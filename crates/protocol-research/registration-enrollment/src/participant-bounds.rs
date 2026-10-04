@@ -10,14 +10,15 @@ use registration_credentials::{
         ClosePurpose, MAXIMUM_LISTED_ENVELOPES_PER_SLOT, close_quorum, close_response_bytes,
         maximum_close_message_bytes,
     },
-    contribution_authentication::{confirmation_body_bytes, opening_body_bytes},
-    contribution_commitment::{self, BODY_HEADER_BYTES, SALT_BYTES},
+    contribution_body::{self, BODY_HEADER_BYTES},
+    contribution_offer::offer_envelope_bytes,
     foundation::{MAXIMUM_USERNAME_INGRESS_BYTES, RegistrationHeader},
     poll::MAXIMUM_POLL_BYTES,
     registration::{KEY_BYTES, RETAINED_REGISTRATION_BYTES},
     release_signing::{self, RELEASE_BODY_HEADER_BYTES, RELEASE_ENVELOPE_BYTES},
     retained_roster::retained_roster_bytes,
     roster::{MAXIMUM_PROPOSAL_BYTES, proposal_bytes},
+    setup_selection::{self, ENDORSEMENT_BYTES},
     target_signing::{MAXIMUM_TARGET_BODY_BYTES, TARGET_VOTE_BYTES},
 };
 use supported_profile::{
@@ -51,12 +52,11 @@ pub fn limits() -> Vec<u64> {
         crate::fhe_sources::maximum_capsule_bytes(),
         MAXIMUM_PROPOSAL_BYTES,
         RETAINED_REGISTRATION_BYTES,
-        SALT_BYTES,
         BODY_HEADER_BYTES,
         PROOF_HEADER_BYTES,
-        confirmation_body_bytes(),
-        opening_body_bytes(),
-        packet_bytes(confirmation_body_bytes()),
+        offer_envelope_bytes(),
+        setup_selection::endorsement_body_bytes(),
+        ENDORSEMENT_BYTES,
         MINIMUM_SCORE,
         MAXIMUM_SCORE,
         ballot_proof::CHUNK_LIMIT,
@@ -82,7 +82,7 @@ pub fn limits() -> Vec<u64> {
 /// their length first.
 pub fn profile_bounds(profile: Profile) -> Vec<u64> {
     let participants = profile.participants();
-    let contribution = contribution_commitment::proof_lengths(profile);
+    let contribution = contribution_body::proof_lengths(profile);
     let (checkpoint_header, checkpoint_records) = contribution_prover::checkpoint_layout(profile);
     let ballot = ballot_body::body_lengths(profile);
     let response = maximum_close_message_bytes(ClosePurpose::Response, participants);
@@ -104,6 +104,7 @@ pub fn profile_bounds(profile: Profile) -> Vec<u64> {
         close_quorum(participants),
         profile.corrupt(),
         profile.setup_contributors(),
+        profile.setup_eligible_contributors(),
         response,
         packet_bytes(response),
         proposal,
@@ -111,6 +112,10 @@ pub fn profile_bounds(profile: Profile) -> Vec<u64> {
         *release.start(),
         *release.end(),
         evaluation_target::stored_coefficient_bytes(profile),
+        setup_selection::selection_body_bytes(profile),
+        setup_selection::certificate_bytes(profile, setup_selection::selection_body_bytes(profile))
+            .expect("Canonical selection certificate"),
+        setup_aggregate::selection_reference_bytes(profile),
         checkpoint_records.len(),
     ];
     bounds.extend(checkpoint_records);
@@ -219,12 +224,16 @@ mod tests {
     #[test]
     fn records_have_their_declared_lengths() {
         let limits = limits();
-        assert_eq!(limits.len(), 37);
+        assert_eq!(limits.len(), 36);
         for profile in [Profile::new(3, 2).unwrap(), Profile::new(20, 20).unwrap()] {
             let bounds = profile_bounds(profile);
-            let checkpoints = bounds[22] as usize;
-            let polynomials = bounds[23 + checkpoints] as usize;
-            assert_eq!(bounds.len(), 24 + checkpoints + 3 * polynomials);
+            let checkpoints = bounds[26] as usize;
+            let polynomials = bounds[27 + checkpoints] as usize;
+            assert_eq!(bounds.len(), 28 + checkpoints + 3 * polynomials);
+            assert_eq!(
+                bounds[15],
+                (profile.setup_contributors() + profile.corrupt()) as u64
+            );
             assert_eq!(
                 bounds[..2],
                 [profile.participants() as u64, profile.options() as u64]

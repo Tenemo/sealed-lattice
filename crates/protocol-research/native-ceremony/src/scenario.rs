@@ -28,6 +28,8 @@ pub struct Scenario {
     pub voters: Vec<usize>,
     pub omitted: Option<usize>,
     pub nonvoters: Vec<usize>,
+    pub departed: Option<usize>,
+    pub selection_fork: bool,
 }
 impl Scenario {
     pub fn new(profile: Profile) -> Self {
@@ -52,7 +54,40 @@ impl Scenario {
             voters,
             omitted,
             nonvoters,
+            departed: None,
+            selection_fork: false,
         }
+    }
+    pub fn setup_departure() -> Self {
+        Self {
+            profile: Profile::new(4, 2).unwrap(),
+            equivocator: None,
+            invalid_proof: None,
+            wrong_position: None,
+            voters: vec![0, 2, 3],
+            omitted: None,
+            nonvoters: Vec::new(),
+            departed: Some(1),
+            selection_fork: false,
+        }
+    }
+    pub fn selection_fork() -> Self {
+        Self {
+            profile: Profile::new(4, 2).unwrap(),
+            equivocator: None,
+            invalid_proof: None,
+            wrong_position: None,
+            voters: vec![0, 1, 2, 3],
+            omitted: None,
+            nonvoters: Vec::new(),
+            departed: None,
+            selection_fork: true,
+        }
+    }
+    pub fn active(&self) -> Vec<usize> {
+        (0..self.profile.participants())
+            .filter(|position| Some(*position) != self.departed)
+            .collect()
     }
     pub fn profile(&self) -> Profile {
         self.profile
@@ -63,7 +98,13 @@ impl Scenario {
             .collect()
     }
     pub fn corrupt(&self, position: usize) -> bool {
-        (1..=self.profile.corrupt()).contains(&position)
+        if self.selection_fork {
+            position == 0
+        } else if self.departed.is_some() {
+            position == 2
+        } else {
+            (1..=self.profile.corrupt()).contains(&position)
+        }
     }
     /// The authors of the usable slots: every accepted voter and the corrupt
     /// authors of authenticated invalid ballots.
@@ -96,7 +137,10 @@ impl Scenario {
     /// The first honest position after the organizer, which receives the
     /// late envelope before the close intent.
     pub fn first_honest_responder(&self) -> usize {
-        self.profile.corrupt() + 1
+        self.honest()
+            .into_iter()
+            .find(|position| *position != 0 && Some(*position) != self.departed)
+            .unwrap()
     }
     /// A ballot's scores: every option receives a score from one to the
     /// maximum.
@@ -182,6 +226,33 @@ pub fn binomial(count: usize, size: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn selection_fork_has_only_a_corrupt_organizer_and_no_unavailable_participant() {
+        let scenario = Scenario::selection_fork();
+        assert_eq!(scenario.active(), [0, 1, 2, 3]);
+        assert_eq!(scenario.honest(), [1, 2, 3]);
+        assert_eq!(scenario.voters, scenario.active());
+        assert!(scenario.corrupt(0));
+        assert!(scenario.departed.is_none());
+        assert_eq!(scenario.profile().inventory_threshold(), 3);
+    }
+    #[test]
+    fn setup_departure_keeps_the_original_roster_and_separates_corruption_from_loss() {
+        let scenario = Scenario::setup_departure();
+        assert_eq!(scenario.profile().participants(), 4);
+        assert_eq!(scenario.profile().corrupt(), 1);
+        assert_eq!(scenario.profile().setup_eligible_contributors(), 3);
+        assert_eq!(scenario.profile().setup_contributors(), 2);
+        assert_eq!(scenario.profile().inventory_threshold(), 3);
+        assert_eq!(scenario.profile().release_threshold(), 2);
+        assert_eq!(scenario.honest(), [0, 1, 3]);
+        assert_eq!(scenario.active(), [0, 2, 3]);
+        assert!(scenario.corrupt(2));
+        assert!(!scenario.corrupt(scenario.departed.unwrap()));
+        assert_eq!(scenario.voters, scenario.active());
+        assert_eq!(scenario.first_honest_responder(), 3);
+        assert!(scenario.equivocator.is_none());
+    }
 
     #[test]
     fn completion_profile_roles_match_the_documented_case() {

@@ -35,6 +35,31 @@ const ordinary = (): ParticipantOperationMeasurement[] => {
 };
 
 describe('complete participant workflow measurements', () => {
+    it('charges clear offers and selection operations to their actual accounting groups', () => {
+        const extra = ['contribute', 'select-setup', 'endorse-setup'].map(
+            (operation, index) => ({
+                position: 0,
+                operation,
+                generation: 4,
+                started: 160 + 10 * index,
+                finished: 165 + 10 * index,
+            }),
+        );
+        const result = summarizeParticipantWorkflow(
+            [...ordinary(), ...extra],
+            3,
+            true,
+        );
+        expect(result.participants[0].stages['contribution offers']).toBe(5);
+        expect(result.participants[0].stages['setup selection']).toBe(10);
+        expect(() =>
+            summarizeParticipantWorkflow(
+                [...ordinary(), { ...extra[0], operation: 'open' }],
+                3,
+                true,
+            ),
+        ).toThrow('Unclassified ordinary operation: open');
+    });
     it('charges the combined result and combined instance memory, and distinguishes wall time from active work', () => {
         const measured = summarizeParticipantWorkflow(ordinary(), 3, true);
         expect(measured.activeMilliseconds).toBe(98);

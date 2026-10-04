@@ -1,3 +1,4 @@
+use registration_credentials::foundation::participant_identity::ParticipantIdentity;
 use registration_credentials::{ballot_authentication::RetainedBallotOwner, poll::VerifiedPoll};
 use setup_aggregate::RetainedSetupInputs;
 use std::sync::Arc;
@@ -11,6 +12,7 @@ pub struct BallotComputationContext {
     profile: Profile,
     inventory: [u8; 64],
     position: usize,
+    participant_identity: ParticipantIdentity,
 }
 impl BallotComputationContext {
     pub fn from_retained(
@@ -32,6 +34,7 @@ impl BallotComputationContext {
             profile,
             inventory: *owner.inventory(),
             position: owner.position(),
+            participant_identity: owner.participant_identity(),
         })
     }
     pub fn poll(&self) -> &Arc<VerifiedPoll> {
@@ -45,5 +48,8 @@ impl BallotComputationContext {
     }
     pub fn position(&self) -> usize {
         self.position
+    }
+    pub fn participant_identity(&self) -> ParticipantIdentity {
+        self.participant_identity
     }
 }

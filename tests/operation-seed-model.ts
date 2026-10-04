@@ -3,6 +3,7 @@ import {
     compileBallotWordProofLayout,
     compileLinkedReleaseWordProofLayout,
 } from '#tests/full-word-proof-layout-model.js';
+import { compileSetupSelectionCensus } from '#tests/setup-selection-model.js';
 import type { SupportedProfile } from '#tests/supported-profile-model.js';
 
 // Fresh private randomness of a contribution generation or continuation, a
@@ -12,12 +13,15 @@ import type { SupportedProfile } from '#tests/supported-profile-model.js';
 // come from a separately retained registration source seed.
 export const operationSeedBytes = 64n;
 
-// The seeds the participants of one roster draw: each setup contributor's
+// The maximum seeds of one roster: each eligible contributor's
 // generation and continuation seeds, and each participant's ballot and
 // release seeds. A repeated operation reads its retained seed again. Original
 // registration source seeds are counted separately by their poll-family owner.
 export const operationSeedCount = (profile: SupportedProfile) =>
-    2n * BigInt(profile.setupContributorCount) +
+    2n *
+        BigInt(
+            compileSetupSelectionCensus(profile.participantCount).eligibleCount,
+        ) +
     2n * BigInt(profile.participantCount);
 
 // The proof stream's bytes when no candidate word is rejected: a ballot's

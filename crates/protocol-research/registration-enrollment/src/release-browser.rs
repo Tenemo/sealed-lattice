@@ -38,7 +38,7 @@ fn command(session: &mut Session, operation: u32, input: &[u8]) -> Result<Vec<u8
     let owner = close.owner();
     let setup = close.setup();
     let profile = setup.profile();
-    let roster = setup.inventory().proposal();
+    let roster = setup.roster();
     match operation {
         // The worker commits the target and the release seed before this
         // call and installs the seed's undrawn randomness. Only the public

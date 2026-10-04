@@ -15,6 +15,7 @@ num-bigint = "=0.5.1"
 ballot-proof = { path = "../ballot-proof" }
 registration-credentials = { path = "../registration-credentials" }
 setup-aggregate = { path = "../setup-aggregate" }
+opened-contribution = { path = "../opened-contribution" }
 setup-witness = { path = "../setup-witness" }
 rns-arithmetic-probe = { path = "../rns-arithmetic-probe" }
 parallel-work = { path = "../parallel-work" }

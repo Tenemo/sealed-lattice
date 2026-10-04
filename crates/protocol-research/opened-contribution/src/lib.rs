@@ -1,7 +1,9 @@
 use parallel_work::Ticket;
 use registration_credentials::{
-    contribution_authentication::{CommitmentInventory, verify_opening},
-    contribution_commitment::{ContributionBodyHeader, ContributionCommitmentHasher},
+    contribution_body::{ContributionBodyHasher, ContributionBodyHeader, body_length},
+    contribution_offer::{AuthenticatedContributionOffer, OfferEnvelope},
+    identity::{IdentityHasher, PUBLIC_POLYNOMIAL_DOMAIN},
+    roster_authentication::OrganizerSignedRoster,
     source_binding::FheKeyCommitmentHasher,
 };
 use setup_witness::{Profile, contribution::common_records_job};
@@ -19,35 +21,56 @@ pub enum Refusal {
     Context,
     Statement,
     Commitment,
+    Body,
     Proof,
     Consumed,
 }
 
-pub struct VerifiedOpenedContribution {
-    inventory: [u8; 64],
-    position: usize,
-    commitment: [u8; 64],
+pub struct OfferPolynomial {
+    index: usize,
+    bytes: usize,
+    digest: [u8; 64],
 }
-impl VerifiedOpenedContribution {
-    pub fn inventory(&self) -> &[u8; 64] {
-        &self.inventory
+impl OfferPolynomial {
+    pub fn index(&self) -> usize {
+        self.index
     }
-    pub fn position(&self) -> usize {
-        self.position
+    pub fn bytes(&self) -> usize {
+        self.bytes
     }
-    pub fn commitment(&self) -> &[u8; 64] {
-        &self.commitment
+    pub fn digest(&self) -> &[u8; 64] {
+        &self.digest
+    }
+}
+
+/// Complete authenticated body bytes whose original source and contribution
+/// relation this verifier accepted. It supplies no selected-set authority.
+pub struct VerifiedContributionOffer {
+    offer: Arc<AuthenticatedContributionOffer>,
+    polynomials: Vec<OfferPolynomial>,
+}
+impl VerifiedContributionOffer {
+    pub fn roster(&self) -> &Arc<OrganizerSignedRoster> {
+        self.offer.roster()
+    }
+    pub fn envelope(&self) -> &OfferEnvelope {
+        self.offer.envelope()
+    }
+    pub fn polynomials(&self) -> &[OfferPolynomial] {
+        &self.polynomials
     }
 }
 
 /// Consumes the body once. A bounded proof-header lookahead is compared again
-/// against the same full proof bytes included in the contribution commitment.
-pub struct OpenedContributionVerifier {
-    inventory: Arc<CommitmentInventory>,
+/// against the same full proof bytes included in the ordinary body identity.
+pub struct ContributionOfferVerifier {
+    offer: Arc<AuthenticatedContributionOffer>,
     profile: Profile,
     position: usize,
-    commitment: ContributionCommitmentHasher,
+    body: ContributionBodyHasher,
     source_binding: Option<FheKeyCommitmentHasher>,
+    polynomial_hash: Option<IdentityHasher>,
+    polynomials: Vec<OfferPolynomial>,
     verifier: Verifier,
     proof_header: Vec<u8>,
     statement_index: usize,
@@ -58,37 +81,34 @@ pub struct OpenedContributionVerifier {
     statement_done: bool,
     failed: bool,
 }
-impl OpenedContributionVerifier {
+impl ContributionOfferVerifier {
     pub fn new(
-        inventory: Arc<CommitmentInventory>,
-        opening_body: &[u8],
-        opening_signature: &[u8],
+        offer: Arc<AuthenticatedContributionOffer>,
         body_header: &[u8],
         proof_header: &[u8],
     ) -> Result<Self, Refusal> {
         if proof_header.len() != HEADER_LENGTH {
             return Err(Refusal::Shape);
         }
-        let opening = verify_opening(&inventory, opening_body, opening_signature)
-            .map_err(|_| Refusal::Context)?;
-        let proposal = inventory.proposal().proposal();
+        let proposal = offer.roster().proposal();
         let profile = proposal.profile();
-        let source_salt = ContributionBodyHeader::decode(profile, body_header)
-            .map_err(|_| Refusal::Shape)?
-            .source_salt;
-        let source_binding =
-            FheKeyCommitmentHasher::for_contribution(proposal, opening.position(), &source_salt)
-                .map_err(|_| Refusal::Context)?;
-        let role = proposal
-            .contribution_role(opening.position())
-            .map_err(|_| Refusal::Context)?;
-        let commitment = ContributionCommitmentHasher::new(
+        let decoded =
+            ContributionBodyHeader::decode(profile, body_header).map_err(|_| Refusal::Shape)?;
+        if body_length(profile, decoded.proof_length).map_err(|_| Refusal::Shape)?
+            != offer.envelope().body_length()
+        {
+            return Err(Refusal::Shape);
+        }
+        let source_binding = FheKeyCommitmentHasher::for_contribution(
             proposal,
-            opening.position(),
-            opening.salt(),
-            body_header,
+            offer.envelope().position(),
+            &decoded.source_salt,
         )
-        .map_err(|_| Refusal::Shape)?;
+        .map_err(|_| Refusal::Context)?;
+        let role = proposal
+            .contribution_role(offer.envelope().position())
+            .map_err(|_| Refusal::Context)?;
+        let body = ContributionBodyHasher::new(profile, body_header).map_err(|_| Refusal::Shape)?;
         // This declared value is not trusted: the underlying statement stream
         // recomputes it from fixed predecessors and every supplied polynomial.
         let declared_statement = proof_header[4..68].try_into().map_err(|_| Refusal::Shape)?;
@@ -99,20 +119,22 @@ impl OpenedContributionVerifier {
             .map_err(|_| Refusal::Statement)?;
         // Every polynomial that is neither the body's nor a recipient's
         // registered key is common.
-        let body = profile.contribution_body_polynomials();
+        let body_polynomials = profile.contribution_body_polynomials();
         let common = (0..profile.setup_polynomials())
             .filter(|index| {
-                !body.contains(index)
+                !body_polynomials.contains(index)
                     && (0..profile.participants())
                         .all(|recipient| profile.recipient_key_polynomial(recipient) != *index)
             })
             .collect();
         let mut result = Self {
-            inventory,
+            position: offer.envelope().position(),
+            offer,
             profile,
-            position: opening.position(),
-            commitment,
+            body,
             source_binding: Some(source_binding),
+            polynomial_hash: None,
+            polynomials: Vec::new(),
             verifier,
             proof_header: proof_header.to_vec(),
             statement_index: 0,
@@ -146,7 +168,7 @@ impl OpenedContributionVerifier {
     fn fixed_inputs(&mut self) -> Result<(), Refusal> {
         let profile = self.profile;
         let next_owned = self
-            .commitment
+            .body
             .next_polynomial()
             .map_or(profile.setup_polynomials(), |(index, _)| index);
         while self.statement_index < next_owned {
@@ -154,7 +176,7 @@ impl OpenedContributionVerifier {
             if let Some(recipient) = (0..profile.participants())
                 .find(|recipient| profile.recipient_key_polynomial(*recipient) == index)
             {
-                let bytes = self.inventory.proposal().proposal().records()[recipient].public_key();
+                let bytes = self.offer.roster().proposal().records()[recipient].public_key();
                 for chunk in bytes.chunks(CHUNK_LIMIT) {
                     self.verifier
                         .push_statement(chunk)
@@ -191,8 +213,23 @@ impl OpenedContributionVerifier {
             if index != self.statement_index {
                 return Err(Refusal::Shape);
             }
-            self.commitment
+            self.body
                 .push_polynomial(index, offset, bytes)
+                .map_err(|_| Refusal::Shape)?;
+            let polynomial_bytes = self
+                .profile
+                .setup_polynomial_bytes(index)
+                .ok_or(Refusal::Shape)?;
+            if offset == 0 {
+                self.polynomial_hash = Some(
+                    IdentityHasher::new(PUBLIC_POLYNOMIAL_DOMAIN, &[], polynomial_bytes)
+                        .map_err(|_| Refusal::Shape)?,
+                );
+            }
+            self.polynomial_hash
+                .as_mut()
+                .ok_or(Refusal::Consumed)?
+                .absorb(bytes)
                 .map_err(|_| Refusal::Shape)?;
             if index == self.profile.fhe_polynomial(0, 1) {
                 self.source_binding
@@ -201,7 +238,7 @@ impl OpenedContributionVerifier {
                     .push(offset, bytes)
                     .map_err(|_| Refusal::Statement)?;
                 if self
-                    .commitment
+                    .body
                     .next_polynomial()
                     .is_none_or(|(next, _)| next != index)
                 {
@@ -212,8 +249,8 @@ impl OpenedContributionVerifier {
                         .finish()
                         .map_err(|_| Refusal::Statement)?;
                     let expected = self
-                        .inventory
-                        .proposal()
+                        .offer
+                        .roster()
                         .proposal()
                         .fhe_key_commitment(self.position)
                         .map_err(|_| Refusal::Context)?;
@@ -226,10 +263,20 @@ impl OpenedContributionVerifier {
                 .push_statement(bytes)
                 .map_err(|_| Refusal::Statement)?;
             if self
-                .commitment
+                .body
                 .next_polynomial()
                 .is_none_or(|(next, _)| next != index)
             {
+                self.polynomials.push(OfferPolynomial {
+                    index,
+                    bytes: polynomial_bytes,
+                    digest: self
+                        .polynomial_hash
+                        .take()
+                        .ok_or(Refusal::Consumed)?
+                        .finish()
+                        .map_err(|_| Refusal::Shape)?,
+                });
                 self.statement_index = index + 1;
                 self.fixed_inputs()?;
             }
@@ -246,7 +293,7 @@ impl OpenedContributionVerifier {
             return Err(Refusal::Consumed);
         }
         let result = (|| {
-            self.commitment
+            self.body
                 .push_proof(offset, bytes)
                 .map_err(|_| Refusal::Shape)?;
             let prefix = HEADER_LENGTH.saturating_sub(offset).min(bytes.len());
@@ -266,25 +313,26 @@ impl OpenedContributionVerifier {
         result
     }
 
-    pub fn finish(mut self) -> Result<VerifiedOpenedContribution, Refusal> {
-        if self.failed || !self.statement_done || self.source_binding.is_some() {
+    pub fn finish(self) -> Result<VerifiedContributionOffer, Refusal> {
+        if self.failed
+            || !self.statement_done
+            || self.source_binding.is_some()
+            || self.polynomial_hash.is_some()
+        {
             return Err(Refusal::Consumed);
         }
-        let commitment = *self
-            .commitment
-            .finish()
-            .map_err(|_| Refusal::Shape)?
-            .digest();
-        if self.inventory.confirmations()[self.position].commitment() != Some(&commitment) {
-            return Err(Refusal::Commitment);
+        let body = self.body.finish().map_err(|_| Refusal::Shape)?;
+        if body.identity() != self.offer.envelope().body_identity()
+            || body.length() != self.offer.envelope().body_length()
+        {
+            return Err(Refusal::Body);
         }
         if !self.verifier.finish() {
             return Err(Refusal::Proof);
         }
-        Ok(VerifiedOpenedContribution {
-            inventory: self.inventory.identity(),
-            position: self.position,
-            commitment,
+        Ok(VerifiedContributionOffer {
+            offer: self.offer,
+            polynomials: self.polynomials,
         })
     }
 }

@@ -79,7 +79,7 @@ describe('simulator trapdoor availability', () => {
                         new Set([challenge]),
                     );
                     expect(selected).toHaveLength(
-                        Math.floor((count - 1) / 3) + 1,
+                        Math.max(Math.floor((count - 1) / 3) + 1, 2),
                     );
                     expect(selected).not.toContain(challenge);
                     expect(
@@ -90,6 +90,12 @@ describe('simulator trapdoor availability', () => {
     });
 
     it('does not silently use a challenge secret when too many keys are unknown', () => {
+        expect(
+            availableExtractionRecipients(3, new Set(), new Set([0])),
+        ).toEqual([1, 2]);
+        expect(
+            availableExtractionRecipients(3, new Set(), new Set([0, 1])),
+        ).toBeUndefined();
         expect(
             availableExtractionRecipients(4, new Set([0]), new Set([1, 2])),
         ).toBeUndefined();

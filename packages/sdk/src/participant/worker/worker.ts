@@ -25,25 +25,20 @@ import {
 } from './close.js';
 import {
     InvalidRequest,
-    isSetupContributor,
+    isEligibleContributor,
     PublicInputFailure,
 } from './context.js';
 import type { ParticipantContext, ProfileContext } from './context.js';
 import {
     beginContribution,
-    confirmContribution,
     confirmRoster,
     continueContribution,
-    discardInterruptedRecords,
     generateContribution,
-    openContribution,
-    publishConfirmation,
-    publishOpening,
+    isContributionSession,
+    publishOffer,
     restoreCheckpoint,
-    resumeContribution,
     resumeParticipant,
-    storedConfirmation,
-    storedOpening,
+    signContribution,
 } from './contribution.js';
 import { openDelivery } from './delivery.js';
 import { createEnrollment, restoreEnrollment } from './enrollment.js';
@@ -66,6 +61,7 @@ import {
     startParallelHelpers,
 } from './parallel.js';
 import type { ParallelHelpers } from './parallel.js';
+import { endorseSetup, selectSetup } from './preparation-selection.js';
 import { publishRecord, readBounded } from './public.js';
 import type { PublicRelay } from './public.js';
 import { decodeReleaseState, releasePhase } from './release-state.js';
@@ -320,8 +316,8 @@ const summary = (
     question: enrollment.poll.question,
     options: enrollment.poll.options,
     topCount: enrollment.poll.topCount,
-    isSetupContributor:
-        profiled === undefined ? undefined : isSetupContributor(profiled),
+    isEligibleContributor:
+        profiled === undefined ? undefined : isEligibleContributor(profiled),
     ballot: ballotState(root),
     ballotStatus: ballotStatus(root, enrollment.isOrganizer, profiled),
 });
@@ -405,6 +401,8 @@ const execute = async (
         case 'status':
             break;
         case 'publish':
+            if (root.head.generation === 4)
+                await resumeParticipant(profileContext(), root);
             await publishRecords(context, relay, root, enrollment);
             break;
         case 'propose-roster': {
@@ -447,102 +445,71 @@ const execute = async (
             reported = { rosterUsernames: accepted.usernames };
             break;
         }
+        case 'confirm': {
+            if (root.head.generation !== 3 && root.head.generation !== 4)
+                return refused('unavailable');
+            const session = await resumeParticipant(profileContext(), root);
+            await confirmRoster(session);
+            root = session.root;
+            break;
+        }
         case 'contribute': {
-            // Only a setup contributor contributes. Generation and
-            // continuation each draw their randomness from a seed retained
-            // before they start, so an interrupted one runs again from its
-            // seed once what it stored is discarded.
-            const { generation } = root.head;
             if (
-                generation < 3 ||
-                generation >= 7 ||
-                !isSetupContributor(profileContext())
+                root.head.generation !== 4 ||
+                !isEligibleContributor(profileContext())
             )
                 return refused('unavailable');
-            if (generation === 4 || generation === 6)
-                await discardInterruptedRecords(profileContext(), root);
-            let session;
-            if (generation === 3 || generation === 4) {
+            let session = await resumeParticipant(profileContext(), root);
+            if (session.state === undefined || session.state.phase === 4) {
                 const proposal = await reverifyRoster(
                     context,
                     relay,
                     root,
                     enrollment,
                 );
-                session =
-                    generation === 3
-                        ? await beginContribution(
-                              profileContext(),
-                              root,
-                              proposal,
-                          )
-                        : await resumeContribution(
-                              profileContext(),
-                              root,
-                              proposal,
-                          );
+                if (
+                    !equalBytes(proposal.identity, session.records.proposal) ||
+                    proposal.position !== session.records.position ||
+                    context.kernel.confirm_roster() !== 0
+                )
+                    throw new Error('The verified original roster changed.');
+                if (!isContributionSession(session))
+                    session = await beginContribution(session);
+                if (!isContributionSession(session))
+                    throw new Error('No offer intent is retained.');
                 await generateContribution(session);
-            } else {
-                session = await resumeContribution(profileContext(), root);
+            } else if (session.state.phase === 5 || session.state.phase === 6) {
+                if (!isContributionSession(session))
+                    throw new Error('No own proof checkpoint is retained.');
                 await restoreCheckpoint(session, relay);
             }
-            await continueContribution(session);
+            if (!isContributionSession(session))
+                throw new Error('No own offer is retained.');
+            if (session.state.phase === 5 || session.state.phase === 6)
+                await continueContribution(session);
+            const offer = await signContribution(session);
             root = session.root;
+            await publishOffer(session, relay, offer);
             break;
         }
-        case 'confirm': {
-            // Every participant confirms the roster once: a setup
-            // contributor with its contribution, any other participant
-            // with its own registration body.
-            if (!isSetupContributor(profileContext())) {
-                if (root.head.generation < 3) return refused('unavailable');
-                const session = await resumeParticipant(profileContext(), root);
-                const confirmation = await confirmRoster(session);
-                root = session.root;
-                await publishConfirmation(session, relay, confirmation);
-                break;
-            }
-            if (root.head.generation < 7) return refused('unavailable');
-            const session = await resumeContribution(profileContext(), root);
-            const confirmation =
-                root.head.generation >= 9
-                    ? await storedConfirmation(session)
-                    : await confirmContribution(session);
-            root = session.root;
-            await publishConfirmation(session, relay, confirmation);
-            break;
-        }
-        case 'open': {
-            if (
-                root.head.generation < 9 ||
-                !isSetupContributor(profileContext())
-            )
+        case 'select-setup': {
+            if (root.head.generation !== 4 || !enrollment.isOrganizer)
                 return refused('unavailable');
-            const session = await resumeContribution(
-                profileContext(),
-                root,
-                root.head.generation < 11
-                    ? await reverifyRoster(context, relay, root, enrollment)
-                    : undefined,
-            );
-            let opening;
-            if (root.head.generation >= 11)
-                opening = await storedOpening(session);
-            else {
-                await confirmContribution(session);
-                opening = await openContribution(session, relay);
-            }
+            const session = await resumeParticipant(profileContext(), root);
+            await selectSetup(session, relay);
             root = session.root;
-            await publishOpening(session, relay, opening);
+            break;
+        }
+        case 'endorse-setup': {
+            if (root.head.generation !== 4) return refused('unavailable');
+            const session = await resumeParticipant(profileContext(), root);
+            await endorseSetup(session, relay);
+            root = session.root;
             break;
         }
         case 'verify-setup': {
-            // A setup contributor verifies the setup behind its opening, and
-            // any other participant behind its signed roster confirmation.
-            if (
-                profiled === undefined ||
-                root.head.generation !== (isSetupContributor(profiled) ? 11 : 9)
-            )
+            // Any original member may activate the uniquely certified setup.
+            if (profiled === undefined || root.head.generation !== 4)
                 return refused('unavailable');
             const session = await resumeParticipant(profiled, root);
             root = await retainSetup(

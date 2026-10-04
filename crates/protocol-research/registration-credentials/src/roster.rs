@@ -125,9 +125,6 @@ impl RetainedContributionContext {
     pub fn fhe_key_commitment(&self) -> &[u8; 64] {
         &self.fhe_key_commitment
     }
-    pub(crate) fn role(&self) -> &[u8] {
-        &self.role
-    }
     /// The checkpoint's routing and profile must match this original owner
     /// before its sealed records are read. Noncontributors retain a context
     /// for ballots, but never import a contribution checkpoint.
@@ -142,7 +139,7 @@ impl RetainedContributionContext {
             || prefix[64..128] != self.runtime
             || prefix[128..] != self.proposal
             || position != self.position
-            || position >= self.profile.setup_contributors()
+            || position >= self.profile.setup_eligible_contributors()
             || profile != self.profile
         {
             return Err(Error::Context);
@@ -278,7 +275,7 @@ impl RosterProposal {
         if position >= self.records.len() {
             return Err(Error::Shape);
         }
-        if position >= self.profile.setup_contributors() {
+        if position >= self.profile.setup_eligible_contributors() {
             return Err(Error::Context);
         }
         contribution_role(&self.records[position], self.identity, position)

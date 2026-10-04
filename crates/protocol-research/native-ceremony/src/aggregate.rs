@@ -1,11 +1,12 @@
 use ballot_proof::statement::setup_input;
+use opened_contribution::{ContributionOfferVerifier, VerifiedContributionOffer};
 use registration_credentials::{
-    contribution_authentication::{CommitmentInventory, SignedOpening},
-    poll::VerifiedPoll,
+    contribution_offer::AuthenticatedContributionOffer, poll::VerifiedPoll,
+    setup_selection::AuthenticatedSelectionProposal,
 };
 use setup_aggregate::{
     CHUNK_BYTES, VerifiedAggregatePolynomial, contribution_family,
-    verified::{SetupAggregator, VerifiedSetupAggregate},
+    verified::{SetupAggregator, VerifiedSelectionInputs, VerifiedSetupAggregate},
 };
 use std::{
     fs::{self, File},
@@ -37,18 +38,14 @@ pub fn ballot_key(profile: Profile) -> usize {
     setup_input(profile).2
 }
 
-/// Both controls reach the original-coordinate comparison before any proof
-/// bytes or the complete-body commitment can decide acceptance. The foreign
-/// coordinate was genuinely generated for another registered participant.
+/// Both controls reach the registered-coordinate check before proof bytes.
 pub fn verify_source_refusals(
-    inventory: Arc<CommitmentInventory>,
+    offers: &[Arc<AuthenticatedContributionOffer>],
     directories: &[PathBuf],
     headers: &[Vec<u8>],
-    openings: &[SignedOpening],
 ) {
-    let profile = inventory.proposal().proposal().profile();
+    let profile = offers[0].roster().proposal().profile();
     let index = profile.fhe_polynomial(0, 1);
-    assert_eq!(profile.contribution_body_polynomials()[0], index);
     let mut proof_header = [0; PROOF_HEADER_BYTES];
     File::open(directories[0].join("proof.bin"))
         .unwrap()
@@ -60,94 +57,147 @@ pub fn verify_source_refusals(
         if !wrong_source {
             header[12] ^= 1;
         }
-        let mut verifier = SetupAggregator::new(inventory.clone()).unwrap();
-        verifier
-            .begin(
-                openings[0].body(),
-                openings[0].signature(),
-                &header,
-                &proof_header,
-            )
-            .unwrap();
-        let directory = &directories[usize::from(wrong_source)];
-        let mut incoming =
-            File::open(directory.join(format!("polynomial-{index:02}.bin"))).unwrap();
-        assert_eq!(incoming.metadata().unwrap().len(), length as u64);
+        let mut verifier =
+            ContributionOfferVerifier::new(offers[0].clone(), &header, &proof_header).unwrap();
+        let mut incoming = File::open(
+            directories[usize::from(wrong_source)].join(format!("polynomial-{index:02}.bin")),
+        )
+        .unwrap();
         let mut bytes = vec![0; capacity];
-        let mut aggregate = vec![0; capacity];
-        let mut offset = 0;
-        while offset < length {
+        for offset in (0..length).step_by(capacity) {
             let count = capacity.min(length - offset);
             incoming.read_exact(&mut bytes[..count]).unwrap();
-            aggregate[..count].fill(0);
-            let result =
-                verifier.polynomial(index, offset, &bytes[..count], &mut aggregate[..count]);
+            let result = verifier.polynomial(index, offset, &bytes[..count]);
             if offset + count == length {
                 assert!(matches!(
                     result,
-                    Err(setup_aggregate::verified::Refusal::Body)
+                    Err(opened_contribution::Refusal::Commitment)
                 ));
             } else {
                 result.unwrap();
             }
-            offset += count;
         }
-        assert_eq!(verifier.accepted(), 0);
-        assert!(!verifier.complete());
-        assert!(verifier.finish_contribution().is_err());
+        assert!(verifier.finish().is_err());
     }
     println!(
-        "Refused a foreign registered coordinate and a changed source opening before proof consumption"
+        "Refused a foreign registered coordinate and changed source opening before proof consumption"
     );
 }
 
+pub fn verify_offer(
+    offer: Arc<AuthenticatedContributionOffer>,
+    directory: &Path,
+    header: &[u8],
+) -> VerifiedContributionOffer {
+    let profile = offer.roster().proposal().profile();
+    let mut proof_header = [0; PROOF_HEADER_BYTES];
+    File::open(directory.join("proof.bin"))
+        .unwrap()
+        .read_exact(&mut proof_header)
+        .unwrap();
+    let mut verifier = ContributionOfferVerifier::new(offer, header, &proof_header).unwrap();
+    for index in profile.contribution_body_polynomials() {
+        let (length, capacity) = polynomial_bytes(profile, index);
+        let mut file = File::open(directory.join(format!("polynomial-{index:02}.bin"))).unwrap();
+        assert_eq!(file.metadata().unwrap().len(), length as u64);
+        let mut buffer = vec![0; capacity];
+        for offset in (0..length).step_by(capacity) {
+            let count = capacity.min(length - offset);
+            file.read_exact(&mut buffer[..count]).unwrap();
+            verifier
+                .polynomial(index, offset, &buffer[..count])
+                .unwrap();
+        }
+    }
+    let mut proof = File::open(directory.join("proof.bin")).unwrap();
+    let mut buffer = vec![0; 1 << 20];
+    let mut offset = 0;
+    loop {
+        let count = proof.read(&mut buffer).unwrap();
+        if count == 0 {
+            break;
+        }
+        verifier.proof(offset, &buffer[..count]).unwrap();
+        offset += count;
+    }
+    verifier.finish().unwrap()
+}
+
 pub fn verify(
-    inventory: Arc<CommitmentInventory>,
+    selection: Arc<AuthenticatedSelectionProposal>,
+    offers: Vec<Arc<VerifiedContributionOffer>>,
     directories: &[PathBuf],
-    headers: &[Vec<u8>],
-    openings: &[SignedOpening],
     output: &Path,
-) -> VerifiedSetupAggregate {
+) -> VerifiedSelectionInputs {
     fs::create_dir(output).unwrap();
-    let profile = inventory.proposal().proposal().profile();
-    let mut verifier = SetupAggregator::new(inventory).unwrap();
-    for (position, directory) in directories.iter().enumerate() {
-        let target = output.join(format!("after-contributor-{position}"));
-        fs::create_dir(&target).unwrap();
-        let mut proof = File::open(directory.join("proof.bin")).unwrap();
-        let mut proof_header = [0; PROOF_HEADER_BYTES];
-        proof.read_exact(&mut proof_header).unwrap();
-        verifier
-            .begin(
-                openings[position].body(),
-                openings[position].signature(),
-                &headers[position],
-                &proof_header,
+    let profile = selection.roster().proposal().profile();
+    let positions: Vec<_> = offers
+        .iter()
+        .map(|offer| offer.envelope().position())
+        .collect();
+    let mut verifier = SetupAggregator::new(selection, offers).unwrap();
+    for (ordinal, directory) in directories.iter().enumerate() {
+        // A changed reread cannot authorize an aggregate or erase the
+        // already accepted prefix. Restart only this same selected author.
+        verifier.begin(positions[ordinal]).unwrap();
+        let first = profile.contribution_body_polynomials()[0];
+        let (length, capacity) = polynomial_bytes(profile, first);
+        let name = format!("polynomial-{first:02}.bin");
+        let mut probe = File::open(directory.join(&name)).unwrap();
+        let mut prior = (ordinal != 0).then(|| {
+            File::open(
+                output
+                    .join(format!("after-contributor-{}", ordinal - 1))
+                    .join(&name),
             )
-            .unwrap();
+            .unwrap()
+        });
+        let mut input = vec![0; capacity];
+        let mut value = vec![0; capacity];
+        let mut refused = false;
+        for offset in (0..length).step_by(capacity) {
+            let count = capacity.min(length - offset);
+            probe.read_exact(&mut input[..count]).unwrap();
+            if offset == 0 {
+                input[1] ^= 1;
+            }
+            if let Some(prior) = prior.as_mut() {
+                prior.read_exact(&mut value[..count]).unwrap();
+            }
+            match verifier.polynomial(first, offset, &input[..count], &mut value[..count]) {
+                Ok(()) => assert!(offset + count < length),
+                Err(setup_aggregate::verified::Refusal::Body) => {
+                    refused = true;
+                    break;
+                }
+                Err(error) => panic!("Unexpected changed-offer refusal: {error:?}"),
+            }
+        }
+        assert!(refused);
+        assert_eq!(verifier.accepted(), ordinal);
+        assert!(!verifier.complete());
+        assert!(verifier.finish_contribution().is_err());
+        let target = output.join(format!("after-contributor-{ordinal}"));
+        fs::create_dir(&target).unwrap();
+        verifier.begin(positions[ordinal]).unwrap();
         for index in profile.contribution_body_polynomials() {
             let (length, capacity) = polynomial_bytes(profile, index);
             let name = format!("polynomial-{index:02}.bin");
             let mut incoming = File::open(directory.join(&name)).unwrap();
             assert_eq!(incoming.metadata().unwrap().len(), length as u64);
-            let mut previous = if position == 0 {
-                None
-            } else {
-                Some(
-                    File::open(
-                        output
-                            .join(format!("after-contributor-{}", position - 1))
-                            .join(&name),
-                    )
-                    .unwrap(),
+            let mut previous = (ordinal != 0).then(|| {
+                File::open(
+                    output
+                        .join(format!("after-contributor-{}", ordinal - 1))
+                        .join(&name),
                 )
-            };
+                .unwrap()
+            });
             let mut destination =
                 crate::public_output::PublicOutput::create(target.join(&name)).unwrap();
             let mut input = vec![0; capacity];
             let mut value = vec![0; capacity];
-            let mut offset = 0;
-            while offset < length {
+            for offset in (0..length).step_by(capacity) {
                 let count = capacity.min(length - offset);
                 incoming.read_exact(&mut input[..count]).unwrap();
                 if let Some(previous) = previous.as_mut() {
@@ -159,23 +209,11 @@ pub fn verify(
                     .polynomial(index, offset, &input[..count], &mut value[..count])
                     .unwrap();
                 destination.write_all(&value[..count]).unwrap();
-                offset += count;
             }
             destination.finish().unwrap();
         }
-        let mut proof = File::open(directory.join("proof.bin")).unwrap();
-        let mut buffer = vec![0; 1 << 20];
-        let mut offset = 0;
-        loop {
-            let count = proof.read(&mut buffer).unwrap();
-            if count == 0 {
-                break;
-            }
-            verifier.proof(offset, &buffer[..count]).unwrap();
-            offset += count;
-        }
         verifier.finish_contribution().unwrap();
-        println!("Verified fresh contribution {position}");
+        println!("Aggregated original selected author {}", positions[ordinal]);
     }
     verifier.finish().unwrap()
 }

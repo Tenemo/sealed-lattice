@@ -3,6 +3,7 @@ import {
     saltedProofHashInputs,
 } from '#tests/proof-hash-work-model.js';
 import { compileProofVerifierQueryCensus } from '#tests/proof-verifier-query-model.js';
+import { compileSetupSelectionCensus } from '#tests/setup-selection-model.js';
 import type { SupportedProfile } from '#tests/supported-profile-model.js';
 import { compileThresholdCompletionProfile } from '#tests/threshold-completion-model.js';
 import { proofCompilerCaps } from '#tests/wide-challenge-compiler-model.js';
@@ -17,15 +18,23 @@ export const proofPurposes = [
     'release',
 ] as const;
 
-// The roster positions that prove each purpose: only the setup contributors
-// prove a setup.
+// Every eligible position may prove an offer, even when it is not selected.
 export const provingPositions = (
     purpose: (typeof proofPurposes)[number],
     participantCount: bigint,
-    setupContributorCount: bigint,
-) => (purpose === 'setup' ? setupContributorCount : participantCount);
+) =>
+    purpose === 'setup'
+        ? BigInt(
+              compileSetupSelectionCensus(Number(participantCount))
+                  .eligibleCount,
+          )
+        : participantCount;
 
-// The proofs, programming points and commitments that one poll emits when
+// Reference multi-roster arithmetic, not a clear-candidate population bound.
+// The former H/(n-f) divisor below does not count rosters exposing offers
+// before certification. Local per-roster producer counts include every eligible
+// position; candidate global scopes remain owned by the security argument.
+// The proofs, programming points and commitments that the reference emits when
 // every roster that reaches an honest opening has this profile, against the
 // caps the proof compiler charges. Every honest registration publishes its
 // registration proof before any roster exists, including one no roster
@@ -46,7 +55,6 @@ export const compileProofCompilerChronology = (
     rosterCount = 1n,
 ) => {
     const participants = BigInt(profile.participantCount);
-    const contributors = BigInt(profile.setupContributorCount);
     if (honestRegistrations < participants)
         throw new RangeError('The registrations must cover the roster.');
     if (rosterCount < 1n)
@@ -62,7 +70,7 @@ export const compileProofCompilerChronology = (
             ? honestRegistrations / honestMembers
             : rosterCount;
     const rosterProvers = (purpose: (typeof proofPurposes)[number]) =>
-        rosters * provingPositions(purpose, participants, contributors);
+        rosters * provingPositions(purpose, participants);
     const honestProofs = proofPurposes.reduce((sum, purpose) => {
         if (purpose === 'registration') return sum + honestRegistrations;
         const provers = rosterProvers(purpose);

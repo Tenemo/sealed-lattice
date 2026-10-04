@@ -36,8 +36,8 @@ export type ProfileContext = ParticipantContext &
     Readonly<{ profile: ParticipantProfile; position: number }>;
 
 // Only the first roster positions contribute setup key material.
-export const isSetupContributor = (context: ProfileContext) =>
-    context.position < context.profile.setupContributorCount;
+export const isEligibleContributor = (context: ProfileContext) =>
+    context.position < context.profile.eligibleContributorCount;
 
 export const sessionInput = (context: PublicContext, bytes: Uint8Array) =>
     writeInput(context.kernel, bytes);

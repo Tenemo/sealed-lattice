@@ -32,13 +32,13 @@ impl ReleaseContext {
             .map_err(|_| Error::Encoding)?;
         let target = self.certificate().target();
         if envelope.poll() != &target.poll().identity()
-            || envelope.inventory() != &target.setup().inventory().identity()
+            || envelope.inventory() != &target.setup().identity()
             || envelope.target() != target.identity()
             || envelope.position() != self.position()
         {
             return Err(Error::Context);
         }
-        let public = target.setup().inventory().proposal().proposal().records()[self.position()]
+        let public = target.setup().roster().proposal().records()[self.position()]
             .header()
             .signing_public;
         let key = ml_dsa_65::PublicKey::try_from_bytes(public).map_err(|_| Error::Context)?;
@@ -191,7 +191,7 @@ impl VerifiedReleaseBody {
         ReleaseEnvelope::new(
             target.setup().profile(),
             target.poll().identity(),
-            target.setup().inventory().identity(),
+            target.setup().identity(),
             *target.identity(),
             self.position,
             self.length,

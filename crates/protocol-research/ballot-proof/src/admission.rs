@@ -90,19 +90,18 @@ impl BallotRelationVerifier {
         statement: [u8; 64],
         proof_header: &[u8],
     ) -> Result<Self, Refusal> {
-        let inventory = setup.inventory();
         let profile = setup.profile();
         let role =
             crate::context::proof_role(poll, setup, position).map_err(|_| Refusal::Context)?;
         if position >= profile.participants()
             || profile.options() != poll.manifest().option_count()
-            || inventory.proposal().proposal().records()[0].header().poll != poll.identity()
+            || setup.roster().proposal().records()[0].header().poll != poll.identity()
         {
             return Err(Refusal::Context);
         }
         let expected_header = statement::header(
             &poll.identity(),
-            &inventory.identity(),
+            &setup.identity(),
             position,
             profile.options(),
             usize::from(poll.top_count()),

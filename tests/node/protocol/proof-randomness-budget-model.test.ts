@@ -7,9 +7,31 @@ import {
     rejectionSubsetBound,
 } from '#tests/proof-randomness-budget-model.js';
 import { compileRegistrationKeyRelationCensus } from '#tests/registration-key-relation-model.js';
-import { completionProfile } from '#tests/supported-profile-model.js';
+import {
+    completionProfile,
+    deriveSupportedProfile,
+} from '#tests/supported-profile-model.js';
 
 describe('bounded randomness for complete proof simulation', () => {
+    it('programs the complete role-specific word without borrowing the setup width', () => {
+        for (const [participants, options, setupBytes] of [
+            [3, 2, 131072n],
+            [10, 10, 262144n],
+            [20, 20, 524288n],
+        ] as const) {
+            const budgets = compileProofRandomnessBudgets(
+                deriveSupportedProfile(participants, options),
+            );
+            expect(
+                budgets.map((value) => value.programmedMessageBytes),
+            ).toEqual([262144n, setupBytes, 262144n, 262144n]);
+            for (const budget of budgets)
+                expect(
+                    budget.simulatorBaselineBytes -
+                        budget.ordinaryBaselineBytes,
+                ).toBe(budget.programmedMessageBytes);
+        }
+    });
     it('bounds a stopping event by fixed rejected-position subsets', () => {
         const bound = rejectionSubsetBound({
             candidatePositions: 4n,

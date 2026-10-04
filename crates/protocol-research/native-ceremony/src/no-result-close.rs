@@ -11,7 +11,6 @@ use ballot_proof::{
 use registration_credentials::{
     ballot_authentication::BallotEnvelope,
     ballot_body::{self, BallotBodyHasher},
-    contribution_authentication::SignedOpening,
     poll::VerifiedPoll,
 };
 use registration_enrollment::Enrollment;
@@ -33,7 +32,7 @@ fn invalid_source(
     let profile = setup.profile();
     let relation = ballot_proof::statement::header(
         &poll.identity(),
-        &setup.inventory().identity(),
+        &setup.identity(),
         0,
         poll.manifest().option_count(),
         usize::from(poll.top_count()),
@@ -55,7 +54,7 @@ fn invalid_source(
     let envelope = BallotEnvelope::new(
         profile,
         poll.identity(),
-        setup.inventory().identity(),
+        setup.identity(),
         0,
         now_milliseconds(),
         header.len() + remaining,
@@ -64,11 +63,7 @@ fn invalid_source(
     .unwrap();
     let signature = enrollment
         .credential
-        .sign_ballot_envelope(
-            setup.inventory().proposal(),
-            &envelope,
-            *crate::random::<32>(),
-        )
+        .sign_ballot_envelope(setup.roster(), &envelope, *crate::random::<32>())
         .unwrap();
     crate::write(directory.join("envelope.bin"), envelope.bytes());
     crate::write(directory.join("signature.bin"), &signature);
@@ -107,23 +102,14 @@ pub fn run(
     output: &Path,
     poll: Arc<VerifiedPoll>,
     setup: Arc<VerifiedSetupAggregate>,
-    enrollments: &mut [Enrollment],
-    openings: &[SignedOpening],
+    enrollments: &mut crate::OriginalEnrollments,
     invalid_only: bool,
     scenario: &Scenario,
 ) -> VerifiedCloseBarrier {
     let count = enrollments.len();
     let context = CloseContext::new(poll.clone(), setup.clone()).unwrap();
     let mut works: Vec<_> = (0..count)
-        .map(|position| {
-            close_work(
-                &enrollments[position],
-                &poll,
-                &setup,
-                openings.get(position),
-                position,
-            )
-        })
+        .map(|position| close_work(&enrollments[position], &poll, &setup, position))
         .collect();
     let invalid =
         invalid_only.then(|| invalid_source(output, &poll, &setup, &mut enrollments[0], scenario));
@@ -159,13 +145,7 @@ pub fn run(
     );
     responses[0] = own;
     for position in 0..count {
-        let fresh = close_work(
-            &enrollments[position],
-            &poll,
-            &setup,
-            openings.get(position),
-            position,
-        );
+        let fresh = close_work(&enrollments[position], &poll, &setup, position);
         replay(
             &works[position],
             fresh,
@@ -209,7 +189,7 @@ pub fn run(
         &output.join("close"),
         output,
         &intent_packet,
-        &responses,
+        responses.iter().enumerate(),
         &proposal,
         &held,
     );

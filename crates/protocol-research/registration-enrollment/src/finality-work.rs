@@ -69,7 +69,7 @@ impl FinalityWork {
         if target.classified().is_none()
             || owner.poll() != &target.poll().identity()
             || owner.runtime() != &target.poll().runtime()
-            || owner.inventory() != &target.setup().inventory().identity()
+            || owner.inventory() != &target.setup().identity()
             || owner.position() >= count
         {
             return Err(Error::Context);
@@ -134,7 +134,7 @@ impl FinalityWork {
         }
         credential.sign_target(
             &self.owner,
-            self.target.setup().inventory().proposal(),
+            self.target.setup().roster(),
             &self.message,
             coins,
         )

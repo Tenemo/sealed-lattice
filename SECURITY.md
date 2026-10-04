@@ -37,13 +37,13 @@ These are requirements, not claims about the current package.
 
 The package ships the participant runtime, a WebAssembly module and worker that carry one participant through registration, roster agreement, the distributed setup, the ballot and its proof, closing, the target vote, the release share, and the local result, and that verify a poll's outcome from its published records without participant state. The participant API returns only the participant's verified progress and its authorized result; it exposes no raw decryption, participant-secret export, or path around certified release. An implemented step is not an established one: the runtime has run only in development environments, and its security argument has no independent review.
 
-The current preparation requires every roster confirmation and every designated setup contribution, so it does not meet departure tolerance from roster fixing. Existing release-subset checks and departures after preparation do not close that gap. Its replacement requires a new agreement, availability and security argument before the corresponding lifecycle can be claimed.
+The changed preparation binds contribution sources during registration and requires a quorum-certified selection of complete public offers before voting. Its complete security bound, departure and recovery matrix, and phone resource qualification remain open. Existing release-subset checks and runs of earlier builds do not close those obligations.
 
 Removed construction formats are not accepted as compatibility inputs or fallback modes.
 
 ## Open security blockers
 
-The emitted protocol implements a candidate for each of the first five items, and a conditional composition argument and security ledger stand for the next two; none is closed without independent review. The current research direction cannot advance beyond research status until all of these are closed for one exact emitted protocol:
+The emitted protocol implements candidates for the first five items. The changed preparation still requires its complete matching composition argument and numerical security ledger; none of these obligations is closed without independent review. The current research direction cannot advance beyond research status until all of these are closed for one exact emitted protocol:
 
 - a malicious, dealerless, fixed-roster BFV/BGV setup that creates threshold secret shares and every evaluation key despite the permitted departures from roster fixing, without participant removal, retry or an indispensable contributor;
 - an asynchronous close rule that completes from the close responses of any `n-f` participants including the organizer and limits a malicious relay or organizer to the bounded omission above;

@@ -20,6 +20,7 @@ import {
 import { readKernel } from './kernel.js';
 import type { ParticipantRefusalReason } from './outcome.js';
 import { validateParticipantPredecessor } from './predecessor.js';
+import { unusedPreparationPurposes } from './preparation-state.js';
 import {
     authenticateRoot,
     chunkBytes,
@@ -82,17 +83,25 @@ const encodeWellFormed = (value: string) => {
     return encodeText(value);
 };
 
-// Signing purposes in the credential's order, each with the last generation
-// at which the root still shows it unused. A purpose whose intent the root
-// retains stays unlocked until its completion generation.
-const lastUnusedGeneration = [2, 8, 10, 16, 18, 20, 21, 23, 28];
-
-const unusedPurposes = (generation: number) =>
-    lastUnusedGeneration.reduce(
-        (mask, last, purpose) =>
-            generation <= last ? mask | (1 << purpose) : mask,
+// Only a completed signature consumes its one-shot purpose. Preparation
+// has independent authenticated intents; later stages use global generations.
+const unusedPurposes = (root: AuthenticatedRoot) => {
+    const generation = root.head.generation;
+    const lastUnused = [2, 0, 0, 0, 16, 18, 20, 21, 23, 28];
+    let mask = lastUnused.reduce(
+        (value, last, purpose) =>
+            generation <= last ? value | (1 << purpose) : value,
         0,
     );
+    if (generation < 4) mask |= 0b1110;
+    else if (generation === 4) {
+        const preparation = root.manifest.suffixes.preparation;
+        if (preparation === undefined)
+            throw new Error('Missing preparation journal.');
+        mask |= unusedPreparationPurposes(preparation);
+    }
+    return mask;
+};
 
 type StagedRecord = { kind: number; offset: number; bytes: Uint8Array };
 
@@ -539,7 +548,7 @@ export const restoreEnrollment = async (
         ...(sourcesRequired
             ? [sourceState]
             : [unsigned32(sourceState.length), sourceState]),
-        unsigned16(created ? 0 : unusedPurposes(root.head.generation)),
+        unsigned16(created ? 0 : unusedPurposes(root)),
     );
     let status: number;
     try {

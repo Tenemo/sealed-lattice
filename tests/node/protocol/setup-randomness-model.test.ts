@@ -17,10 +17,10 @@ describe('setup randomness and bounded integer reduction', () => {
         expect(result.samplesPerContribution).toBe(43n * 65536n);
         expect(result.samplesPerSourceFamily).toBe(65536n);
         expect(result.samplesPerEnrollment).toBe((1n + families) * 65536n);
-        // Four contributors reuse their original first error. Every
+        // All seven eligible contributors reuse their original first error. Every
         // registrant generated all families, including unselected ones.
         expect(result.samplesPerPreparation).toBe(
-            4n * 43n * 65536n + 10n * (1n + families) * 65536n,
+            7n * 43n * 65536n + 10n * (1n + families) * 65536n,
         );
         expect(result.encodedThresholdBytes).toBe(127n * 20n);
         expect(result.quantizationBits).toBeGreaterThan(120);

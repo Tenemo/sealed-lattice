@@ -45,6 +45,8 @@ export type ParticipantOptions = Readonly<{
      * The relay's absolute HTTP or HTTPS base URL, without credentials, a
      * query or a fragment. It serves each public record at `public/<name>`
      * and accepts its publication at `publish/<name>?offset=<offset>`.
+     * The `offers/<position>` endpoint appends untrusted body identities and
+     * returns bounded announcement pages for setup discovery.
      */
     relay: string;
 }>;
@@ -101,7 +103,8 @@ export type ParticipantRequest = Readonly<
               | 'publish'
               | 'contribute'
               | 'confirm'
-              | 'open'
+              | 'select-setup'
+              | 'endorse-setup'
               | 'verify-setup'
               | 'target'
               | 'release'
@@ -123,8 +126,8 @@ export type ParticipantSummary = Readonly<{
     options: readonly Readonly<{ identifier: string; label: string }>[];
     /** How many option identifiers the result lists. */
     topCount: number;
-    /** Whether the participant contributes setup key material, once its roster is retained. */
-    isSetupContributor: boolean | undefined;
+    /** Whether the participant may offer setup key material, once its roster is retained. */
+    isEligibleContributor: boolean | undefined;
     /**
      * The current local ballot state. `could not vote` means submission is
      * closed without an own ballot; it does not identify the cause of absence.

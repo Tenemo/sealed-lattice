@@ -85,10 +85,10 @@ impl CloseWork {
         poll: Arc<VerifiedPoll>,
         setup: Arc<VerifiedSetupAggregate>,
     ) -> Result<Self, Error> {
-        let proposal = setup.inventory().proposal().proposal();
+        let proposal = setup.roster().proposal();
         if owner.poll() != &poll.identity()
             || owner.runtime() != &poll.runtime()
-            || owner.inventory() != &setup.inventory().identity()
+            || owner.inventory() != &setup.identity()
             || owner.position() >= proposal.records().len()
         {
             return Err(Error::Context);
@@ -121,12 +121,7 @@ impl CloseWork {
             body,
             self.context.participant_count(),
         )?;
-        credential.restore_target(
-            &self.owner,
-            self.context.setup().inventory().proposal(),
-            &message,
-            packet,
-        )
+        credential.restore_target(&self.owner, self.context.setup().roster(), &message, packet)
     }
     /// The own ballot's status in a certified target that this participant
     /// did not sign, from the target's classification of its slot and the
@@ -152,7 +147,7 @@ impl CloseWork {
         self.context.participant_count()
     }
     fn roster(&self) -> &registration_credentials::roster_authentication::OrganizerSignedRoster {
-        self.context.setup().inventory().proposal()
+        self.context.setup().roster()
     }
     fn known(&self, identity: &[u8; 64]) -> bool {
         self.envelopes
@@ -413,7 +408,7 @@ impl CloseWork {
                 }
                 let prepared = self.prepared.take().ok_or(Error::Context)?;
                 let coins = input[input.len() - 32..].try_into().unwrap();
-                let roster = self.context.setup().inventory().proposal();
+                let roster = self.context.setup().roster();
                 let signature = match &prepared {
                     Prepared::Intent(message) => {
                         credential.sign_close_intent(&self.owner, roster, message, coins)?
@@ -486,7 +481,7 @@ impl CloseWork {
                 }
                 let count = self.count();
                 let organizer = self.context.organizer();
-                let roster = self.context.setup().inventory().proposal();
+                let roster = self.context.setup().roster();
                 match argument {
                     0 => {
                         let (body, signature) = packet(

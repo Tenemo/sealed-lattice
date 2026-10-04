@@ -1,62 +1,34 @@
-import { commitmentSaltBits } from '#tests/commitment-equivocation-model.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import { compileFullWordProofLayout } from '#tests/full-word-proof-layout-model.js';
-import {
-    compileRegistrationEnrollmentCensus,
-    registrationSigningPublicKeyBytes,
-} from '#tests/registration-enrollment-model.js';
 import { compileRegistrationKeyRelationCensus } from '#tests/registration-key-relation-model.js';
-import { compileRosterProposalCensus } from '#tests/roster-proposal-model.js';
+import { sourceOpeningSaltBytes } from '#tests/registration-setup-binding-model.js';
+import { compileSetupSelectionCensus } from '#tests/setup-selection-model.js';
 import type { SupportedProfile } from '#tests/supported-profile-model.js';
 
-export const contributionBodyHeaderBytes = 4n + 8n + 64n;
-const commitmentDomain = Buffer.from(
-    'sealed-lattice/setup-commitment/v1',
-    'ascii',
-);
+export const contributionBodyHeaderBytes = 4n + 8n + sourceOpeningSaltBytes;
+const bodyDomain = Buffer.from('sealed-lattice/contribution-body/v1', 'ascii');
 
-// Independent byte-level extractor label, checked against the actual Rust
-// canonical encoder and streaming hasher. It creates no verified body value.
-export const contributionSenderPrefix = (publicKey: Uint8Array) => {
-    if (BigInt(publicKey.length) !== registrationSigningPublicKeyBytes)
-        throw new RangeError('Invalid sender key length.');
-    const offset = 8 + 6 + 4 + commitmentDomain.length + 6,
-        prefix = Buffer.alloc(offset + publicKey.length);
+// Ordinary body-hash framing; the source-opening salt is already inside
+// SCB2. This calculation creates no contribution verifier capability.
+export const contributionBodyHashPrefix = (bodyBytes: number) => {
+    if (
+        !Number.isSafeInteger(bodyBytes) ||
+        bodyBytes < 0 ||
+        bodyBytes > 0xffff_fffb
+    )
+        throw new RangeError('Invalid contribution body length.');
+    const prefix = Buffer.alloc(8 + 2 * 6 + 4 + bodyDomain.length + 4);
     prefix.writeUInt16LE(1, 0);
     prefix.writeUInt16LE(1, 2);
-    prefix.writeUInt32LE(5, 4);
+    prefix.writeUInt32LE(2, 4);
     prefix.writeUInt16LE(2, 8);
-    prefix.writeUInt32LE(4 + commitmentDomain.length, 10);
-    prefix.writeUInt32LE(commitmentDomain.length, 14);
-    commitmentDomain.copy(prefix, 18);
-    prefix.writeUInt16LE(1, 18 + commitmentDomain.length);
-    prefix.writeUInt32LE(publicKey.length, 20 + commitmentDomain.length);
-    prefix.set(publicKey, offset);
+    prefix.writeUInt32LE(4 + bodyDomain.length, 10);
+    prefix.writeUInt32LE(bodyDomain.length, 14);
+    bodyDomain.copy(prefix, 18);
+    prefix.writeUInt16LE(1, 18 + bodyDomain.length);
+    prefix.writeUInt32LE(4 + bodyBytes, 20 + bodyDomain.length);
+    prefix.writeUInt32LE(bodyBytes, 24 + bodyDomain.length);
     return prefix;
-};
-
-export const matchesContributionSenderPrefix = (
-    preimage: Uint8Array,
-    publicKey: Uint8Array,
-) => {
-    const prefix = contributionSenderPrefix(publicKey);
-    return (
-        preimage.length >= prefix.length &&
-        prefix.every((value, index) => value === preimage[index])
-    );
-};
-
-export const contributionSaltPrefix = (
-    publicKey: Uint8Array,
-    salt: Uint8Array,
-) => {
-    const saltBytes = commitmentSaltBits / 8n;
-    if (BigInt(salt.length) !== saltBytes)
-        throw new RangeError('Invalid commitment salt length.');
-    const header = Buffer.alloc(6);
-    header.writeUInt16LE(1, 0);
-    header.writeUInt32LE(salt.length, 2);
-    return Buffer.concat([contributionSenderPrefix(publicKey), header, salt]);
 };
 
 export const compileContributionBodyCensus = (profile: SupportedProfile) => {
@@ -66,9 +38,8 @@ export const compileContributionBodyCensus = (profile: SupportedProfile) => {
     };
     const participantCount = profile.participantCount;
     const proof = compileFullWordProofLayout(profile);
-    const registration = compileRegistrationEnrollmentCensus();
     const recipient = compileRegistrationKeyRelationCensus();
-    const roster = compileRosterProposalCensus(participantCount);
+    const selection = compileSetupSelectionCensus(participantCount);
     const polynomialBytes = (degree: bigint, modulus: bigint) =>
         degree * (1n + BigInt(Math.ceil(modulus.toString(2).length / 8)));
     const fhePolynomialBytes = polynomialBytes(
@@ -111,18 +82,7 @@ export const compileContributionBodyCensus = (profile: SupportedProfile) => {
     );
     const maximumBodyBytes =
         headerBytes + polynomialPayloadBytes + proof.maximumMultiproofBytes;
-    const saltBytes = commitmentSaltBits / 8n;
-    const hashPrefixBytes =
-        8n +
-        5n * 6n +
-        4n +
-        BigInt(Buffer.byteLength('sealed-lattice/setup-commitment/v1')) +
-        registration.signingPublicKeyBytes +
-        saltBytes +
-        4n +
-        roster.roleBytes +
-        4n;
-    const senderKeyOffsetBytes = 24n + BigInt(commitmentDomain.length);
+    const hashPrefixBytes = 8n + 2n * 6n + 4n + BigInt(bodyDomain.length) + 4n;
     const minimumHashInputBytes =
         hashPrefixBytes +
         headerBytes +
@@ -137,33 +97,26 @@ export const compileContributionBodyCensus = (profile: SupportedProfile) => {
     return {
         participantCount,
         setupContributorCount: profile.setupContributorCount,
+        eligibleContributorCount: selection.eligibleCount,
         polynomials,
         headerBytes,
         polynomialPayloadBytes,
         minimumProofBytes: proof.headerBytes,
         maximumProofBytes: proof.maximumMultiproofBytes,
         maximumBodyBytes,
-        saltBytes,
+        sourceOpeningSaltBytes,
         hashPrefixBytes,
         minimumHashInputBytes,
         maximumHashInputBytes,
-        senderKeyOffsetBytes,
-        senderPrefixBytes:
-            senderKeyOffsetBytes + registrationSigningPublicKeyBytes,
-        senderSaltPrefixBytes:
-            senderKeyOffsetBytes +
-            registrationSigningPublicKeyBytes +
-            6n +
-            saltBytes,
         minimumHashInputEnclosingBitExponent: enclosingExponent(
             8n * minimumHashInputBytes,
         ),
         maximumHashInputEnclosingBitExponent: enclosingExponent(
             8n * maximumHashInputBytes,
         ),
-        // Only the setup contributors publish a body; every participant
-        // verifies them all.
-        maximumAllContributorBodies:
+        maximumSelectedContributionBodies:
             BigInt(profile.setupContributorCount) * maximumBodyBytes,
+        maximumEligibleOfferBodies:
+            BigInt(selection.eligibleCount) * maximumBodyBytes,
     };
 };

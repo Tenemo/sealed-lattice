@@ -1,8 +1,9 @@
 use num_bigint::{BigInt, Sign};
 use num_traits::Signed;
 use parallel_work::ProtocolHash;
+use registration_credentials::roster::RetainedContributionContext;
 use registration_credentials::roster_authentication::OrganizerSignedRoster;
-use registration_enrollment::{Enrollment, contribution_signing::ContributionSigning};
+use registration_enrollment::{Enrollment, offer_signing::OfferSigning};
 use setup_aggregate::contribution_family;
 use setup_witness::{
     PolynomialOutput,
@@ -108,12 +109,12 @@ fn polynomial_bytes(roster: &OrganizerSignedRoster, directory: &Path, index: usi
     )
 }
 pub fn generate(
+    poll: &registration_credentials::poll::VerifiedPoll,
     roster: &Arc<OrganizerSignedRoster>,
     enrollment: &mut Enrollment,
     position: usize,
     directory: &Path,
-    salt: &[u8; 64],
-) -> (ContributionSigning, Vec<u8>) {
+) -> (OfferSigning, Vec<u8>) {
     std::fs::create_dir(directory).unwrap();
     let profile = roster.proposal().profile();
     let role = roster.proposal().contribution_role(position).unwrap();
@@ -191,15 +192,17 @@ pub fn generate(
             std::fs::metadata(&proof_path).unwrap().len() as usize,
         )
         .unwrap();
-    let mut signing = ContributionSigning::default();
+    let context = RetainedContributionContext::parse(
+        &enrollment.credential,
+        &roster.proposal().records()[position],
+        poll,
+        position,
+        roster.proposal().body(),
+    )
+    .unwrap();
+    let mut signing = OfferSigning::default();
     signing
-        .begin_body(
-            &enrollment.credential,
-            roster.clone(),
-            position,
-            salt,
-            &body_header,
-        )
+        .begin_body(&enrollment.credential, context, &body_header)
         .unwrap();
     let mut buffer = vec![0; 1 << 20];
     for index in profile.contribution_body_polynomials() {
@@ -227,13 +230,8 @@ pub fn generate(
         offset += length;
     }
     signing.finish_body().unwrap();
-    let commitment = *signing.commitment().unwrap();
     signing
-        .sign_confirmation(
-            &mut enrollment.credential,
-            &commitment,
-            *crate::random::<32>(),
-        )
+        .sign(&mut enrollment.credential, *crate::random::<32>())
         .unwrap();
     (signing, body_header.to_vec())
 }

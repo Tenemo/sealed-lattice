@@ -1,3 +1,5 @@
+import { readFile } from 'node:fs/promises';
+
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -7,9 +9,67 @@ import {
     proofHashProfiles,
 } from '#tests/proof-hash-work-model.js';
 import { compileProofVerifierQueryCensus } from '#tests/proof-verifier-query-model.js';
-import { completionProfile } from '#tests/supported-profile-model.js';
+import {
+    completionProfile,
+    deriveSupportedProfile,
+} from '#tests/supported-profile-model.js';
 
 describe('proof hash work', () => {
+    it('uses each actual Rust descriptor word width across small and large profiles', async () => {
+        const source = await readFile(
+            new URL(
+                '../../../crates/protocol-research/supported-profile/src/relation.rs',
+                import.meta.url,
+            ),
+            'utf8',
+        );
+        const fixed = BigInt(
+            source
+                .match(/const MESSAGE_BYTES: usize = ([\d_]+);/u)![1]
+                .replace(/_/gu, ''),
+        );
+        expect(fixed).toBe(262144n);
+        expect(source.match(/message_bytes: MESSAGE_BYTES/gu)).toHaveLength(3);
+        expect(source).toContain(
+            'relation.message_bytes = relation.minimum_message_bytes();',
+        );
+        for (const [participants, options, setupBytes] of [
+            [3, 2, 131072n],
+            [10, 10, 262144n],
+            [20, 20, 524288n],
+        ] as const) {
+            const profile = deriveSupportedProfile(participants, options);
+            const roles = proofHashProfiles(profile);
+            expect(roles.map((role) => role.messageBytes)).toEqual([
+                fixed,
+                setupBytes,
+                fixed,
+                fixed,
+            ]);
+            const queries = compileProofVerifierQueryCensus();
+            const wideCalls = BigInt(
+                queries.verifierMessageQueries + queries.chainStateQueries,
+            );
+            for (const role of roles.filter(
+                (value) => value.role !== 'setup',
+            )) {
+                const actual = compileProofHashWork(profile, role);
+                const borrowedSetupWidth = compileProofHashWork(profile, {
+                    ...role,
+                    messageBytes: setupBytes,
+                });
+                expect(
+                    actual.transcript.inputBytes -
+                        borrowedSetupWidth.transcript.inputBytes,
+                ).toBe(wideCalls * (fixed - setupBytes));
+                expect(
+                    actual.transcript.outputBytes -
+                        borrowedSetupWidth.transcript.outputBytes,
+                ).toBe(wideCalls * (fixed - setupBytes));
+                expect(actual.groups).toEqual(borrowedSetupWidth.groups);
+            }
+        }
+    });
     it('matches explicit suffix padding and block-by-block squeezing', () => {
         for (const rate of [72, 136, 168])
             for (let input = 0; input <= 2 * rate + 1; input++)
@@ -73,8 +133,8 @@ describe('proof hash work', () => {
         expect(profiles.map((value) => value.roleBytes)).toEqual([
             282n,
             410n,
-            266n,
-            341n,
+            404n,
+            479n,
         ]);
         for (const profile of profiles) {
             const costs = compileProofHashWork(completionProfile(), profile);
@@ -124,7 +184,7 @@ describe('proof hash work', () => {
             ...Array.from({ length: 16 }, (_value, index) => 17 - index),
         ];
         const profile = proofHashProfiles(completionProfile())[0];
-        for (const roleBytes of [64, 72, 136, 282, 341, 410, 1024]) {
+        for (const roleBytes of [64, 72, 136, 282, 404, 410, 479, 1024]) {
             const prefix = (domain: string, level: boolean) =>
                 Buffer.concat([
                     Buffer.alloc(64),
@@ -210,7 +270,7 @@ describe('proof hash work', () => {
                     value.proverCore.permutations,
             ),
         ).toEqual(
-            [2n, 3n, 2n, 3n].map(
+            [2n, 3n, 3n, 4n].map(
                 (prefixBlocks) => reusedPrefixes * prefixBlocks,
             ),
         );
@@ -245,7 +305,7 @@ describe('proof hash work', () => {
         );
         // Every leaf and node hash of a group but the first of each reuses
         // the prefix blocks, including the fixed 64-byte digest domain: two blocks for
-        // roles of 266/282 bytes and three for 341/410 bytes at SHAKE256's rate.
+        // the registration role, three for setup/ballot, and four for release.
         const reusedPrefixes = compileProofVerifierQueryCensus().groups.reduce(
             (sum, group) =>
                 sum +
@@ -260,7 +320,7 @@ describe('proof hash work', () => {
                     value.verifierCore.permutations,
             ),
         ).toEqual(
-            [2n, 3n, 2n, 3n].map(
+            [2n, 3n, 3n, 4n].map(
                 (prefixBlocks) => reusedPrefixes * prefixBlocks,
             ),
         );

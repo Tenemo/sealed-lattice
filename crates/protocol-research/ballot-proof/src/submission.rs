@@ -94,12 +94,7 @@ pub fn authenticate_envelope(
     let profile = setup.profile();
     let envelope = BallotEnvelope::decode(profile, bytes).map_err(|_| Error::Context)?;
     let signature: [u8; 3309] = signature.try_into().map_err(|_| Error::Signature)?;
-    if !verify_ballot_signature(
-        setup.inventory().proposal(),
-        &setup.inventory().identity(),
-        &envelope,
-        &signature,
-    ) {
+    if !verify_ballot_signature(setup.roster(), &setup.identity(), &envelope, &signature) {
         return Err(Error::Signature);
     }
     Ok(AuthenticatedBallotEnvelope {
@@ -111,9 +106,8 @@ pub fn authenticate_envelope(
 
 fn check_setup(body: &VerifiedBallotBody, setup: &VerifiedSetupAggregate) -> Result<usize, Error> {
     let relation = body.relation();
-    let inventory = setup.inventory();
-    if relation.inventory() != &inventory.identity()
-        || relation.poll() != &inventory.proposal().proposal().records()[0].header().poll
+    if relation.inventory() != &setup.identity()
+        || relation.poll() != &setup.roster().proposal().records()[0].header().poll
         || relation.position() >= setup.profile().participants()
     {
         return Err(Error::Context);
@@ -132,7 +126,7 @@ pub fn sign_body(
     let envelope = BallotEnvelope::new(
         setup.profile(),
         *body.relation().poll(),
-        setup.inventory().identity(),
+        setup.identity(),
         position,
         ballot_time,
         body.length(),
@@ -140,7 +134,7 @@ pub fn sign_body(
     )
     .map_err(|_| Error::Context)?;
     let signature = credential
-        .sign_ballot_envelope(setup.inventory().proposal(), &envelope, coins)
+        .sign_ballot_envelope(setup.roster(), &envelope, coins)
         .map_err(|_| Error::Signature)?;
     Ok((envelope, signature))
 }
@@ -151,7 +145,7 @@ pub fn verify_submission(
 ) -> Result<VerifiedBallotSubmission, Error> {
     let position = check_setup(&body, setup)?;
     let envelope = &authentication.envelope;
-    if envelope.inventory() != &setup.inventory().identity()
+    if envelope.inventory() != &setup.identity()
         || envelope.poll() != body.relation().poll()
         || envelope.position() != position
         || envelope.body_length() != body.length()

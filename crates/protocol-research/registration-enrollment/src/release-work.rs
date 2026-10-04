@@ -21,7 +21,7 @@ impl ReleaseWork {
         if owner.position() != context.position()
             || owner.poll() != &target.poll().identity()
             || owner.runtime() != &target.poll().runtime()
-            || owner.inventory() != &target.setup().inventory().identity()
+            || owner.inventory() != &target.setup().identity()
         {
             return Err(Error::Context);
         }
@@ -44,7 +44,7 @@ impl ReleaseWork {
         let target = self.context.certificate().target();
         let setup = target.setup();
         let message = TargetMessage::parse(target.body(), setup.profile().participants())?;
-        credential.begin_release(&self.owner, setup.inventory().proposal(), &message)?;
+        credential.begin_release(&self.owner, setup.roster(), &message)?;
         let prepared = key
             .prepare_release(
                 self.context.profile(),

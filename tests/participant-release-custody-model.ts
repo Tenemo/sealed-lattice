@@ -1,15 +1,20 @@
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import { compileLinkedReleaseWordProofLayout } from '#tests/full-word-proof-layout-model.js';
 import { operationSeedBytes } from '#tests/operation-seed-model.js';
-import { compileRegistrationEnrollmentCensus } from '#tests/registration-enrollment-model.js';
+import {
+    compileRegistrationEnrollmentCensus,
+    participantIdentityAsciiBytes,
+} from '#tests/registration-enrollment-model.js';
 import type { SupportedProfile } from '#tests/supported-profile-model.js';
 import { compileTargetSigningStateCensus } from '#tests/target-signing-state-model.js';
 
 export const participantReleaseProofRoleBytes =
     8n +
-    6n * 6n +
+    7n * 6n +
     4n +
-    BigInt(Buffer.byteLength('sealed-lattice/certified-release/v1')) +
+    BigInt(Buffer.byteLength('sealed-lattice/certified-release/v2')) +
+    4n +
+    participantIdentityAsciiBytes +
     4n * 64n +
     2n;
 

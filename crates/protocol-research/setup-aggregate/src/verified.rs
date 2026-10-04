@@ -1,11 +1,14 @@
 use crate::{CHUNK_BYTES, PolynomialAdder, RetainedSetupInputs};
-use opened_contribution::OpenedContributionVerifier;
+use opened_contribution::VerifiedContributionOffer;
 use parallel_work::PendingDigest;
 use registration_credentials::{
     Credential, RETAINED_TAG_BYTES,
-    contribution_authentication::CommitmentInventory,
     identity::{IdentityHasher, PUBLIC_POLYNOMIAL_DOMAIN},
     poll::VerifiedPoll,
+    roster_authentication::OrganizerSignedRoster,
+    setup_selection::{
+        AuthenticatedSelectionCertificate, AuthenticatedSelectionProposal, SelectionProposal,
+    },
 };
 use std::{collections::VecDeque, sync::Arc};
 use supported_profile::Profile;
@@ -28,35 +31,169 @@ impl AggregatePolynomial {
     }
 }
 
-pub struct VerifiedSetupAggregate {
-    inventory: Arc<CommitmentInventory>,
+pub struct VerifiedSelectionInputs {
+    selection: Arc<AuthenticatedSelectionProposal>,
     polynomials: Vec<AggregatePolynomial>,
 }
+pub struct VerifiedSetupAggregate {
+    inputs: Arc<VerifiedSelectionInputs>,
+}
 impl VerifiedSetupAggregate {
-    pub fn inventory(&self) -> &Arc<CommitmentInventory> {
-        &self.inventory
+    pub fn identity(&self) -> [u8; 64] {
+        self.inputs.identity()
+    }
+    pub fn roster(&self) -> &Arc<OrganizerSignedRoster> {
+        self.inputs.roster()
     }
     pub fn profile(&self) -> Profile {
-        self.inventory.proposal().proposal().profile()
+        self.inputs.profile()
     }
     pub fn polynomials(&self) -> &[AggregatePolynomial] {
-        &self.polynomials
+        &self.inputs.polynomials
     }
     pub fn read_polynomial(
         &self,
         index: usize,
     ) -> Result<crate::AggregatePolynomialReader, Refusal> {
         let polynomial = self
+            .inputs
             .polynomials
             .iter()
             .find(|polynomial| polynomial.index == index)
             .ok_or(Refusal::Order)?;
-        crate::AggregatePolynomialReader::new(
-            self.profile(),
-            self.inventory.identity(),
-            polynomial.clone(),
-        )
+        crate::AggregatePolynomialReader::new(self.profile(), self.identity(), polynomial.clone())
     }
+}
+
+fn check_poll(roster: &OrganizerSignedRoster, poll: &VerifiedPoll) -> Result<(), Refusal> {
+    if roster.proposal().records()[0].header().poll != poll.identity()
+        || roster.proposal().records()[0].header().runtime != poll.runtime()
+    {
+        return Err(Refusal::Context);
+    }
+    Ok(())
+}
+
+impl VerifiedSelectionInputs {
+    pub fn identity(&self) -> [u8; 64] {
+        self.selection.selection().identity()
+    }
+    pub fn roster(&self) -> &Arc<OrganizerSignedRoster> {
+        self.selection.roster()
+    }
+    pub fn profile(&self) -> Profile {
+        self.roster().proposal().profile()
+    }
+    pub fn selection(&self) -> &AuthenticatedSelectionProposal {
+        &self.selection
+    }
+    pub fn polynomials(&self) -> &[AggregatePolynomial] {
+        &self.polynomials
+    }
+    pub fn certify(
+        self: &Arc<Self>,
+        certificate: &AuthenticatedSelectionCertificate,
+    ) -> Result<VerifiedSetupAggregate, Refusal> {
+        if certificate.proposal().roster().proposal().identity()
+            != self.roster().proposal().identity()
+            || certificate.proposal().selection().body() != self.selection.selection().body()
+        {
+            return Err(Refusal::Context);
+        }
+        Ok(VerifiedSetupAggregate {
+            inputs: self.clone(),
+        })
+    }
+    pub fn retain(&self, credential: &Credential, poll: &VerifiedPoll) -> Result<Vec<u8>, Refusal> {
+        check_poll(self.roster(), poll)?;
+        let mut reference = crate::retained::encode_reference(
+            b"SPI1",
+            self.profile(),
+            self.identity(),
+            &self.polynomials,
+        )?;
+        let tag = credential.retained_selection_inputs_tag(poll, &reference);
+        reference.extend(tag);
+        Ok(reference)
+    }
+    pub fn restore(
+        credential: &Credential,
+        poll: &VerifiedPoll,
+        selection: Arc<AuthenticatedSelectionProposal>,
+        retained: &[u8],
+    ) -> Result<Self, Refusal> {
+        check_poll(selection.roster(), poll)?;
+        let split = retained
+            .len()
+            .checked_sub(RETAINED_TAG_BYTES)
+            .ok_or(Refusal::Context)?;
+        let (reference, tag) = retained.split_at(split);
+        credential
+            .check_retained_selection_inputs_tag(poll, reference, tag)
+            .map_err(|_| Refusal::Context)?;
+        let profile = selection.roster().proposal().profile();
+        let inputs = RetainedSetupInputs::parse_with_magic(
+            b"SPI1",
+            profile,
+            reference,
+            selection.selection().identity(),
+        )?;
+        Ok(Self {
+            selection,
+            polynomials: inputs.into_polynomials(),
+        })
+    }
+}
+
+impl VerifiedSetupAggregate {
+    pub fn restore(
+        credential: &Credential,
+        poll: &VerifiedPoll,
+        certificate: &AuthenticatedSelectionCertificate,
+        retained: &[u8],
+    ) -> Result<Self, Refusal> {
+        let selection = Arc::new(certificate.proposal().clone());
+        check_poll(selection.roster(), poll)?;
+        let split = retained
+            .len()
+            .checked_sub(RETAINED_TAG_BYTES)
+            .ok_or(Refusal::Context)?;
+        let (reference, tag) = retained.split_at(split);
+        credential
+            .check_retained_setup_tag(poll, reference, tag)
+            .map_err(|_| Refusal::Context)?;
+        let profile = selection.roster().proposal().profile();
+        let inputs = RetainedSetupInputs::parse(profile, reference, certificate.identity())?;
+        Ok(Self {
+            inputs: Arc::new(VerifiedSelectionInputs {
+                selection,
+                polynomials: inputs.into_polynomials(),
+            }),
+        })
+    }
+}
+
+/// The organizer can propose only a complete set of this verifier's offers.
+pub fn build_selection(
+    roster: &Arc<OrganizerSignedRoster>,
+    offers: &[Arc<VerifiedContributionOffer>],
+) -> Result<SelectionProposal, Refusal> {
+    if offers
+        .iter()
+        .any(|offer| offer.roster().proposal().identity() != roster.proposal().identity())
+    {
+        return Err(Refusal::Context);
+    }
+    let selected: Vec<_> = offers
+        .iter()
+        .map(|offer| {
+            (
+                offer.envelope().position(),
+                *offer.envelope().body_identity(),
+            )
+        })
+        .collect();
+    SelectionProposal::new(roster.proposal(), &selected).map_err(|_| Refusal::Context)
 }
 
 #[derive(Debug)]
@@ -65,12 +202,12 @@ pub enum Refusal {
     Order,
     Body,
     PreviousAggregate,
-    Proof,
     Incomplete,
 }
 
 struct Pending {
-    verifier: OpenedContributionVerifier,
+    offer: Arc<VerifiedContributionOffer>,
+    incoming_hash: Option<IdentityHasher>,
     ordinal: usize,
     offset: usize,
     // The identities of the polynomial in progress: the previous aggregate
@@ -115,12 +252,13 @@ fn settle(
     Ok(())
 }
 
-/// Only a completed, positively verified opening advances the accepted prefix.
+/// Only complete bytes matching a positively verified offer advance the prefix.
 /// Output chunks are provisional until `finish_contribution` succeeds. A
 /// polynomial's identities are checked while later polynomials stream, and
 /// `finish_contribution` checks the last ones.
 pub struct SetupAggregator {
-    inventory: Arc<CommitmentInventory>,
+    selection: Arc<AuthenticatedSelectionProposal>,
+    offers: Vec<Arc<VerifiedContributionOffer>>,
     profile: Profile,
     accepted: usize,
     indices: Vec<usize>,
@@ -128,13 +266,18 @@ pub struct SetupAggregator {
     pending: Option<Pending>,
 }
 impl SetupAggregator {
-    pub fn new(inventory: Arc<CommitmentInventory>) -> Result<Self, Refusal> {
-        let profile = inventory.proposal().proposal().profile();
-        if inventory.confirmations().len() != profile.participants() {
+    pub fn new(
+        selection: Arc<AuthenticatedSelectionProposal>,
+        offers: Vec<Arc<VerifiedContributionOffer>>,
+    ) -> Result<Self, Refusal> {
+        let profile = selection.roster().proposal().profile();
+        let rebuilt = build_selection(selection.roster(), &offers)?;
+        if rebuilt.body() != selection.selection().body() {
             return Err(Refusal::Context);
         }
         Ok(Self {
-            inventory,
+            selection,
+            offers,
             profile,
             accepted: 0,
             indices: profile.contribution_body_polynomials(),
@@ -145,68 +288,28 @@ impl SetupAggregator {
     pub fn accepted(&self) -> usize {
         self.accepted
     }
-    /// Restores this verifier's earlier result for the same inventory from
-    /// the setup reference that the participant's credential keyed when the
-    /// verifier accepted it, instead of verifying every opening again. The
-    /// reference must carry that credential's tag for the verified poll and
-    /// name this inventory; the aggregate values it names stay with the
-    /// host, and every reader checks them against its digests.
-    pub fn restore(
-        self,
-        credential: &Credential,
-        poll: &VerifiedPoll,
-        retained: &[u8],
-    ) -> Result<VerifiedSetupAggregate, Refusal> {
-        let proposal = self.inventory.proposal().proposal();
-        if self.accepted != 0
-            || self.pending.is_some()
-            || proposal.records()[0].header().poll != poll.identity()
-            || proposal.records()[0].header().runtime != poll.runtime()
-        {
-            return Err(Refusal::Order);
-        }
-        let split = retained
-            .len()
-            .checked_sub(RETAINED_TAG_BYTES)
-            .ok_or(Refusal::Context)?;
-        let (reference, tag) = retained.split_at(split);
-        credential
-            .check_retained_setup_tag(poll, reference, tag)
-            .map_err(|_| Refusal::Context)?;
-        let inputs =
-            RetainedSetupInputs::parse(self.profile, reference, self.inventory.identity())?;
-        Ok(VerifiedSetupAggregate {
-            inventory: self.inventory,
-            polynomials: inputs.into_polynomials(),
-        })
-    }
-    /// Every setup contributor's opening is accepted and none is pending.
+    /// Every selected contribution is aggregated and none is pending.
     pub fn complete(&self) -> bool {
         self.pending.is_none() && self.accepted == self.profile.setup_contributors()
     }
     pub fn polynomials(&self) -> &[AggregatePolynomial] {
         &self.previous
     }
-    pub fn begin(
-        &mut self,
-        opening_body: &[u8],
-        signature: &[u8],
-        body_header: &[u8],
-        proof_header: &[u8],
-    ) -> Result<(), Refusal> {
+    pub fn begin(&mut self, position: usize) -> Result<(), Refusal> {
         if self.accepted >= self.profile.setup_contributors() {
             return Err(Refusal::Order);
         }
-        let verifier = OpenedContributionVerifier::new(
-            self.inventory.clone(),
-            opening_body,
-            signature,
-            body_header,
-            proof_header,
-        )
-        .map_err(|_| Refusal::Context)?;
+        let offer = self
+            .offers
+            .get(self.accepted)
+            .ok_or(Refusal::Order)?
+            .clone();
+        if offer.envelope().position() != position {
+            return Err(Refusal::Order);
+        }
         self.pending = Some(Pending {
-            verifier,
+            offer,
+            incoming_hash: None,
             ordinal: 0,
             offset: 0,
             previous_hash: None,
@@ -246,17 +349,20 @@ impl SetupAggregator {
             if incoming.len() > bytes.saturating_sub(offset) {
                 return Err(Refusal::Order);
             }
-            pending
-                .verifier
-                .polynomial(index, offset, incoming)
-                .map_err(|_| Refusal::Body)?;
             let identity = || {
                 IdentityHasher::new(PUBLIC_POLYNOMIAL_DOMAIN, &[], bytes).map_err(|_| Refusal::Body)
             };
             if offset == 0 {
+                pending.incoming_hash = Some(identity()?);
                 pending.previous_hash = (self.accepted > 0).then(identity).transpose()?;
                 pending.output_hash = Some(identity()?);
             }
+            pending
+                .incoming_hash
+                .as_mut()
+                .ok_or(Refusal::Order)?
+                .absorb(incoming)
+                .map_err(|_| Refusal::Body)?;
             match pending.previous_hash.as_mut() {
                 None => previous_and_output.fill(0),
                 Some(hash) => hash
@@ -274,6 +380,23 @@ impl SetupAggregator {
                 .map_err(|_| Refusal::Body)?;
             pending.offset += incoming.len();
             if pending.offset == bytes {
+                let original = pending
+                    .offer
+                    .polynomials()
+                    .get(pending.ordinal)
+                    .ok_or(Refusal::Body)?;
+                let digest = pending
+                    .incoming_hash
+                    .take()
+                    .ok_or(Refusal::Order)?
+                    .finish()
+                    .map_err(|_| Refusal::Body)?;
+                if original.index() != index
+                    || original.bytes() != bytes
+                    || original.digest() != &digest
+                {
+                    return Err(Refusal::Body);
+                }
                 let previous = match pending.previous_hash.take() {
                     None => None,
                     Some(hash) => {
@@ -316,39 +439,22 @@ impl SetupAggregator {
         }
         result
     }
-    pub fn proof(&mut self, offset: usize, bytes: &[u8]) -> Result<(), Refusal> {
-        let pending = self.pending.as_mut().ok_or(Refusal::Order)?;
-        if pending.failed || pending.ordinal != self.indices.len() {
-            return Err(Refusal::Order);
-        }
-        if pending.verifier.proof(offset, bytes).is_err() {
-            pending.failed = true;
-            return Err(Refusal::Proof);
-        }
-        Ok(())
-    }
     pub fn finish_contribution(&mut self) -> Result<(), Refusal> {
         let mut pending = self.pending.take().ok_or(Refusal::Order)?;
         if pending.failed || pending.ordinal != self.indices.len() || pending.offset != 0 {
             return Err(Refusal::Incomplete);
         }
         settle(&mut pending.finishing, 0, &mut pending.outputs)?;
-        let verified = pending.verifier.finish().map_err(|_| Refusal::Proof)?;
-        if verified.position() != self.accepted
-            || verified.inventory() != &self.inventory.identity()
-        {
-            return Err(Refusal::Context);
-        }
         self.previous = pending.outputs;
         self.accepted += 1;
         Ok(())
     }
-    pub fn finish(self) -> Result<VerifiedSetupAggregate, Refusal> {
+    pub fn finish(self) -> Result<VerifiedSelectionInputs, Refusal> {
         if !self.complete() {
             return Err(Refusal::Incomplete);
         }
-        Ok(VerifiedSetupAggregate {
-            inventory: self.inventory,
+        Ok(VerifiedSelectionInputs {
+            selection: self.selection,
             polynomials: self.previous,
         })
     }

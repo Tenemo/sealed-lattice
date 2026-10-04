@@ -19,6 +19,7 @@ import {
 import { instantiateParticipantKernel } from '#packages/sdk/src/participant/worker/kernel.js';
 import { noParallelHelpers } from '#packages/sdk/src/participant/worker/parallel.js';
 import { validateParticipantPredecessor } from '#packages/sdk/src/participant/worker/predecessor.js';
+import { encodePreparationState } from '#packages/sdk/src/participant/worker/preparation-state.js';
 import {
     openRecord,
     sealRecord,
@@ -90,8 +91,10 @@ export const mutateParticipantPadding = async (
         };
         const root = await authenticateRoot(initial);
         privateBytes.push(root.plaintext, root.manifest.dataKeys);
-        if (root.head.generation !== 9)
-            throw new Error('The padding control requires generation nine.');
+        if (root.head.generation !== 4)
+            throw new Error(
+                'The padding control requires ongoing preparation.',
+            );
         const context = await retainedProfile(
             initial,
             root,
@@ -101,13 +104,16 @@ export const mutateParticipantPadding = async (
             context.profile.participantCount !== options.participants ||
             context.profile.optionCount !== options.options ||
             context.position !== options.position ||
-            context.position >= context.profile.setupContributorCount
+            context.position >= context.profile.eligibleContributorCount
         )
             throw new Error('The padding control names another participant.');
         const session = await resumeContribution(context, root);
         const state = session.state;
+        if (state.phase !== 7)
+            throw new Error(
+                'The padding control requires the complete unsigned offer body.',
+            );
         privateBytes.push(
-            state.salt,
             state.header,
             ...state.publicRecords.map((record) => record.key),
             ...state.signingRecords.map((record) => record.key),
@@ -199,21 +205,23 @@ export const mutateParticipantPadding = async (
                     sealed.ciphertext,
                 ),
             };
-            const suffix = encodeContributionState(
-                {
-                    ...state,
-                    publicRecords: state.publicRecords.map((value) =>
-                        value === record ? replacement : value,
-                    ),
-                },
-                context.profile,
-            );
+            const suffix = encodeContributionState({
+                ...state,
+                publicRecords: state.publicRecords.map((value) =>
+                    value === record ? replacement : value,
+                ),
+            });
             privateBytes.push(suffix);
             const committed = await commitRoot(context, root, {
-                generation: 9,
+                generation: 4,
                 manifest: {
                     ...root.manifest,
-                    suffixes: { contribution: suffix },
+                    suffixes: {
+                        preparation: encodePreparationState({
+                            ...session.preparation,
+                            contribution: suffix,
+                        }),
+                    },
                 },
                 predecessorRecords,
                 write: (transaction) => {
@@ -247,7 +255,7 @@ export const mutateParticipantPadding = async (
             authenticated.plaintext,
             authenticated.manifest.dataKeys,
         );
-        if (authenticated.head.generation !== 9)
+        if (authenticated.head.generation !== 4)
             throw new Error(
                 'The padding mutation moved the retained generation.',
             );

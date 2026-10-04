@@ -1,5 +1,4 @@
 import { auxiliaryInputEncryptionParameters } from '#tests/auxiliary-input-encryption-parameters.js';
-import { commitmentSaltBits } from '#tests/commitment-equivocation-model.js';
 import { compileCommonMatrixSamplingCensus } from '#tests/common-matrix-sampling-model.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import { operationSeedBytes } from '#tests/operation-seed-model.js';
@@ -8,6 +7,8 @@ import {
     deriveSupportedProfile,
     supportedProfileRanges,
 } from '#tests/supported-profile-model.js';
+
+export const sourceOpeningSaltBytes = 64n;
 
 // First-order screen for committing the FHE encryption-key coordinate
 // before the roster exists. The existing proof ties b[0] to the FHE sharing
@@ -84,7 +85,7 @@ export const compileRegistrationSetupBindingScreen = (
         coordinateCount,
         commitmentDigestPayloadBytes: coordinateCount * 64n,
         privateSeedAndSaltPayloadBytes:
-            coordinateCount * (operationSeedBytes + commitmentSaltBits / 8n),
+            coordinateCount * (operationSeedBytes + sourceOpeningSaltBytes),
         generatedPublicCoordinateBytes: fhe.reduce(
             (sum, family) => sum + family.publicCoordinateBytes,
             0n,

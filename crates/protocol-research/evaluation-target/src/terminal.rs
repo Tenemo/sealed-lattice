@@ -170,7 +170,7 @@ impl ReleaseCollector {
             return Err(Error::NoResult);
         }
         let profile = target.setup().profile();
-        if target.setup().inventory().confirmations().len() != profile.participants()
+        if target.setup().roster().proposal().records().len() != profile.participants()
             || target.poll().manifest().option_count() != profile.options()
             || !(1..=profile.options()).contains(&usize::from(target.poll().top_count()))
         {

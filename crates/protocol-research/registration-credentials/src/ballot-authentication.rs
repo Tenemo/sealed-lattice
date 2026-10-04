@@ -30,6 +30,12 @@ pub struct RetainedBallotOwner {
     signing_public: [u8; 1952],
 }
 impl RetainedBallotOwner {
+    pub fn participant_identity(
+        &self,
+    ) -> crate::foundation::participant_identity::ParticipantIdentity {
+        crate::foundation::derive_participant_identity(&self.signing_public)
+            .expect("Original signing credential identity")
+    }
     pub fn poll(&self) -> &[u8; 64] {
         &self.poll
     }
@@ -169,6 +175,7 @@ impl Credential {
         poll: &VerifiedPoll,
         context: &RetainedContributionContext,
     ) -> Result<(), Error> {
+        self.check_confirmed_context(context)?;
         if context.poll != poll.identity()
             || context.runtime != poll.runtime()
             || context.profile().options() != poll.manifest().option_count()
@@ -178,56 +185,8 @@ impl Credential {
         }
         Ok(())
     }
-    /// A setup contributor's owner: its own signed opening names the
-    /// inventory.
-    pub fn retain_ballot_owner(
-        &self,
-        poll: &VerifiedPoll,
-        context: &RetainedContributionContext,
-        inventory: [u8; 64],
-        opening_body: &[u8],
-        opening_signature: &[u8],
-    ) -> Result<RetainedBallotOwner, Error> {
-        self.check_owner_context(poll, context)?;
-        if context.position >= context.profile().setup_contributors() {
-            return Err(Error::Context);
-        }
-        let (position, _) = crate::contribution_authentication::decode(
-            opening_body,
-            crate::contribution_authentication::OPENING_CONTEXT,
-            inventory,
-            crate::foundation::CanonicalItemType::RawBytes,
-        )?;
-        if position != context.position {
-            return Err(Error::Context);
-        }
-        let signature = opening_signature.try_into().map_err(|_| Error::Shape)?;
-        let identity = crate::contribution_authentication::identity(
-            "sealed-lattice/setup-opening-id/v1",
-            opening_body,
-        )?;
-        let public =
-            ml_dsa_65::PublicKey::try_from_bytes(self.signing_public).map_err(|_| Error::Shape)?;
-        if !public.verify(
-            &identity,
-            &signature,
-            crate::contribution_authentication::OPENING_CONTEXT,
-        ) {
-            return Err(Error::Crypto);
-        }
-        Ok(RetainedBallotOwner {
-            poll: poll.identity(),
-            runtime: poll.runtime(),
-            inventory,
-            position,
-            owner_body: context.owner_body,
-            signing_public: self.signing_public,
-        })
-    }
-    /// The owner of a participant outside the setup contributors, which opens
-    /// nothing: the setup reference that this credential keyed when the
-    /// owning setup verifier accepted the setup names the inventory, after
-    /// the reference's four-byte marker.
+    /// Every original roster member uses its own verified winning setup
+    /// reference, whether its own offer or endorsement was selected or absent.
     pub fn retain_setup_ballot_owner(
         &self,
         poll: &VerifiedPoll,
@@ -237,9 +196,6 @@ impl Credential {
         tag: &[u8],
     ) -> Result<RetainedBallotOwner, Error> {
         self.check_owner_context(poll, context)?;
-        if context.position < context.profile().setup_contributors() {
-            return Err(Error::Context);
-        }
         self.check_retained_setup_tag(poll, reference, tag)?;
         if reference.get(4..68) != Some(inventory.as_slice()) {
             return Err(Error::Context);

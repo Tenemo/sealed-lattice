@@ -26,16 +26,14 @@ const stage = ({ operation, generation }: ParticipantOperationMeasurement) => {
     if (operation === 'create' || (operation === 'publish' && generation === 1))
         return 'registration';
     if (
-        [
-            'propose-roster',
-            'accept-roster',
-            'publish',
-            'contribute',
-            'confirm',
-        ].includes(operation)
+        ['propose-roster', 'accept-roster', 'publish', 'confirm'].includes(
+            operation,
+        )
     )
         return 'roster and confirmation';
-    if (operation === 'open') return 'opening';
+    if (operation === 'contribute') return 'contribution offers';
+    if (operation === 'select-setup' || operation === 'endorse-setup')
+        return 'setup selection';
     if (operation === 'verify-setup' || operation === 'ballot') return 'ballot';
     if (operation === 'close')
         return generation === 22 ? 'certification' : 'closing';

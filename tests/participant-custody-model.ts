@@ -1,4 +1,3 @@
-import { compileContributionAuthenticationCensus } from '#tests/contribution-authentication-model.js';
 import { compileContributionBodyCensus } from '#tests/contribution-body-model.js';
 import { compileFirstOracleCheckpointCensus } from '#tests/first-oracle-checkpoint-model.js';
 import { operationSeedBytes } from '#tests/operation-seed-model.js';
@@ -7,6 +6,7 @@ import { compileParticipantCloseCustody } from '#tests/participant-close-custody
 import { compileParticipantReleaseCustody } from '#tests/participant-release-custody-model.js';
 import { compileRegistrationEnrollmentCensus } from '#tests/registration-enrollment-model.js';
 import { compileSetupContributionRelationCensus } from '#tests/setup-contribution-relation-model.js';
+import { compileSetupSelectionWireCensus } from '#tests/setup-selection-wire-model.js';
 import type { SupportedProfile } from '#tests/supported-profile-model.js';
 import { compileTargetSigningStateCensus } from '#tests/target-signing-state-model.js';
 
@@ -100,11 +100,10 @@ export const compileParticipantCustodyCensus = (profile: SupportedProfile) => {
     const body = compileContributionBodyCensus(profile);
     const checkpoint = compileFirstOracleCheckpointCensus(profile);
     const enrollment = compileRegistrationEnrollmentCensus();
-    const authentication = compileContributionAuthenticationCensus(
-        body.participantCount,
-    );
+    const wire = compileSetupSelectionWireCensus(profile.participantCount);
     const relation = compileSetupContributionRelationCensus(profile);
     const chunkBytes = 1n << 20n;
+    const chunks = (bytes: bigint) => (bytes + chunkBytes - 1n) / chunkBytes;
     const publicRecords = body.polynomials.flatMap((polynomial) => {
         const records = [];
         for (let offset = 0n; offset < polynomial.bytes; offset += chunkBytes) {
@@ -131,11 +130,9 @@ export const compileParticipantCustodyCensus = (profile: SupportedProfile) => {
         }
         return lengths;
     });
-    const maximumProofRecords =
-        (body.maximumProofBytes + chunkBytes - 1n) / chunkBytes;
-    const metadataPrefixBytes = 4n + 2n + body.saltBytes + 4n * 4n;
-    // The continuation intent keeps the checkpoint and the seed of the
-    // continuation's randomness.
+    const maximumProofRecords = chunks(body.maximumProofBytes);
+    // PCS4 owns its phase independently of global preparation generation.
+    const metadataPrefixBytes = 4n + 1n + 2n + 4n * 4n;
     const maximumCheckpointMetadataBytes =
         metadataPrefixBytes +
         checkpoint.maximumHeaderBytes +
@@ -146,84 +143,90 @@ export const compileParticipantCustodyCensus = (profile: SupportedProfile) => {
         metadataPrefixBytes +
         body.headerBytes +
         106n * (BigInt(publicRecords.length) + maximumProofRecords) +
-        5n * 102n;
+        2n * 102n;
     const maximumMetadataBytes =
         maximumCheckpointMetadataBytes > maximumCompletedMetadataBytes
             ? maximumCheckpointMetadataBytes
             : maximumCompletedMetadataBytes;
-    // The setup reference and the confirmation inventory the setup was
-    // verified against join the enrollment records, each in one record.
-    const maximumRootRecords = enrollment.maximumRecords + 2n;
-    const ballot = compileParticipantBallotCustody(profile);
-    // Marker, inventory identity, one digest per aggregate polynomial, and the
-    // credential-keyed protocol digest that the ballot step checks before parsing.
+    // SAV1 and SPI1 contain the semantic selection identity, ordered aggregate
+    // polynomial identities and the owning verifier's credential-keyed tag.
     const setupReferenceBytes =
         4n + 64n + 64n * BigInt(body.polynomials.length) + 64n;
-    // The count and every participant's confirmation packet.
-    const setupInventoryBytes =
-        4n +
-        BigInt(authentication.participants) *
-            authentication.confirmationPacketBytes;
-    // The close suffix collects deliveries alongside every ballot phase.
+    const selectionReferenceBytes = setupReferenceBytes;
+    const setupInventoryBytes = wire.certificateBytes;
+    const emptyPreparationBytes = 4n + 3n * 4n;
+    const maximumSelectionSlotBytes =
+        1n + wire.selectionBodyBytes + wire.signatureBytes;
+    const maximumEndorsementSlotBytes =
+        1n +
+        wire.selectionBodyBytes +
+        wire.signatureBytes +
+        selectionReferenceBytes +
+        wire.endorsementBodyBytes +
+        wire.signatureBytes;
+    const maximumPreparationBytes =
+        emptyPreparationBytes +
+        maximumMetadataBytes +
+        maximumSelectionSlotBytes +
+        maximumEndorsementSlotBytes;
+    const maximumEnrollmentRootRecords = enrollment.maximumRecords;
+    const maximumRootRecords =
+        enrollment.maximumRecords -
+        chunks(enrollment.maximumSourceCapsuleBytes) +
+        chunks(setupReferenceBytes) +
+        chunks(setupInventoryBytes);
+    const ballot = compileParticipantBallotCustody(profile);
     const close = compileParticipantCloseCustody(profile);
-    const maximumWithBallot =
-        maximumCompletedMetadataBytes +
+    const targetSigning = compileTargetSigningStateCensus();
+    const release = compileParticipantReleaseCustody(profile);
+    const completedBallotBytes = ballot.phaseBytes.find(
+        (value) => value.phase === 17,
+    )!.bytes;
+    const maximumBallotSuffixes =
+        4n +
+        emptyPreparationBytes +
         4n +
         ballot.maximumStateBytes +
         4n +
         close.collectingBytes;
-    const completedBallotBytes = ballot.phaseBytes.find(
-        (value) => value.phase === 17,
-    )!.bytes;
-    // A voter's completed ballot precedes its close state; a nonvoter's
-    // close state is the same size.
-    const maximumWithClose =
-        maximumCompletedMetadataBytes +
+    const maximumReleaseSuffixes =
+        4n +
+        emptyPreparationBytes +
         4n +
         completedBallotBytes +
         4n +
-        close.maximumStateBytes;
-    const targetSigning = compileTargetSigningStateCensus();
-    const maximumWithTargetSigning =
-        maximumWithClose + 4n + targetSigning.maximumStateBytes;
-    const release = compileParticipantReleaseCustody(profile);
-    const maximumWithRelease =
-        maximumWithTargetSigning + 4n + release.maximumStateBytes;
-    const maximumWithLaterWork =
-        maximumWithRelease > maximumWithBallot
-            ? maximumWithRelease
-            : maximumWithBallot;
-    const maximumCombinedMetadata =
-        maximumWithLaterWork > maximumMetadataBytes
-            ? maximumWithLaterWork
-            : maximumMetadataBytes;
-    // The completed header changes only completed/late suffixes. A profile
-    // whose larger checkpoint dominates must keep that unchanged maximum.
-    const previousStateMaximum =
-        maximumCheckpointMetadataBytes >
-        maximumCompletedMetadataBytes - body.headerBytes
-            ? maximumCheckpointMetadataBytes
-            : maximumCompletedMetadataBytes - body.headerBytes;
-    const previousCombinedMaximum = [
-        maximumCheckpointMetadataBytes,
-        maximumCompletedMetadataBytes - body.headerBytes,
-        maximumWithLaterWork - body.headerBytes,
-    ].reduce((largest, value) => (value > largest ? value : largest));
-    const maximumRootBytes =
-        enrollment.manifestPrefixBytes +
-        73n * maximumRootRecords +
+        close.maximumStateBytes +
         4n +
-        maximumCombinedMetadata +
+        targetSigning.maximumStateBytes +
+        4n +
+        release.maximumStateBytes;
+    const maximumLaterSuffixes =
+        maximumBallotSuffixes > maximumReleaseSuffixes
+            ? maximumBallotSuffixes
+            : maximumReleaseSuffixes;
+    const maximumPreparationRootBytes =
+        enrollment.manifestPrefixBytes +
+        73n * maximumEnrollmentRootRecords +
+        4n +
+        maximumPreparationBytes +
         16n;
+    const maximumPreparedRootBytes =
+        enrollment.preparedManifestPrefixBytes +
+        73n * maximumRootRecords +
+        maximumLaterSuffixes +
+        16n;
+    const maximumRootBytes =
+        maximumPreparationRootBytes > maximumPreparedRootBytes
+            ? maximumPreparationRootBytes
+            : maximumPreparedRootBytes;
     const maximumPublicBodyCiphertextBytes =
         body.polynomialPayloadBytes +
         body.maximumProofBytes +
         16n * (BigInt(publicRecords.length) + maximumProofRecords);
     const maximumSigningPlaintextBytes =
-        authentication.confirmationBodyBytes +
-        authentication.openingBodyBytes +
-        2n * authentication.signatureBytes +
-        setupInventoryBytes;
+        wire.offerEnvelopeBytes + wire.signatureBytes;
+    // This reservation covers the activation overlap before the source,
+    // private checkpoint and own contribution stores are atomically retired.
     const maximumRetainedPayloadBytes =
         enrollment.maximumRetainedPayloadBytes -
         enrollment.maximumRootBytes +
@@ -233,7 +236,7 @@ export const compileParticipantCustodyCensus = (profile: SupportedProfile) => {
         maximumPublicBodyCiphertextBytes +
         checkpoint.ciphertextBytes +
         maximumSigningPlaintextBytes +
-        5n * 16n;
+        2n * 16n;
     return {
         maximumReleaseStateBytes: release.maximumStateBytes,
         participants: body.participantCount,
@@ -243,14 +246,18 @@ export const compileParticipantCustodyCensus = (profile: SupportedProfile) => {
         maximumCheckpointMetadataBytes,
         maximumCompletedMetadataBytes,
         completedBodyHeaderBytes: body.headerBytes,
-        completedHeaderStateDeltaBytes:
-            maximumMetadataBytes - previousStateMaximum,
-        completedHeaderRootDeltaBytes:
-            maximumCombinedMetadata - previousCombinedMaximum,
         maximumMetadataBytes,
+        emptyPreparationBytes,
+        maximumPreparationBytes,
+        maximumSelectionSlotBytes,
+        maximumEndorsementSlotBytes,
+        selectionReferenceBytes,
+        maximumEnrollmentRootRecords,
         maximumRootRecords,
         setupReferenceBytes,
         setupInventoryBytes,
+        maximumPreparationRootBytes,
+        maximumPreparedRootBytes,
         maximumRootBytes,
         maximumCloseStateBytes: close.maximumStateBytes,
         maximumTargetSigningStateBytes: targetSigning.maximumStateBytes,
@@ -345,14 +352,12 @@ export const compileParticipantVaultKeyClasses = (
     const checkpoint = compileFirstOracleCheckpointCensus(profile);
     const ballot = compileParticipantBallotCustody(profile);
     const release = compileParticipantReleaseCustody(profile);
-    const authentication = compileContributionAuthenticationCensus(
+    const authentication = compileSetupSelectionWireCensus(
         body.participantCount,
     );
     const maximumSigningRecordBytes = [
-        authentication.confirmationBodyBytes,
-        authentication.openingBodyBytes,
+        authentication.offerEnvelopeBytes,
         authentication.signatureBytes,
-        custody.setupInventoryBytes,
     ].reduce((maximum, bytes) => (bytes > maximum ? bytes : maximum), 0n);
     const chunkBytes = 1n << 20n;
     const contributionAssociatedBytes =
@@ -461,7 +466,7 @@ export const compileParticipantVaultKeyClasses = (
         },
         {
             name: 'Contribution signing record',
-            maximumPerCompletedCorpus: 5n,
+            maximumPerCompletedCorpus: 2n,
             encryptions: [
                 invocation(
                     maximumSigningRecordBytes,

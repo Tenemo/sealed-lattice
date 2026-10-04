@@ -43,23 +43,38 @@ pub struct RetainedSetupInputs {
     inventory: [u8; 64],
     polynomials: Vec<AggregatePolynomial>,
 }
+pub(crate) fn encode_reference(
+    magic: &[u8; 4],
+    profile: Profile,
+    identity: [u8; 64],
+    polynomials: &[AggregatePolynomial],
+) -> Result<Vec<u8>, Refusal> {
+    let mut bytes = magic.to_vec();
+    bytes.extend(identity);
+    let indices = profile.contribution_body_polynomials();
+    if polynomials.len() != indices.len() {
+        return Err(Refusal::Incomplete);
+    }
+    for (index, polynomial) in indices.into_iter().zip(polynomials) {
+        if polynomial.index() != index
+            || Some(polynomial.bytes()) != profile.setup_polynomial_bytes(index)
+        {
+            return Err(Refusal::Order);
+        }
+        bytes.extend(polynomial.digest());
+    }
+    Ok(bytes)
+}
 impl RetainedSetupInputs {
     /// Encodes the reference from the owning verifier's result in the fixed
     /// contribution-polynomial order that `parse` consumes.
     pub fn reference(setup: &VerifiedSetupAggregate) -> Result<Vec<u8>, Refusal> {
-        let mut bytes = Vec::from(b"SAV1".as_slice());
-        bytes.extend(setup.inventory().identity());
-        let indices = setup.profile().contribution_body_polynomials();
-        if setup.polynomials().len() != indices.len() {
-            return Err(Refusal::Incomplete);
-        }
-        for (index, polynomial) in indices.into_iter().zip(setup.polynomials()) {
-            if polynomial.index() != index {
-                return Err(Refusal::Order);
-            }
-            bytes.extend(polynomial.digest());
-        }
-        Ok(bytes)
+        encode_reference(
+            b"SAV1",
+            setup.profile(),
+            setup.identity(),
+            setup.polynomials(),
+        )
     }
     /// The profile is the one of the setup that owns the expected inventory.
     pub fn parse(
@@ -67,9 +82,17 @@ impl RetainedSetupInputs {
         bytes: &[u8],
         expected_inventory: [u8; 64],
     ) -> Result<Self, Refusal> {
+        Self::parse_with_magic(b"SAV1", profile, bytes, expected_inventory)
+    }
+    pub(crate) fn parse_with_magic(
+        magic: &[u8; 4],
+        profile: Profile,
+        bytes: &[u8],
+        expected_inventory: [u8; 64],
+    ) -> Result<Self, Refusal> {
         let indices = profile.contribution_body_polynomials();
         if bytes.len() != 4 + 64 + 64 * indices.len()
-            || &bytes[..4] != b"SAV1"
+            || &bytes[..4] != magic
             || bytes[4..68] != expected_inventory
         {
             return Err(Refusal::Context);
@@ -294,5 +317,45 @@ mod private_tests {
         record.pop();
         record[0] ^= 1;
         assert!(RetainedSetupInputs::parse(profile(), &record, [9; 64]).is_err());
+    }
+
+    #[test]
+    fn provisional_and_final_reference_grammars_do_not_alias() {
+        let (final_reference, _) = record();
+        // Local reference operands only: this fixture creates no verified
+        // offer, selection-input capability or public setup capability.
+        let polynomials = RetainedSetupInputs::parse(profile(), &final_reference, [9; 64])
+            .unwrap()
+            .into_polynomials();
+        let provisional = encode_reference(b"SPI1", profile(), [9; 64], &polynomials).unwrap();
+        assert_eq!(
+            provisional.len() + registration_credentials::RETAINED_TAG_BYTES,
+            crate::selection_reference_bytes(profile())
+        );
+        assert!(RetainedSetupInputs::parse(profile(), &provisional, [9; 64]).is_err());
+        assert!(
+            RetainedSetupInputs::parse_with_magic(b"SPI1", profile(), &final_reference, [9; 64])
+                .is_err()
+        );
+        assert!(
+            RetainedSetupInputs::parse_with_magic(b"SPI1", profile(), &provisional, [8; 64])
+                .is_err()
+        );
+        let inputs =
+            RetainedSetupInputs::parse_with_magic(b"SPI1", profile(), &provisional, [9; 64])
+                .unwrap();
+        assert_eq!(inputs.inventory(), &[9; 64]);
+        assert!(
+            encode_reference(
+                b"SPI1",
+                profile(),
+                [9; 64],
+                &polynomials[..polynomials.len() - 1]
+            )
+            .is_err()
+        );
+        let mut reordered = polynomials.clone();
+        reordered.swap(0, 1);
+        assert!(encode_reference(b"SPI1", profile(), [9; 64], &reordered).is_err());
     }
 }

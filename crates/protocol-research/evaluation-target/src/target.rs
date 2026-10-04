@@ -134,7 +134,7 @@ impl ClassifiedClosedInventory {
             CanonicalItem::nonempty_ascii("sealed-lattice/evaluation-target/v1")
                 .map_err(|_| Error::Encoding)?,
             CanonicalItem::hash512(self.poll.identity()),
-            CanonicalItem::hash512(self.setup.inventory().identity()),
+            CanonicalItem::hash512(self.setup.identity()),
             CanonicalItem::hash512(*self.barrier.proposal().identity()),
             CanonicalItem::variable_bytes(&self.classifications).map_err(|_| Error::Encoding)?,
         ])
@@ -517,7 +517,7 @@ impl VerifiedEvaluationTarget {
                 .map(|item| item.canonical_bytes())
         };
         if hash(1) != Some(poll.identity().as_slice())
-            || hash(2) != Some(setup.inventory().identity().as_slice())
+            || hash(2) != Some(setup.identity().as_slice())
         {
             return Err(Error::Context);
         }

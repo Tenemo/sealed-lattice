@@ -12,11 +12,11 @@ import {
     compileBallotSignatureHashWork,
     pureSignatureFrame,
 } from '#tests/authentication-work-model.js';
-import { compileContributionBodyCensus } from '#tests/contribution-body-model.js';
 import {
     framedProofHashBytes,
     proofHashProfiles,
 } from '#tests/proof-hash-work-model.js';
+import { compileSetupSelectionCensus } from '#tests/setup-selection-model.js';
 import { compileFixedSpongeInitializationCensus } from '#tests/sponge-initialization-model.js';
 import { completionProfile } from '#tests/supported-profile-model.js';
 import { compileWideChallengeCompilerCensus } from '#tests/wide-challenge-compiler-model.js';
@@ -108,10 +108,7 @@ describe('Authentication frame accounting', () => {
             'Secret polynomial sampling',
             'Matrix polynomial sampling',
         ]);
-        expect(signature.maximumInputBytes).toBeLessThan(
-            compileContributionBodyCensus(completionProfile())
-                .senderPrefixBytes,
-        );
+        expect(signature.maximumInputBytes).toBe(1952n);
         const messageBytes = BigInt(
             compileWideChallengeCompilerCensus(completionProfile())
                 .challengeBytes,
@@ -147,18 +144,21 @@ describe('Authentication frame accounting', () => {
     });
     it('bounds first-evaluated intents separately from delivered ballot counts', () => {
         const [organizer, participant] = compileCurrentCredentialIntentBounds();
-        expect(organizer.firstEvaluatedIntentBound).toBe(6n);
+        expect(organizer.firstEvaluatedIntentBound).toBe(7n);
         expect(participant.firstEvaluatedIntentBound).toBe(4n);
         expect(participant.purposes).toEqual([
             'registration',
-            'roster-confirmation',
-            'setup-opening',
+            'contribution-offer',
+            'setup-selection-endorsement',
             'ballot-envelope',
         ]);
         for (let count = 3; count <= 20; count++) {
             const intentBound =
                 organizer.firstEvaluatedIntentBound +
-                BigInt(count - 1) * participant.firstEvaluatedIntentBound;
+                BigInt(count - 1) * participant.firstEvaluatedIntentBound -
+                BigInt(
+                    count - compileSetupSelectionCensus(count).eligibleCount,
+                );
             expect(
                 compileCompletedAuthenticationCensus(
                     count,
@@ -200,6 +200,7 @@ describe('Authentication frame accounting', () => {
             64n,
             64n,
             64n,
+            64n,
             214n,
         ]);
         for (const role of roles) {
@@ -228,7 +229,11 @@ describe('Authentication frame accounting', () => {
         for (let participants = 3; participants <= 20; participants++) {
             for (const extraRegistrations of [0, 1, 21]) {
                 for (const ballots of [0, 1, participants]) {
-                    const records = ['poll-definition', 'roster-proposal'];
+                    const records = [
+                        'poll-definition',
+                        'roster-proposal',
+                        'setup-selection-proposal',
+                    ];
                     for (
                         let position = 0;
                         position < participants + extraRegistrations;
@@ -236,7 +241,14 @@ describe('Authentication frame accounting', () => {
                     )
                         records.push('registration');
                     for (let position = 0; position < participants; position++)
-                        records.push('roster-confirmation', 'setup-opening');
+                        records.push('setup-selection-endorsement');
+                    for (
+                        let position = 0;
+                        position <
+                        compileSetupSelectionCensus(participants).eligibleCount;
+                        position++
+                    )
+                        records.push('contribution-offer');
                     for (let position = 0; position < ballots; position++)
                         records.push('ballot-envelope');
                     const census = compileCompletedAuthenticationCensus(
@@ -258,10 +270,10 @@ describe('Authentication frame accounting', () => {
         }
         expect(
             compileCompletedAuthenticationCensus(10, 10n, 10).signatures,
-        ).toBe(42n);
+        ).toBe(40n);
         expect(
             compileCompletedAuthenticationCensus(10, 10n, 0).signatures,
-        ).toBe(32n);
+        ).toBe(30n);
         for (const values of [
             [2, 2n, 0],
             [21, 21n, 0],

@@ -10,7 +10,7 @@ use aes_gcm::{
 use num_bigint::{BigInt, Sign};
 use registration_credentials::{
     Credential,
-    contribution_commitment::{BODY_HEADER_BYTES, body_header},
+    contribution_body::{BODY_HEADER_BYTES, body_header},
     foundation::{CanonicalItem, CanonicalItemType, CanonicalTuple},
     poll::VerifiedPoll,
     source_binding::{

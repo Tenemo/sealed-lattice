@@ -4,11 +4,14 @@ pub mod ballot_authentication;
 pub mod ballot_body;
 #[path = "close-signing.rs"]
 pub mod close_signing;
-#[path = "contribution-authentication.rs"]
-pub mod contribution_authentication;
-#[path = "contribution-commitment.rs"]
-pub mod contribution_commitment;
+#[path = "contribution-body.rs"]
+pub mod contribution_body;
+#[path = "contribution-offer.rs"]
+pub mod contribution_offer;
 mod custody;
+mod preparation;
+#[path = "setup-selection.rs"]
+pub mod setup_selection;
 pub use custody::{SEALED_SIGNING_SEED_BYTES, SigningPurpose};
 pub mod foundation;
 pub mod identity;
@@ -82,7 +85,11 @@ pub struct Credential {
     target_lock: Option<[u8; 64]>,
     release_started: bool,
     release_signed: bool,
-    confirmation: Option<contribution_authentication::ConfirmationLock>,
+    confirmed_roster: Option<preparation::ConfirmedRoster>,
+    offer_signed: Option<[u8; 64]>,
+    selection_proposal_signed: Option<[u8; 64]>,
+    selection_endorsed: Option<[u8; 64]>,
+    preparation_retired: bool,
     locked_purposes: u16,
 }
 impl Credential {
@@ -108,7 +115,11 @@ impl Credential {
             target_lock: None,
             release_started: false,
             release_signed: false,
-            confirmation: None,
+            confirmed_roster: None,
+            offer_signed: None,
+            selection_proposal_signed: None,
+            selection_endorsed: None,
+            preparation_retired: false,
             locked_purposes: 0,
         }
     }

@@ -4,6 +4,7 @@ import {
     compileLinkedReleaseWordProofLayout,
     compileRegistrationWordProofLayout,
 } from '#tests/full-word-proof-layout-model.js';
+import { proofHashProfiles } from '#tests/proof-hash-work-model.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
 import type { SupportedProfile } from '#tests/supported-profile-model.js';
 import { compileWideChallengeCompilerCensus } from '#tests/wide-challenge-compiler-model.js';
@@ -108,15 +109,25 @@ export const compileProofRandomnessBudgets = (profile: SupportedProfile) => {
     // Each role's simulator runs at most once per honest proof, which the
     // compiler's honest-proof budget bounds; restarts replay completed proofs.
     const invocationCap = compiler.honestProofBudget;
+    const messageBytes = new Map(
+        proofHashProfiles(profile).map((role) => [
+            role.role,
+            role.messageBytes,
+        ]),
+    );
     const layouts = [
-        ['registration', compileRegistrationWordProofLayout()],
-        ['setup contribution', compileFullWordProofLayout(profile)],
-        ['linked ballot', compileBallotWordProofLayout(profile)],
-        ['linked release', compileLinkedReleaseWordProofLayout(profile)],
+        ['registration', compileRegistrationWordProofLayout(), 'registration'],
+        ['setup contribution', compileFullWordProofLayout(profile), 'setup'],
+        ['linked ballot', compileBallotWordProofLayout(profile), 'ballot'],
+        [
+            'linked release',
+            compileLinkedReleaseWordProofLayout(profile),
+            'release',
+        ],
     ] as const;
-    return layouts.map(([role, layout]) => {
+    return layouts.map(([role, layout, descriptor]) => {
         const ordinaryBaselineBytes = layout.minimumRequestedRandomBytes;
-        const programmedMessageBytes = BigInt(compiler.challengeBytes);
+        const programmedMessageBytes = messageBytes.get(descriptor)!;
         const simulatorBaselineBytes =
             ordinaryBaselineBytes + programmedMessageBytes;
         const bound = (extraReads: bigint) =>

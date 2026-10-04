@@ -264,10 +264,14 @@ impl Profile {
     pub fn release_threshold(self) -> usize {
         (self.corrupt() + 1).max(2)
     }
-    /// Only the first d roster positions contribute setup key material, so at
-    /// least one contributor is honest and no single one knows the key.
+    /// A certified setup selection contains d valid contributions.
     pub fn setup_contributors(self) -> usize {
         self.release_threshold()
+    }
+    /// The fixed eligible prefix leaves d possible contributors after any f
+    /// permitted departures; selection preserves the original roster.
+    pub fn setup_eligible_contributors(self) -> usize {
+        self.setup_contributors() + self.corrupt()
     }
     /// A result needs f + 2 accepted ballots.
     pub fn minimum_turnout(self) -> usize {
@@ -644,6 +648,8 @@ mod tests {
                 (corrupt, inventory, release, turnout, degree, clearing)
             );
             assert_eq!(profile.sharing_degree(), release - 1);
+            assert_eq!(profile.setup_eligible_contributors(), release + corrupt);
+            assert!(profile.setup_eligible_contributors() <= participants);
             assert_eq!(profile.point_stride() * degree, DEGREE);
         }
     }

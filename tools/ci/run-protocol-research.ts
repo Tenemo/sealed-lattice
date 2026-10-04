@@ -15,8 +15,8 @@ import path from 'node:path';
 import { setTimeout } from 'node:timers/promises';
 
 import { compileBallotBodyCensus } from '#tests/ballot-body-model.js';
+import { compileClearPreparationResources } from '#tests/clear-preparation-resource-model.js';
 import { compileCloseWireCensus } from '#tests/close-wire-model.js';
-import { compileContributionAuthenticationCensus } from '#tests/contribution-authentication-model.js';
 import { compileContributionBodyCensus } from '#tests/contribution-body-model.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import { compileLinkedReleaseWordProofLayout } from '#tests/full-word-proof-layout-model.js';
@@ -85,6 +85,9 @@ type NativeResult = {
     identifiers?: string[];
     releaseSubsets?: number;
     departureSets?: number;
+    departed?: number[];
+    corrupt?: number[];
+    selectedAuthors?: number[];
     cases?: {
         milliseconds: number;
         result: {
@@ -160,6 +163,8 @@ const openingShareResources = openingShareCase
 const scenario = deriveResearchScenario(
     selected.participantCount,
     selected.optionCount,
+    selected.name === 'native-setup-departure',
+    selected.name === 'native-selection-fork',
 );
 // The requested-output probe's profiles, each with its complete ordering
 // and then a shorter prefix.
@@ -199,7 +204,9 @@ await runWithLocalRunLog(
             selected.name,
             ...(openingShareCase
                 ? [selected.source]
-                : seedSharingCase
+                : seedSharingCase ||
+                    selected.name === 'native-setup-departure' ||
+                    selected.name === 'native-selection-fork'
                   ? []
                   : [
                         String(selected.participantCount),
@@ -336,9 +343,7 @@ await runWithLocalRunLog(
             const participants = BigInt(contribution.participantCount);
             const contributors = BigInt(contribution.setupContributorCount);
             const registration = compileRegistrationKeyRelationCensus();
-            const authentication = compileContributionAuthenticationCensus(
-                Number(participants),
-            );
+            const preparation = compileClearPreparationResources(profile);
             const roster = compileRosterProposalCensus(Number(participants));
             const close = compileCloseWireCensus(profile);
             const release = compileLinkedReleaseWordProofLayout(profile);
@@ -353,8 +358,8 @@ await runWithLocalRunLog(
                 198n +
                 degree * coefficientBytes +
                 release.maximumMultiproofBytes;
-            // Only the setup contributors publish a contribution body, and
-            // the native setup verification keeps each contributor's running
+            // Eligible authors may publish a contribution body, and
+            // native setup verification keeps each selected author's running
             // aggregate. The native close records every response, the late
             // control response and an index line of at most 128 bytes per
             // stored submission.
@@ -365,15 +370,20 @@ await runWithLocalRunLog(
                 4096n;
             const sourceBound =
                 closeRecordBound +
-                contributors * contribution.maximumBodyBytes +
+                preparation.maximumEligibleOfferBytes +
                 participants *
                     (registration.maximumProofBytes +
                         registration.publicKeyBytes +
                         enrollment.maximumHeaderBytes +
                         enrollment.signatureBytes) +
-                authentication.allConfirmationPayloadBytes +
-                authentication.allOpeningHeaderPayloadBytes +
-                authentication.inventoryBodyBytes +
+                preparation.selectionProposalBytes +
+                (selected.name === 'native-selection-fork'
+                    ? preparation.selectionProposalBytes +
+                      preparation.quorumEndorsementPacketBytes
+                    : 0n) +
+                preparation.maximumEndorsementPacketBytes +
+                2n * preparation.certificateBytes +
+                64n * BigInt(preparation.eligibleCount) +
                 enrollment.maximumPollDefinitionBytes +
                 2n * enrollment.signatureBytes +
                 roster.proposalBytes +
@@ -406,7 +416,9 @@ await runWithLocalRunLog(
             const diagnosticBound = seedSharingResources
                 ? publicPayloadBound
                 : publicPayloadBound +
-                  contributors * aggregate.aggregateBytes +
+                  contributors *
+                      aggregate.aggregateBytes *
+                      (selected.name === 'native-selection-fork' ? 2n : 1n) +
                   ballot.maximumProofBytes;
             if (seedSharingResources)
                 assert.ok(
@@ -809,11 +821,17 @@ await runWithLocalRunLog(
                                         String(selected.participantCount),
                                         String(selected.optionCount),
                                         ...(selected.name ===
-                                        'native-invalid-only'
-                                            ? ['invalid-only']
-                                            : selected.noResult
-                                              ? ['empty']
-                                              : []),
+                                        'native-selection-fork'
+                                            ? ['selection-fork']
+                                            : selected.name ===
+                                                'native-setup-departure'
+                                              ? ['setup-departure']
+                                              : selected.name ===
+                                                  'native-invalid-only'
+                                                ? ['invalid-only']
+                                                : selected.noResult
+                                                  ? ['empty']
+                                                  : []),
                                     ],
                             env: withSimulatedHelpers(
                                 selected.simulatedHelpers,
@@ -1165,20 +1183,17 @@ await runWithLocalRunLog(
                     ),
                     close.proposalPacketBytes,
                 );
-                for (
-                    let position = 0;
-                    position < Number(participants);
-                    position++
-                ) {
+                const responseFiles = (await readdir(records)).filter((name) =>
+                    /^response-[0-9]+\.bin$/u.test(name),
+                );
+                assert.deepEqual(
+                    responseFiles.sort(),
+                    [...scenario.responseFiles].sort(),
+                    'The native close response inventory differs from the active original participants.',
+                );
+                for (const name of scenario.responseFiles) {
                     const bytes = BigInt(
-                        (
-                            await stat(
-                                path.join(
-                                    records,
-                                    'response-' + position + '.bin',
-                                ),
-                            )
-                        ).size,
+                        (await stat(path.join(records, name))).size,
                     );
                     assert.ok(
                         bytes >=
@@ -1195,6 +1210,51 @@ await runWithLocalRunLog(
                 assert.deepEqual(result.identifiers, scenario.identifiers);
                 assert.equal(result.releaseSubsets, scenario.releaseSubsets);
                 assert.equal(result.departureSets, scenario.departureSets);
+                if (
+                    selected.name === 'native-setup-departure' ||
+                    selected.name === 'native-selection-fork'
+                ) {
+                    assert.deepEqual(result.departed, scenario.departed);
+                    assert.deepEqual(result.corrupt, scenario.corrupt);
+                    assert.deepEqual(
+                        result.selectedAuthors,
+                        scenario.selectedAuthors,
+                    );
+                    const files = await readdir(output, { recursive: true });
+                    const names = files.map((file) =>
+                        file.replace(/\\/gu, '/'),
+                    );
+                    assert.ok(
+                        names.includes('participant-1/registration-header.bin'),
+                    );
+                    for (const name of selected.name ===
+                    'native-setup-departure'
+                        ? [
+                              'contribution-1',
+                              'selection-endorsement-1.bin',
+                              'close/response-1.bin',
+                              'ballot/envelope-1.bin',
+                              'completion/target-vote-1.bin',
+                              'completion/release-1.bin',
+                              'completion/release-envelope-1.bin',
+                          ]
+                        : ['selection-endorsement-1.bin'])
+                        assert.ok(
+                            !names.includes(name),
+                            'The scenario emitted a forbidden participant record: ' +
+                                name,
+                        );
+                    if (selected.name === 'native-selection-fork') {
+                        for (const name of [
+                            'losing-selection.bin',
+                            'losing-selection-endorsement-1.bin',
+                            'ballot/envelope-1.bin',
+                            'completion/target-vote-1.bin',
+                            'completion/release-1.bin',
+                        ])
+                            assert.ok(names.includes(name));
+                    }
+                }
             }
             const countFiles = async (directory: string): Promise<number> => {
                 let bytes = 0;

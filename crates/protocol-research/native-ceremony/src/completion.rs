@@ -7,17 +7,15 @@ use evaluation_target::{
     terminal::{ReleaseCollector, verify_no_result},
 };
 use registration_credentials::{
-    Credential, contribution_authentication::SignedOpening, release_signing::body_header,
-    target_signing::TargetMessage,
+    Credential, release_signing::body_header, target_signing::TargetMessage,
 };
 use registration_enrollment::{
-    Enrollment,
     finality_work::{FinalityWork, OwnBallotStatus, classified_ballot_status},
     release_work::ReleaseWork,
 };
 use rns_arithmetic_probe::ranking::{Ciphertext, stored_bytes, stored_value_bytes};
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     fs::{self, File},
     io::{self, Read, Write},
     path::{Path, PathBuf},
@@ -131,8 +129,7 @@ pub fn run(
     output: &Path,
     scratch_root: &Path,
     barrier: VerifiedCloseBarrier,
-    enrollments: &mut [Enrollment],
-    openings: &[SignedOpening],
+    enrollments: &mut crate::OriginalEnrollments,
     finality: Finality,
     scenario: &crate::scenario::Scenario,
 ) {
@@ -215,17 +212,18 @@ pub fn run(
     if let Some(bytes) = target.ciphertext() {
         crate::write(directory.join("ciphertext.bin"), bytes);
     }
-    let owners: Vec<_> = enrollments
-        .iter_mut()
-        .enumerate()
+    let owners: BTreeMap<_, _> = enrollments
+        .iter()
         .map(|(position, enrollment)| {
-            Arc::new(crate::close::owner_of(
-                &enrollment.credential,
-                &poll,
-                &setup,
-                openings.get(position),
+            (
                 position,
-            ))
+                Arc::new(crate::close::owner_of(
+                    &enrollment.credential,
+                    &poll,
+                    &setup,
+                    position,
+                )),
+            )
         })
         .collect();
     // Each participant's later visit restores the target from the copy its
@@ -253,7 +251,13 @@ pub fn run(
     );
     assert!(target.classified().is_none());
     assert!(target.retain(&enrollments[0].credential).is_err());
-    assert!(restore(&enrollments[1].credential, &retained).is_err());
+    assert!(
+        restore(
+            &enrollments[enrollments.positions()[1]].credential,
+            &retained
+        )
+        .is_err()
+    );
     for position in [0, 4, 8, retained.len() / 2, retained.len() - 1] {
         let mut changed = retained.clone();
         changed[position] ^= 1;
@@ -265,7 +269,7 @@ pub fn run(
     assert!(collector.certificate().is_err());
     assert_eq!(statuses.len(), enrollments.len());
     // Target signing reads the barrier, which only the evaluated target has.
-    assert!(FinalityWork::new(owners[0].clone(), target.clone()).is_err());
+    assert!(FinalityWork::new(owners[&0].clone(), target.clone()).is_err());
     // A release that follows the completed close reads the same status from
     // the restored target's classification of the slot and the close time.
     let message = TargetMessage::parse(target.body(), setup.profile().participants()).unwrap();
@@ -284,7 +288,7 @@ pub fn run(
         )
     };
     for (position, status) in statuses {
-        let work = FinalityWork::new(owners[position].clone(), evaluated.clone()).unwrap();
+        let work = FinalityWork::new(owners[&position].clone(), evaluated.clone()).unwrap();
         assert_eq!(
             work.ballot_status(&enrollments[position].credential),
             status
@@ -295,12 +299,12 @@ pub fn run(
         );
     }
     for (position, credential, status) in &forks {
-        let work = FinalityWork::new(owners[*position].clone(), evaluated.clone()).unwrap();
+        let work = FinalityWork::new(owners[position].clone(), evaluated.clone()).unwrap();
         assert_eq!(work.ballot_status(credential), *status);
         assert_eq!(released(*position, credential), *status);
     }
     for (ordinal, &position) in signers.iter().enumerate() {
-        let owner = owners[position].clone();
+        let owner = owners[&position].clone();
         let work = FinalityWork::new(owner, evaluated.clone()).unwrap();
         let mut wrong = work.body().to_vec();
         wrong[0] ^= 1;
@@ -369,8 +373,9 @@ pub fn run(
     assert!(verify_no_result(certificate.clone()).is_err());
     assert_eq!(accepted, scenario.voters);
     let maximum_proof_bytes = release_relation(profile).maximum_proof_bytes();
-    let mut shares = Vec::new();
-    for position in 0..enrollments.len() {
+    let mut shares = BTreeMap::new();
+    let active = enrollments.positions();
+    for &position in &active {
         let context = Arc::new(
             ReleaseContext::new(
                 certificate.clone(),
@@ -388,7 +393,7 @@ pub fn run(
             )
             .unwrap(),
         );
-        let operation = ReleaseWork::new(owners[position].clone(), context.clone()).unwrap();
+        let operation = ReleaseWork::new(owners[&position].clone(), context.clone()).unwrap();
         let enrollment = &mut enrollments[position];
         let (context, statement, proof) = operation
             .prove(&enrollment.key, &mut enrollment.credential)
@@ -413,8 +418,8 @@ pub fn run(
         let signature = enrollment
             .credential
             .sign_release(
-                &owners[position],
-                setup.inventory().proposal(),
+                &owners[&position],
+                setup.roster(),
                 &envelope,
                 *crate::random::<32>(),
             )
@@ -423,8 +428,8 @@ pub fn run(
             enrollment
                 .credential
                 .sign_release(
-                    &owners[position],
-                    setup.inventory().proposal(),
+                    &owners[&position],
+                    setup.roster(),
                     &envelope,
                     *crate::random::<32>()
                 )
@@ -436,12 +441,15 @@ pub fn run(
         wrong[132] ^= 1;
         assert!(context.authenticate(&wrong).is_err());
         let authentication = context.authenticate(&packet).unwrap();
-        shares.push(Arc::new(verified.authenticate(authentication).unwrap()));
+        shares.insert(
+            position,
+            Arc::new(verified.authenticate(authentication).unwrap()),
+        );
         crate::write(
             directory.join(format!("release-envelope-{position}.bin")),
             &packet,
         );
-        let repeated = ReleaseWork::new(owners[position].clone(), context).unwrap();
+        let repeated = ReleaseWork::new(owners[&position].clone(), context).unwrap();
         assert!(
             repeated
                 .prove(&enrollment.key, &mut enrollment.credential)
@@ -466,32 +474,54 @@ pub fn run(
         .map(|option| options[option].option_identifier().to_owned())
         .collect();
     let threshold = profile.release_threshold();
-    let checked = crate::scenario::checked_subsets(profile.participants(), threshold);
+    let checked = crate::scenario::checked_subsets(active.len(), threshold);
     for subset in &checked {
         let mut result = ReleaseCollector::new(certificate.clone()).unwrap();
         assert!(result.result().is_err());
         for index in subset {
-            assert!(result.insert(shares[*index].clone()).unwrap());
-            assert!(!result.insert(shares[*index].clone()).unwrap());
+            assert!(result.insert(shares[&active[*index]].clone()).unwrap());
+            assert!(!result.insert(shares[&active[*index]].clone()).unwrap());
         }
         assert_eq!(result.result().unwrap().identifiers(), expected);
     }
     let subsets = checked.len();
-    let departure_sets =
-        crate::scenario::checked_departures(profile.participants(), profile.corrupt());
+    let departure_sets = scenario.departed.map_or_else(
+        || crate::scenario::checked_departures(profile.participants(), profile.corrupt()),
+        |position| vec![vec![position]],
+    );
     for missing in &departure_sets {
         let available: Vec<_> = (0..profile.participants())
-            .filter(|position| !missing.contains(position) && !scenario.corrupt(*position))
+            .filter(|position| {
+                !missing.contains(position)
+                    && (scenario.departed.is_some()
+                        || scenario.selection_fork
+                        || !scenario.corrupt(*position))
+            })
             .collect();
         assert!(available.len() >= threshold);
         let mut result = ReleaseCollector::new(certificate.clone()).unwrap();
         for position in available.into_iter().take(threshold) {
-            result.insert(shares[position].clone()).unwrap();
+            result.insert(shares[&position].clone()).unwrap();
         }
         assert_eq!(result.result().unwrap().identifiers(), expected);
     }
     let departures = departure_sets.len();
-    crate::write(directory.join("result.json"),format!("{{\"kind\":\"result\",\"accepted\":{accepted:?},\"invalid\":{invalid:?},\"conflicting\":{conflicting:?},\"signers\":{signers:?},\"identifiers\":{expected:?},\"releaseSubsets\":{subsets},\"departureSets\":{departures},\"milliseconds\":{}}}\n",started.elapsed().as_secs_f64()*1000.0).as_bytes());
+    let departed: Vec<_> = scenario.departed.into_iter().collect();
+    let corrupt: Vec<_> = (0..profile.participants())
+        .filter(|position| scenario.corrupt(*position))
+        .collect();
+    let selection = registration_credentials::setup_selection::SelectionProposal::decode(
+        setup.roster().proposal(),
+        &fs::read(output.join("selection.bin")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(selection.identity(), setup.identity());
+    let selected_authors: Vec<_> = selection
+        .selected()
+        .iter()
+        .map(|(position, _)| *position)
+        .collect();
+    crate::write(directory.join("result.json"),format!("{{\"kind\":\"result\",\"accepted\":{accepted:?},\"invalid\":{invalid:?},\"conflicting\":{conflicting:?},\"signers\":{signers:?},\"identifiers\":{expected:?},\"releaseSubsets\":{subsets},\"departureSets\":{departures},\"departed\":{departed:?},\"corrupt\":{corrupt:?},\"selectedAuthors\":{selected_authors:?},\"milliseconds\":{}}}\n",started.elapsed().as_secs_f64()*1000.0).as_bytes());
     println!(
         "Verified original ballot-to-result path, {subsets} release subsets and {departures} bounded departure sets"
     );

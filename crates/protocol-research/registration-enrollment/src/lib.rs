@@ -12,8 +12,6 @@ use zeroize::Zeroizing;
 pub mod ballot;
 #[path = "close-work.rs"]
 pub mod close_work;
-#[path = "contribution-signing.rs"]
-pub mod contribution_signing;
 #[path = "custody-identity.rs"]
 pub mod custody_identity;
 #[path = "fhe-sources.rs"]
@@ -22,6 +20,8 @@ mod fhe_sources;
 pub mod finality_work;
 #[path = "memory-plan.rs"]
 pub mod memory_plan;
+#[path = "offer-signing.rs"]
+pub mod offer_signing;
 #[cfg(any(target_arch = "wasm32", test))]
 #[path = "operation-random.rs"]
 mod operation_random;
@@ -304,8 +304,7 @@ impl Enrollment {
         &self,
         profile: supported_profile::Profile,
         proof_length: usize,
-    ) -> Result<[u8; registration_credentials::contribution_commitment::BODY_HEADER_BYTES], Error>
-    {
+    ) -> Result<[u8; registration_credentials::contribution_body::BODY_HEADER_BYTES], Error> {
         self.sources
             .as_ref()
             .ok_or(Error::State)?
@@ -315,6 +314,7 @@ impl Enrollment {
     /// The participant root owns authentication and durable retirement first.
     pub fn retire_sources(&mut self) {
         self.sources = None;
+        self.credential.retire_preparation();
     }
     pub fn sources_retired(&self) -> bool {
         self.sources.is_none()
@@ -369,7 +369,7 @@ impl Enrollment {
         data_keys: &[u8; 64],
         records: [&[u8]; 3],
     ) -> Result<Self, Error> {
-        let result = Self::restore_base(
+        let mut result = Self::restore_base(
             poll,
             header,
             public_bytes,
@@ -387,6 +387,7 @@ impl Enrollment {
             .credential
             .check_retained_setup_tag(poll, reference, tag)
             .map_err(|_| Error::State)?;
+        result.credential.retire_preparation();
         Ok(result)
     }
 

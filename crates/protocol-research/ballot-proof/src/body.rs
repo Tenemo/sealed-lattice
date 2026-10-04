@@ -91,14 +91,11 @@ impl BallotBodyRelationVerifier {
         }
         let context = &header[12..];
         if context[4..68] != poll.identity()
-            || context[68..132] != setup.inventory().identity()
+            || context[68..132] != setup.identity()
             || u16::from_le_bytes(context[132..134].try_into().unwrap()) as usize != position
             || context[134] as usize != poll.manifest().option_count()
             || u16::from(context[135]) != poll.top_count()
-            || setup.inventory().proposal().proposal().records()[0]
-                .header()
-                .poll
-                != poll.identity()
+            || setup.roster().proposal().records()[0].header().poll != poll.identity()
         {
             return Err(Error::Context);
         }
@@ -376,7 +373,7 @@ impl SignedBallotVerifier {
         let envelope = authentication.envelope();
         if header.len() != ballot_body::HEADER_BYTES
             || envelope.poll() != &poll.identity()
-            || envelope.inventory() != &setup.inventory().identity()
+            || envelope.inventory() != &setup.identity()
         {
             return Err(Error::Context);
         }

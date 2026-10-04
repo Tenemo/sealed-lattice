@@ -221,7 +221,7 @@ impl State {
                     ballot_proof::take_browser_close_barrier().ok_or(Error::Incomplete)?;
                 // The barrier must come from this instance's own setup verifier.
                 if barrier.poll().identity() != poll.identity()
-                    || barrier.setup().inventory().identity() != setup.inventory().identity()
+                    || barrier.setup().identity() != setup.identity()
                 {
                     return Err(Error::Context);
                 }

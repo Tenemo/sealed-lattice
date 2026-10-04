@@ -4,13 +4,17 @@ use linked_release_proof::{
     statement::{self, PublicStatement},
 };
 use num_bigint::{BigInt, Sign};
+use registration_credentials::foundation::participant_identity::{
+    ParticipantIdentity, derive_participant_identity,
+};
 use registration_credentials::foundation::{CanonicalItem, CanonicalTuple};
 use setup_aggregate::VerifiedAggregatePolynomial;
 use std::sync::Arc;
 use supported_profile::Profile;
 
 /// Canonical public role bytes; this encoding alone grants no release authority.
-pub fn encode_release_proof_role(
+fn encode_release_proof_role(
+    participant_identity: ParticipantIdentity,
     poll: [u8; 64],
     runtime: [u8; 64],
     inventory: [u8; 64],
@@ -22,7 +26,9 @@ pub fn encode_release_proof_role(
         1,
         1,
         vec![
-            CanonicalItem::nonempty_ascii("sealed-lattice/certified-release/v1")
+            CanonicalItem::nonempty_ascii("sealed-lattice/certified-release/v2")
+                .map_err(|_| Error::Encoding)?,
+            CanonicalItem::nonempty_ascii(&participant_identity.to_lowercase_hex())
                 .map_err(|_| Error::Encoding)?,
             CanonicalItem::hash512(poll),
             CanonicalItem::hash512(runtime),
@@ -95,12 +101,14 @@ impl ReleaseContext {
         let setup = target.setup();
         let profile = setup.profile();
         let ciphertext = target.ciphertext().ok_or(Error::NoResult)?;
-        let records = setup.inventory().proposal().proposal().records();
+        let records = setup.roster().proposal().records();
         let release_bytes = statement::release_coefficient_bytes(profile);
         if position >= profile.participants()
             || records.len() != profile.participants()
-            || constant.inventory() != &setup.inventory().identity()
-            || linear.inventory() != &setup.inventory().identity()
+            || records[position].header().poll != target.poll().identity()
+            || records[position].header().runtime != target.poll().runtime()
+            || constant.inventory() != &setup.identity()
+            || linear.inventory() != &setup.identity()
             || constant.index() != profile.share_constant_polynomial(position)
             || linear.index() != profile.share_linear_polynomial(position)
             || ciphertext.len() != 2 * SYSTEMATIC * release_bytes
@@ -120,7 +128,7 @@ impl ReleaseContext {
         let mut header = [0; RELEASE_HEADER_BYTES];
         header[..4].copy_from_slice(b"LRS1");
         header[4..68].copy_from_slice(&target.poll().identity());
-        header[68..132].copy_from_slice(&setup.inventory().identity());
+        header[68..132].copy_from_slice(&setup.identity());
         header[132..196].copy_from_slice(target.identity());
         header[196..].copy_from_slice(&(position as u16).to_le_bytes());
         Ok(Self {
@@ -148,10 +156,19 @@ impl ReleaseContext {
     }
     pub fn proof_role(&self) -> Result<Vec<u8>, Error> {
         let target = self.certificate.target();
+        let original = target
+            .setup()
+            .roster()
+            .proposal()
+            .records()
+            .get(self.position)
+            .ok_or(Error::Context)?;
         encode_release_proof_role(
+            derive_participant_identity(&original.header().signing_public)
+                .map_err(|_| Error::Context)?,
             target.poll().identity(),
             target.poll().runtime(),
-            target.setup().inventory().identity(),
+            target.setup().identity(),
             *target.identity(),
             self.position,
         )
@@ -214,18 +231,39 @@ mod tests {
 
     #[test]
     fn proof_role_separates_every_verified_context_input() {
-        let original = encode_release_proof_role([1; 64], [2; 64], [3; 64], [4; 64], 0).unwrap();
+        let owner = derive_participant_identity(&[7; 1952]).unwrap();
+        let other_owner = derive_participant_identity(&[8; 1952]).unwrap();
+        let original =
+            encode_release_proof_role(owner, [1; 64], [2; 64], [3; 64], [4; 64], 0).unwrap();
         for changed in [
-            encode_release_proof_role([9; 64], [2; 64], [3; 64], [4; 64], 0),
-            encode_release_proof_role([1; 64], [9; 64], [3; 64], [4; 64], 0),
-            encode_release_proof_role([1; 64], [2; 64], [9; 64], [4; 64], 0),
-            encode_release_proof_role([1; 64], [2; 64], [3; 64], [9; 64], 0),
-            encode_release_proof_role([1; 64], [2; 64], [3; 64], [4; 64], 1),
+            encode_release_proof_role(other_owner, [1; 64], [2; 64], [3; 64], [4; 64], 0),
+            encode_release_proof_role(owner, [9; 64], [2; 64], [3; 64], [4; 64], 0),
+            encode_release_proof_role(owner, [1; 64], [9; 64], [3; 64], [4; 64], 0),
+            encode_release_proof_role(owner, [1; 64], [2; 64], [9; 64], [4; 64], 0),
+            encode_release_proof_role(owner, [1; 64], [2; 64], [3; 64], [9; 64], 0),
+            encode_release_proof_role(owner, [1; 64], [2; 64], [3; 64], [4; 64], 1),
         ] {
             assert_ne!(changed.unwrap(), original);
         }
         assert!(original.len() <= 1024);
-        assert_eq!(original.len(), 341);
-        assert!(encode_release_proof_role([1; 64], [2; 64], [3; 64], [4; 64], usize::MAX).is_err());
+        assert_eq!(original.len(), 479);
+        let tuple = CanonicalTuple::decode(&original, &Default::default()).unwrap();
+        assert_eq!(tuple.items.len(), 7);
+        assert_eq!(
+            tuple.items[0].variable_value_bytes().unwrap(),
+            b"sealed-lattice/certified-release/v2"
+        );
+        assert_eq!(
+            tuple.items[1].item_type(),
+            registration_credentials::foundation::CanonicalItemType::Ascii
+        );
+        assert_eq!(
+            tuple.items[1].variable_value_bytes().unwrap(),
+            owner.to_lowercase_hex().as_bytes()
+        );
+        assert!(
+            encode_release_proof_role(owner, [1; 64], [2; 64], [3; 64], [4; 64], usize::MAX)
+                .is_err()
+        );
     }
 }

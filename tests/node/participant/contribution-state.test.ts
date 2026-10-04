@@ -7,7 +7,7 @@ import {
 import type { ContributionState } from '#packages/sdk/src/participant/worker/contribution.js';
 import { compileParticipantRuntimeProfile } from '#tests/participant-runtime-bounds-model.js';
 
-const profile = compileParticipantRuntimeProfile(3, 2);
+const profile = compileParticipantRuntimeProfile(4, 2);
 const bounds = profile.contribution;
 const recordBytes = 1_048_576;
 const fixtureHeader = (length: number) => {
@@ -36,53 +36,80 @@ const record = (
     new DataView(key.buffer).setUint32(0, index + 1, true);
     return { ...location, key, hash: new Uint8Array(64).fill(index % 251) };
 };
-// These synthetic references exercise the private codec, not any public
-// proof or participant capability. The slot oracle comes from the independent
-// runtime model and the record format's fixed one-mebibyte width.
-const completed = (length: number, generation = 7): ContributionState => {
-    const signingLengths = [
-        bounds.confirmationBodyBytes,
-        profile.registration.signatureBytes,
-        profile.root.setupInventoryBytes,
-        bounds.openingBodyBytes,
-        profile.registration.signatureBytes,
-    ];
-    const signingCount =
-        generation === 7
-            ? 0
-            : generation === 8
-              ? 1
-              : generation === 9
-                ? 2
-                : generation === 10
-                  ? 4
-                  : 5;
-    return {
-        position: 0,
-        salt: new Uint8Array(bounds.saltBytes),
-        header: fixtureHeader(length),
-        publicRecords: [...bounds.publicRecords, ...slots].map(record),
-        privateRecords: [],
-        signingRecords: signingLengths
-            .slice(0, signingCount)
-            .map((bytes, index) =>
-                record(
-                    {
-                        object: proofObject + 1 + index,
-                        offset: 0,
-                        length: bytes,
-                    },
-                    bounds.publicRecords.length + slots.length + index,
-                ),
-            ),
-        seed: new Uint8Array(),
-        coins: new Uint8Array(generation === 8 || generation === 10 ? 32 : 0),
-    };
-};
 
-describe('contribution state framing', () => {
-    it('retains one fixed-width SCB2 header and the same completed slot inventory', () => {
-        for (const generation of [7, 8, 9, 10, 11, 12, 29]) {
+// These are references and opaque checkpoint headers for codec checks.
+// They create no authenticated storage, contribution or proof capability.
+const stateAt = (
+    phase: number,
+    proofLength = bounds.minimumProofBytes,
+    position = 2,
+): ContributionState => ({
+    phase,
+    position,
+    header:
+        phase === 4
+            ? new Uint8Array()
+            : phase <= 6
+              ? Uint8Array.of(70, 80, 67, 52, 17, 29)
+              : fixtureHeader(proofLength),
+    publicRecords:
+        phase === 4
+            ? []
+            : [...bounds.publicRecords, ...(phase >= 7 ? slots : [])].map(
+                  record,
+              ),
+    privateRecords:
+        phase === 5 || phase === 6
+            ? bounds.checkpointLengths.map((_length, index) => ({
+                  key: new Uint8Array(32).fill(index % 251),
+                  hash: new Uint8Array(64).fill((index + 1) % 251),
+              }))
+            : [],
+    signingRecords: [
+        bounds.offerEnvelopeBytes,
+        profile.registration.signatureBytes,
+    ]
+        .slice(0, phase === 8 ? 1 : phase === 9 ? 2 : 0)
+        .map((length, index) =>
+            record(
+                { object: proofObject + 1 + index, offset: 0, length },
+                bounds.publicRecords.length + slots.length + index,
+            ),
+        ),
+    seed: new Uint8Array(phase === 4 || phase === 6 ? 64 : 0).fill(61),
+    coins: new Uint8Array(phase === 8 ? 32 : 0).fill(73),
+});
+const decode = (state: ContributionState) =>
+    decodeContributionState(encodeContributionState(state), profile);
+
+describe('independent contribution state framing', () => {
+    it('admits every own phase for eligible pool members beyond the selected count', () => {
+        expect(profile.setupContributorCount).toBe(2);
+        expect(profile.eligibleContributorCount).toBe(3);
+        for (const phase of [4, 5, 6, 7, 8, 9]) {
+            for (const position of [0, 1, 2]) {
+                const state = stateAt(
+                    phase,
+                    bounds.minimumProofBytes,
+                    position,
+                );
+                const bytes = encodeContributionState(state);
+                expect(new TextDecoder().decode(bytes.subarray(0, 4))).toBe(
+                    'PCS4',
+                );
+                expect(decodeContributionState(bytes, profile)).toEqual(state);
+                expect(bytes.length).toBeLessThanOrEqual(
+                    bounds.maximumStateBytes,
+                );
+            }
+            expect(() =>
+                decode(stateAt(phase, bounds.minimumProofBytes, 3)),
+            ).toThrow();
+        }
+    });
+
+    it('retains the same maximum proof slot inventory for varied logical lengths', () => {
+        for (const phase of [7, 8, 9]) {
             let encodedLength: number | undefined;
             for (const length of [
                 bounds.minimumProofBytes,
@@ -91,18 +118,10 @@ describe('contribution state framing', () => {
                 recordBytes + 1,
                 bounds.maximumProofBytes,
             ]) {
-                const state = completed(length, generation);
-                const encoded = encodeContributionState(state, profile);
-                expect(new TextDecoder().decode(encoded.subarray(0, 4))).toBe(
-                    'PCS3',
-                );
-                const decoded = decodeContributionState(
-                    encoded,
-                    generation,
-                    profile,
-                );
+                const state = stateAt(phase, length);
+                const encoded = encodeContributionState(state);
+                const decoded = decodeContributionState(encoded, profile);
                 expect(decoded).toEqual(state);
-                expect(decoded.header.length).toBe(76);
                 expect(
                     new DataView(decoded.header.buffer).getBigUint64(4, true),
                 ).toBe(BigInt(length));
@@ -117,40 +136,113 @@ describe('contribution state framing', () => {
                 ).toEqual(slots);
                 encodedLength ??= encoded.length;
                 expect(encoded.length).toBe(encodedLength);
-                expect(encoded.length).toBeLessThanOrEqual(
-                    bounds.maximumStateBytes,
-                );
             }
         }
     });
 
-    it('refuses missing, extra, shortened and displaced planned proof records', () => {
-        const state = completed(bounds.minimumProofBytes);
-        const last = state.publicRecords.length - 1;
-        for (const records of [
-            state.publicRecords.slice(0, last),
-            [...state.publicRecords, state.publicRecords[last]],
-            state.publicRecords.map((value, index) =>
-                index === last ? { ...value, length: value.length - 1 } : value,
-            ),
-            state.publicRecords.map((value, index) =>
-                index === last ? { ...value, offset: value.offset + 1 } : value,
-            ),
-        ])
+    it('rejects phase substitution instead of reviving or discarding private work', () => {
+        for (const phase of [4, 5, 6, 7, 8, 9]) {
+            const encoded = encodeContributionState(stateAt(phase));
+            for (const changedPhase of [0, 3, 4, 5, 6, 7, 8, 9, 10, 255]) {
+                if (changedPhase === phase) continue;
+                const changed = encoded.slice();
+                changed[4] = changedPhase;
+                expect(() =>
+                    decodeContributionState(changed, profile),
+                ).toThrow();
+            }
             expect(() =>
                 decodeContributionState(
-                    encodeContributionState(
-                        { ...state, publicRecords: records },
-                        profile,
-                    ),
-                    7,
+                    encoded.subarray(0, encoded.length - 1),
                     profile,
                 ),
             ).toThrow();
+            expect(() =>
+                decodeContributionState(
+                    new Uint8Array([...encoded, 0]),
+                    profile,
+                ),
+            ).toThrow();
+        }
     });
 
-    it('refuses malformed body framing and any original variable-size format', () => {
-        const state = completed(bounds.minimumProofBytes);
+    it('rejects missing, extra, shortened and displaced body or proof records', () => {
+        for (const phase of [5, 6, 7, 8, 9]) {
+            const state = stateAt(phase);
+            const last = state.publicRecords.length - 1;
+            for (const records of [
+                state.publicRecords.slice(0, last),
+                [...state.publicRecords, state.publicRecords[last]],
+                state.publicRecords.map((value, index) =>
+                    index === last
+                        ? { ...value, length: value.length - 1 }
+                        : value,
+                ),
+                state.publicRecords.map((value, index) =>
+                    index === last
+                        ? { ...value, offset: value.offset + 1 }
+                        : value,
+                ),
+                state.publicRecords.map((value, index) =>
+                    index === 0
+                        ? { ...value, object: value.object + 1 }
+                        : value,
+                ),
+            ])
+                expect(() =>
+                    decode({ ...state, publicRecords: records }),
+                ).toThrow();
+        }
+        for (const phase of [5, 6]) {
+            const state = stateAt(phase);
+            expect(() =>
+                decode({
+                    ...state,
+                    privateRecords: state.privateRecords.slice(1),
+                }),
+            ).toThrow();
+            expect(() =>
+                decode({
+                    ...state,
+                    privateRecords: [
+                        ...state.privateRecords,
+                        state.privateRecords[0],
+                    ],
+                }),
+            ).toThrow();
+        }
+    });
+
+    it('rejects wrong seed, signing coins and offer record shapes at their actual phases', () => {
+        for (const phase of [4, 5, 6, 7, 8, 9]) {
+            const state = stateAt(phase);
+            for (const seed of [new Uint8Array(63), new Uint8Array(65)])
+                expect(() => decode({ ...state, seed })).toThrow();
+            for (const coins of [new Uint8Array(31), new Uint8Array(33)])
+                expect(() => decode({ ...state, coins })).toThrow();
+        }
+        for (const phase of [8, 9]) {
+            const state = stateAt(phase);
+            for (const signingRecords of [
+                state.signingRecords.slice(1),
+                [...state.signingRecords, state.signingRecords[0]],
+                state.signingRecords.map((value, index) =>
+                    index === 0
+                        ? { ...value, length: value.length + 1 }
+                        : value,
+                ),
+                state.signingRecords.map((value, index) =>
+                    index === 0
+                        ? { ...value, object: value.object + 1 }
+                        : value,
+                ),
+            ])
+                expect(() => decode({ ...state, signingRecords })).toThrow();
+        }
+    });
+
+    it('refuses malformed SCB2 framing and obsolete contribution formats', () => {
+        const state = stateAt(7);
         for (const header of [
             new Uint8Array(),
             new Uint8Array(12),
@@ -159,20 +251,16 @@ describe('contribution state framing', () => {
                 BigInt(bounds.maximumProofBytes + 1),
                 (1n << 64n) - 1n,
             ].map((length) => {
-                const value = state.header.slice();
-                new DataView(value.buffer).setBigUint64(4, length, true);
-                return value;
+                const changed = state.header.slice();
+                new DataView(changed.buffer).setBigUint64(4, length, true);
+                return changed;
             }),
         ])
-            expect(() =>
-                decodeContributionState(
-                    encodeContributionState({ ...state, header }, profile),
-                    7,
-                    profile,
-                ),
-            ).toThrow();
-        const previous = encodeContributionState(state, profile);
-        previous[3] = '2'.charCodeAt(0);
-        expect(() => decodeContributionState(previous, 7, profile)).toThrow();
+            expect(() => decode({ ...state, header })).toThrow();
+        for (const marker of ['PCS2', 'PCS3', 'PRC1']) {
+            const previous = encodeContributionState(state);
+            previous.set(new TextEncoder().encode(marker));
+            expect(() => decodeContributionState(previous, profile)).toThrow();
+        }
     });
 });

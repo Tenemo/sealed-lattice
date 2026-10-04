@@ -445,10 +445,12 @@ describe('composed security ledger', () => {
         ] as const) {
             const participants = BigInt(participantCount);
             const contributors = BigInt(setupContributors(participantCount));
+            const eligible =
+                contributors + BigInt(Math.floor((participantCount - 1) / 3));
             const expected = unitsAbove([
-                { calls: contributors, ...bound(65_536n, 1_024n) },
+                { calls: eligible, ...bound(65_536n, 1_024n) },
                 {
-                    calls: contributors * participants,
+                    calls: eligible * participants,
                     ...bound(65_536n, 256n),
                 },
             ]);
@@ -487,17 +489,21 @@ describe('composed security ledger', () => {
     });
 
     it('charges the seeded operation randomness its one-way-to-hiding bound', () => {
-        // Two 512-bit seeds per setup contributor and two per participant,
+        // Two 512-bit seeds per eligible contributor and two per participant,
         // and 2^80 oracle calls in any experiment within the target:
         // 2*sqrt((q+1)*4q*m/2^512) is at most 4(q+1)*ceil(sqrt(m))/2^256.
         const calls = 1n << 80n;
         for (const [participantCount, optionCount, root] of [
             [3, 2, 4n],
             [10, 10, 6n],
-            [20, 20, 8n],
+            [20, 20, 9n],
         ] as const) {
             const seeds =
-                2n * BigInt(setupContributors(participantCount)) +
+                2n *
+                    BigInt(
+                        setupContributors(participantCount) +
+                            Math.floor((participantCount - 1) / 3),
+                    ) +
                 2n * BigInt(participantCount);
             expect(root * root).toBeGreaterThanOrEqual(seeds);
             expect((root - 1n) * (root - 1n)).toBeLessThan(seeds);
@@ -642,7 +648,8 @@ describe('composed security ledger', () => {
                     roles[registrations],
                     roles[rest] +
                         3 * participantCount +
-                        setupContributors(participantCount),
+                        setupContributors(participantCount) +
+                        Math.floor((participantCount - 1) / 3),
                 );
             }
         }
@@ -660,7 +667,7 @@ describe('composed security ledger', () => {
         // Nineteen participants with six corrupt maximize roles per honest
         // member, and the bound is attained at their multiples.
         expect(tight).toBeGreaterThanOrEqual(Math.floor(limit / 13));
-        expect(acceptedProofRolesAt(13n * 7n)).toBe(64n * 7n);
+        expect(acceptedProofRolesAt(13n * 7n)).toBe(70n * 7n);
     });
 
     it('caps the honest credential population by its rosters', () => {

@@ -139,7 +139,7 @@ describe('original registration source randomness and hash work', () => {
         expect(large.sourceSeedCount).toBeGreaterThanOrEqual(
             small.sourceSeedCount,
         );
-        expect(operationSeedCount(profile)).toBe(2n * 4n + 2n * 10n);
+        expect(operationSeedCount(profile)).toBe(2n * 7n + 2n * 10n);
         expect(large.comparisonHashPermutations).toBe(
             large.families.reduce(
                 (sum, family) =>

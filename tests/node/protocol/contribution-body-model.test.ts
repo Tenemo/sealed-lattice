@@ -1,89 +1,47 @@
+import { createHash } from 'node:crypto';
+
 import { describe, expect, it } from 'vitest';
 
 import {
     compileContributionBodyCensus,
-    contributionSenderPrefix,
-    matchesContributionSenderPrefix,
-    contributionSaltPrefix,
+    contributionBodyHashPrefix,
 } from '#tests/contribution-body-model.js';
 import { completionProfile } from '#tests/supported-profile-model.js';
 
-describe('complete contribution body encoding', () => {
-    it('masks the complete sender and salt slice without selecting a body suffix', () => {
-        const key = new Uint8Array(1952),
-            salt = Uint8Array.from({ length: 64 }, (_, index) => index),
-            sender = contributionSenderPrefix(key),
-            prefix = contributionSaltPrefix(key, salt);
-        expect(prefix.subarray(0, sender.length)).toEqual(sender);
-        expect(prefix.subarray(sender.length, sender.length + 6)).toEqual(
-            Buffer.from([1, 0, 64, 0, 0, 0]),
-        );
-        expect(prefix.subarray(sender.length + 6)).toEqual(Buffer.from(salt));
-        expect(BigInt(prefix.length)).toBe(
-            compileContributionBodyCensus(completionProfile())
-                .senderSaltPrefixBytes,
-        );
-        expect(() => contributionSaltPrefix(key, salt.subarray(1))).toThrow(
-            'salt length',
-        );
-    });
-    it('matches the canonical domain and original key without granting body validity', () => {
-        const key = Uint8Array.from(
-                { length: 1952 },
-                (_, index) => index % 251,
-            ),
-            label = contributionSenderPrefix(key);
-        expect(label.subarray(0, 18)).toEqual(
-            Buffer.from([
-                1, 0, 1, 0, 5, 0, 0, 0, 2, 0, 38, 0, 0, 0, 34, 0, 0, 0,
-            ]),
-        );
-        expect(label.subarray(18, 52).toString('ascii')).toBe(
-            'sealed-lattice/setup-commitment/v1',
-        );
-        expect(label.subarray(52, 58)).toEqual(
-            Buffer.from([1, 0, 160, 7, 0, 0]),
-        );
-        expect(label.subarray(58)).toEqual(Buffer.from(key));
-        // Even the bare label passes this extraction predicate. It is not a
-        // body, a contribution proof, or a public verification capability.
-        expect(matchesContributionSenderPrefix(label, key)).toBe(true);
-        expect(
-            matchesContributionSenderPrefix(
-                Buffer.concat([label, Buffer.from([255])]),
-                key,
-            ),
-        ).toBe(true);
-        expect(
-            matchesContributionSenderPrefix(
-                label.subarray(0, label.length - 1),
-                key,
-            ),
-        ).toBe(false);
-        for (const offset of [
-            0,
-            4,
-            8,
-            10,
-            14,
-            18,
-            52,
-            54,
-            58,
-            label.length - 1,
-        ]) {
-            const changed = label.slice();
-            changed[offset] ^= 1;
-            expect(matchesContributionSenderPrefix(changed, key)).toBe(false);
+describe('complete clear contribution body encoding', () => {
+    it('frames one ordinary body identity without an independent whole-body salt', () => {
+        for (const length of [0, 1, 76, 1024, 65536]) {
+            const body = Buffer.alloc(length, 17);
+            const prefix = contributionBodyHashPrefix(length);
+            expect(prefix.subarray(0, 8)).toEqual(
+                Buffer.from([1, 0, 1, 0, 2, 0, 0, 0]),
+            );
+            const domainLength = prefix.readUInt32LE(14);
+            expect(
+                prefix.subarray(18, 18 + domainLength).toString('ascii'),
+            ).toBe('sealed-lattice/contribution-body/v1');
+            expect(prefix.readUInt32LE(prefix.length - 8)).toBe(length + 4);
+            expect(prefix.readUInt32LE(prefix.length - 4)).toBe(length);
+            const whole = createHash('shake256', { outputLength: 64 })
+                .update(prefix)
+                .update(body)
+                .digest();
+            const streamed = createHash('shake256', {
+                outputLength: 64,
+            }).update(prefix);
+            for (let offset = 0; offset < body.length; offset += 17)
+                streamed.update(body.subarray(offset, offset + 17));
+            expect(streamed.digest()).toEqual(whole);
+            expect(BigInt(prefix.length)).toBe(
+                compileContributionBodyCensus(completionProfile())
+                    .hashPrefixBytes,
+            );
         }
-        const other = key.slice();
-        other[100] ^= 1;
-        expect(matchesContributionSenderPrefix(label, other)).toBe(false);
-        expect(() => contributionSenderPrefix(key.subarray(1))).toThrow(
-            'key length',
-        );
+        for (const length of [-1, 1.5, Infinity, 0xffff_fffc])
+            expect(() => contributionBodyHashPrefix(length)).toThrow('length');
     });
-    it('omits only fixed common polynomials and previously verified recipient keys', () => {
+
+    it('carries only the FHE and encrypted-share polynomials and preserves the SCB2 source opening', () => {
         const value = compileContributionBodyCensus(completionProfile());
         const excluded = new Set([
             42,
@@ -101,47 +59,30 @@ describe('complete contribution body encoding', () => {
                 (index) => !excluded.has(index),
             ),
         );
+        expect(value.headerBytes).toBe(4n + 8n + 64n);
+        expect(value.sourceOpeningSaltBytes).toBe(64n);
         expect(value.polynomialPayloadBytes).toBe(
             24n * 65536n * 109n + 20n * 65536n * 21n,
         );
         expect(value.maximumBodyBytes).toBeLessThan(256n * 1024n ** 2n);
-        expect(value.maximumHashInputBytes).toBeLessThan(1n << 32n);
-        expect(value.hashPrefixBytes).toBeLessThan(4096n);
-        expect(value.minimumHashInputBytes).toBeLessThan(
-            value.maximumHashInputBytes,
-        );
-        expect(value.minimumHashInputEnclosingBitExponent).toBe(
-            value.maximumHashInputEnclosingBitExponent,
-        );
-        const upper = 1n << value.maximumHashInputEnclosingBitExponent;
-        expect(8n * value.minimumHashInputBytes).toBeGreaterThan(upper / 2n);
-        expect(8n * value.maximumHashInputBytes).toBeLessThanOrEqual(upper);
-        expect(value.senderPrefixBytes).toBe(
-            BigInt(contributionSenderPrefix(new Uint8Array(1952)).length),
-        );
-    });
-    it('frames the complete owner-bound role in the body commitment input', () => {
-        const value = compileContributionBodyCensus(completionProfile());
-        const roleBytes =
-            8n + 6n * 6n + (4n + 36n) + (4n + 128n) + 3n * 64n + 2n;
-        const prefix =
-            8n + 5n * 6n + 4n + 34n + 1952n + 64n + 4n + roleBytes + 4n;
-        expect(value.hashPrefixBytes).toBe(prefix);
-        expect(value.maximumHashInputBytes).toBe(
-            prefix + value.maximumBodyBytes,
-        );
+        expect(value.hashPrefixBytes).toBe(8n + 2n * 6n + 4n + 35n + 4n);
         expect(value.minimumHashInputBytes).toBe(
-            prefix +
+            value.hashPrefixBytes +
                 value.headerBytes +
                 value.polynomialPayloadBytes +
                 value.minimumProofBytes,
         );
-        // The sender/salt prefix precedes the role and keeps its own grammar.
-        expect(value.senderSaltPrefixBytes).toBe(
-            BigInt(
-                contributionSaltPrefix(new Uint8Array(1952), new Uint8Array(64))
-                    .length,
-            ),
+        expect(value.maximumHashInputBytes).toBe(
+            value.hashPrefixBytes + value.maximumBodyBytes,
+        );
+        expect(value.maximumHashInputBytes).toBeLessThan(1n << 32n);
+        expect(value.setupContributorCount).toBe(4);
+        expect(value.eligibleContributorCount).toBe(7);
+        expect(value.maximumSelectedContributionBodies).toBe(
+            4n * value.maximumBodyBytes,
+        );
+        expect(value.maximumEligibleOfferBodies).toBe(
+            7n * value.maximumBodyBytes,
         );
     });
 });

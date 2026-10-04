@@ -1,5 +1,6 @@
 import { compileBallotBodyCensus } from '#tests/ballot-body-model.js';
 import { compileBallotEncryptionRelationCensus } from '#tests/ballot-encryption-relation-model.js';
+import { compileCommonAgreementDegreeCensus } from '#tests/common-agreement-degree-model.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import {
     compileBallotWordProofLayout,
@@ -19,6 +20,7 @@ import type { SupportedProfile } from '#tests/supported-profile-model.js';
 import {
     compileWideChallengeCompilerCensus,
     proofCompilerCaps,
+    wideChallengeLayout,
 } from '#tests/wide-challenge-compiler-model.js';
 
 export const byteAlignedSpongePermutations = (
@@ -222,6 +224,18 @@ export const proofHashProfiles = (profile: SupportedProfile) => {
             row.columns + 2 * row.lookups + row.booleans + row.products + 6;
         return {
             role: row.role,
+            // supported-profile::relation fixes the other three descriptors
+            // at MESSAGE_BYTES; only setup chooses its minimum word width.
+            messageBytes:
+                row.role === 'setup'
+                    ? BigInt(
+                          wideChallengeLayout(
+                              oracles,
+                              compileCommonAgreementDegreeCensus().queries,
+                              Number(row.layout.secondWidth),
+                          ).challengeBytes,
+                      )
+                    : 262_144n,
             firstWidth: row.layout.firstWidth,
             secondWidth: row.layout.secondWidth,
             parameterBytes:
@@ -244,7 +258,7 @@ export const compileProofHashWork = (
     const query = compileProofVerifierQueryCensus();
     const compiler = compileWideChallengeCompilerCensus(supportedProfile);
     const tag = compiler.tagBits / 8n;
-    const message = BigInt(compiler.challengeBytes);
+    const message = profile.messageBytes;
     const nodeInput = fixedHashInputBytes('bounded-proof/node', [
         roleBytes,
         4n,

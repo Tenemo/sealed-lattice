@@ -80,7 +80,10 @@ await runWithLocalRunLog(
             const run = JSON.parse(
                 await readFile(path.join(source, 'result.json'), 'utf8'),
             ) as ResearchRun;
-            assert.match(run.case, /^native-(?:result|empty|invalid-only)$/u);
+            assert.match(
+                run.case,
+                /^native-(?:result|empty|invalid-only|setup-departure|selection-fork)$/u,
+            );
             const ceremony = path.join(
                 runArtifactDirectoryPath(source),
                 'ceremony',
@@ -89,6 +92,8 @@ await runWithLocalRunLog(
             const scenario = deriveResearchScenario(
                 run.participantCount,
                 run.optionCount,
+                run.case === 'native-setup-departure',
+                run.case === 'native-selection-fork',
             );
             // Release shares from positions spread evenly over the roster,
             // so no two are adjacent, and a bad share just after the first.
@@ -100,13 +105,25 @@ await runWithLocalRunLog(
                             (scenario.releaseThreshold - 1),
                     ),
             );
-            const badRelease = releaseAuthors[0] + 1;
+            const badRelease =
+                run.case === 'native-setup-departure'
+                    ? 2
+                    : releaseAuthors[0] + 1;
             // A bad extra vote takes the first corrupt position's file, since
             // every corrupt participant withholds its vote.
-            const badVotes = scenario.corrupt.slice(0, 1);
+            const certificateAuthors =
+                run.case === 'native-selection-fork'
+                    ? [0, 1, 3]
+                    : scenario.signers;
+            const badVotes =
+                run.case === 'native-selection-fork'
+                    ? [2]
+                    : run.case === 'native-setup-departure'
+                      ? []
+                      : scenario.corrupt.slice(0, 1);
             let directory: string;
             if (selected.name === 'available-records') {
-                assert.equal(run.case, 'native-result');
+                assert.equal(run.result.kind, 'result');
                 const original = path.join(ceremony, 'completion');
                 directory = path.join(
                     log.artifactDirectoryPath,
@@ -116,12 +133,12 @@ await runWithLocalRunLog(
                 // The native certificate has exactly the honest votes, so
                 // every one is needed; the corrupt participants signed none.
                 assert.equal(
-                    scenario.signers.length,
+                    certificateAuthors.length,
                     scenario.certificateThreshold,
                 );
                 const files = [
                     'target.bin',
-                    ...scenario.signers.map(
+                    ...certificateAuthors.map(
                         (index) => 'target-vote-' + index + '.bin',
                     ),
                     ...releaseAuthors.flatMap((index) => [
@@ -418,10 +435,18 @@ await runWithLocalRunLog(
             if (selected.name === 'available-records') {
                 const terminal = verified as TerminalResult;
                 assert.equal(terminal.kind, 'result');
-                assert.deepEqual(terminal.certificateAuthors, scenario.signers);
+                assert.deepEqual(
+                    terminal.certificateAuthors,
+                    certificateAuthors,
+                );
                 assert.deepEqual(terminal.releaseAuthors, releaseAuthors);
-                const withheld = scenario.corrupt.filter(
-                    (position) => !badVotes.includes(position),
+                const withheld = Array.from(
+                    { length: scenario.participantCount },
+                    (_, position) => position,
+                ).filter(
+                    (position) =>
+                        !certificateAuthors.includes(position) &&
+                        !badVotes.includes(position),
                 );
                 assert.deepEqual(terminal.unavailableVotes, withheld);
                 assert.deepEqual(terminal.invalidVotes, badVotes);

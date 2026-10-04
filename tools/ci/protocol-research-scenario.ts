@@ -35,14 +35,39 @@ export const researchBallotScore = (position: number, option: number) =>
 export const deriveResearchScenario = (
     participantCount: number,
     optionCount: number,
+    setupDeparture = false,
+    selectionFork = false,
 ) => {
     const thresholds = compileThresholdCompletionProfile(participantCount);
     const corrupt = thresholds.maximumCorruptParticipantCount;
-    const honest = [0, ...range(corrupt + 1, participantCount)];
-    const voters = honest.slice(0, thresholds.minimumTurnout);
-    const role = (rank: number) => (corrupt - rank > 0 ? [corrupt - rank] : []);
+    if (
+        (setupDeparture && selectionFork) ||
+        ((setupDeparture || selectionFork) &&
+            (participantCount !== 4 || optionCount !== 2))
+    )
+        throw new Error(
+            'The fixed setup cases require four participants and two options.',
+        );
+    const honest = selectionFork
+        ? [1, 2, 3]
+        : setupDeparture
+          ? [0, 1, 3]
+          : [0, ...range(corrupt + 1, participantCount)];
+    const voters = selectionFork
+        ? [0, 1, 2, 3]
+        : setupDeparture
+          ? [0, 2, 3]
+          : honest.slice(0, thresholds.minimumTurnout);
+    const role = (rank: number) =>
+        !setupDeparture && !selectionFork && corrupt - rank > 0
+            ? [corrupt - rank]
+            : [];
+    const departed = setupDeparture ? [1] : [];
     const omitted =
-        corrupt > 0 && honest.length > thresholds.minimumTurnout
+        !setupDeparture &&
+        !selectionFork &&
+        corrupt > 0 &&
+        honest.length > thresholds.minimumTurnout
             ? [participantCount - 1]
             : [];
     const ranking = evaluateReferenceRanking(
@@ -65,22 +90,37 @@ export const deriveResearchScenario = (
     return {
         participantCount,
         optionCount,
-        corrupt: range(1, corrupt + 1),
+        corrupt: selectionFork
+            ? [0]
+            : setupDeparture
+              ? [2]
+              : range(1, corrupt + 1),
         honest,
         accepted: voters,
         omitted,
         invalid: [...role(2), ...role(1)],
         conflicting: role(0),
-        signers: honest,
+        signers: setupDeparture || selectionFork ? voters : honest,
+        responseFiles: range(0, participantCount)
+            .filter((position) => !departed.includes(position))
+            .map((position) => 'response-' + position + '.bin'),
+        ...(setupDeparture || selectionFork
+            ? { departed, selectedAuthors: [0, 2] }
+            : {}),
         identifiers: ranking.orderedOptionPositions.map(
             (option) => `option-${option}`,
         ),
         releaseThreshold: thresholds.resultReleaseThreshold,
         certificateThreshold: thresholds.inventoryCertificateThreshold,
         releaseSubsets: Math.min(
-            binomial(participantCount, thresholds.resultReleaseThreshold),
+            binomial(
+                participantCount - Number(setupDeparture),
+                thresholds.resultReleaseThreshold,
+            ),
             checkedSetLimit,
         ),
-        departureSets: Math.min(departureTotal, checkedSetLimit),
+        departureSets: setupDeparture
+            ? 1
+            : Math.min(departureTotal, checkedSetLimit),
     };
 };

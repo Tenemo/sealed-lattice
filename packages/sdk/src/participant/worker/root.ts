@@ -33,7 +33,7 @@ import type { ParticipantHead } from './storage.js';
 // the poll and the ordered references of the public and private data records.
 // Generation two appends the organizer's proposal coins. From generation four
 // length-prefixed suffixes follow in a fixed order, each present from its
-// first generation: contribution, then ballot and close together, then target
+// first generation: preparation, then ballot and close together, then target
 // signing, then release.
 export const chunkBytes = 1 << 20;
 const referenceBytes = 73;
@@ -44,7 +44,7 @@ const prefixBytes = (generation: number) =>
     4 + dataKeyBytes(generation) + 64 + 4;
 const lastGeneration = 29;
 const suffixStarts = {
-    contribution: 4,
+    preparation: 4,
     ballot: 12,
     close: 12,
     target: 23,
@@ -52,7 +52,7 @@ const suffixStarts = {
 } as const;
 type ManifestSuffix = keyof typeof suffixStarts;
 const suffixOrder: readonly ManifestSuffix[] = [
-    'contribution',
+    'preparation',
     'ballot',
     'close',
     'target',
@@ -72,7 +72,7 @@ export const dataKind = {
     proposal: 8,
     proposalSignature: 9,
     setupReference: 10,
-    // The setup contributors' confirmations the setup was verified against.
+    // The quorum certificate the setup was verified against.
     setupInventory: 11,
     // This participant's roster verification, keyed to its credential.
     retainedRoster: 12,
@@ -106,7 +106,7 @@ const presentSuffixes = (generation: number) =>
 // retained roster names; before that profile is known, by the largest root
 // of any supported profile.
 const enrollmentRoot = (generation: number) =>
-    generation < suffixStarts.contribution;
+    generation < suffixStarts.preparation;
 
 const provisionalRootBound = (limits: ParticipantLimits, generation: number) =>
     enrollmentRoot(generation)
@@ -135,6 +135,13 @@ export const encodeManifest = (
     manifest: ParticipantManifest,
     generation: number,
 ) => {
+    if (
+        !Number.isSafeInteger(generation) ||
+        generation < 1 ||
+        generation > lastGeneration ||
+        (generation > 4 && generation < 12)
+    )
+        throw new Error('Invalid participant root generation.');
     const suffixes = presentSuffixes(generation).map((name) => {
         const bytes = manifest.suffixes[name];
         if (bytes === undefined)
@@ -150,7 +157,7 @@ export const encodeManifest = (
             'Participant root fields disagree with its generation.',
         );
     return concatenate(
-        encodeText('ERM6'),
+        encodeText('ERM7'),
         manifest.dataKeys,
         manifest.poll,
         unsigned32(manifest.references.length),
@@ -222,8 +229,9 @@ const decodeManifest = (
         !Number.isSafeInteger(generation) ||
         generation < 1 ||
         generation > lastGeneration ||
+        (generation > 4 && generation < 12) ||
         bytes.length < prefixBytes(generation) ||
-        !equalBytes(bytes.subarray(0, 4), encodeText('ERM6'))
+        !equalBytes(bytes.subarray(0, 4), encodeText('ERM7'))
     )
         throw new Error('Invalid participant root manifest.');
     const prefix = prefixBytes(generation);
@@ -444,6 +452,30 @@ export type RootTransition = Readonly<{
     // Other synchronous writes that enter the same transaction.
     write?: (transaction: IDBTransaction) => void;
 }>;
+
+// A saved signing intent can resume without committing another root. Check
+// its complete required predecessor before reinstating that authority too.
+export const authenticateRecords = (
+    context: ParticipantContext,
+    root: AuthenticatedRoot,
+    records: readonly ParticipantStoredRecord[],
+) =>
+    commitParticipantState({
+        database: context.database,
+        stores: participantStores,
+        timeoutMilliseconds: validationMilliseconds,
+        validate: (reader) =>
+            validateParticipantPredecessor(reader, {
+                head: root.head,
+                manifest: root.plaintext,
+                rootContext: rootAssociatedData(context.runtime),
+                maximumRootBytes: rootBound(context, root.head.generation),
+                recordStores: participantRecordStores,
+                records,
+                identities: custodyIdentities(context.kernel),
+            }),
+        write: () => undefined,
+    });
 
 const referenceData = (
     context: ParticipantContext,

@@ -12,10 +12,7 @@ import {
     prefixOracleQueriesPerAccess,
     sparseRoutingWork,
 } from '#tests/compressed-oracle-model.js';
-import {
-    contributionSenderPrefix,
-    compileContributionBodyCensus,
-} from '#tests/contribution-body-model.js';
+import { compileContributionBodyCensus } from '#tests/contribution-body-model.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import {
     compileBallotWordProofLayout,
@@ -220,28 +217,17 @@ export const rosterCountAt = (honestRegistrations: bigint) =>
 // purpose and proving position of each, so at most (3n+d)/(n-f) per honest
 // member.
 export const acceptedProofRolesAt = (honestRegistrations: bigint) =>
-    rosterSizes.reduce(
-        (
-            maximum,
-            { participantCount, setupContributorCount, honestMembers },
-        ) => {
-            const roles =
-                (proofPurposes.reduce(
-                    (sum, purpose) =>
-                        sum +
-                        provingPositions(
-                            purpose,
-                            participantCount,
-                            setupContributorCount,
-                        ),
-                    0n,
-                ) *
-                    honestRegistrations) /
-                honestMembers;
-            return roles > maximum ? roles : maximum;
-        },
-        0n,
-    );
+    rosterSizes.reduce((maximum, { participantCount, honestMembers }) => {
+        const roles =
+            (proofPurposes.reduce(
+                (sum, purpose) =>
+                    sum + provingPositions(purpose, participantCount),
+                0n,
+            ) *
+                honestRegistrations) /
+            honestMembers;
+        return roles > maximum ? roles : maximum;
+    }, 0n);
 
 type StatisticalTerm = Readonly<{
     name: string;
@@ -329,8 +315,10 @@ export const profileStatisticalTerms = (
                     .map((row) => ({
                         ...row,
                         calls:
-                            BigInt(profile.setupContributorCount) *
-                            row.callsPerOperation,
+                            BigInt(
+                                profile.setupContributorCount +
+                                    profile.maximumCorruptParticipantCount,
+                            ) * row.callsPerOperation,
                     })),
             ),
         },
@@ -360,7 +348,7 @@ export const profileStatisticalTerms = (
             // continuation randomness, and every participant its ballot and
             // release randomness, from its own uniform seed through the
             // ideal SHAKE256, and nothing else reads a seed. Replacing the
-            // streams of all k = 2d + 2n seeds by uniform bytes costs, by
+            // streams of all operation seeds by uniform bytes costs, by
             // the semi-classical one-way-to-hiding lemma over q oracle calls
             // of the complete experiment and s-bit seeds,
             // 2*sqrt((q+1)*4q*k/2^s), at most 4(q+1)*sqrt(k)/2^(s/2).
@@ -586,16 +574,18 @@ export const sparseRoutingCoefficients = (() => {
 const maximumOf = (...values: readonly bigint[]) =>
     values.reduce((maximum, value) => (value > maximum ? value : maximum));
 
-// The sender prefix and the programming cap are the same for every profile.
+// Historical whole-body commitment operand of this reference ledger only.
+// Current clear offers use ordinary body identities and no sender/salt prefix.
 const reductionOperands = () => ({
     programmedMessageBudget: proofCompilerCaps.programmedMessageBudget,
     senderPrefixBits:
         8n *
-        BigInt(
-            contributionSenderPrefix(
-                new Uint8Array(Number(registrationSigningPublicKeyBytes)),
-            ).length,
-        ),
+        (8n +
+            6n +
+            4n +
+            BigInt(Buffer.byteLength('sealed-lattice/setup-commitment/v1')) +
+            6n +
+            registrationSigningPublicKeyBytes),
 });
 
 // Reduction work relative to the complete experiment's charged cost T, which

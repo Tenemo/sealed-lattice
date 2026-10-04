@@ -2,6 +2,62 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 
 export type PaddingCut = 'padding' | 'final-slot';
+export type PreparationCut = Readonly<{
+    kind: 'contribution' | 'selection' | 'endorsement';
+    phase: number;
+}>;
+
+// The root generation stays four while independent PRE1 authorities advance.
+// Observe the actual authenticated journal after commit/readback, never an
+// uncommitted producer flag. This hook exists only in the guarded worker copy.
+export const preparationHaltingClient = (
+    worker: Buffer,
+    cut: PreparationCut,
+) => {
+    assert.ok(
+        cut.kind === 'contribution'
+            ? Number.isInteger(cut.phase) && cut.phase >= 4 && cut.phase <= 9
+            : cut.phase === 1 || cut.phase === 2,
+    );
+    const source = worker.toString('utf8');
+    const boundary =
+        /return \{\s*head,\s*plaintext: reopened,\s*manifest\s*\};/gu;
+    assert.equal(
+        [...source.matchAll(boundary)].length,
+        1,
+        'The worker must contain one completed root readback.',
+    );
+    const field = ['contribution', 'selection', 'endorsement'].indexOf(
+        cut.kind,
+    );
+    const instrumented = source.replace(
+        boundary,
+        (matched) => `
+        if (head.generation === 4) {
+            const journal = manifest.suffixes.preparation;
+            let journalOffset = 4;
+            if (journal && journal[0] === 80 && journal[1] === 82 && journal[2] === 69 && journal[3] === 49) {
+                for (let journalField = 0; journalField < 3; journalField++) {
+                    const journalLength = new DataView(journal.buffer, journal.byteOffset + journalOffset, 4).getUint32(0, true);
+                    journalOffset += 4;
+                    if (journalField === ${String(field)} && journalLength > 0 && journal[journalOffset + ${cut.kind === 'contribution' ? '4' : '0'}] === ${String(cut.phase)}) {
+                        self.postMessage({type:'participant-preparation-halt',kind:${JSON.stringify(cut.kind)},phase:${String(cut.phase)}});
+                        await new Promise(() => undefined);
+                    }
+                    journalOffset += journalLength;
+                }
+            }
+        }
+        ${matched}`,
+    );
+    const patched = Buffer.from(instrumented);
+    return {
+        generation: 4,
+        worker: patched,
+        digest: createHash('sha512').update(patched).digest('hex'),
+        preparationCut: cut,
+    };
+};
 export type PaddingSlotObservation = Readonly<{
     type: 'participant-padding-slot';
     offset: number;
@@ -52,7 +108,7 @@ export const paddingHaltingClient = (worker: Buffer, cut: PaddingCut) => {
     );
     const patched = Buffer.from(instrumented);
     return {
-        generation: 6,
+        generation: 4,
         cut,
         worker: patched,
         digest: createHash('sha512').update(patched).digest('hex'),

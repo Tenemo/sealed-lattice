@@ -13,8 +13,9 @@ pub const SEALED_SIGNING_SEED_BYTES: usize = 4 + 32 + 16;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SigningPurpose {
     Proposal,
-    Confirmation,
-    Opening,
+    Offer,
+    SelectionProposal,
+    SelectionEndorsement,
     Ballot,
     CloseIntent,
     CloseResponse,
@@ -87,7 +88,11 @@ impl Credential {
             target_lock: None,
             release_started: false,
             release_signed: false,
-            confirmation: None,
+            confirmed_roster: None,
+            offer_signed: None,
+            selection_proposal_signed: None,
+            selection_endorsed: None,
+            preparation_retired: false,
             locked_purposes: ALL_SIGNING_PURPOSES,
         };
         if !value.check_retained() {
@@ -154,8 +159,9 @@ mod tests {
         assert!(restored.seal_complete(&data_key).is_err());
         let purposes = [
             SigningPurpose::Proposal,
-            SigningPurpose::Confirmation,
-            SigningPurpose::Opening,
+            SigningPurpose::Offer,
+            SigningPurpose::SelectionProposal,
+            SigningPurpose::SelectionEndorsement,
             SigningPurpose::Ballot,
             SigningPurpose::CloseIntent,
             SigningPurpose::CloseResponse,
@@ -170,7 +176,7 @@ mod tests {
                 Err(Error::Consumed)
             ));
         }
-        for undefined in [1 << 9, u16::MAX] {
+        for undefined in [SigningPurpose::Release.mask() << 1, u16::MAX] {
             assert!(matches!(
                 restored.unlock_unused_purposes(undefined),
                 Err(Error::Shape)

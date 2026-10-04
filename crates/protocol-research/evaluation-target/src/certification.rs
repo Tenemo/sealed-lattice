@@ -42,8 +42,7 @@ impl CertificateCollector {
     pub fn new(target: Arc<VerifiedEvaluationTarget>) -> Self {
         let keys: Vec<_> = target
             .setup()
-            .inventory()
-            .proposal()
+            .roster()
             .proposal()
             .records()
             .iter()

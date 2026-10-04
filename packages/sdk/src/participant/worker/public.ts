@@ -1,4 +1,4 @@
-import { concatenate } from './bytes.js';
+import { concatenate, readUnsigned32, readUnsigned64 } from './bytes.js';
 import { describe, PublicInputFailure } from './context.js';
 
 // Public records come from an untrusted relay. Every read has an exact upper
@@ -106,28 +106,16 @@ export const readPublic = async (
     return concatenate(...parts);
 };
 
-// Publishes bytes of one record at an offset. The relay keeps the first
-// bytes at each offset and accepts only an identical retransmission.
-export const publishChunk = async (
-    relay: PublicRelay,
-    name: string,
-    offset: number,
-    bytes: Uint8Array,
-) => {
-    if (bytes.length > transferChunkBytes)
-        throw new Error('A publication chunk exceeds its bound.');
+const postPublic = async (url: string, bytes: Uint8Array) => {
     const controller = new AbortController();
     let response: Response;
     try {
         response = await withDeadline(controller, () =>
-            fetch(
-                relay.base + 'publish/' + name + '?offset=' + String(offset),
-                {
-                    method: 'POST',
-                    body: new Blob([new Uint8Array(bytes)]),
-                    signal: controller.signal,
-                },
-            ),
+            fetch(url, {
+                method: 'POST',
+                body: new Blob([new Uint8Array(bytes)]),
+                signal: controller.signal,
+            }),
         );
     } catch (error) {
         throw new PublicInputFailure(
@@ -136,6 +124,72 @@ export const publishChunk = async (
     }
     if (!response.ok)
         throw new PublicInputFailure('Public delivery was refused.');
+};
+
+// Immutable protocol records accept exact retransmission only.
+export const publishChunk = async (
+    relay: PublicRelay,
+    name: string,
+    offset: number,
+    bytes: Uint8Array,
+) => {
+    if (bytes.length > transferChunkBytes)
+        throw new Error('A publication chunk exceeds its bound.');
+    await postPublic(
+        relay.base + 'publish/' + name + '?offset=' + String(offset),
+        bytes,
+    );
+};
+
+// Discovery is an append-only list of untrusted body identities. Nobody can
+// erase an earlier announcement, and no announcement occupies a selected slot
+// until its signed body has passed the complete owning verifier.
+export const offerDiscoveryPageEntries = 64;
+
+export const publishOfferAnnouncement = (
+    relay: PublicRelay,
+    position: number,
+    bodyIdentity: Uint8Array,
+) => {
+    if (bodyIdentity.length !== 64)
+        throw new Error('An offer announcement must name one body identity.');
+    return postPublic(relay.base + 'offers/' + String(position), bodyIdentity);
+};
+
+export const readOfferAnnouncements = async (
+    relay: PublicRelay,
+    position: number,
+    offset: number,
+) => {
+    if (!Number.isSafeInteger(offset) || offset < 0)
+        throw new PublicInputFailure(
+            'The offer discovery cursor exceeds its bound.',
+        );
+    const bytes = await readBounded(
+        relay.base + 'offers/' + String(position) + '?offset=' + String(offset),
+        12 + offerDiscoveryPageEntries * 64,
+    );
+    if (bytes.length < 12)
+        throw new PublicInputFailure('The offer discovery page is truncated.');
+    const total = readUnsigned64(bytes, 0);
+    const count = readUnsigned32(bytes, 8);
+    if (
+        total > BigInt(Number.MAX_SAFE_INTEGER) ||
+        count > offerDiscoveryPageEntries ||
+        bytes.length !== 12 + count * 64 ||
+        count !==
+            Math.min(
+                offerDiscoveryPageEntries,
+                Math.max(0, Number(total) - offset),
+            )
+    )
+        throw new PublicInputFailure('The offer discovery page is malformed.');
+    return {
+        total: Number(total),
+        identities: Array.from({ length: count }, (_, index) =>
+            bytes.slice(12 + index * 64, 12 + (index + 1) * 64),
+        ),
+    };
 };
 
 // Publishes one record in transfer chunks.

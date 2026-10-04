@@ -28,6 +28,7 @@ type ProtocolResearchSelection = {
     | { name: keyof typeof protocolResearchCases; reference?: string }
     | { name: 'native-public-operator' | 'native-fhe-key-source' }
     | { name: 'registration-session' }
+    | { name: 'native-setup-departure' | 'native-selection-fork' }
     | {
           name:
               | 'scalar-public-operator'
@@ -55,6 +56,23 @@ export const selectProtocolResearchCase = (
     arguments_: readonly string[],
 ): ProtocolResearchSelection => {
     const values = arguments_.filter((value) => value !== '--');
+    if (
+        values[0] === 'native-setup-departure' ||
+        values[0] === 'native-selection-fork'
+    ) {
+        if (values.length !== 1)
+            throw new Error(
+                'The setup departure case has a fixed four-participant profile and accepts no overrides.',
+            );
+        return {
+            name: values[0],
+            execution: true,
+            noResult: false,
+            participantCount: 4,
+            optionCount: 2,
+            simulatedHelpers: 0,
+        };
+    }
     if (values[0] === 'registration-session') {
         if (values.length !== 1)
             throw new Error(

@@ -11,11 +11,14 @@ import { proofCompilerCaps } from '#tests/wide-challenge-compiler-model.js';
 
 const population = compileComposedSecurityLedger().maximumCredentialPopulation;
 
-// Only the first max(f + 1, 2) roster positions prove a setup, with
+// Every position in the first max(f + 1, 2)+f may prove an offer, with
 // f = floor((n - 1) / 3); every position proves its registration, ballot and
 // release.
 const setupContributors = (participantCount: number) =>
-    BigInt(Math.max(Math.floor((participantCount - 1) / 3) + 1, 2));
+    BigInt(
+        Math.max(Math.floor((participantCount - 1) / 3) + 1, 2) +
+            Math.floor((participantCount - 1) / 3),
+    );
 const rosterRoles = (participantCount: number) =>
     3n * BigInt(participantCount) + setupContributors(participantCount);
 
@@ -48,8 +51,8 @@ describe('proof compiler chronology', () => {
         // while the corrupt roles an honest participant accepts stay the
         // roster's.
         const chronology = compileProofCompilerChronology(profile, population);
-        // Seven setup, twenty ballot and twenty release proofs.
-        const rosterProofs = 7n + 2n * 20n;
+        // Thirteen eligible setup, twenty ballot and twenty release proofs.
+        const rosterProofs = 13n + 2n * 20n;
         expect(chronology.honestRegistrations).toBe(population);
         expect(chronology.rosters).toBe(1n);
         expect(chronology.honestProofs).toBe(population + rosterProofs);

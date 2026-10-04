@@ -15,6 +15,7 @@ export const selectParticipantBrowserOptions = (
         '--memory-pressure',
         '--sequential',
         '--scalar',
+        '--setup-departure',
     ]);
     const valuedOptions = new Set([
         '--foreign-poll',
@@ -57,12 +58,23 @@ export const selectParticipantBrowserOptions = (
                 counts.every((value) => /^[1-9]\d*$/u.test(value))),
         'Optionally select the participant and option counts, then no-result, empty, rosters, plain or preparation.',
     );
+    const setupDeparture = switches.has('--setup-departure');
     const [participantCount, optionCount] =
-        counts.length === 0 ? [3, 2] : counts.map(Number);
+        counts.length === 0 ? [setupDeparture ? 4 : 3, 2] : counts.map(Number);
     const profile = deriveSupportedProfile(participantCount, optionCount);
     const memoryPressure = switches.has('--memory-pressure');
     const sequential = switches.has('--sequential');
     const foreignPoll = values.get('--foreign-poll');
+    assert.ok(
+        !setupDeparture ||
+            (participantCount === 4 &&
+                optionCount === 2 &&
+                mode === 'result' &&
+                !memoryPressure &&
+                !sequential &&
+                foreignPoll === undefined),
+        'The setup-departure run requires four participants, two options and no other scenario.',
+    );
     assert.ok(
         !memoryPressure || mode === 'plain',
         'Only a plain run applies memory pressure.',
@@ -108,6 +120,7 @@ export const selectParticipantBrowserOptions = (
         foreignPoll,
         profiling: switches.has('--profile'),
         scalar: switches.has('--scalar'),
+        setupDeparture,
         memoryPressure,
         sequential,
         basePort,

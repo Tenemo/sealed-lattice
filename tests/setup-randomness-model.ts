@@ -1,5 +1,6 @@
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import { compileRegistrationSetupBindingScreen } from '#tests/registration-setup-binding-model.js';
+import { compileSetupSelectionCensus } from '#tests/setup-selection-model.js';
 import type { SupportedProfile } from '#tests/supported-profile-model.js';
 
 export const setupGaussianParameters = {
@@ -10,7 +11,7 @@ export const setupGaussianParameters = {
     maximum: 63,
 } as const;
 
-// One roster's fresh enrollments and completed contributions. By default the
+// One roster's fresh enrollments and complete eligible offer pool. By default the
 // original poll admits exactly this roster size; a larger poll maximum is a
 // separate operand. This is not a population bound for abandoned credentials.
 export const compileSetupRandomnessCensus = (
@@ -25,7 +26,10 @@ export const compileSetupRandomnessCensus = (
     ).coordinateCount;
     const gadgetLength = profile.gadgetLength;
     const participants = BigInt(profile.participantCount);
-    const contributors = BigInt(profile.setupContributorCount);
+    const eligibleContributorCount = compileSetupSelectionCensus(
+        profile.participantCount,
+    ).eligibleCount;
+    const contributors = BigInt(eligibleContributorCount);
     const degree = fixedModulusBfvInputs.polynomialDegree;
     const samplesPerContribution =
         (4n * gadgetLength + 2n * participants - 1n) * degree;
@@ -79,6 +83,7 @@ export const compileSetupRandomnessCensus = (
         preparationSamplingBits++;
     return {
         originalPollMaximumParticipants,
+        eligibleContributorCount,
         sourceFamilyCount,
         samplesPerSourceFamily,
         samplesPerEnrollment,

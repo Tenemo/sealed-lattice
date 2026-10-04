@@ -1,3 +1,5 @@
+import { readFile } from 'node:fs/promises';
+
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -20,8 +22,9 @@ describe('complete participant authentication accounting', () => {
             'poll-definition',
             'registration',
             'roster-proposal',
-            'roster-confirmation',
-            'setup-opening',
+            'contribution-offer',
+            'setup-selection-proposal',
+            'setup-selection-endorsement',
             'ballot-envelope',
             'close-intent',
             'close-response',
@@ -39,6 +42,7 @@ describe('complete participant authentication accounting', () => {
             64n,
             64n,
             64n,
+            64n,
             214n,
             64n,
             64n,
@@ -46,7 +50,7 @@ describe('complete participant authentication accounting', () => {
             64n,
             270n,
         ]);
-        for (const role of roles.slice(6)) {
+        for (const role of roles.slice(7)) {
             const context = Buffer.from(role.context);
             const message = Buffer.alloc(
                 role.purpose === 'release-envelope' ? 270 : 64,
@@ -77,15 +81,15 @@ describe('complete participant authentication accounting', () => {
         const rows = compileCompleteCredentialIntentBounds(
             completionProfileCounts.participantCount,
         );
-        // Organizer: five setup purposes, three close purposes, then target
+        // Organizer: six setup purposes, three close purposes, then target
         // and release as the branch allows. Others: three setup purposes and
         // one close response. Each row adds the optional ballot.
         expect(rows.map((row) => row.firstEvaluatedIntentBound)).toEqual([
-            11n,
+            12n,
             7n,
-            10n,
+            11n,
             6n,
-            10n,
+            11n,
             6n,
         ]);
         for (const row of rows) {
@@ -128,11 +132,52 @@ describe('complete participant authentication accounting', () => {
     });
 
     it('preserves the separate through-ballot census used by retained prefix evidence', () => {
-        expect(compileAuthenticationFrameWork()).toHaveLength(6);
+        expect(compileAuthenticationFrameWork()).toHaveLength(7);
         expect(
             compileCurrentCredentialIntentBounds().map(
                 (row) => row.firstEvaluatedIntentBound,
             ),
-        ).toEqual([6n, 4n]);
+        ).toEqual([7n, 4n]);
+    });
+    it('matches the original poll, registration and clear-preparation signature contexts', async () => {
+        const roles = compileCompleteAuthenticationFrameWork();
+        for (const [purpose, file, name] of [
+            ['poll-definition', 'poll.rs', 'POLL_SIGNATURE_CONTEXT'],
+            ['registration', 'lib.rs', 'SIGNATURE_CONTEXT'],
+            [
+                'roster-proposal',
+                'roster-authentication.rs',
+                'ROSTER_SIGNATURE_CONTEXT',
+            ],
+            ['contribution-offer', 'contribution-offer.rs', 'OFFER_PURPOSE'],
+            [
+                'setup-selection-proposal',
+                'setup-selection.rs',
+                'PROPOSAL_CONTEXT',
+            ],
+            [
+                'setup-selection-endorsement',
+                'setup-selection.rs',
+                'ENDORSEMENT_PURPOSE',
+            ],
+        ] as const) {
+            const source = await readFile(
+                new URL(
+                    '../../../crates/protocol-research/registration-credentials/src/' +
+                        file,
+                    import.meta.url,
+                ),
+                'utf8',
+            );
+            const actual = source.match(
+                new RegExp('pub const ' + name + ': [^=]+ = b?"([^"]+)";', 'u'),
+            );
+            expect(actual).not.toBeNull();
+            expect(
+                roles.find((role) => role.purpose === purpose)!.context,
+            ).toBe(actual![1]);
+        }
+        expect(roles[0].context).toBe('sealed-lattice/poll-definition/v2');
+        expect(roles[1].context).toBe('sealed-lattice/registration/v1');
     });
 });

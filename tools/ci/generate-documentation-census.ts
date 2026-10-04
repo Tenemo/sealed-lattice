@@ -24,6 +24,7 @@ import {
     compileCertificateCustodyCensus,
     fullHolderRequirements,
 } from '#tests/certificate-custody-model.js';
+import { compileClearPreparationResources } from '#tests/clear-preparation-resource-model.js';
 import { compileCloseResponseCensus } from '#tests/close-response-model.js';
 import { compileCloseWireCensus } from '#tests/close-wire-model.js';
 import {
@@ -52,7 +53,6 @@ import {
     prefixOracleWork,
     prefixOracleQueriesPerAccess,
 } from '#tests/compressed-oracle-model.js';
-import { compileContributionAuthenticationCensus } from '#tests/contribution-authentication-model.js';
 import { compileContributionBodyCensus } from '#tests/contribution-body-model.js';
 import { compileFheKeySourceScreenResources } from '#tests/fhe-key-source-resource-model.js';
 import { compileFirstOracleCheckpointCensus } from '#tests/first-oracle-checkpoint-model.js';
@@ -122,6 +122,7 @@ import {
     countStagePath,
     preparationStagePath,
 } from '#tests/setup-selection-model.js';
+import { compileSetupSelectionWireCensus } from '#tests/setup-selection-wire-model.js';
 import { compileSigningLoopSourceComparison } from '#tests/signing-loop-estimate-model.js';
 import { compileSimulatorKeyKnowledgeCensus } from '#tests/simulator-key-knowledge-model.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
@@ -195,9 +196,7 @@ export const renderDocumentationCensus = (): string => {
         compileContributionGenerationResources(completion);
     const contributionBody = compileContributionBodyCensus(completion);
     const setupAggregate = compileSetupAggregateResources(completion);
-    const contributionSigning = compileContributionAuthenticationCensus(
-        contributionBody.participantCount,
-    );
+    const clearPreparation = compileClearPreparationResources(completion);
     const setupRandomness = compileSetupRandomnessCensus(completion);
     const registrationSourceRandomness = compileRegistrationSourceRandomness(
         completion.participantCount,
@@ -226,8 +225,8 @@ export const renderDocumentationCensus = (): string => {
     const rosterProposals = thresholdProfiles.map((profile) =>
         compileRosterProposalCensus(profile.participantCount),
     );
-    const contributionAuthentication = thresholdProfiles.map((profile) =>
-        compileContributionAuthenticationCensus(profile.participantCount),
+    const clearSelectionWires = thresholdProfiles.map((profile) =>
+        compileSetupSelectionWireCensus(profile.participantCount),
     );
     const commonAgreement = compileCommonAgreementDegreeCensus();
     const rnsArithmetic = compileRnsArithmeticResourceCensus(completion);
@@ -237,9 +236,6 @@ export const renderDocumentationCensus = (): string => {
     const ballotRelation = compileBallotEncryptionRelationCensus(completion);
     const fixedModulusBfv = compileProfileBfvCensus(completion);
     const supportedProfiles = compileSupportedProfileCensus();
-    const participantCustodyProfiles = supportedProfiles.profiles.flatMap(
-        (row) => row.map((profile) => compileParticipantCustodyCensus(profile)),
-    );
     const recoverableSetup = compileRecoverableSetupResourceScreen(
         completion.participantCount,
         completion.optionCount,
@@ -274,8 +270,8 @@ export const renderDocumentationCensus = (): string => {
         participants: supportedProfiles.profiles[index][0].participantCount,
         bytes: row.reduce(
             (largest, body) =>
-                body.maximumAllContributorBodies > largest
-                    ? body.maximumAllContributorBodies
+                body.maximumEligibleOfferBodies > largest
+                    ? body.maximumEligibleOfferBodies
                     : largest,
             0n,
         ),
@@ -1058,6 +1054,7 @@ export const renderDocumentationCensus = (): string => {
             [
                 'Role',
                 'Role bytes',
+                'Verifier message bytes',
                 'Prover core logical input bytes',
                 'Prover permutations without prefix reuse',
                 'Prover permutations with prefix reuse',
@@ -1071,6 +1068,7 @@ export const renderDocumentationCensus = (): string => {
                 return [
                     profile.role,
                     formatCount(value.roleBytes),
+                    formatCount(profile.messageBytes),
                     formatCount(value.proverCore.inputBytes),
                     formatCount(
                         value.proverCoreWithoutPrefixReuse.permutations,
@@ -1241,7 +1239,7 @@ export const renderDocumentationCensus = (): string => {
         '',
         '## Operation randomness seeds',
         '',
-        "Fresh randomness that the participant module's samplers and provers draw for a contribution generation or continuation, a ballot or a release is SHAKE256 output over its stream's domain and one seed that the participant's root retains before the operation draws any byte. The contribution's original FHE secret and first encryption error come from its separately retained registration source. A repeated operation reads its retained seed again, so it draws the same bytes; no finite budget is exhausted. The count bounds operation seeds of one roster: two for each setup contributor and two for each participant, excluding the registration sources below. An honest ballot's and release's proof streams serve exactly the listed bytes when no candidate word is rejected; a release's include its noise, drawn in whole reads.",
+        "Fresh randomness that the participant module's samplers and provers draw for a contribution generation or continuation, a ballot or a release is SHAKE256 output over its stream's domain and one seed that the participant's root retains before the operation draws any byte. The contribution's original FHE secret and first encryption error come from its separately retained registration source. A repeated operation reads its retained seed again, so it draws the same bytes; no finite budget is exhausted. The count bounds operation seeds of one roster: two for each eligible contributor and two for each participant, excluding the registration sources below. An honest ballot's and release's proof streams serve exactly the listed bytes when no candidate word is rejected; a release's include its noise, drawn in whole reads.",
         '',
         table(
             ['Property', 'Value'],
@@ -1867,6 +1865,8 @@ export const renderDocumentationCensus = (): string => {
         '',
         '## Proof compiler chronology',
         '',
+        'Multi-roster population rows retain the historical all-confirmation divisor and are reference arithmetic only. Current local proof counts include every eligible offer, but the divisor does not bound clear-candidate exposure before certification and supplies no current credential scope or security claim.',
+        '',
         'Proofs, programming points and commitments that one poll emits under the lifecycle rules owned by the security argument, against the caps the compiler charges. Every honest registration publishes a registration proof before any roster exists, including one no roster takes, so the largest honest credential population bounds them; each setup contributor adds at most one contribution proof and each participant at most one ballot and release proof, because those purposes occupy one-shot slots. A restored participant replays identical bytes and one that loses unfinished work stops. At that population a corrupt organizer can split the honest registrations into as many rosters of one participant count as their honest members allow: each honest registration confirms at most one, and a roster with at most `f` corrupt members holds `n-f` honest ones. The direct simulator programs one verifier message per simulated proof, and accepted proof roles are the registrations and proving positions of those rosters. Committed nodes count every leaf and internal node of every tree and every salted message root. The non-salt input is the widest salted leaf or message-root input without its salt, over every proof role; each cell is the range over the option counts of one participant count.',
         '',
         table(
@@ -2008,7 +2008,7 @@ export const renderDocumentationCensus = (): string => {
         '',
         '## Contribution generation and sampling census',
         '',
-        'The combined browser path keeps witness columns inside Rust, regenerates fixed common polynomials, and retains the remaining public statement and proof as bounded local blobs. Allocation allowances require measured closure. The sampling rows describe one completed roster whose original poll maximum equals its displayed size: every enrolled participant samples its recipient error and every source family, then contributors reuse the selected original first error while sampling their remaining contribution errors. A different original maximum is an explicit model operand. The sampling bound charges finite-word quantization and the omitted Gaussian tails for that local corpus; it does not bound abandoned credentials or establish lattice or composed-protocol security.',
+        'The combined browser path keeps witness columns inside Rust, regenerates fixed common polynomials, and retains the remaining public statement and proof as bounded local blobs. Allocation allowances require measured closure. The sampling rows describe one completed roster whose original poll maximum equals its displayed size: every enrolled participant samples its recipient error and every source family, then the complete eligible pool reuses each original first error while sampling its remaining contribution errors. A different original maximum is an explicit model operand. The sampling bound charges finite-word quantization and the omitted Gaussian tails for that local corpus; it does not bound abandoned credentials or establish lattice or composed-protocol security.',
         '',
         table(
             ['Property', 'Value'],
@@ -2670,31 +2670,19 @@ export const renderDocumentationCensus = (): string => {
                     formatCount(contributionBody.maximumBodyBytes),
                 ],
                 [
-                    'Commitment salt bytes',
-                    formatCount(contributionBody.saltBytes),
+                    'Registered-coordinate opening salt bytes inside SCB2',
+                    formatCount(contributionBody.sourceOpeningSaltBytes),
                 ],
                 [
-                    'Commitment hash-prefix bytes',
+                    'Ordinary body hash-prefix bytes',
                     formatCount(contributionBody.hashPrefixBytes),
                 ],
                 [
-                    'Sender-key byte offset',
-                    formatCount(contributionBody.senderKeyOffsetBytes),
-                ],
-                [
-                    'Sender-prefix bytes',
-                    formatCount(contributionBody.senderPrefixBytes),
-                ],
-                [
-                    'Sender-and-salt prefix bytes',
-                    formatCount(contributionBody.senderSaltPrefixBytes),
-                ],
-                [
-                    'Minimum commitment hash-input bytes',
+                    'Minimum ordinary body hash-input bytes',
                     formatCount(contributionBody.minimumHashInputBytes),
                 ],
                 [
-                    'Maximum commitment hash-input bytes',
+                    'Maximum ordinary body hash-input bytes',
                     formatCount(contributionBody.maximumHashInputBytes),
                 ],
                 [
@@ -2710,8 +2698,8 @@ export const renderDocumentationCensus = (): string => {
                     ),
                 ],
                 [
-                    'Maximum all-contributor body payload bytes',
-                    formatCount(contributionBody.maximumAllContributorBodies),
+                    'Maximum eligible-offer body payload bytes',
+                    formatCount(contributionBody.maximumEligibleOfferBodies),
                 ],
             ],
         ),
@@ -3482,44 +3470,40 @@ export const renderDocumentationCensus = (): string => {
             ],
         ),
         '',
-        'Across all supported profiles, the following changes recompute the maxima of the checkpoint and completed/later suffix branches. A maximum is not increased merely because one smaller branch grew.',
+        'Preparation and later roots have distinct inventories. PRE1 frames independent own-offer, selection and endorsement slots; PCS4 carries its own phase. Activation authenticates the complete predecessor before clearing all slots and retiring source material. Later roots therefore retain an empty preparation journal beside ballot, close, target and release state.',
         '',
         table(
+            ['Authenticated journal property', 'Bytes'],
             [
-                'Completed-header effect in bytes',
-                'Completion profile',
-                'Minimum across profiles',
-                'Maximum across profiles',
-            ],
-            (
                 [
-                    [
-                        'Contribution-state maximum increase',
-                        'completedHeaderStateDeltaBytes',
-                    ],
-                    [
-                        'Encrypted participant-root maximum increase',
-                        'completedHeaderRootDeltaBytes',
-                    ],
-                ] as const
-            ).map(([label, field]) => [
-                label,
-                formatCount(participantCustody[field]),
-                formatCount(
-                    participantCustodyProfiles.reduce(
-                        (smallest, value) =>
-                            value[field] < smallest ? value[field] : smallest,
-                        participantCustodyProfiles[0][field],
-                    ),
-                ),
-                formatCount(
-                    participantCustodyProfiles.reduce(
-                        (largest, value) =>
-                            value[field] > largest ? value[field] : largest,
-                        0n,
-                    ),
-                ),
-            ]),
+                    'Empty preparation journal',
+                    formatCount(participantCustody.emptyPreparationBytes),
+                ],
+                [
+                    'Maximum own-offer state',
+                    formatCount(participantCustody.maximumMetadataBytes),
+                ],
+                [
+                    'Maximum organizer selection slot',
+                    formatCount(participantCustody.maximumSelectionSlotBytes),
+                ],
+                [
+                    'Maximum endorsement slot',
+                    formatCount(participantCustody.maximumEndorsementSlotBytes),
+                ],
+                [
+                    'Maximum complete preparation journal',
+                    formatCount(participantCustody.maximumPreparationBytes),
+                ],
+                [
+                    'Maximum preparation root',
+                    formatCount(participantCustody.maximumPreparationRootBytes),
+                ],
+                [
+                    'Maximum prepared later root',
+                    formatCount(participantCustody.maximumPreparedRootBytes),
+                ],
+            ],
         ),
         '',
         'Actual padding growth depends on an observed complete proof length `L`, not the header-only framing lower bound, which does not establish an achievable proof. With capacity `P`, chunk size `C`, `M=ceil(P/C)` and `m=ceil(L/C)`, the added proof payload is `P-L`, the added record count is `M-m`, and added encrypted proof bytes are `P-L+16*(M-m)`. The completed root adds the body header and `106*(M-m)` reference bytes; the root tag count does not change. Each actual full authentication/consumer pass reads that complete encrypted proof delta again, and an ordinary write pays it once. The [projection model](../tests/participant-custody-model.ts) takes the observed length and explicit pass count; it assumes no extra preflight passes and does not turn per-pass costs into lifetime populations. Checkpoint authentication and atomic retirement remain required, with their payload already included in the overlap bound. Public proof bytes remain the original `L`-byte prefix.',
@@ -3551,55 +3535,210 @@ export const renderDocumentationCensus = (): string => {
         '',
         'For a supplied complete per-key history, the work model separately counts encryption and verification invocations, repeated block computations and the union of block inputs. Its statistical numerators are conditional on the stated secret-key PRP replacement; the AES assumption, full populations and whole-protocol advantage are additional obligations.',
         '',
-        '## Contribution authentication census',
+        '## Clear setup selection wire and resources',
         '',
-        'Every participant signs one canonical confirmation body, which binds the proposal, the position, and either the commitment of a setup contributor or, for any other participant, its own registration body. Only setup contributors sign opening headers, which bind the complete ordered commitment inventory, position, and salt. Each detached signature uses its own purpose; signature randomness and carrier order do not change inventory identity. These are public payload counts, excluding contribution bodies, transport framing and local custody.',
+        'Offers authenticate complete ordinary body identities under the original roster and author. Exactly the roster-derived selected count enters the canonical proposal, and exactly the inventory quorum signs its certificate. Different valid signer subsets carry the same semantic setup identity. Whole-body commitments, later opening messages and unanimous confirmation carriers are absent. The independent lifecycle model covers own-work coexistence, one-shot endorsements, original-state restoration and authenticated retirement; it assumes the complete owning proof/signature verifiers and the named published-store retention contract.',
         '',
         table(
             [
                 'Participants',
-                'Confirmation body bytes',
-                'Opening header bytes',
-                'Inventory body bytes',
-                'All signed confirmation payload bytes',
-                'All signed opening-header payload bytes',
+                'Eligible',
+                'Selected',
+                'Quorum',
+                'Offer envelope bytes',
+                'Selection body bytes',
+                'Endorsement body bytes',
+                'Endorsement packet bytes',
+                'Certificate bytes',
             ],
-            contributionAuthentication.map((value) => [
-                String(value.participants),
-                formatCount(value.confirmationBodyBytes),
-                formatCount(value.openingBodyBytes),
-                formatCount(value.inventoryBodyBytes),
-                formatCount(value.allConfirmationPayloadBytes),
-                formatCount(value.allOpeningHeaderPayloadBytes),
-            ]),
+            clearSelectionWires.map((wire) =>
+                [
+                    wire.participantCount,
+                    wire.eligibleCount,
+                    wire.selectedCount,
+                    wire.quorum,
+                    wire.offerEnvelopeBytes,
+                    wire.selectionBodyBytes,
+                    wire.endorsementBodyBytes,
+                    wire.endorsementPacketBytes,
+                    wire.certificateBytes,
+                ].map(formatCount),
+            ),
         ),
         '',
         table(
-            ['Original-credential command frame', 'Bytes'],
+            ['Completion-profile component', 'Value'],
             [
                 [
-                    'Complete-body control',
-                    formatCount(contributionSigning.bodyControlBytes),
+                    'Maximum eligible body corpus bytes',
+                    formatCount(clearPreparation.maximumEligibleBodyBytes),
                 ],
                 [
-                    'Signing identity and retained coins',
-                    formatCount(contributionSigning.signingControlBytes),
+                    'Maximum selected body corpus bytes',
+                    formatCount(clearPreparation.maximumSelectedBodyBytes),
                 ],
                 [
-                    'Signed confirmation packet',
-                    formatCount(contributionSigning.confirmationPacketBytes),
+                    'Maximum eligible signed-offer corpus bytes',
+                    formatCount(clearPreparation.maximumEligibleOfferBytes),
                 ],
                 [
-                    'Signed opening packet',
-                    formatCount(contributionSigning.openingPacketBytes),
+                    'Maximum certified setup payload bytes',
+                    formatCount(clearPreparation.maximumCertifiedSetupBytes),
                 ],
                 [
-                    'Maximum polynomial input with offset',
+                    'Maximum endorsement packet corpus bytes',
+                    formatCount(clearPreparation.maximumEndorsementPacketBytes),
+                ],
+                [
+                    'Maximum offer proofs',
+                    formatCount(clearPreparation.maximumOfferProofs),
+                ],
+                [
+                    'Maximum untrusted discovery page bytes',
+                    formatCount(clearPreparation.maximumDiscoveryPageBytes),
+                ],
+                [
+                    'Maximum generation and continuation seeds',
                     formatCount(
-                        contributionSigning.maximumPolynomialCommandBytes,
+                        clearPreparation.maximumGenerationAndContinuationSeeds,
+                    ),
+                ],
+                [
+                    'Selected proof verifications per fresh reader',
+                    formatCount(
+                        clearPreparation.selectedProofVerificationsPerReader,
+                    ),
+                ],
+                [
+                    'Fresh selected-offer verification read bytes',
+                    formatCount(
+                        clearPreparation.maximumOfferVerificationReadBytes,
+                    ),
+                ],
+                [
+                    'Selected polynomial aggregation reread bytes',
+                    formatCount(clearPreparation.selectedPolynomialRereadBytes),
+                ],
+                [
+                    'Exact proof lookahead bytes',
+                    formatCount(clearPreparation.selectedProofLookaheadBytes),
+                ],
+                [
+                    'Proof lookahead transport reservation bytes',
+                    formatCount(clearPreparation.maximumLookaheadIngressBytes),
+                ],
+                [
+                    'Matching retained-input certificate activation read bytes',
+                    formatCount(
+                        clearPreparation.maximumMatchingCertificateActivationReadBytes,
+                    ),
+                ],
+                [
+                    'Fresh certificate activation read bytes',
+                    formatCount(
+                        clearPreparation.maximumFreshCertificateActivationReadBytes,
+                    ),
+                ],
+                [
+                    'Clean preparation logical download bytes',
+                    formatCount(
+                        clearPreparation.maximumCleanPreparationDownloadBytes,
+                    ),
+                ],
+                [
+                    'Clean organizer preparation logical download bytes',
+                    formatCount(
+                        clearPreparation.maximumCleanOrganizerPreparationDownloadBytes,
+                    ),
+                ],
+                [
+                    'Clean preparation participant upload bytes',
+                    formatCount(
+                        clearPreparation.maximumCleanParticipantUploadBytes,
+                    ),
+                ],
+                [
+                    'Clean preparation total upload bytes',
+                    formatCount(clearPreparation.maximumCleanTotalUploadBytes),
+                ],
+                [
+                    'Transfer planning target bytes',
+                    formatCount(clearPreparation.transferPlanningBytes),
+                ],
+                [
+                    'Preparation download planning margin bytes',
+                    formatCount(
+                        clearPreparation.transferPlanningBytes -
+                            clearPreparation.maximumCleanPreparationDownloadBytes,
+                    ),
+                ],
+                [
+                    'Organizer preparation download planning margin bytes',
+                    formatCount(
+                        clearPreparation.transferPlanningBytes -
+                            clearPreparation.maximumCleanOrganizerPreparationDownloadBytes,
+                    ),
+                ],
+                [
+                    'Participant upload planning margin bytes',
+                    formatCount(
+                        clearPreparation.transferPlanningBytes -
+                            clearPreparation.maximumCleanParticipantUploadBytes,
+                    ),
+                ],
+                [
+                    'Total upload planning margin bytes',
+                    formatCount(
+                        clearPreparation.transferPlanningBytes -
+                            clearPreparation.maximumCleanTotalUploadBytes,
+                    ),
+                ],
+                [
+                    'Volatile offer polynomial-identity payload bytes',
+                    formatCount(
+                        clearPreparation.volatileOfferPolynomialIdentityBytes,
                     ),
                 ],
             ],
+        ),
+        '',
+        'Clean preparation reads include selected body/proof verification, bounded proof-header lookahead, the polynomial-only aggregation reread and certificate handling. Matching original SPI1 avoids another proof pass at activation; losing or absent local endorsement uses the fresh certificate path. Complete exact named reads with owning verification establish publication under the monotone public-store premise, so selected bodies are not uploaded again. Each extra cache miss or restart must charge its actual verification and aggregation passes; there is no finite lifetime count. These preparation-only logical payload margins exclude registration, ballots, closing, release and transport overhead, and therefore do not establish complete-action qualification.',
+        '',
+        'The current organizer performs a selected-offer verification pass while choosing, then another in its fresh endorsement worker before aggregation. The following preparation-only screen charges that extra pass and every eligible discovery pointer. Polynomial-only floors exclude proofs and metadata; exceeding the planning variance ceiling with such a floor requires architecture review. The variance ceiling is not an absolute cryptographic or allocation limit.',
+        '',
+        table(
+            [
+                'Profile',
+                'Participant polynomial-read floor',
+                'Participant logical-download maximum',
+                'Organizer polynomial-read floor',
+                'Organizer logical-download maximum',
+                'Participant upload maximum',
+                'Total upload maximum',
+                'Eligible polynomial-upload floor',
+                'Planning variance ceiling',
+            ],
+            [
+                [10, 10],
+                [20, 20],
+            ].map(([participants, options]) => {
+                const value = compileClearPreparationResources(
+                    deriveSupportedProfile(participants, options),
+                );
+                return [
+                    participants + '/' + options,
+                    ...[
+                        value.cleanParticipantPolynomialReadFloorBytes,
+                        value.maximumCleanPreparationDownloadBytes,
+                        value.cleanOrganizerPolynomialReadFloorBytes,
+                        value.maximumCleanOrganizerPreparationDownloadBytes,
+                        value.maximumCleanParticipantUploadBytes,
+                        value.maximumCleanTotalUploadBytes,
+                        value.completeEligiblePolynomialUploadFloorBytes,
+                        value.planningVarianceCeilingBytes,
+                    ].map(formatCount),
+                ];
+            }),
         ),
         '',
         '## Roster proposal census',
@@ -4148,7 +4287,7 @@ export const renderDocumentationCensus = (): string => {
                 ),
                 rangeOf(
                     contributionBodies[index].map(
-                        (body) => body.maximumAllContributorBodies,
+                        (body) => body.maximumEligibleOfferBodies,
                     ),
                 ),
                 rangeOf(

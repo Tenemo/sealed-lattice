@@ -19,6 +19,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 
 import { build } from 'tsdown';
 
+import { tupleFields } from '#packages/sdk/src/participant/worker/bytes.js';
 import { completedClosePhase } from '#packages/sdk/src/participant/worker/close-state.js';
 import { chunkBytes } from '#packages/sdk/src/participant/worker/root.js';
 import { registrationFile } from '#packages/sdk/src/participant/worker/roster.js';
@@ -31,6 +32,10 @@ import { targetPhase } from '#packages/sdk/src/participant/worker/target-state.j
 import type { WorkerResult } from '#packages/sdk/src/participant/worker/worker.js';
 import { compileOperationProofDraws } from '#tests/operation-seed-model.js';
 import { compileParticipantRuntimeProfile } from '#tests/participant-runtime-bounds-model.js';
+import {
+    encodeSetupSelectionModel,
+    setupSelectionIdentityModel,
+} from '#tests/setup-selection-wire-model.js';
 import { deriveSupportedProfile } from '#tests/supported-profile-model.js';
 import {
     runArtifactDirectoryPath,
@@ -41,15 +46,22 @@ import { createBrowserPool } from '#tools/ci/participant-browser-pool.js';
 import { summarizeCpuTrace } from '#tools/ci/participant-cpu-profile.js';
 import type { CpuProfileSummary } from '#tools/ci/participant-cpu-profile.js';
 import {
+    participantOfferAnnouncements,
+    serveOfferAnnouncements,
+} from '#tools/ci/participant-offer-announcements.js';
+import {
     paddingHaltingClient,
+    preparationHaltingClient,
     validatePaddingObservation,
 } from '#tools/ci/participant-padding-halt.js';
 import type {
     PaddingCut,
     PaddingHaltObservation,
     PaddingSlotObservation,
+    PreparationCut,
 } from '#tools/ci/participant-padding-halt.js';
 import type { SourceCustodyObservation } from '#tools/ci/participant-preparation-storage.js';
+import { participantRelayWriter } from '#tools/ci/participant-relay-record.js';
 import { assembleParticipantRuntime } from '#tools/ci/participant-runtime-assembly.js';
 import type {
     CorruptParticipantClient,
@@ -101,6 +113,9 @@ import { acquireProtocolResearchLock } from '#tools/ci/protocol-research-lock.js
 // completes the contribution. With --scalar, the origins are not isolated,
 // so every operation uses one scalar worker without optional helpers. With
 // --top-count=<count>, the poll requests that many ranked option identifiers.
+// --setup-departure selects four participants and two options, removes honest
+// eligible position one immediately after roster publication, and completes
+// with positions zero, two and three, where corrupt position two cooperates.
 const {
     participantCount,
     optionCount,
@@ -108,6 +123,7 @@ const {
     foreignPoll,
     profiling,
     scalar,
+    setupDeparture,
     memoryPressure,
     sequential,
     basePort,
@@ -172,14 +188,13 @@ type ViewedRecord = Buffer | Readonly<{ file: string }> | undefined;
 
 type Relay = Readonly<{
     servers: Server[];
-    // The origin that first published each stored file; only it may add
-    // to it.
+    // Only the first publisher may append; another origin may relay exact
+    // spans already stored, as selected-offer forwarding requires.
     owners: Map<string, string>;
     views: Map<string, ViewedRecord>[];
     // Publications the relay refuses to store.
     refused: Set<string>;
-    // Contribution records other than the confirmation and the opening that
-    // arrived before their author's signed opening.
+    // Offer body records received before their signed envelope.
     earlyContributionRecords: string[];
     // The halting client a participant's origin serves instead of the
     // runtime's page and worker while one is set.
@@ -191,19 +206,13 @@ type Relay = Readonly<{
     publicationAttempts: number[];
 }>;
 
-// Records a participant may publish from its contribution before its signed
-// opening: the committed confirmation and the opening itself.
-const preOpeningContributionRecords = new Set([
-    'confirmation.bin',
-    'confirmation-signature.bin',
-    'opening.bin',
-    'opening-signature.bin',
-]);
+const offerEnvelopeRecords = new Set(['offer.bin', 'offer-signature.bin']);
 
 type HaltingClient = Readonly<{
     generation: number;
     worker: Buffer;
     digest: string;
+    preparationCut?: PreparationCut;
 }>;
 
 // The runtime's worker, except that it stops for good once its participant
@@ -266,6 +275,7 @@ const clientPage = (runtime: ParticipantRuntime, workerDigest: string) =>
 const runtime = ${JSON.stringify({ identity: runtime.identity, worker: workerDigest })};
 window.runParticipant = async (operation, parameters) => {
     window.paddingReplay = {slots: [], halt: null};
+    window.preparationHalt = null;
     const response = await fetch('/worker.js', { cache: 'no-store' });
     const bytes = new Uint8Array(await response.arrayBuffer());
     const digest = Array.from(
@@ -283,6 +293,7 @@ window.runParticipant = async (operation, parameters) => {
         worker.onmessage = ({ data }) => {
             if (data?.type === 'participant-padding-slot') { window.paddingReplay.slots.push(data); return; }
             if (data?.type === 'participant-padding-halt') { window.paddingReplay.halt = data; return; }
+            if (data?.type === 'participant-preparation-halt') { window.preparationHalt = data; return; }
             finish();
             resolve(data);
         };
@@ -322,6 +333,11 @@ const startRelay = async (
         () => new Map<string, ViewedRecord>(),
     );
     const refused = new Set<string>();
+    const writeRelayRecord = participantRelayWriter(owners);
+    const announcementStores = new Map<
+        string,
+        ReturnType<typeof participantOfferAnnouncements>
+    >();
     const earlyContributionRecords: string[] = [];
     const publicationAttempts = new Array<number>(originCount).fill(0);
     const delivered = Array.from(
@@ -392,6 +408,37 @@ const startRelay = async (
               )
             : requested;
         const records = (second ? secondRoster : undefined) ?? ownRecords;
+        if (url.pathname.startsWith('/offers/')) {
+            let store = announcementStores.get(records);
+            if (store === undefined) {
+                store = participantOfferAnnouncements(
+                    path.join(
+                        path.dirname(records),
+                        path.basename(records) + '-offers',
+                    ),
+                );
+                announcementStores.set(records, store);
+            }
+            if (request.method === 'POST')
+                publicationAttempts[Number(new URL(origin).port) - basePort]++;
+            const page = await serveOfferAnnouncements(
+                store,
+                participantCount,
+                request,
+                response,
+                url,
+            );
+            if (page !== undefined) {
+                delivering.add(page.route);
+                const consumed = reads[Number(new URL(origin).port) - basePort];
+                const previous = consumed.get(page.route);
+                consumed.set(page.route, {
+                    requests: (previous?.requests ?? 0) + 1,
+                    bytes: (previous?.bytes ?? 0) + page.bytes,
+                });
+            }
+            return;
+        }
         if (request.method === 'GET') {
             const asset = served.get(url.pathname);
             if (asset !== undefined) {
@@ -441,49 +488,24 @@ const startRelay = async (
             !publicPath.test(name) ||
             refused.has(name) ||
             !Number.isSafeInteger(offset) ||
-            offset < 0 ||
-            (owners.get(file) ?? origin) !== origin
+            offset < 0
         ) {
             response.writeHead(404);
             response.end();
             return;
         }
         const bytes = await readBody(request, 1 << 20);
-        const [directory, record] = name.split('/');
+        const [directory, identity, record] = name.split('/');
         if (
             /^contribution-\d+$/u.test(directory) &&
-            !preOpeningContributionRecords.has(record) &&
+            /^[0-9a-f]{128}$/u.test(identity ?? '') &&
+            !offerEnvelopeRecords.has(record) &&
             (await stat(
-                path.join(records, directory, 'opening-signature.bin'),
+                path.join(records, directory, identity, 'offer-signature.bin'),
             ).catch(() => undefined)) === undefined
         )
             earlyContributionRecords.push(name);
-        await mkdir(path.dirname(file), { recursive: true });
-        const existing = await stat(file).catch(() => undefined);
-        const length = existing?.size ?? 0;
-        // A chunk extends the record at its end or repeats identical bytes.
-        if (offset < length) {
-            const handleFile = await open(file, 'r');
-            try {
-                const current = Buffer.alloc(bytes.length);
-                const { bytesRead } = await handleFile.read(
-                    current,
-                    0,
-                    bytes.length,
-                    offset,
-                );
-                if (bytesRead !== bytes.length || !current.equals(bytes)) {
-                    response.writeHead(409);
-                    response.end();
-                    return;
-                }
-            } finally {
-                await handleFile.close();
-            }
-        } else if (offset === length) {
-            await writeFile(file, bytes, { flag: 'a' });
-            owners.set(file, origin);
-        } else {
+        if (!(await writeRelayRecord(file, origin, offset, bytes))) {
             response.writeHead(409);
             response.end();
             return;
@@ -632,6 +654,24 @@ const publicRecordNames = async (directory: string) =>
     (await readdir(directory, { recursive: true }))
         .map((name) => name.split(path.sep).join('/'))
         .filter((name) => publicPath.test(name) && name.endsWith('.bin'));
+
+// The healthy fixture generates one immutable body per offered position.
+// Discovery hints are deliberately not used as authority for this assertion.
+const generatedOfferIdentity = async (directory: string, position: number) => {
+    const entries = await readdir(
+        path.join(directory, 'contribution-' + String(position)),
+        { withFileTypes: true },
+    );
+    const bodies = entries.filter(
+        (entry) => entry.isDirectory() && /^[0-9a-f]{128}$/u.test(entry.name),
+    );
+    assert.equal(
+        bodies.length,
+        1,
+        'The original contributor generated another body.',
+    );
+    return Buffer.from(bodies[0].name, 'hex');
+};
 
 // The record families a relay view replaces with another poll's, each with
 // the refusal of the first of them a result visit reads. A result visit
@@ -799,13 +839,18 @@ await runWithLocalRunLog(
             // the native result ceremony: two copies of its private state
             // sign two more ballots.
             const equivocator =
-                noResult || maximumCorruptParticipantCount === 0
+                setupDeparture ||
+                noResult ||
+                maximumCorruptParticipantCount === 0
                     ? undefined
                     : maximumCorruptParticipantCount;
             // The corrupt positions follow the organizer, as in the native
             // ceremonies; forgeries and altered state are shown to honest ones.
             const honest = (position: number) =>
-                position === 0 || position > maximumCorruptParticipantCount;
+                setupDeparture
+                    ? position !== 2
+                    : position === 0 ||
+                      position > maximumCorruptParticipantCount;
             const copyNames =
                 equivocator === undefined ? [] : ['conflicting', 'late'];
             // In a no-result run the last corrupt position runs a client that
@@ -820,6 +865,7 @@ await runWithLocalRunLog(
                 participantCount,
                 optionCount,
             );
+            const eligibleContributorCount = bounds.eligibleContributorCount;
             // The proof randomness an honest ballot and release draw from
             // their seeds when no candidate is rejected, as the independent
             // models derive it.
@@ -829,9 +875,11 @@ await runWithLocalRunLog(
             for (const file of [
                 'tools/ci/run-participant-browser.ts',
                 'tools/ci/participant-browser-options.ts',
+                'tools/ci/participant-padding-halt.ts',
+                'tools/ci/participant-relay-record.ts',
+                'tools/ci/participant-offer-announcements.ts',
                 ...(mode === 'preparation'
                     ? [
-                          'tools/ci/participant-padding-halt.ts',
                           'tools/ci/participant-padding-corruption.ts',
                           'tools/ci/participant-preparation-storage.ts',
                       ]
@@ -1645,6 +1693,7 @@ await runWithLocalRunLog(
                 position: number,
                 store: string,
                 operation: string,
+                noPublications = false,
             ) => {
                 assert.ok(honest(position), 'Only honest state is lost.');
                 const copy = `lost-${store}-${String(position)}`;
@@ -1675,6 +1724,8 @@ await runWithLocalRunLog(
     };
 })`),
                     );
+                    const publicationAttempts =
+                        relay!.publicationAttempts[position];
                     const result = await request(position, operation, {}, copy);
                     assert.ok(
                         result.status === 'stopped' &&
@@ -1689,6 +1740,12 @@ await runWithLocalRunLog(
                             stopPersistence: 'confirmed',
                         },
                     );
+                    if (noPublications)
+                        assert.equal(
+                            relay!.publicationAttempts[position],
+                            publicationAttempts,
+                            'Missing required preparation state caused a relay publication.',
+                        );
                     const loss = {
                         position,
                         store,
@@ -1696,6 +1753,7 @@ await runWithLocalRunLog(
                         operation,
                         generation,
                         reason: result.reason,
+                        ...(noPublications ? { publicationAttempts: 0 } : {}),
                     };
                     stateLosses.push(loss);
                     log.writeEvent({
@@ -1731,6 +1789,7 @@ await runWithLocalRunLog(
                 // The public record the relay had delivered to the
                 // interrupted operation.
                 delivered?: string;
+                preparation?: PreparationCut;
             }[] = [];
             const interrupt = async (
                 position: number,
@@ -1768,6 +1827,64 @@ await runWithLocalRunLog(
                 log.writeEvent({
                     eventType: 'participant-interruption',
                     details: { position, operation, generation },
+                });
+            };
+            const interruptPreparation = async (
+                position: number,
+                operation: string,
+                cut: PreparationCut,
+            ) => {
+                assert.ok(honest(position));
+                await endBrowser(position);
+                halting.set(
+                    position,
+                    preparationHaltingClient(runtime.worker, cut),
+                );
+                try {
+                    const pending = request(position, operation);
+                    for (;;) {
+                        const outcome = await Promise.race([
+                            pending.then(
+                                (result) => JSON.stringify(result),
+                                (error: unknown) => String(error),
+                            ),
+                            delay(250, undefined),
+                        ]);
+                        assert.equal(
+                            outcome,
+                            undefined,
+                            `${operation} ended before ${cut.kind} phase ${String(cut.phase)}: ${String(outcome)}`,
+                        );
+                        const reached = await inBrowser(
+                            position,
+                            undefined,
+                            (chrome) =>
+                                chrome.evaluate('window.preparationHalt'),
+                        );
+                        if (reached !== null && reached !== undefined) {
+                            assert.deepEqual(reached, {
+                                type: 'participant-preparation-halt',
+                                ...cut,
+                            });
+                            break;
+                        }
+                    }
+                    assert.equal(await headGeneration(position), 4);
+                    await endBrowser(position);
+                    await assert.rejects(pending);
+                } finally {
+                    halting.delete(position);
+                }
+                recoveryOperations.set(position, operation);
+                interruptions.push({
+                    position,
+                    operation,
+                    generation: 4,
+                    preparation: cut,
+                });
+                log.writeEvent({
+                    eventType: 'participant-preparation-interruption',
+                    details: { position, operation, ...cut },
                 });
             };
             // Crashes a participant's browser while its operation, in the
@@ -1871,7 +1988,7 @@ await runWithLocalRunLog(
                 halting.set(position, client);
                 try {
                     const before = await retainedHead(position);
-                    assert.equal(before.generation, 6);
+                    assert.equal(before.generation, 4);
                     const checkpointRecords = await storedRecords(
                         position,
                         'checkpoint',
@@ -1946,7 +2063,8 @@ await runWithLocalRunLog(
                     interruptions.push({
                         position,
                         operation: 'contribute',
-                        generation: 6,
+                        generation: 4,
+                        preparation: { kind: 'contribution', phase: 6 },
                         staged: {
                             store: 'contribution',
                             records:
@@ -2121,64 +2239,143 @@ await runWithLocalRunLog(
             // Every member casts a counted ballot, the organizer closes
             // at the current time after every ballot, the first quorum of
             // members vote on the target, and every member releases.
+            const setupDiscoveryFaults: Record<string, unknown>[] = [];
             const completeRoster = async (
                 members: readonly Member[],
                 recordIds: readonly string[],
                 scores: readonly (readonly number[])[],
+                absent?: number,
             ) => {
-                const [organizing, ...accepting] = members;
+                const organizing = members[0];
+                const active = members.flatMap((member, position) =>
+                    position === absent ? [] : [{ member, position }],
+                );
+                const accepting = active.filter(
+                    ({ position }) => position !== 0,
+                );
                 assert.equal(
                     (await act(organizing, 'propose-roster', { recordIds }))
                         .generation,
                     3,
                 );
                 await act(organizing, 'publish');
+                if (absent !== undefined) await depart(members[absent].origin);
                 for (const details of await Promise.all(
-                    accepting.map((member) =>
+                    accepting.map(({ member }) =>
                         act(member, 'accept-roster', { recordIds }),
                     ),
                 ))
                     assert.equal(details.generation, 3);
-                const contributing = members.slice(0, setupContributorCount);
-                if (memoryPressure)
-                    await pressure(contributing[1].origin, 'contribute');
-                await Promise.all([
-                    ...contributing.map(async (member) => {
-                        assert.equal(
-                            (await act(member, 'contribute')).generation,
-                            7,
-                        );
+                const contributing = active
+                    .filter(
+                        ({ position }) => position < eligibleContributorCount,
+                    )
+                    .slice(0, setupContributorCount);
+                assert.equal(contributing.length, setupContributorCount);
+                await Promise.all(
+                    active.map(async ({ member }) => {
                         assert.equal(
                             (await act(member, 'confirm')).generation,
-                            9,
+                            4,
                         );
                     }),
-                    ...members
-                        .slice(setupContributorCount)
-                        .map(async (member) => {
-                            assert.equal(
-                                (await act(member, 'confirm')).generation,
-                                9,
-                            );
-                        }),
-                ]);
+                );
+                if (memoryPressure)
+                    await pressure(contributing[1].member.origin, 'contribute');
+                const contribute = async (member: Member) =>
+                    assert.equal(
+                        (await act(member, 'contribute')).generation,
+                        4,
+                    );
+                if (absent !== undefined) {
+                    assert.deepEqual(
+                        contributing.map(({ position }) => position),
+                        [0, 2],
+                    );
+                    await contribute(contributing[0].member);
+                    const badIdentity = 'a5'.repeat(64);
+                    const announced = await inBrowser(2, undefined, (chrome) =>
+                        chrome.evaluate(
+                            `fetch('/offers/2', { method: 'POST', body: new Uint8Array(64).fill(165) }).then(response => response.status)`,
+                        ),
+                    );
+                    assert.equal(announced, 204);
+                    const before = await retainedHead(0);
+                    assert.equal(before.generation, 4);
+                    const pending = await request(0, 'select-setup');
+                    assert.deepEqual(pending, {
+                        status: 'pending',
+                        cause: 'public input',
+                        reason: 'Too few complete eligible contribution offers are available.',
+                    });
+                    assert.deepEqual(
+                        await retainedHead(0),
+                        before,
+                        'An invalid discovery hint consumed the selection intent.',
+                    );
+                    assert.equal(
+                        await stat(
+                            path.join(publicDirectory, 'selection.bin'),
+                        ).catch(() => undefined),
+                        undefined,
+                    );
+                    await contribute(contributing[1].member);
+                    const announcements = await inBrowser(
+                        2,
+                        undefined,
+                        (chrome) =>
+                            chrome.evaluate(`fetch('/offers/2?offset=0').then(async response => {
+                        if (!response.ok) throw new Error('Offer announcements unavailable.');
+                        const bytes = new Uint8Array(await response.arrayBuffer());
+                        const view = new DataView(bytes.buffer);
+                        const count = view.getUint32(8, true);
+                        if (view.getBigUint64(0, true) !== 2n || bytes.length !== 12 + count * 64) throw new Error('Malformed discovery page.');
+                        return Array.from({ length: count }, (_, index) => Array.from(bytes.subarray(12 + index * 64, 12 + (index + 1) * 64), value => value.toString(16).padStart(2, '0')).join(''));
+                    })`),
+                    );
+                    assert.deepEqual(announcements, [
+                        badIdentity,
+                        (
+                            await generatedOfferIdentity(publicDirectory, 2)
+                        ).toString('hex'),
+                    ]);
+                    const fault = {
+                        position: 2,
+                        invalidAnnouncementFirst: true,
+                        laterValidAnnouncementPreserved: true,
+                        result: pending,
+                        originalSelectionIntentUnused: true,
+                    };
+                    setupDiscoveryFaults.push(fault);
+                    log.writeEvent({
+                        eventType: 'participant-offer-discovery-fault',
+                        details: fault,
+                    });
+                } else
+                    await Promise.all(
+                        contributing.map(({ member }) => contribute(member)),
+                    );
+                assert.equal(
+                    (await act(organizing, 'select-setup')).generation,
+                    4,
+                );
                 await Promise.all(
-                    contributing.map(async (member) => {
+                    active.map(async ({ member }) => {
                         assert.equal(
-                            (await act(member, 'open')).generation,
-                            11,
+                            (await act(member, 'endorse-setup')).generation,
+                            4,
                         );
                     }),
                 );
                 await Promise.all(
-                    members.map(async (member) => {
+                    active.map(async ({ member }) => {
                         const verified = await act(member, 'verify-setup');
                         assert.equal(verified.generation, 12);
                         assert.equal(verified.ballot, 'open');
                     }),
                 );
                 await Promise.all(
-                    members.map(async (member, position) => {
+                    active.map(async ({ member, position }) => {
                         assert.equal(
                             (
                                 await act(member, 'ballot', {
@@ -2191,7 +2388,7 @@ await runWithLocalRunLog(
                 );
                 // A close collects every other participant's published ballot
                 // with its body.
-                const authors = members.map((_member, position) => position);
+                const authors = active.map(({ position }) => position);
                 const collectsEvery = (position: number) => [
                     { kind: 'own', position },
                     ...authors
@@ -2199,12 +2396,12 @@ await runWithLocalRunLog(
                         .map((author) => ({ kind: 'held', position: author })),
                 ];
                 await Promise.all(
-                    accepting.map(async (member, index) => {
+                    accepting.map(async ({ member, position }) => {
                         const collected = await act(member, 'close');
                         assert.equal(collected.generation, 17);
                         assert.deepEqual(
                             collected.closeEvents,
-                            collectsEvery(index + 1),
+                            collectsEvery(position),
                         );
                     }),
                 );
@@ -2217,7 +2414,7 @@ await runWithLocalRunLog(
                     { kind: 'lock' },
                 ]);
                 await Promise.all(
-                    accepting.map(async (member) => {
+                    accepting.map(async ({ member }) => {
                         assert.equal(
                             (await act(member, 'close')).generation,
                             21,
@@ -2226,34 +2423,36 @@ await runWithLocalRunLog(
                 );
                 assert.equal((await act(organizing, 'close')).generation, 22);
                 await Promise.all(
-                    members
+                    active
                         .slice(0, bounds.close.quorum)
-                        .map(async (member) => {
+                        .map(async ({ member }) => {
                             const voted = await act(member, 'target');
                             assert.equal(voted.generation, 24);
                             assert.equal(voted.ballotStatus, 'included');
-                            assert.equal(voted.usableBallots, participantCount);
-                            assert.equal(voted.validBallots, participantCount);
+                            assert.equal(voted.usableBallots, active.length);
+                            assert.equal(voted.validBallots, active.length);
                         }),
                 );
                 for (const details of await Promise.all(
-                    members.map((member) => act(member, 'release')),
+                    active.map(({ member }) => act(member, 'release')),
                 )) {
                     assert.equal(details.generation, 29);
                     assert.equal(details.encrypted, true);
                 }
                 const combined = await act(
-                    members[members.length - 1],
+                    active[active.length - 1].member,
                     'result',
                 );
                 assert.equal(combined.encrypted, true);
                 assert.deepEqual(
                     combined.identifiers,
-                    rankedIdentifiers(scores),
+                    rankedIdentifiers(
+                        active.map(({ position }) => scores[position]),
+                    ),
                 );
                 return combined.identifiers as readonly string[];
             };
-            if (mode === 'plain') {
+            if (mode === 'plain' || setupDeparture) {
                 // Every other participant joins, and the roster completes
                 // each stage once.
                 const joined = await Promise.all(
@@ -2268,10 +2467,110 @@ await runWithLocalRunLog(
                     positions.map((position) => ({ origin: position })),
                     plainRecordIds,
                     positions.map(ballotScores),
+                    setupDeparture ? 1 : undefined,
                 );
-                // Before its signed opening no contributor published anything
-                // derived from its contribution body but the committed
-                // confirmation.
+                let independentOutcome: WorkerResult | undefined;
+                if (setupDeparture) {
+                    assert.deepEqual([...departed], [1]);
+                    assert.equal(
+                        await stat(
+                            path.join(publicDirectory, 'contribution-1'),
+                        ).catch(() => undefined),
+                        undefined,
+                    );
+                    assert.equal(
+                        await stat(
+                            path.join(
+                                publicDirectory,
+                                'selection-endorsement-1.bin',
+                            ),
+                        ).catch(() => undefined),
+                        undefined,
+                    );
+                    const selection = await readFile(
+                        path.join(publicDirectory, 'selection.bin'),
+                    );
+                    const fields = tupleFields(selection);
+                    assert.equal(fields.length, 3);
+                    const rosterIdentity = Buffer.from(fields[1]).toString(
+                        'hex',
+                    );
+                    const selected = await Promise.all(
+                        [0, 2].map(async (position) => ({
+                            position,
+                            bodyIdentity: (
+                                await generatedOfferIdentity(
+                                    publicDirectory,
+                                    position,
+                                )
+                            ).toString('hex'),
+                        })),
+                    );
+                    assert.deepEqual(
+                        selection,
+                        encodeSetupSelectionModel(
+                            participantCount,
+                            rosterIdentity,
+                            selected,
+                        ),
+                    );
+                    assert.equal(
+                        (
+                            await readFile(
+                                path.join(
+                                    publicDirectory,
+                                    'setup-identity.bin',
+                                ),
+                            )
+                        ).toString('hex'),
+                        setupSelectionIdentityModel(
+                            participantCount,
+                            rosterIdentity,
+                            selected,
+                        ),
+                    );
+                    const certificate = await readFile(
+                        path.join(publicDirectory, 'setup-certificate.bin'),
+                    );
+                    assert.equal(
+                        certificate.subarray(0, 4).toString('ascii'),
+                        'SSC1',
+                    );
+                    const endorsementOffset =
+                        8 +
+                        certificate.readUInt32LE(4) +
+                        bounds.registration.signatureBytes;
+                    assert.deepEqual(
+                        Array.from(
+                            { length: bounds.close.quorum },
+                            (_, ordinal) =>
+                                certificate.readUInt16LE(
+                                    endorsementOffset +
+                                        ordinal *
+                                            (2 +
+                                                bounds.registration
+                                                    .signatureBytes),
+                                ),
+                        ),
+                        [0, 2, 3],
+                    );
+                    independentOutcome = (await inBrowser(
+                        leftOut,
+                        undefined,
+                        (chrome) =>
+                            chrome.evaluate(
+                                `window.verifyOutcome(${JSON.stringify(organizer.poll)})`,
+                            ),
+                    )) as WorkerResult;
+                    assert.equal(independentOutcome.status, 'completed');
+                    assert.ok(independentOutcome.status === 'completed');
+                    assert.equal(independentOutcome.details.encrypted, true);
+                    assert.deepEqual(
+                        independentOutcome.details.identifiers,
+                        identifiers,
+                    );
+                }
+                // Clear offer bodies follow their durably signed envelope.
                 assert.deepEqual(relay.earlyContributionRecords, []);
                 await writeFile(
                     path.join(log.runDirectoryPath, 'result.json'),
@@ -2282,6 +2581,17 @@ await runWithLocalRunLog(
                             mode,
                             sequential,
                             scalar,
+                            setupDeparture,
+                            ...(setupDeparture
+                                ? {
+                                      departedAfterRoster: 1,
+                                      cooperativeCorruptPositions: [2],
+                                      activePositions: [0, 2, 3],
+                                      selectedPositions: [0, 2],
+                                  }
+                                : {}),
+                            independentOutcome,
+                            setupDiscoveryFaults,
                             poll: organizer.poll,
                             recordIds: plainRecordIds,
                             runtimeIdentity: runtime.identity.runtime,
@@ -2299,15 +2609,18 @@ await runWithLocalRunLog(
                                 'Human delays between visits',
                                 'Physical-device performance and power use',
                             ],
-                            workflow: memoryPressure
-                                ? null
-                                : summarizeParticipantWorkflow(
-                                      ordinaryOperations,
-                                      participantCount,
-                                      sequential,
-                                  ),
+                            workflow:
+                                memoryPressure || setupDeparture
+                                    ? null
+                                    : summarizeParticipantWorkflow(
+                                          ordinaryOperations,
+                                          participantCount,
+                                          sequential,
+                                      ),
                             scope: [
-                                'Browser registration, roster agreement, setup contribution and verification, signed ballots, close responses, target votes, release shares and the combined result of one roster of honest participants, each stage once with no crash, forgery or other roster, in the maintained participant runtime in external Chrome.',
+                                setupDeparture
+                                    ? 'Four original registrations fix one roster; honest eligible position one disappears immediately after roster publication, before confirmation or contribution. Position two is the cooperative corrupt participant and executes all required valid actions. Positions zero and two supply the selected clear offers; zero, two and three certify setup, vote, close, certify the target and release the verified result. Original positions and thresholds remain unchanged. The corrupt participant also announces an invalid body identity before its valid offer; the organizer stays pending without consuming selection authority and later accepts the valid offer behind that hint. This external Chrome run is development evidence for those cases, not a general adversarial-scheduling proof.'
+                                    : 'Browser registration, roster confirmation, signed clear contribution offers, quorum setup selection and verification, ballots, close responses, target votes, release shares and the combined result of one roster, each stage once in the maintained participant runtime in external Chrome.',
                                 ...(profiling
                                     ? [
                                           'Chrome recorded the CPU samples of every operation, which slows it.',
@@ -2476,9 +2789,7 @@ await runWithLocalRunLog(
                         identifiers,
                     );
                 }
-                // Before its signed opening no contributor of either roster
-                // published anything derived from its contribution body but
-                // the committed confirmation.
+                // Both rosters retain signed-envelope-before-body ordering.
                 assert.deepEqual(relay.earlyContributionRecords, []);
                 const rostersScope = [
                     "A corrupt organizer's private state is copied after its registration, and the copy proposes a second roster of the same poll to other registrants under its own path of the organizer's origin, where the relay serves that roster's records. Both rosters, whose only corrupt member is the organizer, complete roster agreement, setup contribution and verification, signed ballots, close responses, target votes, release shares and the combined result in parallel in the maintained participant runtime in external Chrome.",
@@ -2612,40 +2923,35 @@ await runWithLocalRunLog(
                 definitionSignature: hexadecimal(definitionSignature),
                 username: 'Participant again',
             });
-            // Only the first roster positions contribute setup key material,
-            // as each participant reports once its roster is retained. Every
-            // participant confirms the roster.
+            // Eligibility is the fixed redundant pool; selection still uses d.
             const contributors = positions.slice(0, setupContributorCount);
-            const confirmers = positions.slice(setupContributorCount);
+            const noncontributors = positions.slice(eligibleContributorCount);
+            const otherMembers = positions.filter(
+                (position) => !contributors.includes(position),
+            );
             for (const position of positions) {
                 const status = await run(position, 'status');
                 assert.equal(status.generation, 3);
                 assert.equal(status.poll, organizer.poll);
                 assert.equal(
-                    status.isSetupContributor,
-                    position < setupContributorCount,
+                    status.isEligibleContributor,
+                    position < eligibleContributorCount,
                 );
+                await expectStatus(position, 'contribute', 'refused');
             }
-            // A participant outside the setup contributors contributes and
-            // opens nothing, and verifies the setup only behind its own
-            // signed confirmation.
-            if (confirmers.length > 0)
-                for (const operation of ['contribute', 'open', 'verify-setup'])
-                    await expectStatus(confirmers[0], operation, 'refused');
-            // Every setup contributor generates and retains its contribution
-            // body and confirms it. No opening precedes the complete
-            // confirmation inventory. The last honest contributor crashes
-            // during its generation once checkpoint records are stored, with
-            // its checkpoint retained, during its continuation once proof
-            // records are stored, and with its confirmation and opening
-            // intents. Each next visit discards what an interrupted operation
-            // stored and continues from its retained seed, checkpoint or
-            // coins.
             const setupReplay = [...contributors].reverse().find(honest);
             assert.ok(setupReplay !== undefined);
+            await interrupt(setupReplay, 'confirm', {}, 4);
+            for (const position of positions)
+                assert.equal((await run(position, 'confirm')).generation, 4);
+            for (const position of noncontributors)
+                await expectStatus(position, 'contribute', 'refused');
+            await expectStatus(0, 'verify-setup', 'pending');
+            await expectStatus(0, 'select-setup', 'pending');
+            await expectStatus(1, 'select-setup', 'refused');
             if (mode === 'preparation') {
                 for (const position of positions)
-                    await inspectSourceCustody(position, 'accepted roster');
+                    await inspectSourceCustody(position, 'confirmed roster');
                 await refuseLostSource(setupReplay, 'contribute');
             }
             const bodyRecords = bounds.contribution.publicRecords.length;
@@ -2659,11 +2965,22 @@ await runWithLocalRunLog(
                             'checkpoint',
                             1,
                         );
-                        await interrupt(position, 'contribute', {}, 5);
+                        await interruptPreparation(position, 'contribute', {
+                            kind: 'contribution',
+                            phase: 5,
+                        });
+                        // Generic public retransmission must authenticate the
+                        // same required own checkpoint as other g4 operations.
+                        await loseState(
+                            position,
+                            'checkpoint',
+                            'publish',
+                            true,
+                        );
                         await interruptStaged(
                             position,
                             'contribute',
-                            6,
+                            4,
                             'contribution',
                             bodyRecords + 1,
                         );
@@ -2683,78 +3000,31 @@ await runWithLocalRunLog(
                             for (const [
                                 index,
                                 slot,
-                            ] of padding.observation.slots.entries()) {
+                            ] of padding.observation.slots.entries())
                                 assert.equal(
                                     slot.sha512,
                                     final.observation.slots[index].sha512,
                                     'Padding replay changed its original proof bytes.',
                                 );
-                            }
+                            // Keep the unsigned complete body for authenticated
+                            // damaged-padding probes before any offer publication.
+                            await interruptPreparation(position, 'contribute', {
+                                kind: 'contribution',
+                                phase: 7,
+                            });
+                            return;
                         }
+                        await interruptPreparation(position, 'contribute', {
+                            kind: 'contribution',
+                            phase: 8,
+                        });
                     }
                     assert.equal(
                         (await run(position, 'contribute')).generation,
-                        7,
-                    );
-                    if (mode === 'preparation') {
-                        assert.equal(
-                            await storedRecords(position, 'checkpoint'),
-                            0,
-                        );
-                        assert.equal(
-                            await storedRecords(position, 'contribution'),
-                            bodyRecords +
-                                Math.ceil(
-                                    bounds.contribution.maximumProofBytes /
-                                        chunkBytes,
-                                ),
-                        );
-                    }
-                }),
-            );
-            await expectStatus(0, 'contribute', 'refused');
-            if (setupReplay === 0) await interrupt(0, 'confirm', {}, 8);
-            assert.equal((await run(0, 'confirm')).generation, 9);
-            assert.deepEqual(await request(0, 'open'), {
-                status: 'pending',
-                cause: 'public input',
-                reason: 'A public record is unavailable.',
-            });
-            assert.equal((await run(0, 'status')).generation, 9);
-            await Promise.all(
-                contributors.slice(1).map(async (position) => {
-                    if (position === setupReplay)
-                        await interrupt(position, 'confirm', {}, 8);
-                    assert.equal(
-                        (await run(position, 'confirm')).generation,
-                        9,
+                        4,
                     );
                 }),
             );
-            // The opening waits for every participant's confirmation. The
-            // last honest participant outside the setup contributors crashes
-            // with its confirmation intent, and its next visit signs with
-            // the locked coins.
-            if (confirmers.length > 0) {
-                assert.deepEqual(await request(0, 'open'), {
-                    status: 'pending',
-                    cause: 'public input',
-                    reason: 'A public record is unavailable.',
-                });
-                const confirmationReplay = [...confirmers]
-                    .reverse()
-                    .find(honest);
-                await Promise.all(
-                    confirmers.map(async (position) => {
-                        if (position === confirmationReplay)
-                            await interrupt(position, 'confirm', {}, 8);
-                        assert.equal(
-                            (await run(position, 'confirm')).generation,
-                            9,
-                        );
-                    }),
-                );
-            }
             const paddingRefusals: Record<string, unknown>[] = [];
             if (mode === 'preparation') {
                 assert.ok(
@@ -2789,7 +3059,7 @@ await runWithLocalRunLog(
                             relay.publicationAttempts[setupReplay];
                         const rejected = await request(
                             setupReplay,
-                            'open',
+                            'contribute',
                             {},
                             copy,
                         );
@@ -2823,37 +3093,181 @@ await runWithLocalRunLog(
                     }
                 }
             }
+            if (mode === 'preparation') {
+                await interruptPreparation(setupReplay, 'contribute', {
+                    kind: 'contribution',
+                    phase: 8,
+                });
+                assert.equal(
+                    (await run(setupReplay, 'contribute')).generation,
+                    4,
+                );
+            }
+            const offerDirectory = async (position: number) => {
+                const identity = await generatedOfferIdentity(
+                    publicDirectory,
+                    position,
+                );
+                assert.equal(identity.length, 64);
+                return (
+                    'contribution-' +
+                    String(position) +
+                    '/' +
+                    identity.toString('hex') +
+                    '/'
+                );
+            };
+            const replayedOffer = await offerDirectory(setupReplay);
+            const replayedEnvelope = await readFile(
+                path.join(publicDirectory, replayedOffer, 'offer.bin'),
+            );
+            const replayedSignature = await readFile(
+                path.join(
+                    publicDirectory,
+                    replayedOffer,
+                    'offer-signature.bin',
+                ),
+            );
+            assert.equal((await run(setupReplay, 'contribute')).generation, 4);
+            assert.deepEqual(
+                await readFile(
+                    path.join(publicDirectory, replayedOffer, 'offer.bin'),
+                ),
+                replayedEnvelope,
+            );
+            assert.deepEqual(
+                await readFile(
+                    path.join(
+                        publicDirectory,
+                        replayedOffer,
+                        'offer-signature.bin',
+                    ),
+                ),
+                replayedSignature,
+            );
+            assert.deepEqual(relay.earlyContributionRecords, []);
+            await interruptPreparation(0, 'select-setup', {
+                kind: 'selection',
+                phase: 1,
+            });
+            assert.equal((await run(0, 'select-setup')).generation, 4);
+            const selectedBytes = await readFile(
+                path.join(publicDirectory, 'selection.bin'),
+            );
+            assert.equal((await run(0, 'select-setup')).generation, 4);
+            assert.deepEqual(
+                await readFile(path.join(publicDirectory, 'selection.bin')),
+                selectedBytes,
+            );
+            const endorsementReplay = [...positions].reverse().find(honest);
+            assert.ok(endorsementReplay !== undefined);
+            const finalOffer = await offerDirectory(
+                contributors[contributors.length - 1],
+            );
             await Promise.all(
-                contributors.map(async (position) => {
-                    if (position === setupReplay)
-                        await interrupt(position, 'open', {}, 10);
-                    assert.equal((await run(position, 'open')).generation, 11);
+                positions.map(async (position) => {
+                    if (position === endorsementReplay) {
+                        // The first endorsement verifies all clear bodies;
+                        // later activation may use its retained verification.
+                        await interruptDelivered(
+                            position,
+                            'endorse-setup',
+                            4,
+                            finalOffer + 'offer.bin',
+                        );
+                        await interruptPreparation(position, 'endorse-setup', {
+                            kind: 'endorsement',
+                            phase: 1,
+                        });
+                    }
+                    assert.equal(
+                        (await run(position, 'endorse-setup')).generation,
+                        4,
+                    );
                 }),
             );
-            // Before its signed opening a participant publishes nothing
-            // derived from its contribution body but the committed
-            // confirmation, as the late-materialization argument assumes.
-            assert.deepEqual(relay.earlyContributionRecords, []);
-            // Every participant verifies the complete setup and retains its
-            // reference once, which opens its ballot: a setup contributor
-            // behind its opening, any other participant behind its signed
-            // confirmation. In an empty run the last participant's setup
-            // arrives only after the organizer's close intent, below.
-            // A ballot needs the verified setup.
             await expectStatus(0, 'ballot', 'refused', {
                 scores: ballotScores(0),
             });
+            // A successful POST is insufficient: activation must read back
+            // the named certificate and selector before retiring preparation.
+            // These views affect GET only; the relay still accepts each write.
+            const setupPublicationFaults: Record<string, unknown>[] = [];
+            const activationHead = await retainedHead(setupReplay);
+            assert.equal(activationHead.generation, 4);
+            const activationRecords = {
+                contribution: await storedRecords(setupReplay, 'contribution'),
+                checkpoint: await storedRecords(setupReplay, 'checkpoint'),
+            };
+            assert.ok(activationRecords.contribution > 0);
+            assert.equal(
+                await stat(
+                    path.join(publicDirectory, 'setup-certificate.bin'),
+                ).catch(() => undefined),
+                undefined,
+            );
+            for (const hidden of [
+                'setup-certificate.bin',
+                'setup-identity.bin',
+            ]) {
+                views[setupReplay].set(hidden, undefined);
+                const before = relay.publicationAttempts[setupReplay];
+                try {
+                    const pending = await request(setupReplay, 'verify-setup');
+                    assert.deepEqual(pending, {
+                        status: 'pending',
+                        cause: 'public input',
+                        reason: 'A public record is unavailable.',
+                    });
+                    assert.ok(
+                        relay.publicationAttempts[setupReplay] > before,
+                        'Activation did not attempt the acknowledged setup publication.',
+                    );
+                    assert.ok(
+                        (await stat(path.join(publicDirectory, hidden))).size >
+                            0,
+                        'The relay did not retain the acknowledged setup write.',
+                    );
+                    assert.deepEqual(
+                        await retainedHead(setupReplay),
+                        activationHead,
+                        'A setup publication without readback changed the preparation root.',
+                    );
+                    assert.deepEqual(
+                        {
+                            contribution: await storedRecords(
+                                setupReplay,
+                                'contribution',
+                            ),
+                            checkpoint: await storedRecords(
+                                setupReplay,
+                                'checkpoint',
+                            ),
+                        },
+                        activationRecords,
+                        'A setup publication without readback retired own preparation.',
+                    );
+                    const fault = {
+                        position: setupReplay,
+                        hidden,
+                        generation: 4,
+                        result: pending,
+                        acknowledgedWriteRetained: true,
+                        originalPreparationRetained: true,
+                    };
+                    setupPublicationFaults.push(fault);
+                    log.writeEvent({
+                        eventType: 'participant-setup-publication-fault',
+                        details: fault,
+                    });
+                } finally {
+                    views[setupReplay].delete(hidden);
+                }
+            }
             const lateSetup =
                 mode === 'empty' ? participantCount - 1 : undefined;
-            // The first honest participant outside the setup contributors,
-            // or the last honest contributor when every position contributes,
-            // crashes while it verifies the setup, once the relay delivered it
-            // the last contributor's opening, and again right after it
-            // retains the verified setup. Its next visits verify the setup
-            // again from the public records and then continue from the
-            // retained setup.
             const verificationReplay = [
-                ...confirmers,
+                ...otherMembers,
                 ...[...contributors].reverse(),
             ].find((position) => honest(position) && position !== lateSetup);
             assert.ok(verificationReplay !== undefined);
@@ -2864,12 +3278,6 @@ await runWithLocalRunLog(
                     .filter((position) => position !== lateSetup)
                     .map(async (position) => {
                         if (position === verificationReplay) {
-                            await interruptDelivered(
-                                position,
-                                'verify-setup',
-                                position < setupContributorCount ? 11 : 9,
-                                `contribution-${String(setupContributorCount - 1)}/opening.bin`,
-                            );
                             await interrupt(position, 'verify-setup', {}, 12);
                             const status = await run(position, 'status');
                             assert.equal(status.generation, 12);
@@ -2881,18 +3289,17 @@ await runWithLocalRunLog(
                         assert.equal(verified.ballot, 'open');
                     }),
             );
-            await expectStatus(0, 'verify-setup', 'refused');
-            // With its setup retained, a participant outside the setup
-            // contributors still contributes and opens nothing, and only
-            // delivers its signed confirmation again.
-            const confirmer = confirmers.find(
-                (position) => position !== lateSetup,
-            );
-            if (confirmer !== undefined) {
-                for (const operation of ['contribute', 'open', 'verify-setup'])
-                    await expectStatus(confirmer, operation, 'refused');
-                assert.equal((await run(confirmer, 'confirm')).generation, 12);
-            }
+            for (const position of positions.filter(
+                (candidate) => candidate !== lateSetup,
+            ))
+                for (const operation of [
+                    'confirm',
+                    'contribute',
+                    'select-setup',
+                    'endorse-setup',
+                    'verify-setup',
+                ])
+                    await expectStatus(position, operation, 'refused');
             if (mode === 'preparation') {
                 const sourceRestarts: Record<string, unknown>[] = [];
                 const publishedShape = async () =>
@@ -2925,23 +3332,14 @@ await runWithLocalRunLog(
                     assert.equal(ready.generation, 12);
                     assert.equal(ready.ballot, 'open');
                     assert.equal(relay.publicationAttempts[position], attempts);
-                    if (position < setupContributorCount) {
-                        for (const operation of ['confirm', 'open']) {
-                            await endBrowser(position);
-                            const published =
-                                relay.publicationAttempts[position];
-                            const repeated = await run(position, operation);
-                            assert.equal(repeated.generation, 12);
-                            assert.equal(
-                                repeated.bodyDigest,
-                                recordIds[position],
-                            );
-                            assert.ok(
-                                relay.publicationAttempts[position] > published,
-                                'The prepared participant did not retransmit its original setup records.',
-                            );
-                        }
-                    }
+                    assert.equal(
+                        await storedRecords(position, 'contribution'),
+                        0,
+                    );
+                    assert.equal(
+                        await storedRecords(position, 'checkpoint'),
+                        0,
+                    );
                     assert.deepEqual(
                         await retainedHead(position),
                         before,
@@ -2956,10 +3354,7 @@ await runWithLocalRunLog(
                         generation: 12,
                         originalBodyDigest: recordIds[position],
                         restoredSetup: true,
-                        retransmitted:
-                            position < setupContributorCount
-                                ? ['confirm', 'open']
-                                : [],
+                        privatePreparationRetired: true,
                     };
                     sourceRestarts.push(details);
                     log.writeEvent({
@@ -2972,18 +3367,19 @@ await runWithLocalRunLog(
                 assert.deepEqual(
                     await publishedShape(),
                     publicBefore,
-                    'Prepared retransmission extended or replaced public setup records.',
+                    'Prepared recovery extended or replaced public setup records.',
                 );
                 assert.equal(paddingInterruptions.length, 2);
                 const last = paddingInterruptions[1];
                 const proofPath = path.join(
                     publicDirectory,
-                    `contribution-${String(last.position)}/proof.bin`,
+                    (await offerDirectory(last.position)) + 'proof.bin',
                 );
                 const header = await readFile(
                     path.join(
                         publicDirectory,
-                        `contribution-${String(last.position)}/body-header.bin`,
+                        (await offerDirectory(last.position)) +
+                            'body-header.bin',
                     ),
                 );
                 assert.equal(
@@ -3057,11 +3453,13 @@ await runWithLocalRunLog(
                             paddingRefusals,
                             sourceCustody,
                             sourceRefusals,
+                            stateLosses,
+                            setupPublicationFaults,
                             sourceRestarts,
                             coincidentPaddingCuts:
                                 first.slotOffset === final.slotOffset,
                             logicalProofBytes: last.observation.halt.proofBytes,
-                            scope: 'Original fixed-roster setup only: real contribution generation and original-intent restart, confirmation, opening and every recipient setup verifier. Missing or damaged required source capsules stop copied original namespaces; verified setup retires its source capsule and wrapping key, and cold recovery restores the original credential and setup without them. Prepared contributors retransmit identical public confirmation/opening records. Harness-only pauses and private plaintext proof digests measure padding replay; their work is included in interrupted operations. This instrumented development run establishes no replacement setup, departure tolerance, ballots, outcome, exact-build qualification or phone support.',
+                            scope: 'Clear fixed-roster preparation only: local confirmation, real signed-offer generation and original-intent restart, organizer selection, quorum endorsements and every original member setup verifier. Missing or damaged required source capsules stop copied original namespaces; verified setup retires its source capsule and wrapping key, and cold recovery restores the original credential and setup without them. Before certification, contributors retransmit identical signed offers; certification retires private preparation while the public records remain retrievable. Harness-only pauses and private plaintext proof digests measure padding replay; their work is included in interrupted operations. This instrumented development run does not exercise departure tolerance, ballots or outcome and establishes no exact-build qualification or phone support.',
                         },
                         null,
                         2,
@@ -4520,7 +4918,7 @@ await runWithLocalRunLog(
                       ]),
                 'A registrant that the organizer leaves out of the roster stays pending when shown it.',
                 'The organizer crashes with its roster proposal intent and the last honest participant right after it retains the accepted roster, and an honest participant crashes while it verifies the setup and right after it retains the verified setup; each next visit continues from its retained state, verifying the setup again from the public records after the first of those crashes.',
-                'Every participant confirms the roster, and only the setup contributors contribute and open; a contributor opens only once every participant confirmed. An honest setup contributor crashes during its contribution generation and during its continuation once it stored records ahead of its next root, with its retained checkpoint, and with its confirmation and opening intents, and an honest participant outside the setup contributors with its confirmation intent; each next visit discards what an interrupted operation stored and continues from its retained seed or state.',
+                'Every participant locally confirms the fixed roster. Selected eligible contributors publish signed clear offers; the organizer proposes the selection and members endorse it before setup activation. The cohort interrupts original contribution and continuation work, the offer-signing intent, the organizer selection intent and one endorsement intent; each next visit preserves its original seed, checkpoint, signature coins and independently retained preparation state.',
                 `Honest browsers crash right after their participants durably enter each ${mode === 'empty' ? 'close and target' : noResult ? 'ballot, close and target' : 'ballot, close, target and release'} generation, and each next visit continues from the retained state.`,
                 mode === 'empty'
                     ? "Copies of honest participants' state that lose their last data record before their close response or target vote stop for good."
@@ -4565,6 +4963,7 @@ await runWithLocalRunLog(
                         interrupted: interruption,
                         interruptions,
                         stateLosses,
+                        setupPublicationFaults,
                         equivocation:
                             equivocation === undefined
                                 ? undefined

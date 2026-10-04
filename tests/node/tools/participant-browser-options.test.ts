@@ -113,4 +113,34 @@ describe('participant browser cohort selection', () => {
             sequential: false,
         });
     });
+
+    it('selects the fixed early setup departure without replacing the ordinary baseline', () => {
+        expect(
+            selectParticipantBrowserOptions(['--setup-departure', '--scalar']),
+        ).toMatchObject({
+            participantCount: 4,
+            optionCount: 2,
+            setupDeparture: true,
+            mode: 'result',
+            scalar: true,
+        });
+        expect(
+            selectParticipantBrowserOptions(['4', '2', '--setup-departure']),
+        ).toMatchObject({ setupDeparture: true });
+        expect(selectParticipantBrowserOptions([])).toMatchObject({
+            participantCount: 3,
+            optionCount: 2,
+            setupDeparture: false,
+        });
+        for (const args of [
+            ['3', '2', '--setup-departure'],
+            ['4', '3', '--setup-departure'],
+            ['4', '2', 'plain', '--setup-departure'],
+            ['--setup-departure', '--sequential'],
+            ['--setup-departure', '--foreign-poll=old'],
+            ['--setup-departure', '--memory-pressure'],
+            ['--setup-departure', '--setup-departure'],
+        ])
+            expect(() => selectParticipantBrowserOptions(args)).toThrow();
+    });
 });

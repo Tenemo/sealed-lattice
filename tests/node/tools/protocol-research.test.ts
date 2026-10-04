@@ -12,6 +12,92 @@ import {
 import { parseRegistrationSessionResult } from '#tools/ci/run-registration-session.js';
 
 describe('guarded protocol research entry', () => {
+    it('requires only actual response files while retaining original roster positions and all normal responders', () => {
+        const departure = deriveResearchScenario(4, 2, true);
+        expect(departure.participantCount).toBe(4);
+        expect(departure.responseFiles).toEqual([
+            'response-0.bin',
+            'response-2.bin',
+            'response-3.bin',
+        ]);
+        for (const scenario of [
+            deriveResearchScenario(4, 2),
+            deriveResearchScenario(4, 2, false, true),
+        ])
+            expect(scenario.responseFiles).toEqual([
+                'response-0.bin',
+                'response-1.bin',
+                'response-2.bin',
+                'response-3.bin',
+            ]);
+        // Target-signature withholding does not imply an absent close response.
+        const normal = deriveResearchScenario(10, 10);
+        expect(normal.responseFiles).toEqual(
+            Array.from(
+                { length: 10 },
+                (_, position) => `response-${position}.bin`,
+            ),
+        );
+        expect(normal.responseFiles).toContain('response-1.bin');
+        expect(normal.signers).not.toContain(1);
+    });
+    it('keeps the forked-organizer selection case separate from departures and ballot equivocation', () => {
+        expect(
+            selectProtocolResearchCase(['native-selection-fork']),
+        ).toMatchObject({
+            name: 'native-selection-fork',
+            participantCount: 4,
+            optionCount: 2,
+        });
+        expect(deriveResearchScenario(4, 2, false, true)).toMatchObject({
+            corrupt: [0],
+            departed: [],
+            selectedAuthors: [0, 2],
+            honest: [1, 2, 3],
+            accepted: [0, 1, 2, 3],
+            signers: [0, 1, 2, 3],
+            conflicting: [],
+            invalid: [],
+            releaseSubsets: 6,
+            departureSets: 5,
+        });
+        expect(() => deriveResearchScenario(4, 2, true, true)).toThrow();
+        expect(() =>
+            selectProtocolResearchCase(['native-selection-fork', '4', '2']),
+        ).toThrow();
+    });
+    it('fixes the setup departure profile and keeps cooperative corruption separate from honest loss', () => {
+        expect(selectProtocolResearchCase(['native-setup-departure'])).toEqual({
+            name: 'native-setup-departure',
+            execution: true,
+            noResult: false,
+            participantCount: 4,
+            optionCount: 2,
+            simulatedHelpers: 0,
+        });
+        for (const values of [
+            ['native-setup-departure', '4', '2'],
+            ['native-setup-departure', '--simulated-helpers', '1'],
+            ['native-setup-departure', 'extra'],
+        ])
+            expect(() => selectProtocolResearchCase(values)).toThrow();
+        expect(deriveResearchScenario(4, 2, true)).toMatchObject({
+            corrupt: [2],
+            departed: [1],
+            selectedAuthors: [0, 2],
+            honest: [0, 1, 3],
+            accepted: [0, 2, 3],
+            signers: [0, 2, 3],
+            invalid: [],
+            conflicting: [],
+            omitted: [],
+            certificateThreshold: 3,
+            releaseThreshold: 2,
+            releaseSubsets: 3,
+            departureSets: 1,
+        });
+        expect(() => deriveResearchScenario(3, 2, true)).toThrow();
+    });
     it('fixes the FHE key source screen and requires one native source for each scalar host', () => {
         expect(
             selectProtocolResearchCase(['native-fhe-key-source']),

@@ -20,22 +20,10 @@ import {
     unsigned64,
 } from './bytes.js';
 import { closeRecordInventory, decodeCloseState } from './close-state.js';
-import {
-    describe,
-    isSetupContributor,
-    PublicInputFailure,
-    sessionInput,
-} from './context.js';
+import { describe, PublicInputFailure, sessionInput } from './context.js';
 import type { ProfileContext } from './context.js';
-import {
-    contributionRecords,
-    isContributionSession,
-    storedOpening,
-} from './contribution.js';
-import type {
-    ContributionSession,
-    ParticipantSession,
-} from './contribution.js';
+import { contributionRecords } from './contribution.js';
+import type { ParticipantSession } from './contribution.js';
 import { openDelivery } from './delivery.js';
 import { custodyIdentity, custodyPurpose } from './identity.js';
 import {
@@ -295,20 +283,7 @@ export const resumeBallot = async (
     return state === undefined ? undefined : { participant, records, state };
 };
 
-// A setup contributor's signed opening as the module reads it.
-const openingPacket = async (session: ContributionSession) => {
-    const opening = await storedOpening(session);
-    return concatenate(
-        unsigned32(opening.body.length),
-        opening.body,
-        opening.signature,
-    );
-};
-
-// The input that starts the module's ballot or close work from the retained
-// poll, a setup contributor's own opening and the setup reference. A
-// participant outside the setup contributors opened nothing and names no
-// opening.
+// Ballot and close authority binds the original member to its verified setup.
 export const ballotWorkInput = async (
     participant: ParticipantSession,
     inventory: Uint8Array,
@@ -330,13 +305,6 @@ export const ballotWorkInput = async (
         manifest,
         dataKind.setupReference,
     );
-    // A setup contributor's own opening names the inventory; any other
-    // participant's setup reference does.
-    const packet =
-        isSetupContributor(participant.context) &&
-        isContributionSession(participant)
-            ? await openingPacket(participant)
-            : new Uint8Array();
     return concatenate(
         manifest.poll,
         participant.context.runtime,
@@ -344,8 +312,6 @@ export const ballotWorkInput = async (
         definition,
         definitionSignature,
         inventory,
-        unsigned32(packet.length),
-        packet,
         reference,
     );
 };

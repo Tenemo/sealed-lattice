@@ -108,12 +108,11 @@ impl VerifiedCloseBarrier {
 
 impl CloseContext {
     pub fn new(poll: Arc<VerifiedPoll>, setup: Arc<VerifiedSetupAggregate>) -> Result<Self, Error> {
-        let proposal = setup.inventory().proposal().proposal();
+        let proposal = setup.roster().proposal();
         if !supported_profile::Profile::participant_range().contains(&proposal.records().len())
-            || proposal
-                .records()
-                .iter()
-                .any(|record| record.header().poll != poll.identity())
+            || proposal.records().iter().any(|record| {
+                record.header().poll != poll.identity() || record.header().runtime != poll.runtime()
+            })
             || proposal.records()[proposal.organizer_position()]
                 .header()
                 .signing_public
@@ -130,20 +129,15 @@ impl CloseContext {
         &self.setup
     }
     pub fn participant_count(&self) -> usize {
-        self.setup.inventory().proposal().proposal().records().len()
+        self.setup.roster().proposal().records().len()
     }
     pub fn organizer(&self) -> usize {
-        self.setup
-            .inventory()
-            .proposal()
-            .proposal()
-            .organizer_position()
+        self.setup.roster().proposal().organizer_position()
     }
     fn key(&self, position: usize) -> Result<&[u8; 1952], Error> {
         Ok(&self
             .setup
-            .inventory()
-            .proposal()
+            .roster()
             .proposal()
             .records()
             .get(position)
@@ -152,7 +146,7 @@ impl CloseContext {
             .signing_public)
     }
     fn inventory(&self) -> [u8; 64] {
-        self.setup.inventory().identity()
+        self.setup.identity()
     }
     pub fn intent(&self, close_time: u64) -> Result<CloseIntentMessage, Error> {
         CloseIntentMessage::new(self.poll.identity(), self.inventory(), close_time)

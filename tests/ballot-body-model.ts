@@ -1,7 +1,10 @@
 import { auxiliaryInputEncryptionParameters } from '#tests/auxiliary-input-encryption-parameters.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import { compileBallotWordProofLayout } from '#tests/full-word-proof-layout-model.js';
-import { compileRegistrationEnrollmentCensus } from '#tests/registration-enrollment-model.js';
+import {
+    compileRegistrationEnrollmentCensus,
+    participantIdentityAsciiBytes,
+} from '#tests/registration-enrollment-model.js';
 import type { SupportedProfile } from '#tests/supported-profile-model.js';
 
 // Marker, poll, inventory, author position, ballot time, body length and
@@ -38,9 +41,11 @@ export const compileBallotBodyCensus = (profile: SupportedProfile) => {
     const contextBytes = 4n + 64n + 64n + 2n + 1n + 1n;
     const proofRoleBytes =
         8n +
-        5n * 6n +
+        6n * 6n +
         4n +
-        BigInt(Buffer.byteLength('sealed-lattice/ballot-proof/v1')) +
+        BigInt(Buffer.byteLength('sealed-lattice/ballot-proof/v2')) +
+        4n +
+        participantIdentityAsciiBytes +
         3n * 64n +
         2n;
     const headerBytes = 4n + 8n + contextBytes;

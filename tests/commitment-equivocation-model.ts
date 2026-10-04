@@ -4,7 +4,7 @@ import {
     mlDsa65PublicMatrixSeedBytes,
 } from '#tests/ml-dsa-65-parameters.js';
 
-export const commitmentSaltBits = 512n;
+const commitmentSaltBits = 512n;
 
 // Whole-message extension of ABKK22 Theorem 5.12's single-sender hybrid.
 // The coefficient two is from AHU19 Theorem 3 (one-way to hiding).

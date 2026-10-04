@@ -5,16 +5,18 @@ use ballot_proof::{
     submission::{BallotBodyAuthentication, authenticate_envelope},
 };
 use evaluation_target::target::{ClassifiedClosedInventory, Error, PublicInputs, WorkingStore};
+use opened_contribution::ContributionOfferVerifier;
 use registration_credentials::{
     ballot_authentication::ENVELOPE_BYTES,
     ballot_body,
     close_signing::{
         CloseProposalMessage, ClosePurpose, CloseResponseMessage, maximum_close_message_bytes,
     },
-    contribution_authentication::{CommitmentInventory, verify_confirmation},
-    contribution_commitment::BODY_HEADER_BYTES,
+    contribution_body::BODY_HEADER_BYTES,
+    contribution_offer::{MAXIMUM_OFFER_BYTES, authenticate_offer},
     roster_authentication::verify_roster_proposal,
     roster_input::RosterInputVerifier,
+    setup_selection::{MAXIMUM_SELECTION_BYTES, authenticate_certificate, certificate_bytes},
 };
 use rns_arithmetic_probe::ranking::{
     Ciphertext, KEY_RECORD_BYTES, stored_bytes, stored_value_bytes,
@@ -321,31 +323,30 @@ fn main() -> io::Result<()> {
         )
         .map_err(refusal)?,
     );
-    // Every roster participant published a confirmation; only the setup
-    // contributors published a contribution.
-    let profile = proposal.proposal().profile();
-    let directories: Vec<_> = (0..profile.participants())
-        .map(|position| ceremony.join(format!("contribution-{position}")))
-        .collect();
-    let contributions = &directories[..profile.setup_contributors()];
-    let mut confirmations = Vec::new();
-    for directory in &directories {
-        let body = bounded(directory.join("confirmation.bin"), 2048, &mut work)?;
-        let signature = bounded(
-            directory.join("confirmation-signature.bin"),
-            3309,
-            &mut work,
-        )?;
-        confirmations.push(verify_confirmation(&proposal, &body, &signature).map_err(refusal)?);
-    }
-    let inventory = Arc::new(CommitmentInventory::new(proposal, confirmations).map_err(refusal)?);
-    let mut aggregator = SetupAggregator::new(inventory).map_err(refusal)?;
+    let roster = proposal;
+    let profile = roster.proposal().profile();
+    let carrier = bounded(
+        ceremony.join("setup-certificate.bin"),
+        certificate_bytes(profile, MAXIMUM_SELECTION_BYTES).map_err(refusal)?,
+        &mut work,
+    )?;
+    let certificate = authenticate_certificate(roster.clone(), &carrier).map_err(refusal)?;
+    let proposal = Arc::new(certificate.proposal().clone());
     let indices = profile.contribution_body_polynomials();
-    for (position, directory) in contributions.iter().enumerate() {
-        let stage = scratch.join(format!("aggregate-{position}"));
-        fs::create_dir(&stage)?;
-        let opening = bounded(directory.join("opening.bin"), 2048, &mut work)?;
-        let signature = bounded(directory.join("opening-signature.bin"), 3309, &mut work)?;
+    let mut contributions = Vec::new();
+    let mut offers = Vec::new();
+    for (position, identity) in proposal.selection().selected() {
+        let identity: String = identity.iter().map(|byte| format!("{byte:02x}")).collect();
+        let directory = ceremony
+            .join(format!("contribution-{position}"))
+            .join(identity);
+        let envelope = bounded(directory.join("offer.bin"), MAXIMUM_OFFER_BYTES, &mut work)?;
+        let signature = bounded(directory.join("offer-signature.bin"), 3309, &mut work)?;
+        let authenticated =
+            Arc::new(authenticate_offer(roster.clone(), &envelope, &signature).map_err(refusal)?);
+        if authenticated.envelope().position() != *position {
+            return Err(refusal("Offer author differs from selected position"));
+        }
         let header = bounded(
             directory.join("body-header.bin"),
             BODY_HEADER_BYTES,
@@ -354,19 +355,56 @@ fn main() -> io::Result<()> {
         let mut proof = File::open(directory.join("proof.bin"))?;
         let mut proof_header = [0; PROOF_HEADER_BYTES];
         work.read(&mut proof, &mut proof_header)?;
-        aggregator
-            .begin(&opening, &signature, &header, &proof_header)
+        let mut verifier = ContributionOfferVerifier::new(authenticated, &header, &proof_header)
             .map_err(refusal)?;
+        for index in &indices {
+            let (length, capacity) = polynomial_bytes(profile, *index)?;
+            let mut incoming = File::open(directory.join(polynomial_name(*index)))?;
+            for offset in (0..length).step_by(capacity) {
+                let count = capacity.min(length - offset);
+                work.read(&mut incoming, &mut buffer[..count])?;
+                verifier
+                    .polynomial(*index, offset, &buffer[..count])
+                    .map_err(refusal)?;
+            }
+            end(&mut incoming)?;
+        }
+        let mut proof = File::open(directory.join("proof.bin"))?;
+        let mut offset = 0;
+        loop {
+            let count = proof.read(&mut buffer)?;
+            work.read_bytes += count as u64;
+            if count == 0 {
+                break;
+            }
+            verifier.proof(offset, &buffer[..count]).map_err(refusal)?;
+            offset += count;
+        }
+        offers.push(Arc::new(verifier.finish().map_err(refusal)?));
+        contributions.push(directory);
+        println!("Verified complete original offer {position}");
+    }
+    let authors: Vec<_> = proposal
+        .selection()
+        .selected()
+        .iter()
+        .map(|(position, _)| *position)
+        .collect();
+    let mut aggregator = SetupAggregator::new(proposal, offers).map_err(refusal)?;
+    for (ordinal, directory) in contributions.iter().enumerate() {
+        let stage = scratch.join(format!("aggregate-{ordinal}"));
+        fs::create_dir(&stage)?;
+        aggregator.begin(authors[ordinal]).map_err(refusal)?;
         for index in &indices {
             let (length, capacity) = polynomial_bytes(profile, *index)?;
             let name = polynomial_name(*index);
             let mut incoming = File::open(directory.join(&name))?;
-            let mut prior = if position == 0 {
+            let mut prior = if ordinal == 0 {
                 None
             } else {
                 Some(File::open(
                     scratch
-                        .join(format!("aggregate-{}", position - 1))
+                        .join(format!("aggregate-{}", ordinal - 1))
                         .join(&name),
                 )?)
             };
@@ -377,8 +415,7 @@ fn main() -> io::Result<()> {
                     .open(stage.join(&name))?,
             );
             let mut previous = vec![0; capacity];
-            let mut offset = 0;
-            while offset < length {
+            for offset in (0..length).step_by(capacity) {
                 let count = capacity.min(length - offset);
                 work.read(&mut incoming, &mut buffer[..count])?;
                 if let Some(prior) = prior.as_mut() {
@@ -389,7 +426,6 @@ fn main() -> io::Result<()> {
                     .map_err(refusal)?;
                 destination.write_all(&previous[..count])?;
                 work.written(count);
-                offset += count;
             }
             end(&mut incoming)?;
             if let Some(prior) = prior.as_mut() {
@@ -398,32 +434,19 @@ fn main() -> io::Result<()> {
             destination.flush()?;
             destination.get_ref().sync_all()?;
         }
-        let mut proof = File::open(directory.join("proof.bin"))?;
-        let mut offset = 0;
-        loop {
-            let count = proof.read(&mut buffer)?;
-            work.read_bytes += count as u64;
-            if count == 0 {
-                break;
-            }
-            aggregator
-                .proof(offset, &buffer[..count])
-                .map_err(refusal)?;
-            offset += count;
-        }
         aggregator.finish_contribution().map_err(refusal)?;
-        if position > 0 {
+        if ordinal > 0 {
             for index in &indices {
                 work.remove(
                     &scratch
-                        .join(format!("aggregate-{}", position - 1))
+                        .join(format!("aggregate-{}", ordinal - 1))
                         .join(polynomial_name(*index)),
                 )?;
             }
         }
-        println!("Verified setup contribution {position}");
     }
-    let setup = Arc::new(aggregator.finish().map_err(refusal)?);
+    let inputs = Arc::new(aggregator.finish().map_err(refusal)?);
+    let setup = Arc::new(inputs.certify(&certificate).map_err(refusal)?);
     let setup_milliseconds = started.elapsed().as_secs_f64() * 1000.0;
     let close = CloseContext::new(poll.clone(), setup.clone()).map_err(refusal)?;
     let records = ceremony.join("close");

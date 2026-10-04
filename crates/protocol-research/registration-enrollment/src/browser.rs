@@ -1,4 +1,4 @@
-use crate::{Enrollment, contribution_signing::ContributionSigning};
+use crate::{Enrollment, offer_signing::OfferSigning};
 use registration_credentials::foundation::{
     MAXIMUM_USERNAME_INGRESS_BYTES, RegistrationHeader, normalize_username,
 };
@@ -50,8 +50,9 @@ struct Session {
     proposal: Option<RosterProposal>,
     proposal_signature: Option<[u8; 3309]>,
     signed_proposal: Option<Arc<OrganizerSignedRoster>>,
-    contribution: ContributionSigning,
+    offer: OfferSigning,
     contribution_output: Vec<u8>,
+    unsigned_selection: Option<registration_credentials::setup_selection::SelectionProposal>,
     retained_context: Option<RetainedContributionContext>,
     ballot: Option<crate::ballot::BallotWork>,
     close: Option<crate::close_work::CloseWork>,
@@ -60,7 +61,7 @@ struct Session {
     // A retained evaluated target the host streams in, and its length.
     evaluation: Option<(usize, Vec<u8>)>,
 }
-thread_local! {static SESSION:RefCell<Session>=RefCell::new(Session{input:vec![0;input_bytes()],started:false,restored:false,enrollment:None,poll_identity:[0;64],roster:None,proposal:None,proposal_signature:None,signed_proposal:None,contribution:ContributionSigning::default(),contribution_output:Vec::new(),retained_context:None,ballot:None,close:None,finality:None,release:None,evaluation:None});}
+thread_local! {static SESSION:RefCell<Session>=RefCell::new(Session{input:vec![0;input_bytes()],started:false,restored:false,enrollment:None,poll_identity:[0;64],roster:None,proposal:None,proposal_signature:None,signed_proposal:None,offer:OfferSigning::default(),contribution_output:Vec::new(),unsigned_selection:None,retained_context:None,ballot:None,close:None,finality:None,release:None,evaluation:None});}
 #[unsafe(no_mangle)]
 pub extern "C" fn input_pointer() -> usize {
     SESSION.with(|state| state.borrow_mut().input.as_mut_ptr() as usize)
@@ -756,7 +757,9 @@ pub extern "C" fn verify_roster_signature(length: usize) -> u32 {
 
 fn signed_packet(bytes: &[u8]) -> Option<(&[u8], &[u8])> {
     let length = u32::from_le_bytes(bytes.get(..4)?.try_into().ok()?) as usize;
-    if length > 1024 || bytes.len() != 4 + length + 3309 {
+    if length > registration_credentials::setup_selection::MAXIMUM_SELECTION_BYTES
+        || bytes.len() != 4 + length + 3309
+    {
         return None;
     }
     Some((&bytes[4..4 + length], &bytes[4 + length..]))
@@ -769,201 +772,131 @@ fn emitted_packet(body: &[u8], signature: &[u8]) -> Vec<u8> {
     output
 }
 
-fn contribution_operation(
+fn original_context(
+    state: &Session,
+) -> Result<RetainedContributionContext, registration_credentials::Error> {
+    use registration_credentials::Error;
+    if let Some(context) = &state.retained_context {
+        return Ok(context.clone());
+    }
+    let enrollment = state.enrollment.as_ref().ok_or(Error::Context)?;
+    let original = crate::own_verification::verified().ok_or(Error::Context)?;
+    let proposal = state
+        .signed_proposal
+        .as_ref()
+        .ok_or(Error::Context)?
+        .proposal();
+    let position = proposal
+        .records()
+        .iter()
+        .position(|record| {
+            record.body_digest() == original.body_digest()
+                && record.header().signing_public == *enrollment.credential.signing_public()
+        })
+        .ok_or(Error::Context)?;
+    crate::own_verification::with_poll(|poll| {
+        RetainedContributionContext::parse(
+            &enrollment.credential,
+            &original,
+            poll,
+            position,
+            proposal.body(),
+        )
+    })
+    .ok_or(Error::Context)?
+}
+
+/// The parent authenticates and commits its original confirmed roster first.
+#[unsafe(no_mangle)]
+pub extern "C" fn confirm_roster() -> u32 {
+    SESSION.with(|state| {
+        let mut state = state.borrow_mut();
+        let Ok(context) = original_context(&state) else {
+            return 1;
+        };
+        let Some(enrollment) = state.enrollment.as_mut() else {
+            return 1;
+        };
+        if enrollment.credential.confirm_roster(&context).is_err() {
+            return 1;
+        }
+        state.retained_context = Some(context);
+        0
+    })
+}
+
+fn offer_operation(
     state: &mut Session,
     operation: u32,
     argument: usize,
     length: usize,
 ) -> Result<(), registration_credentials::Error> {
     use registration_credentials::Error;
-    if length > state.input.len() || (operation != 2 && operation != 3 && argument != 0) {
+    if length > state.input.len() || (!matches!(operation, 2 | 3) && argument != 0) {
         return Err(Error::Shape);
     }
     let input = Zeroizing::new(state.input[..length].to_vec());
     state.input[..length].zeroize();
-    let body_inputs = if matches!(operation, 1 | 16) {
-        if length != if operation == 1 { 74 } else { 10 } {
-            return Err(Error::Shape);
-        }
-        let position = u16::from_le_bytes(input[..2].try_into().unwrap()) as usize;
-        let profile = if let Some(context) = state.retained_context.as_ref() {
-            if context.position() != position {
-                return Err(Error::Context);
-            }
-            context.profile()
-        } else {
-            let proposal = state.signed_proposal.as_ref().ok_or(Error::Context)?;
-            state
-                .enrollment
-                .as_ref()
-                .ok_or(Error::Context)?
-                .credential
-                .validate_body_position(proposal, position)?;
-            proposal.proposal().profile()
-        };
-        if position >= profile.setup_contributors() {
-            return Err(Error::Context);
-        }
-        let proof_offset = if operation == 1 { 66 } else { 2 };
-        let proof_length = usize::try_from(u64::from_le_bytes(
-            input[proof_offset..proof_offset + 8].try_into().unwrap(),
-        ))
-        .map_err(|_| Error::Shape)?;
-        let enrollment = state.enrollment.as_ref().ok_or(Error::Context)?;
-        let header = enrollment
-            .contribution_header(profile, proof_length)
-            .map_err(|_| Error::Context)?;
-        Some(header)
-    } else {
-        None
-    };
-    let credential = &mut state.enrollment.as_mut().ok_or(Error::Context)?.credential;
+    let context = original_context(state)?;
     match operation {
-        1 => {
-            let header = body_inputs.ok_or(Error::Context)?;
-            let position = u16::from_le_bytes(input[..2].try_into().unwrap()) as usize;
-            if let Some(context) = &state.retained_context {
-                if context.position() != position {
-                    return Err(Error::Context);
-                }
-                state.contribution.begin_retained_body(
-                    credential,
-                    context.clone(),
-                    input[2..66].try_into().unwrap(),
-                    &header,
-                )?;
-            } else {
-                let proposal = state.signed_proposal.clone().ok_or(Error::Context)?;
-                state.contribution.begin_body(
-                    credential,
-                    proposal,
-                    position,
-                    input[2..66].try_into().unwrap(),
-                    &header,
-                )?;
+        1 | 8 => {
+            if input.len() != 10
+                || usize::from(u16::from_le_bytes(input[..2].try_into().unwrap()))
+                    != context.position()
+            {
+                return Err(Error::Shape);
+            }
+            let proof_length = usize::try_from(u64::from_le_bytes(input[2..].try_into().unwrap()))
+                .map_err(|_| Error::Shape)?;
+            let enrollment = state.enrollment.as_ref().ok_or(Error::Context)?;
+            enrollment.credential.validate_offer_owner(&context)?;
+            let header = enrollment
+                .contribution_header(context.profile(), proof_length)
+                .map_err(|_| Error::Context)?;
+            if operation == 1 {
+                state
+                    .offer
+                    .begin_body(&enrollment.credential, context, &header)?;
             }
             state.contribution_output = header.to_vec();
         }
         2 => {
-            if !(5..=4 + (1 << 20)).contains(&length) {
+            if !(5..=4 + (1 << 20)).contains(&input.len()) {
                 return Err(Error::Shape);
             }
             let offset = u32::from_le_bytes(input[..4].try_into().unwrap()) as usize;
-            state
-                .contribution
-                .polynomial(argument, offset, &input[4..])?;
+            state.offer.polynomial(argument, offset, &input[4..])?;
         }
-        3 => {
-            if !(1..=1 << 20).contains(&length) {
+        3 => state.offer.proof(argument, &input)?,
+        4 | 6 => {
+            if !input.is_empty() {
                 return Err(Error::Shape);
             }
-            state.contribution.proof(argument, &input)?;
-        }
-        4 => {
-            if length != 0 {
-                return Err(Error::Shape);
+            if operation == 4 {
+                state.offer.finish_body()?;
             }
-            state.contribution.finish_body()?;
             state.contribution_output = state
-                .contribution
-                .commitment()
+                .offer
+                .envelope()
                 .ok_or(Error::Consumed)?
+                .bytes()
                 .to_vec();
         }
         5 => {
-            if length != 96 {
+            if input.len() != 32 {
                 return Err(Error::Shape);
             }
-            state.contribution.sign_confirmation(
-                credential,
-                input[..64].try_into().unwrap(),
-                input[64..].try_into().unwrap(),
-            )?;
-            let confirmation = state.contribution.confirmation().ok_or(Error::Consumed)?;
-            state.contribution_output =
-                emitted_packet(confirmation.body(), confirmation.signature());
-        }
-        6 => {
-            let (body, signature) = signed_packet(&input).ok_or(Error::Shape)?;
+            let credential = &mut state.enrollment.as_mut().ok_or(Error::Context)?.credential;
             state
-                .contribution
-                .restore_confirmation(credential, body, signature)?;
+                .offer
+                .sign(credential, input[..].try_into().unwrap())?;
+            let (envelope, signature) = state.offer.offer().ok_or(Error::Consumed)?;
+            state.contribution_output = emitted_packet(envelope.bytes(), signature);
         }
         7 => {
-            let (body, signature) = signed_packet(&input).ok_or(Error::Shape)?;
-            state.contribution.accept_confirmation(body, signature)?;
-        }
-        8 => {
-            if length != 0 {
-                return Err(Error::Shape);
-            }
-            state.contribution.finish_inventory()?;
-            state.contribution_output = state
-                .contribution
-                .inventory()
-                .ok_or(Error::Consumed)?
-                .identity()
-                .to_vec();
-        }
-        9 => {
-            if length != 96 {
-                return Err(Error::Shape);
-            }
-            state.contribution.sign_opening(
-                credential,
-                input[..64].try_into().unwrap(),
-                input[64..].try_into().unwrap(),
-            )?;
-            let opening = state.contribution.opening().ok_or(Error::Consumed)?;
-            state.contribution_output = emitted_packet(opening.body(), opening.signature());
-        }
-        10 => {
-            let (body, signature) = signed_packet(&input).ok_or(Error::Shape)?;
-            state
-                .contribution
-                .consume_opening(credential, body, signature)?;
-        }
-        11 => {
-            if length != 2 {
-                return Err(Error::Shape);
-            }
-            let position = u16::from_le_bytes(input[..2].try_into().unwrap()) as usize;
-            credential.validate_confirmation_position(
-                state.signed_proposal.as_ref().ok_or(Error::Context)?,
-                position,
-            )?;
-        }
-        12 | 13 => {
-            if length != 0 {
-                return Err(Error::Shape);
-            }
-            state.contribution_output = if operation == 12 {
-                state.contribution.confirmation_body(credential)?
-            } else {
-                state.contribution.opening_body(credential)?
-            };
-        }
-        // A participant outside the setup contributors confirms the retained
-        // roster without a contribution.
-        14 => {
-            if length != 0 {
-                return Err(Error::Shape);
-            }
-            let context = state.retained_context.as_ref().ok_or(Error::Context)?;
-            state.contribution_output = credential.retained_roster_confirmation_body(context)?;
-        }
-        15 => {
-            if length != 32 {
-                return Err(Error::Shape);
-            }
-            let context = state.retained_context.as_ref().ok_or(Error::Context)?;
-            let confirmation = credential
-                .sign_retained_roster_confirmation(context, input[..].try_into().unwrap())?;
-            state.contribution_output =
-                emitted_packet(confirmation.body(), confirmation.signature());
-        }
-        16 => {
-            state.contribution_output = body_inputs.ok_or(Error::Context)?.to_vec();
+            let (envelope, signature) = signed_packet(&input).ok_or(Error::Shape)?;
+            let credential = &mut state.enrollment.as_mut().ok_or(Error::Context)?.credential;
+            state.offer.restore(credential, envelope, signature)?;
         }
         _ => return Err(Error::Shape),
     }
@@ -971,11 +904,173 @@ fn contribution_operation(
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn contribution_signing(operation: u32, argument: usize, length: usize) -> u32 {
+pub extern "C" fn offer_signing(operation: u32, argument: usize, length: usize) -> u32 {
     SESSION.with(|state| {
-        u32::from(
-            contribution_operation(&mut state.borrow_mut(), operation, argument, length).is_err(),
-        )
+        u32::from(offer_operation(&mut state.borrow_mut(), operation, argument, length).is_err())
+    })
+}
+
+fn selection_operation(
+    state: &mut Session,
+    operation: u32,
+    length: usize,
+) -> Result<(), registration_credentials::Error> {
+    use registration_credentials::{Error, setup_selection};
+    if length > state.input.len() {
+        return Err(Error::Shape);
+    }
+    let input = Zeroizing::new(state.input[..length].to_vec());
+    state.input[..length].zeroize();
+    let context = original_context(state)?;
+    let (_, roster) = setup_aggregate::setup_browser::roster_context().ok_or(Error::Context)?;
+    if roster.proposal().identity_bytes() != context.identity() {
+        return Err(Error::Context);
+    }
+    match operation {
+        0 => {
+            if !input.is_empty() {
+                return Err(Error::Shape);
+            }
+            let selection =
+                setup_aggregate::setup_browser::unsigned_selection().ok_or(Error::Context)?;
+            if selection.roster_identity() != context.identity() {
+                return Err(Error::Context);
+            }
+            state.contribution_output = selection.body().to_vec();
+            state.unsigned_selection = Some(selection);
+        }
+        1 => {
+            if input.len() != 32 {
+                return Err(Error::Shape);
+            }
+            let selection = state.unsigned_selection.as_ref().ok_or(Error::Context)?;
+            let signature = state
+                .enrollment
+                .as_mut()
+                .ok_or(Error::Context)?
+                .credential
+                .sign_selection_proposal(&roster, selection, input[..].try_into().unwrap())?;
+            state.contribution_output = emitted_packet(selection.body(), &signature);
+        }
+        2 | 5 => {
+            let inputs =
+                setup_aggregate::setup_browser::selection_inputs().ok_or(Error::Context)?;
+            if inputs.roster().proposal().identity_bytes() != context.identity() {
+                return Err(Error::Context);
+            }
+            let selection = inputs.selection().selection();
+            state.contribution_output = if operation == 2 {
+                if input.len() != 32 {
+                    return Err(Error::Shape);
+                }
+                state
+                    .enrollment
+                    .as_mut()
+                    .ok_or(Error::Context)?
+                    .credential
+                    .endorse_selection(
+                        &roster,
+                        selection,
+                        context.position(),
+                        input[..].try_into().unwrap(),
+                    )?
+            } else {
+                if !input.is_empty() {
+                    return Err(Error::Shape);
+                }
+                setup_selection::endorsement_body(selection.identity(), context.position())?
+            };
+        }
+        3 => {
+            let (body, signature) = signed_packet(&input).ok_or(Error::Shape)?;
+            let proposal = setup_selection::authenticate_selection(roster, body, signature)?;
+            state
+                .enrollment
+                .as_mut()
+                .ok_or(Error::Context)?
+                .credential
+                .restore_selection_proposal(&proposal)?;
+        }
+        4 => {
+            let prefix = input.get(..4).ok_or(Error::Shape)?;
+            let length = u32::from_le_bytes(prefix.try_into().unwrap()) as usize;
+            if length > setup_selection::MAXIMUM_SELECTION_BYTES
+                || input.len() != 4 + length + 3309 + setup_selection::ENDORSEMENT_BYTES
+            {
+                return Err(Error::Shape);
+            }
+            let proposal = setup_selection::authenticate_selection(
+                roster.clone(),
+                &input[4..4 + length],
+                &input[4 + length..4 + length + 3309],
+            )?;
+            let endorsement = setup_selection::authenticate_endorsement(
+                &roster,
+                proposal.selection(),
+                &input[4 + length + 3309..],
+            )?;
+            state
+                .enrollment
+                .as_mut()
+                .ok_or(Error::Context)?
+                .credential
+                .restore_selection_endorsement(&roster, &endorsement)?;
+        }
+        6 => {
+            if !input.is_empty() {
+                return Err(Error::Shape);
+            }
+            state.contribution_output = state
+                .unsigned_selection
+                .as_ref()
+                .ok_or(Error::Context)?
+                .identity()
+                .to_vec();
+        }
+        _ => return Err(Error::Shape),
+    }
+    Ok(())
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn selection_signing(operation: u32, length: usize) -> u32 {
+    SESSION.with(|state| {
+        u32::from(selection_operation(&mut state.borrow_mut(), operation, length).is_err())
+    })
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn retain_selection_inputs() -> u32 {
+    SESSION.with(|state| {
+        let mut state = state.borrow_mut();
+        state.contribution_output.clear();
+        let Some(enrollment) = state.enrollment.as_ref() else {
+            return 1;
+        };
+        let Some((poll, _)) = setup_aggregate::setup_browser::roster_context() else {
+            return 1;
+        };
+        let Some(inputs) = setup_aggregate::setup_browser::selection_inputs() else {
+            return 1;
+        };
+        let Ok(retained) = inputs.retain(&enrollment.credential, &poll) else {
+            return 1;
+        };
+        state.contribution_output = retained;
+        0
+    })
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn restore_selection_inputs(length: usize) -> u32 {
+    SESSION.with(|state| {
+        let state = state.borrow();
+        let (Some(enrollment), Some(bytes)) =
+            (state.enrollment.as_ref(), state.input.get(..length))
+        else {
+            return 1;
+        };
+        u32::from(!setup_aggregate::setup_browser::restore_inputs(
+            &enrollment.credential,
+            bytes,
+        ))
     })
 }
 
@@ -993,7 +1088,13 @@ pub extern "C" fn contribution_output_length() -> usize {
 pub extern "C" fn begin_contribution(position: usize) -> u32 {
     SESSION.with(|state| {
         let state = state.borrow();
-        if state.contribution.body_started() || state.retained_context.is_some() {
+        if state.offer.body_started() {
+            return 1;
+        }
+        let Ok(context) = original_context(&state) else {
+            return 1;
+        };
+        if context.position() != position {
             return 1;
         }
         let Some(enrollment) = state.enrollment.as_ref() else {
@@ -1002,9 +1103,12 @@ pub extern "C" fn begin_contribution(position: usize) -> u32 {
         let Some(proposal) = state.signed_proposal.as_ref() else {
             return 1;
         };
+        if proposal.proposal().identity_bytes() != context.identity() {
+            return 1;
+        }
         if enrollment
             .credential
-            .validate_confirmation_position(proposal, position)
+            .validate_offer_context(&context)
             .is_err()
         {
             return 1;
@@ -1065,20 +1169,21 @@ pub extern "C" fn contribution_checkpoint_command(
     length: usize,
 ) -> u32 {
     SESSION.with(|state| {
-        if state
-            .borrow()
-            .enrollment
-            .as_ref()
-            .is_none_or(Enrollment::sources_retired)
+        let state = state.borrow();
+        let (Some(enrollment), Some(context)) =
+            (state.enrollment.as_ref(), state.retained_context.as_ref())
+        else {
+            return 1;
+        };
+        if enrollment.sources_retired()
+            || enrollment
+                .credential
+                .validate_offer_context(context)
+                .is_err()
         {
             return 1;
         }
-        contribution_prover::browser::checkpoint_command(
-            operation,
-            position,
-            length,
-            state.borrow().retained_context.as_ref(),
-        )
+        contribution_prover::browser::checkpoint_command(operation, position, length, Some(context))
     })
 }
 
@@ -1101,8 +1206,7 @@ pub extern "C" fn retain_proposal(length: usize) -> u32 {
         };
         if !(134..=state.input.len()).contains(&length)
             || state.retained_context.is_some()
-            || state.signed_proposal.is_some()
-            || state.contribution.body_started()
+            || state.offer.body_started()
             || contribution_prover::browser::phase() != 0
         {
             return 1;
@@ -1127,6 +1231,13 @@ pub extern "C" fn retain_proposal(length: usize) -> u32 {
         }) else {
             return 1;
         };
+        if state
+            .signed_proposal
+            .as_ref()
+            .is_some_and(|proposal| proposal.proposal().identity_bytes() != context.identity())
+        {
+            return 1;
+        }
         state.retained_context = Some(context);
         state.started = true;
         0
@@ -1175,7 +1286,7 @@ pub extern "C" fn retire_contribution_sources() -> u32 {
         let Some(original) = crate::own_verification::verified() else {
             return 1;
         };
-        let proposal = setup.inventory().proposal().proposal();
+        let proposal = setup.roster().proposal();
         let Some(position) = proposal.records().iter().position(|record| {
             record.body_digest() == original.body_digest()
                 && record.header().signing_public == *enrollment.credential.signing_public()
@@ -1198,6 +1309,8 @@ pub extern "C" fn retire_contribution_sources() -> u32 {
             return 1;
         }
         state.enrollment.as_mut().unwrap().retire_sources();
+        state.offer = OfferSigning::default();
+        state.unsigned_selection = None;
         contribution_prover::browser::retire();
         crate::operation_random::retire_contribution();
         0
@@ -1206,7 +1319,7 @@ pub extern "C" fn retire_contribution_sources() -> u32 {
 
 /// Restores the verified setup from the retained setup reference and its
 /// tag, once the setup verifier holds this visit's verified roster and
-/// confirmations, instead of verifying every opening again.
+/// selection certificate, instead of verifying every selected offer again.
 #[unsafe(no_mangle)]
 pub extern "C" fn restore_setup(length: usize) -> u32 {
     SESSION.with(|state| {

@@ -8,6 +8,7 @@ import { participantReleaseEnvelopeBytes } from '#tests/participant-release-cust
 import { byteAlignedSpongePermutations } from '#tests/proof-hash-work-model.js';
 import { rejectionSubsetBound } from '#tests/proof-randomness-budget-model.js';
 import { compileRegistrationEnrollmentCensus } from '#tests/registration-enrollment-model.js';
+import { compileSetupSelectionCensus } from '#tests/setup-selection-model.js';
 
 const envelopeBytes = ballotEnvelopeBytes;
 const signatureBytes = compileRegistrationEnrollmentCensus().signatureBytes;
@@ -16,8 +17,9 @@ export const authenticationPurposes = [
     'poll-definition',
     'registration',
     'roster-proposal',
-    'roster-confirmation',
-    'setup-opening',
+    'contribution-offer',
+    'setup-selection-proposal',
+    'setup-selection-endorsement',
     'ballot-envelope',
 ] as const;
 type AuthenticationPurpose = (typeof authenticationPurposes)[number];
@@ -33,7 +35,7 @@ type CompleteAuthenticationPurpose =
     (typeof completeAuthenticationPurposes)[number];
 
 export const authenticationContext = (purpose: CompleteAuthenticationPurpose) =>
-    `sealed-lattice/${purpose}/v1`;
+    `sealed-lattice/${purpose}/${purpose === 'poll-definition' ? 'v2' : 'v1'}`;
 
 // One original credential through ballot completion, under the original-state
 // invariant. Each purpose has one fixed first-evaluated intent; repeated
@@ -44,8 +46,9 @@ export const compileCurrentCredentialIntentBounds = () => {
         'poll-definition': 'organizer',
         registration: 'everyone',
         'roster-proposal': 'organizer',
-        'roster-confirmation': 'everyone',
-        'setup-opening': 'everyone',
+        'contribution-offer': 'everyone',
+        'setup-selection-proposal': 'organizer',
+        'setup-selection-endorsement': 'everyone',
         'ballot-envelope': 'everyone',
     };
     return (['organizer', 'other participant'] as const).map((role) => {
@@ -410,12 +413,16 @@ export const compileCompletedAuthenticationCensus = (
     )
         throw new RangeError('Invalid completed authentication population.');
     const participants = BigInt(participantCount);
+    const eligible = BigInt(
+        compileSetupSelectionCensus(participantCount).eligibleCount,
+    );
     const counts: Record<AuthenticationPurpose, bigint> = {
         'poll-definition': 1n,
         registration: registrationCount,
         'roster-proposal': 1n,
-        'roster-confirmation': participants,
-        'setup-opening': participants,
+        'contribution-offer': eligible,
+        'setup-selection-proposal': 1n,
+        'setup-selection-endorsement': participants,
         'ballot-envelope': BigInt(ballotCount),
     };
     const roles = compileAuthenticationFrameWork().map((role) => ({

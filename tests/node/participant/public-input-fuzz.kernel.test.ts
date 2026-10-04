@@ -270,28 +270,64 @@ const publicInputCommands: readonly PublicInputCommand[] = [
         parameters: ['length'],
         acceptsWithNonzero: true,
     },
-    { name: 'setup_confirmation', buffer: 'setup', parameters: ['length'] },
+    { name: 'setup_offer_begin', buffer: 'setup', parameters: ['length'] },
     {
-        name: 'setup_inventory_finish',
+        name: 'setup_offer_polynomial',
+        buffer: 'setup',
+        parameters: ['index', 'index', 'length'],
+    },
+    {
+        name: 'setup_offer_proof',
+        buffer: 'setup',
+        parameters: ['index', 'length'],
+    },
+    {
+        name: 'setup_offer_finish',
         buffer: 'setup',
         parameters: [],
         acceptsWithNonzero: true,
     },
-    { name: 'setup_begin_opening', buffer: 'setup', parameters: ['length'] },
+    {
+        name: 'setup_offer_available',
+        buffer: 'setup',
+        parameters: ['index', 'length'],
+        acceptsWithNonzero: true,
+    },
+    { name: 'setup_selection_build', buffer: 'setup', parameters: ['length'] },
+    { name: 'setup_selection_begin', buffer: 'setup', parameters: ['length'] },
+    {
+        name: 'setup_selection_aggregate',
+        buffer: 'setup',
+        parameters: [],
+        acceptsWithNonzero: true,
+    },
+    {
+        name: 'setup_begin_selected_offer',
+        buffer: 'setup',
+        parameters: ['index'],
+    },
     {
         name: 'setup_polynomial',
         buffer: 'setup',
         parameters: ['index', 'index', 'length'],
     },
-    { name: 'setup_proof', buffer: 'setup', parameters: ['index', 'length'] },
     {
-        name: 'setup_finish_contribution',
+        name: 'setup_finish_selected_offer',
         buffer: 'setup',
         parameters: [],
         acceptsWithNonzero: true,
     },
     {
-        name: 'setup_finish',
+        name: 'setup_selection_finish',
+        buffer: 'setup',
+        parameters: [],
+        acceptsWithNonzero: true,
+    },
+    { name: 'setup_endorsement', buffer: 'setup', parameters: ['length'] },
+    { name: 'setup_certificate_build', buffer: 'setup', parameters: [] },
+    { name: 'setup_certificate', buffer: 'setup', parameters: ['length'] },
+    {
+        name: 'setup_finish_certificate',
         buffer: 'setup',
         parameters: [],
         acceptsWithNonzero: true,
@@ -382,6 +418,80 @@ const drawArgument = (
 const writtenBytes = 16_384;
 
 describe('participant module public input', () => {
+    it('withholds offer and setup authority for partial carriers and proof bytes without a verified roster', async () => {
+        const { kernel } = await instantiate();
+        const signatureBytes = organizer.limits.registration.signatureBytes;
+        const envelope = shake('unscoped-offer/envelope', 96);
+        const selection = shake('unscoped-selection/body', 128);
+        const carriers: readonly Readonly<{
+            name:
+                | 'setup_offer_begin'
+                | 'setup_selection_begin'
+                | 'setup_certificate';
+            bytes: Uint8Array;
+        }>[] = [
+            { name: 'setup_offer_begin', bytes: unsigned32(0xffff_ffff) },
+            {
+                name: 'setup_offer_begin',
+                bytes: concatenate(
+                    unsigned32(envelope.length),
+                    envelope,
+                    new Uint8Array(signatureBytes - 1),
+                ),
+            },
+            { name: 'setup_selection_begin', bytes: unsigned32(0xffff_ffff) },
+            {
+                name: 'setup_selection_begin',
+                bytes: concatenate(
+                    unsigned32(selection.length),
+                    selection,
+                    new Uint8Array(signatureBytes - 1),
+                ),
+            },
+            { name: 'setup_certificate', bytes: encodeText('SSC1') },
+            {
+                name: 'setup_certificate',
+                bytes: concatenate(encodeText('SSC1'), unsigned32(0xffff_ffff)),
+            },
+            {
+                name: 'setup_certificate',
+                bytes: concatenate(
+                    encodeText('SSC1'),
+                    unsigned32(selection.length),
+                    selection,
+                    new Uint8Array(signatureBytes),
+                ),
+            },
+        ];
+        // These are controls of the prerequisite boundary. Authenticated
+        // roster/body/certificate controls run in the guarded complete cohort.
+        for (const { name, bytes } of carriers) {
+            writeSetupInput(kernel, bytes);
+            expect(call(kernel, name, [bytes.length], name)).not.toBe(0);
+            expect(kernel.setup_offer_finish()).toBe(0);
+            expect(kernel.setup_selection_finish()).toBe(0);
+            expect(kernel.setup_finish_certificate()).toBe(0);
+            expect(kernel.setup_selection_count()).toBe(0);
+            expect(kernel.setup_selection_position(0) >>> 0).toBe(0xffff_ffff);
+            expect(kernel.setup_selection_body_identity_pointer(0)).toBe(0);
+        }
+        for (const length of [0, 1, 64, 4095]) {
+            writeSetupInput(kernel, organizer.proof.subarray(0, length));
+            expect(
+                call(
+                    kernel,
+                    'setup_offer_proof',
+                    [0, length],
+                    `unscoped-proof/${String(length)}`,
+                ),
+            ).not.toBe(0);
+            expect(kernel.setup_offer_finish()).toBe(0);
+        }
+        const begin = rosterBegin(minimumParticipants);
+        writeSetupInput(kernel, begin);
+        expect(kernel.setup_roster_begin(begin.length)).toBe(0);
+    });
+
     it('refuses arbitrary arguments and bytes at every command that reads public input, and the instance stays usable', async () => {
         const { kernel } = await instantiate();
         // Open roster verifications give the record commands a verifier to

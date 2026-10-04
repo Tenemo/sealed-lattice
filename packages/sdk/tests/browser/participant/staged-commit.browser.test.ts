@@ -65,7 +65,8 @@ const write = (
 
 // Transaction-layer custody fixture: real root and record AES-GCM, real
 // module identities and real IndexedDB. Opaque suffix bytes stand for an
-// original generation-six seed/checkpoint and its completed successor;
+// original phase-six seed/checkpoint and its completed successor, both
+// inside the same preparation generation;
 // they are not protocol capabilities or valid contribution proofs.
 const fixture = async () => {
     const namespace = 'staged-' + crypto.randomUUID();
@@ -118,30 +119,30 @@ const fixture = async () => {
         poll: new Uint8Array(64).fill(41),
         references: [],
         suffixes: {
-            contribution: new Uint8Array([
+            preparation: new Uint8Array([
                 ...new Uint8Array(64).fill(43),
                 ...oldRecord.key,
                 ...oldAssociatedData,
             ]),
         },
     };
-    const plaintext = encodeManifest(manifest, 6);
+    const plaintext = encodeManifest(manifest, 4);
     const key = await createRootKey();
     const sealed = await sealRoot(
         key,
-        6,
+        4,
         rootAssociatedData(runtime),
         plaintext,
     );
     const head = {
-        generation: 6,
+        generation: 4,
         runtime: hexadecimal(runtime),
         hash: hexadecimal(custodyIdentity(kernel, custodyPurpose.root, sealed)),
     };
     const predecessor: AuthenticatedRoot = { head, plaintext, manifest };
     const successor: ParticipantManifest = {
         ...manifest,
-        suffixes: { contribution: Uint8Array.of(83, 67, 66, 49) },
+        suffixes: { preparation: Uint8Array.of(83, 67, 66, 49) },
     };
     await write(
         database,
@@ -159,7 +160,7 @@ const fixture = async () => {
         },
     );
     const transition = (): RootTransition => ({
-        generation: 7,
+        generation: 4,
         manifest: successor,
         predecessorRecords: [required],
         stagedRecords: [staged],
@@ -172,7 +173,7 @@ const fixture = async () => {
         expect(snapshot.counts.checkpoint).toBe(1);
         const reopened = await openRoot(
             snapshot.key as CryptoKey,
-            6,
+            4,
             rootAssociatedData(runtime),
             snapshot.root as Uint8Array,
         );
@@ -270,7 +271,7 @@ describe('staged-record root commit boundary', () => {
             fixed.predecessor,
             fixed.transition(),
         );
-        expect(successor.head.generation).toBe(7);
+        expect(successor.head.generation).toBe(4);
         let error: unknown;
         try {
             await commitRoot(
@@ -347,7 +348,7 @@ describe('staged-record root commit boundary', () => {
             intercepted.mockRestore();
         }
         const snapshot = await snapshotParticipant(fixed.database);
-        expect(snapshot.head).toMatchObject({ generation: 7 });
+        expect(snapshot.head).toMatchObject({ generation: 4 });
         expect(snapshot.counts.checkpoint).toBe(0);
         expect(snapshot.counts.contribution).toBe(1);
     });

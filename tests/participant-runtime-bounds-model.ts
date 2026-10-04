@@ -6,7 +6,6 @@ import type {
 } from '#packages/sdk/src/participant/worker/bounds.js';
 import { compileBallotBodyCensus } from '#tests/ballot-body-model.js';
 import { compileCloseWireCensus } from '#tests/close-wire-model.js';
-import { compileContributionAuthenticationCensus } from '#tests/contribution-authentication-model.js';
 import { compileContributionBodyCensus } from '#tests/contribution-body-model.js';
 import { compileFirstOracleCheckpointCensus } from '#tests/first-oracle-checkpoint-model.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
@@ -19,6 +18,7 @@ import { compileRegistrationEnrollmentCensus } from '#tests/registration-enrollm
 import { compileRegistrationKeyRelationCensus } from '#tests/registration-key-relation-model.js';
 import { compileRosterProposalCensus } from '#tests/roster-proposal-model.js';
 import { compileSetupContributionRelationCensus } from '#tests/setup-contribution-relation-model.js';
+import { compileSetupSelectionWireCensus } from '#tests/setup-selection-wire-model.js';
 import {
     ballotScoreRange,
     deriveSupportedProfile,
@@ -45,8 +45,7 @@ export const compileParticipantRuntimeProfile = (
     const body = compileContributionBodyCensus(profile);
     const checkpoint = compileFirstOracleCheckpointCensus(profile);
     const relation = compileSetupContributionRelationCensus(profile);
-    const authentication =
-        compileContributionAuthenticationCensus(participantCount);
+    const authentication = compileSetupSelectionWireCensus(participantCount);
     const ballotBody = compileBallotBodyCensus(profile);
     const ballotCustody = compileParticipantBallotCustody(profile);
     const closeWire = compileCloseWireCensus(profile);
@@ -57,6 +56,7 @@ export const compileParticipantRuntimeProfile = (
         participantCount,
         optionCount,
         setupContributorCount: profile.setupContributorCount,
+        eligibleContributorCount: authentication.eligibleCount,
         proposalBytes: number(
             compileRosterProposalCensus(participantCount).proposalBytes,
         ),
@@ -97,7 +97,6 @@ export const compileParticipantRuntimeProfile = (
             ),
             firstOracleColumns: relation.wordColumns + relation.booleanColumns,
             statementBytes: number(relation.expandedStatementByteLength),
-            saltBytes: number(body.saltBytes),
             bodyHeaderBytes: number(body.headerBytes),
             proofHeaderBytes: number(
                 compileFullWordProofLayout(profile).headerBytes,
@@ -106,11 +105,7 @@ export const compileParticipantRuntimeProfile = (
             maximumProofBytes: number(body.maximumProofBytes),
             maximumStateBytes: number(custody.maximumMetadataBytes),
             maximumCheckpointHeaderBytes: number(checkpoint.maximumHeaderBytes),
-            confirmationBodyBytes: number(authentication.confirmationBodyBytes),
-            openingBodyBytes: number(authentication.openingBodyBytes),
-            confirmationPacketBytes: number(
-                authentication.confirmationPacketBytes,
-            ),
+            offerEnvelopeBytes: number(authentication.offerEnvelopeBytes),
             requiredStorageBytes: number(custody.maximumRetainedPayloadBytes),
             polynomials: body.polynomials.map((polynomial) => ({
                 expandedIndex: polynomial.expandedIndex,
@@ -123,6 +118,18 @@ export const compileParticipantRuntimeProfile = (
                 length: number(record.length),
             })),
             checkpointLengths: custody.checkpointLengths.map(number),
+        },
+        preparation: {
+            selectionBodyBytes: number(authentication.selectionBodyBytes),
+            endorsementBodyBytes: number(authentication.endorsementBodyBytes),
+            selectionReferenceBytes: number(custody.selectionReferenceBytes),
+            certificateBytes: number(authentication.certificateBytes),
+            endorsementPacketBytes: number(
+                authentication.endorsementPacketBytes,
+            ),
+            signedSelectionPacketBytes: number(
+                authentication.signedSelectionPacketBytes,
+            ),
         },
         ballot: {
             minimumScore: ballotScoreRange.minimum,

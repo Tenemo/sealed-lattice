@@ -4,14 +4,18 @@ mod completion;
 mod contribution;
 #[path = "no-result-close.rs"]
 mod no_result_close;
+mod participants;
 #[path = "public-output.rs"]
 mod public_output;
 mod scenario;
+#[path = "selected-setup-completion.rs"]
+mod selected_setup_completion;
+mod selection;
 use aggregate::{ballot_key, final_keys, polynomial_bytes};
+use participants::OriginalEnrollments;
 use registration_credentials::{
     RETAINED_TAG_BYTES,
     ballot_authentication::BallotEnvelope,
-    contribution_authentication::{CommitmentInventory, SignedOpening, verify_confirmation},
     foundation::{
         StabilizedDisplayText,
         ceremony::{Manifest, OptionDefinition},
@@ -83,28 +87,18 @@ impl BallotInputs<'_> {
     fn cast(
         &self,
         enrollment: &mut Enrollment,
-        opening: Option<&SignedOpening>,
         position: usize,
         scores: &[u8],
     ) -> close::Submission {
         let profile = self.scenario.profile();
         let proposal = RetainedContributionContext::parse(
             &enrollment.credential,
-            &self.setup.inventory().proposal().proposal().records()[position],
+            &self.setup.roster().proposal().records()[position],
             self.poll,
             position,
-            self.setup.inventory().proposal().proposal().body(),
+            self.setup.roster().proposal().body(),
         )
         .unwrap();
-        // Only a setup contributor names its own opening.
-        let opening_packet = opening.map_or_else(Vec::new, |opening| {
-            [
-                (opening.body().len() as u32).to_le_bytes().as_slice(),
-                opening.body(),
-                opening.signature(),
-            ]
-            .concat()
-        });
         let retained_reference = registration_enrollment::ballot::retained_setup_reference(
             &enrollment.credential,
             self.poll,
@@ -117,9 +111,7 @@ impl BallotInputs<'_> {
             (self.definition.body.len() as u32).to_le_bytes().as_slice(),
             self.definition.body.as_slice(),
             self.definition.signature.as_slice(),
-            self.setup.inventory().identity().as_slice(),
-            (opening_packet.len() as u32).to_le_bytes().as_slice(),
-            opening_packet.as_slice(),
+            self.setup.identity().as_slice(),
             retained_reference.as_slice(),
         ]
         .concat();
@@ -238,13 +230,31 @@ fn main() {
     let arguments = std::env::args().skip(1).collect::<Vec<_>>();
     assert!(
         arguments.len() == 5
-            || (arguments.len() == 6 && matches!(arguments[5].as_str(), "empty" | "invalid-only"))
+            || (arguments.len() == 6
+                && matches!(
+                    arguments[5].as_str(),
+                    "empty" | "invalid-only" | "setup-departure" | "selection-fork"
+                ))
     );
     let scratch = PathBuf::from(&arguments[2]);
     assert!(scratch.is_dir());
     let profile =
         Profile::new(arguments[3].parse().unwrap(), arguments[4].parse().unwrap()).unwrap();
-    let scenario = Scenario::new(profile);
+    let scenario = if arguments
+        .get(5)
+        .is_some_and(|mode| mode == "setup-departure")
+    {
+        assert_eq!(profile, Profile::new(4, 2).unwrap());
+        Scenario::setup_departure()
+    } else if arguments
+        .get(5)
+        .is_some_and(|mode| mode == "selection-fork")
+    {
+        assert_eq!(profile, Profile::new(4, 2).unwrap());
+        Scenario::selection_fork()
+    } else {
+        Scenario::new(profile)
+    };
     let count = profile.participants();
     let output = PathBuf::from(&arguments[0]);
     fs::create_dir(&output).unwrap();
@@ -323,7 +333,8 @@ fn main() {
     let mut corrupt_wrapping_key = Zeroizing::new([0u8; 32]);
     for (position, directory) in directories.iter().enumerate().skip(1) {
         let keys = random::<96>();
-        let equivocator = Some(position) == scenario.equivocator;
+        let retained_corrupt_signer = Some(position) == scenario.equivocator
+            || (scenario.departed.is_some() && scenario.corrupt(position));
         let mut record_output = EnrollmentOutput::new(directory, &mut controls[position]);
         enrollments.push(
             Enrollment::create_for_poll(
@@ -343,7 +354,7 @@ fn main() {
                         assert_eq!(offset, enrollment_capsules[position][capsule].len());
                         enrollment_capsules[position][capsule].extend(bytes);
                     }
-                    if equivocator && kind == 5 {
+                    if retained_corrupt_signer && kind == 5 {
                         assert_eq!(offset, corrupt_signing_capsule.len());
                         corrupt_signing_capsule.extend(bytes);
                     }
@@ -352,7 +363,7 @@ fn main() {
             .unwrap(),
         );
         record_output.finish();
-        if equivocator {
+        if retained_corrupt_signer {
             corrupt_wrapping_key.copy_from_slice(&keys[32..64]);
         }
         enrollment_data_keys.push(keys);
@@ -449,87 +460,70 @@ fn main() {
     write(output.join("proposal-signature.bin"), &proposal_signature);
     let roster = Arc::new(verify_roster_proposal(proposal, &proposal_signature).unwrap());
     println!("Verified original enrollment roster");
-    // Every participant confirms the roster once. Only the setup
-    // contributors commit and open; any other position's contribution is
-    // refused before commitment work, and its confirmation names its own
-    // registration body instead.
-    let contributors = profile.setup_contributors();
-    let mut confirmations = Vec::new();
-    for (position, enrollment) in enrollments.iter_mut().enumerate().skip(contributors) {
-        assert!(matches!(
-            enrollment
-                .credential
-                .validate_confirmation_position(&roster, position),
-            Err(registration_credentials::Error::Context)
-        ));
-        assert!(roster.proposal().contribution_role(position).is_err());
-        let signed = enrollment
-            .credential
-            .sign_roster_confirmation(&roster, position, *random::<32>())
+    let mut enrollments = OriginalEnrollments::new(enrollments);
+    if let Some(position) = scenario.departed {
+        // No future message or private operation can access this authority.
+        enrollments.depart(position);
+        assert_eq!(enrollments.positions(), [0, 2, 3]);
+    }
+    let selected_authors: Vec<_> = if scenario.departed.is_some() || scenario.selection_fork {
+        vec![0, 2]
+    } else {
+        (0..profile.setup_contributors()).collect()
+    };
+    let alternate_endorser = if scenario.departed.is_some() || scenario.selection_fork {
+        let position = if scenario.selection_fork { 0 } else { 2 };
+        let record = &roster.proposal().records()[position];
+        let key = if position == 0 {
+            data_keys[32..64].try_into().unwrap()
+        } else {
+            &*corrupt_wrapping_key
+        };
+        let capsule = if position == 0 {
+            &signing_capsule
+        } else {
+            &*corrupt_signing_capsule
+        };
+        let mut credential = registration_credentials::Credential::open_complete(
+            record.header().signing_public,
+            record.body_digest(),
+            key,
+            capsule,
+        )
+        .unwrap();
+        let retained = RetainedContributionContext::parse(
+            &credential,
+            record,
+            &poll,
+            position,
+            roster.proposal().body(),
+        )
+        .unwrap();
+        credential.confirm_roster(&retained).unwrap();
+        credential
+            .unlock_unused_purposes(
+                registration_credentials::SigningPurpose::SelectionEndorsement.mask()
+                    | registration_credentials::SigningPurpose::SelectionProposal.mask(),
+            )
             .unwrap();
-        let directory = output.join(format!("contribution-{position}"));
-        fs::create_dir_all(&directory).unwrap();
-        write(directory.join("confirmation.bin"), signed.body());
-        write(
-            directory.join("confirmation-signature.bin"),
-            signed.signature(),
-        );
-        confirmations
-            .push(verify_confirmation(&roster, signed.body(), signed.signature()).unwrap());
-    }
-    let mut contribution_directories = Vec::new();
-    let mut body_headers = Vec::new();
-    for (position, enrollment) in enrollments.iter_mut().enumerate().take(contributors) {
-        let directory = output.join(format!("contribution-{position}"));
-        let (signing, header) =
-            contribution::generate(&roster, enrollment, position, &directory, &random::<64>());
-        let signed = signing.confirmation().unwrap();
-        write(directory.join("confirmation.bin"), signed.body());
-        write(
-            directory.join("confirmation-signature.bin"),
-            signed.signature(),
-        );
-        write(directory.join("body-header.bin"), &header);
-        confirmations
-            .push(verify_confirmation(&roster, signed.body(), signed.signature()).unwrap());
-        contribution_directories.push(directory);
-        body_headers.push(header);
-        println!("Generated and confirmed contribution {position}");
-    }
-    let inventory = Arc::new(CommitmentInventory::new(roster, confirmations).unwrap());
-    write(output.join("inventory.bin"), inventory.body());
-    write(output.join("inventory-identity.bin"), &inventory.identity());
-    let mut openings = Vec::new();
-    for (position, enrollment) in enrollments.iter_mut().enumerate().take(contributors) {
-        let opening = enrollment
-            .credential
-            .sign_opening(&inventory, *random::<32>())
-            .unwrap();
-        write(
-            contribution_directories[position].join("opening.bin"),
-            opening.body(),
-        );
-        write(
-            contribution_directories[position].join("opening-signature.bin"),
-            opening.signature(),
-        );
-        openings.push(opening);
-    }
-    aggregate::verify_source_refusals(
-        inventory.clone(),
-        &contribution_directories,
-        &body_headers,
-        &openings,
+        Some((position, credential))
+    } else {
+        None
+    };
+    let prepared = selection::run(
+        &output,
+        &poll,
+        roster,
+        &mut enrollments,
+        &selected_authors,
+        alternate_endorser,
+        scenario.selection_fork,
     );
-    let setup = Arc::new(aggregate::verify(
-        inventory.clone(),
-        &contribution_directories,
-        &body_headers,
-        &openings,
-        &output.join("aggregates"),
-    ));
-    for enrollment in &mut enrollments {
+    let setup = prepared.setup;
+    let certificate = prepared.certificate;
+    for (_, enrollment) in enrollments.iter_mut() {
         enrollment.retire_sources();
+        enrollment.credential.retire_preparation();
         assert!(enrollment.sources_retired());
         assert!(enrollment.contribution_source(profile).is_err());
         assert!(
@@ -538,6 +532,18 @@ fn main() {
                 .is_err()
         );
     }
+    if scenario.departed.is_some() || scenario.selection_fork {
+        selected_setup_completion::run(
+            &output,
+            &scratch,
+            poll,
+            setup,
+            &packet,
+            &mut enrollments,
+            &scenario,
+        );
+        return;
+    }
     if let Some(mode) = arguments.get(5) {
         let invalid_only = mode == "invalid-only";
         let barrier = no_result_close::run(
@@ -545,7 +551,6 @@ fn main() {
             poll.clone(),
             setup.clone(),
             &mut enrollments,
-            &openings,
             invalid_only,
             &scenario,
         );
@@ -566,7 +571,6 @@ fn main() {
             &scratch,
             barrier,
             &mut enrollments,
-            &openings,
             completion::Finality {
                 signers: (0..count).collect(),
                 statuses,
@@ -580,118 +584,13 @@ fn main() {
     let fhe_key = ballot_key(profile);
     let retained_proposal = RetainedContributionContext::parse(
         &enrollments[0].credential,
-        &inventory.proposal().proposal().records()[0],
+        &setup.roster().proposal().records()[0],
         &poll,
         0,
-        inventory.proposal().proposal().body(),
+        setup.roster().proposal().body(),
     )
     .unwrap();
-    let owner = enrollments[0]
-        .credential
-        .retain_ballot_owner(
-            &poll,
-            &retained_proposal,
-            inventory.identity(),
-            openings[0].body(),
-            openings[0].signature(),
-        )
-        .unwrap();
-    // A separately verified poll cannot supply another option count for
-    // this original registration's retained context.
-    let other_options = if profile.options() < 20 {
-        profile.options() + 1
-    } else {
-        profile.options() - 1
-    };
-    let other_manifest = Manifest::new(
-        text("Another poll"),
-        (0..other_options as u16)
-            .map(|index| {
-                OptionDefinition::new(
-                    index,
-                    format!("option-{index}"),
-                    text(&format!("Option {index}")),
-                )
-                .unwrap()
-            })
-            .collect(),
-    )
-    .unwrap();
-    let other_packet = registration_credentials::Credential::from_seed(*random::<32>())
-        .create_poll(
-            PollDraft::new(other_manifest, 1, count as u16).unwrap(),
-            runtime,
-            *random::<32>(),
-            *random::<32>(),
-        )
-        .unwrap();
-    let other_poll = verify_poll(
-        other_packet.identity,
-        runtime,
-        &other_packet.body,
-        &other_packet.signature,
-    )
-    .unwrap();
-    assert!(
-        RetainedContributionContext::parse(
-            &enrollments[0].credential,
-            &inventory.proposal().proposal().records()[0],
-            &other_poll,
-            0,
-            inventory.proposal().proposal().body(),
-        )
-        .is_err()
-    );
-    assert!(
-        enrollments[1]
-            .credential
-            .retain_ballot_owner(
-                &poll,
-                &retained_proposal,
-                inventory.identity(),
-                openings[0].body(),
-                openings[0].signature()
-            )
-            .is_err()
-    );
-    let mut changed_signature = *openings[0].signature();
-    changed_signature[0] ^= 1;
-    assert!(
-        enrollments[0]
-            .credential
-            .retain_ballot_owner(
-                &poll,
-                &retained_proposal,
-                inventory.identity(),
-                openings[0].body(),
-                &changed_signature
-            )
-            .is_err()
-    );
-    assert!(
-        enrollments[0]
-            .credential
-            .retain_ballot_owner(
-                &poll,
-                &retained_proposal,
-                [0; 64],
-                openings[0].body(),
-                openings[0].signature()
-            )
-            .is_err()
-    );
-    assert!(
-        enrollments[0]
-            .credential
-            .retain_ballot_owner(
-                &poll,
-                &retained_proposal,
-                inventory.identity(),
-                openings[1].body(),
-                openings[1].signature()
-            )
-            .is_err()
-    );
+    let owner = close::owner_of(&enrollments[0].credential, &poll, &setup, 0);
     let retained_reference = registration_enrollment::ballot::retained_setup_reference(
         &enrollments[0].credential,
         &poll,
@@ -699,19 +598,11 @@ fn main() {
     )
     .unwrap();
     let retained_record = &retained_reference[..retained_reference.len() - RETAINED_TAG_BYTES];
-    // The setup verifier's result comes back for the same inventory from the
-    // reference the participant's credential keyed, as a later visit restores
-    // it instead of verifying every opening again.
     let restore = |credential: &registration_credentials::Credential, retained: &[u8]| {
-        setup_aggregate::verified::SetupAggregator::new(setup.inventory().clone())
-            .unwrap()
-            .restore(credential, &poll, retained)
+        VerifiedSetupAggregate::restore(credential, &poll, &certificate, retained)
     };
     let restored = restore(&enrollments[0].credential, &retained_reference).unwrap();
-    assert_eq!(
-        restored.inventory().identity(),
-        setup.inventory().identity()
-    );
+    assert_eq!(restored.identity(), setup.identity());
     assert_eq!(restored.polynomials().len(), setup.polynomials().len());
     for (left, right) in restored.polynomials().iter().zip(setup.polynomials()) {
         assert_eq!(
@@ -720,7 +611,7 @@ fn main() {
         );
     }
     let inputs =
-        setup_aggregate::RetainedSetupInputs::parse(profile, retained_record, inventory.identity())
+        setup_aggregate::RetainedSetupInputs::parse(profile, retained_record, setup.identity())
             .unwrap();
     let private_context = ballot_encryption::context::BallotComputationContext::from_retained(
         poll.clone(),
@@ -732,12 +623,6 @@ fn main() {
         ballot_proof::context::private_proof_role(&private_context).unwrap(),
         ballot_proof::context::proof_role(&poll, &setup, 0).unwrap()
     );
-    let opening_packet = [
-        (openings[0].body().len() as u32).to_le_bytes().as_slice(),
-        openings[0].body(),
-        openings[0].signature(),
-    ]
-    .concat();
     let control_with_reference = |reference: &[u8]| {
         [
             poll.identity().as_slice(),
@@ -745,15 +630,11 @@ fn main() {
             (packet.body.len() as u32).to_le_bytes().as_slice(),
             packet.body.as_slice(),
             packet.signature.as_slice(),
-            inventory.identity().as_slice(),
-            (opening_packet.len() as u32).to_le_bytes().as_slice(),
-            opening_packet.as_slice(),
+            setup.identity().as_slice(),
             reference,
         ]
         .concat()
     };
-    // A reference keyed to another credential, a changed digest under the
-    // original tag, and an untagged record are all refused before any work.
     let foreign_reference = registration_enrollment::ballot::retained_setup_reference(
         &enrollments[1].credential,
         &poll,
@@ -767,25 +648,22 @@ fn main() {
             registration_enrollment::ballot::BallotWork::new(
                 &enrollments[0].credential,
                 &retained_proposal,
-                &control_with_reference(reference),
+                &control_with_reference(reference)
             )
             .is_err()
         );
         assert!(restore(&enrollments[0].credential, reference).is_err());
     }
-    // Another participant's credential restores nothing from this one's
-    // reference.
     assert!(restore(&enrollments[1].credential, &retained_reference).is_err());
-    // The last position contributes nothing. Its owner comes only from the
-    // setup reference its own credential keyed, never from an opening, and a
-    // contributor's never from its reference alone.
+    // Selected and nonselected original positions use the same certified,
+    // credential-keyed setup reference; neither needs an own offer later.
     let outsider = count - 1;
     let outsider_proposal = RetainedContributionContext::parse(
         &enrollments[outsider].credential,
-        &inventory.proposal().proposal().records()[outsider],
+        &setup.roster().proposal().records()[outsider],
         &poll,
         outsider,
-        inventory.proposal().proposal().body(),
+        setup.roster().proposal().body(),
     )
     .unwrap();
     let outsider_reference = registration_enrollment::ballot::retained_setup_reference(
@@ -794,93 +672,15 @@ fn main() {
         &setup,
     )
     .unwrap();
-    let (outsider_record, outsider_tag) =
-        outsider_reference.split_at(outsider_reference.len() - RETAINED_TAG_BYTES);
-    let outsider_owner = enrollments[outsider]
-        .credential
-        .retain_setup_ballot_owner(
-            &poll,
-            &outsider_proposal,
-            inventory.identity(),
-            outsider_record,
-            outsider_tag,
-        )
-        .unwrap();
+    let outsider_owner =
+        close::owner_of(&enrollments[outsider].credential, &poll, &setup, outsider);
     assert_eq!(outsider_owner.position(), outsider);
-    assert_eq!(outsider_owner.inventory(), &inventory.identity());
-    let organizer_tag = &retained_reference[retained_record.len()..];
-    for (record, tag, inventory) in [
-        (retained_record, organizer_tag, inventory.identity()),
-        (outsider_record, outsider_tag, [0; 64]),
-    ] {
-        assert!(
-            enrollments[outsider]
-                .credential
-                .retain_setup_ballot_owner(&poll, &outsider_proposal, inventory, record, tag)
-                .is_err()
-        );
-    }
-    assert!(
-        enrollments[outsider]
-            .credential
-            .retain_ballot_owner(
-                &poll,
-                &outsider_proposal,
-                inventory.identity(),
-                openings[0].body(),
-                openings[0].signature()
-            )
-            .is_err()
-    );
-    assert!(
-        enrollments[0]
-            .credential
-            .retain_setup_ballot_owner(
-                &poll,
-                &retained_proposal,
-                inventory.identity(),
-                retained_record,
-                organizer_tag
-            )
-            .is_err()
-    );
-    // A ballot names an opening exactly when its author contributed.
-    let control_of = |opening: &[u8], reference: &[u8]| {
-        [
-            poll.identity().as_slice(),
-            poll.runtime().as_slice(),
-            (packet.body.len() as u32).to_le_bytes().as_slice(),
-            packet.body.as_slice(),
-            packet.signature.as_slice(),
-            inventory.identity().as_slice(),
-            (opening.len() as u32).to_le_bytes().as_slice(),
-            opening,
-            reference,
-        ]
-        .concat()
-    };
-    for (position, context, control) in [
-        (
-            outsider,
-            &outsider_proposal,
-            control_of(&opening_packet, &outsider_reference),
-        ),
-        (0, &retained_proposal, control_of(&[], &retained_reference)),
-    ] {
-        assert!(
-            registration_enrollment::ballot::BallotWork::new(
-                &enrollments[position].credential,
-                context,
-                &control,
-            )
-            .is_err()
-        );
-    }
+    assert_eq!(outsider_owner.inventory(), &setup.identity());
     assert_eq!(
         registration_enrollment::ballot::BallotWork::new(
             &enrollments[outsider].credential,
             &outsider_proposal,
-            &control_of(&[], &outsider_reference),
+            &control_with_reference(&outsider_reference)
         )
         .unwrap()
         .into_owner()
@@ -1042,7 +842,7 @@ fn main() {
     let envelope = BallotEnvelope::new(
         profile,
         poll.identity(),
-        inventory.identity(),
+        setup.identity(),
         0,
         ballot_time,
         body.length(),
@@ -1073,15 +873,18 @@ fn main() {
         work.command(&mut enrollments[0].credential, 8, 0, &signing)
             .is_err()
     );
-    let original = inventory.proposal().proposal().records()[0].as_ref();
+    let original = setup.roster().proposal().records()[0].as_ref();
     let restore_credential = || {
-        registration_credentials::Credential::open_complete(
+        let mut credential = registration_credentials::Credential::open_complete(
             original.header().signing_public,
             original.body_digest(),
             data_keys[32..64].try_into().unwrap(),
             &signing_capsule,
         )
-        .unwrap()
+        .unwrap();
+        credential.confirm_roster(&retained_proposal).unwrap();
+        credential.retire_preparation();
+        credential
     };
     let mut restored = restore_credential();
     for changed_body in [false, true] {
@@ -1150,15 +953,7 @@ fn main() {
             );
         }
     }
-    let restored_owner = restored
-        .retain_ballot_owner(
-            &poll,
-            &retained_proposal,
-            inventory.identity(),
-            openings[0].body(),
-            openings[0].signature(),
-        )
-        .unwrap();
+    let restored_owner = close::owner_of(&restored, &poll, &setup, 0);
     let mut changed_envelope = *envelope.bytes();
     changed_envelope[150] ^= 1;
     let changed_envelope = BallotEnvelope::decode(profile, &changed_envelope).unwrap();
@@ -1251,7 +1046,7 @@ fn main() {
         let wrong_position = BallotEnvelope::new(
             profile,
             *body.relation().poll(),
-            setup.inventory().identity(),
+            setup.identity(),
             author,
             close::now_milliseconds(),
             body.length(),
@@ -1260,11 +1055,7 @@ fn main() {
         .unwrap();
         let wrong_position_signature = enrollments[author]
             .credential
-            .sign_ballot_envelope(
-                setup.inventory().proposal(),
-                &wrong_position,
-                *random::<32>(),
-            )
+            .sign_ballot_envelope(setup.roster(), &wrong_position, *random::<32>())
             .unwrap();
         let authentication = ballot_proof::submission::authenticate_envelope(
             &setup,
@@ -1320,7 +1111,7 @@ fn main() {
         let invalid_proof_envelope = BallotEnvelope::new(
             profile,
             poll.identity(),
-            setup.inventory().identity(),
+            setup.identity(),
             author,
             close::now_milliseconds(),
             envelope.body_length(),
@@ -1329,11 +1120,7 @@ fn main() {
         .unwrap();
         let invalid_proof_signature = enrollments[author]
             .credential
-            .sign_ballot_envelope(
-                setup.inventory().proposal(),
-                &invalid_proof_envelope,
-                *random::<32>(),
-            )
+            .sign_ballot_envelope(setup.roster(), &invalid_proof_envelope, *random::<32>())
             .unwrap();
         write(
             ballot_directory.join("invalid-proof-envelope.bin"),
@@ -1412,22 +1199,32 @@ fn main() {
     for &position in scenario.voters[1..].iter().chain(&scenario.omitted) {
         submissions[position] = Some(ballot_inputs.cast(
             &mut enrollments[position],
-            openings.get(position),
             position,
             &scenario.scores(position),
         ));
         println!("Cast and accepted honest ballot {position}");
     }
     let equivocator = scenario.equivocator.map(|position| {
-        let record = &setup.inventory().proposal().proposal().records()[position];
+        let record = &setup.roster().proposal().records()[position];
         let restore = || {
-            registration_credentials::Credential::open_complete(
+            let mut credential = registration_credentials::Credential::open_complete(
                 record.header().signing_public,
                 record.body_digest(),
                 &corrupt_wrapping_key,
                 &corrupt_signing_capsule,
             )
-            .unwrap()
+            .unwrap();
+            let retained = RetainedContributionContext::parse(
+                &credential,
+                record,
+                &poll,
+                position,
+                setup.roster().proposal().body(),
+            )
+            .unwrap();
+            credential.confirm_roster(&retained).unwrap();
+            credential.retire_preparation();
+            credential
         };
         // A corrupt participant's own root may unlock any purpose on its
         // forks.
@@ -1453,7 +1250,6 @@ fn main() {
         setup,
         close::Participants {
             enrollments: &mut enrollments,
-            openings: &openings,
         },
         &submissions,
         restored,
@@ -1479,7 +1275,6 @@ fn main() {
         &scratch,
         barrier,
         &mut enrollments,
-        &openings,
         completion::Finality {
             signers: scenario.honest(),
             statuses,

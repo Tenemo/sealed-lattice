@@ -24,6 +24,7 @@ const maximum = (...values: number[]) => Math.max(...values);
 // The reservation includes the source key retained before setup. Later
 // roots retire that key and its capsule and use a shorter actual prefix.
 const rootPrefixBytes = 4 + 96 + 64 + 4;
+const preparedRootPrefixBytes = 4 + 64 + 64 + 4;
 const rootReferenceBytes = 1 + 4 + 4 + identityBytes;
 const suffixLengthBytes = 4;
 
@@ -64,9 +65,9 @@ export type ParticipantLimits = Readonly<{
 export type ParticipantProfile = Readonly<{
     participantCount: number;
     optionCount: number;
-    // Only the first roster positions contribute setup key material; every
-    // participant verifies their contributions.
+    // Exactly d contributions are selected from the first k eligible positions.
     setupContributorCount: number;
+    eligibleContributorCount: number;
     proposalBytes: number;
     registration: ParticipantLimits['registration'];
     root: Readonly<{
@@ -86,16 +87,13 @@ export type ParticipantProfile = Readonly<{
         // degree mask in the first oracle.
         firstOracleColumns: number;
         statementBytes: number;
-        saltBytes: number;
         bodyHeaderBytes: number;
         proofHeaderBytes: number;
         minimumProofBytes: number;
         maximumProofBytes: number;
         maximumStateBytes: number;
         maximumCheckpointHeaderBytes: number;
-        confirmationBodyBytes: number;
-        openingBodyBytes: number;
-        confirmationPacketBytes: number;
+        offerEnvelopeBytes: number;
         requiredStorageBytes: number;
         // The polynomials a contribution body carries, in body order, each
         // of coefficients of one width.
@@ -111,6 +109,14 @@ export type ParticipantProfile = Readonly<{
             length: number;
         }>[];
         checkpointLengths: readonly number[];
+    }>;
+    preparation: Readonly<{
+        selectionBodyBytes: number;
+        endorsementBodyBytes: number;
+        selectionReferenceBytes: number;
+        certificateBytes: number;
+        endorsementPacketBytes: number;
+        signedSelectionPacketBytes: number;
     }>;
     ballot: Readonly<{
         minimumScore: number;
@@ -206,12 +212,13 @@ const readModuleLimits = (kernel: ParticipantKernel) => {
             retainedRegistrationBytes: take(),
         },
         contribution: {
-            saltBytes: take(),
             bodyHeaderBytes: take(),
             proofHeaderBytes: take(),
-            confirmationBodyBytes: take(),
-            openingBodyBytes: take(),
-            confirmationPacketBytes: take(),
+            offerEnvelopeBytes: take(),
+        },
+        preparation: {
+            endorsementBodyBytes: take(),
+            endorsementPacketBytes: take(),
         },
         ballot: {
             minimumScore: take(),
@@ -265,6 +272,7 @@ const readModuleProfile = (
         quorum: take(),
         faultBound: take(),
         setupContributorCount: take(),
+        eligibleContributorCount: take(),
         maximumResponseBodyBytes: take(),
         maximumResponsePacketBytes: take(),
         proposalBodyBytes: take(),
@@ -272,6 +280,9 @@ const readModuleProfile = (
         minimumReleaseBodyBytes: take(),
         maximumReleaseBodyBytes: take(),
         storedCoefficientBytes: take(),
+        selectionBodyBytes: take(),
+        certificateBytes: take(),
+        selectionReferenceBytes: take(),
         checkpointLengths: list(take),
         polynomials: list(() => ({
             expandedIndex: take(),
@@ -353,15 +364,15 @@ const enrollmentPayloadBytes = (
     retainedRosterBytes +
     registration.retainedRegistrationBytes;
 
-// The contribution suffix: its marker, position, salt and counts, the
+// The contribution suffix: its marker, own phase, position and counts, the
 // checkpoint header, a reference per public and private record, each
 // signing record, and the seed of an interrupted generation or
 // continuation.
-const contributionPrefixBytes = (saltBytes: number) => 4 + 2 + saltBytes + 16;
+const contributionPrefixBytes = 4 + 1 + 2 + 16;
 const publicEntryBytes = 2 + 4 + 4 + keyBytes + identityBytes;
 const privateEntryBytes = keyBytes + identityBytes;
 const signingEntryBytes = 2 + 4 + keyBytes + identityBytes;
-const signingRecords = 5;
+const signingRecords = 2;
 
 const contributionBounds = (module: ModuleLimits, profile: ModuleProfile) => {
     const { contribution } = module;
@@ -373,7 +384,7 @@ const contributionBounds = (module: ModuleLimits, profile: ModuleProfile) => {
         })),
     );
     const maximumProofRecords = chunks(profile.maximumProofBytes);
-    const prefix = contributionPrefixBytes(contribution.saltBytes);
+    const prefix = contributionPrefixBytes;
     const completedStateBytes =
         prefix +
         contribution.bodyHeaderBytes +
@@ -395,7 +406,6 @@ const contributionBounds = (module: ModuleLimits, profile: ModuleProfile) => {
                 operationSeedBytes,
             completedStateBytes,
         ),
-        completedStateBytes,
         polynomials: profile.polynomials,
         publicRecords,
         checkpointLengths: profile.checkpointLengths,
@@ -413,10 +423,8 @@ const contributionBounds = (module: ModuleLimits, profile: ModuleProfile) => {
             0,
         ),
         signingBytes:
-            contribution.confirmationBodyBytes +
-            contribution.openingBodyBytes +
-            2 * module.registration.signatureBytes +
-            setupInventoryBytes(module, profile) +
+            contribution.offerEnvelopeBytes +
+            module.registration.signatureBytes +
             tagBytes * signingRecords,
     };
 };
@@ -559,8 +567,8 @@ const setupReferenceBytes = (profile: ModuleProfile) =>
     4 + identityBytes * (profile.polynomials.length + 2);
 
 // The count and every participant's confirmation packet.
-const setupInventoryBytes = (module: ModuleLimits, profile: ModuleProfile) =>
-    4 + profile.participantCount * module.contribution.confirmationPacketBytes;
+const setupInventoryBytes = (profile: ModuleProfile) =>
+    profile.certificateBytes;
 
 // Assembles one profile's bounds from the module's sizes and the retained
 // layouts.
@@ -570,7 +578,6 @@ const profileBounds = (
     profile: ModuleProfile,
 ): ParticipantProfile => {
     const {
-        completedStateBytes,
         publicCiphertextBytes,
         checkpointCiphertextBytes,
         signingBytes,
@@ -586,35 +593,69 @@ const profileBounds = (
     const target = targetBounds(module);
     const release = releaseBounds(module, profile);
     const setupReference = setupReferenceBytes(profile);
-    const setupInventory = setupInventoryBytes(module, profile);
-    // The suffixes present together: the completed contribution with the
-    // ballot collecting deliveries, or with the completed ballot, the close,
-    // target signing and release.
+    const setupInventory = setupInventoryBytes(profile);
+    const preparation = {
+        ...module.preparation,
+        selectionBodyBytes: profile.selectionBodyBytes,
+        selectionReferenceBytes: profile.selectionReferenceBytes,
+        certificateBytes: profile.certificateBytes,
+        signedSelectionPacketBytes:
+            4 + profile.selectionBodyBytes + module.registration.signatureBytes,
+    };
+    // PRE1 frames three independent slots. Each signing slot retains either
+    // coins or its longer completed signature. At activation all slots empty.
+    const emptyPreparationBytes = 4 + 3 * suffixLengthBytes;
+    const selectionSlotBytes =
+        1 + preparation.selectionBodyBytes + module.registration.signatureBytes;
+    const endorsementSlotBytes =
+        1 +
+        preparation.selectionBodyBytes +
+        module.registration.signatureBytes +
+        preparation.selectionReferenceBytes +
+        preparation.endorsementBodyBytes +
+        module.registration.signatureBytes;
+    const maximumPreparationBytes =
+        emptyPreparationBytes +
+        contribution.maximumStateBytes +
+        selectionSlotBytes +
+        endorsementSlotBytes;
+    const enrollmentRecords = dataKindMaximums(
+        limits.registration,
+        0,
+        0,
+        limits.root.maximumRetainedRosterBytes,
+    ).reduce((total, bytes) => total + chunks(bytes), 0);
+    // Preparation retains the source capsule and own work; later roots
+    // retire them and retain the verified setup reference and certificate.
     const suffixes = (...bytes: number[]) =>
         bytes.reduce((total, value) => total + suffixLengthBytes + value, 0);
     const maximumRootBytes =
-        rootPrefixBytes +
-        rootReferenceBytes * limits.root.maximumRecords +
         maximum(
-            suffixes(contribution.maximumStateBytes),
-            suffixes(
-                completedStateBytes,
-                ballot.maximumStateBytes,
-                collectingBytes,
-            ),
-            suffixes(
-                completedStateBytes,
-                signedStateBytes,
-                close.maximumStateBytes,
-                target.maximumStateBytes,
-                release.maximumStateBytes,
-            ),
-        ) +
-        tagBytes;
+            rootPrefixBytes +
+                rootReferenceBytes * enrollmentRecords +
+                suffixes(maximumPreparationBytes),
+            preparedRootPrefixBytes +
+                rootReferenceBytes * limits.root.maximumRecords +
+                maximum(
+                    suffixes(
+                        emptyPreparationBytes,
+                        ballot.maximumStateBytes,
+                        collectingBytes,
+                    ),
+                    suffixes(
+                        emptyPreparationBytes,
+                        signedStateBytes,
+                        close.maximumStateBytes,
+                        target.maximumStateBytes,
+                        release.maximumStateBytes,
+                    ),
+                ),
+        ) + tagBytes;
     return {
         participantCount: profile.participantCount,
         optionCount: profile.optionCount,
         setupContributorCount: profile.setupContributorCount,
+        eligibleContributorCount: profile.eligibleContributorCount,
         proposalBytes: profile.proposalBytes,
         registration: limits.registration,
         root: {
@@ -642,6 +683,7 @@ const profileBounds = (
                 checkpointCiphertextBytes +
                 signingBytes,
         },
+        preparation,
         ballot: {
             ...ballot,
             requiredStorageBytes:
@@ -673,7 +715,7 @@ export const readParticipantLimits = (
     if (largest === undefined)
         throw new Error('The participant module lacks its largest profile.');
     const maximumSetupReferenceBytes = setupReferenceBytes(largest);
-    const maximumSetupInventoryBytes = setupInventoryBytes(module, largest);
+    const maximumSetupInventoryBytes = setupInventoryBytes(largest);
     const maximumRetainedRosterBytes = largest.retainedRosterBytes;
     const enrollment: ParticipantLimits = {
         participants,
@@ -681,7 +723,7 @@ export const readParticipantLimits = (
         registration,
         root: {
             maximumRecords: dataKindMaximums(
-                registration,
+                { ...registration, maximumSourceCapsuleBytes: 0 },
                 maximumSetupReferenceBytes,
                 maximumSetupInventoryBytes,
                 maximumRetainedRosterBytes,

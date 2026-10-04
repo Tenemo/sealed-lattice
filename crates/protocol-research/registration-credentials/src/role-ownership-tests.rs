@@ -73,6 +73,9 @@ fn retained_registration(
 }
 
 fn custody_fixture(runtime: [u8; 64], nonce: u8) -> CustodyFixture {
+    custody_fixture_with_size(runtime, nonce, 3)
+}
+fn custody_fixture_with_size(runtime: [u8; 64], nonce: u8, participants: usize) -> CustodyFixture {
     let text = |value: &str| StabilizedDisplayText::from_ingress_utf8(value.as_bytes()).unwrap();
     let options = (0..2)
         .map(|index| {
@@ -84,8 +87,13 @@ fn custody_fixture(runtime: [u8; 64], nonce: u8) -> CustodyFixture {
             .unwrap()
         })
         .collect();
-    let draft = PollDraft::new(Manifest::new(text("Question"), options).unwrap(), 2, 3).unwrap();
-    let mut credentials: Vec<_> = (1..=3)
+    let draft = PollDraft::new(
+        Manifest::new(text("Question"), options).unwrap(),
+        2,
+        participants as u16,
+    )
+    .unwrap();
+    let mut credentials: Vec<_> = (1..=participants as u8)
         .map(|seed| Credential::from_seed([seed; 32]))
         .collect();
     let packet = credentials[0]
@@ -106,6 +114,311 @@ fn custody_fixture(runtime: [u8; 64], nonce: u8) -> CustodyFixture {
         credentials,
         proposal,
     }
+}
+
+#[test]
+fn clear_preparation_purposes_share_one_original_confirmed_roster() {
+    use crate::{
+        contribution_body::body_lengths,
+        contribution_offer::{OfferEnvelope, authenticate_offer},
+        setup_selection::{SelectionProposal, authenticate_endorsement, authenticate_selection},
+    };
+    let mut fixture = custody_fixture_with_size([4; 64], 5, 4);
+    let contexts: Vec<_> = (0..4)
+        .map(|position| retained_context(&fixture, position))
+        .collect();
+    let mut foreign_records = fixture.proposal.records().to_vec();
+    foreign_records.swap(1, 2);
+    let foreign = RosterProposal::new(&fixture.poll, foreign_records).unwrap();
+    let foreign_context = RetainedContributionContext::parse(
+        &fixture.credentials[1],
+        &foreign.records()[2],
+        &fixture.poll,
+        2,
+        foreign.body(),
+    )
+    .unwrap();
+    let signature = fixture.credentials[0]
+        .sign_roster_proposal(&fixture.proposal, [11; 32])
+        .unwrap();
+    let roster = Arc::new(
+        crate::roster_authentication::verify_roster_proposal(fixture.proposal, &signature).unwrap(),
+    );
+    // A corrupt organizer can authenticate another roster; that does not
+    // let an honest member split its preparation purposes between them.
+    let mut equivocator = Credential::from_seed([1; 32]);
+    equivocator.completed_body = Some(foreign.records()[0].body_digest());
+    let signature = equivocator
+        .sign_roster_proposal(&foreign, [12; 32])
+        .unwrap();
+    let foreign =
+        crate::roster_authentication::verify_roster_proposal(foreign, &signature).unwrap();
+    let profile = roster.proposal().profile();
+    let envelope = OfferEnvelope::new(
+        roster.proposal(),
+        1,
+        *body_lengths(profile).start(),
+        [13; 64],
+    )
+    .unwrap();
+    assert!(
+        fixture.credentials[1]
+            .sign_offer(&contexts[1], &envelope, [14; 32])
+            .is_err()
+    );
+    fixture.credentials[1].confirm_roster(&contexts[1]).unwrap();
+    fixture.credentials[1].confirm_roster(&contexts[1]).unwrap();
+    assert!(
+        fixture.credentials[1]
+            .confirm_roster(&foreign_context)
+            .is_err()
+    );
+    let foreign_envelope = OfferEnvelope::new(
+        foreign.proposal(),
+        2,
+        *body_lengths(profile).start(),
+        [13; 64],
+    )
+    .unwrap();
+    assert!(
+        fixture.credentials[1]
+            .sign_offer(&foreign_context, &foreign_envelope, [14; 32])
+            .is_err()
+    );
+    let signature = fixture.credentials[1]
+        .sign_offer(&contexts[1], &envelope, [14; 32])
+        .unwrap();
+    authenticate_offer(roster.clone(), envelope.bytes(), &signature).unwrap();
+    assert!(
+        fixture.credentials[1]
+            .sign_offer(&contexts[1], &envelope, [15; 32])
+            .is_err()
+    );
+    let selection =
+        SelectionProposal::new(roster.proposal(), &[(0, [17; 64]), (2, [18; 64])]).unwrap();
+    let other_selection =
+        SelectionProposal::new(foreign.proposal(), &[(0, [17; 64]), (2, [18; 64])]).unwrap();
+    assert!(
+        fixture.credentials[1]
+            .endorse_selection(&foreign, &other_selection, 2, [16; 32])
+            .is_err()
+    );
+    let endorsement = fixture.credentials[1]
+        .endorse_selection(&roster, &selection, 1, [16; 32])
+        .unwrap();
+    authenticate_endorsement(&roster, &selection, &endorsement).unwrap();
+    assert!(
+        fixture.credentials[1]
+            .endorse_selection(&roster, &selection, 1, [16; 32])
+            .is_err()
+    );
+    fixture.credentials[0].confirm_roster(&contexts[0]).unwrap();
+    let signature = fixture.credentials[0]
+        .sign_selection_proposal(&roster, &selection, [19; 32])
+        .unwrap();
+    authenticate_selection(roster.clone(), selection.body(), &signature).unwrap();
+    assert!(
+        fixture.credentials[0]
+            .sign_selection_proposal(&roster, &selection, [19; 32])
+            .is_err()
+    );
+    fixture.credentials[2].confirm_roster(&contexts[2]).unwrap();
+    fixture.credentials[2].retire_preparation();
+    fixture.credentials[2].confirm_roster(&contexts[2]).unwrap();
+    fixture.credentials[2]
+        .unlock_unused_purposes(
+            crate::SigningPurpose::Offer.mask()
+                | crate::SigningPurpose::SelectionEndorsement.mask(),
+        )
+        .unwrap();
+    assert!(
+        fixture.credentials[2]
+            .validate_offer_context(&contexts[2])
+            .is_err()
+    );
+    assert!(
+        fixture.credentials[2]
+            .endorse_selection(&roster, &selection, 2, [20; 32])
+            .is_err()
+    );
+}
+
+#[test]
+fn a_losing_endorsement_never_blocks_authenticating_the_winning_certificate() {
+    use crate::setup_selection::{
+        SelectionProposal, authenticate_certificate, authenticate_endorsement,
+        authenticate_selection, encode_certificate,
+    };
+    let mut fixture = custody_fixture_with_size([4; 64], 5, 4);
+    let contexts: Vec<_> = (0..4)
+        .map(|position| retained_context(&fixture, position))
+        .collect();
+    for (position, context) in contexts.iter().enumerate() {
+        fixture.credentials[position]
+            .confirm_roster(context)
+            .unwrap();
+    }
+    let signature = fixture.credentials[0]
+        .sign_roster_proposal(&fixture.proposal, [11; 32])
+        .unwrap();
+    let roster = Arc::new(
+        crate::roster_authentication::verify_roster_proposal(fixture.proposal, &signature).unwrap(),
+    );
+    let winning =
+        SelectionProposal::new(roster.proposal(), &[(0, [13; 64]), (2, [14; 64])]).unwrap();
+    let losing =
+        SelectionProposal::new(roster.proposal(), &[(0, [13; 64]), (1, [15; 64])]).unwrap();
+    let packet = fixture.credentials[3]
+        .endorse_selection(&roster, &losing, 3, [16; 32])
+        .unwrap();
+    let old = authenticate_endorsement(&roster, &losing, &packet).unwrap();
+    fixture.credentials[3]
+        .restore_selection_endorsement(&roster, &old)
+        .unwrap();
+    assert!(
+        fixture.credentials[3]
+            .endorse_selection(&roster, &winning, 3, [17; 32])
+            .is_err()
+    );
+    let signature = fixture.credentials[0]
+        .sign_selection_proposal(&roster, &winning, [18; 32])
+        .unwrap();
+    let proposal = authenticate_selection(roster.clone(), winning.body(), &signature).unwrap();
+    let endorsements: Vec<_> = fixture
+        .credentials
+        .iter_mut()
+        .take(3)
+        .enumerate()
+        .map(|(position, credential)| {
+            authenticate_endorsement(
+                &roster,
+                &winning,
+                &credential
+                    .endorse_selection(&roster, &winning, position, [19; 32])
+                    .unwrap(),
+            )
+            .unwrap()
+        })
+        .collect();
+    let certificate = encode_certificate(&proposal, &endorsements).unwrap();
+    assert_eq!(
+        authenticate_certificate(roster, &certificate)
+            .unwrap()
+            .identity(),
+        winning.identity()
+    );
+    assert_eq!(
+        fixture.credentials[3].selection_endorsed,
+        Some(losing.identity())
+    );
+}
+
+#[test]
+fn selection_certificates_bind_complete_canonical_choices_but_not_quorum_carriers() {
+    use crate::setup_selection::{
+        self, SelectionProposal, authenticate_certificate, authenticate_endorsement,
+        authenticate_selection, encode_certificate,
+    };
+    let mut fixture = custody_fixture_with_size([4; 64], 5, 4);
+    let contexts: Vec<_> = (0..4)
+        .map(|position| retained_context(&fixture, position))
+        .collect();
+    for (position, context) in contexts.iter().enumerate() {
+        fixture.credentials[position]
+            .confirm_roster(context)
+            .unwrap();
+    }
+    let signature = fixture.credentials[0]
+        .sign_roster_proposal(&fixture.proposal, [11; 32])
+        .unwrap();
+    let roster = Arc::new(
+        crate::roster_authentication::verify_roster_proposal(fixture.proposal, &signature).unwrap(),
+    );
+    let entries = [(0, [13; 64]), (2, [14; 64])];
+    for malformed in [
+        vec![entries[0]],
+        vec![entries[0], entries[0]],
+        vec![entries[1], entries[0]],
+        vec![(0, [13; 64]), (3, [14; 64])],
+    ] {
+        assert!(SelectionProposal::new(roster.proposal(), &malformed).is_err());
+    }
+    let selection = SelectionProposal::new(roster.proposal(), &entries).unwrap();
+    assert_eq!(
+        selection.body().len(),
+        setup_selection::selection_body_bytes(roster.proposal().profile())
+    );
+    let signature = fixture.credentials[0]
+        .sign_selection_proposal(&roster, &selection, [15; 32])
+        .unwrap();
+    let proposal = authenticate_selection(roster.clone(), selection.body(), &signature).unwrap();
+    let endorsements: Vec<_> = fixture
+        .credentials
+        .iter_mut()
+        .enumerate()
+        .map(|(position, credential)| {
+            let packet = credential
+                .endorse_selection(&roster, &selection, position, [16; 32])
+                .unwrap();
+            assert_eq!(packet.len(), setup_selection::ENDORSEMENT_BYTES);
+            authenticate_endorsement(&roster, &selection, &packet).unwrap()
+        })
+        .collect();
+    let first = encode_certificate(&proposal, &endorsements[..3]).unwrap();
+    let second = encode_certificate(
+        &proposal,
+        &[
+            endorsements[0].clone(),
+            endorsements[2].clone(),
+            endorsements[3].clone(),
+        ],
+    )
+    .unwrap();
+    assert_ne!(first, second);
+    assert_eq!(
+        authenticate_certificate(roster.clone(), &first)
+            .unwrap()
+            .identity(),
+        authenticate_certificate(roster.clone(), &second)
+            .unwrap()
+            .identity()
+    );
+    assert_eq!(
+        first.len(),
+        setup_selection::certificate_bytes(roster.proposal().profile(), selection.body().len())
+            .unwrap()
+    );
+    assert!(encode_certificate(&proposal, &endorsements[..2]).is_err());
+    assert!(
+        encode_certificate(
+            &proposal,
+            &[
+                endorsements[0].clone(),
+                endorsements[0].clone(),
+                endorsements[2].clone()
+            ]
+        )
+        .is_err()
+    );
+    for changed in [
+        first[..first.len() - 1].to_vec(),
+        [first.as_slice(), &[0]].concat(),
+        {
+            let mut changed = first.clone();
+            let end = changed.len();
+            changed[end - 1] ^= 1;
+            changed
+        },
+    ] {
+        assert!(authenticate_certificate(roster.clone(), &changed).is_err());
+    }
+    let mut packet = endorsements[1].packet();
+    packet[2] ^= 1;
+    assert!(authenticate_endorsement(&roster, &selection, &packet).is_err());
+    let mut encoded =
+        CanonicalTuple::decode(selection.body(), &CanonicalDecodeLimits::default()).unwrap();
+    encoded.items[1] = CanonicalItem::hash512([99; 64]);
+    assert!(SelectionProposal::decode(roster.proposal(), &encoded.encode().unwrap()).is_err());
 }
 
 fn retained_context(fixture: &CustodyFixture, position: usize) -> RetainedContributionContext {
@@ -165,7 +478,7 @@ fn restore_roster(fixture: &CustodyFixture) -> RosterProposal {
 fn contribution_roles_retain_the_original_owner_across_roster_and_context_restoration() {
     let fixture = custody_fixture([4; 64], 5);
     let restored = restore_roster(&fixture);
-    for position in 0..fixture.proposal.profile().setup_contributors() {
+    for position in 0..fixture.proposal.profile().setup_eligible_contributors() {
         let role = fixture.proposal.contribution_role(position).unwrap();
         let tuple = CanonicalTuple::decode(&role, &CanonicalDecodeLimits::default()).unwrap();
         let participant =
@@ -200,7 +513,12 @@ fn contribution_roles_retain_the_original_owner_across_roster_and_context_restor
         );
         assert_eq!(restored.contribution_role(position).unwrap(), role);
         let context = retained_context(&fixture, position);
-        assert_eq!(context.role(), role);
+        assert_eq!(
+            context
+                .checkpoint_role(&checkpoint_prefix(&fixture), position, context.profile())
+                .unwrap(),
+            role
+        );
         assert_eq!(
             context.fhe_key_commitment(),
             fixture.proposal.fhe_key_commitment(position).unwrap()
@@ -338,9 +656,9 @@ fn retained_context_requires_the_original_poll_and_runtime() {
 }
 
 #[test]
-fn retained_noncontributors_keep_roster_context_without_checkpoint_authority() {
+fn retained_noneligible_members_keep_roster_context_without_offer_authority() {
     let mut fixture = custody_fixture([4; 64], 5);
-    let position = fixture.proposal.profile().setup_contributors();
+    let position = fixture.proposal.profile().setup_eligible_contributors();
     let context = retained_context(&fixture, position);
     assert_eq!(context.position(), position);
     assert_eq!(context.profile(), fixture.proposal.profile());
@@ -352,29 +670,15 @@ fn retained_noncontributors_keep_roster_context_without_checkpoint_authority() {
         context.checkpoint_role(&checkpoint_prefix(&fixture), position, context.profile()),
         Err(Error::Context)
     ));
-    let expected = fixture.credentials[position]
-        .retained_roster_confirmation_body(&context)
+    fixture.credentials[position]
+        .confirm_roster(&context)
         .unwrap();
-    let confirmation = fixture.credentials[position]
-        .sign_retained_roster_confirmation(&context, [11; 32])
+    fixture.credentials[position]
+        .confirm_roster(&context)
         .unwrap();
-    assert_eq!(confirmation.body(), expected);
-    let signature = fixture.credentials[0]
-        .sign_roster_proposal(&fixture.proposal, [12; 32])
-        .unwrap();
-    let roster =
-        crate::roster_authentication::verify_roster_proposal(fixture.proposal, &signature).unwrap();
-    let verified = crate::contribution_authentication::verify_confirmation(
-        &roster,
-        confirmation.body(),
-        confirmation.signature(),
-    )
-    .unwrap();
-    assert_eq!(verified.position(), position);
-    assert_eq!(verified.commitment(), None);
     assert!(matches!(
-        fixture.credentials[position].sign_retained_roster_confirmation(&context, [13; 32]),
-        Err(Error::Consumed)
+        fixture.credentials[position].validate_offer_context(&context),
+        Err(Error::Context)
     ));
 }
 
@@ -413,6 +717,6 @@ fn checkpoint_roles_refuse_changed_routing_position_and_profile() {
         context
             .checkpoint_role(&prefix, 1, context.profile())
             .unwrap(),
-        context.role()
+        fixture.proposal.contribution_role(1).unwrap()
     );
 }

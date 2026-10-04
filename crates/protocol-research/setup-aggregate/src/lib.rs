@@ -13,6 +13,13 @@ pub use retained::{
 
 pub const CHUNK_BYTES: usize = 524_288;
 
+/// The provisional aggregate reference and its original participant's tag.
+pub fn selection_reference_bytes(profile: Profile) -> usize {
+    4 + 64
+        + 64 * profile.contribution_body_polynomials().len()
+        + registration_credentials::RETAINED_TAG_BYTES
+}
+
 /// The family of a setup polynomial that contribution bodies carry, and so
 /// the aggregate sums.
 pub fn contribution_family(profile: Profile, index: usize) -> Option<Family> {

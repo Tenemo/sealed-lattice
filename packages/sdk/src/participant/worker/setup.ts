@@ -2,31 +2,26 @@ import { readParticipantProfile } from './bounds.js';
 import {
     concatenate,
     equalBytes,
-    readUnsigned32,
+    readUnsigned16,
+    tupleFields,
     unsigned32,
 } from './bytes.js';
 import { collectingCloseState, encodeCloseState } from './close-state.js';
-import {
-    isSetupContributor,
-    PublicInputFailure,
-    sessionInput,
-} from './context.js';
+import { PublicInputFailure, sessionInput } from './context.js';
 import type { PublicContext, PublicProfileContext } from './context.js';
 import {
     contributionDirectory,
     contributionRecords,
-    isContributionSession,
-    openedInventory,
     polynomialFile,
-    readConfirmations,
 } from './contribution.js';
-import type { ParticipantSession } from './contribution.js';
+import type { ParticipantSession, SignedPacket } from './contribution.js';
+import { openDelivery } from './delivery.js';
 import { readKernel, ResourceFailure, writeSetupInput } from './kernel.js';
-import { readPublic, streamPublic } from './public.js';
+import { encodePreparationState } from './preparation-state.js';
+import { publishRecord, readPublic, streamPublic } from './public.js';
 import type { PublicRelay } from './public.js';
 import {
     addedReferences,
-    chunkBytes,
     commitRoot,
     dataKind,
     dataRecordInventory,
@@ -41,21 +36,9 @@ import {
 } from './roster.js';
 import { awaitLater, namespacedName, setupCacheName } from './storage.js';
 
-// Verifies the complete setup from public records in the participant's own
-// module: the poll again, the roster the participant verified, restored from
-// its retained roster and the published keys, the organizer's proposal
-// signature, every participant's confirmation, and every setup contributor's
-// opening with its body and proof. A contributor verifies the confirmations
-// it opened; any other participant, once its own confirmation is signed,
-// first verifies the published ones, which every contributor's opening must
-// name, and then retains them. The running public aggregate lives in an
-// origin-local cache between contributions, and the module checks every
-// chunk it reads back. Only the complete verified setup lets the module emit
-// the retained setup reference, and a later visit restores the verified
-// setup from that reference while the cache holds the final aggregate. A
-// verifier without participant state verifies the same records from the
-// poll's identity alone, every registration proof included, and keeps the
-// aggregate in its own working cache.
+// The owning Rust verifiers authenticate the roster, complete selected offers,
+// organizer proposal and endorsement certificate. The public aggregate cache
+// supplies only bytes that Rust checks against those exact predecessors.
 
 const cacheStore = 'aggregate';
 
@@ -265,25 +248,140 @@ export const readFinalAggregate = async (
     }
 };
 
-// Verifies one opening, streams its body polynomials in whole-coefficient
-// chunks against the running aggregate, and then its proof.
-const verifyContribution = async (
+export type SelectedOffer = Readonly<{
+    position: number;
+    identity: Uint8Array;
+}>;
+type SetupSelection = Readonly<{
+    identity: Uint8Array;
+    offers: readonly SelectedOffer[];
+}>;
+
+const offerDirectory = (offer: SelectedOffer) =>
+    contributionDirectory(offer.position, offer.identity);
+
+// These getters describe only a selection already authenticated by Rust.
+const selectedSetup = (context: PublicProfileContext): SetupSelection => {
+    const { kernel, profile } = context;
+    const count = kernel.setup_selection_count();
+    const pointer = kernel.setup_selection_identity_pointer();
+    if (count !== profile.setupContributorCount || pointer === 0)
+        throw new PublicInputFailure(
+            'No authenticated setup selection is available.',
+        );
+    const identity = readKernel(kernel, pointer, 64);
+    const offers = Array.from({ length: count }, (_, ordinal) => {
+        const position = kernel.setup_selection_position(ordinal) >>> 0;
+        const bodyIdentityPointer =
+            kernel.setup_selection_body_identity_pointer(ordinal);
+        if (
+            position >= profile.eligibleContributorCount ||
+            bodyIdentityPointer === 0
+        )
+            throw new PublicInputFailure(
+                'The setup selection has an invalid author.',
+            );
+        return {
+            position,
+            identity: readKernel(kernel, bodyIdentityPointer, 64),
+        };
+    });
+    return { identity, offers };
+};
+
+export const setupOutput = (context: PublicContext) =>
+    readKernel(
+        context.kernel,
+        context.kernel.setup_output_pointer(),
+        context.kernel.setup_output_length(),
+    );
+
+export const authenticateSelection = (
+    context: PublicProfileContext,
+    packet: SignedPacket,
+    retained = false,
+) => {
+    const bytes = concatenate(
+        unsigned32(packet.body.length),
+        packet.body,
+        packet.signature,
+    );
+    writeSetupInput(context.kernel, bytes);
+    if (context.kernel.setup_selection_begin(bytes.length) !== 0)
+        throw retained
+            ? new Error('The retained setup selection was refused.')
+            : new PublicInputFailure('The setup selection was refused.');
+    return selectedSetup(context);
+};
+
+export const readSelection = async (
     context: PublicProfileContext,
     relay: PublicRelay,
-    cache: IDBDatabase,
-    position: number,
+): Promise<SignedPacket> => ({
+    body: await readPublic(
+        relay,
+        'selection.bin',
+        context.profile.preparation.selectionBodyBytes,
+    ),
+    signature: await readPublic(
+        relay,
+        'selection-signature.bin',
+        context.profile.registration.signatureBytes,
+    ),
+});
+
+// A bounded lookahead only. The later complete proof stream must reproduce
+// these bytes inside Rust; an interrupted fetch supplies no verified record.
+const readProofPrefix = async (
+    relay: PublicRelay,
+    name: string,
+    maximum: number,
+    length: number,
+) => {
+    const prefix = new Uint8Array(length);
+    const complete = new Error('The bounded proof lookahead is complete.');
+    let used = 0;
+    try {
+        await streamPublic(relay, name, maximum, (bytes) => {
+            const count = Math.min(bytes.length, length - used);
+            prefix.set(bytes.subarray(0, count), used);
+            used += count;
+            if (used === length) throw complete;
+        });
+    } catch (error) {
+        if (error !== complete) throw error;
+    }
+    if (used !== length)
+        throw new PublicInputFailure('A contribution proof is incomplete.');
+    return prefix;
+};
+
+// Discovery never supplies verification authority. Complete named reads from
+// the relay published store and the owning proof verifier establish the exact
+// published dependency. Retention preserves those records; no receipt or
+// arbitrary local buffer substitutes for that completed read and verification.
+export const verifyOffer = async (
+    context: PublicProfileContext,
+    relay: PublicRelay,
+    offer: SelectedOffer,
 ) => {
     const { kernel, profile } = context;
     const bounds = profile.contribution;
-    const directory = contributionDirectory(position);
-    const opening = await readPublic(
+    writeSetupInput(kernel, offer.identity);
+    if (
+        kernel.setup_offer_available(offer.position, offer.identity.length) ===
+        1
+    )
+        return;
+    const directory = offerDirectory(offer);
+    const envelope = await readPublic(
         relay,
-        directory + 'opening.bin',
-        bounds.openingBodyBytes,
+        directory + 'offer.bin',
+        bounds.offerEnvelopeBytes,
     );
-    const openingSignature = await readPublic(
+    const signature = await readPublic(
         relay,
-        directory + 'opening-signature.bin',
+        directory + 'offer-signature.bin',
         profile.registration.signatureBytes,
     );
     const header = await readPublic(
@@ -291,31 +389,98 @@ const verifyContribution = async (
         directory + 'body-header.bin',
         bounds.bodyHeaderBytes,
     );
-    const proof = await readPublic(
+    const proofPrefix = await readProofPrefix(
         relay,
         directory + 'proof.bin',
         bounds.maximumProofBytes,
+        bounds.proofHeaderBytes,
     );
-    if (
-        header.length !== bounds.bodyHeaderBytes ||
-        proof.length < bounds.proofHeaderBytes
-    )
-        throw new PublicInputFailure('A contribution body is incomplete.');
-    const packet = concatenate(
-        unsigned32(opening.length),
-        opening,
-        openingSignature,
-    );
+    if (header.length !== bounds.bodyHeaderBytes)
+        throw new PublicInputFailure('A contribution offer is incomplete.');
     const control = concatenate(
-        unsigned32(packet.length),
-        packet,
+        unsigned32(envelope.length),
+        envelope,
+        signature,
         header,
-        proof.subarray(0, bounds.proofHeaderBytes),
+        proofPrefix,
     );
     writeSetupInput(kernel, control);
+    if (kernel.setup_offer_begin(control.length) !== 0)
+        throw new PublicInputFailure('A contribution offer was refused.');
+    // Check the authenticated envelope's transport destination before its
+    // proof can replace any author in the module's verified-offer pool.
+    const fields = tupleFields(envelope);
+    if (
+        readUnsigned16(fields[2], 0) !== offer.position ||
+        !equalBytes(fields[4], offer.identity)
+    )
+        throw new PublicInputFailure(
+            'The offer route names another body or author.',
+        );
+    for (const polynomial of bounds.polynomials) {
+        let offset = 0;
+        const length = await streamPublic(
+            relay,
+            directory + polynomialFile(polynomial.expandedIndex),
+            polynomial.bytes,
+            (bytes) => {
+                writeSetupInput(kernel, bytes);
+                if (
+                    kernel.setup_offer_polynomial(
+                        polynomial.expandedIndex,
+                        offset,
+                        bytes.length,
+                    ) !== 0
+                )
+                    throw new PublicInputFailure(
+                        'A contribution offer polynomial was refused.',
+                    );
+                offset += bytes.length;
+            },
+        );
+        if (length !== polynomial.bytes)
+            throw new PublicInputFailure(
+                'A contribution offer polynomial is incomplete.',
+            );
+    }
+    let proofOffset = 0;
+    await streamPublic(
+        relay,
+        directory + 'proof.bin',
+        bounds.maximumProofBytes,
+        (bytes) => {
+            writeSetupInput(kernel, bytes);
+            if (kernel.setup_offer_proof(proofOffset, bytes.length) !== 0)
+                throw new PublicInputFailure(
+                    'A contribution offer proof was refused.',
+                );
+            proofOffset += bytes.length;
+        },
+    );
+    if (kernel.setup_offer_finish() !== 1)
+        throw new PublicInputFailure('A contribution offer was refused.');
+    writeSetupInput(kernel, offer.identity);
+    if (
+        kernel.setup_offer_available(offer.position, offer.identity.length) !==
+        1
+    )
+        throw new PublicInputFailure(
+            'The verified offer differs from its advertised identity.',
+        );
+};
+
+const aggregateOffer = async (
+    context: PublicProfileContext,
+    relay: PublicRelay,
+    cache: IDBDatabase,
+    offer: SelectedOffer,
+) => {
+    const { kernel, profile } = context;
+    const bounds = profile.contribution;
+    const directory = offerDirectory(offer);
     const accepted = kernel.setup_accepted();
-    if (kernel.setup_begin_opening(control.length) !== 0)
-        throw new PublicInputFailure('An opening was refused.');
+    if (kernel.setup_begin_selected_offer(offer.position) !== 0)
+        throw new PublicInputFailure('A selected verified offer was refused.');
     const chunk = kernel.setup_chunk_capacity();
     // Each polynomial's previous aggregate is read while the polynomial
     // before it is verified, and its new aggregate is written while the one
@@ -415,18 +580,14 @@ const verifyContribution = async (
             }),
         );
     }
-    for (let offset = 0; offset < proof.length; offset += chunkBytes) {
-        const bytes = proof.subarray(offset, offset + chunkBytes);
-        writeSetupInput(kernel, bytes);
-        if (kernel.setup_proof(offset, bytes.length) !== 0)
-            throw new PublicInputFailure('A contribution proof was refused.');
-    }
     await writing;
     if (
-        kernel.setup_finish_contribution() !== 1 ||
+        kernel.setup_finish_selected_offer() !== 1 ||
         kernel.setup_accepted() !== accepted + 1
     )
-        throw new PublicInputFailure('A contribution was refused.');
+        throw new PublicInputFailure(
+            'A selected contribution aggregate was refused.',
+        );
     if (accepted > 0)
         await writeCache(cache, (store) =>
             store.delete(
@@ -435,77 +596,39 @@ const verifyContribution = async (
         );
 };
 
-// The confirmation inventory a verification reads: the participant count
-// and every participant's packet. Retained bytes are authenticated state, so
-// their refusal stops the participant; published ones leave it pending.
-type SetupInventory = Readonly<{ bytes: Uint8Array; retained: boolean }>;
-
-// Verifies every confirmation of the inventory under the verified roster,
-// recording each one's bytes, and builds the commitment inventory that
-// leaves the module ready for the openings.
-const verifyConfirmations = (
-    context: PublicProfileContext,
-    inventory: SetupInventory,
-) => {
-    const { kernel, profile } = context;
-    const refuse = (message: string) =>
-        inventory.retained
-            ? new Error(message)
-            : new PublicInputFailure(message);
-    const participants = profile.participantCount;
-    const packetBytes = profile.contribution.confirmationPacketBytes;
-    if (
-        inventory.bytes.length !== profile.root.setupInventoryBytes ||
-        readUnsigned32(inventory.bytes, 0) !== participants
-    )
-        throw refuse('The confirmation inventory is incomplete.');
-    for (let position = 0; position < participants; position++) {
-        const confirmation = inventory.bytes.subarray(
-            4 + position * packetBytes,
-            4 + (position + 1) * packetBytes,
-        );
-        writeSetupInput(kernel, confirmation);
-        if (kernel.setup_confirmation(confirmation.length) !== 0)
-            throw refuse('The setup verifier refused a confirmation.');
-    }
-    if (kernel.setup_inventory_finish() !== 1)
-        throw refuse('The setup verifier refused the inventory.');
-};
-
-// Verifies every setup contributor's opening, body and proof in roster
-// order, starting from an empty aggregate cache, and then the complete
-// setup.
-const verifyContributions = async (
+const aggregateSelection = async (
     context: PublicProfileContext,
     relay: PublicRelay,
+    selection: SetupSelection,
 ) => {
-    const { kernel, profile } = context;
+    const { kernel } = context;
+    if (kernel.setup_selection_aggregate() !== 1)
+        throw new PublicInputFailure(
+            'Complete selected offers are unavailable.',
+        );
     const cache = await openSetupCache(context.namespace);
     try {
         await writeCache(cache, (store) => store.clear());
-        for (
-            let position = 0;
-            position < profile.setupContributorCount;
-            position++
-        )
-            await verifyContribution(context, relay, cache, position);
+        for (const offer of selection.offers)
+            await aggregateOffer(context, relay, cache, offer);
     } finally {
         cache.close();
     }
-    if (kernel.setup_finish() !== 1)
-        throw new PublicInputFailure('The complete setup was refused.');
+    if (kernel.setup_selection_finish() !== 1)
+        throw new PublicInputFailure('The selected aggregate was refused.');
 };
 
-// Starts a setup verification in the module with the participant's retained
-// roster, the published keys, the organizer's proposal signature and the
-// given confirmations, which leaves it ready for the openings.
-const verifySetupInventory = async (
+// Each operation owns one Rust module; this records only whether that module
+// has already restored the roster, never whether an offer or setup is valid.
+const preparedRosters = new WeakSet<object>();
+
+export const verifySetupRoster = async (
     session: ParticipantSession,
     relay: PublicRelay,
-    inventory: SetupInventory,
 ) => {
     const { context } = session;
     const { kernel, profile } = context;
+    if (preparedRosters.has(kernel)) return;
     const { manifest } = session.root;
     const proposal = await readDataKind(context, manifest, dataKind.proposal);
     const definition = await readDataKind(
@@ -565,29 +688,110 @@ const verifySetupInventory = async (
         throw new PublicInputFailure(
             'The published registrations are not the retained roster.',
         );
-    verifyConfirmations(context, inventory);
+    preparedRosters.add(kernel);
 };
 
-// Verifies the complete setup behind the given confirmations and has the
-// original credential emit its retained setup reference. The verification
-// starts from an empty aggregate cache.
-const verifyCompleteSetup = async (
+export const verifySelectionInputs = async (
     session: ParticipantSession,
     relay: PublicRelay,
-    inventory: SetupInventory,
-): Promise<Uint8Array> => {
-    const { context } = session;
-    const { kernel, profile } = context;
-    await verifySetupInventory(session, relay, inventory);
-    await verifyContributions(context, relay);
-    if (kernel.retain_setup() !== 0)
+    packet: SignedPacket,
+    retained = false,
+) => {
+    await verifySetupRoster(session, relay);
+    const selection = authenticateSelection(session.context, packet, retained);
+    for (const offer of selection.offers)
+        await verifyOffer(session.context, relay, offer);
+    await aggregateSelection(session.context, relay, selection);
+    return selection;
+};
+
+const authenticateCertificate = (
+    context: PublicProfileContext,
+    bytes: Uint8Array,
+    retained = false,
+) => {
+    writeSetupInput(context.kernel, bytes);
+    if (context.kernel.setup_certificate(bytes.length) !== 0)
+        throw retained
+            ? new Error('The retained setup certificate was refused.')
+            : new PublicInputFailure('The setup certificate was refused.');
+    return selectedSetup(context);
+};
+
+export const endorsementPath = (position: number) =>
+    'selection-endorsement-' + String(position) + '.bin';
+
+// A published complete certificate takes precedence over discovery or the
+// participant's own endorsement. Otherwise collect independently authenticated
+// endorsements of the organizer's proposal; invalid public entries are ignored.
+const readSetupCertificate = async (
+    context: PublicProfileContext,
+    relay: PublicRelay,
+) => {
+    try {
+        const bytes = await readPublic(
+            relay,
+            'setup-certificate.bin',
+            context.profile.preparation.certificateBytes,
+        );
+        authenticateCertificate(context, bytes);
+        return bytes;
+    } catch (error) {
+        if (!(error instanceof PublicInputFailure)) throw error;
+    }
+    authenticateSelection(context, await readSelection(context, relay));
+    for (
+        let position = 0;
+        position < context.profile.participantCount;
+        position++
+    ) {
+        try {
+            const bytes = await readPublic(
+                relay,
+                endorsementPath(position),
+                context.profile.preparation.endorsementPacketBytes,
+            );
+            writeSetupInput(context.kernel, bytes);
+            if (context.kernel.setup_endorsement(bytes.length) !== 0) continue;
+        } catch (error) {
+            if (!(error instanceof PublicInputFailure)) throw error;
+        }
+    }
+    if (context.kernel.setup_certificate_build() !== 0)
+        throw new PublicInputFailure(
+            'A complete setup endorsement quorum is unavailable.',
+        );
+    const certificate = setupOutput(context);
+    authenticateCertificate(context, certificate);
+    return certificate;
+};
+
+const verifyCertificateInputs = async (
+    context: PublicProfileContext,
+    relay: PublicRelay,
+    certificate: Uint8Array,
+    retained = false,
+) => {
+    const selection = authenticateCertificate(context, certificate, retained);
+    for (const offer of selection.offers)
+        await verifyOffer(context, relay, offer);
+    await aggregateSelection(context, relay, selection);
+    if (context.kernel.setup_finish_certificate() !== 1)
+        throw new PublicInputFailure(
+            'The complete certified setup was refused.',
+        );
+    return selection;
+};
+
+const retainedReference = (context: PublicProfileContext) => {
+    if (context.kernel.retain_setup() !== 0)
         throw new Error('The credential refused the verified setup.');
     const reference = readKernel(
-        kernel,
-        kernel.contribution_output_pointer(),
-        kernel.contribution_output_length(),
+        context.kernel,
+        context.kernel.contribution_output_pointer(),
+        context.kernel.contribution_output_length(),
     );
-    if (reference.length !== profile.root.setupReferenceBytes)
+    if (reference.length !== context.profile.root.setupReferenceBytes)
         throw new Error('The setup reference has another length.');
     return reference;
 };
@@ -597,92 +801,144 @@ export type VerifiedSetup = Readonly<{
     inventory: Uint8Array;
 }>;
 
-// A setup reference names the inventory identity after its marker.
-const referenceInventory = (reference: Uint8Array) =>
-    reference.subarray(4, 4 + 64);
+const referenceInventory = (reference: Uint8Array) => reference.subarray(4, 68);
 
-// Verifies the setup once: a setup contributor behind its opening, any other
-// participant behind the published confirmations once its own is signed.
+const certifyRetainedSelection = (
+    session: ParticipantSession,
+    certificate: Uint8Array,
+) => {
+    const retained = session.preparation.endorsement;
+    if (retained === undefined) return undefined;
+    const selection = authenticateCertificate(session.context, certificate);
+    const original = authenticateSelection(
+        session.context,
+        retained.selection,
+        true,
+    );
+    sessionInput(session.context, retained.reference);
+    if (
+        session.context.kernel.restore_selection_inputs(
+            retained.reference.length,
+        ) !== 0
+    )
+        throw new Error(
+            'The original selection verification could not be restored.',
+        );
+    // Installing a different winning proposal discards the losing inputs in
+    // Rust. Equality preserves the credential-keyed original verified inputs.
+    authenticateCertificate(session.context, certificate);
+    if (!equalBytes(original.identity, selection.identity)) return undefined;
+    if (session.context.kernel.setup_finish_certificate() !== 1)
+        throw new PublicInputFailure(
+            'The certificate does not match the verified selection.',
+        );
+    return selection;
+};
+
 export const verifySetup = async (
     session: ParticipantSession,
     relay: PublicRelay,
 ): Promise<VerifiedSetup> => {
-    if (!isSetupContributor(session.context)) {
-        if (session.root.head.generation !== 9)
-            throw new Error(
-                'No signed roster confirmation awaits setup verification.',
-            );
-        const inventory = await readConfirmations(session.context, relay);
-        return {
-            reference: await verifyCompleteSetup(session, relay, {
-                bytes: inventory,
-                retained: false,
-            }),
-            inventory,
-        };
-    }
-    if (!isContributionSession(session) || session.root.head.generation !== 11)
-        throw new Error('No opened contribution awaits setup verification.');
-    const opened = await openedInventory(session);
-    const reference = await verifyCompleteSetup(session, relay, {
-        bytes: opened.inventory,
-        retained: true,
-    });
-    if (!equalBytes(referenceInventory(reference), opened.identity))
-        throw new Error(
-            'The verified setup differs from the opened inventory.',
+    if (session.root.head.generation !== 4)
+        throw new Error('No confirmed roster awaits setup activation.');
+    await verifySetupRoster(session, relay);
+    let inventory = await readSetupCertificate(session.context, relay);
+    const delivery = await openDelivery(session.context, session.root);
+    const selection =
+        certifyRetainedSelection(session, inventory) ??
+        (await verifyCertificateInputs(session.context, relay, inventory));
+    // Concurrent publishers may store different valid carriers of the same
+    // setup. Completed named readback, not a successful HTTP response alone,
+    // establishes which new certificate and selector entered the public store.
+    try {
+        await delivery.transfer(() =>
+            publishRecord(relay, 'setup-certificate.bin', inventory),
         );
-    return { reference, inventory: opened.inventory };
+    } catch (error) {
+        if (!(error instanceof PublicInputFailure)) throw error;
+    }
+    await delivery.transfer(async () => {
+        inventory = await readPublic(
+            relay,
+            'setup-certificate.bin',
+            session.context.profile.preparation.certificateBytes,
+        );
+    });
+    const accepted = authenticateCertificate(session.context, inventory);
+    if (
+        !equalBytes(accepted.identity, selection.identity) ||
+        session.context.kernel.setup_finish_certificate() !== 1
+    )
+        throw new PublicInputFailure(
+            'The published certificate names another setup.',
+        );
+    try {
+        await delivery.transfer(() =>
+            publishRecord(relay, 'setup-identity.bin', selection.identity),
+        );
+    } catch (error) {
+        if (!(error instanceof PublicInputFailure)) throw error;
+    }
+    await delivery.transfer(async () => {
+        const stored = await readPublic(
+            relay,
+            'setup-identity.bin',
+            selection.identity.length,
+        );
+        if (!equalBytes(stored, selection.identity))
+            throw new PublicInputFailure(
+                'The published setup identity changed.',
+            );
+    });
+    const reference = retainedReference(session.context);
+    if (!equalBytes(referenceInventory(reference), selection.identity))
+        throw new Error('The retained setup names another selection.');
+    return { reference, inventory };
 };
 
-// Makes sure the cache holds the final aggregate that work after the setup
-// reads. A missing aggregate verifies the complete setup again, which
-// rewrites the cache and must reproduce the retained setup reference.
-// Returns whether this instance performed the complete verification.
 export const ensureFinalAggregate = async (
     session: ParticipantSession,
     relay: PublicRelay,
 ) => {
     if (session.root.head.generation < 12)
         throw new Error('No setup reference is retained.');
-    const { context, root } = session;
-    if (await holdsFinalAggregate(context)) return false;
-    const reference = await verifyCompleteSetup(session, relay, {
-        bytes: await readDataKind(
-            context,
-            root.manifest,
-            dataKind.setupInventory,
-        ),
-        retained: true,
-    });
+    if (await holdsFinalAggregate(session.context)) return false;
+    // A cache loss can also occur after certification in this same visit.
+    // Rebuild from fresh owning verification, not an existing aggregate flag.
+    preparedRosters.delete(session.context.kernel);
+    await verifySetupRoster(session, relay);
+    const certificate = await readDataKind(
+        session.context,
+        session.root.manifest,
+        dataKind.setupInventory,
+    );
+    await verifyCertificateInputs(session.context, relay, certificate, true);
     if (
         !equalBytes(
-            reference,
-            await readDataKind(context, root.manifest, dataKind.setupReference),
+            retainedReference(session.context),
+            await readDataKind(
+                session.context,
+                session.root.manifest,
+                dataKind.setupReference,
+            ),
         )
     )
         throw new Error('The verified setup differs from the retained one.');
     return true;
 };
 
-// Makes the verified setup live in this instance for work that needs it
-// itself. The module restores the setup verifier's earlier result from the
-// retained setup reference, once it has verified the retained roster and
-// confirmations again, instead of verifying every opening again.
 export const restoreSetup = async (
     session: ParticipantSession,
     relay: PublicRelay,
 ) => {
     if (await ensureFinalAggregate(session, relay)) return;
+    await verifySetupRoster(session, relay);
     const { context, root } = session;
-    await verifySetupInventory(session, relay, {
-        bytes: await readDataKind(
-            context,
-            root.manifest,
-            dataKind.setupInventory,
-        ),
-        retained: true,
-    });
+    authenticateCertificate(
+        context,
+        await readDataKind(context, root.manifest, dataKind.setupInventory),
+        true,
+    );
     const reference = await readDataKind(
         context,
         root.manifest,
@@ -693,8 +949,6 @@ export const restoreSetup = async (
         throw new Error('The credential refused the retained setup.');
 };
 
-// The proposal's ordered registration identities, which must name a
-// supported roster; malformed bytes are public input.
 const publishedRecordIds = (context: PublicContext, proposal: Uint8Array) => {
     let recordIds: string[];
     try {
@@ -707,12 +961,6 @@ const publishedRecordIds = (context: PublicContext, proposal: Uint8Array) => {
     return recordIds;
 };
 
-// Verifies the complete setup of the poll the identity names from public
-// records alone, for a verifier that holds no participant state: the poll's
-// signed definition, every registration with its signature and proof, the
-// organizer's proposal signature, every participant's published
-// confirmation and every setup contributor's opening with its body and
-// proof. Returns the context of the profile the verified roster names.
 export const verifyPublicSetup = async (
     context: PublicContext,
     relay: PublicRelay,
@@ -779,15 +1027,12 @@ export const verifyPublicSetup = async (
     if (profile === undefined || proposal.length !== profile.proposalBytes)
         throw new PublicInputFailure('The poll names no supported profile.');
     const profiled = { ...context, profile };
-    verifyConfirmations(profiled, {
-        bytes: await readConfirmations(profiled, relay),
-        retained: false,
-    });
-    await verifyContributions(profiled, relay);
+    preparedRosters.add(kernel);
+    const certificate = await readSetupCertificate(profiled, relay);
+    await verifyCertificateInputs(profiled, relay, certificate);
     return profiled;
 };
 
-// The identity of the confirmation inventory the retained setup names.
 export const retainedSetupInventory = async (session: ParticipantSession) =>
     referenceInventory(
         await readDataKind(
@@ -797,9 +1042,6 @@ export const retainedSetupInventory = async (session: ParticipantSession) =>
         ),
     ).slice();
 
-// Retains the setup reference and the confirmation inventory it was
-// verified against. The ballot suffix starts empty and the close log
-// collects from here on; the contribution suffix keeps what it lists.
 export const retainSetup = async (
     session: ParticipantSession,
     verified: VerifiedSetup,
@@ -821,6 +1063,7 @@ export const retainSetup = async (
             references: addedReferences(context, retainedReferences, added),
             suffixes: {
                 ...root.manifest.suffixes,
+                preparation: encodePreparationState({}),
                 ballot: new Uint8Array(),
                 close: encodeCloseState(12, false, collectingCloseState()),
             },
@@ -832,6 +1075,8 @@ export const retainSetup = async (
         addedData: added,
         write: (transaction) => {
             transaction.objectStore('data').delete([dataKind.sourceCapsule, 0]);
+            transaction.objectStore('contribution').clear();
+            transaction.objectStore('checkpoint').clear();
         },
     });
     // Both storage and live private sources retire only after the exact
@@ -840,5 +1085,8 @@ export const retainSetup = async (
     root.plaintext.subarray(4 + 64, 4 + 96).fill(0);
     if (context.kernel.retire_contribution_sources() !== 0)
         throw new Error('The original key sources could not be retired.');
+    session.root = retained;
+    session.preparation = {};
+    delete session.state;
     return retained;
 };
