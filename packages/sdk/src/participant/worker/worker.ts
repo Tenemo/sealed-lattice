@@ -40,7 +40,6 @@ import {
     resumeParticipant,
     signContribution,
 } from './contribution.js';
-import { openDelivery } from './delivery.js';
 import { createEnrollment, restoreEnrollment } from './enrollment.js';
 import type { EnrollmentRequest, RestoredEnrollment } from './enrollment.js';
 import { participantRuntimeLabel } from './identity.js';
@@ -62,8 +61,9 @@ import {
 } from './parallel.js';
 import type { ParallelHelpers } from './parallel.js';
 import { endorseSetup, selectSetup } from './preparation-selection.js';
-import { publishRecord, readBounded } from './public.js';
+import { readBounded } from './public.js';
 import type { PublicRelay } from './public.js';
+import { publishRegistrationRecords } from './registration-publication.js';
 import { decodeReleaseState, releasePhase } from './release-state.js';
 import {
     advanceRelease,
@@ -71,14 +71,12 @@ import {
     publishRelease,
     resumeRelease,
 } from './release.js';
-import { authenticateRoot, dataKind, readDataKind } from './root.js';
+import { authenticateRoot } from './root.js';
 import type { AuthenticatedRoot } from './root.js';
 import {
     acceptRoster,
     parseRecordIds,
     proposeRoster,
-    registrationFile,
-    registrationPath,
     retainedProfile,
     reverifyRoster,
     signRoster,
@@ -105,8 +103,8 @@ import { verifyPublishedOutcome } from './verifier.js';
 // The application's SDK supplies the namespace of the participant's local
 // state, the relay's base URL, the module's URL and the identities its build
 // recorded; the worker fetches the module itself and recomputes the runtime
-// identity that every retained root binds. Every bound comes from the module and the retained
-// state, never from the page. When the page separates evaluation, a worker
+// identity that every retained root binds. Protocol bounds come from the
+// verified module and retained state, never from the page. When the page separates evaluation, a worker
 // that retains the target it evaluated before the operation's other work
 // ends there, and the page runs the operation again in a fresh worker.
 type WorkerCommand = Readonly<{
@@ -151,19 +149,18 @@ const refused = (
     reason: Exclude<ParticipantRefusalReason, 'another runtime'>,
 ) => ({ status: 'refused', reason }) as const;
 
-// The pinned delivery digest that gates executing the module, and the runtime
-// identity derived from the delivered files' digests. Neither is an identity
-// the participant binds into protocol or retained state.
-const deliveryDigest = async (bytes: Uint8Array) =>
-    new Uint8Array(
-        await crypto.subtle.digest('SHA-512', new Uint8Array(bytes)),
-    );
+// The pinned module digest gates execution. The runtime identity combines it
+// with the pinned source and worker digests and binds protocol contexts and
+// retained state; it is distinct from module-owned protocol object identities.
+const deliveryDigest = async (bytes: Uint8Array<ArrayBuffer>) =>
+    new Uint8Array(await crypto.subtle.digest('SHA-512', bytes));
 
 const fetchModule = async (url: string, expected: string) => {
-    const module = await readBounded(url, maximumModuleBytes);
-    if (hexadecimal(await deliveryDigest(module)) !== expected)
+    const bytes = await readBounded(url, maximumModuleBytes);
+    const digest = await deliveryDigest(bytes);
+    if (hexadecimal(digest) !== expected)
         throw new PublicInputFailure('The participant module changed.');
-    return module;
+    return { bytes, digest };
 };
 
 // An absolute HTTP or HTTPS URL in its canonical form.
@@ -198,13 +195,13 @@ const isWellFormed = (command: WorkerCommand) =>
 
 const runtimeIdentity = async (
     identity: WorkerCommand['identity'],
-    module: Uint8Array,
+    moduleDigest: Uint8Array<ArrayBuffer>,
 ) =>
     deliveryDigest(
         concatenate(
             encodeText(participantRuntimeLabel),
             fromHexadecimal(identity.source),
-            await deliveryDigest(module),
+            moduleDigest,
             fromHexadecimal(identity.worker),
         ),
     );
@@ -222,40 +219,6 @@ const bytes = (value: unknown) => {
     if (!/^(?:[0-9a-f]{2})*$/u.test(encoded))
         throw new InvalidRequest('Malformed byte parameter.');
     return fromHexadecimal(encoded);
-};
-
-// Publishes every public record the current root holds: the registration
-// record, and the organizer's poll, proposal and proposal signature. The
-// retained authority is inspected around every transfer.
-const publishRecords = async (
-    context: ParticipantContext,
-    relay: PublicRelay,
-    root: AuthenticatedRoot,
-    enrollment: RestoredEnrollment,
-) => {
-    const id = hexadecimal(enrollment.bodyDigest);
-    const files: [number, string][] = [
-        [dataKind.publicKey, registrationPath(id, registrationFile.publicKey)],
-        [dataKind.proof, registrationPath(id, registrationFile.proof)],
-        [dataKind.header, registrationPath(id, registrationFile.header)],
-        [dataKind.signature, registrationPath(id, registrationFile.signature)],
-    ];
-    if (enrollment.isOrganizer) {
-        files.push(
-            [dataKind.pollDefinition, 'poll-definition.bin'],
-            [dataKind.pollSignature, 'poll-signature.bin'],
-        );
-        if (root.head.generation >= 3)
-            files.push(
-                [dataKind.proposal, 'proposal.bin'],
-                [dataKind.proposalSignature, 'proposal-signature.bin'],
-            );
-    }
-    const delivery = await openDelivery(context, root);
-    for (const [kind, name] of files) {
-        const record = await readDataKind(context, root.manifest, kind);
-        await delivery.transfer(() => publishRecord(relay, name, record));
-    }
 };
 
 // What this participant's ballot is: open once the verified setup is
@@ -403,7 +366,7 @@ const execute = async (
         case 'publish':
             if (root.head.generation === 4)
                 await resumeParticipant(profileContext(), root);
-            await publishRecords(context, relay, root, enrollment);
+            await publishRegistrationRecords(context, relay, root, enrollment);
             break;
         case 'propose-roster': {
             const recordIds = parseRecordIds(parameters.recordIds);
@@ -776,12 +739,15 @@ const run = async (
     let helpers: ParallelHelpers | undefined;
     let authorityStarted = false;
     try {
-        const moduleBytes = await fetchModule(
+        const delivered = await fetchModule(
             command.module,
             command.identity.module,
         );
-        const runtime = await runtimeIdentity(command.identity, moduleBytes);
-        const module = await WebAssembly.compile(new Uint8Array(moduleBytes));
+        const runtime = await runtimeIdentity(
+            command.identity,
+            delivered.digest,
+        );
+        const module = await WebAssembly.compile(delivered.bytes);
         const evaluation = evaluatingOperations.has(command.operation);
         const started = startParallelHelpers(module, helperPorts, evaluation);
         database = await openParticipantDatabase(command.namespace);
@@ -941,12 +907,15 @@ const runVerification = async (
     if (!isWellFormedVerification(command)) return refused('invalid request');
     let helpers: ParallelHelpers | undefined;
     try {
-        const moduleBytes = await fetchModule(
+        const delivered = await fetchModule(
             command.module,
             command.identity.module,
         );
-        const runtime = await runtimeIdentity(command.identity, moduleBytes);
-        const module = await WebAssembly.compile(new Uint8Array(moduleBytes));
+        const runtime = await runtimeIdentity(
+            command.identity,
+            delivered.digest,
+        );
+        const module = await WebAssembly.compile(delivered.bytes);
         helpers = await startParallelHelpers(module, helperPorts, true);
         const parallel = helpers;
         const namespace = verificationNamespace(command.poll);

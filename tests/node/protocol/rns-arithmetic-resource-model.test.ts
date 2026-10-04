@@ -109,6 +109,11 @@ describe('exact RNS arithmetic resource floor', () => {
                 expect(
                     product * researchTransformPrime(Number(count) - 1) > bound,
                 ).toBe(true);
+                const covered =
+                    product * researchTransformPrime(Number(count) - 1);
+                expect(
+                    (covered - bound) * (1n << 57n) >= 4n * count * covered,
+                ).toBe(true);
                 const bits = BigInt(bound.toString(2).length);
                 expect(count >= (bits + 57n) / 58n).toBe(true);
                 expect(count <= bits / 57n + 1n).toBe(true);

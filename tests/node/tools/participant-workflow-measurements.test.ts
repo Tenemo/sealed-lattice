@@ -1,9 +1,36 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-    summarizeParticipantWorkflow,
+    summarizeParticipantWorkflow as summarize,
+    type ParticipantBootstrapMeasurement,
     type ParticipantOperationMeasurement,
 } from '#tools/ci/participant-workflow-measurements.js';
+
+const bootstrapsFor = (
+    operations: readonly ParticipantOperationMeasurement[],
+): ParticipantBootstrapMeasurement[] => {
+    const sessions = new Set<number>();
+    return [...operations]
+        .sort((left, right) => left.started - right.started)
+        .flatMap((operation) => {
+            if (sessions.has(operation.session)) return [];
+            sessions.add(operation.session);
+            return [
+                {
+                    session: operation.session,
+                    position: operation.position,
+                    started: operation.started - 2,
+                    finished: operation.started,
+                },
+            ];
+        });
+};
+const measure = (
+    operations: readonly ParticipantOperationMeasurement[],
+    participants: number,
+    sequential: boolean,
+    bootstraps = bootstrapsFor(operations),
+) => summarize(operations, participants, sequential, bootstraps);
 
 const ordinary = (recovery = false): ParticipantOperationMeasurement[] => {
     const operations: ParticipantOperationMeasurement[] = [];
@@ -75,10 +102,18 @@ const ordinary = (recovery = false): ParticipantOperationMeasurement[] => {
 describe('explicit participant productive-visit trace', () => {
     it('checks the actual stage path and bounds crossing close work without counting it twice cumulatively', () => {
         const operations = ordinary();
-        const measured = summarizeParticipantWorkflow(operations, 3, true);
+        const measured = measure(operations, 3, true);
         // Thirty-nine calls: thirty-eight cost one unit, final close costs nineteen.
         expect(operations).toHaveLength(39);
         expect(measured.activeMilliseconds).toBe(57);
+        expect(measured.bootstrapMilliseconds).toBe(48);
+        expect(measured.activeMillisecondsUpperBound).toBe(105);
+        expect(measured.cohortWallMilliseconds).toBe(135);
+        expect(
+            measured.participants.map(
+                (participant) => participant.activeMillisecondsUpperBound,
+            ),
+        ).toEqual([48, 29, 28]);
         expect(
             measured.participants.map(
                 (participant) => participant.activeMilliseconds,
@@ -90,15 +125,18 @@ describe('explicit participant productive-visit trace', () => {
             ),
         ).toEqual([8, 8, 8]);
         const organizer = measured.participants[0];
-        expect(organizer.visits[4].activeMillisecondsUpperBound).toBe(20);
-        expect(organizer.visits[5].activeMillisecondsUpperBound).toBe(20);
-        expect(organizer.maximumVisitUpperBoundMilliseconds).toBe(20);
+        expect(measured.operations[0].bootstrapMilliseconds).toBe(2);
+        expect(measured.operations[1].bootstrapMilliseconds).toBe(0);
+        expect(organizer.visits[0].activeMillisecondsUpperBound).toBe(4);
+        expect(organizer.visits[4].activeMillisecondsUpperBound).toBe(24);
+        expect(organizer.visits[5].activeMillisecondsUpperBound).toBe(22);
+        expect(organizer.maximumVisitUpperBoundMilliseconds).toBe(24);
         expect(
             organizer.visits.reduce(
                 (sum, visit) => sum + visit.activeMillisecondsUpperBound,
                 0,
             ),
-        ).toBe(51);
+        ).toBe(69);
         const selection = measured.operations.find(
             (operation) => operation.operation === 'select-setup',
         )!;
@@ -116,23 +154,66 @@ describe('explicit participant productive-visit trace', () => {
         ).toHaveLength(3);
     });
     it('charges pending and interrupted work to the original stages across browser sessions', () => {
-        const measured = summarizeParticipantWorkflow(ordinary(true), 3, true);
+        const measured = measure(ordinary(true), 3, true);
         expect(measured.activeMilliseconds).toBe(72);
+        expect(measured.bootstrapMilliseconds).toBe(50);
+        expect(measured.activeMillisecondsUpperBound).toBe(122);
+        const pending = measured.operations.find(
+            (operation) => operation.outcome === 'pending',
+        )!;
+        expect(pending.bootstrapMilliseconds).toBe(2);
+        expect(
+            measured.operations.find(
+                (operation) =>
+                    operation.session === pending.session &&
+                    operation.outcome === 'completed',
+            )!.bootstrapMilliseconds,
+        ).toBe(0);
         expect(
             measured.participants[0].visits[2].activeMillisecondsUpperBound,
-        ).toBe(8);
+        ).toBe(10);
         expect(
             measured.participants[1].visits[1].activeMillisecondsUpperBound,
-        ).toBe(8);
+        ).toBe(12);
         expect(measured.participants[1].visits[1].sessions).toHaveLength(2);
         expect(
             measured.participants[2].visits[1].activeMillisecondsUpperBound,
-        ).toBe(5);
+        ).toBe(7);
         expect(
             measured.participants.map(
                 (participant) => participant.productiveVisits,
             ),
         ).toEqual([8, 8, 8]);
+    });
+    it('requires complete once-per-session bootstrap coverage and valid nonoverlapping intervals', () => {
+        const operations = ordinary();
+        const bootstraps = bootstrapsFor(operations);
+        const first = bootstraps[0];
+        const tail = bootstraps.slice(1);
+        for (const invalid of [
+            tail,
+            [...bootstraps, first],
+            [{ ...first, position: 1 }, ...tail],
+            [{ ...first, started: NaN }, ...tail],
+            [{ ...first, finished: first.started - 1 }, ...tail],
+            [{ ...first, finished: operations[0].started + 1 }, ...tail],
+            [...bootstraps, { ...first, session: 1000 }],
+        ])
+            expect(() => measure(operations, 3, true, invalid)).toThrow();
+        const overlapping = bootstraps.map((bootstrap, index) =>
+            index === 1
+                ? { ...bootstrap, started: bootstrap.started - 1 }
+                : bootstrap,
+        );
+        expect(() => measure(operations, 3, true, overlapping)).toThrow(
+            'overlap',
+        );
+        // Parallel page bootstrap may overlap another participant's work;
+        // it never masquerades as observed sequential completion.
+        expect(
+            measure(operations, 3, false, overlapping)
+                .sequentialCompletionMilliseconds,
+        ).toBeNull();
     });
     it('does not infer preparation stages from their shared generation or generic publish operation', () => {
         const operations = ordinary();
@@ -141,9 +222,7 @@ describe('explicit participant productive-visit trace', () => {
                 ? { ...operation, stages: [2] }
                 : operation,
         );
-        expect(() => summarizeParticipantWorkflow(wrong, 3, true)).toThrow(
-            'explicit stage',
-        );
+        expect(() => measure(wrong, 3, true)).toThrow('explicit stage');
         const missing = operations.filter(
             (operation) =>
                 !(
@@ -152,9 +231,7 @@ describe('explicit participant productive-visit trace', () => {
                     operation.generation === 3
                 ),
         );
-        expect(() => summarizeParticipantWorkflow(missing, 3, true)).toThrow(
-            'roster',
-        );
+        expect(() => measure(missing, 3, true)).toThrow('roster');
     });
     it('refuses missing peer-message frontiers and a participant whose target or outcome was omitted', () => {
         for (const predicate of [
@@ -167,7 +244,7 @@ describe('explicit participant productive-visit trace', () => {
                 operation.operation === 'result' && operation.position === 1,
         ])
             expect(() =>
-                summarizeParticipantWorkflow(
+                measure(
                     ordinary().filter((operation) => !predicate(operation)),
                     3,
                     true,
@@ -178,7 +255,7 @@ describe('explicit participant productive-visit trace', () => {
                 ? { ...operation, outcome: 'pending' as const }
                 : operation,
         );
-        expect(() => summarizeParticipantWorkflow(noOffer, 3, true)).toThrow(
+        expect(() => measure(noOffer, 3, true)).toThrow(
             'Incomplete message frontier: offer',
         );
     });
@@ -192,7 +269,7 @@ describe('explicit participant productive-visit trace', () => {
             started: final.finished + 1,
             finished: final.finished + 4,
         });
-        const measured = summarizeParticipantWorkflow(operations, 3, true);
+        const measured = measure(operations, 3, true);
         expect(measured.activeMilliseconds).toBe(60);
         expect(measured.participants[2].productiveVisits).toBe(8);
         expect(
@@ -212,12 +289,11 @@ describe('explicit participant productive-visit trace', () => {
             },
         };
         expect(
-            summarizeParticipantWorkflow(operations, 3, true).participants[2]
+            measure(operations, 3, true).participants[2]
                 .combinedWorkerHelperArenaBytes,
         ).toBe(240);
         expect(
-            summarizeParticipantWorkflow(operations, 3, false)
-                .sequentialCompletionMilliseconds,
+            measure(operations, 3, false).sequentialCompletionMilliseconds,
         ).toBeNull();
         for (const invalid of [
             { ...final, id: operations[0].id },
@@ -231,11 +307,7 @@ describe('explicit participant productive-visit trace', () => {
             { ...final, stages: [6, 7] },
         ])
             expect(() =>
-                summarizeParticipantWorkflow(
-                    [...operations.slice(0, -1), invalid],
-                    3,
-                    true,
-                ),
+                measure([...operations.slice(0, -1), invalid], 3, true),
             ).toThrow();
     });
 });

@@ -1,4 +1,4 @@
-import { concatenate, readUnsigned32, readUnsigned64 } from './bytes.js';
+import { readUnsigned32, readUnsigned64 } from './bytes.js';
 import { describe, PublicInputFailure } from './context.js';
 
 // Public records come from an untrusted relay. Every read has an exact upper
@@ -32,6 +32,8 @@ const streamBounded = async (
     maximum: number,
     accept: (bytes: Uint8Array) => void | Promise<void>,
 ): Promise<number> => {
+    if (!Number.isSafeInteger(maximum) || maximum < 0)
+        throw new PublicInputFailure('A public record has an invalid bound.');
     const controller = new AbortController();
     let response: Response;
     try {
@@ -79,12 +81,42 @@ const streamBounded = async (
     return total;
 };
 
-export const readBounded = async (url: string, maximum: number) => {
-    const parts: Uint8Array[] = [];
+// Network fragmentation does not determine the retained object count. Pages
+// are allocated only as bytes arrive, within the caller's trusted bound; the
+// returned exact-sized buffer is owned and nonshared.
+export const readBounded = async (
+    url: string,
+    maximum: number,
+): Promise<Uint8Array<ArrayBuffer>> => {
+    const pages: Uint8Array<ArrayBuffer>[] = [];
+    let length = 0;
+    let used = 0;
     await streamBounded(url, maximum, (bytes) => {
-        parts.push(bytes.slice());
+        for (let offset = 0; offset < bytes.length;) {
+            let page = pages[pages.length - 1];
+            if (page === undefined || used === page.length) {
+                page = new Uint8Array(
+                    Math.min(transferChunkBytes, maximum - length),
+                );
+                pages.push(page);
+                used = 0;
+            }
+            const count = Math.min(page.length - used, bytes.length - offset);
+            page.set(bytes.subarray(offset, offset + count), used);
+            offset += count;
+            used += count;
+            length += count;
+        }
     });
-    return concatenate(...parts);
+    if (pages.length === 1 && pages[0].length === length) return pages[0];
+    const result = new Uint8Array(length);
+    let offset = 0;
+    for (const page of pages) {
+        const count = Math.min(page.length, length - offset);
+        result.set(page.subarray(0, count), offset);
+        offset += count;
+    }
+    return result;
 };
 
 export const streamPublic = (
@@ -94,17 +126,8 @@ export const streamPublic = (
     accept: (bytes: Uint8Array) => void | Promise<void>,
 ) => streamBounded(relay.base + 'public/' + name, maximum, accept);
 
-export const readPublic = async (
-    relay: PublicRelay,
-    name: string,
-    maximum: number,
-) => {
-    const parts: Uint8Array[] = [];
-    await streamPublic(relay, name, maximum, (bytes) => {
-        parts.push(bytes.slice());
-    });
-    return concatenate(...parts);
-};
+export const readPublic = (relay: PublicRelay, name: string, maximum: number) =>
+    readBounded(relay.base + 'public/' + name, maximum);
 
 const postPublic = async (url: string, bytes: Uint8Array) => {
     const controller = new AbortController();

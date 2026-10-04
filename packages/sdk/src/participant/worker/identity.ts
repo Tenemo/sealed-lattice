@@ -19,9 +19,9 @@ export const custodyPurpose = {
 } as const;
 type CustodyPurpose = (typeof custodyPurpose)[keyof typeof custodyPurpose];
 
-// Derives one identity in the participant module, whose SHAKE256 framing is
-// the only hash the runtime binds into its retained state or addresses public
-// records by.
+// Derives protocol object and custody identities with the participant
+// module's canonical SHAKE256 framing. The separately derived build runtime
+// identity is also bound into protocol contexts and retained state.
 export const custodyIdentity = (
     kernel: ParticipantKernel,
     purpose: CustodyPurpose,

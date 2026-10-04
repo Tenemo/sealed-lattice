@@ -1044,12 +1044,8 @@ const takeResponses = async (session: CloseSession, relay: PublicRelay) => {
                 )
             )
                 continue;
-            let submission = await readPublishedSubmission(
-                profile,
-                relay,
-                author,
-                identity,
-            );
+            let submission: Uint8Array | undefined =
+                await readPublishedSubmission(profile, relay, author, identity);
             if (
                 submission === undefined ||
                 !isListedSubmission(context, submission, author, identity)

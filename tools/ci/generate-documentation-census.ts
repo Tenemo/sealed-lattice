@@ -74,6 +74,7 @@ import {
     prefixReplacementBaseQueriesPerAccess,
     shadowOracleDomainWork,
 } from '#tests/oracle-domain-model.js';
+import { compileOrdinaryWorkflowResources } from '#tests/ordinary-workflow-resource-model.js';
 import { compileParticipantBallotCustody } from '#tests/participant-ballot-custody-model.js';
 import { compileParticipantCloseCustody } from '#tests/participant-close-custody-model.js';
 import {
@@ -145,6 +146,7 @@ import {
     compileWideChallengeCompilerCensus,
 } from '#tests/wide-challenge-compiler-model.js';
 import { compileWideShareLiftingCensus } from '#tests/wide-share-lifting-model.js';
+import { readParticipantArtifactResources } from '#tools/ci/participant-artifact-resources.js';
 
 const formatCount = (value: bigint | number): string =>
     `\`${value.toLocaleString('en-US')}\``;
@@ -160,6 +162,13 @@ const table = (
     ].join('\n');
 
 export const renderDocumentationCensus = (): string => {
+    const resourceArtifact = readParticipantArtifactResources();
+    const workflowResources = [
+        deriveSupportedProfile(10, 10),
+        deriveSupportedProfile(20, 20),
+    ].map((profile) =>
+        compileOrdinaryWorkflowResources(profile, resourceArtifact),
+    );
     const completion = completionProfile();
     const thresholdProfiles = compileSupportedThresholdCompletionProfiles();
     const boundedLinearProof = compileBoundedLinearPolynomialProofCensus();
@@ -3849,6 +3858,335 @@ export const renderDocumentationCensus = (): string => {
                 ];
             }),
         ),
+        '',
+        '## Complete ordinary workflow resource screen',
+        '',
+        'The [workflow model](../tests/ordinary-workflow-resource-model.ts) follows one successful ordinary traversal with all roster members casting, responding, evaluating, voting, releasing and reading the result. Its ordinary schedule generates only the selected contributors; the separate eligible-corpus row allows every eligible author to publish. Body sizes are canonical maxima, not predictions of sampled proof sizes. The model counts complete named offers, close response/envelope copies, organizer closure bodies, repeated certificate/selector uploads, the organizer’s repeated registration/poll publication and repeated close intent/held list. Clean forwarding is zero with the complete organizer-held list; the missing-list fallback is separate. Invalid inputs, retransmissions, retries and arbitrary extra visits have no finite lifetime population here.',
+        '',
+        'The artifact operands below come from the existing shared SDK build. Census generation verifies every recorded source digest and the packaged runtime identity, refuses a missing or stale build, and never triggers a build. Regenerate and check this section after the shared SDK build. These byte lengths identify delivered artifacts, not a phone measurement. The SDK embeds the worker source and creates worker/helper Blob URLs, so network bootstrap is one SDK bundle per page load plus one module per actual primary-worker invocation; the embedded worker is not charged twice. The ordinary target-signing call uses one worker, and the subsequent release/result calls restore its intact target. A cache-miss release/result call can automatically start a second worker and must charge both module fetches. Host-page bytes, transport headers and application delivery remain separate operands.',
+        '',
+        table(
+            ['Built runtime operand', 'Value'],
+            [
+                [
+                    'Runtime identity',
+                    `\`${resourceArtifact.identity.runtime}\``,
+                ],
+                ['SDK entry digest', `\`${resourceArtifact.sdkDigest}\``],
+                [
+                    'SDK bundle bytes per page load',
+                    formatCount(resourceArtifact.sdkBytes),
+                ],
+                [
+                    'Module bytes per operation invocation',
+                    formatCount(resourceArtifact.moduleBytes),
+                ],
+                [
+                    'Embedded worker source bytes',
+                    formatCount(resourceArtifact.workerBytes),
+                ],
+            ],
+        ),
+        '',
+        table(
+            ['Property', ...workflowResources.map((value) => value.profile)],
+            [
+                [
+                    'Ordinary selected offer count',
+                    (value: (typeof workflowResources)[number]) =>
+                        value.rows[0].offers,
+                ],
+                [
+                    'All-eligible offer count',
+                    (value: (typeof workflowResources)[number]) =>
+                        value.rows[1].offers,
+                ],
+                [
+                    'Ordinary complete public corpus bytes',
+                    (value: (typeof workflowResources)[number]) =>
+                        value.rows[0].publicCorpusBytes,
+                ],
+                [
+                    'All-eligible complete public corpus bytes',
+                    (value: (typeof workflowResources)[number]) =>
+                        value.rows[1].publicCorpusBytes,
+                ],
+                [
+                    'Ordinary total upload bytes',
+                    (value: (typeof workflowResources)[number]) =>
+                        value.rows[0].totalUploadBytes,
+                ],
+                [
+                    'All-eligible total upload bytes',
+                    (value: (typeof workflowResources)[number]) =>
+                        value.rows[1].totalUploadBytes,
+                ],
+                [
+                    'Organizer upload bytes',
+                    (value: (typeof workflowResources)[number]) =>
+                        value.organizerUploadBytes,
+                ],
+                [
+                    'Organizer closure copies',
+                    (value: (typeof workflowResources)[number]) =>
+                        value.organizerClosureCopyBytes,
+                ],
+                [
+                    'Responders’ listed-envelope copies',
+                    (value: (typeof workflowResources)[number]) =>
+                        value.responderListedCopyBytes,
+                ],
+                [
+                    'Missing-held-list body-forwarding fallback',
+                    (value: (typeof workflowResources)[number]) =>
+                        value.maximumForwardedBodyFallbackBytes,
+                ],
+                [
+                    'Fresh standalone reader protocol bytes',
+                    (value: (typeof workflowResources)[number]) =>
+                        value.publicReaderProtocolBytes,
+                ],
+                [
+                    'Fresh standalone reader plus one SDK/module delivery',
+                    (value: (typeof workflowResources)[number]) =>
+                        value.publicReaderColdDeliveryBytes,
+                ],
+                [
+                    'Ordinary operation-worker invocations',
+                    (value: (typeof workflowResources)[number]) =>
+                        value.rows[0].workerInvocations,
+                ],
+                [
+                    'All-eligible operation-worker invocations',
+                    (value: (typeof workflowResources)[number]) =>
+                        value.rows[1].workerInvocations,
+                ],
+                [
+                    'Ordinary module-download bytes across participants',
+                    (value: (typeof workflowResources)[number]) =>
+                        value.rows[0].moduleDownloadBytes,
+                ],
+            ].map(([label, select]) => [
+                label as string,
+                ...workflowResources.map((value) =>
+                    formatCount(
+                        (
+                            select as (
+                                value: (typeof workflowResources)[number],
+                            ) => bigint
+                        )(value),
+                    ),
+                ),
+            ]),
+        ),
+        '',
+        'The standalone reader has no participant custody and streams every usable ballot for barrier authentication, classification and evaluation import before checking the target votes and release shares. Participants with intact close custody read those bodies locally. Roster restoration refetches complete registered headers and recipient keys, preserving its own retained verification instead of repeating registration proofs. Metadata allowances are conservative: held close responses can avoid target reads, and an existing setup certificate avoids assembly reads. These are protocol-read upper bounds, not exact ordinary network traces. The action rows exclude bootstrap; add the actual module for each primary-worker invocation and the SDK for each page load. Cumulative download rows are distinct from the per-action planning target.',
+        '',
+        table(
+            [
+                'Clean protocol read upper bound',
+                ...workflowResources.map((value) => value.profile),
+            ],
+            [
+                [
+                    'One roster restoration',
+                    (value: (typeof workflowResources)[number]) =>
+                        value.rosterRestoreBytes,
+                ],
+                [
+                    'Preparation endorsement and activation',
+                    (value: (typeof workflowResources)[number]) =>
+                        value.preparationReaderBytes,
+                ],
+                [
+                    'Organizer selection, endorsement and activation',
+                    (value: (typeof workflowResources)[number]) =>
+                        value.preparationOrganizerBytes,
+                ],
+                [
+                    'Other member’s two close invocations',
+                    (value: (typeof workflowResources)[number]) =>
+                        value.nonorganizerCloseBytes,
+                ],
+                [
+                    'Organizer’s two close invocations',
+                    (value: (typeof workflowResources)[number]) =>
+                        value.organizerCloseBytes,
+                ],
+                [
+                    'Target action',
+                    (value: (typeof workflowResources)[number]) =>
+                        value.targetReadBytes,
+                ],
+                [
+                    'Release action with retained target',
+                    (value: (typeof workflowResources)[number]) =>
+                        value.releaseReadBytes,
+                ],
+                [
+                    'Result action with retained target',
+                    (value: (typeof workflowResources)[number]) =>
+                        value.resultReadBytes,
+                ],
+                [
+                    'Cumulative member without an offer',
+                    (value: (typeof workflowResources)[number]) =>
+                        value.noncontributorProtocolReads,
+                ],
+                [
+                    'Cumulative member with one offer',
+                    (value: (typeof workflowResources)[number]) =>
+                        value.contributorProtocolReads,
+                ],
+                [
+                    'Cumulative organizer',
+                    (value: (typeof workflowResources)[number]) =>
+                        value.organizerProtocolReads,
+                ],
+            ].map(([label, select]) => [
+                label as string,
+                ...workflowResources.map((value) =>
+                    formatCount(
+                        (
+                            select as (
+                                value: (typeof workflowResources)[number],
+                            ) => bigint
+                        )(value),
+                    ),
+                ),
+            ]),
+        ),
+        '',
+        '## Scalar evaluation storage screen',
+        '',
+        'The [independent storage model](../tests/evaluation-storage-model.ts) emits the existing algebraic ranking DAG in the Rust program’s DFS order and interprets the scalar capacity and eviction policy without ciphertexts or proofs. It preserves the pinned completion-program identity. The farthest next use is evicted first, with greatest index breaking ties; a reloaded value keeps its stored copy until final use. Old host key records coexist with newly written spills before awaited cache deletion, and replacement ordinal writes follow that deletion. These are successful logical store payloads; physical database journals, garbage collection, Blob allocation and process memory are separate evidence.',
+        '',
+        table(
+            [
+                'Scalar schedule operand',
+                ...workflowResources.map((value) => value.profile),
+            ],
+            [
+                [
+                    'Instructions',
+                    (value: (typeof workflowResources)[number]) =>
+                        BigInt(value.evaluation.program.instructions.length),
+                ],
+                [
+                    'One stored ciphertext bytes',
+                    (value: (typeof workflowResources)[number]) =>
+                        value.evaluation.capacity.storedValueBytes,
+                ],
+                [
+                    'Multiplication-key record bytes',
+                    (value: (typeof workflowResources)[number]) =>
+                        value.evaluation.capacity.multiplicationKeyBytes,
+                ],
+                [
+                    'One scalar job allowance bytes',
+                    (value: (typeof workflowResources)[number]) =>
+                        value.evaluation.capacity.jobBytes,
+                ],
+                [
+                    'First spill writes',
+                    (value: (typeof workflowResources)[number]) =>
+                        BigInt(value.evaluation.spillCount),
+                ],
+                [
+                    'Reloads',
+                    (value: (typeof workflowResources)[number]) =>
+                        BigInt(value.evaluation.reloadCount),
+                ],
+                [
+                    'Resident-only drops of stored values',
+                    (value: (typeof workflowResources)[number]) =>
+                        BigInt(value.evaluation.dropCount),
+                ],
+                [
+                    'Peak live spilled values',
+                    (value: (typeof workflowResources)[number]) =>
+                        BigInt(value.evaluation.peakStored),
+                ],
+                [
+                    'Peak evaluation-store payload bytes',
+                    (value: (typeof workflowResources)[number]) =>
+                        value.evaluation.peakBytes,
+                ],
+                [
+                    'Scratch planning variance ceiling',
+                    (value: (typeof workflowResources)[number]) =>
+                        value.evaluation.scratchVarianceCeilingBytes,
+                ],
+                [
+                    'All key-bank writes',
+                    (value: (typeof workflowResources)[number]) =>
+                        value.evaluation.keyBankWriteBytes,
+                ],
+                [
+                    'Spill writes and matching readback, each',
+                    (value: (typeof workflowResources)[number]) =>
+                        value.evaluation.spillWriteBytes,
+                ],
+                [
+                    'Reload read bytes',
+                    (value: (typeof workflowResources)[number]) =>
+                        value.evaluation.reloadBytes,
+                ],
+                [
+                    'Preparation retained and aggregate payload subtotal',
+                    (value: (typeof workflowResources)[number]) =>
+                        value.prepRetainedAndAggregatePayloadBytes,
+                ],
+                [
+                    'Closed custody and aggregate payload subtotal',
+                    (value: (typeof workflowResources)[number]) =>
+                        value.closedCustodyAndAggregatePayloadBytes,
+                ],
+                [
+                    'Evaluation custody, aggregate and store payload subtotal',
+                    (value: (typeof workflowResources)[number]) =>
+                        value.evaluationCustodyAndStorePayloadBytes,
+                ],
+                [
+                    'Completed release payload subtotal',
+                    (value: (typeof workflowResources)[number]) =>
+                        value.releaseEndPayloadBytes,
+                ],
+                [
+                    'Maximum retained target Vec / immutable Blob bytes',
+                    (value: (typeof workflowResources)[number]) =>
+                        value.retainedTarget.maximumRetainedBytes,
+                ],
+                [
+                    'Maximum retained-target copied slice bytes',
+                    (value: (typeof workflowResources)[number]) =>
+                        value.retainedTarget.maximumSliceBytes,
+                ],
+                [
+                    'Local publication data-kind payload reads across participants',
+                    (value: (typeof workflowResources)[number]) =>
+                        value.publicationRecordPayloadReadBytes,
+                ],
+                [
+                    'Maximum registration-publication record bytes',
+                    (value: (typeof workflowResources)[number]) =>
+                        value.maximumPublicationRecordBytes,
+                ],
+            ].map(([label, select]) => [
+                label as string,
+                ...workflowResources.map((value) =>
+                    formatCount(
+                        (
+                            select as (
+                                value: (typeof workflowResources)[number],
+                            ) => bigint
+                        )(value),
+                    ),
+                ),
+            ]),
+        ),
+        '',
+        'The retained-target repair bounds each copied JavaScript slice while preserving the full Rust output and single immutable stored Blob. Public data-kind publication now uses a complete preflight followed by guarded record-sized delivery; the local payload-read row charges those two passes, with root/head/count authority checks additional and no change to upload bytes. The custody subtotals still need residual record/head metadata, restart overlap and physical storage accounting before they establish a complete origin-storage bound. The largest profile remains outside the scratch planning variance ceiling and its organizer’s preparation polynomial-read floor remains outside the transfer variance ceiling; no largest-profile resource closure follows from the smaller ordinary corpus or bounded copy repair.',
         '',
         '## Roster proposal census',
         '',

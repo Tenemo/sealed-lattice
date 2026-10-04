@@ -37,6 +37,7 @@ import {
     ModuleFailure,
     moduleChunkBytes,
     readKernel,
+    ResourceFailure,
     writeChunkInput,
 } from './kernel.js';
 import { publishRecord, readPublic, streamPublic } from './public.js';
@@ -44,6 +45,7 @@ import type { PublicRelay } from './public.js';
 import { commitRoot, dataRecordInventory } from './root.js';
 import { deliverFinalAggregate, readFinalAggregate } from './setup.js';
 import {
+    awaitLater,
     evaluatedTargetName,
     namespacedName,
     publicEvaluationName,
@@ -575,11 +577,13 @@ const evaluatedTargetRequest = async <Value>(
     const database = await request(opened);
     try {
         const transaction = database.transaction(evaluatedTargetStore, mode);
-        const done = completion(transaction);
-        const value = await request(
-            run(transaction.objectStore(evaluatedTargetStore)),
-        );
-        await done;
+        // Observe completion before creating the request: a synchronous
+        // factory failure can still be followed by a transaction abort.
+        const done = awaitLater(completion(transaction));
+        const [value] = await Promise.all([
+            request(run(transaction.objectStore(evaluatedTargetStore))),
+            done,
+        ]);
         return value;
     } finally {
         database.close();
@@ -587,17 +591,29 @@ const evaluatedTargetRequest = async <Value>(
 };
 
 // Retains the target this instance evaluated, keyed to the credential.
-const retainEvaluation = async (context: ProfileContext) => {
+export const retainEvaluation = async (context: ProfileContext) => {
     const { kernel } = context;
     if (kernel.retain_evaluation() !== 0)
         throw new Error('The credential refused the evaluated target.');
-    const bytes = readKernel(
-        kernel,
-        kernel.contribution_output_pointer(),
-        kernel.contribution_output_length(),
-    );
+    const pointer = kernel.contribution_output_pointer() >>> 0;
+    const length = kernel.contribution_output_length();
+    const parts: Blob[] = [];
+    for (let offset = 0; offset < length; offset += moduleChunkBytes)
+        // Blob snapshots this bounded view synchronously. No Wasm call or
+        // awaited work changes the encoded target while its parts are copied.
+        parts.push(
+            new Blob([
+                new Uint8Array(
+                    kernel.memory.buffer,
+                    pointer + offset,
+                    Math.min(moduleChunkBytes, length - offset),
+                ),
+            ]),
+        );
+    const copy = new Blob(parts);
+    parts.length = 0;
     await evaluatedTargetRequest(context.namespace, 'readwrite', (store) =>
-        store.put(new Blob([new Uint8Array(bytes)]), 0),
+        store.put(copy, 0),
     );
 };
 
@@ -614,11 +630,14 @@ export const discardEvaluation = async (context: PublicContext) => {
 // read, that the module refuses or on which the module fails is discarded,
 // so a later visit evaluates the target again. Returns whether the target
 // was restored.
-const restoreEvaluation = async (context: ProfileContext) => {
+export const restoreEvaluation = async (context: ProfileContext) => {
     try {
         return await restoreEvaluationCopy(context);
     } catch (error) {
-        if (error instanceof ModuleFailure) await discardEvaluation(context);
+        if (error instanceof ModuleFailure)
+            // A public-cache cleanup failure cannot turn a terminal module
+            // failure into a different local-state outcome.
+            await discardEvaluation(context).catch(() => undefined);
         throw error;
     }
 };
@@ -630,28 +649,57 @@ const restoreEvaluationCopy = async (context: ProfileContext) => {
         (store) => store.get(0),
     );
     if (!(value instanceof Blob)) return false;
+    const length = value.size;
+    // Wasm usize is u32. A wider host length must not wrap into a valid
+    // profile-sized allocation before the owning Rust bound is checked.
+    if (!Number.isSafeInteger(length) || length < 0 || length > 0xffff_ffff) {
+        await discardEvaluation(context);
+        return false;
+    }
     // The module bounds the copy's length before any of it is read, and its
     // last step ends the copy it began whether or not the copy restores.
     const { kernel } = context;
-    let restored = kernel.restore_evaluation(0, value.size) === 0;
+    let restored = kernel.restore_evaluation(0, length) === 0;
     if (restored) {
-        const bytes = await value.arrayBuffer().then(
-            (buffer) => new Uint8Array(buffer),
-            () => undefined,
-        );
-        for (
-            let offset = 0;
-            restored && bytes !== undefined && offset < bytes.length;
-            offset += moduleChunkBytes
-        ) {
-            const chunk = bytes.subarray(offset, offset + moduleChunkBytes);
-            sessionInput(context, chunk);
-            restored = kernel.restore_evaluation(1, chunk.length) === 0;
+        let terminal = false;
+        try {
+            for (
+                let offset = 0;
+                restored && offset < length;
+                offset += moduleChunkBytes
+            ) {
+                // Every slice belongs to the immutable Blob snapshot read
+                // above, even if another connection replaces its stored key.
+                const buffer = await value
+                    .slice(offset, offset + moduleChunkBytes)
+                    .arrayBuffer()
+                    .catch((error: unknown) => {
+                        if (
+                            error instanceof ModuleFailure ||
+                            error instanceof ResourceFailure
+                        )
+                            throw error;
+                        return undefined;
+                    });
+                if (buffer === undefined) {
+                    restored = false;
+                    break;
+                }
+                const chunk = new Uint8Array(buffer);
+                sessionInput(context, chunk);
+                restored = kernel.restore_evaluation(1, chunk.length) === 0;
+            }
+        } catch (error) {
+            terminal =
+                error instanceof ModuleFailure ||
+                error instanceof ResourceFailure;
+            throw error;
+        } finally {
+            // Finish consumes an incomplete copy too. Terminally failed
+            // instances cannot be entered again, including for cleanup.
+            if (!terminal)
+                restored = kernel.restore_evaluation(2, 0) === 0 && restored;
         }
-        restored =
-            kernel.restore_evaluation(2, 0) === 0 &&
-            restored &&
-            bytes !== undefined;
     }
     if (!restored) await discardEvaluation(context);
     return restored;

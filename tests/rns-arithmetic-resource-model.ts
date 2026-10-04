@@ -44,13 +44,18 @@ const transformPrime = (index: number): bigint => {
 };
 export const researchTransformPrime = transformPrime;
 
-// The least number of leading transform primes whose product exceeds a
-// centered bound, from which an exact product lifts.
+// The least prime prefix satisfying the production fixed-point lift margin:
+// (P-bound)*2^57 >= 4*count*P (word-arithmetic::Lift::covers).
 const primeCount = (bound: bigint): bigint => {
     let product = 1n;
     for (let index = 0; ; index++) {
         product *= transformPrime(index);
-        if (product > bound) return BigInt(index + 1);
+        const count = BigInt(index + 1);
+        if (
+            product > bound &&
+            (product - bound) * (1n << 57n) >= 4n * count * product
+        )
+            return count;
     }
 };
 
@@ -80,6 +85,16 @@ export const compileRnsArithmeticResourceCensus = (
     const half = modulus / 2n;
     const gadgetLength = profile.gadgetLength;
     const exactProductPrimes = primeCount(2n * degree * half * half);
+    const plaintextBound =
+        degree * (fixedModulusBfvInputs.plaintextModulus / 2n);
+    const secretBound =
+        BigInt(profile.setupContributorCount) *
+        fixedModulusBfvInputs.secretSupportWeight;
+    const keyProductPrimes = primeCount(
+        2n *
+            (plaintextBound > secretBound ? plaintextBound : secretBound) *
+            half,
+    );
     const externalProductPrimes = primeCount(
         2n *
             gadgetLength *
@@ -102,6 +117,7 @@ export const compileRnsArithmeticResourceCensus = (
         tableBytesPerPrime,
         recursiveTableBytes,
         exactProductPrimes,
+        keyProductPrimes,
         externalProductPrimes,
         flatTableBytesPerPrime,
         flatTableBytes,

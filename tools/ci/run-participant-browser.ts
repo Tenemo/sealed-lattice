@@ -80,6 +80,7 @@ import {
 } from '#tools/ci/participant-transfer.js';
 import {
     summarizeParticipantWorkflow,
+    type ParticipantBootstrapMeasurement,
     type ParticipantOperationMeasurement,
 } from '#tools/ci/participant-workflow-measurements.js';
 import {
@@ -833,6 +834,7 @@ await runWithLocalRunLog(
         let guardFailure: Error | undefined;
         let completed = false;
         const ordinaryOperations: ParticipantOperationMeasurement[] = [];
+        const ordinaryBootstraps: ParticipantBootstrapMeasurement[] = [];
         const measureWorkflow =
             mode === 'plain' &&
             !memoryPressure &&
@@ -1187,37 +1189,70 @@ await runWithLocalRunLog(
                 return browsers.use(
                     key,
                     async () => {
+                        // This callback starts only after the pool has room;
+                        // pool queueing and another browser's eviction stay outside.
+                        const session = nextBrowserSession++;
                         const launching = performance.now();
-                        const chrome = await launchChromeParticipant(
-                            copy === undefined
-                                ? profile(position)
-                                : copyProfile(copy),
-                            origin(position) +
-                                (copy === secondRosterCopy
-                                    ? secondRosterPath
-                                    : ''),
-                            copy === undefined && pressured.has(position)
-                                ? `--wasm-max-mem-pages=${String(pressurePages)}`
-                                : undefined,
-                        );
+                        let chrome: ChromeParticipant | undefined;
                         try {
+                            chrome = await launchChromeParticipant(
+                                copy === undefined
+                                    ? profile(position)
+                                    : copyProfile(copy),
+                                origin(position) +
+                                    (copy === secondRosterCopy
+                                        ? secondRosterPath
+                                        : ''),
+                                copy === undefined && pressured.has(position)
+                                    ? `--wasm-max-mem-pages=${String(pressurePages)}`
+                                    : undefined,
+                            );
                             assert.equal(
                                 await chrome.evaluate('crossOriginIsolated'),
                                 !scalar,
                                 'The browser isolation differs from the selected execution mode.',
                             );
+                            assert.equal(
+                                await chrome.evaluate(
+                                    "typeof window.runParticipant === 'function'",
+                                ),
+                                true,
+                                'The participant page SDK did not initialize.',
+                            );
                         } catch (error) {
-                            await chrome.crash();
+                            const bootstrap = {
+                                session,
+                                position,
+                                started: launching,
+                                finished: performance.now(),
+                            };
+                            if (measureWorkflow && copy === undefined)
+                                ordinaryBootstraps.push(bootstrap);
+                            log.writeEvent({
+                                eventType:
+                                    'participant-browser-bootstrap-failed',
+                                details: { ...details, ...bootstrap },
+                            });
+                            await chrome?.crash();
                             throw error;
                         }
+                        const bootstrap = {
+                            session,
+                            position,
+                            started: launching,
+                            finished: performance.now(),
+                        };
                         browserDetails.set(key, details);
-                        browserSessions.set(chrome, nextBrowserSession++);
+                        browserSessions.set(chrome, session);
+                        if (measureWorkflow && copy === undefined)
+                            ordinaryBootstraps.push(bootstrap);
                         log.writeEvent({
                             eventType: 'participant-browser',
                             details: {
                                 ...details,
-                                session: browserSessions.get(chrome),
-                                milliseconds: performance.now() - launching,
+                                ...bootstrap,
+                                milliseconds:
+                                    bootstrap.finished - bootstrap.started,
                                 version: chrome.version,
                                 launchArguments: chrome.launchArguments,
                                 scalar,
@@ -2937,6 +2972,7 @@ await runWithLocalRunLog(
                                           ordinaryOperations,
                                           participantCount,
                                           sequential,
+                                          ordinaryBootstraps,
                                       ),
                             scope: [
                                 setupDeparture

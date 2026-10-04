@@ -25,6 +25,13 @@ export type ParticipantOperationMeasurement = Readonly<{
     }>;
 }>;
 
+export type ParticipantBootstrapMeasurement = Readonly<{
+    session: number;
+    position: number;
+    started: number;
+    finished: number;
+}>;
+
 // This is a trace of an ordinary clear-certified schedule, not protocol
 // authority. Every dependency below names a completed SDK invocation; the
 // owning runtime still verifies all actual bytes and signatures itself.
@@ -32,6 +39,7 @@ export const summarizeParticipantWorkflow = (
     operations: readonly ParticipantOperationMeasurement[],
     participants: number,
     sequential: boolean,
+    bootstraps: readonly ParticipantBootstrapMeasurement[],
 ) => {
     assert.ok(
         operations.length > 0 &&
@@ -46,6 +54,27 @@ export const summarizeParticipantWorkflow = (
         (left, right) => left.started - right.started,
     );
     const identifiers = new Set<number>();
+    const startup = new Map<number, ParticipantBootstrapMeasurement>();
+    for (const bootstrap of bootstraps) {
+        assert.ok(
+            Number.isInteger(bootstrap.session) &&
+                bootstrap.session >= 0 &&
+                !startup.has(bootstrap.session),
+            'Duplicate or invalid browser bootstrap.',
+        );
+        assert.ok(
+            Number.isInteger(bootstrap.position) &&
+                bootstrap.position >= 0 &&
+                bootstrap.position < participants,
+        );
+        assert.ok(
+            Number.isFinite(bootstrap.started) &&
+                Number.isFinite(bootstrap.finished) &&
+                bootstrap.finished >= bootstrap.started,
+            'Invalid browser bootstrap interval.',
+        );
+        startup.set(bootstrap.session, bootstrap);
+    }
     const sessions = new Map<number, number>();
     const published = new Map<string, ParticipantOperationMeasurement>();
     const latest = new Array<number>(participants).fill(-Infinity);
@@ -55,6 +84,7 @@ export const summarizeParticipantWorkflow = (
     );
     const byParticipant = paths.map((path) => ({
         activeMilliseconds: 0,
+        bootstrapMilliseconds: 0,
         attempts: 0,
         combinedWorkerHelperArenaBytes: undefined as number | undefined,
         visits: path.map((stage) => ({
@@ -77,6 +107,7 @@ export const summarizeParticipantWorkflow = (
     const traced = [];
     let lastFinished = -Infinity;
     let activeMilliseconds = 0;
+    let bootstrapMilliseconds = 0;
     const key = (kind: string, position: number) => kind + ':' + position;
     for (const operation of ordered) {
         const { position, stages, outcome } = operation;
@@ -95,6 +126,20 @@ export const summarizeParticipantWorkflow = (
         assert.ok(
             Number.isInteger(operation.session) && operation.session >= 0,
         );
+        const bootstrap = startup.get(operation.session);
+        assert.ok(
+            bootstrap && bootstrap.position === position,
+            'Missing or mismatched browser bootstrap.',
+        );
+        const firstInSession = !sessions.has(operation.session);
+        if (firstInSession)
+            assert.ok(
+                bootstrap.finished <= operation.started,
+                'Browser bootstrap overlaps its first invocation.',
+            );
+        const effectiveStart = firstInSession
+            ? bootstrap.started
+            : operation.started;
         assert.ok(
             !sessions.has(operation.session) ||
                 sessions.get(operation.session) === position,
@@ -107,12 +152,12 @@ export const summarizeParticipantWorkflow = (
                 operation.finished >= operation.started,
         );
         assert.ok(
-            operation.started >= latest[position],
+            effectiveStart >= latest[position],
             'One participant has overlapping operations.',
         );
         if (sequential)
             assert.ok(
-                operation.started >= lastFinished,
+                effectiveStart >= lastFinished,
                 'Participant operations overlap in a sequential run.',
             );
         latest[position] = operation.finished;
@@ -302,15 +347,20 @@ export const summarizeParticipantWorkflow = (
             }
         }
         const milliseconds = operation.finished - operation.started;
+        const bootstrapCost = firstInSession
+            ? bootstrap.finished - bootstrap.started
+            : 0;
         const participant = byParticipant[position];
         participant.attempts++;
         participant.activeMilliseconds += milliseconds;
+        participant.bootstrapMilliseconds += bootstrapCost;
         activeMilliseconds += milliseconds;
+        bootstrapMilliseconds += bootstrapCost;
         for (const index of stages) {
             const visit = participant.visits[index];
             visit.operationIds.push(operation.id);
             visit.sessions.add(operation.session);
-            visit.activeMillisecondsUpperBound += milliseconds;
+            visit.activeMillisecondsUpperBound += milliseconds + bootstrapCost;
         }
         for (const memory of [operation.memory, operation.evaluationMemory]) {
             if (memory === undefined) continue;
@@ -329,7 +379,11 @@ export const summarizeParticipantWorkflow = (
                 values.reduce((sum, value) => sum + value, 0),
             );
         }
-        traced.push({ ...operation, dependencies: [...new Set(dependencies)] });
+        traced.push({
+            ...operation,
+            bootstrapMilliseconds: bootstrapCost,
+            dependencies: [...new Set(dependencies)],
+        });
     }
     for (const [position, stages] of finishedStages.entries())
         assert.equal(
@@ -337,18 +391,36 @@ export const summarizeParticipantWorkflow = (
             paths[position].length,
             'An ordinary participant did not complete every measured stage.',
         );
-    const workflowMilliseconds = lastFinished - ordered[0].started;
+    assert.equal(
+        sessions.size,
+        startup.size,
+        'A browser bootstrap has no measured invocation.',
+    );
+    const workflowMilliseconds =
+        lastFinished -
+        Math.min(
+            ordered[0].started,
+            ...bootstraps.map((bootstrap) => bootstrap.started),
+        );
     return {
-        schema: 'explicit-clear-stage-trace/1',
+        schema: 'explicit-clear-stage-trace/2',
         activeMilliseconds,
+        bootstrapMilliseconds,
+        activeMillisecondsUpperBound:
+            activeMilliseconds + bootstrapMilliseconds,
         cohortWallMilliseconds: workflowMilliseconds,
         sequentialCompletionMilliseconds: sequential
             ? workflowMilliseconds
             : null,
         operations: traced,
+        bootstraps,
         participants: byParticipant.map((participant, position) => ({
             position,
             activeMilliseconds: participant.activeMilliseconds,
+            bootstrapMilliseconds: participant.bootstrapMilliseconds,
+            activeMillisecondsUpperBound:
+                participant.activeMilliseconds +
+                participant.bootstrapMilliseconds,
             attempts: participant.attempts,
             productiveVisits: participant.visits.length,
             browserSessions: new Set(
@@ -366,6 +438,6 @@ export const summarizeParticipantWorkflow = (
             combinedWorkerHelperArenaBytes:
                 participant.combinedWorkerHelperArenaBytes ?? null,
         })),
-        scope: 'Explicit ordinary clear-certified stage traversal with completed SDK-message frontiers. Every attempted invocation, including pending, refusal and interrupted work, is counted once in active totals. Browser sessions and productive stages are separate. The organizer close invocation spanning response collection and proposal is charged in full to both adjacent visit upper bounds, never twice to cumulative totals; these are conservative per-visit bounds, not exact within-call partitions or a minimum visit claim. Browser launch, queueing and human delays are outside invocation active time. Module memory totals compare successive evaluation/continuation workers rather than adding them; sampled browser-process memory includes additional allocations. These diagnostics create no protocol authority.',
+        scope: 'Explicit ordinary clear-certified stage traversal with completed SDK-message frontiers. Invocation-only active totals preserve every completed, pending, refused and interrupted attempt. Each browser session bootstrap spans its launch, navigation, SDK delivery and page initialization after pool acquisition, and is charged once to cumulative active upper bounds and the first invocation’s visit bounds. Worker and helper bootstrap and module delivery already occur inside invocation time and are not added again. The organizer close invocation spanning collection and proposal, with any first-session bootstrap, is charged in full to both adjacent visit upper bounds but once cumulatively. These are conservative bounds, not an exact within-call partition or minimum visit claim. Pool queueing and human delays are outside active bounds; wall time starts at the first bootstrap. Module memory compares successive evaluation/continuation workers rather than adding them. These diagnostics create no protocol authority.',
     };
 };

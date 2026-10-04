@@ -19,7 +19,9 @@ export const equalBytes = (left: Uint8Array, right: Uint8Array): boolean =>
     left.length === right.length &&
     left.every((value, index) => value === right[index]);
 
-export const concatenate = (...parts: readonly Uint8Array[]): Uint8Array => {
+export const concatenate = (
+    ...parts: readonly Uint8Array[]
+): Uint8Array<ArrayBuffer> => {
     const bytes = new Uint8Array(
         parts.reduce((sum, part) => sum + part.length, 0),
     );
