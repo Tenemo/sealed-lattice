@@ -372,11 +372,11 @@ mod tests {
                     .is_ok()
             );
         }
-        // The completion profile's body model: 24 FHE keys, 20 share
-        // encryptions and the auxiliary key, with the setup proof bound.
+        // The independent body model: 24 FHE keys and 20 share
+        // encryptions, with the setup proof bound.
         let completion = Profile::new(10, 10).unwrap();
-        assert_eq!(polynomials(completion).len(), 45);
-        assert_eq!(*proof_lengths(completion).end(), 41_855_840);
+        assert_eq!(polynomials(completion).len(), 44);
+        assert_eq!(*proof_lengths(completion).end(), 41_562_976);
         let longest = Profile::new(20, 20).unwrap();
         assert!(body_header(completion, *proof_lengths(longest).end(), &[6; 64]).is_err());
     }

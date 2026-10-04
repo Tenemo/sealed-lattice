@@ -76,7 +76,7 @@ fn invalid_source(
     assert!(
         SignedBallotVerifier::new(poll.clone(), setup.clone(), authentication, &header, None)
             .unwrap()
-            .requires_keys()
+            .requires_key()
     );
     for mode in ["header", "truncated"] {
         assert!(

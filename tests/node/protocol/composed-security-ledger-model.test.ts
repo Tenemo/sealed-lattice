@@ -413,8 +413,8 @@ describe('composed security ledger', () => {
     it('charges every sparse sampler call its cap-exhaustion bound', () => {
         // A balanced sparse sampler of support s over degree d fails its
         // draw cap of 2s with probability at most (4(s-1)/d)^s. Every setup
-        // contributor draws two FHE secrets, one ephemeral per recipient
-        // and one auxiliary secret; every participant one FHE and one
+        // contributor draws one fresh FHE auxiliary secret and one ephemeral
+        // per recipient; every participant draws one FHE and one
         // auxiliary ballot ephemeral; every registration one recipient
         // secret.
         const bound = (degree: bigint, support: bigint) => ({
@@ -446,12 +446,11 @@ describe('composed security ledger', () => {
             const participants = BigInt(participantCount);
             const contributors = BigInt(setupContributors(participantCount));
             const expected = unitsAbove([
-                { calls: 2n * contributors, ...bound(65_536n, 1_024n) },
+                { calls: contributors, ...bound(65_536n, 1_024n) },
                 {
                     calls: contributors * participants,
                     ...bound(65_536n, 256n),
                 },
-                { calls: contributors, ...bound(4_096n, 256n) },
             ]);
             const term = profileStatisticalTerms(
                 deriveSupportedProfile(participantCount, optionCount),

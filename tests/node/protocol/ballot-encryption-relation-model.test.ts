@@ -208,9 +208,9 @@ describe('linked scored ballot encryption', () => {
     it('fits the actual auxiliary decoding margin and full field residuals', () => {
         const census =
             compileBallotEncryptionRelationCensus(completionProfile());
-        // The aggregate auxiliary key sums four setup contributors' secrets.
-        expect(census.auxiliaryNoiseBound).toBe((2n * 4n * 256n + 1n) * 64n);
-        expect(2n * census.auxiliaryNoiseBound).toBeLessThan(
+        // Only the proof game's single good key has a secret/noise bound.
+        expect(census.auxiliaryGoodKeyNoiseBound).toBe((2n * 256n + 1n) * 64n);
+        expect(2n * census.auxiliaryGoodKeyNoiseBound).toBeLessThan(
             auxiliaryInputEncryptionParameters.scale,
         );
         expect(census.residualBound).toBeLessThan(

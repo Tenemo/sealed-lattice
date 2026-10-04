@@ -708,12 +708,12 @@ export const renderDocumentationCensus = (): string => {
                     formatCount(auxiliaryInputEncryptionParameters.scale),
                 ],
                 [
-                    'Auxiliary secret and ephemeral support',
+                    'Auxiliary ephemeral and proof-game secret support',
                     formatCount(auxiliaryInputEncryptionParameters.support),
                 ],
                 [
-                    'Accepted auxiliary encryption noise',
-                    formatCount(ballotRelation.auxiliaryNoiseBound),
+                    'Auxiliary good-key proof-game noise bound',
+                    formatCount(ballotRelation.auxiliaryGoodKeyNoiseBound),
                 ],
                 ['FHE integer limbs', formatCount(ballotRelation.limbs)],
                 [
@@ -807,7 +807,7 @@ export const renderDocumentationCensus = (): string => {
         '',
         '## Ballot body census',
         '',
-        "The framed body carries the bound context, both ciphertext pairs, and the exact proof. Common matrices and certified public keys are reconstructed from the verifier's setup. Framing alone supplies no signature, publication, or ballot authority.",
+        'The framed body carries the bound context, both ciphertext pairs, and the exact proof. The verifier obtains only the FHE aggregate public key from certified setup and derives the FHE common coordinate and both fixed auxiliary coordinates locally. The complete expanded relation still has eight polynomials. Framing alone supplies no signature, publication, or ballot authority.',
         '',
         table(
             ['Property', 'Value'],
@@ -825,6 +825,14 @@ export const renderDocumentationCensus = (): string => {
                 [
                     'Reconstructed public input bytes',
                     formatCount(ballotBody.reconstructedInputBytes),
+                ],
+                [
+                    'Certified setup key input bytes',
+                    formatCount(ballotBody.setupKeyInputBytes),
+                ],
+                [
+                    'Locally derived common and fixed-pair input bytes',
+                    formatCount(ballotBody.locallyDerivedInputBytes),
                 ],
                 [
                     'Minimum proof bytes',
@@ -1540,7 +1548,7 @@ export const renderDocumentationCensus = (): string => {
         '',
         '## Setup contribution operator census',
         '',
-        'The complete reduced-ring model exercises every key, encrypted-share, auxiliary-key, range, and support relation. Full-profile affine rows scale those same equation families to their actual ring degrees. Unused auxiliary padding has no public meaning and needs no zero constraint; support sums read only active coefficients.',
+        'The complete reduced-ring model exercises the FHE key, encrypted-share, range and support relations. Full-profile affine rows scale those same equation families to the full ring degree. The full-degree KLSW auxiliary secret remains part of setup; the fixed auxiliary ballot pair supplies no setup secret, equation, column or public polynomial.',
         '',
         table(
             ['Property', 'Value'],
@@ -1604,10 +1612,6 @@ export const renderDocumentationCensus = (): string => {
                 [
                     'Full-ring query cosets',
                     formatCount(setupRelation.fullRingQueryCosets),
-                ],
-                [
-                    'Auxiliary-ring query cosets',
-                    formatCount(setupRelation.auxiliaryQueryCosets),
                 ],
                 [
                     'Expanded statement polynomials',
@@ -2871,7 +2875,7 @@ export const renderDocumentationCensus = (): string => {
         '',
         'Existing-format arithmetic for the [recoverable sealed preparation candidate](security-argument.md#recoverable-sealed-preparation-candidate), computed by the independent [resource model](../tests/recoverable-setup-resource-model.ts). The eligible pool is `k=d+f` and the selected subset is `s=d=max(f+1,2)`. One existing inner contribution body has bound `B` from the contribution-body model, including its existing proof. Thus `kB` bounds the unchanged inner-body bytes of all eligible offers, while `sB` bounds only the selected inner bodies. Selected reads never remove unselected offers from the uploaded corpus.',
         '',
-        'The candidate encrypts each opening-seed evaluation as two polynomials in the original registered-recipient ring. Its raw ciphertext subtotal is `k*n*2*N*w`, where `N` and the signed coefficient width `w` come from the registration-key relation and modulus. This is distinct from the smaller auxiliary encryption ring already inside the inner body. Outer proofs and the public opening-share batch projection are counted separately below. One opening batch carries the public integer shares of every selected package and one proof under its recipient key; the corpus screen counts one batch from every roster participant. The original common polynomial, registered key and source ciphertexts are predecessors, never counted again as new opening uploads. These figures bound only the named components, not a final candidate package; they are not a lower bound or an impossibility result. They exclude new sealed-body length and padding framing, opening-statement headers, package and opening signatures and metadata, ECHO/READY carriers, registrations, ballots, result release, storage amplification, transfers and execution work. Any changed inner proof or parameter invalidates the reuse of `B`; full correctness, security and resource derivation remain open.',
+        'The candidate encrypts each opening-seed evaluation as two polynomials in the original registered-recipient ring. Its raw ciphertext subtotal is `k*n*2*N*w`, where `N` and the signed coefficient width `w` come from the registration-key relation and modulus. This is distinct from the smaller fixed auxiliary ring used by ballots, which contributes no inner setup-body polynomial. Outer proofs and the public opening-share batch projection are counted separately below. One opening batch carries the public integer shares of every selected package and one proof under its recipient key; the corpus screen counts one batch from every roster participant. The original common polynomial, registered key and source ciphertexts are predecessors, never counted again as new opening uploads. These figures bound only the named components, not a final candidate package; they are not a lower bound or an impossibility result. They exclude new sealed-body length and padding framing, opening-statement headers, package and opening signatures and metadata, ECHO/READY carriers, registrations, ballots, result release, storage amplification, transfers and execution work. Any changed inner proof or parameter invalidates the reuse of `B`; full correctness, security and resource derivation remain open.',
         '',
         table(
             ['Completion-profile operand', 'Value'],
@@ -3623,7 +3627,7 @@ export const renderDocumentationCensus = (): string => {
         '',
         '## Common-matrix sampling census',
         '',
-        'A fixed admitted suite label selects independent ideal-oracle words. Exact modulo-law enumeration checks the residue distance and the corresponding conditional full-oracle law. The complete bound includes all FHE, sharing, and auxiliary common polynomials. Registration fixes the common share polynomial before the roster size is known, so the sharing and auxiliary families use one profile-independent sample width within half the distance allocation, and the FHE width follows the profile. Caller-selected labels, adaptive parameter grinding, the fixed SHAKE implementation, and cryptographic security of the resulting keys are not established by this sampling calculation.',
+        'A fixed admitted suite label selects independent ideal-oracle words. Exact modulo-law enumeration checks the residue distance and the corresponding conditional full-oracle law. The complete bound includes all FHE common polynomials, the common sharing polynomial and both fixed auxiliary coordinates. Registration fixes the common share polynomial before the roster size is known, so the sharing and auxiliary families use one profile-independent sample width within half the distance allocation, and the FHE width follows the profile. Caller-selected labels, adaptive parameter grinding, the fixed SHAKE implementation, and cryptographic security of the resulting keys are not established by this sampling calculation.',
         '',
         table(
             ['Property', 'Value'],

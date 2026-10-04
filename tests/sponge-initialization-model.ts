@@ -146,6 +146,12 @@ export const compileFixedSpongeInitializationCensus = (
                 modulus: auxiliaryInputEncryptionParameters.modulus,
                 bits: matrices.fixedFamilyBitsPerCoefficient,
             },
+            {
+                label: 'common-auxiliary-key',
+                degree: auxiliaryInputEncryptionParameters.degree,
+                modulus: auxiliaryInputEncryptionParameters.modulus,
+                bits: matrices.fixedFamilyBitsPerCoefficient,
+            },
         ]);
     const prefix = Buffer.from('synthetic-full-setup-witness/1');
     const extraSamplingBits =

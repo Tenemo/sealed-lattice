@@ -1,4 +1,3 @@
-import { auxiliaryInputEncryptionParameters } from '#tests/auxiliary-input-encryption-parameters.js';
 import { commitmentSaltBits } from '#tests/commitment-equivocation-model.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import { compileFullWordProofLayout } from '#tests/full-word-proof-layout-model.js';
@@ -105,14 +104,6 @@ export const compileContributionBodyCensus = (profile: SupportedProfile) => {
                 bytes: recipient.publicKeyBytes,
                 coefficients: recipient.degree,
             });
-    polynomials.push({
-        expandedIndex: sharingStart + 3 * participantCount + 2,
-        bytes: polynomialBytes(
-            auxiliaryInputEncryptionParameters.degree,
-            auxiliaryInputEncryptionParameters.modulus,
-        ),
-        coefficients: auxiliaryInputEncryptionParameters.degree,
-    });
     const headerBytes = contributionBodyHeaderBytes;
     const polynomialPayloadBytes = polynomials.reduce(
         (total, polynomial) => total + polynomial.bytes,

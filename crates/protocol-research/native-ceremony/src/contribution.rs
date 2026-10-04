@@ -145,7 +145,7 @@ pub fn generate(
             .collect::<Vec<_>>();
         generator.share(recipient, &values, &mut output).unwrap();
     }
-    generator.finish(&mut output).unwrap();
+    generator.finish().unwrap();
     assert_eq!(output.next, profile.setup_polynomials());
     let columns = generator.into_columns().unwrap();
     let mut prover = Prover::from_generated(

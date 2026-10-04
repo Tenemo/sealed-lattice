@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 
-import { auxiliaryInputEncryptionParameters } from '#tests/auxiliary-input-encryption-parameters.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import { compileRegistrationKeyRelationCensus } from '#tests/registration-key-relation-model.js';
 import {
@@ -28,23 +27,13 @@ describe('setup aggregate cache resources', () => {
             BigInt(
                 Math.ceil(profile.ciphertext.modulus.toString(2).length / 8),
             );
-        const auxiliaryWidth =
-            1n +
-            BigInt(
-                Math.ceil(
-                    auxiliaryInputEncryptionParameters.modulus.toString(2)
-                        .length / 8,
-                ),
-            );
         const expected =
             4n * gadgetCount * parameters.polynomialDegree * fheWidth +
-            2n * participantCount * recipient.publicKeyBytes +
-            auxiliaryInputEncryptionParameters.degree * auxiliaryWidth;
+            2n * participantCount * recipient.publicKeyBytes;
         expect(value.aggregateBytes).toBe(expected);
         expect(value.coefficients).toBe(
             (4n * gadgetCount + 2n * participantCount) *
-                parameters.polynomialDegree +
-                auxiliaryInputEncryptionParameters.degree,
+                parameters.polynomialDegree,
         );
         expect(value.maximumTwoGenerationPayloadBytes).toBe(2n * expected);
         // Every recipient's share sums the first max(f + 1, 2) positions'

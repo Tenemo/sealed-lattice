@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 
-import { auxiliaryInputEncryptionParameters } from '#tests/auxiliary-input-encryption-parameters.js';
 import { contributionBodyHeaderBytes } from '#tests/contribution-body-model.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import {
@@ -179,17 +178,13 @@ describe('recoverable setup resource screen', () => {
             const profile = deriveSupportedProfile(participants, options);
             const proof = compileFullWordProofLayout(profile);
             // Four emitted FHE polynomials per gadget, two encrypted-share
-            // polynomials per recipient, and one auxiliary polynomial.
+            // polynomials per recipient; the fixed auxiliary pair is absent.
             const polynomialBytes =
                 4n *
                     profile.gadgetLength *
                     fixedModulusBfvInputs.polynomialDegree *
                     coefficientBytes(profile.ciphertext.modulus) +
-                2n * BigInt(participants) * recipient.publicKeyBytes +
-                auxiliaryInputEncryptionParameters.degree *
-                    coefficientBytes(
-                        auxiliaryInputEncryptionParameters.modulus,
-                    );
+                2n * BigInt(participants) * recipient.publicKeyBytes;
             const bodyBytes =
                 contributionBodyHeaderBytes +
                 polynomialBytes +

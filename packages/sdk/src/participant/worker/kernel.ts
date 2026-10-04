@@ -91,7 +91,7 @@ export const kernelFunctions = [
     'ballot_body_input_pointer',
     'ballot_classification_begin',
     // One when the body relation needs its encryption keys.
-    'ballot_classification_requires_keys',
+    'ballot_classification_requires_key',
     // The aggregate polynomial of the key at an ordinal under the verified
     // setup, or the maximum value without one.
     'ballot_classification_key_index',

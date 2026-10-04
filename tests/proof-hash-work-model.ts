@@ -175,9 +175,9 @@ export const proofHashProfiles = (profile: SupportedProfile) => {
             booleans: setup.booleanColumns,
             lookups: setup.lookupEntries,
             products: setup.disjointPairs,
-            prefixWords: 19n,
+            prefixWords: 18n,
             statementBytes: setup.expandedStatementByteLength,
-            relationTag: 'complete-setup-words/1',
+            relationTag: 'complete-setup-words/2',
             roleBytes: compileRosterProposalCensus(profile.participantCount)
                 .roleBytes,
         },

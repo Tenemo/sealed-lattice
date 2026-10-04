@@ -92,7 +92,6 @@ export const compileBallotEncryptionColumnLayout = (
 export const compileBallotEncryptionRelationCensus = (
     profile: SupportedProfile,
 ) => {
-    const contributors = BigInt(profile.setupContributorCount);
     const optionCount = BigInt(profile.optionCount);
     const modulus = profile.ciphertext.modulus;
     const scale = profilePlaintextScale(profile);
@@ -113,13 +112,14 @@ export const compileBallotEncryptionRelationCensus = (
         (support + quotientBound + plaintextBound + 2n) * (radix - 1n) +
         error +
         carryBound * (radix + 1n);
-    const auxiliaryNoiseBound =
-        (2n * contributors * auxiliary.support + 1n) * error;
+    // The real fixed pair has no participant-held secret. This decoding
+    // bound belongs only to its single-good-key proof game.
+    const auxiliaryGoodKeyNoiseBound = (2n * auxiliary.support + 1n) * error;
     assert.equal(
         auxiliary.modulus,
         auxiliary.plaintextModulus * auxiliary.scale + 1n,
     );
-    assert.ok(2n * auxiliaryNoiseBound < auxiliary.scale);
+    assert.ok(2n * auxiliaryGoodKeyNoiseBound < auxiliary.scale);
     assert.ok(trueQuotientBound < quotientBound);
     assert.ok(trueCarryBound < carryBound);
     assert.ok(residualBound < proofPrime);
@@ -144,7 +144,7 @@ export const compileBallotEncryptionRelationCensus = (
         trueQuotientBound,
         trueCarryBound,
         residualBound,
-        auxiliaryNoiseBound,
+        auxiliaryGoodKeyNoiseBound,
         packingQuotientBound,
         packingResidualBound,
         auxiliaryResidualBound,
@@ -336,15 +336,18 @@ export const createBallotEncryptionRelationModel = (
         ciphertextModulus: bigint,
         plaintextScale: bigint,
         message: readonly bigint[],
+        aggregate: boolean,
     ) => {
-        const secret = sparse(length, true),
+        const secret = sparse(length, aggregate),
             ephemeral = sparse(length, false);
         const common = Array.from({ length }, () =>
             centered(random(), ciphertextModulus),
         );
         const publicKey = convolution(common, secret).map((value) =>
             centered(
-                -value - contributors * fixedModulusBfvInputs.errorBound,
+                -value -
+                    (aggregate ? contributors : 1n) *
+                        fixedModulusBfvInputs.errorBound,
                 ciphertextModulus,
             ),
         );
@@ -391,7 +394,7 @@ export const createBallotEncryptionRelationModel = (
             decoded,
         };
     };
-    const fhe = makeEncryption(degree, modulus, scale, plaintext);
+    const fhe = makeEncryption(degree, modulus, scale, plaintext, true);
     const auxiliaryPlaintext = Array.from(
         { length: auxiliaryDegree },
         (_unused, index) => auxiliaryScores[index] ?? 0n,
@@ -401,6 +404,9 @@ export const createBallotEncryptionRelationModel = (
         auxiliary.modulus,
         auxiliary.scale,
         auxiliaryPlaintext,
+        // This reduced relation fixture uses the proof game's single good
+        // pair to check decoding; the real fixed pair has no retained secret.
+        false,
     );
     const carries = Array.from({ length: 2 }, () =>
         Array.from({ length: limbs - 1 }, () =>

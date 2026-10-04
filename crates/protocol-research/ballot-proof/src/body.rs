@@ -1,7 +1,7 @@
 use crate::{
     CHUNK_LIMIT, HEADER_LENGTH,
     admission::{BallotRelationVerifier, VerifiedBallotRelation},
-    statement::setup_inputs,
+    statement::setup_input,
 };
 use registration_credentials::{
     ballot_body::{self, BallotBodyHasher},
@@ -46,8 +46,8 @@ impl VerifiedBallotBody {
 /// checks each one's identity in every statement.
 pub struct BallotInputs {
     setup: Arc<VerifiedSetupAggregate>,
-    commons: Vec<Vec<u8>>,
-    keys: Vec<Vec<u8>>,
+    commons: [Vec<u8>; 2],
+    keys: [Vec<u8>; 2],
 }
 impl BallotInputs {
     /// Whether these are the inputs of this verified setup.
@@ -68,9 +68,9 @@ struct BallotBodyRelationVerifier {
     proof_length: usize,
     proof_bytes: usize,
     verifier: Option<BallotRelationVerifier>,
-    // The complete shared inputs, or the keys read so far without them.
+    // The complete shared inputs, or the FHE aggregate key being read.
     inputs: Option<Arc<BallotInputs>>,
-    keys: Vec<Vec<u8>>,
+    key: Option<Vec<u8>>,
     key_reader: Option<AggregatePolynomialReader>,
     key_offset: usize,
     failed: bool,
@@ -116,7 +116,7 @@ impl BallotBodyRelationVerifier {
             proof_bytes: 0,
             verifier: None,
             inputs,
-            keys: Vec::new(),
+            key: None,
             key_reader: None,
             key_offset: 0,
             failed: false,
@@ -126,8 +126,8 @@ impl BallotBodyRelationVerifier {
         if self.failed
             || self.inputs.is_some()
             || self.key_reader.is_some()
-            || self.keys.len() >= 2
-            || index != setup_inputs(self.profile)[self.keys.len()].2
+            || self.key.is_some()
+            || index != setup_input(self.profile).2
         {
             self.failed = true;
             return Err(Error::Stage);
@@ -137,7 +137,7 @@ impl BallotBodyRelationVerifier {
                 .read_polynomial(index)
                 .map_err(|_| Error::Context)?,
         );
-        self.keys.push(Vec::new());
+        self.key = Some(Vec::new());
         self.key_offset = 0;
         Ok(())
     }
@@ -151,7 +151,7 @@ impl BallotBodyRelationVerifier {
                 .ok_or(Error::Stage)?
                 .push(self.key_offset, bytes)
                 .map_err(|_| Error::Context)?;
-            self.keys.last_mut().ok_or(Error::Stage)?.extend(bytes);
+            self.key.as_mut().ok_or(Error::Stage)?.extend(bytes);
             self.key_offset += bytes.len();
             Ok(())
         })();
@@ -170,19 +170,19 @@ impl BallotBodyRelationVerifier {
             .ok_or(Error::Stage)
             .and_then(|reader| reader.finish().map(|_| ()).map_err(|_| Error::Context))
             .and_then(|()| {
-                if self.keys.len() == 2 {
-                    let commons = setup_inputs(self.profile)
-                        .into_iter()
-                        .map(|(_, common, _)| {
-                            common_records(self.profile, common).map_err(|_| Error::Context)
-                        })
-                        .collect::<Result<_, _>>()?;
-                    self.inputs = Some(Arc::new(BallotInputs {
-                        setup: self.setup.clone(),
-                        commons,
-                        keys: std::mem::take(&mut self.keys),
-                    }));
-                }
+                let commons = [
+                    common_records(self.profile, setup_input(self.profile).1)
+                        .map_err(|_| Error::Context)?,
+                    setup_witness::fixed_auxiliary::common_records(),
+                ];
+                self.inputs = Some(Arc::new(BallotInputs {
+                    setup: self.setup.clone(),
+                    commons,
+                    keys: [
+                        self.key.take().ok_or(Error::Stage)?,
+                        setup_witness::fixed_auxiliary::public_key_records(),
+                    ],
+                }));
                 Ok(())
             });
         if result.is_err() {
@@ -399,7 +399,7 @@ impl SignedBallotVerifier {
             failed: false,
         })
     }
-    pub fn requires_keys(&self) -> bool {
+    pub fn requires_key(&self) -> bool {
         self.relation
             .as_ref()
             .is_some_and(|value| !value.inputs_ready())

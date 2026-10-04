@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 
-import { auxiliaryInputEncryptionParameters } from '#tests/auxiliary-input-encryption-parameters.js';
 import {
     compileBallotWordProofLayout,
     compileFullWordProofLayout,
@@ -48,12 +47,12 @@ describe('full word-proof layout and theorem operands', () => {
         expect(layout.headerBytes).toBe(
             4n + 128n + 192n + 48n + 20n * 128n + 16n * 64n + 48n,
         );
-        expect(layout.firstWidth).toBe(360n * 16n + 48n);
-        expect(layout.secondWidth).toBe(380n * 48n);
+        expect(layout.firstWidth).toBe(356n * 16n + 48n);
+        expect(layout.secondWidth).toBe(377n * 48n);
         expect(layout.proverInterpolationPoints).toBe(131072);
         expect(
             layout.expandedFirstOracleBytes + layout.expandedSecondOracleBytes,
-        ).toBe(262144n * (5808n + 18240n));
+        ).toBe(262144n * (5744n + 18096n));
         expect(layout.maximumProofBytes).toBeLessThan(67_108_864n);
         expect(layout.maximumMultiproofBytes).toBeLessThan(
             layout.maximumProofBytes,
@@ -62,10 +61,10 @@ describe('full word-proof layout and theorem operands', () => {
     });
     it('charges the actual lookup, affine, batching, and first-fold events', () => {
         const census = compileWideChallengeCompilerCensus(completionProfile());
-        expect(census.lookupEntryCount).toBe(378n * 65536n);
-        expect(census.lookupRootDegree).toBe(379n * 65536n - 1n);
-        expect(census.correlatedRowCount).toBe(2n * 1160n);
-        expect(census.batchingAndFirstFoldNumerator).toBe(2321n * 262144n);
+        expect(census.lookupEntryCount).toBe(375n * 65536n);
+        expect(census.lookupRootDegree).toBe(376n * 65536n - 1n);
+        expect(census.correlatedRowCount).toBe(2n * (734n + 413n));
+        expect(census.batchingAndFirstFoldNumerator).toBe(2295n * 262144n);
         expect(census.ordinaryAlgebraicNumerator).toBe(
             census.batchingAndFirstFoldNumerator,
         );
@@ -75,13 +74,5 @@ describe('full word-proof layout and theorem operands', () => {
         expect(new Set(result.points).size).toBe(32);
         expect(result.evenAgreement).toBe(true);
         expect(result.oddDifference.every((value) => value !== 0n)).toBe(true);
-    });
-    it('gives an auxiliary key with no bounded witness when its common matrix is zero', () => {
-        const modulus = auxiliaryInputEncryptionParameters.modulus;
-        expect(modulus).toBeGreaterThan(128n);
-        for (let error = -64n; error < 64n; error++)
-            expect((((64n - error) % modulus) + modulus) % modulus).not.toBe(
-                0n,
-            );
     });
 });

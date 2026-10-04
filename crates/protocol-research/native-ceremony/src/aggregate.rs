@@ -1,4 +1,4 @@
-use ballot_proof::statement::setup_inputs;
+use ballot_proof::statement::setup_input;
 use registration_credentials::{
     contribution_authentication::{CommitmentInventory, SignedOpening},
     poll::VerifiedPoll,
@@ -32,10 +32,9 @@ pub fn final_keys(output: &Path, profile: Profile) -> PathBuf {
         profile.setup_contributors() - 1
     ))
 }
-/// The setup indices of the FHE and auxiliary encryption keys, in the
-/// order a ballot statement takes them.
-pub fn ballot_keys(profile: Profile) -> [usize; 2] {
-    setup_inputs(profile).map(|(_, _, key)| key)
+/// The FHE key the ballot takes from the verified setup aggregate.
+pub fn ballot_key(profile: Profile) -> usize {
+    setup_input(profile).2
 }
 
 /// Both controls reach the original-coordinate comparison before any proof
@@ -208,20 +207,19 @@ pub fn verify_ballot(
 ) -> ballot_proof::body::VerifiedBallotBody {
     let profile = setup.profile();
     let mut verifier = ballot_proof::body::BallotBodyVerifier::new(poll, setup, 0, header).unwrap();
-    for index in ballot_keys(profile) {
-        verifier.begin_key(index).unwrap();
-        let (total, capacity) = polynomial_bytes(profile, index);
-        let mut file = File::open(keys.join(format!("polynomial-{index:02}.bin"))).unwrap();
-        let mut buffer = vec![0; capacity];
-        let mut offset = 0;
-        while offset < total {
-            let count = capacity.min(total - offset);
-            file.read_exact(&mut buffer[..count]).unwrap();
-            verifier.push_key(&buffer[..count]).unwrap();
-            offset += count;
-        }
-        verifier.finish_key().unwrap();
+    let index = ballot_key(profile);
+    verifier.begin_key(index).unwrap();
+    let (total, capacity) = polynomial_bytes(profile, index);
+    let mut file = File::open(keys.join(format!("polynomial-{index:02}.bin"))).unwrap();
+    let mut buffer = vec![0; capacity];
+    let mut offset = 0;
+    while offset < total {
+        let count = capacity.min(total - offset);
+        file.read_exact(&mut buffer[..count]).unwrap();
+        verifier.push_key(&buffer[..count]).unwrap();
+        offset += count;
     }
+    verifier.finish_key().unwrap();
     let mut file = File::open(path).unwrap();
     let mut actual_header = vec![0; header.len()];
     file.read_exact(&mut actual_header).unwrap();
@@ -258,26 +256,24 @@ pub fn classify_ballot(
         header[0] ^= 1;
     }
     let mut verifier = SignedBallotVerifier::new(poll, setup, authentication, &header, None)?;
-    let [fhe_key, last_key] = ballot_keys(profile);
-    if verifier.requires_keys() {
-        for index in [fhe_key, last_key] {
-            verifier.begin_key(index)?;
-            let (total, capacity) = polynomial_bytes(profile, index);
-            let mut key = File::open(keys.join(format!("polynomial-{index:02}.bin"))).unwrap();
-            let mut buffer = vec![0; capacity];
-            let mut offset = 0;
-            while offset < total {
-                let count = capacity.min(total - offset);
-                key.read_exact(&mut buffer[..count]).unwrap();
-                if mode == "key" && index == fhe_key && offset == 0 {
-                    buffer[1] ^= 1;
-                }
-                verifier.push_key(&buffer[..count])?;
-                offset += count;
+    let index = ballot_key(profile);
+    if verifier.requires_key() {
+        verifier.begin_key(index)?;
+        let (total, capacity) = polynomial_bytes(profile, index);
+        let mut key = File::open(keys.join(format!("polynomial-{index:02}.bin"))).unwrap();
+        let mut buffer = vec![0; capacity];
+        let mut offset = 0;
+        while offset < total {
+            let count = capacity.min(total - offset);
+            key.read_exact(&mut buffer[..count]).unwrap();
+            if mode == "key" && offset == 0 {
+                buffer[1] ^= 1;
             }
-            if mode != "unfinished-keys" || index != last_key {
-                verifier.finish_key()?;
-            }
+            verifier.push_key(&buffer[..count])?;
+            offset += count;
+        }
+        if mode != "unfinished-key" {
+            verifier.finish_key()?;
         }
     }
     let total = file.metadata().unwrap().len() as usize - usize::from(mode == "truncated");

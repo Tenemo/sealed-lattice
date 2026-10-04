@@ -19,6 +19,16 @@ describe('ballot body framing', () => {
         expect(
             layout.reconstructedPolynomials.map((value) => value.expandedIndex),
         ).toEqual([0, 1, 4, 5]);
+        expect(layout.setupKeyPolynomials).toEqual([
+            { expandedIndex: 1, bytes: 65536n * 109n },
+        ]);
+        expect(layout.setupKeyInputBytes).toBe(65536n * 109n);
+        expect(layout.locallyDerivedInputBytes).toBe(
+            65536n * 109n + 2n * 4096n * 6n,
+        );
+        expect(
+            layout.setupKeyInputBytes + layout.locallyDerivedInputBytes,
+        ).toBe(layout.reconstructedInputBytes);
         expect(layout.contextBytes).toBe(136n);
         expect(layout.proofRoleBytes).toBe(8n + 30n + 4n + 30n + 192n + 2n);
         expect(layout.headerBytes).toBe(148n);

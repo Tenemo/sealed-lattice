@@ -5,9 +5,8 @@ use super::{
 use parallel_work::{HashStream, Pipeline, Sponge, Ticket};
 use std::collections::VecDeque;
 use supported_profile::{
-    AUXILIARY_DEGREE, AUXILIARY_SECRET_SUPPORT, DEGREE, FHE_LIMB_BITS, FHE_SECRET_SUPPORT, Family,
-    Profile, SETUP_ERROR_BITS, SETUP_FHE_CARRY_BITS, SETUP_QUOTIENT_BITS, SHARE_EPHEMERAL_SUPPORT,
-    share_modulus,
+    DEGREE, FHE_LIMB_BITS, FHE_SECRET_SUPPORT, Family, Profile, SETUP_ERROR_BITS,
+    SETUP_FHE_CARRY_BITS, SETUP_QUOTIENT_BITS, SHARE_EPHEMERAL_SUPPORT, share_modulus,
 };
 
 const SHARE_SCALE: i128 = supported_profile::SHARE_SCALE as i128;
@@ -68,40 +67,27 @@ pub fn setup_polynomial_stream(
 struct Layout {
     profile: Profile,
     degree: usize,
-    auxiliary_degree: usize,
     fhe_half_support: usize,
     share_half_support: usize,
-    auxiliary_half_support: usize,
 }
 impl Layout {
     fn full(profile: Profile) -> Self {
         Self {
             profile,
             degree: DEGREE,
-            auxiliary_degree: AUXILIARY_DEGREE,
             fhe_half_support: FHE_SECRET_SUPPORT / 2,
             share_half_support: SHARE_EPHEMERAL_SUPPORT / 2,
-            auxiliary_half_support: AUXILIARY_SECRET_SUPPORT / 2,
         }
     }
     fn header(self) -> Vec<u8> {
-        let mut header = Vec::from(b"SCO1".as_slice());
-        header.extend((self.degree as u32).to_le_bytes());
-        header.extend((self.auxiliary_degree as u32).to_le_bytes());
-        header.extend(&self.profile.parameters()[4..]);
+        let mut header = self.profile.setup_statement_header();
+        header[4..8].copy_from_slice(&(self.degree as u32).to_le_bytes());
         header
     }
     fn polynomial(self, index: usize) -> Option<(Family, usize)> {
-        self.profile.setup_family(index).map(|family| {
-            (
-                family,
-                if family == Family::Auxiliary {
-                    self.auxiliary_degree
-                } else {
-                    self.degree
-                },
-            )
-        })
+        self.profile
+            .setup_family(index)
+            .map(|family| (family, self.degree))
     }
     fn encoded_length(self) -> usize {
         self.header().len()
@@ -296,8 +282,6 @@ impl Accumulator {
         let ephemerals: Vec<Variable> = (0..profile.participants())
             .map(|_| result.sparse(layout.degree, layout.share_half_support))
             .collect();
-        let auxiliary_secret =
-            result.sparse(layout.auxiliary_degree, layout.auxiliary_half_support);
         // Each sharing coefficient's low and high limb parts.
         let limb = profile.share_limb_bits();
         let sharing: Vec<(Variable, Variable)> = (0..profile.sharing_degree())
@@ -351,7 +335,6 @@ impl Accumulator {
                 None,
             )?;
         }
-        result.auxiliary_key(&auxiliary_secret)?;
         for (column, degree, required) in result.supports.clone() {
             let variable = Variable {
                 terms: vec![(column, 1)],
@@ -598,25 +581,6 @@ impl Accumulator {
         )?;
         self.put(&error, key, self.weight)?;
         self.weight = times(self.weight, times(z, z));
-        Ok(())
-    }
-    fn auxiliary_key(&mut self, secret: &Variable) -> Result<(), Error> {
-        let degree = self.layout.auxiliary_degree;
-        let profile = self.layout.profile;
-        let quotient = self.signed(SETUP_QUOTIENT_BITS, degree);
-        let error = self.signed(SETUP_ERROR_BITS, degree);
-        let key = GeometryKey::identity(degree);
-        let z = power(self.alpha, degree);
-        self.register(
-            profile.auxiliary_common_polynomial(),
-            profile.auxiliary_key_polynomial(),
-            secret,
-            1,
-        )?;
-        let modulus = fingerprint_in(&profile.family_modulus(Family::Auxiliary), FHE_LIMB_BITS, z);
-        self.put(&quotient, key, minus(ZERO, times(self.weight, modulus)))?;
-        self.put(&error, key, minus(ZERO, self.weight))?;
-        self.weight = times(self.weight, z);
         Ok(())
     }
     fn is_common(&self, polynomial: usize) -> bool {
@@ -932,10 +896,8 @@ mod tests {
         Layout {
             profile,
             degree: 16,
-            auxiliary_degree: 8,
             fhe_half_support: 2,
             share_half_support: 2,
-            auxiliary_half_support: 2,
         }
     }
 
@@ -1318,7 +1280,6 @@ mod tests {
         let profile = layout.profile;
         let degree = layout.degree;
         let fhe = integer(&profile.family_modulus(Family::Fhe));
-        let auxiliary_modulus = integer(&profile.family_modulus(Family::Auxiliary));
         let share = integer(share_modulus());
         let mut witness = Witness::default();
         let mut polynomials = vec![Vec::new(); profile.setup_polynomials()];
@@ -1327,13 +1288,7 @@ mod tests {
         let ephemerals: Vec<Vec<i8>> = (0..profile.participants())
             .map(|_| random.sparse(degree, layout.share_half_support))
             .collect();
-        let auxiliary_secret =
-            random.sparse(layout.auxiliary_degree, layout.auxiliary_half_support);
-        for values in [&secret, &auxiliary]
-            .into_iter()
-            .chain(&ephemerals)
-            .chain([&auxiliary_secret])
-        {
+        for values in [&secret, &auxiliary].into_iter().chain(&ephemerals) {
             witness.sparse(values);
         }
         let limb = profile.share_limb_bits();
@@ -1407,20 +1362,6 @@ mod tests {
                 None,
             );
         }
-        let common = random.polynomial(layout.auxiliary_degree, &auxiliary_modulus);
-        polynomials[profile.auxiliary_key_polynomial()] = key_equation(
-            &mut witness,
-            random,
-            KeyEquation {
-                common: &common,
-                left: &auxiliary_secret,
-                direct: vec![BigInt::from(0); layout.auxiliary_degree],
-                multiplier: BigInt::from(0),
-                modulus: &auxiliary_modulus,
-                limbs: 1,
-            },
-        );
-        polynomials[profile.auxiliary_common_polynomial()] = common;
         let shape = profile.setup_shape();
         assert_eq!(witness.words.len(), shape.word_columns);
         assert_eq!(witness.booleans.len(), shape.boolean_columns);
@@ -1579,7 +1520,7 @@ mod tests {
             assert_ne!(apply(&operator, &changed), target, "{label}");
             for polynomial in [
                 profile.fhe_polynomial(0, 0),
-                profile.auxiliary_key_polynomial(),
+                profile.share_linear_polynomial(profile.participants() - 1),
             ] {
                 let mut changed = statement.clone();
                 change_polynomial(layout, &mut changed, polynomial);
@@ -1595,6 +1536,46 @@ mod tests {
             let layout = Layout::full(profile);
             assert_eq!(layout.header(), profile.setup_statement_header());
             assert_eq!(layout.encoded_length(), profile.setup_statement_length());
+        }
+    }
+
+    #[test]
+    fn both_relinearization_equations_keep_the_original_full_ring_auxiliary() {
+        let mut random = Random(0x082e_fa98_ec4e_6c89);
+        let alpha = [17, 37, 91];
+        for (participants, options) in [(3, 2), (10, 10), (20, 20)] {
+            let layout = reduced(Profile::new(participants, options).unwrap());
+            let (statement, witness) = satisfying_relation(layout, &mut random);
+            let columns = witness.columns();
+            let (operator, target) = systematic_operator(layout, alpha, &statement);
+            assert_eq!(apply(&operator, &columns), target);
+
+            // Move one positive r coefficient to an empty position. Every
+            // Boolean, disjointness and support predicate stays satisfied.
+            let positive = layout.profile.setup_shape().word_columns + 2;
+            let selected = columns[positive]
+                .iter()
+                .position(|value| *value == 1)
+                .unwrap();
+            let empty = (0..layout.degree)
+                .find(|position| {
+                    columns[positive][*position] == 0 && columns[positive + 1][*position] == 0
+                })
+                .unwrap();
+            let mut changed = columns.clone();
+            changed[positive].swap(selected, empty);
+            assert_ne!(apply(&operator, &changed), target);
+
+            for component in [2, 4] {
+                let mut changed = statement.clone();
+                change_polynomial(
+                    layout,
+                    &mut changed,
+                    layout.profile.fhe_polynomial(0, component),
+                );
+                let (operator, target) = systematic_operator(layout, alpha, &changed);
+                assert_ne!(apply(&operator, &columns), target);
+            }
         }
     }
 
@@ -1620,6 +1601,7 @@ mod tests {
                 Error::Length,
                 Error::Binding,
                 Error::Encoding,
+                Error::Parameters,
             ];
             for (kind, expected) in expected.into_iter().enumerate() {
                 let mut bytes = original.clone();
@@ -1632,7 +1614,9 @@ mod tests {
                     3 => bytes.push(0),
                     4 => bytes[header + 1] ^= 1,
                     // A share coefficient beyond half the modulus.
-                    _ => bytes[share + 1..share + 1 + share_modulus().len()].fill(0xff),
+                    5 => bytes[share + 1..share + 1 + share_modulus().len()].fill(0xff),
+                    // The preceding statement grammar cannot enter this relation.
+                    _ => bytes[..4].copy_from_slice(b"SCO1"),
                 }
                 // Each statement but the unbound one is bound, so only its own
                 // check can refuse it.

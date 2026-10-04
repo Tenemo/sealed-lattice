@@ -1,8 +1,7 @@
 use super::*;
 use parallel_work::{Job, Part, Ticket, submit};
 use supported_profile::{
-    AUXILIARY_SECRET_SUPPORT, FHE_SECRET_SUPPORT, Family, SHARE_EPHEMERAL_SUPPORT,
-    auxiliary_modulus, fixed_common_sample_bits, share_modulus,
+    FHE_SECRET_SUPPORT, Family, SHARE_EPHEMERAL_SUPPORT, fixed_common_sample_bits, share_modulus,
 };
 #[derive(Debug)]
 pub enum Error {
@@ -14,13 +13,11 @@ pub struct Contribution {
     profile: Profile,
     modulus: BigInt,
     share_modulus: BigInt,
-    auxiliary_modulus: BigInt,
     witness: Witness,
     secret: Sparse,
     first_encryption_error: Option<Zeroizing<Vec<i128>>>,
     auxiliary: Sparse,
     ephemerals: Vec<Sparse>,
-    auxiliary_secret: Sparse,
     sharing: Zeroizing<Vec<Vec<i128>>>,
     common_share: Option<Vec<BigInt>>,
     next_gadget: usize,
@@ -57,13 +54,6 @@ fn common_source(profile: Profile, index: usize) -> Result<(String, usize, Vec<u
             "common-share".to_owned(),
             DEGREE,
             share_modulus().to_vec(),
-            fixed_common_sample_bits(),
-        ))
-    } else if index == profile.auxiliary_common_polynomial() {
-        Ok((
-            "common-auxiliary".to_owned(),
-            AUXILIARY_DEGREE,
-            auxiliary_modulus().to_vec(),
             fixed_common_sample_bits(),
         ))
     } else {
@@ -134,7 +124,6 @@ impl Contribution {
     fn create(profile: Profile, source: Option<fhe_key_source::FheKeySource>) -> Self {
         let modulus = integer(&profile.family_modulus(Family::Fhe));
         let plan = Plan::new(DEGREE);
-        let auxiliary_plan = Plan::new(AUXILIARY_DEGREE);
         let mut witness = Witness::new();
         let (secret, first_encryption_error) = match source {
             Some(source) => {
@@ -157,12 +146,6 @@ impl Contribution {
                 )
             })
             .collect();
-        let auxiliary_secret = witness.sparse(
-            "auxiliary-secret",
-            AUXILIARY_DEGREE,
-            AUXILIARY_SECRET_SUPPORT,
-            &auxiliary_plan,
-        );
         let bits = profile.sharing_coefficient_bits();
         let sharing = Zeroizing::new(
             (0..profile.sharing_degree())
@@ -202,13 +185,11 @@ impl Contribution {
             profile,
             modulus,
             share_modulus: integer(share_modulus()),
-            auxiliary_modulus: integer(auxiliary_modulus()),
             witness,
             secret,
             first_encryption_error,
             auxiliary,
             ephemerals,
-            auxiliary_secret,
             sharing,
             common_share: None,
             next_gadget: 0,
@@ -365,26 +346,10 @@ impl Contribution {
         self.next_recipient += 1;
         Ok(ciphertexts)
     }
-    pub fn finish(&mut self, output: &mut impl PolynomialOutput) -> Result<(), Error> {
+    pub fn finish(&mut self) -> Result<(), Error> {
         if self.next_recipient != self.profile.participants() || self.finished {
             return Err(Error::Phase);
         }
-        let common = common_polynomial(self.profile, self.profile.auxiliary_common_polynomial())?;
-        let width = auxiliary_modulus().len();
-        output.polynomial(&common, &self.auxiliary_modulus, width);
-        let input = KeyInput {
-            label: "auxiliary-key",
-            common: &common,
-            left: &self.auxiliary_secret,
-            right: &self.auxiliary_secret.values,
-            multiplier: BigInt::from(0),
-            automorphism: 1,
-            modulus: &self.auxiliary_modulus,
-            limbs: 1,
-            width,
-        };
-        let products = input.products();
-        key(&mut self.witness, output, input, products);
         self.finished = true;
         Ok(())
     }
@@ -433,7 +398,6 @@ mod tests {
                 profile.fhe_polynomial(last, 3),
                 profile.fhe_polynomial(last, 5),
                 profile.share_common_polynomial(),
-                profile.auxiliary_common_polynomial(),
             ] {
                 let records = common_records(profile, index).unwrap();
                 assert_eq!(*common_records_job(profile, index).unwrap().wait(), records);
@@ -451,7 +415,6 @@ mod tests {
             for index in [
                 profile.fhe_polynomial(0, 1),
                 profile.recipient_key_polynomial(0),
-                profile.auxiliary_key_polynomial(),
             ] {
                 assert!(common_records_job(profile, index).is_err());
             }

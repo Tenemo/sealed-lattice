@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 
-import { auxiliaryInputEncryptionParameters } from '#tests/auxiliary-input-encryption-parameters.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import {
     compileSetupContributionRelationCensus,
@@ -54,9 +53,9 @@ describe('complete setup contribution relation in a reduced ring', () => {
             expect(
                 model.rows().every((row) => model.evaluateRow(row) === 0n),
             ).toBe(true);
-            expect(model.rows()).toHaveLength((24 * 9 + 20 * 2) * 16 + 8 + 26);
+            expect(model.rows()).toHaveLength((24 * 9 + 20 * 2) * 16 + 24);
             expect(model.decryptedShares).toEqual(model.expectedShares);
-            expect(model.equations).toHaveLength(24 + 20 + 1);
+            expect(model.equations).toHaveLength(24 + 20);
         }
     });
 
@@ -75,7 +74,7 @@ describe('complete setup contribution relation in a reduced ring', () => {
             expect(model.verify()).toBe(true);
             expect(model.decryptedShares).toEqual(model.expectedShares);
             expect(model.equations).toHaveLength(
-                4 * Number(profile.gadgetLength) + 2 * participantCount + 1,
+                4 * Number(profile.gadgetLength) + 2 * participantCount,
             );
             const layout = compileSetupContributionColumnLayout(profile);
             const shape = deriveSetupContributionShape(profile);
@@ -90,13 +89,9 @@ describe('complete setup contribution relation in a reduced ring', () => {
             ).toHaveLength(shape.errorColumns);
             // Each limb equation has one row per ring coefficient.
             const limbEquations =
-                (model.rows().length -
-                    model.auxiliaryDegree -
-                    shape.supportRows) /
-                model.degree;
+                (model.rows().length - shape.supportRows) / model.degree;
             expect(
                 BigInt(limbEquations) * fixedModulusBfvInputs.polynomialDegree +
-                    auxiliaryInputEncryptionParameters.degree +
                     BigInt(shape.supportRows),
             ).toBe(shape.affineRows);
         }
@@ -107,35 +102,31 @@ describe('complete setup contribution relation in a reduced ring', () => {
             compileSetupContributionRelationCensus(completionProfile()),
         ).toEqual({
             // Each 112-bit sharing coefficient fills seven words.
-            wordColumns: 24 * 10 + 3 * 7 + 10 * 7 + 2,
-            booleanColumns: 2 * (2 + 10 + 1),
-            errorColumns: 24 + 2 * 10 + 1,
-            disjointPairs: 13,
-            supportRows: 26,
-            affineRows: BigInt((24 * 9 + 20 * 2) * 65536 + 4096 + 26),
-            lookupEntries: 333 + 45,
-            fullAffineCoefficientByteLength: 359n * 65536n * (3n * 16n),
+            wordColumns: 24 * 10 + 3 * 7 + 10 * 7,
+            booleanColumns: 2 * (2 + 10),
+            errorColumns: 24 + 2 * 10,
+            disjointPairs: 12,
+            supportRows: 24,
+            affineRows: BigInt((24 * 9 + 20 * 2) * 65536 + 24),
+            lookupEntries: 331 + 44,
+            fullAffineCoefficientByteLength: 355n * 65536n * (3n * 16n),
             singlePublicAdjointCoefficientByteLength: 65536n * (3n * 16n),
             largestPublicPolynomialByteLength: 65536n * (1n + 108n),
             maximumPublicQueryCount: 2 * 704,
             publicQueryValueByteLength: 2n * 704n * (3n * 16n),
-            fullAffineQueryValueByteLength: 359n * 2n * 704n * (3n * 16n),
+            fullAffineQueryValueByteLength: 355n * 2n * 704n * (3n * 16n),
             publicQueryTransformVectorByteLength:
                 2n * 65536n * (3n * 16n) + 32768n * 16n + 1408n * 48n,
             fullRingQueryCosets: 4n,
-            auxiliaryQueryCosets: 64n,
-            expandedStatementPolynomialCount: 42n + 31n + 2n,
-            expandedStatementHeaderByteLength: 4n + 8n + 108n + 20n + 5n,
+            expandedStatementPolynomialCount: 42n + 31n,
+            expandedStatementHeaderByteLength: 4n + 4n + 108n + 20n,
             expandedStatementByteLength:
-                145n +
-                42n * 65536n * 109n +
-                31n * 65536n * 21n +
-                2n * 4096n * 6n,
+                4n + 4n + 108n + 20n + 42n * 65536n * 109n + 31n * 65536n * 21n,
             maximumEncodedOperatorByteLength:
-                64n + 2n * 48n + 359n * 1408n * 48n,
+                64n + 2n * 48n + 355n * 1408n * 48n,
             maximumIntegerLimbConvolutionMagnitude: 1024n * ((1n << 96n) - 1n),
             syntheticWitnessHeaderByteLength: 4n + 3n * 4n + 64n,
-            syntheticWitnessByteLength: 80n + 359n * 65536n * 2n,
+            syntheticWitnessByteLength: 80n + 355n * 65536n * 2n,
         });
     });
 
@@ -146,9 +137,9 @@ describe('complete setup contribution relation in a reduced ring', () => {
             [...layout.modelToCanonicalColumn].sort(
                 (left, right) => left - right,
             ),
-        ).toEqual(Array.from({ length: 359 }, (_unused, index) => index));
-        expect(layout.lookups.slice(0, 333)).toEqual(
-            Array.from({ length: 333 }, (_unused, column) => ({
+        ).toEqual(Array.from({ length: 355 }, (_unused, index) => index));
+        expect(layout.lookups.slice(0, 331)).toEqual(
+            Array.from({ length: 331 }, (_unused, column) => ({
                 column,
                 scale: 1n,
             })),
@@ -159,15 +150,14 @@ describe('complete setup contribution relation in a reduced ring', () => {
                 264 + 7 * index,
                 267 + 7 * index,
             ]).flat(),
-            332,
         ];
-        expect(layout.lookups.slice(333)).toEqual(
+        expect(layout.lookups.slice(331)).toEqual(
             errorColumns.map((column) => ({ column, scale: 512n })),
         );
         expect(layout.disjointBooleanPairs).toEqual(
-            Array.from({ length: 13 }, (_unused, index) => [
-                333 + 2 * index,
-                334 + 2 * index,
+            Array.from({ length: 12 }, (_unused, index) => [
+                331 + 2 * index,
+                332 + 2 * index,
             ]),
         );
     });
@@ -255,22 +245,23 @@ describe('complete setup contribution relation in a reduced ring', () => {
         expect(model.verify()).toBe(true);
     });
 
-    it('rejects range violations and support moved from active auxiliary positions to padding', () => {
+    it('rejects range violations and overlapping signs in the retained FHE auxiliary secret', () => {
         const model = createSetupContributionRelationModel(completionProfile());
         const error = model.columns.find((column) => column.bits === 7)!;
         const originalError = error.values[0];
         error.values[0] = 128n;
         expect(model.verify()).toBe(false);
         error.values[0] = originalError;
-        const positive = model.columns[model.auxiliarySecretColumns[0]];
-        const active = positive.values.findIndex(
-            (value, position) => position % 2 === 0 && value === 1n,
-        );
-        positive.values[active] = 0n;
-        positive.values[active + 1] = 1n;
+        const positive = model.columns.find(
+            (column) => column.name === 'FHE auxiliary secret/positive',
+        )!;
+        const negative = model.columns.find(
+            (column) => column.name === 'FHE auxiliary secret/negative',
+        )!;
+        const active = positive.values.findIndex((value) => value === 1n);
+        negative.values[active] = 1n;
         expect(model.verify()).toBe(false);
-        positive.values[active] = 1n;
-        positive.values[active + 1] = 0n;
+        negative.values[active] = 0n;
         expect(model.verify()).toBe(true);
     });
 });

@@ -7,7 +7,7 @@ mod no_result_close;
 #[path = "public-output.rs"]
 mod public_output;
 mod scenario;
-use aggregate::{ballot_keys, final_keys, polynomial_bytes};
+use aggregate::{ballot_key, final_keys, polynomial_bytes};
 use registration_credentials::{
     RETAINED_TAG_BYTES,
     ballot_authentication::BallotEnvelope,
@@ -127,13 +127,12 @@ impl BallotInputs<'_> {
         let mut work =
             registration_enrollment::ballot::BallotWork::new(credential, &proposal, &control)
                 .unwrap();
-        for index in ballot_keys(profile) {
-            work.command(credential, 1, index, &[]).unwrap();
-            stream_key(self.final_keys, profile, index, |offset, bytes| {
-                work.command(credential, 2, offset, bytes).unwrap();
-            });
-            work.command(credential, 3, 0, &[]).unwrap();
-        }
+        let index = ballot_key(profile);
+        work.command(credential, 1, index, &[]).unwrap();
+        stream_key(self.final_keys, profile, index, |offset, bytes| {
+            work.command(credential, 2, offset, bytes).unwrap();
+        });
+        work.command(credential, 3, 0, &[]).unwrap();
         let ballot_time = close::now_milliseconds();
         work.command(
             credential,
@@ -578,7 +577,7 @@ fn main() {
         return;
     }
     let final_keys = final_keys(&output, profile);
-    let [fhe_key, auxiliary_key] = ballot_keys(profile);
+    let fhe_key = ballot_key(profile);
     let retained_proposal = RetainedContributionContext::parse(
         &enrollments[0].credential,
         &inventory.proposal().proposal().records()[0],
@@ -899,7 +898,7 @@ fn main() {
         work.command(&mut enrollments[0].credential, 10, 0, &[])
             .is_err()
     );
-    // Keys are delivered only in the statement's order.
+    // Only the FHE aggregate is a delivered ballot key.
     assert!(
         registration_enrollment::ballot::BallotWork::new(
             &enrollments[0].credential,
@@ -907,27 +906,66 @@ fn main() {
             &ballot_control,
         )
         .unwrap()
-        .command(&mut enrollments[0].credential, 1, auxiliary_key, &[])
+        .command(
+            &mut enrollments[0].credential,
+            1,
+            profile.share_constant_polynomial(0),
+            &[]
+        )
         .is_err()
     );
-    for index in [fhe_key, auxiliary_key] {
-        let mut reader = inputs.read_polynomial(index).unwrap();
-        stream_key(&final_keys, profile, index, |offset, bytes| {
-            reader.push(offset, bytes).unwrap();
-        });
-        let key = reader.finish().unwrap();
-        assert_eq!(
-            key.coefficients(),
-            aggregate::read_key(&setup, index, &final_keys).coefficients()
-        );
-        work.command(&mut enrollments[0].credential, 1, index, &[])
+    let index = fhe_key;
+    let mut reader = inputs.read_polynomial(index).unwrap();
+    stream_key(&final_keys, profile, index, |offset, bytes| {
+        reader.push(offset, bytes).unwrap();
+    });
+    let key = reader.finish().unwrap();
+    assert_eq!(
+        key.coefficients(),
+        aggregate::read_key(&setup, index, &final_keys).coefficients()
+    );
+    work.command(&mut enrollments[0].credential, 1, index, &[])
+        .unwrap();
+    stream_key(&final_keys, profile, index, |offset, bytes| {
+        work.command(&mut enrollments[0].credential, 2, offset, bytes)
             .unwrap();
-        stream_key(&final_keys, profile, index, |offset, bytes| {
-            work.command(&mut enrollments[0].credential, 2, offset, bytes)
+    });
+    work.command(&mut enrollments[0].credential, 3, 0, &[])
+        .unwrap();
+    // A repeated key poisons its private session, so isolate that hostile
+    // delivery from the original session's later score checks.
+    {
+        let mut repeated = registration_enrollment::ballot::BallotWork::new(
+            &enrollments[0].credential,
+            &retained_proposal,
+            &ballot_control,
+        )
+        .unwrap();
+        repeated
+            .command(&mut enrollments[0].credential, 1, fhe_key, &[])
+            .unwrap();
+        stream_key(&final_keys, profile, fhe_key, |offset, bytes| {
+            repeated
+                .command(&mut enrollments[0].credential, 2, offset, bytes)
                 .unwrap();
         });
-        work.command(&mut enrollments[0].credential, 3, 0, &[])
+        repeated
+            .command(&mut enrollments[0].credential, 3, 0, &[])
             .unwrap();
+        assert!(
+            repeated
+                .command(&mut enrollments[0].credential, 1, fhe_key, &[])
+                .is_err()
+        );
+        let timed_scores = [
+            close::now_milliseconds().to_le_bytes().as_slice(),
+            &scenario.scores(0),
+        ]
+        .concat();
+        assert!(matches!(
+            repeated.command(&mut enrollments[0].credential, 4, 0, &timed_scores),
+            Err(registration_credentials::Error::Consumed)
+        ));
     }
     // Refused inputs consume neither the ballot attempt nor the keys already
     // delivered to this session.
@@ -1054,19 +1092,18 @@ fn main() {
             &ballot_control,
         )
         .unwrap();
-        for index in [fhe_key, auxiliary_key] {
+        let index = fhe_key;
+        restored_work
+            .command(&mut restored_credential, 1, index, &[])
+            .unwrap();
+        stream_key(&final_keys, profile, index, |offset, bytes| {
             restored_work
-                .command(&mut restored_credential, 1, index, &[])
+                .command(&mut restored_credential, 2, offset, bytes)
                 .unwrap();
-            stream_key(&final_keys, profile, index, |offset, bytes| {
-                restored_work
-                    .command(&mut restored_credential, 2, offset, bytes)
-                    .unwrap();
-            });
-            restored_work
-                .command(&mut restored_credential, 3, 0, &[])
-                .unwrap();
-        }
+        });
+        restored_work
+            .command(&mut restored_credential, 3, 0, &[])
+            .unwrap();
         restored_work
             .command(&mut restored_credential, 5, 0, envelope.bytes())
             .unwrap();
@@ -1319,7 +1356,7 @@ fn main() {
         "truncated",
         "trailing",
         "key",
-        "unfinished-keys",
+        "unfinished-key",
         "valid",
     ] {
         let result = aggregate::classify_ballot(

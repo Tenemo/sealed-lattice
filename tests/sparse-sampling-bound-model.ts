@@ -1,4 +1,3 @@
-import { auxiliaryInputEncryptionParameters } from '#tests/auxiliary-input-encryption-parameters.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import { compileRegistrationKeyRelationCensus } from '#tests/registration-key-relation-model.js';
 import type { SupportedProfile } from '#tests/supported-profile-model.js';
@@ -79,15 +78,6 @@ export const compileSparseSupportSamplingCensus = (
             ...boundSparseSupportSampling(
                 fixedModulusBfvInputs.polynomialDegree,
                 sharing.encryptionSupportWeight,
-            ),
-        },
-        {
-            role: 'Contribution auxiliary secret',
-            scope: 'contribution',
-            callsPerOperation: 1n,
-            ...boundSparseSupportSampling(
-                auxiliaryInputEncryptionParameters.degree,
-                auxiliaryInputEncryptionParameters.support,
             ),
         },
     ];

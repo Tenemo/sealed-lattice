@@ -391,7 +391,6 @@ mod retained_tests {
             for index in [
                 profile.fhe_polynomial(profile.gadget_length() - 1, 6),
                 profile.share_linear_polynomial(participants - 1),
-                profile.auxiliary_key_polynomial(),
             ] {
                 let (expected, bytes, values) = source(profile, index);
                 let family = profile.setup_family(index).unwrap();
@@ -427,31 +426,45 @@ mod retained_tests {
         };
         assert!(crate::AggregatePolynomialReader::new(wide, [0; 64], common).is_err());
     }
+    fn share_width(profile: Profile) -> usize {
+        1 + profile.family_magnitude_bytes(supported_profile::Family::Sharing)
+    }
+    fn push_all(reader: &mut crate::AggregatePolynomialReader, profile: Profile, bytes: &[u8]) {
+        let chunk = CHUNK_BYTES / share_width(profile) * share_width(profile);
+        for (ordinal, part) in bytes.chunks(chunk).enumerate() {
+            reader.push(ordinal * chunk, part).unwrap();
+        }
+    }
     #[test]
     fn changed_canonical_cache_and_incomplete_reads_supply_no_key() {
         let profile = Profile::new(3, 2).unwrap();
-        let (expected, mut bytes, _) = source(profile, profile.auxiliary_key_polynomial());
+        let (expected, mut bytes, _) = source(profile, profile.share_constant_polynomial(0));
         let mut reader =
             crate::AggregatePolynomialReader::new(profile, [0; 64], expected.clone()).unwrap();
-        reader.push(0, &bytes[..bytes.len() - 6]).unwrap();
+        push_all(
+            &mut reader,
+            profile,
+            &bytes[..bytes.len() - share_width(profile)],
+        );
         assert!(matches!(reader.finish(), Err(Refusal::Incomplete)));
         bytes[1] = 1;
         let mut reader = crate::AggregatePolynomialReader::new(profile, [0; 64], expected).unwrap();
-        reader.push(0, &bytes).unwrap();
+        push_all(&mut reader, profile, &bytes);
         assert!(matches!(reader.finish(), Err(Refusal::PreviousAggregate)));
     }
     #[test]
     fn malformed_reads_poison_only_the_pending_key() {
         let profile = Profile::new(3, 2).unwrap();
-        let (expected, bytes, _) = source(profile, profile.auxiliary_key_polynomial());
-        let mut negative_zero = vec![0; 6];
+        let (expected, bytes, _) = source(profile, profile.share_constant_polynomial(0));
+        let width = share_width(profile);
+        let mut negative_zero = vec![0; width];
         negative_zero[0] = 1;
-        let mut unknown_sign = vec![0; 6];
+        let mut unknown_sign = vec![0; width];
         unknown_sign[0] = 2;
         for (offset, invalid) in [
-            (6, vec![0; 6]),
+            (width, vec![0; width]),
             (0, vec![]),
-            (0, vec![0; 5]),
+            (0, vec![0; width - 1]),
             (0, vec![0; CHUNK_BYTES + 1]),
             (0, negative_zero),
             (0, unknown_sign),
@@ -459,17 +472,17 @@ mod retained_tests {
             let mut reader =
                 crate::AggregatePolynomialReader::new(profile, [0; 64], expected.clone()).unwrap();
             assert!(reader.push(offset, &invalid).is_err());
-            assert!(reader.push(0, &bytes).is_err());
+            assert!(reader.push(0, &bytes[..width]).is_err());
             assert!(reader.finish().is_err());
         }
         let mut reader =
             crate::AggregatePolynomialReader::new(profile, [0; 64], expected.clone()).unwrap();
-        reader.push(0, &bytes[..6]).unwrap();
-        assert!(reader.push(0, &bytes[..6]).is_err());
+        reader.push(0, &bytes[..width]).unwrap();
+        assert!(reader.push(0, &bytes[..width]).is_err());
         assert!(reader.finish().is_err());
         let mut reader = crate::AggregatePolynomialReader::new(profile, [0; 64], expected).unwrap();
-        reader.push(0, &bytes).unwrap();
-        assert!(reader.push(bytes.len(), &bytes[..6]).is_err());
+        push_all(&mut reader, profile, &bytes);
+        assert!(reader.push(bytes.len(), &bytes[..width]).is_err());
         assert!(reader.finish().is_err());
     }
 }

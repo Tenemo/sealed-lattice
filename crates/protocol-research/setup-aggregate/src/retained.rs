@@ -30,6 +30,9 @@ impl RetainedAggregatePolynomial {
     pub fn coefficients(&self) -> &[BigInt] {
         &self.coefficients
     }
+    pub fn into_coefficients(self) -> Vec<BigInt> {
+        self.coefficients
+    }
 }
 
 /// Parsed local references only. Their provenance is the owning setup verifier's
@@ -224,7 +227,7 @@ mod private_tests {
     }
     fn record() -> (Vec<u8>, Vec<u8>) {
         let profile = profile();
-        let key = profile.auxiliary_key_polynomial();
+        let key = profile.share_constant_polynomial(0);
         let values = vec![0; profile.setup_polynomial_bytes(key).unwrap()];
         let mut record = Vec::from(b"SAV1".as_slice());
         record.extend([9; 64]);
@@ -238,13 +241,21 @@ mod private_tests {
         }
         (record, values)
     }
+    fn push_all(reader: &mut RetainedPolynomialReader, bytes: &[u8]) {
+        let width = 1 + profile().family_magnitude_bytes(supported_profile::Family::Sharing);
+        let chunk = CHUNK_BYTES / width * width;
+        for (ordinal, part) in bytes.chunks(chunk).enumerate() {
+            reader.push(ordinal * chunk, part).unwrap();
+        }
+    }
     #[test]
     fn retained_inputs_check_complete_identity_and_canonical_values() {
         let (record, values) = record();
-        let key_index = profile().auxiliary_key_polynomial();
+        let key_index = profile().share_constant_polynomial(0);
+        let width = 1 + profile().family_magnitude_bytes(supported_profile::Family::Sharing);
         let inputs = RetainedSetupInputs::parse(profile(), &record, [9; 64]).unwrap();
         let mut reader = inputs.read_polynomial(key_index).unwrap();
-        reader.push(0, &values).unwrap();
+        push_all(&mut reader, &values);
         let key = reader.finish().unwrap();
         assert_eq!(key.inventory(), &[9; 64]);
         assert_eq!(key.index(), key_index);
@@ -256,16 +267,16 @@ mod private_tests {
         let mut changed = values.clone();
         changed[1] = 1;
         let mut reader = inputs.read_polynomial(key_index).unwrap();
-        reader.push(0, &changed).unwrap();
+        push_all(&mut reader, &changed);
         assert!(reader.finish().is_err());
         let mut reader = inputs.read_polynomial(key_index).unwrap();
-        reader.push(0, &values[..values.len() - 6]).unwrap();
+        push_all(&mut reader, &values[..values.len() - width]);
         assert!(reader.finish().is_err());
         let mut negative_zero = values.clone();
         negative_zero[0] = 1;
         let mut reader = inputs.read_polynomial(key_index).unwrap();
-        assert!(reader.push(0, &negative_zero).is_err());
-        assert!(reader.push(0, &values).is_err());
+        assert!(reader.push(0, &negative_zero[..width]).is_err());
+        assert!(reader.push(0, &values[..width]).is_err());
         assert!(reader.finish().is_err());
         assert!(inputs.read_polynomial(0).is_err());
     }

@@ -354,7 +354,6 @@ mod tests {
                 profile.fhe_polynomial(profile.gadget_length() - 1, 5),
                 profile.share_common_polynomial(),
                 profile.recipient_key_polynomial(participants - 1),
-                profile.auxiliary_common_polynomial(),
                 profile.setup_polynomials(),
             ] {
                 assert_eq!(contribution_family(profile, index), None);
@@ -370,7 +369,6 @@ mod tests {
                     profile.share_linear_polynomial(participants - 1),
                     Family::Sharing,
                 ),
-                (profile.auxiliary_key_polynomial(), Family::Auxiliary),
             ] {
                 assert_eq!(contribution_family(profile, index), Some(family));
             }

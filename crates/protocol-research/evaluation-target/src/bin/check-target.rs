@@ -1,7 +1,7 @@
 use ballot_proof::{
     body::SignedBallotVerifier,
     close::{CloseContext, ClosedSlot},
-    statement::setup_inputs,
+    statement::setup_input,
     submission::{BallotBodyAuthentication, authenticate_envelope},
 };
 use evaluation_target::target::{ClassifiedClosedInventory, Error, PublicInputs, WorkingStore};
@@ -552,22 +552,21 @@ fn main() -> io::Result<()> {
         let mut classifier =
             SignedBallotVerifier::new(poll.clone(), setup.clone(), authentication, &header, None)
                 .map_err(refusal)?;
-        if classifier.requires_keys() {
-            for (_, _, index) in setup_inputs(profile) {
-                classifier.begin_key(index).map_err(refusal)?;
-                // Whole-coefficient chunks, as the key reader takes them.
-                let (length, capacity) = polynomial_bytes(profile, index)?;
-                let mut key = File::open(aggregate.join(polynomial_name(index)))?;
-                let mut offset = 0;
-                while offset < length {
-                    let count = capacity.min(length - offset);
-                    work.read(&mut key, &mut buffer[..count])?;
-                    classifier.push_key(&buffer[..count]).map_err(refusal)?;
-                    offset += count;
-                }
-                end(&mut key)?;
-                classifier.finish_key().map_err(refusal)?;
+        if classifier.requires_key() {
+            let (_, _, index) = setup_input(profile);
+            classifier.begin_key(index).map_err(refusal)?;
+            // Whole-coefficient chunks, as the key reader takes them.
+            let (length, capacity) = polynomial_bytes(profile, index)?;
+            let mut key = File::open(aggregate.join(polynomial_name(index)))?;
+            let mut offset = 0;
+            while offset < length {
+                let count = capacity.min(length - offset);
+                work.read(&mut key, &mut buffer[..count])?;
+                classifier.push_key(&buffer[..count]).map_err(refusal)?;
+                offset += count;
             }
+            end(&mut key)?;
+            classifier.finish_key().map_err(refusal)?;
         }
         loop {
             let count = body.read(&mut buffer)?;

@@ -54,9 +54,9 @@ describe('shared participant custody', () => {
             compileRegistrationEnrollmentCensus().maximumRecords + 2n,
         );
         // The marker, inventory identity, and public-polynomial identities of
-        // the 45 aggregate polynomials, followed by a 64-byte protocol tag.
-        expect(body.polynomials).toHaveLength(45);
-        expect(value.setupReferenceBytes).toBe(4n + 64n + 45n * 64n + 64n);
+        // the 44 aggregate polynomials, followed by a 64-byte protocol tag.
+        expect(body.polynomials).toHaveLength(44);
+        expect(value.setupReferenceBytes).toBe(4n + 64n + 44n * 64n + 64n);
         expect(value.publicRecords.some((record) => record.object === 0)).toBe(
             false,
         );

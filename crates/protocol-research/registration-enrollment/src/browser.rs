@@ -1375,17 +1375,13 @@ pub extern "C" fn participant_ballot_command(
 /// this ordinal, which ballot creation reads as its key; the maximum value
 /// when no poll is retained or no such key exists.
 #[unsafe(no_mangle)]
-pub extern "C" fn participant_ballot_key_index(ordinal: usize) -> usize {
+pub extern "C" fn participant_ballot_key_index() -> usize {
     SESSION.with(|session| {
         session
             .borrow()
             .retained_context
             .as_ref()
-            .and_then(|context| {
-                ballot_proof::statement::setup_inputs(context.profile())
-                    .get(ordinal)
-                    .map(|input| input.2)
-            })
+            .map(|context| ballot_proof::statement::setup_input(context.profile()).2)
             .unwrap_or(usize::MAX)
     })
 }

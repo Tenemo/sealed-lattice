@@ -1,4 +1,3 @@
-import { auxiliaryInputEncryptionParameters } from '#tests/auxiliary-input-encryption-parameters.js';
 import { compileCommonAgreementDegreeCensus } from '#tests/common-agreement-degree-model.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import {
@@ -138,9 +137,8 @@ export const compileBrowserWordProverResources = (
             columns: relation.wordColumns + relation.booleanColumns,
             lookups: relation.lookupEntries,
             preparedAdjointBytes:
-                (fullDegreeCommonPolynomials *
-                    BigInt(agreement.systematicSize) +
-                    auxiliaryInputEncryptionParameters.degree) *
+                fullDegreeCommonPolynomials *
+                BigInt(agreement.systematicSize) *
                 field.packedExtensionElementByteLength,
         }),
     };
@@ -150,7 +148,6 @@ export const compileContributionGenerationResources = (
     profile: SupportedProfile,
 ) => {
     const degree = fixedModulusBfvInputs.polynomialDegree;
-    const auxiliaryDegree = auxiliaryInputEncryptionParameters.degree;
     const participants = BigInt(profile.participantCount);
     const sharingDegree = BigInt(profile.releaseThreshold - 1);
     const roster = compileRosterProposalCensus(Number(participants));
@@ -159,8 +156,8 @@ export const compileContributionGenerationResources = (
     const additionalInputBufferBytes = 1_572_864n - (1n << 20n);
     const relation = compileSetupContributionRelationCensus(profile);
     const proof = compileFullWordProofLayout(profile);
-    const sparseData = ((participants + 2n) * degree + auxiliaryDegree) * 17n;
-    const transforms = 3n * (degree + auxiliaryDegree) * 16n;
+    const sparseData = (participants + 2n) * degree * 17n;
+    const transforms = 3n * degree * 16n;
     const sharing = sharingDegree * degree * 16n;
     const privateWorkspace = 24n * degree * 16n;
     const publicWorkspace = 4n * degree * publicCoefficientAllowance;
@@ -175,27 +172,16 @@ export const compileContributionGenerationResources = (
     const proverAllowance =
         compileBrowserWordProverResources(profile).maximumLiveBytes;
     const gadgetLength = profile.gadgetLength;
-    const auxiliaryPolynomialBytes =
-        auxiliaryDegree *
-        (1n +
-            BigInt(
-                Math.ceil(
-                    auxiliaryInputEncryptionParameters.modulus.toString(2)
-                        .length / 8,
-                ),
-            ));
     const sharingGroupBytes =
         relation.expandedStatementByteLength -
         relation.expandedStatementHeaderByteLength -
-        7n * gadgetLength * relation.largestPublicPolynomialByteLength -
-        2n * auxiliaryPolynomialBytes;
+        7n * gadgetLength * relation.largestPublicPolynomialByteLength;
     const sharingPolynomialBytes = sharingGroupBytes / (3n * participants + 1n);
     if (sharingPolynomialBytes * (3n * participants + 1n) !== sharingGroupBytes)
         throw new Error('Nonintegral sharing statement shape.');
     const regeneratedCommonBytes =
         3n * gadgetLength * relation.largestPublicPolynomialByteLength +
-        sharingPolynomialBytes +
-        auxiliaryPolynomialBytes;
+        sharingPolynomialBytes;
     return {
         generationAllowance,
         retainedRosterPayloadBytes,

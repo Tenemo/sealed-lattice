@@ -13,7 +13,7 @@ const TABLE: &[u8] = include_bytes!("../profiles.bin");
 const MAGIC: &[u8; 4] = b"SPT1";
 const RECORD_BYTES: usize = 30;
 const PARAMETER_MAGIC: &[u8; 4] = b"SCP1";
-const STATEMENT_MAGIC: &[u8; 4] = b"SCO1";
+const STATEMENT_MAGIC: &[u8; 4] = b"SCO2";
 
 /// Ring degree of the FHE and share-encryption polynomials.
 pub const DEGREE: usize = 65_536;
@@ -41,7 +41,7 @@ const GADGET_POLYNOMIALS: usize = 7;
 /// polynomials, which a contribution body does not carry.
 const GADGET_KEY_COMPONENTS: [usize; 4] = [1, 2, 4, 6];
 /// Nonzero coefficients of each FHE secret, share-encryption ephemeral and
-/// auxiliary-encryption secret; half of each support is +1 and half -1.
+/// auxiliary-encryption ephemeral; half of each support is +1 and half -1.
 pub const FHE_SECRET_SUPPORT: usize = 1_024;
 pub const SHARE_EPHEMERAL_SUPPORT: usize = 256;
 pub const AUXILIARY_SECRET_SUPPORT: usize = 256;
@@ -166,9 +166,8 @@ pub struct SetupShape {
     /// Each narrow word column and its width, in column order.
     pub narrow_words: Vec<(usize, usize)>,
     /// The sparse secrets' ring-degree strides and half supports, in
-    /// allocation order: the FHE secret and auxiliary secret, each
-    /// recipient's share-encryption ephemeral and the auxiliary-encryption
-    /// secret.
+    /// allocation order: the FHE secret, its relinearization auxiliary and
+    /// each recipient's share-encryption ephemeral.
     pub sparse_supports: Vec<(usize, usize)>,
 }
 
@@ -386,7 +385,7 @@ impl Profile {
         self.options.next_power_of_two()
     }
 
-    /// The setup parameter object: its magic, then the FHE, share and
+    /// The suite parameter object: its magic, then the FHE, share and
     /// auxiliary moduli.
     pub fn parameters(self) -> Vec<u8> {
         [
@@ -420,9 +419,9 @@ impl Profile {
     }
 
     /// Setup polynomials: seven per gadget coordinate, the common share
-    /// polynomial, three per recipient and the two auxiliary polynomials.
+    /// polynomial and three per recipient.
     pub fn setup_polynomials(self) -> usize {
-        GADGET_POLYNOMIALS * self.gadget_length() + 3 * self.participants + 3
+        GADGET_POLYNOMIALS * self.gadget_length() + 3 * self.participants + 1
     }
     pub fn fhe_polynomial(self, gadget: usize, component: usize) -> usize {
         assert!(gadget < self.gadget_length() && component < GADGET_POLYNOMIALS);
@@ -446,18 +445,11 @@ impl Profile {
     pub fn share_linear_polynomial(self, recipient: usize) -> usize {
         self.recipient_key_polynomial(recipient) + 2
     }
-    pub fn auxiliary_common_polynomial(self) -> usize {
-        self.share_common_polynomial() + 3 * self.participants + 1
-    }
-    pub fn auxiliary_key_polynomial(self) -> usize {
-        self.auxiliary_common_polynomial() + 1
-    }
     /// Signed witness variable widths in allocation order after the sparse
     /// secrets: each sharing coefficient's low and high limb parts, each
     /// gadget coordinate's encryption, two relinearization and automorphism
-    /// key equations, each recipient's constant and linear share equations,
-    /// and the auxiliary key equation. Each equation has its quotient, its
-    /// carries and its error.
+    /// key equations and each recipient's constant and linear share equations.
+    /// Each equation has its quotient, its carries and its error.
     pub fn setup_variable_bits(self) -> Vec<usize> {
         let mut bits = Vec::new();
         for _ in 0..self.sharing_degree() {
@@ -484,7 +476,6 @@ impl Profile {
                 SETUP_ERROR_BITS,
             ]);
         }
-        bits.extend([SETUP_QUOTIENT_BITS, SETUP_ERROR_BITS]);
         bits
     }
     pub fn setup_shape(self) -> SetupShape {
@@ -494,7 +485,6 @@ impl Profile {
             degree(SHARE_EPHEMERAL_SUPPORT, 1),
             self.participants,
         ));
-        sparse_supports.push(degree(AUXILIARY_SECRET_SUPPORT, DEGREE / AUXILIARY_DEGREE));
         let mut word_columns = 0;
         let mut boolean_columns = 2 * sparse_supports.len();
         let mut narrow_words = Vec::new();
@@ -514,13 +504,13 @@ impl Profile {
             sparse_supports,
         }
     }
-    /// The setup statement header: its magic, both ring degrees and the
-    /// parameter object's moduli.
+    /// The setup statement header: its magic, the ring degree and the FHE
+    /// and share-encryption moduli.
     pub fn setup_statement_header(self) -> Vec<u8> {
         let mut header = STATEMENT_MAGIC.to_vec();
         header.extend((DEGREE as u32).to_le_bytes());
-        header.extend((AUXILIARY_DEGREE as u32).to_le_bytes());
-        header.extend(&self.parameters()[PARAMETER_MAGIC.len()..]);
+        header.extend(self.ciphertext_modulus().to_bytes());
+        header.extend(share_modulus());
         header
     }
     /// Bytes of one setup polynomial: a sign byte and a magnitude for each
@@ -539,7 +529,7 @@ impl Profile {
     }
     /// The setup polynomials a contribution body carries, in body order:
     /// each gadget coordinate's keys, each recipient's constant and linear
-    /// share encryptions, and the auxiliary key.
+    /// share encryptions.
     pub fn contribution_body_polynomials(self) -> Vec<usize> {
         let mut polynomials: Vec<_> = (0..self.gadget_length())
             .flat_map(|gadget| {
@@ -552,16 +542,13 @@ impl Profile {
                 self.share_linear_polynomial(recipient),
             ]);
         }
-        polynomials.push(self.auxiliary_key_polynomial());
         polynomials
     }
     pub fn setup_family(self, index: usize) -> Option<Family> {
         if index < self.share_common_polynomial() {
             Some(Family::Fhe)
-        } else if index < self.auxiliary_common_polynomial() {
-            Some(Family::Sharing)
         } else if index < self.setup_polynomials() {
-            Some(Family::Auxiliary)
+            Some(Family::Sharing)
         } else {
             None
         }
@@ -734,22 +721,19 @@ mod tests {
                 );
                 mark(profile.share_linear_polynomial(recipient), Family::Sharing);
             }
-            mark(profile.auxiliary_common_polynomial(), Family::Auxiliary);
-            mark(profile.auxiliary_key_polynomial(), Family::Auxiliary);
             assert!(seen.iter().all(|value| *value));
             assert_eq!(profile.setup_family(profile.setup_polynomials()), None);
         }
         let completion = Profile::new(10, 10).unwrap();
-        assert_eq!(completion.setup_statement_header().len(), 145);
+        assert_eq!(completion.setup_statement_header().len(), 136);
         assert_eq!(
             completion.setup_statement_length(),
-            145 + 42 * DEGREE * 109 + 31 * DEGREE * 21 + 2 * AUXILIARY_DEGREE * 6
+            136 + 42 * DEGREE * 109 + 31 * DEGREE * 21
         );
-        assert_eq!(completion.setup_polynomials(), 75);
+        assert_eq!(completion.setup_polynomials(), 73);
         assert_eq!(completion.share_common_polynomial(), 42);
         assert_eq!(completion.recipient_key_polynomial(0), 43);
         assert_eq!(completion.share_linear_polynomial(9), 72);
-        assert_eq!(completion.auxiliary_key_polynomial(), 74);
     }
 
     #[test]
@@ -758,13 +742,10 @@ mod tests {
             let polynomials = profile.contribution_body_polynomials();
             assert_eq!(
                 polynomials.len(),
-                4 * profile.gadget_length() + 2 * profile.participants() + 1
+                4 * profile.gadget_length() + 2 * profile.participants()
             );
             assert!(polynomials.windows(2).all(|pair| pair[0] < pair[1]));
-            let mut commons = vec![
-                profile.share_common_polynomial(),
-                profile.auxiliary_common_polynomial(),
-            ];
+            let mut commons = vec![profile.share_common_polynomial()];
             for gadget in 0..profile.gadget_length() {
                 commons
                     .extend([0, 3, 5].map(|component| profile.fhe_polynomial(gadget, component)));
@@ -780,19 +761,19 @@ mod tests {
             );
         }
         // The contribution body model's layout: four FHE keys per gadget
-        // coordinate, two share encryptions per recipient and the auxiliary
-        // key, each a sign byte and a magnitude per coefficient.
+        // coordinate and two share encryptions per recipient, each a sign
+        // byte and a magnitude per coefficient.
         let completion = Profile::new(10, 10).unwrap();
         let polynomials = completion.contribution_body_polynomials();
         assert_eq!(polynomials[..4], [1, 2, 4, 6]);
         assert_eq!(polynomials[20..26], [36, 37, 39, 41, 44, 45]);
-        assert_eq!(polynomials[44], 74);
+        assert_eq!(polynomials[43], 72);
         assert_eq!(
             polynomials
                 .iter()
                 .map(|index| completion.setup_polynomial_bytes(*index).unwrap())
                 .sum::<usize>(),
-            24 * DEGREE * 109 + 20 * DEGREE * 21 + AUXILIARY_DEGREE * 6
+            24 * DEGREE * 109 + 20 * DEGREE * 21
         );
         assert_eq!(
             completion.setup_polynomial_bytes(completion.setup_polynomials()),
@@ -805,22 +786,20 @@ mod tests {
         let completion = Profile::new(10, 10).unwrap().setup_shape();
         assert_eq!(
             (completion.word_columns, completion.boolean_columns),
-            (333, 26)
+            (331, 24)
         );
         // Twenty-four FHE errors, one per key, then two share errors per
-        // recipient and the auxiliary error.
+        // recipient.
         let mut narrow: Vec<_> = (0..24).map(|key| (30 + 10 * key, 7)).collect();
         for recipient in 0..10 {
             narrow.extend([(264 + 7 * recipient, 7), (267 + 7 * recipient, 7)]);
         }
-        narrow.push((332, 7));
         assert_eq!(completion.narrow_words, narrow);
-        assert_eq!(completion.sparse_supports.len(), 13);
+        assert_eq!(completion.sparse_supports.len(), 12);
         assert_eq!(completion.sparse_supports[0], (1, 512));
         assert_eq!(completion.sparse_supports[2], (1, 128));
-        assert_eq!(completion.sparse_supports[12], (16, 128));
         // Census ranges of word columns by participant count.
-        for (participants, low, high) in [(3, 142, 270), (16, 360, 452), (20, 394, 486)] {
+        for (participants, low, high) in [(3, 140, 268), (16, 358, 450), (20, 392, 484)] {
             let words: Vec<_> = Profile::option_range()
                 .map(|options| {
                     Profile::new(participants, options)

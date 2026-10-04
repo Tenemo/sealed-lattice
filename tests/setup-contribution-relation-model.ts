@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 
-import { auxiliaryInputEncryptionParameters } from '#tests/auxiliary-input-encryption-parameters.js';
 import { isCanonicalCenteredPolynomial } from '#tests/canonical-polynomial-model.js';
 import { compileCommonAgreementDegreeCensus } from '#tests/common-agreement-degree-model.js';
 import { integerLimbConvolutionMagnitudeBound } from '#tests/exact-integer-convolution-model.js';
@@ -63,13 +62,12 @@ type Equation = Readonly<{
     radix: bigint;
 }>;
 
-// FHE and auxiliary equations use 96-bit limbs; share equations use the
+// FHE equations use 96-bit limbs; share equations use the
 // profile's share-lifting limb.
 const fheRadix = 1n << 96n;
 const prime = compileSmallLimbProofFieldCensus().modulus;
 const shareScale = shareEncryptionParameters.scale;
 const shareModulus = shareEncryptionParameters.modulus;
-const auxiliaryModulus = auxiliaryInputEncryptionParameters.modulus;
 const modulo = (value: bigint, modulus: bigint) =>
     ((value % modulus) + modulus) % modulus;
 const center = (value: bigint, modulus: bigint) => {
@@ -104,8 +102,7 @@ export const createSetupContributionRelationModel = (
     profile: SupportedProfile,
     seed = 1n,
 ) => {
-    const degree = 16,
-        auxiliaryDegree = 8;
+    const degree = 16;
     const participants = profile.participantCount;
     const sharingDegree = profile.releaseThreshold - 1;
     const shareLifting = profile.shareLifting;
@@ -240,10 +237,6 @@ export const createSetupContributionRelationModel = (
     const shareEphemerals = Array.from(
         { length: participants },
         (_value, recipient) => sparse(`share encryption ${String(recipient)}`),
-    );
-    const auxiliarySecret = sparse(
-        'auxiliary encryption secret',
-        auxiliaryDegree,
     );
     const sharingRadius = 1n << BigInt(shareLifting.sharingCoefficientBits - 1);
     const highRadius =
@@ -649,40 +642,6 @@ export const createSetupContributionRelationModel = (
         decryptedShares.push(recovered);
         expectedShares.push(message);
     }
-    const auxiliaryCommon = publicPolynomial(auxiliaryModulus, auxiliaryDegree),
-        auxiliaryError = errors(auxiliaryDegree);
-    const auxiliaryProduct = convolution(
-        auxiliaryCommon,
-        auxiliarySecret.values,
-    );
-    const auxiliaryPublic = auxiliaryProduct.map((value, position) =>
-        center(-value + auxiliaryError[position], auxiliaryModulus),
-    );
-    addEquation(
-        'auxiliary public key',
-        {
-            modulus: auxiliaryModulus,
-            degree: auxiliaryDegree,
-            publicValue: auxiliaryPublic,
-            publicSign: 1n,
-            convolution: [
-                {
-                    publicCoefficients: auxiliaryCommon,
-                    variable: auxiliarySecret.variable,
-                },
-            ],
-            direct: [],
-            errorSign: -1n,
-            limbs: 1,
-            radix: fheRadix,
-        },
-        auxiliaryProduct.map(
-            (value, position) =>
-                value + auxiliaryPublic[position] - auxiliaryError[position],
-        ),
-        auxiliaryError,
-        16,
-    );
     const rows = () => [...equations.flatMap(compileEquation), ...supportRows];
     const transpose = (alpha: bigint) => {
         alpha = modulo(alpha, prime);
@@ -846,7 +805,6 @@ export const createSetupContributionRelationModel = (
         rows().every((row) => modulo(evaluateRow(row), prime) === 0n);
     return {
         degree,
-        auxiliaryDegree,
         columns,
         disjointPairs,
         equations,
@@ -856,9 +814,6 @@ export const createSetupContributionRelationModel = (
         verify,
         decryptedShares,
         expectedShares,
-        auxiliarySecretColumns: auxiliarySecret.variable.terms.map(
-            ({ column }) => column,
-        ),
     };
 };
 
@@ -949,14 +904,11 @@ export const deriveSetupContributionShape = (profile: SupportedProfile) => {
             16,
             7,
         ]).flat(),
-        // The auxiliary key equation.
-        16,
-        7,
     ];
     const columns = variableBits.map(signedVariableColumns);
-    // FHE secret, FHE auxiliary secret, recipient ephemerals and the
-    // auxiliary encryption secret each have a positive and a negative column.
-    const disjointPairs = participants + 3;
+    // The FHE secret, FHE auxiliary secret and recipient ephemerals each
+    // have a positive and a negative column.
+    const disjointPairs = participants + 2;
     const wordColumns = columns.reduce((sum, value) => sum + value.words, 0);
     const narrowWords = columns.reduce(
         (sum, value) => sum + value.narrowWords,
@@ -976,7 +928,6 @@ export const deriveSetupContributionShape = (profile: SupportedProfile) => {
         affineRows:
             BigInt(fheEquations * fheLimbs + 4 * participants) *
                 fixedModulusBfvInputs.polynomialDegree +
-            auxiliaryInputEncryptionParameters.degree +
             BigInt(supportRows),
     };
 };
@@ -987,7 +938,6 @@ export const compileSetupContributionRelationCensus = (
     const shape = deriveSetupContributionShape(profile);
     const columnCount = BigInt(shape.wordColumns + shape.booleanColumns);
     const degree = fixedModulusBfvInputs.polynomialDegree;
-    const auxiliaryDegree = auxiliaryInputEncryptionParameters.degree;
     const field = compileSmallLimbProofFieldCensus();
     const extensionElementByteLength = field.packedExtensionElementByteLength;
     const agreement = compileCommonAgreementDegreeCensus();
@@ -1000,16 +950,12 @@ export const compileSetupContributionRelationCensus = (
         BigInt(profile.ciphertext.modulus.toString(2).length + 7) / 8n;
     const shareMagnitudeByteLength =
         BigInt(shareModulus.toString(2).length + 7) / 8n;
-    const auxiliaryMagnitudeByteLength =
-        BigInt(auxiliaryModulus.toString(2).length + 7) / 8n;
     const fheStatementPolynomials = 7n * profile.gadgetLength;
     const sharingStatementPolynomials =
         3n * BigInt(profile.participantCount) + 1n;
-    const auxiliaryStatementPolynomials = 2n;
     const largestConvolutionOneNorm = [
         fixedModulusBfvInputs.secretSupportWeight,
         shareEncryptionParameters.encryptionSupportWeight,
-        auxiliaryInputEncryptionParameters.support,
     ].reduce((maximum, value) => (value > maximum ? value : maximum), 0n);
     // The widest limb of any equation bounds every limb convolution.
     const maximumIntegerLimbConvolutionMagnitude =
@@ -1021,10 +967,9 @@ export const compileSetupContributionRelationCensus = (
     const syntheticWitnessHeaderByteLength = 4n + 3n * 4n + 64n;
     const expandedStatementHeaderByteLength =
         4n +
-        2n * 4n +
+        4n +
         publicCoefficientMagnitudeByteLength +
-        shareMagnitudeByteLength +
-        auxiliaryMagnitudeByteLength;
+        shareMagnitudeByteLength;
     return {
         ...shape,
         fullAffineCoefficientByteLength:
@@ -1041,11 +986,8 @@ export const compileSetupContributionRelationCensus = (
             (degree / 2n) * field.packedFieldElementByteLength +
             publicQueryValueByteLength,
         fullRingQueryCosets: BigInt(agreement.domainSize) / degree,
-        auxiliaryQueryCosets: BigInt(agreement.domainSize) / auxiliaryDegree,
         expandedStatementPolynomialCount:
-            fheStatementPolynomials +
-            sharingStatementPolynomials +
-            auxiliaryStatementPolynomials,
+            fheStatementPolynomials + sharingStatementPolynomials,
         expandedStatementHeaderByteLength,
         expandedStatementByteLength:
             expandedStatementHeaderByteLength +
@@ -1054,10 +996,7 @@ export const compileSetupContributionRelationCensus = (
                 (1n + publicCoefficientMagnitudeByteLength) +
             sharingStatementPolynomials *
                 degree *
-                (1n + shareMagnitudeByteLength) +
-            auxiliaryStatementPolynomials *
-                auxiliaryDegree *
-                (1n + auxiliaryMagnitudeByteLength),
+                (1n + shareMagnitudeByteLength),
         maximumEncodedOperatorByteLength:
             64n +
             2n * extensionElementByteLength +

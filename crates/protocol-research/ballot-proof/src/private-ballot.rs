@@ -2,12 +2,15 @@ use crate::{
     columns,
     context::private_proof_role,
     proof::BallotProof,
-    statement::{PublicStatement, coefficient_bytes, encode_polynomial, setup_inputs},
+    statement::{PublicStatement, coefficient_bytes, encode_polynomial, setup_input},
 };
 use ballot_encryption::{context::BallotComputationContext, encryption::LinkedBallotWitness};
 use registration_credentials::{ballot_authentication::BallotEnvelope, ballot_body};
 use setup_aggregate::RetainedAggregatePolynomial;
-use supported_profile::relation::{PROOF_HEADER_BYTES, ballot_relation};
+use supported_profile::{
+    Family,
+    relation::{PROOF_HEADER_BYTES, ballot_relation},
+};
 use word_proof::oracles::Witness;
 
 #[derive(Debug)]
@@ -94,11 +97,10 @@ fn falsify(mut public: PublicStatement) -> PublicStatement {
 pub fn create(
     context: BallotComputationContext,
     fhe: RetainedAggregatePolynomial,
-    auxiliary: RetainedAggregatePolynomial,
     scores: &[u8],
     ballot_time: u64,
 ) -> Result<(Vec<u8>, BallotEnvelope), Error> {
-    let encryption = LinkedBallotWitness::create_with_context(context, fhe, auxiliary, scores)
+    let encryption = LinkedBallotWitness::create_with_context(context, fhe, scores)
         .map_err(|_| Error::Context)?;
     let profile = encryption.context.profile();
     let public = PublicStatement::from_encryption(&encryption).map_err(|_| Error::Encoding)?;
@@ -135,7 +137,7 @@ pub fn create(
 /// The caller must first authenticate its current participant root and records.
 pub fn verify(
     context: &BallotComputationContext,
-    keys: &[RetainedAggregatePolynomial; 2],
+    key: &RetainedAggregatePolynomial,
     body: &[u8],
     ballot_time: u64,
 ) -> Result<BallotEnvelope, Error> {
@@ -161,21 +163,31 @@ pub fn verify(
     }
     let mut polynomials = Vec::with_capacity(8);
     let mut offset = ballot_body::HEADER_BYTES;
-    for (key, (family, common, index)) in keys.iter().zip(setup_inputs(profile)) {
-        let width = coefficient_bytes(profile, family);
-        let degree = profile.family_degree(family);
-        if key.index() != index
-            || key.inventory() != context.inventory()
-            || key.coefficients().len() != degree
-        {
-            return Err(Error::Context);
-        }
-        polynomials.push(
+    let (_, common, index) = setup_input(profile);
+    if key.index() != index
+        || key.inventory() != context.inventory()
+        || key.coefficients().len() != profile.family_degree(Family::Fhe)
+    {
+        return Err(Error::Context);
+    }
+    for (family, common, public_key) in [
+        (
+            Family::Fhe,
             setup_witness::contribution::common_records(profile, common)
                 .map_err(|_| Error::Encoding)?,
-        );
-        polynomials
-            .push(encode_polynomial(key.coefficients(), width).map_err(|_| Error::Encoding)?);
+            encode_polynomial(key.coefficients(), coefficient_bytes(profile, Family::Fhe))
+                .map_err(|_| Error::Encoding)?,
+        ),
+        (
+            Family::Auxiliary,
+            setup_witness::fixed_auxiliary::common_records(),
+            setup_witness::fixed_auxiliary::public_key_records(),
+        ),
+    ] {
+        let width = coefficient_bytes(profile, family);
+        let degree = profile.family_degree(family);
+        polynomials.push(common);
+        polynomials.push(public_key);
         for _ in 0..2 {
             polynomials.push(body[offset..offset + degree * width].to_vec());
             offset += degree * width;

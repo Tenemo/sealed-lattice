@@ -219,8 +219,8 @@ pub fn setup_relation(profile: Profile) -> Relation {
     let shape = profile.setup_shape();
     let words = shape.word_columns;
     let mut relation = Relation {
-        tag: b"complete-setup-words/1",
-        proof_magic: b"SWP2",
+        tag: b"complete-setup-words/2",
+        proof_magic: b"SWP3",
         words,
         booleans: shape.boolean_columns,
         narrow: shape
@@ -243,7 +243,6 @@ pub fn setup_relation(profile: Profile) -> Relation {
     relation.message_bytes = relation.minimum_message_bytes();
     relation.parameters = vec![
         DEGREE,
-        AUXILIARY_DEGREE,
         relation.words(),
         relation.booleans(),
         relation.lookups(),
@@ -302,7 +301,7 @@ impl BallotColumns {
     pub fn words(self) -> usize {
         self.scores() + 5
     }
-    /// The FHE and auxiliary secrets' positive and negative supports, then
+    /// The FHE and auxiliary ephemerals' positive and negative supports, then
     /// the packed plaintext's high bit.
     pub fn fhe_positive(self) -> usize {
         self.words()
@@ -488,21 +487,21 @@ mod tests {
                 setup.support_pairs(),
                 setup.oracles(),
             ),
-            (333, 26, 378, 13, 13, 1160)
+            (331, 24, 375, 12, 12, 1147)
         );
         assert_eq!(
             setup.relation_parameters(),
             [
-                65_536, 704, 1_409, 262_144, 131_071, 2, 262_144, 65_536, 4_096, 333, 26, 378,
-                1_024, 256, 112, 96, 16, 7, 32
+                65_536, 704, 1_409, 262_144, 131_071, 2, 262_144, 65_536, 331, 24, 375, 1_024, 256,
+                112, 96, 16, 7, 32
             ]
         );
         assert_eq!(
             setup.statement_bytes(),
-            145 + 42 * 65_536 * 109 + 31 * 65_536 * 21 + 2 * 4_096 * 6
+            136 + 42 * 65_536 * 109 + 31 * 65_536 * 21
         );
-        assert_eq!(setup.zero_product_columns(12), (357, 358));
-        assert_eq!(setup.support(12), (16, 128));
+        assert_eq!(setup.zero_product_columns(11), (353, 354));
+        assert_eq!(setup.support(11), (1, 128));
         let ballot = ballot_relation(completion);
         assert_eq!(
             ballot.relation_parameters()[7..],
@@ -696,7 +695,7 @@ mod tests {
             ]);
             assert_eq!(
                 setup_relation(profile).support_pairs(),
-                profile.participants() + 3
+                profile.participants() + 2
             );
         }
         for relation in relations {

@@ -47,8 +47,7 @@ const maximumSourceInventory = () => {
             count++
         ) {
             const profile = deriveSupportedProfile(count, option);
-            const polynomials =
-                4n * profile.gadgetLength + 2n * BigInt(count) + 1n;
+            const polynomials = 4n * profile.gadgetLength + 2n * BigInt(count);
             const bytes = 4n + 64n + 64n * polynomials + 64n;
             if (bytes > retainedSetupBytes) retainedSetupBytes = bytes;
         }

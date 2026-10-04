@@ -5,6 +5,8 @@ pub mod fhe_key_source;
 #[cfg(feature = "key-source-screen")]
 #[path = "fhe-key-source-screen.rs"]
 pub mod fhe_key_source_screen;
+#[path = "fixed-auxiliary.rs"]
+pub mod fixed_auxiliary;
 pub mod gaussian;
 pub mod reduction;
 pub mod registration;
@@ -21,9 +23,7 @@ use common_polynomial::{public_polynomial, public_records};
 mod proth_common_polynomial;
 use proth_common_polynomial::{proth_public_polynomial, proth_public_records};
 pub use supported_profile::Profile;
-use supported_profile::{
-    AUXILIARY_DEGREE, DEGREE, SETUP_ERROR_BITS, SETUP_FHE_CARRY_BITS, SETUP_QUOTIENT_BITS,
-};
+use supported_profile::{DEGREE, SETUP_ERROR_BITS, SETUP_FHE_CARRY_BITS, SETUP_QUOTIENT_BITS};
 use zeroize::{Zeroize, Zeroizing};
 
 const SCALE: i128 = supported_profile::SHARE_SCALE as i128;

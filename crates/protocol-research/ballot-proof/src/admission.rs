@@ -1,7 +1,7 @@
 use crate::{
     CHUNK_LIMIT, Refusal, Verifier,
     parameters::BALLOT_HEADER_BYTES,
-    statement::{self, polynomial_bytes, setup_inputs},
+    statement::{self, polynomial_bytes, setup_input},
     verifier,
 };
 use registration_credentials::{
@@ -13,13 +13,13 @@ use std::cell::RefCell;
 use supported_profile::Profile;
 
 thread_local! {
-    /// Each profile's common polynomial identities, which every ballot of
-    /// the profile's statement shares.
-    static COMMON_IDENTITIES: RefCell<Vec<(Profile, [[u8; 64]; 2])>> =
+    /// Each profile's fixed-input identities: FHE common, then the two
+    /// auxiliary public coordinates derived from the suite.
+    static FIXED_INPUT_IDENTITIES: RefCell<Vec<(Profile, [[u8; 64]; 3])>> =
         const { RefCell::new(Vec::new()) };
 }
-fn common_identities(profile: Profile) -> Result<[[u8; 64]; 2], Refusal> {
-    let known = COMMON_IDENTITIES.with(|known| {
+fn fixed_input_identities(profile: Profile) -> Result<[[u8; 64]; 3], Refusal> {
+    let known = FIXED_INPUT_IDENTITIES.with(|known| {
         known
             .borrow()
             .iter()
@@ -29,14 +29,21 @@ fn common_identities(profile: Profile) -> Result<[[u8; 64]; 2], Refusal> {
     if let Some(identities) = known {
         return Ok(identities);
     }
-    let mut identities = [[0; 64]; 2];
-    for (slot, (_, common, _)) in setup_inputs(profile).into_iter().enumerate() {
-        let records = setup_witness::contribution::common_records(profile, common)
-            .map_err(|_| Refusal::Context)?;
+    let mut identities = [[0; 64]; 3];
+    let (_, common, _) = setup_input(profile);
+    for (slot, records) in [
+        setup_witness::contribution::common_records(profile, common)
+            .map_err(|_| Refusal::Context)?,
+        setup_witness::fixed_auxiliary::common_records(),
+        setup_witness::fixed_auxiliary::public_key_records(),
+    ]
+    .into_iter()
+    .enumerate()
+    {
         identities[slot] =
             identity(PUBLIC_POLYNOMIAL_DOMAIN, &records).map_err(|_| Refusal::Context)?;
     }
-    COMMON_IDENTITIES.with(|known| known.borrow_mut().push((profile, identities)));
+    FIXED_INPUT_IDENTITIES.with(|known| known.borrow_mut().push((profile, identities)));
     Ok(identities)
 }
 
@@ -101,17 +108,14 @@ impl BallotRelationVerifier {
             usize::from(poll.top_count()),
         )
         .map_err(|_| Refusal::Context)?;
-        let commons = common_identities(profile)?;
-        let mut expected_inputs = [[0; 64]; 4];
-        for (slot, (_, _, key)) in setup_inputs(profile).into_iter().enumerate() {
-            expected_inputs[2 * slot] = commons[slot];
-            let key = setup
-                .polynomials()
-                .iter()
-                .find(|polynomial| polynomial.index() == key)
-                .ok_or(Refusal::Context)?;
-            expected_inputs[2 * slot + 1] = *key.digest();
-        }
+        let fixed = fixed_input_identities(profile)?;
+        let (_, _, key_index) = setup_input(profile);
+        let key = setup
+            .polynomials()
+            .iter()
+            .find(|polynomial| polynomial.index() == key_index)
+            .ok_or(Refusal::Context)?;
+        let expected_inputs = [fixed[0], *key.digest(), fixed[1], fixed[2]];
         Ok(Self {
             profile,
             verifier: Some(verifier(profile, &role, statement, proof_header)?),
@@ -230,5 +234,84 @@ impl BallotRelationVerifier {
             position: u16::from_le_bytes(self.expected_header[132..134].try_into().unwrap())
                 as usize,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // An unfinished statement parser with a syntactically valid proof header.
+    // It never finishes a proof or creates a setup or ballot capability.
+    fn parser(profile: Profile, fhe_key: &[u8]) -> BallotRelationVerifier {
+        let fixed = fixed_input_identities(profile).unwrap();
+        let mut proof_header = vec![0; crate::HEADER_LENGTH];
+        proof_header[..4]
+            .copy_from_slice(supported_profile::relation::ballot_relation(profile).proof_magic);
+        BallotRelationVerifier {
+            profile,
+            verifier: Some(
+                verifier(profile, b"fixed-input-binding-test", [0; 64], &proof_header).unwrap(),
+            ),
+            expected_header: statement::header(&[1; 64], &[2; 64], 0, profile.options(), 1)
+                .unwrap(),
+            expected_inputs: [
+                fixed[0],
+                identity(PUBLIC_POLYNOMIAL_DOMAIN, fhe_key).unwrap(),
+                fixed[1],
+                fixed[2],
+            ],
+            header_offset: 0,
+            polynomial: 0,
+            polynomial_bytes: 0,
+            hash: None,
+            statement_done: false,
+            statement: [0; 64],
+        }
+    }
+
+    #[test]
+    fn admission_stream_refuses_substituted_fixed_auxiliary_coordinates() {
+        let profile = Profile::new(3, 2).unwrap();
+        let common =
+            setup_witness::contribution::common_records(profile, setup_input(profile).1).unwrap();
+        let zero = vec![0; polynomial_bytes(profile, 1)];
+        let auxiliary = [
+            setup_witness::fixed_auxiliary::common_records(),
+            setup_witness::fixed_auxiliary::public_key_records(),
+        ];
+        for changed in [None, Some(0), Some(1)] {
+            let mut verifier = parser(profile, &zero);
+            verifier
+                .push_statement(&verifier.expected_header.clone())
+                .unwrap();
+            for polynomial in [&common, &zero, &zero, &zero] {
+                for chunk in polynomial.chunks(CHUNK_LIMIT) {
+                    verifier.push_statement(chunk).unwrap();
+                }
+            }
+            for (index, bytes) in auxiliary.iter().enumerate() {
+                let mut bytes = bytes.clone();
+                if changed == Some(index) {
+                    assert!(
+                        bytes[1..1 + supported_profile::auxiliary_modulus().len()]
+                            .iter()
+                            .any(|byte| *byte != 0)
+                    );
+                    bytes[0] ^= 1;
+                    assert!(matches!(
+                        verifier.push_statement(&bytes),
+                        Err(Refusal::Context)
+                    ));
+                    assert!(matches!(verifier.push_statement(&[0]), Err(Refusal::Stage)));
+                    break;
+                }
+                verifier.push_statement(&bytes).unwrap();
+            }
+            if changed.is_none() {
+                assert_eq!(verifier.polynomial, 6);
+            }
+            assert!(verifier.finish().is_err());
+        }
     }
 }

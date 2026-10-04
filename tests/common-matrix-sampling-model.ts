@@ -55,10 +55,12 @@ const commonMatrixSampling = {
     distanceAllocationBits: 128,
 } as const;
 const sharingModulus = compileSmallLimbProofFieldCensus().modulus * 998244353n;
+const auxiliaryPolynomialCount = 2n;
 // r(Q-r) <= Q^2/4; tensorization adds the coefficient distances.
 const fixedFamilyDistanceNumerator =
     fixedModulusBfvInputs.polynomialDegree * sharingModulus +
-    auxiliaryInputEncryptionParameters.degree *
+    auxiliaryPolynomialCount *
+        auxiliaryInputEncryptionParameters.degree *
         auxiliaryInputEncryptionParameters.modulus;
 export const fixedFamilyBitsPerCoefficient = (() => {
     let bits: number = commonMatrixSampling.wordBits;
@@ -95,7 +97,7 @@ export function compileCommonMatrixInitializationCensus(
         },
         {
             name: 'Auxiliary',
-            polynomials: 1n,
+            polynomials: auxiliaryPolynomialCount,
             degree: auxiliaryInputEncryptionParameters.degree,
             modulus: auxiliaryInputEncryptionParameters.modulus,
             bitsPerCoefficient: fixedFamilyBitsPerCoefficient,
@@ -148,7 +150,9 @@ export const compileCommonMatrixSamplingCensus = (
     const fhePolynomialCount = (2n + 1n) * profile.gadgetLength;
     const auxiliaryDegree = auxiliaryInputEncryptionParameters.degree;
     const coefficientCount =
-        fhePolynomialCount * degree + degree + auxiliaryDegree;
+        fhePolynomialCount * degree +
+        degree +
+        auxiliaryPolynomialCount * auxiliaryDegree;
     const fheDistanceNumerator =
         fhePolynomialCount * degree * profile.ciphertext.modulus;
     const fixedBits = BigInt(fixedFamilyBitsPerCoefficient);
@@ -179,7 +183,8 @@ export const compileCommonMatrixSamplingCensus = (
         coefficientCount,
         expandedSampleBytes:
             (fhePolynomialCount * degree * BigInt(fheBitsPerCoefficient) +
-                (degree + auxiliaryDegree) * fixedBits) /
+                (degree + auxiliaryPolynomialCount * auxiliaryDegree) *
+                    fixedBits) /
             8n,
         distanceUpperNumerator,
         distanceUpperDenominator,

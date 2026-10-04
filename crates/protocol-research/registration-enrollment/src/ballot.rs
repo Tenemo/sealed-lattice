@@ -1,5 +1,5 @@
 use ballot_encryption::{context::BallotComputationContext, encryption::check_ballot_scores};
-use ballot_proof::statement::setup_inputs;
+use ballot_proof::statement::setup_input;
 use registration_credentials::{
     Credential, Error, RETAINED_TAG_BYTES,
     ballot_authentication::{BallotEnvelope, ENVELOPE_BYTES, RetainedBallotOwner},
@@ -32,7 +32,7 @@ pub struct BallotWork {
     owner: RetainedBallotOwner,
     inputs: RetainedSetupInputs,
     context: Option<BallotComputationContext>,
-    keys: Vec<RetainedAggregatePolynomial>,
+    key: Option<RetainedAggregatePolynomial>,
     reader: Option<RetainedPolynomialReader>,
     key_offset: usize,
     consumed: bool,
@@ -118,7 +118,7 @@ impl BallotWork {
             owner,
             inputs,
             context: Some(context),
-            keys: Vec::new(),
+            key: None,
             reader: None,
             key_offset: 0,
             consumed: false,
@@ -164,8 +164,8 @@ impl BallotWork {
                 if !input.is_empty()
                     || self.consumed
                     || self.reader.is_some()
-                    || self.keys.len() >= 2
-                    || argument != setup_inputs(self.inputs.profile())[self.keys.len()].2
+                    || self.key.is_some()
+                    || argument != setup_input(self.inputs.profile()).2
                 {
                     return Err(Error::Consumed);
                 }
@@ -192,11 +192,11 @@ impl BallotWork {
                     return Err(Error::Shape);
                 }
                 let reader = self.reader.take().ok_or(Error::Consumed)?;
-                self.keys.push(reader.finish().map_err(|_| Error::Crypto)?);
+                self.key = Some(reader.finish().map_err(|_| Error::Crypto)?);
             }
             // Input is the ballot time fixed by the attempt lock, then the scores.
             4 => {
-                if argument != 0 || self.consumed || self.keys.len() != 2 || self.reader.is_some() {
+                if argument != 0 || self.consumed || self.key.is_none() || self.reader.is_some() {
                     return Err(Error::Consumed);
                 }
                 let context = self.context.as_ref().ok_or(Error::Consumed)?;
@@ -206,12 +206,10 @@ impl BallotWork {
                 self.consumed = true;
                 let ballot_time = u64::from_le_bytes(time.try_into().unwrap());
                 let scores = Zeroizing::new(scores.to_vec());
-                let auxiliary = self.keys.pop().unwrap();
-                let fhe = self.keys.pop().unwrap();
+                let fhe = self.key.take().unwrap();
                 let (body, envelope) = ballot_proof::private_ballot::create(
                     self.context.take().ok_or(Error::Consumed)?,
                     fhe,
-                    auxiliary,
                     &scores,
                     ballot_time,
                 )
@@ -220,7 +218,7 @@ impl BallotWork {
                 self.envelope = Some(envelope);
             }
             5 => {
-                if argument != 0 || self.consumed || self.keys.len() != 2 || self.reader.is_some() {
+                if argument != 0 || self.consumed || self.key.is_none() || self.reader.is_some() {
                     return Err(Error::Consumed);
                 }
                 let envelope = BallotEnvelope::decode(self.inputs.profile(), input)?;
@@ -249,12 +247,10 @@ impl BallotWork {
                     return Err(Error::Shape);
                 }
                 let pending = self.pending.take().ok_or(Error::Consumed)?;
-                let keys: [RetainedAggregatePolynomial; 2] = std::mem::take(&mut self.keys)
-                    .try_into()
-                    .map_err(|_| Error::Context)?;
+                let key = self.key.take().ok_or(Error::Context)?;
                 let checked = ballot_proof::private_ballot::verify(
                     self.context.as_ref().ok_or(Error::Context)?,
-                    &keys,
+                    &key,
                     &self.body,
                     pending.ballot_time(),
                 )

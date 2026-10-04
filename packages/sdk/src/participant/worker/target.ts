@@ -388,8 +388,8 @@ const classifierInput = (context: PublicProfileContext, bytes: Uint8Array) => {
 };
 
 // Starts the owning signed-ballot classifier on a usable submission and its
-// body header, and delivers the encryption keys from the verified aggregate
-// while the body relation needs them.
+// body header, and delivers its FHE key from the verified aggregate when
+// the body relation needs it. The module derives the fixed auxiliary pair.
 const beginClassification = async (
     context: PublicProfileContext,
     submission: Uint8Array,
@@ -402,12 +402,8 @@ const beginClassification = async (
         ) !== 0
     )
         throw new PublicInputFailure('A usable ballot was refused.');
-    for (
-        let ordinal = 0;
-        kernel.ballot_classification_requires_keys() === 1;
-        ordinal++
-    ) {
-        const index = kernel.ballot_classification_key_index(ordinal) >>> 0;
+    if (kernel.ballot_classification_requires_key() === 1) {
+        const index = kernel.ballot_classification_key_index() >>> 0;
         if (
             index === unusedWord ||
             kernel.ballot_classification_key_begin(index) !== 0

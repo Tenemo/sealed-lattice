@@ -1,4 +1,3 @@
-import { auxiliaryInputEncryptionParameters } from '#tests/auxiliary-input-encryption-parameters.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import { compileRegistrationSetupBindingScreen } from '#tests/registration-setup-binding-model.js';
 import type { SupportedProfile } from '#tests/supported-profile-model.js';
@@ -29,8 +28,7 @@ export const compileSetupRandomnessCensus = (
     const contributors = BigInt(profile.setupContributorCount);
     const degree = fixedModulusBfvInputs.polynomialDegree;
     const samplesPerContribution =
-        (4n * gadgetLength + 2n * participants - 1n) * degree +
-        auxiliaryInputEncryptionParameters.degree;
+        (4n * gadgetLength + 2n * participants - 1n) * degree;
     const samplesPerSourceFamily = degree;
     const samplesPerEnrollment = (1n + sourceFamilyCount) * degree;
     const samplesPerPreparation =

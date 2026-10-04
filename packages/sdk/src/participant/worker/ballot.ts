@@ -65,9 +65,6 @@ import { snapshotParticipant, StoragePending } from './storage.js';
 // Creates, retains, signs and delivers a participant's ballot through the
 // phases the ballot state records.
 
-// The FHE and auxiliary encryption keys the ballot encrypts under.
-const ballotKeys = 2;
-
 export type BallotSession = {
     readonly participant: ParticipantSession;
     readonly records: RecordContext;
@@ -376,8 +373,8 @@ const ballotCommand = (
 };
 
 // Starts the module's ballot work from the retained poll, opening and setup
-// reference, and delivers both encryption keys from the final public
-// aggregate. The module checks each key against the retained reference, so
+// reference, and delivers the FHE key from the final public aggregate.
+// The module derives the fixed auxiliary pair and checks the FHE reference, so
 // an unavailable or refused key leaves the participant pending.
 const startBallotWork = async (session: BallotSession) => {
     const { participant } = session;
@@ -389,26 +386,24 @@ const startBallotWork = async (session: BallotSession) => {
         0,
         await ballotWorkInput(participant, session.records.inventory),
     );
-    for (let ordinal = 0; ordinal < ballotKeys; ordinal++) {
-        const index = kernel.participant_ballot_key_index(ordinal) >>> 0;
-        ballotCommand(context, 1, index);
-        try {
-            await deliverFinalAggregate(context, async () => {
-                await readFinalAggregate(context, index, (offset, bytes) => {
-                    ballotCommand(context, 2, offset, bytes);
-                });
-                ballotCommand(context, 3);
+    const index = kernel.participant_ballot_key_index() >>> 0;
+    ballotCommand(context, 1, index);
+    try {
+        await deliverFinalAggregate(context, async () => {
+            await readFinalAggregate(context, index, (offset, bytes) => {
+                ballotCommand(context, 2, offset, bytes);
             });
-        } catch (error) {
-            if (
-                error instanceof PublicInputFailure ||
-                error instanceof ResourceFailure
-            )
-                throw error;
-            throw new PublicInputFailure(
-                'A ballot key was refused: ' + describe(error),
-            );
-        }
+            ballotCommand(context, 3);
+        });
+    } catch (error) {
+        if (
+            error instanceof PublicInputFailure ||
+            error instanceof ResourceFailure
+        )
+            throw error;
+        throw new PublicInputFailure(
+            'A ballot key was refused: ' + describe(error),
+        );
     }
 };
 

@@ -76,8 +76,8 @@ describe('bounded sparse-support sampling comparison', () => {
                 .slice(0, 3)
                 .every((value) => value.degree === constant('DEGREE')),
         ).toBe(true);
-        expect(rows[3].degree).toBe(constant('AUXILIARY_DEGREE'));
-        expect(contribution.match(/witness\.sparse\(/gu)).toHaveLength(4);
+        expect(rows).toHaveLength(3);
+        expect(contribution.match(/witness\.sparse\(/gu)).toHaveLength(3);
         expect(registration.match(/witness\.sparse\(/gu)).toHaveLength(1);
         const support = (code: string, label: string) =>
             constant(
@@ -101,7 +101,7 @@ describe('bounded sparse-support sampling comparison', () => {
         );
         expect(rows[1].callsPerOperation).toBe(1n);
         expect(support(contribution, 'fhe-auxiliary')).toBe(rows[1].support);
-        expect(support(contribution, 'auxiliary-secret')).toBe(rows[3].support);
+        expect(contribution).not.toContain('"auxiliary-secret"');
         // One share-encryption ephemeral per roster position.
         const ephemerals = contribution.match(
             /\(0\.\.profile\.participants\(\)\)\s*\.map\(\|index\| \{\s*witness\.sparse\(\s*&format!\("share-ephemeral-\{index\}"\),\s*DEGREE,\s*([A-Z_]+),/u,
@@ -170,9 +170,8 @@ describe('bounded sparse-support sampling comparison', () => {
             [65_536n, 256n, 1n],
             [65_536n, 1024n, 1n],
             [65_536n, 256n, 10n],
-            [4096n, 256n, 1n],
         ]);
-        for (const [index, bits] of [1536n, 4096n, 1536n, 512n].entries()) {
+        for (const [index, bits] of [1536n, 4096n, 1536n].entries()) {
             const value = rows[index];
             expect(value.numerator << bits).toBeLessThan(value.denominator);
             expect(value.maximumExaminedBytes).toBeLessThan(65_520n);

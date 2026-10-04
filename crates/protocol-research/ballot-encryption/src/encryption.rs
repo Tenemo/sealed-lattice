@@ -96,7 +96,7 @@ pub struct CiphertextComponent {
     pub errors: Zeroizing<Vec<i8>>,
 }
 pub struct EncryptionWitness {
-    pub key: RetainedAggregatePolynomial,
+    pub key: Vec<BigInt>,
     pub common: Vec<BigInt>,
     pub ephemeral: Zeroizing<Vec<i8>>,
     pub components: [CiphertextComponent; 2],
@@ -200,34 +200,50 @@ pub fn fhe_key_polynomial(profile: Profile) -> usize {
     profile.fhe_polynomial(0, 1)
 }
 impl EncryptionWitness {
-    /// Encrypts a message under the profile's FHE or auxiliary key with
-    /// fresh randomness.
+    /// Encrypts under the digest-checked FHE aggregate key. Auxiliary
+    /// encryption has no caller-supplied key or retained setup operand.
     pub fn create(
         profile: Profile,
         key: RetainedAggregatePolynomial,
         message: &[i32],
     ) -> Result<Self, Refusal> {
-        let random = &mut Random::new();
-        let (family, support, common_index, plaintext_modulus) =
-            if key.index() == fhe_key_polynomial(profile) {
-                (
-                    Family::Fhe,
-                    FHE_SECRET_SUPPORT,
-                    profile.fhe_polynomial(0, 0),
-                    PLAINTEXT_MODULUS,
-                )
-            } else if key.index() == profile.auxiliary_key_polynomial() {
-                (
-                    Family::Auxiliary,
-                    AUXILIARY_SECRET_SUPPORT,
-                    profile.auxiliary_common_polynomial(),
-                    AUXILIARY_PLAINTEXT_MODULUS,
-                )
-            } else {
-                return Err(Refusal::Context);
-            };
-        let degree = profile.family_degree(family);
-        if key.coefficients().len() != degree
+        if key.index() != fhe_key_polynomial(profile) {
+            return Err(Refusal::Context);
+        }
+        let common =
+            setup_witness::contribution::common_polynomial(profile, profile.fhe_polynomial(0, 0))
+                .map_err(|_| Refusal::Context)?;
+        Self::encrypt(
+            key.into_coefficients(),
+            common,
+            &profile.family_modulus(Family::Fhe),
+            PLAINTEXT_MODULUS,
+            FHE_SECRET_SUPPORT,
+            message,
+        )
+    }
+    /// Encrypts under the two fixed-suite public streams. No participant
+    /// has an auxiliary secret or can select either public coordinate.
+    pub fn create_auxiliary(message: &[i32]) -> Result<Self, Refusal> {
+        Self::encrypt(
+            setup_witness::fixed_auxiliary::public_key(),
+            setup_witness::fixed_auxiliary::common_polynomial(),
+            supported_profile::auxiliary_modulus(),
+            AUXILIARY_PLAINTEXT_MODULUS,
+            AUXILIARY_SECRET_SUPPORT,
+            message,
+        )
+    }
+    fn encrypt(
+        key: Vec<BigInt>,
+        common: Vec<BigInt>,
+        modulus_bytes: &[u8],
+        plaintext_modulus: u32,
+        support: usize,
+        message: &[i32],
+    ) -> Result<Self, Refusal> {
+        let degree = common.len();
+        if key.len() != degree
             || message.len() != degree
             || message
                 .iter()
@@ -235,10 +251,9 @@ impl EncryptionWitness {
         {
             return Err(Refusal::Context);
         }
-        let modulus = BigInt::from_bytes_le(Sign::Plus, &profile.family_modulus(family));
+        let modulus = BigInt::from_bytes_le(Sign::Plus, modulus_bytes);
         let scale = (&modulus - BigInt::from(1)) / BigInt::from(plaintext_modulus);
-        let common = setup_witness::contribution::common_polynomial(profile, common_index)
-            .map_err(|_| Refusal::Context)?;
+        let random = &mut Random::new();
         let plan = Plan::new(degree);
         let ephemeral = random.sparse(degree, support)?;
         let transformed = Zeroizing::new(plan.sparse_transform(&ephemeral));
@@ -247,7 +262,7 @@ impl EncryptionWitness {
             &ephemeral,
             &transformed,
             ComponentInput {
-                public: key.coefficients(),
+                public: &key,
                 modulus: &modulus,
                 scale: &scale,
                 message: Some(message),
@@ -298,14 +313,11 @@ impl LinkedBallotWitness {
     pub fn create_with_context(
         context: BallotComputationContext,
         fhe_key: RetainedAggregatePolynomial,
-        auxiliary_key: RetainedAggregatePolynomial,
         scores: &[u8],
     ) -> Result<Self, Refusal> {
         let profile = context.profile();
         if fhe_key.index() != fhe_key_polynomial(profile)
-            || auxiliary_key.index() != profile.auxiliary_key_polynomial()
             || fhe_key.inventory() != context.inventory()
-            || auxiliary_key.inventory() != context.inventory()
         {
             return Err(Refusal::Context);
         }
@@ -316,7 +328,7 @@ impl LinkedBallotWitness {
         for (target, score) in literal.iter_mut().zip(scores) {
             *target = i32::from(*score);
         }
-        let auxiliary = EncryptionWitness::create(profile, auxiliary_key, &literal)?;
+        let auxiliary = EncryptionWitness::create_auxiliary(&literal)?;
         Ok(Self {
             context,
             packing,
@@ -350,6 +362,56 @@ mod tests {
             }
         }
         result
+    }
+    #[test]
+    fn fixed_auxiliary_encryptions_use_the_suite_pair_and_exact_integer_equations() {
+        let modulus = BigInt::from_bytes_le(Sign::Plus, supported_profile::auxiliary_modulus());
+        let scale = (&modulus - BigInt::from(1)) / AUXILIARY_PLAINTEXT_MODULUS;
+        let mut message = vec![0; AUXILIARY_DEGREE];
+        message[..4].copy_from_slice(&[1, 10, -128, 128]);
+        let witness = EncryptionWitness::create_auxiliary(&message).unwrap();
+        assert_eq!(
+            witness.common,
+            setup_witness::fixed_auxiliary::common_polynomial()
+        );
+        assert_eq!(witness.key, setup_witness::fixed_auxiliary::public_key());
+        assert_ne!(witness.common, witness.key);
+        for sign in [-1, 1] {
+            assert_eq!(
+                witness
+                    .ephemeral
+                    .iter()
+                    .filter(|value| **value == sign)
+                    .count(),
+                AUXILIARY_SECRET_SUPPORT / 2
+            );
+        }
+        for (component, public) in [&witness.key, &witness.common].into_iter().enumerate() {
+            for row in [0, 1, 3, AUXILIARY_DEGREE / 2, AUXILIARY_DEGREE - 1] {
+                let mut product = BigInt::from(0);
+                for (position, secret) in witness.ephemeral.iter().enumerate() {
+                    let index = (row + AUXILIARY_DEGREE - position) % AUXILIARY_DEGREE;
+                    product += &public[index]
+                        * i32::from(if position <= row { *secret } else { -*secret });
+                }
+                let value = &witness.components[component];
+                let raw = product
+                    + i32::from(value.errors[row])
+                    + if component == 0 {
+                        &scale * message[row]
+                    } else {
+                        BigInt::from(0)
+                    };
+                assert_eq!(value.coefficients[row], centered(raw.clone(), &modulus));
+                assert_eq!(
+                    raw,
+                    &value.coefficients[row] + &modulus * i32::from(value.quotients[row])
+                );
+            }
+        }
+        assert!(EncryptionWitness::create_auxiliary(&message[..message.len() - 1]).is_err());
+        message[0] = 129;
+        assert!(EncryptionWitness::create_auxiliary(&message).is_err());
     }
     #[test]
     fn sparse_secret_draws_are_uniform_positions() {

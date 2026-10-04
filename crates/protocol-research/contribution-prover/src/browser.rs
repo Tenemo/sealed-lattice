@@ -193,7 +193,7 @@ impl Work {
         } else if self.next_recipient < self.registrations.len() {
             self.generate_recipient()?;
         } else if self.next_recipient == profile.participants() {
-            generator.finish(public).map_err(|_| ())?;
+            generator.finish().map_err(|_| ())?;
             if public.total != profile.setup_statement_length()
                 || public.next != profile.setup_polynomials() + 1
             {

@@ -1,4 +1,3 @@
-import { auxiliaryInputEncryptionParameters } from '#tests/auxiliary-input-encryption-parameters.js';
 import { compileContributionBodyCensus } from '#tests/contribution-body-model.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import { compileRegistrationKeyRelationCensus } from '#tests/registration-key-relation-model.js';
@@ -42,20 +41,14 @@ export const compileSetupAggregateResources = (profile: SupportedProfile) => {
     )
         gadgetCount++;
     const fheEnd = 7 * gadgetCount;
-    const auxiliaryIndex = fheEnd + 3 * body.participantCount + 2;
     const coefficientBytes = (modulus: bigint) =>
         1n + BigInt(Math.ceil(modulus.toString(2).length / 8));
     const polynomials = body.polynomials.map(({ expandedIndex, bytes }) => {
-        const degree =
-            expandedIndex === auxiliaryIndex
-                ? auxiliaryInputEncryptionParameters.degree
-                : parameters.polynomialDegree;
+        const degree = parameters.polynomialDegree;
         const width =
             expandedIndex < fheEnd
                 ? coefficientBytes(parameters.ciphertextModulus)
-                : expandedIndex === auxiliaryIndex
-                  ? coefficientBytes(auxiliaryInputEncryptionParameters.modulus)
-                  : recipient.publicKeyBytes / degree;
+                : recipient.publicKeyBytes / degree;
         const partition = partitionAggregatePolynomial(degree, width);
         if (partition.bytes !== bytes)
             throw new Error('Aggregate and contribution encodings disagree.');

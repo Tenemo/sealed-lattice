@@ -10,6 +10,7 @@ import {
 import {
     completionProfile,
     deriveSupportedProfile,
+    listSupportedProfiles,
 } from '#tests/supported-profile-model.js';
 import { shareEncryptionParameters } from '#tests/wide-share-lifting-model.js';
 
@@ -22,8 +23,14 @@ describe('fixed-suite public-matrix sampling', () => {
             matrix.expandedSampleBytes,
         );
         expect(initialization.programmedInputs).toBe(
-            matrix.fhePolynomialCount + 2n,
+            matrix.fhePolynomialCount + 3n,
         );
+        const auxiliary = initialization.families.find(
+            (family) => family.name === 'Auxiliary',
+        );
+        expect(auxiliary?.polynomials).toBe(2n);
+        expect(auxiliary?.coefficients).toBe(2n * 4096n);
+        expect(auxiliary?.programmedPrefixBytes).toBe((2n * 4096n * 320n) / 8n);
         expect(initialization.biasNumerator).toBe(matrix.coefficientCount);
         expect(initialization.biasDenominator).toBe(
             4n << initialization.extraSamplingBits,
@@ -91,12 +98,14 @@ describe('fixed-suite public-matrix sampling', () => {
     it('covers every common vector and charges the complete sampling expansion', () => {
         const census = compileCommonMatrixSamplingCensus(completionProfile());
         // Six gadget coordinates in each of a, u, and the automorphism vector,
-        // plus distinct common polynomials for sharing and auxiliary scores.
+        // plus the sharing polynomial and both fixed auxiliary coordinates.
         expect(census.fhePolynomialCount).toBe(18n);
-        expect(census.coefficientCount).toBe(18n * 65536n + 65536n + 4096n);
+        expect(census.coefficientCount).toBe(
+            18n * 65536n + 65536n + 2n * 4096n,
+        );
         // FHE coefficients at 1024 bits, share and auxiliary ones at 320.
         expect(census.expandedSampleBytes).toBe(
-            (18n * 65536n * 1024n + (65536n + 4096n) * 320n) / 8n,
+            (18n * 65536n * 1024n + (65536n + 2n * 4096n) * 320n) / 8n,
         );
         expect(census.distanceBits).toBe(141);
         expect(census.distanceUpperNumerator << 141n).toBeLessThanOrEqual(
@@ -113,7 +122,7 @@ describe('fixed-suite public-matrix sampling', () => {
         // and exceed it at 256.
         const fixed = [
             [65536n, shareEncryptionParameters.modulus],
-            [4096n, auxiliaryInputEncryptionParameters.modulus],
+            [2n * 4096n, auxiliaryInputEncryptionParameters.modulus],
         ] as const;
         const fixedBound = fixed.reduce(
             (sum, [coefficients, modulus]) => sum + coefficients * modulus,
@@ -163,6 +172,32 @@ describe('fixed-suite public-matrix sampling', () => {
                 ((fheBound << 320n) + (fixedBound << BigInt(width - 64))) <<
                     128n,
             ).toBeGreaterThan(4n << BigInt(width - 64 + 320));
+        }
+    });
+
+    it('preserves every existing FHE modulus and sampling-width family while charging the added auxiliary coordinate', () => {
+        const originalFixedBound =
+            65536n * shareEncryptionParameters.modulus +
+            4096n * auxiliaryInputEncryptionParameters.modulus;
+        for (const profile of listSupportedProfiles()) {
+            const fheBound =
+                3n * profile.gadgetLength * 65536n * profile.ciphertext.modulus;
+            let originalWidth = 64;
+            for (;;) {
+                const numerator =
+                    ((fheBound << 320n) +
+                        (originalFixedBound << BigInt(originalWidth))) <<
+                    128n;
+                const denominator = 4n << BigInt(originalWidth + 320);
+                if (numerator <= denominator) break;
+                originalWidth += 64;
+            }
+            const current = compileCommonMatrixSamplingCensus(profile);
+            expect(current.fixedFamilyBitsPerCoefficient).toBe(320);
+            expect(current.fheBitsPerCoefficient).toBe(originalWidth);
+            expect(current.coefficientCount).toBe(
+                3n * profile.gadgetLength * 65536n + 65536n + 8192n,
+            );
         }
     });
 

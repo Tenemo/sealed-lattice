@@ -1090,7 +1090,7 @@ mod tests {
         assert!(open(b"role", [1; 64], &bytes).is_err());
         assert!(open(b"role", [0; 64], &bytes[..HEADER_LENGTH - 1]).is_err());
         let mut other = bytes.clone();
-        other[..4].copy_from_slice(b"SWP2");
+        other[..4].copy_from_slice(b"SWP3");
         assert!(matches!(
             open(b"role", [0; 64], &other),
             Err(Refusal::Encoding)

@@ -51,21 +51,14 @@ pub fn coefficient_bytes(profile: Profile, family: Family) -> usize {
 pub fn polynomial_bytes(profile: Profile, index: usize) -> usize {
     profile.family_degree(family(index)) * coefficient_bytes(profile, family(index))
 }
-/// Each encryption's family with the setup indices of its common polynomial
-/// and its key, which the statement takes as inputs.
-pub fn setup_inputs(profile: Profile) -> [(Family, usize, usize); 2] {
-    [
-        (
-            Family::Fhe,
-            profile.fhe_polynomial(0, 0),
-            fhe_key_polynomial(profile),
-        ),
-        (
-            Family::Auxiliary,
-            profile.auxiliary_common_polynomial(),
-            profile.auxiliary_key_polynomial(),
-        ),
-    ]
+/// The FHE common and aggregate key indices. The auxiliary pair is derived
+/// locally and has no setup-polynomial or host-delivery index.
+pub fn setup_input(profile: Profile) -> (Family, usize, usize) {
+    (
+        Family::Fhe,
+        profile.fhe_polynomial(0, 0),
+        fhe_key_polynomial(profile),
+    )
 }
 /// The statement header: its magic, the poll and inventory identities, the
 /// roster position, the option count and the result length.
@@ -145,7 +138,7 @@ impl PublicStatement {
             let width = coefficient_bytes(profile, family);
             for values in [
                 &encryption.common,
-                encryption.key.coefficients(),
+                &encryption.key,
                 &encryption.components[0].coefficients,
                 &encryption.components[1].coefficients,
             ] {
@@ -684,7 +677,7 @@ pub(crate) mod tests {
             .map(|option| [1, 10, 4, 7][option % 4])
             .collect();
         let packing = PackingWitness::new(&scores).unwrap();
-        let [(_, _, fhe_key), (_, _, auxiliary_key)] = setup_inputs(profile);
+        let (_, _, fhe_key) = setup_input(profile);
         let fhe = EncryptionWitness::create(
             profile,
             retained_key(profile, fhe_key, 3),
@@ -695,9 +688,7 @@ pub(crate) mod tests {
         for (target, score) in literal.iter_mut().zip(&scores) {
             *target = i32::from(*score);
         }
-        let auxiliary =
-            EncryptionWitness::create(profile, retained_key(profile, auxiliary_key, 5), &literal)
-                .unwrap();
+        let auxiliary = EncryptionWitness::create_auxiliary(&literal).unwrap();
         let header = header(
             &[1; 64],
             &[7; 64],
@@ -827,14 +818,12 @@ pub(crate) mod tests {
         let largest = Profile::all().last().unwrap();
         assert_ne!(smallest.ciphertext_modulus(), largest.ciphertext_modulus());
         for profile in [smallest, largest] {
-            for (family, common, _) in setup_inputs(profile) {
-                let values =
-                    setup_witness::contribution::common_polynomial(profile, common).unwrap();
-                assert_eq!(
-                    setup_witness::contribution::common_records(profile, common).unwrap(),
-                    encode_polynomial(&values, coefficient_bytes(profile, family)).unwrap()
-                );
-            }
+            let (family, common, _) = setup_input(profile);
+            let values = setup_witness::contribution::common_polynomial(profile, common).unwrap();
+            assert_eq!(
+                setup_witness::contribution::common_records(profile, common).unwrap(),
+                encode_polynomial(&values, coefficient_bytes(profile, family)).unwrap()
+            );
         }
     }
 }

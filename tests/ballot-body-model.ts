@@ -26,14 +26,15 @@ export const compileBallotBodyCensus = (profile: SupportedProfile) => {
         { expandedIndex: 6, bytes: auxiliaryBytes },
         { expandedIndex: 7, bytes: auxiliaryBytes },
     ];
-    // The verifier rebuilds each family's fixed common polynomial and
-    // certified public key from its setup, in the family's statement encoding.
+    // Only the FHE aggregate key is supplied from certified setup. Both
+    // auxiliary coordinates and the FHE common coordinate are derived locally.
     const reconstructedPolynomials = [
         { expandedIndex: 0, bytes: fheBytes },
         { expandedIndex: 1, bytes: fheBytes },
         { expandedIndex: 4, bytes: auxiliaryBytes },
         { expandedIndex: 5, bytes: auxiliaryBytes },
     ];
+    const setupKeyPolynomials = [{ expandedIndex: 1, bytes: fheBytes }];
     const contextBytes = 4n + 64n + 64n + 2n + 1n + 1n;
     const proofRoleBytes =
         8n +
@@ -57,6 +58,9 @@ export const compileBallotBodyCensus = (profile: SupportedProfile) => {
     return {
         polynomials,
         reconstructedPolynomials,
+        setupKeyPolynomials,
+        setupKeyInputBytes: fheBytes,
+        locallyDerivedInputBytes: fheBytes + 2n * auxiliaryBytes,
         contextBytes,
         proofRoleBytes,
         headerBytes,
