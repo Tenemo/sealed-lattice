@@ -1,6 +1,9 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 #[cfg(target_arch = "wasm32")]
 pub mod browser;
+#[cfg(any(target_arch = "wasm32", test))]
+#[path = "coefficient-encoding.rs"]
+mod coefficient_encoding;
 
 use registration_credentials::roster::RetainedContributionContext;
 use supported_profile::{Profile, relation::setup_relation};

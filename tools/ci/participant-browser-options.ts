@@ -16,6 +16,7 @@ export const selectParticipantBrowserOptions = (
         '--sequential',
         '--scalar',
         '--setup-departure',
+        '--unselected-checkpoint',
     ]);
     const valuedOptions = new Set([
         '--foreign-poll',
@@ -59,21 +60,25 @@ export const selectParticipantBrowserOptions = (
         'Optionally select the participant and option counts, then no-result, empty, rosters, plain or preparation.',
     );
     const setupDeparture = switches.has('--setup-departure');
+    const unselectedCheckpoint = switches.has('--unselected-checkpoint');
     const [participantCount, optionCount] =
-        counts.length === 0 ? [setupDeparture ? 4 : 3, 2] : counts.map(Number);
+        counts.length === 0
+            ? [setupDeparture || unselectedCheckpoint ? 4 : 3, 2]
+            : counts.map(Number);
     const profile = deriveSupportedProfile(participantCount, optionCount);
     const memoryPressure = switches.has('--memory-pressure');
     const sequential = switches.has('--sequential');
     const foreignPoll = values.get('--foreign-poll');
     assert.ok(
-        !setupDeparture ||
+        !(setupDeparture || unselectedCheckpoint) ||
             (participantCount === 4 &&
                 optionCount === 2 &&
                 mode === 'result' &&
                 !memoryPressure &&
                 !sequential &&
-                foreignPoll === undefined),
-        'The setup-departure run requires four participants, two options and no other scenario.',
+                foreignPoll === undefined &&
+                !(setupDeparture && unselectedCheckpoint)),
+        'The fixed setup case requires four participants, two options and no other scenario.',
     );
     assert.ok(
         !memoryPressure || mode === 'plain',
@@ -121,6 +126,7 @@ export const selectParticipantBrowserOptions = (
         profiling: switches.has('--profile'),
         scalar: switches.has('--scalar'),
         setupDeparture,
+        unselectedCheckpoint,
         memoryPressure,
         sequential,
         basePort,

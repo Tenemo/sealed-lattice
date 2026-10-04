@@ -100,11 +100,7 @@ impl PolynomialOutput for PublicOutput {
         let mut encoded = vec![0u8; 1 + width];
         for value in values {
             assert!(value.magnitude() <= half.magnitude());
-            let (sign, magnitude) = value.to_bytes_le();
-            assert!(magnitude.len() <= width);
-            encoded.fill(0);
-            encoded[0] = u8::from(sign == Sign::Minus);
-            encoded[1..1 + magnitude.len()].copy_from_slice(&magnitude);
+            crate::coefficient_encoding::encode(value, &mut encoded);
             self.append(&encoded);
         }
         self.flush();

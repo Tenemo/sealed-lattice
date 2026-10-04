@@ -60,7 +60,10 @@ import type {
     PaddingSlotObservation,
     PreparationCut,
 } from '#tools/ci/participant-padding-halt.js';
-import type { SourceCustodyObservation } from '#tools/ci/participant-preparation-storage.js';
+import type {
+    CheckpointCustodyObservation,
+    SourceCustodyObservation,
+} from '#tools/ci/participant-preparation-storage.js';
 import { participantRelayWriter } from '#tools/ci/participant-relay-record.js';
 import { assembleParticipantRuntime } from '#tools/ci/participant-runtime-assembly.js';
 import type {
@@ -116,6 +119,9 @@ import { acquireProtocolResearchLock } from '#tools/ci/protocol-research-lock.js
 // --setup-departure selects four participants and two options, removes honest
 // eligible position one immediately after roster publication, and completes
 // with positions zero, two and three, where corrupt position two cooperates.
+// --unselected-checkpoint instead keeps all four original members available:
+// position one endorses and activates the winning setup while its unused
+// own contribution remains at the genuine first-oracle checkpoint.
 const {
     participantCount,
     optionCount,
@@ -124,6 +130,7 @@ const {
     profiling,
     scalar,
     setupDeparture,
+    unselectedCheckpoint,
     memoryPressure,
     sequential,
     basePort,
@@ -840,6 +847,7 @@ await runWithLocalRunLog(
             // sign two more ballots.
             const equivocator =
                 setupDeparture ||
+                unselectedCheckpoint ||
                 noResult ||
                 maximumCorruptParticipantCount === 0
                     ? undefined
@@ -847,7 +855,7 @@ await runWithLocalRunLog(
             // The corrupt positions follow the organizer, as in the native
             // ceremonies; forgeries and altered state are shown to honest ones.
             const honest = (position: number) =>
-                setupDeparture
+                setupDeparture || unselectedCheckpoint
                     ? position !== 2
                     : position === 0 ||
                       position > maximumCorruptParticipantCount;
@@ -878,7 +886,7 @@ await runWithLocalRunLog(
                 'tools/ci/participant-padding-halt.ts',
                 'tools/ci/participant-relay-record.ts',
                 'tools/ci/participant-offer-announcements.ts',
-                ...(mode === 'preparation'
+                ...(mode === 'preparation' || unselectedCheckpoint
                     ? [
                           'tools/ci/participant-padding-corruption.ts',
                           'tools/ci/participant-preparation-storage.ts',
@@ -910,7 +918,7 @@ await runWithLocalRunLog(
                       )
                     : undefined;
             let preparationStorageBundle: string | undefined;
-            if (mode === 'preparation') {
+            if (mode === 'preparation' || unselectedCheckpoint) {
                 const bundles = await build({
                     config: false,
                     clean: false,
@@ -952,7 +960,7 @@ await runWithLocalRunLog(
                     preparationStorageBundle,
                     { flag: 'wx' },
                 );
-                for (const client of paddingClients!.values())
+                for (const client of paddingClients?.values() ?? [])
                     await writeFile(
                         path.join(
                             log.runDirectoryPath,
@@ -2240,6 +2248,61 @@ await runWithLocalRunLog(
             // at the current time after every ballot, the first quorum of
             // members vote on the target, and every member releases.
             const setupDiscoveryFaults: Record<string, unknown>[] = [];
+            const unselectedCheckpointEvidence: Record<string, unknown>[] = [];
+            const inspectCheckpoint = async (
+                stage: string,
+                copy?: string,
+                damageCheckpoint = false,
+            ) => {
+                assert.ok(preparationStorageBundle);
+                const started = performance.now();
+                const observation = (await inBrowser(1, copy, (chrome) =>
+                    chrome.evaluate(
+                        preparationStorageBundle +
+                            '\nparticipantPreparationFixture.inspectParticipantCheckpointCustody(' +
+                            JSON.stringify({
+                                namespace: participantNamespace,
+                                runtimeIdentity: runtime.identity.runtime,
+                                moduleDigest: runtime.identity.module,
+                                damageCheckpoint,
+                            }) +
+                            ');',
+                    ),
+                )) as CheckpointCustodyObservation;
+                assert.equal(observation.position, 1);
+                const entry = {
+                    stage,
+                    copy,
+                    ...observation,
+                    instrumentationMilliseconds: performance.now() - started,
+                };
+                unselectedCheckpointEvidence.push(entry);
+                log.writeEvent({
+                    eventType: 'participant-unselected-checkpoint',
+                    details: entry,
+                });
+                return observation;
+            };
+            const sameOwnCheckpoint = (
+                before: CheckpointCustodyObservation,
+                after: CheckpointCustodyObservation,
+            ) => {
+                for (const field of [
+                    'phase',
+                    'position',
+                    'ownJournalSha512',
+                    'headerSha512',
+                    'recordInventorySha512',
+                    'contributionRecords',
+                    'checkpointRecords',
+                ] as const)
+                    assert.deepEqual(
+                        after[field],
+                        before[field],
+                        'Endorsement changed the original own checkpoint: ' +
+                            field,
+                    );
+            };
             const completeRoster = async (
                 members: readonly Member[],
                 recordIds: readonly string[],
@@ -2268,7 +2331,9 @@ await runWithLocalRunLog(
                     assert.equal(details.generation, 3);
                 const contributing = active
                     .filter(
-                        ({ position }) => position < eligibleContributorCount,
+                        ({ position }) =>
+                            position < eligibleContributorCount &&
+                            !(unselectedCheckpoint && position === 1),
                     )
                     .slice(0, setupContributorCount);
                 assert.equal(contributing.length, setupContributorCount);
@@ -2280,6 +2345,42 @@ await runWithLocalRunLog(
                         );
                     }),
                 );
+                let originalCheckpoint:
+                    CheckpointCustodyObservation | undefined;
+                if (unselectedCheckpoint) {
+                    assert.deepEqual(
+                        active.map(({ position }) => position),
+                        [0, 1, 2, 3],
+                    );
+                    assert.deepEqual(
+                        contributing.map(({ position }) => position),
+                        [0, 2],
+                    );
+                    await interruptPreparation(1, 'contribute', {
+                        kind: 'contribution',
+                        phase: 5,
+                    });
+                    originalCheckpoint = await inspectCheckpoint(
+                        'original checkpoint',
+                    );
+                    assert.equal(originalCheckpoint.generation, 4);
+                    assert.equal(originalCheckpoint.phase, 5);
+                    assert.equal(originalCheckpoint.endorsement, null);
+                    assert.ok(
+                        originalCheckpoint.checkpointRecords > 0 &&
+                            originalCheckpoint.contributionRecords > 0,
+                    );
+                    assert.match(
+                        originalCheckpoint.ownJournalSha512 ?? '',
+                        /^[0-9a-f]{128}$/u,
+                    );
+                    assert.equal(
+                        await stat(
+                            path.join(publicDirectory, 'contribution-1'),
+                        ).catch(() => undefined),
+                        undefined,
+                    );
+                }
                 if (memoryPressure)
                     await pressure(contributing[1].member.origin, 'contribute');
                 const contribute = async (member: Member) =>
@@ -2367,6 +2468,86 @@ await runWithLocalRunLog(
                         );
                     }),
                 );
+                if (unselectedCheckpoint) {
+                    assert.ok(originalCheckpoint);
+                    assert.ok(relay);
+                    const endorsed = await inspectCheckpoint(
+                        'endorsed with unused checkpoint',
+                    );
+                    assert.equal(endorsed.generation, 4);
+                    assert.equal(endorsed.endorsement, 'signed');
+                    sameOwnCheckpoint(originalCheckpoint, endorsed);
+                    assert.equal(
+                        await stat(
+                            path.join(publicDirectory, 'contribution-1'),
+                        ).catch(() => undefined),
+                        undefined,
+                    );
+                    const copy = 'damaged-unselected-checkpoint';
+                    await copyState(1, copy);
+                    try {
+                        const before = await retainedHead(1, copy);
+                        const damaged = await inspectCheckpoint(
+                            'damaged isolated checkpoint copy',
+                            copy,
+                            true,
+                        );
+                        sameOwnCheckpoint(originalCheckpoint, damaged);
+                        assert.ok(damaged.damagedRecord);
+                        assert.notEqual(
+                            damaged.damagedRecord.beforeSha512,
+                            damaged.damagedRecord.afterSha512,
+                        );
+                        const attempts = relay.publicationAttempts[1];
+                        const rejected = await request(
+                            1,
+                            'verify-setup',
+                            {},
+                            copy,
+                        );
+                        assert.ok(
+                            rejected.status === 'stopped' &&
+                                rejected.stopPersistence === 'confirmed',
+                            JSON.stringify(rejected),
+                        );
+                        assert.deepEqual(
+                            await retainedHead(1, copy),
+                            before,
+                            'Damaged activation replaced the original preparation root.',
+                        );
+                        assert.equal(
+                            relay.publicationAttempts[1],
+                            attempts,
+                            'Damaged checkpoint activation attempted a publication.',
+                        );
+                        await browsers.crash(copyBrowser(copy));
+                        assert.deepEqual(await request(1, 'status', {}, copy), {
+                            status: 'stopped',
+                            reason: 'Missing or inconsistent participant authority.',
+                            stopPersistence: 'confirmed',
+                        });
+                        assert.equal(relay.publicationAttempts[1], attempts);
+                        const fault = {
+                            stage: 'damaged checkpoint activation refused',
+                            position: 1,
+                            result: rejected,
+                            publicationAttempts: 0,
+                        };
+                        unselectedCheckpointEvidence.push(fault);
+                        log.writeEvent({
+                            eventType:
+                                'participant-unselected-checkpoint-fault',
+                            details: fault,
+                        });
+                    } finally {
+                        await removeCopy(copy);
+                    }
+                    const healthy = await inspectCheckpoint(
+                        'healthy original before activation',
+                    );
+                    sameOwnCheckpoint(originalCheckpoint, healthy);
+                    assert.equal(healthy.endorsement, 'signed');
+                }
                 await Promise.all(
                     active.map(async ({ member }) => {
                         const verified = await act(member, 'verify-setup');
@@ -2374,6 +2555,23 @@ await runWithLocalRunLog(
                         assert.equal(verified.ballot, 'open');
                     }),
                 );
+                if (unselectedCheckpoint) {
+                    const retired = await inspectCheckpoint(
+                        'certified setup retired unused checkpoint',
+                    );
+                    assert.equal(retired.generation, 12);
+                    assert.equal(retired.phase, null);
+                    assert.equal(retired.ownJournalSha512, null);
+                    assert.equal(retired.endorsement, null);
+                    assert.equal(retired.contributionRecords, 0);
+                    assert.equal(retired.checkpointRecords, 0);
+                    assert.equal(
+                        await stat(
+                            path.join(publicDirectory, 'contribution-1'),
+                        ).catch(() => undefined),
+                        undefined,
+                    );
+                }
                 await Promise.all(
                     active.map(async ({ member, position }) => {
                         assert.equal(
@@ -2452,7 +2650,7 @@ await runWithLocalRunLog(
                 );
                 return combined.identifiers as readonly string[];
             };
-            if (mode === 'plain' || setupDeparture) {
+            if (mode === 'plain' || setupDeparture || unselectedCheckpoint) {
                 // Every other participant joins, and the roster completes
                 // each stage once.
                 const joined = await Promise.all(
@@ -2470,23 +2668,24 @@ await runWithLocalRunLog(
                     setupDeparture ? 1 : undefined,
                 );
                 let independentOutcome: WorkerResult | undefined;
-                if (setupDeparture) {
-                    assert.deepEqual([...departed], [1]);
+                if (setupDeparture || unselectedCheckpoint) {
+                    assert.deepEqual([...departed], setupDeparture ? [1] : []);
                     assert.equal(
                         await stat(
                             path.join(publicDirectory, 'contribution-1'),
                         ).catch(() => undefined),
                         undefined,
                     );
-                    assert.equal(
-                        await stat(
-                            path.join(
-                                publicDirectory,
-                                'selection-endorsement-1.bin',
-                            ),
-                        ).catch(() => undefined),
-                        undefined,
-                    );
+                    if (setupDeparture)
+                        assert.equal(
+                            await stat(
+                                path.join(
+                                    publicDirectory,
+                                    'selection-endorsement-1.bin',
+                                ),
+                            ).catch(() => undefined),
+                            undefined,
+                        );
                     const selection = await readFile(
                         path.join(publicDirectory, 'selection.bin'),
                     );
@@ -2552,7 +2751,7 @@ await runWithLocalRunLog(
                                                     .signatureBytes),
                                 ),
                         ),
-                        [0, 2, 3],
+                        setupDeparture ? [0, 2, 3] : [0, 1, 2],
                     );
                     independentOutcome = (await inBrowser(
                         leftOut,
@@ -2582,12 +2781,22 @@ await runWithLocalRunLog(
                             sequential,
                             scalar,
                             setupDeparture,
+                            unselectedCheckpoint,
                             ...(setupDeparture
                                 ? {
                                       departedAfterRoster: 1,
                                       cooperativeCorruptPositions: [2],
                                       activePositions: [0, 2, 3],
                                       selectedPositions: [0, 2],
+                                  }
+                                : {}),
+                            ...(unselectedCheckpoint
+                                ? {
+                                      cooperativeCorruptPositions: [2],
+                                      activePositions: [0, 1, 2, 3],
+                                      selectedPositions: [0, 2],
+                                      unselectedCheckpointEvidence,
+                                      interruptions,
                                   }
                                 : {}),
                             independentOutcome,
@@ -2610,7 +2819,9 @@ await runWithLocalRunLog(
                                 'Physical-device performance and power use',
                             ],
                             workflow:
-                                memoryPressure || setupDeparture
+                                memoryPressure ||
+                                setupDeparture ||
+                                unselectedCheckpoint
                                     ? null
                                     : summarizeParticipantWorkflow(
                                           ordinaryOperations,
@@ -2620,7 +2831,9 @@ await runWithLocalRunLog(
                             scope: [
                                 setupDeparture
                                     ? 'Four original registrations fix one roster; honest eligible position one disappears immediately after roster publication, before confirmation or contribution. Position two is the cooperative corrupt participant and executes all required valid actions. Positions zero and two supply the selected clear offers; zero, two and three certify setup, vote, close, certify the target and release the verified result. Original positions and thresholds remain unchanged. The corrupt participant also announces an invalid body identity before its valid offer; the organizer stays pending without consuming selection authority and later accepts the valid offer behind that hint. This external Chrome run is development evidence for those cases, not a general adversarial-scheduling proof.'
-                                    : 'Browser registration, roster confirmation, signed clear contribution offers, quorum setup selection and verification, ballots, close responses, target votes, release shares and the combined result of one roster, each stage once in the maintained participant runtime in external Chrome.',
+                                    : unselectedCheckpoint
+                                      ? 'All four original participants remain available, with cooperative corrupt position two and no permanent departure in the real branch. Honest eligible position one retains its genuine phase-five checkpoint while positions zero and two are selected. It endorses without completing its own offer, preserves the original nested own state and encrypted records, then retires them only on certified setup activation and casts a ballot and releases. An isolated damaged-checkpoint copy stops before activation or publication; the healthy original continues. Diagnostic fingerprints stay separate from protocol authority. This is desktop development evidence, not phone qualification.'
+                                      : 'Browser registration, roster confirmation, signed clear contribution offers, quorum setup selection and verification, ballots, close responses, target votes, release shares and the combined result of one roster, each stage once in the maintained participant runtime in external Chrome.',
                                 ...(profiling
                                     ? [
                                           'Chrome recorded the CPU samples of every operation, which slows it.',

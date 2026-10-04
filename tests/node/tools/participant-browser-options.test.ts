@@ -143,4 +143,41 @@ describe('participant browser cohort selection', () => {
         ])
             expect(() => selectParticipantBrowserOptions(args)).toThrow();
     });
+
+    it('selects the original unselected checkpoint case without adding a permanent departure', () => {
+        expect(
+            selectParticipantBrowserOptions([
+                '--unselected-checkpoint',
+                '--scalar',
+            ]),
+        ).toMatchObject({
+            participantCount: 4,
+            optionCount: 2,
+            mode: 'result',
+            unselectedCheckpoint: true,
+            setupDeparture: false,
+        });
+        expect(
+            selectParticipantBrowserOptions([
+                '4',
+                '2',
+                '--unselected-checkpoint',
+            ]),
+        ).toMatchObject({ unselectedCheckpoint: true });
+        expect(selectParticipantBrowserOptions([])).toMatchObject({
+            participantCount: 3,
+            unselectedCheckpoint: false,
+        });
+        for (const args of [
+            ['3', '2', '--unselected-checkpoint'],
+            ['4', '3', '--unselected-checkpoint'],
+            ['--unselected-checkpoint', '--setup-departure'],
+            ['--unselected-checkpoint', '--sequential'],
+            ['--unselected-checkpoint', '--memory-pressure'],
+            ['--unselected-checkpoint', '--foreign-poll=old'],
+            ['4', '2', 'preparation', '--unselected-checkpoint'],
+            ['--unselected-checkpoint', '--unselected-checkpoint'],
+        ])
+            expect(() => selectParticipantBrowserOptions(args)).toThrow();
+    });
 });
