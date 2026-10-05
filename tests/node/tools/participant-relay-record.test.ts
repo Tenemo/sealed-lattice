@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readdir, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import path from 'node:path';
 
@@ -6,6 +6,7 @@ import { expect, it } from 'vitest';
 
 import {
     candidateChunkBytes,
+    decodeCandidateManifest,
     encodeCandidateManifest,
 } from '#packages/sdk/src/participant/worker/candidate-codec.js';
 import { PublicInputFailure } from '#packages/sdk/src/participant/worker/context.js';
@@ -16,6 +17,8 @@ import {
     readCandidateFile,
 } from '#packages/sdk/src/participant/worker/public.js';
 import { serveParticipantCandidates } from '#tools/ci/participant-candidate-http.js';
+import { participantCandidateView } from '#tools/ci/participant-candidate-view.js';
+import type { ViewedParticipantRecord } from '#tools/ci/participant-candidate-view.js';
 import { participantRelayStore } from '#tools/ci/participant-relay-record.js';
 
 const withStore = async (
@@ -68,6 +71,100 @@ it('retains distinct immutable candidates through concurrent publication, pagina
         const bytes = [];
         for await (const part of original.read()) bytes.push(part);
         expect(Buffer.concat(bytes)).toEqual(Buffer.from([3, 5, 7]));
+    }));
+
+it('selects and hides equivocal candidate discovery without changing the immutable publications', async () =>
+    withStore(async (directory, store) => {
+        const projection = participantCandidateView(store, directory);
+        const candidates = [];
+        for (const value of [17, 23, 41]) {
+            const envelope = await store.putChunk(Uint8Array.of(value, 5));
+            const body = await store.putChunk(Uint8Array.of(value));
+            const receipt = await store.append(
+                'ballot-1',
+                encodeCandidateManifest({
+                    files: [
+                        { name: 'envelope.bin', length: 2, chunks: [envelope] },
+                        { name: 'body.bin', length: 1, chunks: [body] },
+                    ],
+                }),
+            );
+            const candidate = await store.candidate(receipt.id);
+            await projection.published(candidate);
+            candidates.push({
+                candidate,
+                identity: await readFile(
+                    path.join(directory, 'ballot-1/submission.bin'),
+                ),
+                value,
+            });
+        }
+        const view = new Map<string, ViewedParticipantRecord>();
+        const reader = projection.forReader(view, () => undefined);
+        const all = {
+            total: 3,
+            ids: candidates.map(({ candidate }) => candidate.id),
+        };
+        expect(await reader.page('ballot-1', 0)).toEqual(all);
+        expect(
+            new Set(candidates.map(({ identity }) => identity.toString('hex')))
+                .size,
+        ).toBe(3);
+        for (const { candidate, identity, value } of candidates) {
+            view.set('ballot-1/submission.bin', identity);
+            expect(await reader.page('ballot-1', 0)).toEqual({
+                total: 1,
+                ids: [candidate.id],
+            });
+            expect(await reader.page('ballot-1', 1)).toEqual({
+                total: 1,
+                ids: [],
+            });
+            expect(await reader.manifest(candidate)).toEqual(
+                new Uint8Array(candidate.bytes),
+            );
+            const body = [];
+            for await (const bytes of (
+                await store.file(candidate.id, 'body.bin')
+            ).read())
+                body.push(bytes);
+            expect(Buffer.concat(body)).toEqual(Buffer.of(value));
+        }
+        view.set('ballot-1/submission.bin', undefined);
+        expect(await reader.page('ballot-1', 0)).toEqual({ total: 0, ids: [] });
+        expect(await store.page('ballot-1', 0)).toEqual(all);
+        view.delete('ballot-1/submission.bin');
+        expect(await reader.page('ballot-1', 0)).toEqual(all);
+        const shared = candidates[0].candidate.manifest.files.find(
+            (file) => file.name === 'body.bin',
+        )!.chunks[0];
+        const closureReceipt = await store.append(
+            'close-proposal',
+            encodeCandidateManifest({
+                files: [{ name: 'body.bin', length: 1, chunks: [shared] }],
+            }),
+        );
+        const closure = await store.candidate(closureReceipt.id);
+        await projection.published(closure);
+        view.set('close/closure/body.bin', undefined);
+        expect(await reader.manifest(closure)).toBeUndefined();
+        expect(
+            Buffer.from(
+                (await reader.chunk(shared, await store.chunk(shared))) ?? [],
+            ),
+        ).toEqual(Buffer.of(17));
+        view.set('close/closure/body.bin', Buffer.of(99));
+        const changed = decodeCandidateManifest(
+            (await reader.manifest(closure))!,
+        );
+        const changedId = changed.files[0].chunks[0];
+        expect(changedId).not.toBe(shared);
+        expect(await store.chunk(changedId)).toEqual(Buffer.of(99));
+        expect(
+            Buffer.from(
+                (await reader.chunk(shared, await store.chunk(shared))) ?? [],
+            ),
+        ).toEqual(Buffer.of(17));
     }));
 
 it('never appends a manifest whose immutable chunks are missing or incomplete', async () =>

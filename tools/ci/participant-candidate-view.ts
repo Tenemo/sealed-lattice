@@ -5,7 +5,6 @@ import path from 'node:path';
 import {
     candidateChunkBytes,
     candidatePageEntries,
-    decodeCandidateManifest,
     encodeCandidateManifest,
 } from '#packages/sdk/src/participant/worker/candidate-codec.js';
 import type {
@@ -44,7 +43,7 @@ const identity = (domain: string, bytes: Uint8Array) => {
 
 export const participantCandidateView = (store: Store, directory: string) => {
     const paths = new Map<string, Map<string, string>>();
-    const chunkLocations = new Map<string, { route: string; offset: number }>();
+    const chunkRoutes = new Map<string, string>();
     const ballotIdentities = new Map<string, string>();
     const readSmall = async (
         candidate: StoredParticipantCandidate,
@@ -75,7 +74,7 @@ export const participantCandidateView = (store: Store, directory: string) => {
                       'sealed-lattice/ballot-envelope-id/v1',
                       ballot,
                   ).toString('hex');
-        if (envelopeIdentity !== undefined && candidate.id !== '')
+        if (envelopeIdentity !== undefined)
             ballotIdentities.set(candidate.id, envelopeIdentity);
         const result = new Map(
             candidate.manifest.files.map((file) => {
@@ -133,17 +132,11 @@ export const participantCandidateView = (store: Store, directory: string) => {
                             : 'release-envelope-' +
                               key.slice('release-'.length)) +
                         '.bin';
-                if (candidate.id !== '')
-                    file.chunks.forEach((id, index) =>
-                        chunkLocations.set(id, {
-                            route,
-                            offset: index * candidateChunkBytes,
-                        }),
-                    );
+                for (const id of file.chunks) chunkRoutes.set(id, route);
                 return [file.name, route] as const;
             }),
         );
-        if (candidate.id !== '') paths.set(candidate.id, result);
+        paths.set(candidate.id, result);
         return result;
     };
     const viewedBytes = async (value: ViewedParticipantRecord) => {
@@ -152,19 +145,6 @@ export const participantCandidateView = (store: Store, directory: string) => {
         return readFile(value.file);
     };
     return {
-        accepts: async (
-            key: string,
-            bytes: Uint8Array,
-            refused: ReadonlySet<string>,
-        ) => {
-            const mapped = await project({
-                id: '',
-                key,
-                bytes: Buffer.from(bytes),
-                manifest: decodeCandidateManifest(bytes),
-            });
-            return ![...mapped.values()].some((route) => refused.has(route));
-        },
         published: async (candidate: StoredParticipantCandidate) => {
             const mapped = await project(candidate);
             for (const [name, route] of mapped) {
@@ -279,7 +259,7 @@ export const participantCandidateView = (store: Store, directory: string) => {
                                 offset + candidateChunkBytes,
                             ),
                         );
-                        chunkLocations.set(id, { route, offset });
+                        chunkRoutes.set(id, route);
                         chunks.push(id);
                     }
                     files.push({
@@ -293,19 +273,16 @@ export const participantCandidateView = (store: Store, directory: string) => {
                     : encodeCandidateManifest({ files });
             },
             chunk: async (id: string, original: Uint8Array) => {
-                const location = chunkLocations.get(id);
-                if (location === undefined) return original;
-                const { route, offset } = location;
-                const overridden = view.has(route);
-                const bytes = overridden
-                    ? await viewedBytes(view.get(route))
-                    : original;
-                if (bytes === undefined) return undefined;
-                const output = overridden
-                    ? bytes.subarray(offset, offset + candidateChunkBytes)
-                    : bytes;
-                served(route, output.length);
-                return output;
+                const route = chunkRoutes.get(id);
+                if (route === undefined) return original;
+                const record = view.get(route);
+                if (record !== undefined && !Buffer.isBuffer(record))
+                    await record.beforeServe?.();
+                // Manifest overrides already name new immutable chunks.
+                // Rewriting a shared old locator would also change every
+                // untouched carrier that legitimately references its bytes.
+                served(route, original.length);
+                return original;
             },
         }),
     };

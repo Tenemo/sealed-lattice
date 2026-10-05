@@ -210,7 +210,10 @@ Use `--publication-faults` with a plain cohort to put empty and corrupted candid
 
 ```text
 pnpm run research:participant -- 3 2 plain --scalar --publication-faults
+pnpm run research:participant -- 4 2 plain --scalar --publication-faults
 ```
+
+When the selected profile permits a corrupt participant, this case also withholds that participant's ballot publication, sends its real signed close response and envelopes without body references, and removes its private state. The organizer must collect a ready quorum beyond that authenticated but incomplete response. The remaining original participants complete and a fresh reader retrieves the result.
 
 Use `--selection-fork` for the fixed four-participant case in which the corrupt organizer signs competing selections. An honest participant endorses the losing selection, refuses to endorse again and then accepts the certified winner and completes the result. The run also checks a fresh standalone reader:
 

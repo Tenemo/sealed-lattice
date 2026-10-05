@@ -209,8 +209,8 @@ type Relay = Readonly<{
     servers: Server[];
     views: Map<string, ViewedRecord>[];
     // Publications the relay refuses to store.
-    refused: Set<string>;
     refusedKeys: Set<string>;
+    refusedCandidates: Map<string, Uint8Array>;
     publicationFaultEvidence: {
         key: string;
         empty: string;
@@ -337,8 +337,8 @@ const startRelay = async (
         { length: originCount },
         () => new Map<string, ViewedRecord>(),
     );
-    const refused = new Set<string>();
     const refusedKeys = new Set<string>();
+    const refusedCandidates = new Map<string, Uint8Array>();
     const poisoned = new Set<string>();
     const publicationFaultEvidence: Relay['publicationFaultEvidence'] = [];
     const candidateStores = new Map<
@@ -494,6 +494,10 @@ const startRelay = async (
                     });
                 }),
                 accept: async (key, bytes) => {
+                    if (refusedKeys.has(key)) {
+                        refusedCandidates.set(key, new Uint8Array(bytes));
+                        return false;
+                    }
                     if (
                         publicationFaults &&
                         !poisoned.has(records + '/' + key)
@@ -556,10 +560,7 @@ const startRelay = async (
                             ...(changed === undefined ? {} : { changed }),
                         });
                     }
-                    return (
-                        !refusedKeys.has(key) &&
-                        projection.accepts(key, bytes, refused)
-                    );
+                    return true;
                 },
                 published: projection.published,
             })
@@ -631,8 +632,8 @@ const startRelay = async (
         servers,
         publicationAttempts,
         views,
-        refused,
         refusedKeys,
+        refusedCandidates,
         publicationFaultEvidence,
         halting,
         delivered,
@@ -1080,12 +1081,7 @@ await runWithLocalRunLog(
                 secondRosterDirectory,
                 transfers,
             );
-            const {
-                views,
-                refused: refusedPublications,
-                halting,
-                delivered: deliveredRecords,
-            } = relay;
+            const { views, halting, delivered: deliveredRecords } = relay;
             profiles = await mkdtemp(
                 path.join(root, 'temp/participant-browser-'),
             );
@@ -2510,6 +2506,7 @@ await runWithLocalRunLog(
             // fault schedules retain quorum target voters and one combiner.
             const setupDiscoveryFaults: Record<string, unknown>[] = [];
             const publicationRecoveryEvidence: Record<string, unknown>[] = [];
+            const incompleteResponseEvidence: Record<string, unknown>[] = [];
             const unselectedCheckpointEvidence: Record<string, unknown>[] = [];
             const selectionForkEvidence: Record<string, unknown>[] = [];
             const inspectCheckpoint = async (
@@ -2573,6 +2570,10 @@ await runWithLocalRunLog(
                 absent?: number,
             ) => {
                 const organizing = members[0];
+                const incompleteResponder =
+                    publicationFaults && maximumCorruptParticipantCount > 0
+                        ? 1
+                        : undefined;
                 let active = members.flatMap((member, position) =>
                     position === absent ? [] : [{ member, position }],
                 );
@@ -3009,9 +3010,13 @@ await runWithLocalRunLog(
                     member,
                     position,
                 }: (typeof active)[number]) => {
-                    if (publicationFaults && position === 0) {
+                    if (
+                        publicationFaults &&
+                        (position === 0 || position === incompleteResponder)
+                    ) {
                         assert.ok(relay);
-                        relay.refusedKeys.add('ballot-0');
+                        const key = 'ballot-' + String(position);
+                        relay.refusedKeys.add(key);
                         try {
                             const pending = await request(
                                 member.origin,
@@ -3029,7 +3034,7 @@ await runWithLocalRunLog(
                                 await stat(
                                     path.join(
                                         publicDirectory,
-                                        'ballot-0/submission.bin',
+                                        key + '/submission.bin',
                                     ),
                                 ).catch(() => undefined),
                                 undefined,
@@ -3047,7 +3052,7 @@ await runWithLocalRunLog(
                                 details: evidence,
                             });
                         } finally {
-                            relay.refusedKeys.delete('ballot-0');
+                            relay.refusedKeys.delete(key);
                         }
                     } else
                         assert.equal(
@@ -3094,7 +3099,9 @@ await runWithLocalRunLog(
                         .filter(
                             (author) =>
                                 author !== position &&
-                                (!publicationFaults || author !== 0),
+                                (!publicationFaults ||
+                                    (author !== 0 &&
+                                        author !== incompleteResponder)),
                         )
                         .map((author) => ({ kind: 'held', position: author })),
                 ];
@@ -3117,15 +3124,108 @@ await runWithLocalRunLog(
                     { kind: 'lock' },
                 ]);
                 await Promise.all(
-                    accepting.map(async ({ member }) => {
+                    accepting.map(async ({ member, position }) => {
+                        if (position === incompleteResponder) {
+                            assert.ok(relay);
+                            const key = 'close-response-' + String(position);
+                            relay.refusedKeys.add(key);
+                            try {
+                                const pending = await request(
+                                    member.origin,
+                                    'close',
+                                    {},
+                                    member.copy,
+                                );
+                                assert.equal(pending.status, 'pending');
+                                assert.equal(
+                                    await headGeneration(
+                                        member.origin,
+                                        member.copy,
+                                    ),
+                                    21,
+                                );
+                            } finally {
+                                relay.refusedKeys.delete(key);
+                            }
+                            const complete = relay.refusedCandidates.get(key);
+                            assert.ok(complete);
+                            const original = decodeCandidateManifest(complete);
+                            const files = original.files.filter(
+                                (file) =>
+                                    file.name === 'response.bin' ||
+                                    file.name === 'submissions.bin',
+                            );
+                            assert.equal(files.length, 2);
+                            assert.ok(original.files.length > files.length);
+                            // A corrupt sender publishes its real signed response
+                            // and envelopes, withholding every body reference.
+                            const carrier = encodeCandidateManifest({ files });
+                            const published = await fetch(
+                                origin(position) + '/candidates/' + key,
+                                {
+                                    method: 'POST',
+                                    body: new Uint8Array(carrier),
+                                },
+                            );
+                            assert.equal(published.status, 200);
+                            await published.arrayBuffer();
+                            return;
+                        }
                         assert.equal(
                             (await act(member, 'close')).generation,
                             21,
                         );
                     }),
                 );
+                if (incompleteResponder !== undefined) {
+                    await depart(members[incompleteResponder].origin);
+                    active = active.filter(
+                        ({ position }) => position !== incompleteResponder,
+                    );
+                }
                 markStage([4, 5], [active[0]]);
-                assert.equal((await act(organizing, 'close')).generation, 22);
+                const concluded = await act(organizing, 'close');
+                assert.equal(concluded.generation, 22);
+                if (incompleteResponder !== undefined) {
+                    const receivedResponses = (
+                        concluded.closeEvents as { kind: string }[]
+                    ).filter((event) => event.kind === 'response').length;
+                    assert.equal(receivedResponses, bounds.close.quorum);
+                    const proposal = await readFile(
+                        path.join(publicDirectory, 'close/proposal.bin'),
+                    );
+                    assert.equal(
+                        proposal.length,
+                        4 +
+                            bounds.close.proposalBodyBytes +
+                            bounds.registration.signatureBytes,
+                    );
+                    const proposalResponders = Array.from(
+                        { length: bounds.close.quorum },
+                        (_, ordinal) =>
+                            proposal.readUInt16LE(
+                                4 +
+                                    bounds.close.proposalBodyBytes -
+                                    (bounds.close.quorum - ordinal) * 66,
+                            ),
+                    );
+                    assert.deepEqual(
+                        proposalResponders,
+                        active
+                            .slice(0, bounds.close.quorum)
+                            .map(({ position }) => position),
+                    );
+                    const evidence = {
+                        unavailableResponder: incompleteResponder,
+                        receivedResponses,
+                        proposalResponders,
+                    };
+                    incompleteResponseEvidence.push(evidence);
+                    log.writeEvent({
+                        eventType: 'participant-incomplete-close-response',
+                        details: evidence,
+                    });
+                }
                 markStage([5]);
                 await each(
                     measureWorkflow
@@ -3300,7 +3400,14 @@ await runWithLocalRunLog(
                     );
                 }
                 if (publicationFaults) {
-                    assert.equal(publicationRecoveryEvidence.length, 1);
+                    assert.equal(
+                        publicationRecoveryEvidence.length,
+                        maximumCorruptParticipantCount > 0 ? 2 : 1,
+                    );
+                    assert.equal(
+                        incompleteResponseEvidence.length,
+                        maximumCorruptParticipantCount > 0 ? 1 : 0,
+                    );
                     assert.ok(relay.publicationFaultEvidence.length > 0);
                     for (const key of [
                         'poll',
@@ -3321,7 +3428,8 @@ await runWithLocalRunLog(
                             'Missing genuine-verifier refusal control for ' +
                                 key,
                         );
-                    for (const position of positions) await depart(position);
+                    for (const position of positions)
+                        if (!departed.has(position)) await depart(position);
                     independentOutcome = (await inBrowser(
                         leftOut,
                         undefined,
@@ -3384,6 +3492,7 @@ await runWithLocalRunLog(
                                       publicationFaultEvidence:
                                           relay.publicationFaultEvidence,
                                       publicationRecoveryEvidence,
+                                      incompleteResponseEvidence,
                                   }
                                 : {}),
                             ...(setupDeparture
@@ -4574,21 +4683,14 @@ await runWithLocalRunLog(
             );
             // Before its ballot the equivocator's private state is copied
             // twice, and each copy acts in its own browser at the same origin.
-            // The relay refuses the pointer to the equivocator's ballot until
-            // every ballot is signed, so that the pointer it stores names the
-            // original ballot.
-            const pointerName = (author: number) =>
+            // All three correlated publications complete. Explicit discovery
+            // views below choose which signed envelope each recipient sees.
+            const ballotDiscoveryName = (author: number) =>
                 'ballot-' + String(author) + '/submission.bin';
             if (equivocator !== undefined) {
                 for (const copy of copyNames)
                     await copyState(equivocator, copy);
-                refusedPublications.add(pointerName(equivocator));
             }
-            const refusedDelivery = {
-                status: 'pending',
-                cause: 'public input',
-                reason: 'Public delivery was refused.',
-            };
             // The first honest authors halt between them at every ballot
             // generation: after the attempt lock, with the seed retained,
             // with the body retained, with the signature intent, and with the
@@ -4607,13 +4709,6 @@ await runWithLocalRunLog(
             );
             const signBallot = async (position: number) => {
                 const scores = ballotScores(position);
-                if (position === equivocator) {
-                    assert.deepEqual(
-                        await request(position, 'ballot', { scores }),
-                        refusedDelivery,
-                    );
-                    return;
-                }
                 // A signed ballot is only delivered again. A copy of the state
                 // with the retained body loses a body record and stops.
                 const halts = ballotHalts.get(position) ?? [];
@@ -4636,19 +4731,21 @@ await runWithLocalRunLog(
             // Each copy of the equivocator's state signs other scores.
             const signCopy = async (copy: string) => {
                 assert.ok(equivocator !== undefined);
-                assert.deepEqual(
-                    await request(
-                        equivocator,
-                        'ballot',
-                        {
-                            scores: ballotScores(
-                                participantCount + copyNames.indexOf(copy),
-                            ),
-                        },
-                        copy,
-                    ),
-                    refusedDelivery,
+                const result = await request(
+                    equivocator,
+                    'ballot',
+                    {
+                        scores: ballotScores(
+                            participantCount + copyNames.indexOf(copy),
+                        ),
+                    },
+                    copy,
                 );
+                assert.ok(
+                    result.status === 'completed',
+                    JSON.stringify(result),
+                );
+                assert.equal(result.details.generation, 17);
             };
             // The on-time ballots and the conflicting copy's are signed
             // together, and the late ones, the late copy's among them, only
@@ -4665,9 +4762,8 @@ await runWithLocalRunLog(
                 ...copyBallots('late'),
             ]);
             if (equivocator !== undefined) {
-                // The original ballot is only delivered again, now with its
-                // pointer, and the copies' private state is deleted.
-                refusedPublications.delete(pointerName(equivocator));
+                // Retransmit the original bytes and restore the diagnostic
+                // inspection index before deleting the corrupt copies.
                 assert.equal((await run(equivocator, 'ballot')).generation, 17);
                 for (const copy of copyNames) await removeCopy(copy);
             }
@@ -4678,14 +4774,17 @@ await runWithLocalRunLog(
                 assert.equal((await run(0, 'ballot')).generation, 17);
             }
             const ballotBounds = bounds.ballot;
-            // An author's pointer names the directory of its submission.
+            // The diagnostic index names an original submission for fixture inspection.
             const submissionDirectory = async (author: number) =>
                 path.join(
                     publicDirectory,
                     'ballot-' + String(author),
                     (
                         await readFile(
-                            path.join(publicDirectory, pointerName(author)),
+                            path.join(
+                                publicDirectory,
+                                ballotDiscoveryName(author),
+                            ),
                         )
                     ).toString('hex'),
                 );
@@ -4760,8 +4859,19 @@ await runWithLocalRunLog(
                           const [conflicting, late] = copied.sort(
                               (left, right) => left.time - right.time,
                           );
-                          return { position: equivocator, conflicting, late };
+                          return {
+                              position: equivocator,
+                              original,
+                              conflicting,
+                              late,
+                          };
                       })();
+            if (equivocation !== undefined)
+                for (const view of views)
+                    view.set(
+                        ballotDiscoveryName(equivocation.position),
+                        Buffer.from(equivocation.original, 'hex'),
+                    );
             const closeTime =
                 mode === 'empty'
                     ? Date.now()
@@ -4798,19 +4908,27 @@ await runWithLocalRunLog(
             const beforeClose = mode === 'empty' ? 12 : 17;
             const submissions = (kind: string, authors: readonly number[]) =>
                 authors.map((position) => ({ kind, position }));
-            // Hides the pointers to the authors' ballots from a participant,
-            // but those its view already replaces, and returns a function
-            // that shows them again.
-            const hidePointers = (
+            // Hide candidate discovery temporarily, preserving any earlier
+            // explicit selection or omission when the view is restored.
+            const hideBallotDiscovery = (
                 position: number,
                 authors: readonly number[],
             ) => {
-                const hidden = authors
-                    .map(pointerName)
-                    .filter((name) => !views[position].has(name));
-                for (const name of hidden) views[position].set(name, undefined);
+                const hidden = authors.map((author) => {
+                    const name = ballotDiscoveryName(author);
+                    return {
+                        name,
+                        existed: views[position].has(name),
+                        value: views[position].get(name),
+                    };
+                });
+                for (const { name } of hidden)
+                    views[position].set(name, undefined);
                 return () => {
-                    for (const name of hidden) views[position].delete(name);
+                    for (const { name, existed, value } of hidden) {
+                        if (existed) views[position].set(name, value);
+                        else views[position].delete(name);
+                    }
                 };
             };
             // The relay shows one honest verifier no other author's pointer
@@ -4840,7 +4958,7 @@ await runWithLocalRunLog(
             if (omittedVoter !== undefined) {
                 const directory = await submissionDirectory(omittedVoter);
                 omission.push(
-                    pointerName(omittedVoter),
+                    ballotDiscoveryName(omittedVoter),
                     ...(await readdir(directory)).map((file) =>
                         path
                             .relative(
@@ -4858,17 +4976,20 @@ await runWithLocalRunLog(
             // The relay's pointer to the equivocator's ballot names its late
             // copy's ballot to the last participant, and its conflicting
             // copy's to the organizer's first collection.
-            const pointerTo = (identity: string) =>
+            const discoveryIdentity = (identity: string) =>
                 Buffer.from(identity, 'hex');
             if (equivocation !== undefined)
                 views[lastPosition].set(
-                    pointerName(equivocation.position),
-                    pointerTo(equivocation.late.identity),
+                    ballotDiscoveryName(equivocation.position),
+                    discoveryIdentity(equivocation.late.identity),
                 );
-            const showProbePointers =
+            const restoreProbeDiscovery =
                 publicBodyProbe === undefined
                     ? () => undefined
-                    : hidePointers(publicBodyProbe, others(publicBodyProbe));
+                    : hideBallotDiscovery(
+                          publicBodyProbe,
+                          others(publicBodyProbe),
+                      );
             // Every other participant with its verified setup collects the
             // published ballots, its own first, before any intent exists;
             // with no ballot it collects nothing and commits nothing.
@@ -4899,18 +5020,21 @@ await runWithLocalRunLog(
                 equivocation === undefined ? [] : [equivocation.position];
             if (equivocation !== undefined) {
                 views[0].set(
-                    pointerName(equivocation.position),
-                    pointerTo(equivocation.conflicting.identity),
+                    ballotDiscoveryName(equivocation.position),
+                    discoveryIdentity(equivocation.conflicting.identity),
                 );
-                const showOrganizerPointers = hidePointers(
+                const restoreOrganizerDiscovery = hideBallotDiscovery(
                     0,
                     others(0).filter(
                         (author) => author !== equivocation.position,
                     ),
                 );
                 const collected = await run(0, 'close');
-                showOrganizerPointers();
-                views[0].delete(pointerName(equivocation.position));
+                restoreOrganizerDiscovery();
+                views[0].set(
+                    ballotDiscoveryName(equivocation.position),
+                    discoveryIdentity(equivocation.original),
+                );
                 assert.equal(collected.generation, 17);
                 assert.deepEqual(collected.closeEvents, [
                     ...submissions('own', [0]),
@@ -4931,7 +5055,10 @@ await runWithLocalRunLog(
             );
             assert.equal(withheld === undefined, mode === 'empty');
             const withheldList = withheld === undefined ? [] : [withheld];
-            const showWithheldPointer = hidePointers(0, withheldList);
+            const restoreWithheldDiscovery = hideBallotDiscovery(
+                0,
+                withheldList,
+            );
             const organizerDeliveries = shown(0, cast(others(0))).filter(
                 (position) => position !== withheld,
             );
@@ -5016,9 +5143,11 @@ await runWithLocalRunLog(
                     ]);
                 }),
             );
-            showProbePointers();
+            restoreProbeDiscovery();
             if (equivocation !== undefined)
-                views[lastPosition].delete(pointerName(equivocation.position));
+                views[lastPosition].delete(
+                    ballotDiscoveryName(equivocation.position),
+                );
             // The lock ended the ballot window, so a participant without a
             // ballot starts none.
             if (mode === 'empty')
@@ -5038,16 +5167,22 @@ await runWithLocalRunLog(
             // the published proposal below names the responses it took.
             const concluded = await run(0, 'close');
             assert.equal(concluded.generation, 22);
+            const responseEvents = (
+                concluded.closeEvents as { kind: string }[]
+            ).filter((event) => event.kind === 'response');
+            assert.ok(responseEvents.length >= bounds.close.quorum - 1);
+            assert.ok(responseEvents.length <= responders.length);
             assert.deepEqual(
-                concluded.closeEvents,
+                (concluded.closeEvents as { kind: string }[]).filter(
+                    (event) => event.kind !== 'response',
+                ),
                 [
                     ...organizerCollected,
                     { kind: 'lock' },
-                    ...submissions('response', responders),
                     ...submissions('held', withheldList),
                 ].map(({ kind }) => ({ kind })),
             );
-            showWithheldPointer();
+            restoreWithheldDiscovery();
             // Completed close work is only delivered again.
             assert.equal((await run(1, 'close')).generation, 21);
             assert.equal((await run(0, 'close')).generation, 22);

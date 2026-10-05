@@ -935,6 +935,13 @@ const takeResponses = async (session: CloseSession, relay: PublicRelay) => {
     const { profile } = context;
     const { close, registration } = profile;
     const taken = new Set(session.responders.values());
+    // Authentication does not establish body availability. Only the owning
+    // close machine may prepare the organizer's response from a ready quorum.
+    const restored = tryCloseCommand(context, 6);
+    if (restored !== undefined) return restored;
+    await deliverWantedBodies(session, relay);
+    const recovered = tryCloseCommand(context, 6);
+    if (recovered !== undefined) return recovered;
     const remaining = new Map(
         Array.from(
             { length: profile.participantCount },
@@ -950,7 +957,7 @@ const takeResponses = async (session: CloseSession, relay: PublicRelay) => {
                 position !== session.records.position && !taken.has(position),
         ),
     );
-    while (remaining.size > 0 && taken.size < close.quorum - 1) {
+    while (remaining.size > 0) {
         for (const [responder, candidates] of remaining) {
             const next = await candidates.next();
             if (next.done) {
@@ -1034,11 +1041,15 @@ const takeResponses = async (session: CloseSession, relay: PublicRelay) => {
                 added,
             );
             learnResponse(session, event.serial, record);
-            taken.add(responder);
             remaining.delete(responder);
-            if (taken.size >= close.quorum - 1) break;
+            const prepared = tryCloseCommand(context, 6);
+            if (prepared !== undefined) return prepared;
         }
+        await deliverWantedBodies(session, relay);
+        const prepared = tryCloseCommand(context, 6);
+        if (prepared !== undefined) return prepared;
     }
+    return undefined;
 };
 
 // Delivers the bodies the taken responses need and the organizer lacks,
@@ -1104,10 +1115,10 @@ const deliverWantedBodies = async (
 // same body from the replayed log. The organizer then takes its own response
 // and retains its proposal body and coins with it. Returns whether the
 // organizer's proposal is prepared in this instance.
-const respond = async (session: CloseSession) => {
+const respond = async (session: CloseSession, preparedBody?: Uint8Array) => {
     const { context } = session.participant;
     const resumed = generationOf(session) === closePhase.responding;
-    const body = tryCloseCommand(context, 6);
+    const body = preparedBody ?? tryCloseCommand(context, 6);
     if (body === undefined) {
         if (resumed)
             throw new Error('The retained response can no longer be prepared.');
@@ -1257,16 +1268,15 @@ export const advanceClose = async (
     } else if (unlocked) {
         await lockAvailableIntent(session, relay);
     }
-    if (session.organizer && generation() === closePhase.locked) {
-        await takeResponses(session, relay);
-        await deliverWantedBodies(session, relay);
-    }
+    let responseBody: Uint8Array | undefined;
+    if (session.organizer && generation() === closePhase.locked)
+        responseBody = await takeResponses(session, relay);
     let prepared = false;
     if (
         generation() === closePhase.locked ||
         generation() === closePhase.responding
     )
-        prepared = await respond(session);
+        prepared = await respond(session, responseBody);
     if (session.organizer && generation() === closePhase.responded)
         await propose(session, prepared);
 };
