@@ -1,7 +1,14 @@
 import { expect, it } from 'vitest';
 
+import {
+    compileOracleMaskRouting,
+    runOracleSliceRouting,
+} from '#tests/compressed-oracle-model.js';
 import { compileRegistrationSetupBindingScreen } from '#tests/registration-setup-binding-model.js';
-import { registrationSourceMask } from '#tests/registration-source-domain-model.js';
+import {
+    registrationSourceMask,
+    registrationSourceSliceMask,
+} from '#tests/registration-source-domain-model.js';
 import { compileRegistrationSourceRandomness } from '#tests/registration-source-randomness-model.js';
 
 const uint = (width: number, value: number | bigint) => {
@@ -32,6 +39,57 @@ const frame = (
         field(4, uint(8, sampleBits)),
         field(1, variable(coordinate)),
     ]);
+
+it('routes raw source families and salts without reordering or aliasing their oracle inputs', () => {
+    const owner = Buffer.alloc(1952, 11);
+    const modulus = Buffer.from([253, 1]);
+    const otherModulus = Buffer.from([251, 1]);
+    const degree = 4;
+    const first = registrationSourceMask(owner, modulus, 128n, degree);
+    const second = registrationSourceMask(owner, otherModulus, 128n, degree);
+    const masks = [first, second].map((source) =>
+        registrationSourceSliceMask(source, Buffer.alloc(64, 3)),
+    );
+    expect(masks[0].positions.length).toBe(Number(first.comparedRawBits) + 512);
+    const capacity = masks[0].inputLength + 8;
+    const compiled = compileOracleMaskRouting(capacity, 2, masks);
+    const coordinate = Buffer.alloc(degree * 3, 19);
+    const original = frame(owner, modulus, 128n, coordinate);
+    const run = (bytes: Buffer, requested = 2) => {
+        const data = Uint8Array.from(
+            { length: capacity },
+            (_, bit) => ((bytes[Math.floor(bit / 8)] ?? 0) >> (bit % 8)) & 1,
+        );
+        return runOracleSliceRouting(
+            compiled,
+            data,
+            bytes.length * 8,
+            requested,
+        );
+    };
+    expect(run(original)).toEqual([0, 2, 0]);
+    // Identical owner and salt are still disjoint because the family fields
+    // after the salt belong to the exact predicate.
+    expect(run(frame(owner, otherModulus, 128n, coordinate))).toEqual([
+        0, 0, 2,
+    ]);
+    expect(run(frame(owner, Buffer.from([249, 1]), 128n, coordinate))).toEqual([
+        2, 0, 0,
+    ]);
+    const changedSalt = Buffer.from(original);
+    changedSalt[first.saltOffset] ^= 1;
+    expect(run(changedSalt)).toEqual([2, 0, 0]);
+    const malformed = Buffer.from(original);
+    malformed[0] ^= 1;
+    expect(run(malformed)).toEqual([2, 0, 0]);
+    expect(run(Buffer.concat([original, Buffer.of(0)]))).toEqual([2, 0, 0]);
+    expect(run(original.subarray(0, original.length - 1))).toEqual([2, 0, 0]);
+    // Raw-domain membership leaves payload validity to the protocol verifier.
+    expect(
+        run(frame(owner, modulus, 128n, Buffer.alloc(degree * 3, 255))),
+    ).toEqual([0, 2, 0]);
+    expect(run(original, 3)).toEqual([0, 0, 0]);
+});
 
 // An independent length-delimited decoder, not the mask's offsets.
 const decode = (bytes: Buffer, degree: number) => {

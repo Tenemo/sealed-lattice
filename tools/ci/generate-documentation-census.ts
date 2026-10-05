@@ -44,6 +44,7 @@ import {
     labelledHashExtractionWork,
     prefixOracleWork,
     prefixOracleQueriesPerAccess,
+    oracleMaskRoutingWork,
 } from '#tests/compressed-oracle-model.js';
 import { compileContributionBodyCensus } from '#tests/contribution-body-model.js';
 import { compileFheKeySourceScreenResources } from '#tests/fhe-key-source-resource-model.js';
@@ -60,7 +61,11 @@ import {
     operationSeedBytes,
     operationSeedCount,
 } from '#tests/operation-seed-model.js';
-import { compileOraclePermutationBudget } from '#tests/oracle-budget-model.js';
+import {
+    compileFullCircuitOracleBudget,
+    compileOraclePermutationBudget,
+    shakePermutationGateCharge,
+} from '#tests/oracle-budget-model.js';
 import {
     oracleDomainWork,
     programmedOracleDomainWork,
@@ -95,8 +100,14 @@ import {
     compileRecoverableSeedSharingProofResources,
 } from '#tests/recoverable-setup-resource-model.js';
 import { compileRegistrationEnrollmentCensus } from '#tests/registration-enrollment-model.js';
-import { compileRegistrationSetupBindingScreen } from '#tests/registration-setup-binding-model.js';
-import { compileRegistrationSourceRandomness } from '#tests/registration-source-randomness-model.js';
+import {
+    compileRegistrationSetupBindingScreen,
+    sourceOpeningSaltBytes,
+} from '#tests/registration-setup-binding-model.js';
+import {
+    compileRegistrationSourceRandomness,
+    compileRegistrationSourceExtractionWork,
+} from '#tests/registration-source-randomness-model.js';
 import { compileReleaseShareLiftingCensus } from '#tests/release-share-lifting-model.js';
 import { compileReleaseVerificationWorkload } from '#tests/release-verification-work-model.js';
 import { compileRnsArithmeticResourceCensus } from '#tests/rns-arithmetic-resource-model.js';
@@ -5144,6 +5155,81 @@ export const renderDocumentationCensus = (): string => {
                     ].map(formatCount);
                 }),
             ),
+        ),
+        '',
+        '### Full-circuit query and source extraction budgets',
+        '',
+        'The owner-selected full-circuit convention charges controlled permutation slots regardless of branch probability. Separate input and output maxima are bounded by a rectangle costing at most twice that slot budget. These examples price the complete programmed/background query circuit, every declared shadow and its selection circuit. All caller queries must enter the supplied budget; extra reduction calls, non-oracle computation and constructor work cannot be silently charged to the original experiment. The record and shadow counts below are declared examples, not a numerical registration limit.',
+        '',
+        table(
+            [
+                'Charged gates',
+                'Maximum logical queries',
+                'Maximum-length permutations',
+                'Programmed records',
+                'Shadow streams',
+                'All shadow query gates bound',
+            ],
+            [
+                [shakePermutationGateCharge, 0n, 0n],
+                [1n << 40n, 10n, 20n],
+                [1n << 80n, 1024n, 1024n],
+            ].map(([gates, records, shadows]) => {
+                const work = compileFullCircuitOracleBudget(
+                    gates,
+                    512n,
+                    records,
+                    shadows,
+                );
+                return [
+                    gates,
+                    work.maximumLogicalQueries,
+                    work.maximumLengthPermutations,
+                    records,
+                    shadows,
+                    work.shadowQueryGatesUpperBound,
+                ].map(formatCount);
+            }),
+        ),
+        '',
+        'The raw registration-source slice fixes the source grammar, original owner, immutable family and salt at their actual bit positions. Its exact length is checked; poll/runtime and the coordinate payload stay unconstrained. The following query-controller and prepared-extraction counts use the completion poll family inventory, an output prefix equal to the commitment width and a declared extraction database capacity. They exclude the independent query-circuit and returned-coordinate decoding costs.',
+        '',
+        table(
+            [
+                'Source family',
+                'Raw input bits',
+                'Hidden-slice compared bits',
+                'One-slice clean routing gates',
+                'Extraction component capacity',
+                'Prepared selection gates per request',
+            ],
+            (() => {
+                const extraction = compileRegistrationSourceExtractionWork(
+                    completion.participantCount,
+                    completion.optionCount,
+                    1n << 40n,
+                    1n,
+                );
+                return registrationSourceRandomness.families.map(
+                    (family, index) => {
+                        const inputBits = 8n * family.commitmentInputBytes;
+                        const comparedBits =
+                            family.commitmentMaskRawBits +
+                            8n * sourceOpeningSaltBytes;
+                        const routing = oracleMaskRoutingWork(inputBits, 512n, [
+                            { inputLength: inputBits, comparedBits },
+                        ]);
+                        return [
+                            family.index,
+                            inputBits,
+                            comparedBits,
+                            routing.computeAndUncomputeGates,
+                            1n << 40n,
+                            extraction.families[index].preparedSelectionGates,
+                        ].map(formatCount);
+                    },
+                );
+            })(),
         ),
         '',
         'The hidden-slice example keeps two independent shadows before one opening and one afterward. It preserves both databases and the programmed background across stages. Slice selection, nested background copies and all shadow calls are charged; record metadata, initialization and complete reduction-time conversion remain separate.',

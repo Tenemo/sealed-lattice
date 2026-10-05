@@ -1182,6 +1182,151 @@ export function runOracleSliceRouting(
     return values;
 }
 
+export type OracleInputMask = {
+    readonly inputLength: number;
+    readonly positions: readonly number[];
+    readonly values: Uint8Array;
+};
+
+export function oracleMaskRoutingWork(
+    inputCapacity: bigint,
+    outputCapacity: bigint,
+    masks: readonly { inputLength: bigint; comparedBits: bigint }[],
+) {
+    assert.ok(inputCapacity >= 0n && outputCapacity >= 0n);
+    const inputLengthBits = integerWidth(inputCapacity);
+    const outputLengthBits = integerWidth(outputCapacity);
+    const cx = integerWidth(inputCapacity + 1n);
+    const cy = integerWidth(outputCapacity + 1n);
+    let computeGates = 6n + 7n * cx + 7n * cy + outputLengthBits;
+    let cleanWorkQubits = 5n + 4n * cx + 4n * cy + outputLengthBits;
+    for (const mask of masks) {
+        assert.ok(
+            mask.inputLength >= 0n &&
+                mask.comparedBits >= 0n &&
+                mask.comparedBits <= mask.inputLength,
+        );
+        if (mask.inputLength <= inputCapacity) {
+            computeGates +=
+                11n + 5n * mask.comparedBits + 5n * cx + outputLengthBits;
+            cleanWorkQubits +=
+                7n + 3n * mask.comparedBits + 3n * cx + outputLengthBits;
+        }
+    }
+    const inputBits = inputCapacity + inputLengthBits + outputLengthBits;
+    const outputBits = BigInt(masks.length + 1) * outputLengthBits;
+    return {
+        inputCapacity,
+        outputCapacity,
+        inputLengthBits,
+        outputLengthBits,
+        inputBits,
+        outputBits,
+        computeGates,
+        cleanWorkQubits,
+        computeAndUncomputeGates: 4n * computeGates + 2n * outputBits,
+        routingQubits: inputBits + outputBits + cleanWorkQubits,
+    };
+}
+
+// Exact-length masks act on selected original input wires. They neither
+// relabel raw inputs nor make two calls to the same bytes independent.
+export function compileOracleMaskRouting(
+    inputCapacity: number,
+    outputCapacity: number,
+    masks: readonly OracleInputMask[],
+) {
+    assert.ok(
+        Number.isSafeInteger(inputCapacity) &&
+            Number.isSafeInteger(outputCapacity),
+    );
+    for (const [index, mask] of masks.entries()) {
+        assert.ok(
+            Number.isSafeInteger(mask.inputLength) && mask.inputLength >= 0,
+        );
+        assert.equal(mask.positions.length, mask.values.length);
+        assert.equal(new Set(mask.positions).size, mask.positions.length);
+        assert.ok(
+            mask.positions.every(
+                (position) =>
+                    Number.isSafeInteger(position) &&
+                    position >= 0 &&
+                    position < mask.inputLength,
+            ),
+        );
+        assert.ok(mask.values.every((bit) => bit <= 1));
+        const fixed = new Map(
+            mask.positions.map((position, bit) => [position, mask.values[bit]]),
+        );
+        for (const other of masks.slice(0, index))
+            assert.ok(
+                other.inputLength !== mask.inputLength ||
+                    other.positions.some(
+                        (position, bit) =>
+                            fixed.has(position) &&
+                            fixed.get(position) !== other.values[bit],
+                    ),
+                'Oracle slices overlap.',
+            );
+    }
+    const work = oracleMaskRoutingWork(
+        BigInt(inputCapacity),
+        BigInt(outputCapacity),
+        masks.map((mask) => ({
+            inputLength: BigInt(mask.inputLength),
+            comparedBits: BigInt(mask.positions.length),
+        })),
+    );
+    const builder = new Builder(Number(work.inputBits));
+    const one = builder.not(builder.zero);
+    const cx = Number(integerWidth(BigInt(inputCapacity + 1)));
+    const cy = Number(integerWidth(BigInt(outputCapacity + 1)));
+    const a = Number(work.inputLengthBits);
+    const b = Number(work.outputLengthBits);
+    const constant = (value: number, width: number) =>
+        Array.from({ length: width }, (_, bit) =>
+            Math.floor(value / 2 ** bit) % 2 ? one : builder.zero,
+        );
+    const inputLength = Array.from({ length: cx }, (_, bit) =>
+        bit < a ? inputCapacity + bit : builder.zero,
+    );
+    const outputLength = Array.from({ length: cy }, (_, bit) =>
+        bit < b ? inputCapacity + a + bit : builder.zero,
+    );
+    const valid = builder.and(
+        builder.less(inputLength, constant(inputCapacity + 1, cx)),
+        builder.less(outputLength, constant(outputCapacity + 1, cy)),
+    );
+    const outputs: number[][] = [];
+    let seen = builder.zero;
+    for (const mask of masks) {
+        if (mask.inputLength > inputCapacity) {
+            outputs.push(Array<number>(b).fill(builder.zero));
+            continue;
+        }
+        const match = builder.and(
+            builder.equal(
+                mask.positions,
+                Array.from(mask.values, (bit) => (bit ? one : builder.zero)),
+            ),
+            builder.equal(inputLength, constant(mask.inputLength, cx)),
+        );
+        seen = builder.or(seen, match);
+        const selected = builder.and(valid, match);
+        outputs.push(
+            outputLength.slice(0, b).map((bit) => builder.and(selected, bit)),
+        );
+    }
+    const background = builder.and(valid, builder.not(seen));
+    const circuit = builder.finish([
+        ...outputLength.slice(0, b).map((bit) => builder.and(background, bit)),
+        ...outputs.flat(),
+    ]);
+    assert.equal(BigInt(circuit.gates.length), work.computeGates);
+    assert.equal(BigInt(circuit.wires - circuit.inputs), work.cleanWorkQubits);
+    return { work, circuit };
+}
+
 export function oraclePrefixReplacementWork(
     inputCapacity: bigint,
     outputCapacity: bigint,

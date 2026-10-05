@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
 import { operationSeedCount } from '#tests/operation-seed-model.js';
-import { compileRegistrationSourceRandomness } from '#tests/registration-source-randomness-model.js';
+import {
+    compileRegistrationSourceRandomness,
+    compileRegistrationSourceExtractionWork,
+} from '#tests/registration-source-randomness-model.js';
 import { completionProfile } from '#tests/supported-profile-model.js';
 
 const unsigned = (bytes: number, value: bigint) => {
@@ -37,6 +40,57 @@ const permutations = (input: number, output: number) => {
 };
 
 describe('original registration source randomness and hash work', () => {
+    it('prices the full source cell and exact-length padding at every extraction', () => {
+        const queries = 19n;
+        const requests = 7n;
+        const result = compileRegistrationSourceExtractionWork(
+            10,
+            10,
+            queries,
+            requests,
+        );
+        const inventory = compileRegistrationSourceRandomness(10, 10);
+        let largest = 0n;
+        for (const [index, family] of inventory.families.entries()) {
+            // Recover the raw mask from its independent byte framing: only
+            // salt, poll/runtime and the coordinate payload are unconstrained.
+            const rawLength = 8n * family.commitmentInputBytes;
+            const rawMask =
+                8n *
+                (family.commitmentInputBytes -
+                    192n -
+                    family.publicCoordinateBytes);
+            let classWidth = 1n;
+            while (classWidth < rawLength) classWidth *= 2n;
+            const padding = classWidth + 1n - rawLength;
+            const label = rawMask + padding;
+            const input = classWidth + 1n;
+            const expected =
+                2n * queries * (14n + 5n * (label + 512n) + 3n * input) +
+                input +
+                1n +
+                2n * (label + 512n);
+            expect(result.families[index].preparedSelectionGates).toBe(
+                expected,
+            );
+            expect(result.families[index].comparedInputBits).toBe(label);
+            const withoutPadding =
+                2n * queries * (14n + 5n * (rawMask + 512n) + 3n * input) +
+                input +
+                1n +
+                2n * (rawMask + 512n);
+            expect(expected).toBeGreaterThan(withoutPadding);
+            largest = expected > largest ? expected : largest;
+        }
+        expect(result.maximumPreparedSelectionGates).toBe(requests * largest);
+        expect(
+            compileRegistrationSourceExtractionWork(3, 2, 0n, 0n)
+                .maximumPreparedSelectionGates,
+        ).toBe(0n);
+        expect(() =>
+            compileRegistrationSourceExtractionWork(3, 2, -1n, 0n),
+        ).toThrow();
+    });
     it.each([
         [3, 2],
         [10, 10],

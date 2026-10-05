@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 
+import type { OracleInputMask } from '#tests/compressed-oracle-model.js';
+
 // The source-target predicate reads syntax, owner and the immutable family.
 // It deliberately leaves the salt, poll, runtime and coordinate unconstrained.
 // Coefficient validity belongs to the real contribution verifier, not extraction.
@@ -48,6 +50,7 @@ export const registrationSourceMask = (
     header(1, owner.length);
     literal(owner);
     header(1, 64);
+    const saltOffset = offset;
     offset += 64;
     for (let hash = 0; hash < 2; hash++) {
         header(6, 64);
@@ -80,10 +83,36 @@ export const registrationSourceMask = (
         );
     return {
         fixed,
+        saltOffset,
         inputBytes,
         inputClassUpper,
         comparedRawBits,
         comparedCellBits,
         matches,
+    };
+};
+
+// A hidden honest source slice additionally fixes its original salt. Owner,
+// family and salt can occupy non-adjacent spans of the actual tuple encoding.
+export const registrationSourceSliceMask = (
+    source: ReturnType<typeof registrationSourceMask>,
+    salt: Uint8Array,
+): OracleInputMask => {
+    assert.equal(salt.length, 64);
+    const positions: number[] = [];
+    const values: number[] = [];
+    for (const range of [
+        ...source.fixed,
+        { offset: source.saltOffset, bytes: salt },
+    ])
+        for (const [index, byte] of range.bytes.entries())
+            for (let bit = 0; bit < 8; bit++) {
+                positions.push(8 * (range.offset + index) + bit);
+                values.push((byte >> bit) & 1);
+            }
+    return {
+        inputLength: 8 * source.inputBytes,
+        positions,
+        values: Uint8Array.from(values),
     };
 };

@@ -1,15 +1,61 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+    compileFullCircuitOracleBudget,
     compileOraclePermutationBudget,
+    fullCircuitQueryEnvelope,
+    shakePermutationGateCharge,
     shakeQueryPermutations,
 } from '#tests/oracle-budget-model.js';
 import {
     oracleDomainWork,
     programmedOracleDomainWork,
+    shadowOracleDomainWork,
 } from '#tests/oracle-domain-model.js';
 
 describe('Declared maximum-length oracle work', () => {
+    it('covers correlated lengths without assuming the input and output maxima share a branch', () => {
+        for (const rate of [1088n, 1344n] as const)
+            for (const slots of [1n, 2n, 5n, 31n]) {
+                const envelope = fullCircuitQueryEnvelope(slots, rate);
+                // These branches each cost p permutations, but their two
+                // maxima together cost 2*p-1. An average cannot bound them.
+                const branches = [
+                    { input: rate * slots - 6n, output: 1n },
+                    { input: 0n, output: rate * slots },
+                ];
+                for (const branch of branches)
+                    expect(
+                        shakeQueryPermutations(
+                            branch.input,
+                            branch.output,
+                            rate,
+                        ),
+                    ).toBe(slots);
+                expect(
+                    shakeQueryPermutations(
+                        envelope.inputCapacity,
+                        envelope.outputCapacity,
+                        rate,
+                    ),
+                ).toBe(2n * slots - 1n);
+                for (let absorb = 1n; absorb <= slots; absorb++)
+                    for (
+                        let squeeze = 1n;
+                        absorb + squeeze - 1n <= slots;
+                        squeeze++
+                    ) {
+                        expect(rate * absorb - 6n).toBeLessThanOrEqual(
+                            envelope.inputCapacity,
+                        );
+                        expect(rate * squeeze).toBeLessThanOrEqual(
+                            envelope.outputCapacity,
+                        );
+                    }
+            }
+        expect(() => fullCircuitQueryEnvelope(0n, 1088n)).toThrow();
+    });
+
     it('counts padding and the first squeeze block at both SHAKE rate boundaries', () => {
         for (const rate of [1088n, 1344n] as const)
             for (const input of [
@@ -116,5 +162,62 @@ describe('Declared maximum-length oracle work', () => {
         expect(() => compileOraclePermutationBudget(-1n, 512n)).toThrow();
         expect(() => compileOraclePermutationBudget(1n, 0n)).toThrow();
         expect(() => compileOraclePermutationBudget(1n, 512n, -1n)).toThrow();
+    });
+
+    it('prices every shadow across opening stages and includes complete nested background work', () => {
+        const runs = [
+            {
+                count: 17n,
+                inputCapacity: 31n,
+                outputCapacity: 4n,
+                activeShadows: [0, 1, 2],
+                replacements: [],
+            },
+            {
+                count: 5n,
+                inputCapacity: 8192n,
+                outputCapacity: 4096n,
+                activeShadows: [1, 2],
+                replacements: [{ inputBits: 31n, prefixBits: 4n }],
+            },
+            {
+                count: 1n << 20n,
+                inputCapacity: 2n,
+                outputCapacity: 1n,
+                activeShadows: [2],
+                replacements: [{ inputBits: 31n, prefixBits: 4n }],
+            },
+        ];
+        const slots = runs.reduce(
+            (sum, run) =>
+                sum +
+                run.count *
+                    shakeQueryPermutations(
+                        run.inputCapacity,
+                        run.outputCapacity,
+                        1088n,
+                    ),
+            0n,
+        );
+        const charged = slots * 1600n * 24n;
+        const bound = compileFullCircuitOracleBudget(charged, 512n, 1n, 3n);
+        const actual = shadowOracleDomainWork(runs, 512n, [7n, 19n, 29n]);
+        expect(shakePermutationGateCharge).toBe(1600n * 24n);
+        expect(bound.maximumLogicalQueries).toBe(slots);
+        expect(actual.queryGates).toBeLessThanOrEqual(
+            bound.shadowQueryGatesUpperBound,
+        );
+        expect(actual.queryGates).toBeGreaterThan(
+            actual.base.queryGates + actual.copyGates,
+        );
+        // A smaller-than-one-permutation budget cannot contain a nonempty
+        // reference SHAKE call. Extra gates never silently buy another call.
+        const low = compileFullCircuitOracleBudget(38399n, 512n, 3n, 5n);
+        expect(low.maximumLogicalQueries).toBe(0n);
+        expect(low.shadowQueryGatesUpperBound).toBe(0n);
+        expect(() => compileFullCircuitOracleBudget(-1n, 512n)).toThrow();
+        expect(() =>
+            compileOraclePermutationBudget(1n, 512n, 0n, -1n),
+        ).toThrow();
     });
 });

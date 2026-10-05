@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
 
+// Keccak-f[1600]: 24 rounds, with one chi product at each state bit.
+export const shakePermutationGateCharge = 24n * 1600n;
+
 // FIPS 202 sections 5.2 and 6.2: SHAKE appends four domain bits and
 // pad10*1, then reads the initial squeeze block before another permutation.
 // Zero-output XOR queries are identities and are omitted from this schedule.
@@ -22,6 +25,21 @@ const bitWidth = (value: bigint) => {
     return bits;
 };
 
+// A full coherent circuit has this many permutation slots even when a slot
+// is controlled by a low-probability branch. Input and output maxima may be
+// on different branches. Their rectangular envelope costs 2*p-1, not p.
+export const fullCircuitQueryEnvelope = (
+    permutationSlots: bigint,
+    rateBits: 1088n | 1344n,
+) => {
+    assert.ok(permutationSlots >= 1n);
+    return {
+        inputCapacity: rateBits * permutationSlots - 6n,
+        outputCapacity: rateBits * permutationSlots,
+        maximumLengthPermutations: 2n * permutationSlots - 1n,
+    };
+};
+
 // An upper bound on the maintained query circuits, conditional on charging
 // EACH call at its declared maximum input and output capacities. It is not
 // a normalization theorem for arbitrary coherent-length or expected-work
@@ -35,9 +53,13 @@ export const compileOraclePermutationBudget = (
     permutations: bigint,
     firstChunkBits: bigint,
     programmedRecords = 0n,
+    shadowStreams = 0n,
 ) => {
     assert.ok(
-        permutations >= 0n && firstChunkBits >= 1n && programmedRecords >= 0n,
+        permutations >= 0n &&
+            firstChunkBits >= 1n &&
+            programmedRecords >= 0n &&
+            shadowStreams >= 0n,
     );
     const rateBits = 1344n;
     const lengthBits = bitWidth(
@@ -83,11 +105,51 @@ export const compileOraclePermutationBudget = (
             programmedRecords * (10n + 10n * lengthBits) +
             2n * rateBits * (14n * lengthBits + 5n) +
             20n * rateBits * programmedRecords);
+    const baseQueryGates = queryCircuit(1n);
+    const programmedQueryGates = queryCircuit(2n) + replacementCopies;
+    // Each shadow keeps its own database across all openings. Prefix routing
+    // compares only fitting input positions, and cannot exceed this sum even
+    // when all potential shadows are active for the entire schedule.
+    const shadowRoutingGates =
+        permutations *
+        (24n +
+            62n * lengthBits +
+            shadowStreams * (44n + 34n * lengthBits + 40n * rateBits));
     return {
         lengthBitsUpperBound: lengthBits,
         componentVisitsUpperBound: componentVisits,
         componentBitVisitsUpperBound: componentBitVisits,
-        baseQueryGatesUpperBound: queryCircuit(1n),
-        programmedQueryGatesUpperBound: queryCircuit(2n) + replacementCopies,
+        baseQueryGatesUpperBound: baseQueryGates,
+        programmedQueryGatesUpperBound: programmedQueryGates,
+        shadowQueryGatesUpperBound:
+            programmedQueryGates +
+            shadowStreams * baseQueryGates +
+            shadowRoutingGates,
+    };
+};
+
+// Applies the owner-selected full-circuit convention to the query circuits.
+// This operand must include every caller's charged oracle work. Extra calls
+// introduced by a reduction must be included before using this conversion.
+// Other simulation work, extraction and record construction remain separate.
+export const compileFullCircuitOracleBudget = (
+    experimentGates: bigint,
+    firstChunkBits: bigint,
+    programmedRecords = 0n,
+    shadowStreams = 0n,
+) => {
+    assert.ok(experimentGates >= 0n);
+    const permutationSlots = experimentGates / shakePermutationGateCharge;
+    // Sum_i(2*p_i-1) <= 2*sum_i p_i; no quantum branch is inspected.
+    const maximumLengthPermutations = 2n * permutationSlots;
+    return {
+        maximumLogicalQueries: permutationSlots,
+        maximumLengthPermutations,
+        ...compileOraclePermutationBudget(
+            maximumLengthPermutations,
+            firstChunkBits,
+            programmedRecords,
+            shadowStreams,
+        ),
     };
 };

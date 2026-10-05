@@ -1,3 +1,6 @@
+import assert from 'node:assert/strict';
+
+import { labelledHashExtractionWork } from '#tests/compressed-oracle-model.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import { operationSeedBytes } from '#tests/operation-seed-model.js';
 import { byteAlignedSpongePermutations } from '#tests/proof-hash-work-model.js';
@@ -124,5 +127,56 @@ export const compileRegistrationSourceRandomness = (
                 family.commonPermutations,
             0n,
         ),
+    };
+};
+
+// The first output component has the complete 512-bit commitment prefix.
+// fullValueQueries is the caller's actual component-capacity bound, including
+// every nested wrapper. Query simulation, decoding, cache construction and
+// the DFMS disturbance/mismatch terms are separate from this selection cost.
+export const compileRegistrationSourceExtractionWork = (
+    originalPollMaximumParticipants: number,
+    optionCount: number,
+    fullValueQueries: bigint,
+    extractionRequests: bigint,
+) => {
+    assert.ok(fullValueQueries >= 0n && extractionRequests >= 0n);
+    const inventory = compileRegistrationSourceRandomness(
+        originalPollMaximumParticipants,
+        optionCount,
+    );
+    const families = inventory.families.map((family) => {
+        const selection = labelledHashExtractionWork(
+            fullValueQueries,
+            family.commitmentInputCellBits,
+            512n,
+            family.commitmentMaskCellBits,
+            512n,
+        );
+        // Copy the classical target into clean input wires and erase that
+        // copy afterward. Static zero bits only make this bound smaller.
+        const targetPreparationGates =
+            2n * (family.commitmentMaskCellBits + 512n);
+        return {
+            family: family.index,
+            inputCellBits: family.commitmentInputCellBits,
+            comparedInputBits: family.commitmentMaskCellBits,
+            selectionGates: selection.extractionGates,
+            targetPreparationGates,
+            preparedSelectionGates:
+                selection.extractionGates + targetPreparationGates,
+        };
+    });
+    const maximumGatesPerRequest = families.reduce(
+        (maximum, family) =>
+            family.preparedSelectionGates > maximum
+                ? family.preparedSelectionGates
+                : maximum,
+        0n,
+    );
+    return {
+        families,
+        maximumPreparedSelectionGates:
+            extractionRequests * maximumGatesPerRequest,
     };
 };
