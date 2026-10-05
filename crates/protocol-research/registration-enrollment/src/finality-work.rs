@@ -120,7 +120,6 @@ impl FinalityWork {
         &self,
         credential: &mut Credential,
         retained_body: &[u8],
-        coins: [u8; 32],
     ) -> Result<TargetVote, Error> {
         if retained_body != self.body() {
             return Err(Error::Context);
@@ -132,12 +131,7 @@ impl FinalityWork {
         }) {
             return Err(Error::Context);
         }
-        credential.sign_target(
-            &self.owner,
-            self.target.setup().roster(),
-            &self.message,
-            coins,
-        )
+        credential.sign_target(&self.owner, self.target.setup().roster(), &self.message)
     }
 }
 

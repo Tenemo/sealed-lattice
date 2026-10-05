@@ -1,5 +1,4 @@
 import {
-    ballotCoinBytes,
     ballotEnvelopeMatches,
     ballotPhase,
     ballotRecordAssociatedData,
@@ -245,7 +244,6 @@ export const beginBallot = async (
             bodyLength: 0,
             bodyKeys: [],
             envelope: new Uint8Array(),
-            coins: new Uint8Array(),
             signature: new Uint8Array(),
         },
     };
@@ -482,20 +480,7 @@ export const completeBallot = async (
         });
     if (generation() === ballotPhase.ready) await retainBallot(session);
     else await importBody(session);
-    if (generation() === ballotPhase.body)
-        await commitBallot(session, {
-            generation: ballotPhase.signing,
-            state: {
-                ...session.state,
-                coins: crypto.getRandomValues(new Uint8Array(ballotCoinBytes)),
-            },
-        });
-    const control = concatenate(session.state.envelope, session.state.coins);
-    try {
-        ballotCommand(context, 8, 0, control);
-    } finally {
-        control.fill(0);
-    }
+    ballotCommand(context, 8, 0, session.state.envelope);
     const signature = ballotCommand(context, 12);
     if (signature.length !== context.profile.registration.signatureBytes)
         throw new Error('The ballot signature is incomplete.');
@@ -505,7 +490,6 @@ export const completeBallot = async (
             ...session.state,
             scores: new Uint8Array(),
             ballotTime: 0n,
-            coins: new Uint8Array(),
             signature,
         },
     });

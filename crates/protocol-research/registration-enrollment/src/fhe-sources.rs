@@ -283,9 +283,7 @@ mod tests {
         let draft =
             PollDraft::new(Manifest::new(text("Question"), options).unwrap(), 1, 3).unwrap();
         let mut credential = Credential::from_seed([19; 32]);
-        let signed = credential
-            .create_poll(draft, [7; 64], [11; 32], [13; 32])
-            .unwrap();
+        let signed = credential.create_poll(draft, [7; 64], [11; 32]).unwrap();
         (
             verify_poll(signed.identity, [7; 64], &signed.body, &signed.signature).unwrap(),
             credential,

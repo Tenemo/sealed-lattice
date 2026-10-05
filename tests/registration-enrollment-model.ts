@@ -122,9 +122,8 @@ export const compileRegistrationEnrollmentCensus = () => {
     const maximumEnrollmentManifestBytes =
         manifestPrefixBytes + maximumEnrollmentRecords * 73n;
     const maximumProposalIntentManifestBytes =
-        manifestPrefixBytes + (maximumEnrollmentRecords + 3n) * 73n + 32n;
-    const maximumManifestBytes =
-        manifestPrefixBytes + maximumRecords * 73n + 32n;
+        manifestPrefixBytes + (maximumEnrollmentRecords + 3n) * 73n;
+    const maximumManifestBytes = manifestPrefixBytes + maximumRecords * 73n;
     const maximumRootBytes = maximumManifestBytes + 16n;
     const proofRoleBytes =
         bytes('registered-recipient-key/1') +

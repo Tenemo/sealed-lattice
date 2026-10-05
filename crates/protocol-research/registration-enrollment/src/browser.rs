@@ -675,7 +675,7 @@ pub extern "C" fn roster_identity_pointer() -> usize {
 pub extern "C" fn sign_roster_proposal(length: usize) -> u32 {
     SESSION.with(|state| {
         let mut state = state.borrow_mut();
-        if length != 96 {
+        if length != 64 {
             return 1;
         }
         let Session {
@@ -694,12 +694,8 @@ pub extern "C" fn sign_roster_proposal(length: usize) -> u32 {
         if input[..64] != proposal.identity() {
             return 1;
         }
-        let randomness = input[64..96].try_into().unwrap();
-        input[..96].zeroize();
-        let Ok(signature) = enrollment
-            .credential
-            .sign_roster_proposal(proposal, randomness)
-        else {
+        input[..64].zeroize();
+        let Ok(signature) = enrollment.credential.sign_roster_proposal(proposal) else {
             return 1;
         };
         *proposal_signature = Some(signature);
@@ -884,13 +880,11 @@ fn offer_operation(
                 .to_vec();
         }
         5 => {
-            if input.len() != 32 {
+            if !input.is_empty() {
                 return Err(Error::Shape);
             }
             let credential = &mut state.enrollment.as_mut().ok_or(Error::Context)?.credential;
-            state
-                .offer
-                .sign(credential, input[..].try_into().unwrap())?;
+            state.offer.sign(credential)?;
             let (envelope, signature) = state.offer.offer().ok_or(Error::Consumed)?;
             state.contribution_output = emitted_packet(envelope.bytes(), signature);
         }
@@ -941,7 +935,7 @@ fn selection_operation(
             state.unsigned_selection = Some(selection);
         }
         1 => {
-            if input.len() != 32 {
+            if !input.is_empty() {
                 return Err(Error::Shape);
             }
             let selection = state.unsigned_selection.as_ref().ok_or(Error::Context)?;
@@ -950,7 +944,7 @@ fn selection_operation(
                 .as_mut()
                 .ok_or(Error::Context)?
                 .credential
-                .sign_selection_proposal(&roster, selection, input[..].try_into().unwrap())?;
+                .sign_selection_proposal(&roster, selection)?;
             state.contribution_output = emitted_packet(selection.body(), &signature);
         }
         2 | 5 => {
@@ -961,7 +955,7 @@ fn selection_operation(
             }
             let selection = inputs.selection().selection();
             state.contribution_output = if operation == 2 {
-                if input.len() != 32 {
+                if !input.is_empty() {
                     return Err(Error::Shape);
                 }
                 state
@@ -969,12 +963,7 @@ fn selection_operation(
                     .as_mut()
                     .ok_or(Error::Context)?
                     .credential
-                    .endorse_selection(
-                        &roster,
-                        selection,
-                        context.position(),
-                        input[..].try_into().unwrap(),
-                    )?
+                    .endorse_selection(&roster, selection, context.position())?
             } else {
                 if !input.is_empty() {
                     return Err(Error::Shape);

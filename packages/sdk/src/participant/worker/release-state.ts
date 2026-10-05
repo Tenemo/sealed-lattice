@@ -22,20 +22,18 @@ import type { BallotStatus } from './target-state.js';
 // and the own ballot's status in it, and generation 26 adds the seed of all
 // the release's randomness before any private generation. Generation 27
 // retains the generated body's records and its envelope, retiring the seed;
-// 28 also the signing coins before the signature exists, and 29 the
+// that same transaction locks signing, and generation 29 retains the
 // signature.
 
 export const releasePhase = {
     locked: 25,
     ready: 26,
     body: 27,
-    intent: 28,
     signed: 29,
 } as const;
 
-const marker = encodeText('RST3');
+const marker = encodeText('RST4');
 const prefixBytes = marker.length + 2 + 2 + 4 + 2;
-const coinBytes = 32;
 
 export type ReleaseState = Readonly<{
     // The signed-target or completed-close generation the release follows.
@@ -49,7 +47,7 @@ export type ReleaseState = Readonly<{
     bodyLength: number;
     bodyKeys: readonly Uint8Array[];
     envelope: Uint8Array;
-    coins: Uint8Array;
+
     signature: Uint8Array;
 }>;
 
@@ -71,7 +69,6 @@ export const encodeReleaseState = (generation: number, state: ReleaseState) => {
         state.seed,
         ...state.bodyKeys,
         ...(phase >= releasePhase.body ? [state.envelope] : []),
-        ...(phase === releasePhase.intent ? [state.coins] : []),
         ...(phase === releasePhase.signed ? [state.signature] : []),
     );
 };
@@ -100,6 +97,7 @@ export const decodeReleaseState = (
     const phase = phaseOf(generation);
     if (
         generation < releasePhase.locked ||
+        generation === 28 ||
         bytes.length < prefixBytes ||
         bytes.length > bounds.maximumStateBytes ||
         !equalBytes(bytes.subarray(0, marker.length), marker) ||
@@ -125,7 +123,6 @@ export const decodeReleaseState = (
         throw new Error('The release state has other counts.');
     const tail =
         (withBody ? bounds.envelopeBytes : 0) +
-        (phase === releasePhase.intent ? coinBytes : 0) +
         (phase === releasePhase.signed
             ? profile.registration.signatureBytes
             : 0);
@@ -148,10 +145,6 @@ export const decodeReleaseState = (
             ),
         ),
         envelope: bytes.slice(tailStart, envelopeEnd),
-        coins:
-            phase === releasePhase.intent
-                ? bytes.slice(envelopeEnd)
-                : new Uint8Array(),
         signature:
             phase === releasePhase.signed
                 ? bytes.slice(envelopeEnd)

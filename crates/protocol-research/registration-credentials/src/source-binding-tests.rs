@@ -35,7 +35,7 @@ fn poll(maximum: usize, options: usize) -> VerifiedPoll {
     )
     .unwrap();
     let packet = Credential::from_seed([1; 32])
-        .create_poll(draft, [2; 64], [3; 32], [4; 32])
+        .create_poll(draft, [2; 64], [3; 32])
         .unwrap();
     verify_poll(packet.identity, [2; 64], &packet.body, &packet.signature).unwrap()
 }
@@ -128,9 +128,7 @@ fn registration_signature_binds_ordered_coordinate_commitments() {
         body.absorb(&vec![0; PROOF_HEADER_BYTES]).unwrap();
         body.finish().unwrap()
     };
-    let signature = credential
-        .sign_registration(digest(&header), [8; 32])
-        .unwrap();
+    let signature = credential.sign_registration(digest(&header)).unwrap();
     assert!(verify_registration_signature(digest(&header), &signature));
     header.fhe_key_commitments.swap(0, 1);
     assert!(!verify_registration_signature(digest(&header), &signature));

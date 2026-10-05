@@ -191,18 +191,16 @@ fn command(session: &mut Session, operation: u32, input: &[u8]) -> Result<Vec<u8
         5 => {
             let state = session.release.as_ref().ok_or(Error::Context)?;
             let verified = state.verified.as_ref().ok_or(Error::Context)?;
-            if input.len() != RELEASE_ENVELOPE_BYTES + 32
+            if input.len() != RELEASE_ENVELOPE_BYTES
                 || input[..RELEASE_ENVELOPE_BYTES] != *verified.envelope().bytes()
             {
                 return Err(Error::Context);
             }
             let enrollment = session.enrollment.as_mut().ok_or(Error::Context)?;
-            let signature = enrollment.credential.sign_release(
-                &owner,
-                roster,
-                &verified.envelope(),
-                input[RELEASE_ENVELOPE_BYTES..].try_into().unwrap(),
-            )?;
+            let signature =
+                enrollment
+                    .credential
+                    .sign_release(&owner, roster, &verified.envelope())?;
             let mut packet = verified.envelope().bytes().to_vec();
             packet.extend(signature);
             Ok(packet)

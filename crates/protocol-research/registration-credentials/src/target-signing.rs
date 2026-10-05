@@ -12,7 +12,6 @@ use fips204::{
     traits::{KeyGen, SerDes, Signer, Verifier},
 };
 use supported_profile::Profile;
-use zeroize::Zeroizing;
 
 pub const TARGET_PURPOSE: &str = "sealed-lattice/evaluation-target/v1";
 pub const TARGET_IDENTITY_DOMAIN: &str = "sealed-lattice/evaluation-target-id/v1";
@@ -244,13 +243,12 @@ impl Credential {
     }
     /// Volatile one-shot signing beneath the authenticated participant root.
     /// The enrollment bridge supplies a genuinely evaluated target and commits
-    /// its exact body and coins before reaching this method.
+    /// its exact exact body before reaching this method.
     pub fn sign_target(
         &mut self,
         owner: &RetainedBallotOwner,
         roster: &OrganizerSignedRoster,
         message: &TargetMessage,
-        coins: [u8; 32],
     ) -> Result<TargetVote, Error> {
         self.check_target_owner(owner, roster, message)?;
         self.check_target_predecessors(owner, roster)?;
@@ -260,10 +258,9 @@ impl Credential {
         }
         self.target_signed = true;
         self.target_lock = Some(*message.identity());
-        let coins = Zeroizing::new(coins);
         let (_, key) = ml_dsa_65::KG::keygen_from_seed(&self.signing_seed);
         let signature = key
-            .try_sign_with_seed(&coins, message.identity(), CERTIFICATION_CONTEXT)
+            .try_sign_with_seed(&[0; 32], message.identity(), CERTIFICATION_CONTEXT)
             .map_err(|_| Error::Crypto)?;
         Ok(TargetVote {
             position: owner.position(),

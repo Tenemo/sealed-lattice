@@ -32,9 +32,6 @@ const endorse = (
     const signed = model.snapshot(position);
     expect(model.lockEndorsement(position, selected.map(offer))).toBe(true);
     expect(model.snapshot(position)).toEqual(signed);
-    expect(signed.required.some(([name]) => name === 'endorsement-coins')).toBe(
-        false,
-    );
 };
 
 describe('clear preparation lifecycle under original custody', () => {

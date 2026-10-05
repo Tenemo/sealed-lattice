@@ -29,7 +29,6 @@ export const compileParticipantReleaseCustody = (profile: SupportedProfile) => {
     const { signatureBytes } = compileRegistrationEnrollmentCensus();
     const recordBytes = 1n << 20n;
     const keyBytes = 32n;
-    const coinBytes = 32n;
     const bodyHeaderBytes = 4n + 8n + releaseContextBytes;
     const coefficientBytes =
         1n + (BigInt(profile.release.modulus.toString(2).length) + 7n) / 8n;
@@ -49,7 +48,7 @@ export const compileParticipantReleaseCustody = (profile: SupportedProfile) => {
         { phase: 25, bytes: attempt },
         { phase: 26, bytes: attempt + operationSeedBytes },
         { phase: 27, bytes: attempt + retainedBody },
-        { phase: 28, bytes: attempt + retainedBody + coinBytes },
+
         { phase: 29, bytes: attempt + retainedBody + signatureBytes },
     ];
     return {

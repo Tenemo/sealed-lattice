@@ -14,13 +14,12 @@ const chunkBytes = 1 << 20;
 const tagBytes = 16;
 const keyBytes = 32;
 const identityBytes = 64;
-const coinBytes = 32;
 const chunks = (bytes: number) => Math.ceil(bytes / chunkBytes);
 const maximum = (...values: number[]) => Math.max(...values);
 
 // The encrypted root manifest: its marker, data keys, poll and record
 // count, then one reference per data record. Generation two retains the
-// organizer's proposal signing coins, and each suffix has a length.
+// organizer's proposal intent, and each suffix has a length.
 // The reservation includes the source key retained before setup. Later
 // roots retire that key and its capsule and use a shorter actual prefix.
 const rootPrefixBytes = 4 + 96 + 64 + 4;
@@ -327,7 +326,7 @@ const dataKindMaximums = (
 ];
 
 // The largest enrollment root: every record but the setup reference and
-// inventory, which it lacks, and the organizer's proposal coins.
+// inventory, which it lacks, and the organizer's proposal intent.
 const enrollmentRootBytes = (
     registration: ParticipantLimits['registration'],
     retainedRosterBytes: number,
@@ -338,7 +337,6 @@ const enrollmentRootBytes = (
             (total, bytes) => total + chunks(bytes),
             0,
         ) +
-    coinBytes +
     tagBytes;
 
 // Everything the participant retains through its accepted roster: the
@@ -432,7 +430,7 @@ const contributionBounds = (module: ModuleLimits, profile: ModuleProfile) => {
 // The ballot suffix: its marker, score count, body length and key count,
 // the scores, the attempt's ballot time until the envelope carries it, the
 // randomness seed until the body is retained, a key per body record, the
-// envelope, the signing coins and the signature.
+// envelope and the signature.
 const ballotPrefixBytes = 4 + 1 + 4 + 2;
 const ballotTimeBytes = 8;
 
@@ -455,7 +453,7 @@ const ballotBounds = (
         bodyRecords,
         maximumStateBytes: maximum(
             attempt + operationSeedBytes,
-            attempt + retainedBody + coinBytes,
+            attempt + retainedBody,
             signedStateBytes,
         ),
         signedStateBytes,
@@ -512,12 +510,11 @@ const closeBounds = (
         maximumRecords: heldBodies * (1 + ballotBodyRecords) + responseEvents,
         maximumStateBytes: maximum(
             collectingBytes,
-            collectingBytes + close.intentBodyBytes + coinBytes,
-            intentStateBytes + 4 + profile.maximumResponseBodyBytes + coinBytes,
+            collectingBytes + close.intentBodyBytes,
+            intentStateBytes + 4 + profile.maximumResponseBodyBytes,
             intentStateBytes +
                 profile.maximumResponsePacketBytes +
-                profile.proposalBodyBytes +
-                coinBytes,
+                profile.proposalBodyBytes,
             completedStateBytes,
         ),
         collectingBytes,
@@ -525,23 +522,20 @@ const closeBounds = (
 };
 
 // The target suffix: its marker, the close phase it follows, the own
-// ballot's status and the body length, the target body, then its signing
-// coins or the signed vote.
+// ballot's status and the body length, the target body, then the signed vote once completed.
 const targetBounds = (module: ModuleLimits) => {
     const { target } = module;
     const prefix = 4 + 1 + 1 + 2;
     return {
         ...target,
         maximumStateBytes:
-            prefix +
-            target.maximumBodyBytes +
-            maximum(coinBytes, target.votePacketBytes),
+            prefix + target.maximumBodyBytes + target.votePacketBytes,
     };
 };
 
 // The release suffix: its marker, predecessor, own ballot status, target
 // length, body length and key count, the target body, the randomness seed until the body exists,
-// a key per body record, the envelope, the signing coins and the signature.
+// a key per body record, the envelope and the signature.
 const releaseBounds = (module: ModuleLimits, profile: ModuleProfile) => {
     const { release } = module;
     const bodyRecords = Math.ceil(
@@ -555,7 +549,7 @@ const releaseBounds = (module: ModuleLimits, profile: ModuleProfile) => {
         maximumBodyBytes: profile.maximumReleaseBodyBytes,
         maximumStateBytes: maximum(
             attempt + operationSeedBytes,
-            attempt + retainedBody + coinBytes,
+            attempt + retainedBody,
             attempt + retainedBody + module.registration.signatureBytes,
         ),
     };
@@ -602,8 +596,8 @@ const profileBounds = (
         signedSelectionPacketBytes:
             4 + profile.selectionBodyBytes + module.registration.signatureBytes,
     };
-    // PRE1 frames three independent slots. Each signing slot retains either
-    // coins or its longer completed signature. At activation all slots empty.
+    // PRE2 frames three independent slots. Each signing slot retains the locked body,
+    // followed by the signature on completion. At activation all slots empty.
     const emptyPreparationBytes = 4 + 3 * suffixLengthBytes;
     const selectionSlotBytes =
         1 + preparation.selectionBodyBytes + module.registration.signatureBytes;

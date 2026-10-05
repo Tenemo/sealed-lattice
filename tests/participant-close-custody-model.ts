@@ -20,7 +20,6 @@ export const compileParticipantCloseCustody = (profile: SupportedProfile) => {
     const participants = wire.participantCount;
     const keyBytes = 32n;
     const tagBytes = 16n;
-    const coinBytes = 32n;
     // Marker and event count.
     const prefixBytes = 4n + 4n;
     const eventBytes = (records: bigint) =>
@@ -34,17 +33,13 @@ export const compileParticipantCloseCustody = (profile: SupportedProfile) => {
         deliveryEventBytes +
         eventBytes(0n) +
         maximumResponseEvents * eventBytes(1n);
-    const responseSigningBytes = 4n + wire.maximumResponseBodyBytes + coinBytes;
-    const proposalSigningBytes = wire.proposalBodyBytes + coinBytes;
+    const responseSigningBytes = 4n + wire.maximumResponseBodyBytes;
+    const proposalSigningBytes = wire.proposalBodyBytes;
     const phaseBytes = [
-        // The organizer's intent body and coins before its signature.
+        // The organizer's intent exact body before its signature.
         {
             phase: 18,
-            bytes:
-                prefixBytes +
-                wire.intentBodyBytes +
-                coinBytes +
-                deliveryEventBytes,
+            bytes: prefixBytes + wire.intentBodyBytes + deliveryEventBytes,
         },
         // The locked intent; responses arrive only after it.
         {
@@ -60,7 +55,7 @@ export const compileParticipantCloseCustody = (profile: SupportedProfile) => {
                 responseSigningBytes,
         },
         // The completed response; the organizer's completion transaction also
-        // retains its proposal body and coins.
+        // retains its proposal exact body.
         {
             phase: 21,
             bytes:

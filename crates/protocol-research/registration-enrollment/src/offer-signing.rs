@@ -104,14 +104,13 @@ impl OfferSigning {
     pub fn envelope(&self) -> Option<&OfferEnvelope> {
         self.envelope.as_ref()
     }
-    pub fn sign(&mut self, credential: &mut Credential, coins: [u8; 32]) -> Result<(), Error> {
+    pub fn sign(&mut self, credential: &mut Credential) -> Result<(), Error> {
         if self.failed || self.signature.is_some() {
             return Err(Error::Consumed);
         }
         self.signature = Some(credential.sign_offer(
             self.context.as_ref().ok_or(Error::Consumed)?,
             self.envelope.as_ref().ok_or(Error::Consumed)?,
-            coins,
         )?);
         Ok(())
     }

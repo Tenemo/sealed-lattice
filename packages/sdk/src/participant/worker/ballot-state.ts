@@ -19,7 +19,7 @@ import type { RecordContext } from './records.js';
 // the attempt's scores and ballot time; generation 14 adds the seed of all
 // the ballot's randomness before the module draws any. Generation 15 retains
 // the envelope and every body record with one root, retiring the seed;
-// generation 16 the signing coins; generation 17 the signature, retiring the
+// that same transaction locks signing. Generation 17 retains the signature, retiring the
 // scores. An interruption before the body is retained draws the same bytes
 // from the seed again. Every root is sealed under a fresh key. A signed
 // ballot stays retained unchanged through the later generations, and a
@@ -29,12 +29,10 @@ export const ballotPhase = {
     locked: 13,
     ready: 14,
     body: 15,
-    signing: 16,
     signed: 17,
 } as const;
-const marker = encodeText('BST2');
+const marker = encodeText('BST3');
 const envelopeMarker = encodeText('LBE2');
-export const ballotCoinBytes = 32;
 
 export type BallotState = Readonly<{
     scores: Uint8Array;
@@ -43,7 +41,7 @@ export type BallotState = Readonly<{
     bodyLength: number;
     bodyKeys: readonly Uint8Array[];
     envelope: Uint8Array;
-    coins: Uint8Array;
+
     signature: Uint8Array;
 }>;
 
@@ -83,7 +81,7 @@ export const encodeBallotState = (generation: number, state: BallotState) =>
         unsigned16(state.bodyKeys.length),
         ...state.bodyKeys,
         state.envelope,
-        state.coins,
+
         state.signature,
     );
 
@@ -115,6 +113,7 @@ export const decodeBallotState = (
     if (
         generation < ballotPhase.locked ||
         generation > ballotPhase.signed ||
+        generation === 16 ||
         bytes.length > bounds.maximumStateBytes ||
         !equalBytes(bytes.subarray(0, marker.length), marker)
     )
@@ -157,10 +156,6 @@ export const decodeBallotState = (
         generation >= ballotPhase.body
             ? take(bounds.envelopeBytes)
             : new Uint8Array();
-    const coins =
-        generation === ballotPhase.signing
-            ? take(ballotCoinBytes)
-            : new Uint8Array();
     const signature =
         generation === ballotPhase.signed
             ? take(profile.registration.signatureBytes)
@@ -184,7 +179,7 @@ export const decodeBallotState = (
         bodyLength,
         bodyKeys,
         envelope,
-        coins,
+
         signature,
     };
 };

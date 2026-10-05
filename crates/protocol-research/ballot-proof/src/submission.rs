@@ -120,7 +120,6 @@ pub fn sign_body(
     body: &VerifiedBallotBody,
     setup: &VerifiedSetupAggregate,
     ballot_time: u64,
-    coins: [u8; 32],
 ) -> Result<(BallotEnvelope, [u8; 3309]), Error> {
     let position = check_setup(body, setup)?;
     let envelope = BallotEnvelope::new(
@@ -134,7 +133,7 @@ pub fn sign_body(
     )
     .map_err(|_| Error::Context)?;
     let signature = credential
-        .sign_ballot_envelope(setup.roster(), &envelope, coins)
+        .sign_ballot_envelope(setup.roster(), &envelope)
         .map_err(|_| Error::Signature)?;
     Ok((envelope, signature))
 }

@@ -62,9 +62,7 @@ import {
 // seed of all release randomness enters the root before any private
 // generation, and the module proves the release from that seed alone, so an
 // interrupted generation draws the same bytes again. The body and envelope
-// are retained before the signing coins, and the coins before the signature.
-
-const coinBytes = 32;
+// are retained before the signing intent, and the intent before the signature.
 
 export type ReleaseSession = {
     readonly close: CloseSession;
@@ -425,7 +423,6 @@ const lockRelease = async (
                 bodyLength: 0,
                 bodyKeys: [],
                 envelope: new Uint8Array(),
-                coins: new Uint8Array(),
                 signature: new Uint8Array(),
             },
         });
@@ -519,30 +516,18 @@ const restoreReleaseBody = async (session: ReleaseSession) => {
     releaseCommand(context, 4);
 };
 
-// Retains the signing coins and signs the exact envelope.
+// The verified body transaction already locks the exact signing envelope.
 const signRelease = async (session: ReleaseSession) => {
     const { context } = session.close.participant;
     if (session.state === undefined)
         throw new Error('No release body is retained.');
-    if (generationOf(session) === releasePhase.body)
-        await commitRelease(session, {
-            generation: releasePhase.intent,
-            state: {
-                ...session.state,
-                coins: crypto.getRandomValues(new Uint8Array(coinBytes)),
-            },
-        });
     const state = session.state;
-    const packet = releaseCommand(
-        context,
-        5,
-        concatenate(state.envelope, state.coins),
-    );
+    const packet = releaseCommand(context, 5, state.envelope);
     await commitRelease(session, {
         generation: releasePhase.signed,
         state: {
             ...state,
-            coins: new Uint8Array(),
+
             signature: packet.slice(state.envelope.length),
         },
     });

@@ -66,7 +66,7 @@ import {
 
 // Own offer work advances independently of the preparation journal. Its
 // generation and continuation seeds reproduce interrupted work exactly.
-// Every signature has durable coins before any public derivative is exposed.
+// Every signature has a durable message intent before any public derivative is exposed.
 
 type RecordLocation = Readonly<{
     object: number;
@@ -89,7 +89,6 @@ export type ContributionState = Readonly<{
     signingRecords: readonly SealedRecord[];
     // The randomness seed of a generation or continuation intent.
     seed: Uint8Array;
-    coins: Uint8Array;
 }>;
 
 // What a sealed record is bound to besides its location.
@@ -127,7 +126,7 @@ const publicEntryBytes = 2 + 4 + 4 + 32 + 64;
 const privateEntryBytes = 32 + 64;
 const signingEntryBytes = 2 + 4 + 32 + 64;
 const keyBytes = 32;
-const coinBytes = 32;
+
 const identityBytes = 64;
 // The sealed checkpoint bytes one write stores while the next are sealed.
 const checkpointWriteBytes = 4 << 20;
@@ -190,7 +189,6 @@ const retainedShape = (phase: number) => ({
     stage: phase,
     signingRecords: phase <= 7 ? 0 : phase === 8 ? 1 : 2,
     seedBytes: phase === 4 || phase === 6 ? operationSeedBytes : 0,
-    coinBytes: phase === 8 ? coinBytes : 0,
 });
 
 const prefixBytes = 4 + 1 + 2 + 4 * 4;
@@ -205,7 +203,7 @@ const encodeSigningRecord = (record: SealedRecord) =>
 
 export const encodeContributionState = (state: ContributionState) =>
     concatenate(
-        encodeText('PCS4'),
+        encodeText('PCS5'),
         new Uint8Array([state.phase]),
         unsigned16(state.position),
         unsigned32(state.header.length),
@@ -227,7 +225,6 @@ export const encodeContributionState = (state: ContributionState) =>
         ),
         ...state.signingRecords.map(encodeSigningRecord),
         state.seed,
-        state.coins,
     );
 
 // Decodes the first signing records in their order from the offset.
@@ -271,7 +268,7 @@ export const decodeContributionState = (
         phase > 9 ||
         bytes.length < prefix ||
         bytes.length > bounds.maximumStateBytes ||
-        !equalBytes(bytes.subarray(0, 4), encodeText('PCS4'))
+        !equalBytes(bytes.subarray(0, 4), encodeText('PCS5'))
     )
         throw new Error('Invalid contribution state.');
     const position = readUnsigned16(bytes, 5);
@@ -304,8 +301,7 @@ export const decodeContributionState = (
                 publicEntryBytes * publicCount +
                 privateEntryBytes * privateCount +
                 signingEntryBytes * signingCount +
-                shape.seedBytes +
-                shape.coinBytes
+                shape.seedBytes
     )
         throw new Error('The contribution state does not match its phase.');
     let offset = prefix + headerLength;
@@ -364,7 +360,6 @@ export const decodeContributionState = (
         privateRecords,
         signingRecords,
         seed: bytes.slice(offset, offset + shape.seedBytes),
-        coins: bytes.slice(offset + shape.seedBytes),
     };
 };
 
@@ -811,7 +806,6 @@ export const beginContribution = async (
         privateRecords: [],
         signingRecords: [],
         seed: crypto.getRandomValues(new Uint8Array(operationSeedBytes)),
-        coins: new Uint8Array(),
     };
     await commitContribution(session, { phase: 4, state });
     if (!isContributionSession(session))
@@ -1223,7 +1217,6 @@ export const signContribution = async (
             state: {
                 ...session.state,
                 signingRecords: [output.record],
-                coins: crypto.getRandomValues(new Uint8Array(coinBytes)),
             },
             signing: [output],
         });
@@ -1232,7 +1225,7 @@ export const signContribution = async (
     if (!equalBytes(envelope, body))
         throw new Error('The locked offer changed.');
     const signed = splitPacket(
-        signing(context, signingCommand.signOffer, session.state.coins),
+        signing(context, signingCommand.signOffer),
         profile,
     );
     if (!equalBytes(signed.body, body))
@@ -1248,7 +1241,6 @@ export const signContribution = async (
         state: {
             ...session.state,
             signingRecords: [...session.state.signingRecords, output.record],
-            coins: new Uint8Array(),
         },
         signing: [output],
     });

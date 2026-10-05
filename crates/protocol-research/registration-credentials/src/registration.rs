@@ -239,7 +239,7 @@ mod tests {
             )
             .unwrap();
             let packet = Credential::from_seed([1; 32])
-                .create_poll(draft, [4; 64], [5; 32], [6; 32])
+                .create_poll(draft, [4; 64], [5; 32])
                 .unwrap();
             verify_poll(packet.identity, [4; 64], &packet.body, &packet.signature).unwrap()
         };

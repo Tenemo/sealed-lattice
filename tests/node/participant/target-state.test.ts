@@ -25,7 +25,7 @@ const state = (
     predecessor: completedClosePhase(organizer),
     ballotStatus,
     body: filled(bodyLength, 7),
-    coins: filled(32, 9),
+
     vote: filled(profile.target.votePacketBytes, 11),
 });
 
@@ -36,7 +36,7 @@ describe('participant target signing state', () => {
                 const value = state(organizer, bodyLength);
                 const intent = encodeTargetState(targetPhase.intent, value);
                 expect(intent.length).toBe(
-                    Number(census.prefixBytes) + bodyLength + 32,
+                    Number(census.prefixBytes) + bodyLength,
                 );
                 expect(
                     decodeTargetState(
@@ -59,7 +59,7 @@ describe('participant target signing state', () => {
                         organizer,
                         signed,
                     ),
-                ).toEqual({ ...value, coins: new Uint8Array() });
+                ).toEqual(value);
                 // Later generations keep the completed vote unchanged.
                 expect(
                     decodeTargetState(
@@ -68,7 +68,7 @@ describe('participant target signing state', () => {
                         organizer,
                         signed,
                     ),
-                ).toEqual({ ...value, coins: new Uint8Array() });
+                ).toEqual(value);
             }
     });
 

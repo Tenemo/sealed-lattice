@@ -32,7 +32,7 @@ export const compileTargetSigningStateCensus = () => {
     // The marker, the close phase, the own ballot's status and the body
     // length.
     const prefixBytes = 4n + 1n + 1n + 2n;
-    const intentBytes = prefixBytes + maximumBodyBytes + 32n;
+    const intentBytes = prefixBytes + maximumBodyBytes;
     const completionBytes = prefixBytes + maximumBodyBytes + packetBytes;
     return {
         maximumBodyBytes,

@@ -113,7 +113,6 @@ export const inspectParticipantCheckpointCustody = async (
             privateBytes.push(
                 state.header,
                 state.seed,
-                state.coins,
                 ...state.publicRecords.map((record) => record.key),
                 ...state.privateRecords.map((record) => record.key),
                 ...state.signingRecords.map((record) => record.key),

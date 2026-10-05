@@ -27,15 +27,15 @@ describe('participant close custody layout', () => {
         const proposal = 4n + 732n + signatureBytes;
         expect(value.collectingBytes).toBe(8n + delivery);
         expect(value.phaseBytes).toEqual([
-            { phase: 18, bytes: 8n + 202n + 32n + delivery },
+            { phase: 18, bytes: 8n + 202n + delivery },
             { phase: 19, bytes: 8n + intent + events },
             {
                 phase: 20,
-                bytes: 8n + intent + events + 4n + 1598n + 32n,
+                bytes: 8n + intent + events + 4n + 1598n,
             },
             {
                 phase: 21,
-                bytes: 8n + intent + events + response + 732n + 32n,
+                bytes: 8n + intent + events + response + 732n,
             },
             { phase: 22, bytes: 8n + intent + events + response + proposal },
         ]);

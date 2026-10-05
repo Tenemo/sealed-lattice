@@ -217,11 +217,6 @@ export class ClearPreparationLifecycleModel {
         if (state.endorsement !== undefined) return true;
         state.endorsement = identity;
         this.retain(state, 'endorsement-intent', identity);
-        this.retain(
-            state,
-            'endorsement-coins',
-            `original-coins:${position}:${identity}`,
-        );
         return true;
     }
     publishEndorsement(position: number): boolean {
@@ -229,8 +224,6 @@ export class ClearPreparationLifecycleModel {
         if (state?.generation !== 4 || state.endorsement === undefined)
             return false;
         this.retain(state, 'endorsement-signature', state.endorsement);
-        state.required.delete('endorsement-coins');
-        state.stored.delete('endorsement-coins');
         const choices = this.endorsements.get(position) ?? new Set<string>();
         choices.add(state.endorsement);
         this.endorsements.set(position, choices);

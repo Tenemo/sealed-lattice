@@ -68,7 +68,7 @@ const splitPacket = (
 
 // Only transport destinations are recovered from an authenticated original
 // signing intent. Rust rebuilds the proposal from complete verified offers and
-// must reproduce that exact body before the retained coins are consumed.
+// must reproduce that exact body before its one-shot purpose is consumed.
 const originalSelectedOffers = (
     session: ParticipantSession,
     body: Uint8Array,
@@ -150,17 +150,13 @@ export const selectSetup = async (
                 selection: {
                     stage: 'intent',
                     body,
-                    coins: crypto.getRandomValues(new Uint8Array(32)),
                 },
             });
             retained = session.preparation.selection;
         }
         if (retained?.stage !== 'intent' || !equalBytes(retained.body, body))
             throw new Error('The original selection intent changed.');
-        const signed = splitPacket(
-            session,
-            selectionCommand(session, 1, retained.coins),
-        );
+        const signed = splitPacket(session, selectionCommand(session, 1));
         if (!equalBytes(signed.body, retained.body))
             throw new Error('The organizer changed its locked selection.');
         await commitPreparation(session, {
@@ -235,7 +231,6 @@ export const endorseSetup = async (
                 selection,
                 reference,
                 body,
-                coins: crypto.getRandomValues(new Uint8Array(32)),
             },
         });
         retained = session.preparation.endorsement;
@@ -256,7 +251,7 @@ export const endorseSetup = async (
     if (retained.stage === 'intent') {
         if (!equalBytes(selectionCommand(session, 5), retained.body))
             throw new Error('The original endorsement intent changed.');
-        const signed = selectionCommand(session, 2, retained.coins);
+        const signed = selectionCommand(session, 2);
         const fields = tupleFields(retained.body);
         const prefix = concatenate(fields[2], fields[1]);
         if (

@@ -8,7 +8,7 @@ import {
 } from './bytes.js';
 
 export type PreparationSignature = Readonly<
-    | { stage: 'intent'; body: Uint8Array; coins: Uint8Array }
+    | { stage: 'intent'; body: Uint8Array }
     | { stage: 'signed'; body: Uint8Array; signature: Uint8Array }
 >;
 
@@ -27,7 +27,7 @@ export type PreparationState = Readonly<{
 }>;
 
 const signatureTail = (state: PreparationSignature) =>
-    state.stage === 'intent' ? state.coins : state.signature;
+    state.stage === 'intent' ? new Uint8Array() : state.signature;
 
 export const encodePreparationState = (state: PreparationState) => {
     const selection = state.selection;
@@ -53,13 +53,13 @@ export const encodePreparationState = (state: PreparationState) => {
               ),
     ];
     return concatenate(
-        encodeText('PRE1'),
+        encodeText('PRE2'),
         ...fields.flatMap((bytes) => [unsigned32(bytes.length), bytes]),
     );
 };
 
 const splitPreparation = (bytes: Uint8Array) => {
-    if (!equalBytes(bytes.subarray(0, 4), encodeText('PRE1')))
+    if (!equalBytes(bytes.subarray(0, 4), encodeText('PRE2')))
         throw new Error('Invalid preparation journal.');
     let offset = 4;
     const fields: Uint8Array[] = [];
@@ -88,13 +88,13 @@ const decodeSignature = (
     if (
         (stage !== 1 && stage !== 2) ||
         bytes.length !==
-            bodyOffset + bodyLength + (stage === 1 ? 32 : signatureBytes)
+            bodyOffset + bodyLength + (stage === 1 ? 0 : signatureBytes)
     )
         throw new Error('Invalid preparation signing intent.');
     const body = bytes.slice(bodyOffset, bodyOffset + bodyLength);
     const tail = bytes.slice(bodyOffset + bodyLength);
     return stage === 1
-        ? { stage: 'intent', body, coins: tail }
+        ? { stage: 'intent', body }
         : { stage: 'signed', body, signature: tail };
 };
 
@@ -157,7 +157,7 @@ export const unusedPreparationPurposes = (bytes: Uint8Array) => {
     else {
         const phase = contribution[4];
         if (
-            !equalBytes(contribution.subarray(0, 4), encodeText('PCS4')) ||
+            !equalBytes(contribution.subarray(0, 4), encodeText('PCS5')) ||
             phase === undefined ||
             phase < 4 ||
             phase > 9

@@ -309,27 +309,15 @@ pub fn run(
         let mut wrong = work.body().to_vec();
         wrong[0] ^= 1;
         assert!(
-            work.sign(
-                &mut enrollments[position].credential,
-                &wrong,
-                *crate::random::<32>()
-            )
-            .is_err()
+            work.sign(&mut enrollments[position].credential, &wrong,)
+                .is_err()
         );
         let vote = work
-            .sign(
-                &mut enrollments[position].credential,
-                work.body(),
-                *crate::random::<32>(),
-            )
+            .sign(&mut enrollments[position].credential, work.body())
             .unwrap();
         assert!(
-            work.sign(
-                &mut enrollments[position].credential,
-                work.body(),
-                *crate::random::<32>()
-            )
-            .is_err()
+            work.sign(&mut enrollments[position].credential, work.body(),)
+                .is_err()
         );
         let packet = vote.encode();
         let mut wrong = packet.clone();
@@ -417,22 +405,12 @@ pub fn run(
         body.finish().unwrap();
         let signature = enrollment
             .credential
-            .sign_release(
-                &owners[&position],
-                setup.roster(),
-                &envelope,
-                *crate::random::<32>(),
-            )
+            .sign_release(&owners[&position], setup.roster(), &envelope)
             .unwrap();
         assert!(
             enrollment
                 .credential
-                .sign_release(
-                    &owners[&position],
-                    setup.roster(),
-                    &envelope,
-                    *crate::random::<32>()
-                )
+                .sign_release(&owners[&position], setup.roster(), &envelope)
                 .is_err()
         );
         let mut packet = envelope.bytes().to_vec();

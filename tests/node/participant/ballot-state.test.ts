@@ -86,7 +86,7 @@ const stateAt = (
         envelope: retained
             ? envelopeFor(ballot.envelopeBytes, context, bodyLength)
             : new Uint8Array(),
-        coins: phase === ballotPhase.signing ? filled(32, 3) : new Uint8Array(),
+
         signature:
             phase === ballotPhase.signed
                 ? filled(signatureBytes, 4)
@@ -252,7 +252,7 @@ describe('participant ballot state', () => {
     });
 
     it('lists every body record under its own index, length and binding', () => {
-        const state = stateAt(ballotPhase.signing, bounds.maximumBodyBytes);
+        const state = stateAt(ballotPhase.body, bounds.maximumBodyBytes);
         const records = ballotRecordInventory(profile, context, state);
         expect(records.map((record) => record.key)).toEqual(
             state.bodyKeys.map((_key, index) => index),

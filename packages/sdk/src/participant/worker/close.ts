@@ -56,7 +56,6 @@ import { snapshotParticipant } from './storage.js';
 // root together; a refused public input changes nothing and leaves the
 // participant where it was.
 
-const coinBytes = 32;
 const identityBytes = 64;
 const listedEntryBytes = 2 + identityBytes;
 // The envelope's author position, ballot time and body length.
@@ -856,7 +855,7 @@ const deliverBallot = async (
     }
 };
 
-// The organizer's intent. Its body and fresh coins enter the root before the
+// The organizer's intent. Its exact body enters the root before the
 // signature exists; an interrupted signing recomputes the same body from the
 // retained close time, which ends the body.
 const signIntent = async (session: CloseSession, closeTime?: bigint) => {
@@ -876,16 +875,10 @@ const signIntent = async (session: CloseSession, closeTime?: bigint) => {
             state: {
                 ...session.state,
                 intentBody: body,
-                coins: crypto.getRandomValues(new Uint8Array(coinBytes)),
             },
         });
     }
-    const signature = closeCommand(
-        context,
-        8,
-        0,
-        concatenate(body, session.state.coins),
-    );
+    const signature = closeCommand(context, 8, 0, body);
     return packet(body, signature);
 };
 
@@ -1110,10 +1103,10 @@ const deliverWantedBodies = async (
     }
 };
 
-// This participant's one response. Its body and fresh coins enter the root
+// This participant's one response. Its exact body enters the root
 // before the signature exists; an interrupted signing must recompute the
 // same body from the replayed log. The organizer then takes its own response
-// and retains its proposal body and coins with it. Returns whether the
+// and retains its proposal exact body with it. Returns whether the
 // organizer's proposal is prepared in this instance.
 const respond = async (session: CloseSession, preparedBody?: Uint8Array) => {
     const { context } = session.participant;
@@ -1135,20 +1128,14 @@ const respond = async (session: CloseSession, preparedBody?: Uint8Array) => {
             state: {
                 ...session.state,
                 responseBody: body,
-                coins: crypto.getRandomValues(new Uint8Array(coinBytes)),
             },
         });
-    const signature = closeCommand(
-        context,
-        8,
-        0,
-        concatenate(body, session.state.coins),
-    );
+    const signature = closeCommand(context, 8, 0, body);
     const responsePacket = packet(body, signature);
     let state: CloseState = {
         ...session.state,
         responseBody: new Uint8Array(),
-        coins: new Uint8Array(),
+
         responsePacket,
     };
     if (session.organizer) {
@@ -1156,7 +1143,6 @@ const respond = async (session: CloseSession, preparedBody?: Uint8Array) => {
         state = {
             ...state,
             proposalBody: closeCommand(context, 9),
-            coins: crypto.getRandomValues(new Uint8Array(coinBytes)),
         };
     }
     await commitClose(session, { generation: closePhase.responded, state });
@@ -1174,18 +1160,12 @@ const propose = async (session: CloseSession, prepared: boolean) => {
                 'The replayed proposal differs from the retained one.',
             );
     }
-    const signature = closeCommand(
-        context,
-        8,
-        0,
-        concatenate(session.state.proposalBody, session.state.coins),
-    );
+    const signature = closeCommand(context, 8, 0, session.state.proposalBody);
     await commitClose(session, {
         generation: closePhase.proposed,
         state: {
             ...session.state,
             proposalBody: new Uint8Array(),
-            coins: new Uint8Array(),
             proposalPacket: packet(session.state.proposalBody, signature),
         },
     });

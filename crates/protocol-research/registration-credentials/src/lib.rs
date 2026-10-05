@@ -129,11 +129,7 @@ impl Credential {
     pub fn proof_role(&self, poll: [u8; 64], runtime: [u8; 64]) -> Vec<u8> {
         registration_proof_role(poll, runtime, &self.signing_public)
     }
-    pub fn sign_registration(
-        &mut self,
-        body: BodyDigest,
-        randomness: [u8; 32],
-    ) -> Result<[u8; 3309], Error> {
+    pub fn sign_registration(&mut self, body: BodyDigest) -> Result<[u8; 3309], Error> {
         if self.signed {
             return Err(Error::Consumed);
         }
@@ -142,10 +138,9 @@ impl Credential {
         }
         self.signed = true;
         self.poll_creation_consumed = true;
-        let coins = Zeroizing::new(randomness);
         let (_, private) = ml_dsa_65::KG::keygen_from_seed(&self.signing_seed);
         let signature = private
-            .try_sign_with_seed(&coins, &body.digest, SIGNATURE_CONTEXT)
+            .try_sign_with_seed(&[0; 32], &body.digest, SIGNATURE_CONTEXT)
             .map_err(|_| Error::Crypto)?;
         self.completed_body = Some(body.digest);
         Ok(signature)
@@ -338,7 +333,7 @@ mod tests {
     fn credentials_sign_one_body_and_bind_the_full_public_context() {
         let mut credential = Credential::from_seed([7; 32]);
         let signature = credential
-            .sign_registration(body(&credential, [1; 64]), [10; 32])
+            .sign_registration(body(&credential, [1; 64]))
             .unwrap();
         assert!(verify_registration_signature(
             body(&credential, [1; 64]),
@@ -354,9 +349,45 @@ mod tests {
         ));
         assert!(
             credential
-                .sign_registration(body(&credential, [1; 64]), [11; 32])
+                .sign_registration(body(&credential, [1; 64]))
                 .is_err()
         );
+    }
+    #[test]
+    fn deterministic_signing_replays_the_locked_frame_without_fresh_coins() {
+        for seed in [0, 7, 255] {
+            for poll in [1, 2] {
+                let mut original = Credential::from_seed([seed; 32]);
+                let digest = body(&original, [poll; 64]).bytes();
+                let signature = original
+                    .sign_registration(body(&original, [poll; 64]))
+                    .unwrap();
+                // FIPS 204 Algorithm 2 fixes rnd to zero. The dependency's
+                // seeded primitive is independently checked against Wycheproof.
+                let (_, key) = ml_dsa_65::KG::keygen_from_seed(&[seed; 32]);
+                assert_eq!(
+                    signature,
+                    key.try_sign_with_seed(&[0; 32], &digest, SIGNATURE_CONTEXT)
+                        .unwrap()
+                );
+                let mut interrupted = Credential::from_seed([seed; 32]);
+                assert_eq!(
+                    interrupted
+                        .sign_registration(body(&interrupted, [poll; 64]))
+                        .unwrap(),
+                    signature
+                );
+                assert!(
+                    original
+                        .sign_registration(body(&original, [poll + 1; 64]))
+                        .is_err()
+                );
+                assert!(!verify_registration_signature(
+                    body(&original, [poll + 1; 64]),
+                    &signature
+                ));
+            }
+        }
     }
     #[test]
     fn body_streams_refuse_incomplete_or_ignored_overrun_requests() {
@@ -439,9 +470,7 @@ mod tests {
             value.absorb(&[4; 5000]).unwrap();
             value.finish().unwrap()
         };
-        let signature = credential
-            .sign_registration(hash(&encoded), [10; 32])
-            .unwrap();
+        let signature = credential.sign_registration(hash(&encoded)).unwrap();
         assert!(verify_registration_signature(hash(&encoded), &signature));
         assert!(!verify_registration_signature(hash(&other), &signature));
         let name_end = encoded.len() - (6 + 6 + 64);

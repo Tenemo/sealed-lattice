@@ -63,7 +63,7 @@ fn invalid_source(
     .unwrap();
     let signature = enrollment
         .credential
-        .sign_ballot_envelope(setup.roster(), &envelope, *crate::random::<32>())
+        .sign_ballot_envelope(setup.roster(), &envelope)
         .unwrap();
     crate::write(directory.join("envelope.bin"), envelope.bytes());
     crate::write(directory.join("signature.bin"), &signature);

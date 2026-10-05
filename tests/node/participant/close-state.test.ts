@@ -84,7 +84,6 @@ const phases: readonly (readonly [number, boolean, CloseState])[] = [
         state({
             events: collected,
             intentBody: filled(close.intentBodyBytes, 5),
-            coins: filled(32, 6),
         }),
     ],
     [19, false, state({ events: [...collected, lock], ...locked })],
@@ -96,7 +95,6 @@ const phases: readonly (readonly [number, boolean, CloseState])[] = [
             events: [...collected, lock],
             ...locked,
             responseBody: filled(responseBodyBytes, 8),
-            coins: filled(32, 6),
         }),
     ],
     [21, false, state({ events: [...collected, lock], ...responded })],
@@ -107,7 +105,6 @@ const phases: readonly (readonly [number, boolean, CloseState])[] = [
             events: [...collected, lock, response],
             ...responded,
             proposalBody: filled(close.proposalBodyBytes, 10),
-            coins: filled(32, 6),
         }),
     ],
     [
@@ -261,7 +258,6 @@ describe('participant close state', () => {
                 encoded(20, false, {
                     ...lockedState,
                     responseBody: filled(close.minimumResponseBodyBytes - 1, 8),
-                    coins: filled(32, 6),
                 }),
             ),
         ).toThrow();

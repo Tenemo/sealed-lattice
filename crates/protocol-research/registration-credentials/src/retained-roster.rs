@@ -133,9 +133,7 @@ mod tests {
         let mut credentials: Vec<Credential> = (0..3u8)
             .map(|seed| Credential::from_seed([seed + 1; 32]))
             .collect();
-        let packet = credentials[0]
-            .create_poll(draft, runtime, [5; 32], [6; 32])
-            .unwrap();
+        let packet = credentials[0].create_poll(draft, runtime, [5; 32]).unwrap();
         let poll = verify_poll(packet.identity, runtime, &packet.body, &packet.signature).unwrap();
         let keys: Vec<Vec<u8>> = (0..3u8)
             .map(|seed| (0..KEY_BYTES).map(|index| (index as u8) ^ seed).collect())

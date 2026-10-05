@@ -87,7 +87,7 @@ const encodeWellFormed = (value: string) => {
 // has independent authenticated intents; later stages use global generations.
 const unusedPurposes = (root: AuthenticatedRoot) => {
     const generation = root.head.generation;
-    const lastUnused = [2, 0, 0, 0, 16, 18, 20, 21, 23, 28];
+    const lastUnused = [2, 0, 0, 0, 15, 18, 20, 21, 23, 27];
     let mask = lastUnused.reduce(
         (value, last, purpose) =>
             generation <= last ? value | (1 << purpose) : value,

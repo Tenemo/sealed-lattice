@@ -1,39 +1,28 @@
 type Message = Readonly<{ key: string; context: string; body: string }>;
 type Intent = {
     message: Message;
-    coins?: number;
     volatileResponse?: string;
     completedResponse?: string;
     lost: boolean;
 };
 
-// This exposes an abstract deterministic function of signing inputs, not a
-// cryptographic signature. Equality of the finite input distributions is
-// preserved by deterministic ML-DSA signing. The reduction does not see coins
-// chosen inside its standard signing oracle.
-const response = (message: Message, coins: number): string =>
-    JSON.stringify([message.key, message.context, message.body, coins]);
+// Abstract deterministic signing inputs, not a signature primitive. The real
+// signer and its oracle use the same fixed zero signing input from FIPS 204.
+const response = (message: Message): string =>
+    JSON.stringify([message.key, message.context, message.body]);
 
 export const createSignatureIntentSimulation = (
-    mode: 'retained-coins' | 'cached-oracle',
-    randomness: readonly number[],
+    mode: 'deterministic' | 'cached-oracle',
 ) => {
     const intents = new Map<string, Intent>();
     const oracleCache = new Map<string, string>();
-    let randomIndex = 0;
     let signingEvaluations = 0;
     let oracleQueries = 0;
-    const random = (): number => {
-        const value = randomness[randomIndex++];
-        if (value === undefined) throw new Error('Model randomness exhausted.');
-        return value;
-    };
     const begin = (identity: string, message: Message): void => {
         if (!identity || intents.has(identity))
             throw new Error('Signing intent already consumed.');
         intents.set(identity, {
             message: { ...message },
-            coins: mode === 'retained-coins' ? random() : undefined,
             lost: false,
         });
     };
@@ -55,16 +44,14 @@ export const createSignatureIntentSimulation = (
             return intent.completedResponse;
         signingEvaluations++;
         let value: string;
-        if (mode === 'retained-coins') {
-            if (intent.coins === undefined)
-                throw new Error('Signing coins unavailable.');
-            value = response(intent.message, intent.coins);
+        if (mode === 'deterministic') {
+            value = response(intent.message);
         } else {
             const cached = oracleCache.get(identity);
             if (cached !== undefined) value = cached;
             else {
                 oracleQueries++;
-                value = response(intent.message, random());
+                value = response(intent.message);
                 oracleCache.set(identity, value);
             }
         }
@@ -76,7 +63,6 @@ export const createSignatureIntentSimulation = (
         if (intent.volatileResponse === undefined)
             throw new Error('No evaluated response to retain.');
         intent.completedResponse = intent.volatileResponse;
-        intent.coins = undefined;
         intent.volatileResponse = undefined;
     };
     const interrupt = (identity: string): void => {
@@ -85,7 +71,6 @@ export const createSignatureIntentSimulation = (
     const loseRequiredState = (identity: string): void => {
         const intent = retained(identity);
         intent.lost = true;
-        intent.coins = undefined;
         intent.volatileResponse = undefined;
         intent.completedResponse = undefined;
     };
@@ -96,41 +81,8 @@ export const createSignatureIntentSimulation = (
         interrupt,
         loseRequiredState,
         counts: () => ({
-            randomDraws: randomIndex,
             signingEvaluations,
             oracleQueries,
         }),
     };
-};
-
-export const signatureIntentJointDistribution = (
-    mode: 'retained-coins' | 'cached-oracle',
-) => {
-    const distribution = new Map<string, number>();
-    const message = {
-        key: 'original-credential',
-        context: 'ballot',
-        body: 'fixed-envelope',
-    };
-    for (let first = 0; first < 4; first++)
-        for (let second = 0; second < 4; second++) {
-            const model = createSignatureIntentSimulation(mode, [
-                first,
-                second,
-            ]);
-            model.begin('intent-a', message);
-            model.begin('intent-b', message);
-            // Reverse evaluation order: lazy oracle coins cannot be equated
-            // pathwise to the earlier chronological intent-creation stream.
-            const initial = model.evaluate('intent-b', message);
-            model.interrupt('intent-b');
-            const repeated = model.evaluate('intent-b', message);
-            model.commit('intent-b');
-            const other = model.evaluate('intent-a', message);
-            const key = JSON.stringify([initial, repeated, other]);
-            distribution.set(key, (distribution.get(key) ?? 0) + 1);
-        }
-    return [...distribution].sort(([left], [right]) =>
-        left.localeCompare(right),
-    );
 };

@@ -394,30 +394,24 @@ impl CloseWork {
                 self.responses.push(response);
                 Ok(Vec::new())
             }
-            // Signing is reachable only after the root commits this body and
-            // its exact coins. One request consumes the prepared body; the
+            // Signing is reachable only after the root commits this exact
+            // body. One request consumes the prepared body; the
             // credential consumes its purpose before signing.
             8 => {
-                if input.len() < 32 {
-                    return Err(Error::Shape);
-                }
-                if input[..input.len() - 32]
-                    != *self.prepared.as_ref().ok_or(Error::Context)?.body()
-                {
+                if input != self.prepared.as_ref().ok_or(Error::Context)?.body() {
                     return Err(Error::Context);
                 }
                 let prepared = self.prepared.take().ok_or(Error::Context)?;
-                let coins = input[input.len() - 32..].try_into().unwrap();
                 let roster = self.context.setup().roster();
                 let signature = match &prepared {
                     Prepared::Intent(message) => {
-                        credential.sign_close_intent(&self.owner, roster, message, coins)?
+                        credential.sign_close_intent(&self.owner, roster, message)?
                     }
                     Prepared::Response(message) => {
-                        credential.sign_close_response(&self.owner, roster, message, coins)?
+                        credential.sign_close_response(&self.owner, roster, message)?
                     }
                     Prepared::Proposal(message) => {
-                        credential.sign_close_proposal(&self.owner, roster, message, coins)?
+                        credential.sign_close_proposal(&self.owner, roster, message)?
                     }
                 };
                 Ok(signature.to_vec())

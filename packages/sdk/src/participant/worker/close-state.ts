@@ -17,9 +17,9 @@ import type { RecordContext } from './records.js';
 // replays them into the same state. An event holds its kind, its record
 // count, the serial its records are stored under, its payload length and one
 // key per record. Before an intent the log only collects, alongside every
-// ballot phase. Generation 18 retains the organizer's intent body and coins,
-// 19 the locked intent, 20 the response body and coins, 21 the signed
-// response and, for the organizer, its proposal body and coins, and 22 the
+// ballot phase. Generation 18 retains the organizer's intent exact body,
+// 19 the locked intent, 20 the response exact body, 21 the signed
+// response and, for the organizer, its proposal exact body, and 22 the
 // organizer's signed proposal. No event is added from generation 20 on, and
 // later generations keep the completed close unchanged.
 
@@ -31,7 +31,7 @@ export const closePhase = {
     proposed: 22,
 } as const;
 const marker = encodeText('CST2');
-const coinBytes = 32;
+
 const eventHeaderBytes = 1 + 2 + 4 + 4;
 
 // The participant's own signed ballot and the locked intent reference other
@@ -61,7 +61,6 @@ export type CloseState = Readonly<{
     responsePacket: Uint8Array;
     proposalBody: Uint8Array;
     proposalPacket: Uint8Array;
-    coins: Uint8Array;
 }>;
 
 export const collectingCloseState = (): CloseState => ({
@@ -72,7 +71,6 @@ export const collectingCloseState = (): CloseState => ({
     responsePacket: new Uint8Array(),
     proposalBody: new Uint8Array(),
     proposalPacket: new Uint8Array(),
-    coins: new Uint8Array(),
 });
 
 // The completed close of a participant: its signed response, and for the
@@ -91,7 +89,7 @@ const phaseOf = (generation: number, organizer: boolean) => {
 const phaseFields = (phase: number, organizer: boolean, state: CloseState) => {
     switch (phase) {
         case closePhase.intent:
-            return [state.intentBody, state.coins];
+            return [state.intentBody];
         case closePhase.locked:
             return [state.intentPacket];
         case closePhase.responding:
@@ -99,16 +97,10 @@ const phaseFields = (phase: number, organizer: boolean, state: CloseState) => {
                 state.intentPacket,
                 unsigned32(state.responseBody.length),
                 state.responseBody,
-                state.coins,
             ];
         case closePhase.responded:
             return organizer
-                ? [
-                      state.intentPacket,
-                      state.responsePacket,
-                      state.proposalBody,
-                      state.coins,
-                  ]
+                ? [state.intentPacket, state.responsePacket, state.proposalBody]
                 : [state.intentPacket, state.responsePacket];
         case closePhase.proposed:
             return [
@@ -270,7 +262,6 @@ export const decodeCloseState = (
         result = {
             ...state,
             intentBody: take(close.intentBodyBytes),
-            coins: take(coinBytes),
         };
     else if (phase >= closePhase.locked) {
         const intentPacket = take(intentPacketBytes);
@@ -287,7 +278,6 @@ export const decodeCloseState = (
             result = {
                 ...result,
                 responseBody: take(length),
-                coins: take(coinBytes),
             };
         } else if (phase >= closePhase.responded) {
             const responsePacket = take(
@@ -304,7 +294,6 @@ export const decodeCloseState = (
                 result = {
                     ...result,
                     proposalBody: take(close.proposalBodyBytes),
-                    coins: take(coinBytes),
                 };
             else if (phase === closePhase.proposed) {
                 const proposalPacket = take(

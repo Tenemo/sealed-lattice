@@ -10,7 +10,6 @@ use fips204::{
     traits::{KeyGen, SerDes, Signer, Verifier},
 };
 use supported_profile::Profile;
-use zeroize::Zeroizing;
 
 pub const POLL_SIGNATURE_CONTEXT: &[u8] = b"sealed-lattice/poll-definition/v2";
 pub const MAXIMUM_POLL_BYTES: usize = 1_048_576;
@@ -139,7 +138,6 @@ impl Credential {
         draft: PollDraft,
         runtime: [u8; 64],
         nonce: [u8; 32],
-        randomness: [u8; 32],
     ) -> Result<SignedPoll, Error> {
         if self.poll_creation_consumed || self.signed {
             return Err(Error::Consumed);
@@ -147,10 +145,9 @@ impl Credential {
         let body = draft.body(runtime, nonce, self.signing_public)?;
         let identity = identity(&body)?;
         self.poll_creation_consumed = true;
-        let coins = Zeroizing::new(randomness);
         let (_, private) = ml_dsa_65::KG::keygen_from_seed(&self.signing_seed);
         let signature = private
-            .try_sign_with_seed(&coins, &identity, POLL_SIGNATURE_CONTEXT)
+            .try_sign_with_seed(&[0; 32], &identity, POLL_SIGNATURE_CONTEXT)
             .map_err(|_| Error::Crypto)?;
         Ok(SignedPoll {
             body,
@@ -267,7 +264,7 @@ mod tests {
         let mut creator = Credential::from_seed([7; 32]);
         let original = *creator.signing_public();
         let packet = creator
-            .create_poll(draft(2).unwrap(), [2; 64], [3; 32], [4; 32])
+            .create_poll(draft(2).unwrap(), [2; 64], [3; 32])
             .unwrap();
         let verified =
             verify_poll(packet.identity, [2; 64], &packet.body, &packet.signature).unwrap();
@@ -286,7 +283,7 @@ mod tests {
         );
         assert!(
             creator
-                .create_poll(draft(1).unwrap(), [2; 64], [4; 32], [5; 32])
+                .create_poll(draft(1).unwrap(), [2; 64], [4; 32])
                 .is_err()
         );
         assert!(verify_poll(packet.identity, [9; 64], &packet.body, &packet.signature).is_err());
@@ -310,7 +307,7 @@ mod tests {
                 )
                 .unwrap();
                 let packet = Credential::from_seed([7; 32])
-                    .create_poll(draft, [2; 64], [3; 32], [4; 32])
+                    .create_poll(draft, [2; 64], [3; 32])
                     .unwrap();
                 let verified =
                     verify_poll(packet.identity, [2; 64], &packet.body, &packet.signature).unwrap();
@@ -335,7 +332,7 @@ mod tests {
             let draft =
                 PollDraft::new(manifest("Question", "First", "Second", 2), 1, maximum).unwrap();
             let packet = Credential::from_seed([7; 32])
-                .create_poll(draft, [2; 64], [3; 32], [4; 32])
+                .create_poll(draft, [2; 64], [3; 32])
                 .unwrap();
             let verified =
                 verify_poll(packet.identity, [2; 64], &packet.body, &packet.signature).unwrap();
@@ -354,7 +351,7 @@ mod tests {
     fn valid_signatures_do_not_authorize_invalid_poll_fields() {
         let mut creator = Credential::from_seed([7; 32]);
         let packet = creator
-            .create_poll(draft(10).unwrap(), [2; 64], [3; 32], [4; 32])
+            .create_poll(draft(10).unwrap(), [2; 64], [3; 32])
             .unwrap();
         let original =
             CanonicalTuple::decode(&packet.body, &CanonicalDecodeLimits::default()).unwrap();

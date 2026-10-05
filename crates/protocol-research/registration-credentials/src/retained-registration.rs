@@ -125,9 +125,7 @@ mod tests {
         let draft =
             PollDraft::new(Manifest::new(text("Question"), options).unwrap(), 2, 10).unwrap();
         let mut organizer = Credential::from_seed([1; 32]);
-        let packet = organizer
-            .create_poll(draft, runtime, [5; 32], [6; 32])
-            .unwrap();
+        let packet = organizer.create_poll(draft, runtime, [5; 32]).unwrap();
         let poll = verify_poll(packet.identity, runtime, &packet.body, &packet.signature).unwrap();
         let credential = Credential::from_seed([seed; 32]);
         let key: Vec<u8> = (0..KEY_BYTES).map(|index| (index as u8) ^ seed).collect();

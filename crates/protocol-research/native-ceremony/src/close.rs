@@ -464,7 +464,7 @@ pub fn run(
                 )
                 .unwrap();
                 let signature = fork
-                    .sign_retained_ballot_envelope(&owner, &envelope, *crate::random::<32>())
+                    .sign_retained_ballot_envelope(&owner, &envelope)
                     .unwrap();
                 Submission {
                     envelope,
@@ -596,11 +596,9 @@ pub fn run(
         )
         .unwrap();
         assert!(matches!(
-            enrollments[nonvoter].credential.sign_ballot_envelope(
-                roster,
-                &envelope,
-                *crate::random::<32>()
-            ),
+            enrollments[nonvoter]
+                .credential
+                .sign_ballot_envelope(roster, &envelope),
             Err(Error::Consumed)
         ));
     }
@@ -725,12 +723,7 @@ pub fn run(
         )
         .unwrap();
         let late_signature = late_fork
-            .sign_close_response(
-                &equivocation.owner,
-                roster,
-                &late_listing,
-                *crate::random::<32>(),
-            )
+            .sign_close_response(&equivocation.owner, roster, &late_listing)
             .unwrap();
         assert_eq!(
             context
@@ -1253,12 +1246,7 @@ pub fn run(
             Err(Error::Consumed)
         ));
         assert!(matches!(
-            restored.sign_close_response(
-                &restored_owner,
-                roster,
-                &response,
-                *crate::random::<32>()
-            ),
+            restored.sign_close_response(&restored_owner, roster, &response),
             Err(Error::Consumed)
         ));
         late_fork = Some(fork);
@@ -1284,12 +1272,7 @@ pub fn run(
             .unwrap();
     }
     assert!(matches!(
-        organizer_restored.sign_close_proposal(
-            &organizer_owner,
-            roster,
-            &proposal_message,
-            *crate::random::<32>()
-        ),
+        organizer_restored.sign_close_proposal(&organizer_owner, roster, &proposal_message),
         Err(Error::Consumed)
     ));
     let directory = output.join("close");

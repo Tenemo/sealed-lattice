@@ -344,9 +344,7 @@ pub(crate) mod tests {
         let draft =
             PollDraft::new(Manifest::new(text("Question"), options).unwrap(), 2, 3).unwrap();
         let mut organizer = Credential::from_seed([1; 32]);
-        let packet = organizer
-            .create_poll(draft, [4; 64], [5; 32], [6; 32])
-            .unwrap();
+        let packet = organizer.create_poll(draft, [4; 64], [5; 32]).unwrap();
         let header = RegistrationHeader {
             username: normalize_username(b"Participant").unwrap(),
             poll: packet.identity,

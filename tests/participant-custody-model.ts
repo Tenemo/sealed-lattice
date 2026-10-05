@@ -131,7 +131,7 @@ export const compileParticipantCustodyCensus = (profile: SupportedProfile) => {
         return lengths;
     });
     const maximumProofRecords = chunks(body.maximumProofBytes);
-    // PCS4 owns its phase independently of global preparation generation.
+    // PCS5 owns its phase independently of global preparation generation.
     const metadataPrefixBytes = 4n + 1n + 2n + 4n * 4n;
     const maximumCheckpointMetadataBytes =
         metadataPrefixBytes +

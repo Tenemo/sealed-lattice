@@ -12,7 +12,6 @@ use fips204::{
     traits::{KeyGen, SerDes, Signer, Verifier},
 };
 use supported_profile::Profile;
-use zeroize::Zeroizing;
 
 pub const BALLOT_SIGNATURE_CONTEXT: &[u8] = b"sealed-lattice/ballot-envelope/v1";
 pub const ENVELOPE_BYTES: usize = 4 + 64 + 64 + 2 + 8 + 8 + 64;
@@ -213,7 +212,6 @@ impl Credential {
         &mut self,
         owner: &RetainedBallotOwner,
         envelope: &BallotEnvelope,
-        coins: [u8; 32],
     ) -> Result<[u8; 3309], Error> {
         if self.completed_body != Some(owner.owner_body)
             || self.signing_public != owner.signing_public
@@ -223,7 +221,7 @@ impl Credential {
         {
             return Err(Error::Context);
         }
-        self.sign_ballot_bytes(envelope, coins)
+        self.sign_ballot_bytes(envelope)
     }
     pub fn restore_retained_ballot_signing(
         &mut self,
@@ -257,7 +255,6 @@ impl Credential {
         &mut self,
         roster: &OrganizerSignedRoster,
         envelope: &BallotEnvelope,
-        coins: [u8; 32],
     ) -> Result<[u8; 3309], Error> {
         if self.signed_ballot.is_some() {
             return Err(Error::Consumed);
@@ -273,23 +270,18 @@ impl Credential {
         {
             return Err(Error::Context);
         }
-        self.sign_ballot_bytes(envelope, coins)
+        self.sign_ballot_bytes(envelope)
     }
-    fn sign_ballot_bytes(
-        &mut self,
-        envelope: &BallotEnvelope,
-        coins: [u8; 32],
-    ) -> Result<[u8; 3309], Error> {
+    fn sign_ballot_bytes(&mut self, envelope: &BallotEnvelope) -> Result<[u8; 3309], Error> {
         self.check_unlocked(SigningPurpose::Ballot)?;
         // An attempt locked before the close intent completes; a new one never starts.
         if self.signed_ballot.is_some() || (self.close_lock.is_some() && !self.ballot_attempted) {
             return Err(Error::Consumed);
         }
         self.signed_ballot = Some((envelope.identity(), envelope.ballot_time()));
-        let coins = Zeroizing::new(coins);
         let (_, private) = ml_dsa_65::KG::keygen_from_seed(&self.signing_seed);
         private
-            .try_sign_with_seed(&coins, envelope.bytes(), BALLOT_SIGNATURE_CONTEXT)
+            .try_sign_with_seed(&[0; 32], envelope.bytes(), BALLOT_SIGNATURE_CONTEXT)
             .map_err(|_| Error::Crypto)
     }
 }
@@ -340,7 +332,7 @@ mod tests {
         let draft =
             PollDraft::new(Manifest::new(label("Question"), options).unwrap(), 10, 10).unwrap();
         let packet = Credential::from_seed([20; 32])
-            .create_poll(draft, runtime, [3; 32], [4; 32])
+            .create_poll(draft, runtime, [3; 32])
             .unwrap();
         verify_poll(packet.identity, runtime, &packet.body, &packet.signature).unwrap()
     }

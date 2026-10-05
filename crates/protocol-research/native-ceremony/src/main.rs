@@ -454,7 +454,7 @@ fn main() {
     assert_eq!(proposal.profile(), profile);
     let proposal_signature = enrollments[0]
         .credential
-        .sign_roster_proposal(&proposal, *random::<32>())
+        .sign_roster_proposal(&proposal)
         .unwrap();
     write(output.join("proposal.bin"), proposal.body());
     write(output.join("proposal-signature.bin"), &proposal_signature);
@@ -853,7 +853,7 @@ fn main() {
     assert!(
         enrollments[1]
             .credential
-            .sign_retained_ballot_envelope(&owner, &envelope, *random::<32>())
+            .sign_retained_ballot_envelope(&owner, &envelope)
             .is_err()
     );
     let coins = random::<32>();
@@ -960,7 +960,7 @@ fn main() {
     // The restored credential signs nothing new until its authenticated root
     // unlocks a purpose that the root's records show unused.
     assert!(matches!(
-        restored.sign_retained_ballot_envelope(&restored_owner, &changed_envelope, *random::<32>()),
+        restored.sign_retained_ballot_envelope(&restored_owner, &changed_envelope),
         Err(registration_credentials::Error::Consumed)
     ));
     // Restoring the completed ballot consumes the purpose even after an unlock.
@@ -977,12 +977,12 @@ fn main() {
         .unwrap();
     assert!(
         restored
-            .sign_retained_ballot_envelope(&restored_owner, &envelope, *random::<32>())
+            .sign_retained_ballot_envelope(&restored_owner, &envelope)
             .is_err()
     );
     assert!(
         restored
-            .sign_retained_ballot_envelope(&restored_owner, &changed_envelope, *random::<32>())
+            .sign_retained_ballot_envelope(&restored_owner, &changed_envelope)
             .is_err()
     );
     assert!(
@@ -991,7 +991,6 @@ fn main() {
             &body,
             &setup,
             ballot_time,
-            *random::<32>()
         )
         .is_err()
     );
@@ -1028,7 +1027,6 @@ fn main() {
             &body,
             &setup,
             ballot_time,
-            *random::<32>()
         )
         .is_err()
     );
@@ -1055,7 +1053,7 @@ fn main() {
         .unwrap();
         let wrong_position_signature = enrollments[author]
             .credential
-            .sign_ballot_envelope(setup.roster(), &wrong_position, *random::<32>())
+            .sign_ballot_envelope(setup.roster(), &wrong_position)
             .unwrap();
         let authentication = ballot_proof::submission::authenticate_envelope(
             &setup,
@@ -1120,7 +1118,7 @@ fn main() {
         .unwrap();
         let invalid_proof_signature = enrollments[author]
             .credential
-            .sign_ballot_envelope(setup.roster(), &invalid_proof_envelope, *random::<32>())
+            .sign_ballot_envelope(setup.roster(), &invalid_proof_envelope)
             .unwrap();
         write(
             ballot_directory.join("invalid-proof-envelope.bin"),

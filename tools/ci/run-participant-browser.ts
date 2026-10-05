@@ -3811,7 +3811,7 @@ await runWithLocalRunLog(
             );
             // The organizer crashes with its proposal intent, and its next
             // visit verifies the records again and signs the locked proposal
-            // with the retained coins. The last honest participant crashes
+            // deterministically. The last honest participant crashes
             // right after it retains the accepted roster, and its next visit
             // continues from that roster.
             await interrupt(0, 'propose-roster', { recordIds }, 2);
@@ -4693,7 +4693,7 @@ await runWithLocalRunLog(
             }
             // The first honest authors halt between them at every ballot
             // generation: after the attempt lock, with the seed retained,
-            // with the body retained, with the signature intent, and with the
+            // with the body and signing intent retained, and with the
             // signed ballot before its delivery.
             const ballotHalts = new Map(
                 ballotAuthors
@@ -4701,10 +4701,7 @@ await runWithLocalRunLog(
                     .slice(0, 3)
                     .map(
                         (position, index) =>
-                            [
-                                position,
-                                [[13, 16, 17], [14], [15]][index],
-                            ] as const,
+                            [position, [[13, 17], [14], [15]][index]] as const,
                     ),
             );
             const signBallot = async (position: number) => {
@@ -5525,7 +5522,7 @@ await runWithLocalRunLog(
                 // The combining participant halts at every generation after
                 // its target lock, the last with its signed release before
                 // delivery, which its next visit only delivers.
-                for (const generation of [26, 27, 28, 29])
+                for (const generation of [26, 27, 29])
                     await interrupt(
                         combiningPosition,
                         'release',
@@ -6098,7 +6095,7 @@ await runWithLocalRunLog(
                       ]),
                 'A registrant that the organizer leaves out of the roster stays pending when shown it.',
                 'The organizer crashes with its roster proposal intent and the last honest participant right after it retains the accepted roster, and an honest participant crashes while it verifies the setup and right after it retains the verified setup; each next visit continues from its retained state, verifying the setup again from the public records after the first of those crashes.',
-                'Every participant locally confirms the fixed roster. Selected eligible contributors publish signed clear offers; the organizer proposes the selection and members endorse it before setup activation. The cohort interrupts original contribution and continuation work, the offer-signing intent, the organizer selection intent and one endorsement intent; each next visit preserves its original seed, checkpoint, signature coins and independently retained preparation state.',
+                'Every participant locally confirms the fixed roster. Selected eligible contributors publish signed clear offers; the organizer proposes the selection and members endorse it before setup activation. The cohort interrupts original contribution and continuation work, the offer-signing intent, the organizer selection intent and one endorsement intent; each next visit preserves its original seed, checkpoint, signing intent and independently retained preparation state.',
                 `Honest browsers crash right after their participants durably enter each ${mode === 'empty' ? 'close and target' : noResult ? 'ballot, close and target' : 'ballot, close, target and release'} generation, and each next visit continues from the retained state.`,
                 mode === 'empty'
                     ? "Copies of honest participants' state that lose their last data record before their close response or target vote stop for good."

@@ -27,9 +27,15 @@ describe('signed registration and original-key custody', () => {
         expect(value.maximumEnrollmentRecords).toBe(18n);
         expect(value.maximumRecords).toBe(22n);
         expect(value.maximumEnrollmentManifestBytes).toBe(1482n);
-        expect(value.maximumProposalIntentManifestBytes).toBe(1733n);
-        expect(value.maximumManifestBytes).toBe(1806n);
-        expect(value.maximumRootBytes).toBe(1822n);
+        expect(value.maximumProposalIntentManifestBytes).toBe(
+            4n + 96n + 64n + 4n + 21n * 73n,
+        );
+        expect(value.maximumManifestBytes).toBe(
+            4n + 96n + 64n + 4n + 22n * 73n,
+        );
+        expect(value.maximumRootBytes).toBe(
+            4n + 96n + 64n + 4n + 22n * 73n + 16n,
+        );
         expect(value.maximumRestoreInputBytes).toBeLessThan(1_572_864n);
         expect(value.maximumRetainedPayloadBytes).toBeLessThan(
             16n * 1024n ** 2n,
@@ -43,7 +49,7 @@ describe('signed registration and original-key custody', () => {
         expect(value.rootAssociatedBytes).toBe(68n);
         expect(value.recipientAssociatedBytes).toBe(482n);
         expect(value.initialRootDistinctBlockInputs).toBe(101n);
-        expect(value.rootDistinctBlockInputs).toBe(115n);
+        expect(value.rootDistinctBlockInputs).toBe(113n);
         expect(value.signingDistinctBlockInputs).toBe(5n);
         expect(value.sourceDistinctBlockInputs).toBe(
             2n + (value.maximumSourceCapsuleBytes - 16n + 15n) / 16n,
@@ -122,8 +128,8 @@ describe('signed registration and original-key custody', () => {
                 .initialRootDistinctBlockInputs,
         );
         for (const [nonceOrdinal, blocks] of [
-            [2n, 109],
-            [3n, 113],
+            [2n, 107],
+            [3n, 111],
         ] as const) {
             const rotatedKeyInputs = new Set<bigint>([0n]);
             for (let counter = 0; counter <= blocks; counter++) {

@@ -36,18 +36,13 @@ fn command(session: &mut Session, operation: u32, input: &[u8]) -> Result<Vec<u8
             Ok(output)
         }
         1 => {
-            if !(33..=MAXIMUM_TARGET_BODY_BYTES + 32).contains(&input.len()) {
+            if !(1..=MAXIMUM_TARGET_BODY_BYTES).contains(&input.len()) {
                 return Err(Error::Shape);
             }
-            let body_length = input.len() - 32;
             let work = session.finality.as_ref().ok_or(Error::Context)?;
             let enrollment = session.enrollment.as_mut().ok_or(Error::Context)?;
-            work.sign(
-                &mut enrollment.credential,
-                &input[..body_length],
-                input[body_length..].try_into().unwrap(),
-            )
-            .map(|vote| vote.encode())
+            work.sign(&mut enrollment.credential, input)
+                .map(|vote| vote.encode())
         }
         2 => {
             if session.finality.is_some() {

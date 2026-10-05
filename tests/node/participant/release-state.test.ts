@@ -50,7 +50,7 @@ const stateAt = (
         phase >= releasePhase.body
             ? filled(bounds.envelopeBytes, 9)
             : new Uint8Array(),
-    coins: phase === releasePhase.intent ? filled(32, 3) : new Uint8Array(),
+
     signature:
         phase === releasePhase.signed
             ? filled(profile.registration.signatureBytes, 4)
@@ -190,7 +190,7 @@ describe('participant release state', () => {
             position: 2,
         };
         const digest = filled(64, 8);
-        const state = stateAt(releasePhase.intent, 7, bounds.maximumBodyBytes);
+        const state = stateAt(releasePhase.body, 7, bounds.maximumBodyBytes);
         const records = releaseRecordInventory(profile, context, digest, state);
         expect(records.map((record) => record.key)).toEqual(
             state.bodyKeys.map((_key, index) => index),

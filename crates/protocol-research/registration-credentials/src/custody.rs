@@ -147,7 +147,7 @@ mod tests {
         let digest = make();
         let body = digest.bytes();
         let for_repeat = make();
-        original.sign_registration(digest, [10; 32]).unwrap();
+        original.sign_registration(digest).unwrap();
         let sealed = original.seal_complete(&data_key).unwrap();
         assert_eq!(sealed.len(), SEALED_SIGNING_SEED_BYTES);
         assert!(original.seal_complete(&data_key).is_err());
@@ -155,7 +155,7 @@ mod tests {
             Credential::open_complete(*original.signing_public(), body, &data_key, &sealed)
                 .unwrap();
         assert!(restored.check_retained());
-        assert!(restored.sign_registration(for_repeat, [12; 32]).is_err());
+        assert!(restored.sign_registration(for_repeat).is_err());
         assert!(restored.seal_complete(&data_key).is_err());
         let purposes = [
             SigningPurpose::Proposal,

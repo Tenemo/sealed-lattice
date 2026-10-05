@@ -66,7 +66,7 @@ import type { TargetState } from './target-state.js';
 // A participant's target signing. It verifies the organizer's close barrier
 // from the public close records, classifies each usable ballot, evaluates
 // the public ranking target and retains the exact target body and the own
-// ballot's status in it with fresh signing coins before its target vote
+// ballot's status in it before its target vote
 // exists. An interrupted signing
 // evaluates again and must reproduce the retained body. The values the
 // evaluation spills and the records of its keys are public work in their own
@@ -79,7 +79,6 @@ import type { TargetState } from './target-state.js';
 // barrier, classifies and evaluates from the public records alone, in its
 // own working storage, and retains nothing.
 
-const coinBytes = 32;
 const unusedWord = 0xff_ff_ff_ff;
 export const targetVoteCandidateKey = (position: number) =>
     'target-vote-' + String(position);
@@ -1240,7 +1239,7 @@ export const signTarget = async (close: CloseSession, relay: PublicRelay) => {
             predecessor: completedClosePhase(close.organizer),
             ballotStatus,
             body,
-            coins: crypto.getRandomValues(new Uint8Array(coinBytes)),
+
             vote: new Uint8Array(),
         };
         await commitTarget(close, targetPhase.intent, state);
@@ -1250,14 +1249,10 @@ export const signTarget = async (close: CloseSession, relay: PublicRelay) => {
         );
     else if (state.ballotStatus !== ballotStatus)
         throw new Error('The finality work reported another ballot status.');
-    const vote = finalityCommand(
-        context,
-        1,
-        concatenate(state.body, state.coins),
-    );
+    const vote = finalityCommand(context, 1, state.body);
     await commitTarget(close, targetPhase.signed, {
         ...state,
-        coins: new Uint8Array(),
+
         vote,
     });
     return { usableBallots, validBallots };

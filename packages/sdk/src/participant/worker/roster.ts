@@ -384,9 +384,9 @@ export type RetainedRoster = Readonly<{
     usernames: readonly string[];
 }>;
 
-// The organizer locks the verified proposal and its signing coins before the
+// The organizer locks the verified proposal before the
 // signature exists, then signs. A restored intent signs the same proposal
-// with the retained coins after verifying its records again.
+// deterministically after verifying its records again.
 export const proposeRoster = async (
     context: ParticipantContext,
     relay: PublicRelay,
@@ -411,7 +411,6 @@ export const proposeRoster = async (
             bytes: retainRegistration(context),
         },
     ];
-    const proposalCoins = crypto.getRandomValues(new Uint8Array(32));
     const locked = await commitRoot(context, root, {
         generation: 2,
         manifest: {
@@ -421,7 +420,6 @@ export const proposeRoster = async (
                 root.manifest.references,
                 added,
             ),
-            proposalCoins,
         },
         predecessorRecords: dataRecordInventory(root.manifest),
         addedData: added,
@@ -437,11 +435,10 @@ export const signRoster = async (
     root: AuthenticatedRoot,
     proposal: VerifiedProposal,
 ): Promise<AuthenticatedRoot> => {
-    const coins = root.manifest.proposalCoins;
-    if (root.head.generation !== 2 || coins === undefined)
+    if (root.head.generation !== 2)
         throw new Error('No locked roster proposal exists.');
     const { kernel, limits } = context;
-    const signing = concatenate(proposal.identity, coins);
+    const signing = proposal.identity.slice();
     let signed: number;
     try {
         sessionInput(context, signing);
@@ -458,7 +455,7 @@ export const signRoster = async (
     );
     if (!verifySignature(context, signature))
         throw new Error('The proposal signature did not verify.');
-    const { proposalCoins: _retired, ...manifest } = root.manifest;
+    const manifest = root.manifest;
     return commitRoot(context, root, {
         generation: 3,
         manifest: {

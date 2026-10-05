@@ -230,8 +230,6 @@ pub fn generate(
         offset += length;
     }
     signing.finish_body().unwrap();
-    signing
-        .sign(&mut enrollment.credential, *crate::random::<32>())
-        .unwrap();
+    signing.sign(&mut enrollment.credential).unwrap();
     (signing, body_header.to_vec())
 }

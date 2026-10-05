@@ -3,7 +3,6 @@ use fips204::{
     ml_dsa_65,
     traits::{KeyGen, SerDes, Signer, Verifier},
 };
-use zeroize::Zeroizing;
 
 pub const ROSTER_SIGNATURE_CONTEXT: &[u8] = b"sealed-lattice/roster-proposal/v1";
 
@@ -34,17 +33,12 @@ impl Credential {
         }
         Ok(())
     }
-    pub fn sign_roster_proposal(
-        &mut self,
-        proposal: &RosterProposal,
-        randomness: [u8; 32],
-    ) -> Result<[u8; 3309], Error> {
+    pub fn sign_roster_proposal(&mut self, proposal: &RosterProposal) -> Result<[u8; 3309], Error> {
         self.validate_roster_proposal_target(proposal)?;
         self.proposal_signed = true;
-        let coins = Zeroizing::new(randomness);
         let (_, private) = ml_dsa_65::KG::keygen_from_seed(&self.signing_seed);
         private
-            .try_sign_with_seed(&coins, &proposal.identity(), ROSTER_SIGNATURE_CONTEXT)
+            .try_sign_with_seed(&[0; 32], &proposal.identity(), ROSTER_SIGNATURE_CONTEXT)
             .map_err(|_| Error::Crypto)
     }
 }

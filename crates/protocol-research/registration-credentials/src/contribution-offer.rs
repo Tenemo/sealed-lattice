@@ -213,7 +213,6 @@ impl Credential {
         &mut self,
         context: &RetainedContributionContext,
         envelope: &OfferEnvelope,
-        coins: [u8; 32],
     ) -> Result<[u8; SIGNATURE_BYTES], Error> {
         self.validate_offer_context(context)?;
         if envelope.roster_identity() != context.identity()
@@ -222,7 +221,7 @@ impl Credential {
             return Err(Error::Context);
         }
         self.offer_signed = Some(envelope.identity());
-        self.sign_preparation_digest(&envelope.identity(), OFFER_PURPOSE.as_bytes(), coins)
+        self.sign_preparation_digest(&envelope.identity(), OFFER_PURPOSE.as_bytes())
     }
     pub fn restore_offer(
         &mut self,

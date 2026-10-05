@@ -12,8 +12,8 @@ describe('participant release custody layout', () => {
         // The marker, predecessor, ballot status, target length, body
         // length and key count;
         // the 2,048-byte largest target; the 512-bit seed; 32-byte keys; the
-        // envelope of the release context, body length and body identity; 32
-        // coin bytes and the 3,309-byte signature. The largest release body
+        // envelope of the release context, body length and body identity;
+        // and the 3,309-byte signature. The largest release body
         // fills 16 records of 1 MiB; the runtime bounds test checks its
         // length against the participant module's.
         const attempt = 14n + 2048n;
@@ -27,7 +27,7 @@ describe('participant release custody layout', () => {
             { phase: 25, bytes: attempt },
             { phase: 26, bytes: attempt + 64n },
             { phase: 27, bytes: attempt + 32n * records + envelope },
-            { phase: 28, bytes: attempt + 32n * records + envelope + 32n },
+
             { phase: 29, bytes: attempt + 32n * records + envelope + 3309n },
         ]);
         expect(value.maximumStateBytes).toBe(6153n);

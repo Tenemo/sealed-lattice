@@ -12,7 +12,6 @@ use fips204::{
     traits::{KeyGen, SerDes, Signer, Verifier},
 };
 use supported_profile::Profile;
-use zeroize::Zeroizing;
 
 /// Two different envelopes already make a slot conflicting, so a response
 /// lists no more; a corrupt author cannot inflate honest responses.
@@ -464,15 +463,9 @@ impl Credential {
         }
         Ok(())
     }
-    fn sign_close(
-        &self,
-        purpose: ClosePurpose,
-        identity: &[u8; 64],
-        coins: [u8; 32],
-    ) -> Result<[u8; 3309], Error> {
-        let coins = Zeroizing::new(coins);
+    fn sign_close(&self, purpose: ClosePurpose, identity: &[u8; 64]) -> Result<[u8; 3309], Error> {
         let (_, key) = ml_dsa_65::KG::keygen_from_seed(&self.signing_seed);
-        key.try_sign_with_seed(&coins, identity, purpose.context().as_bytes())
+        key.try_sign_with_seed(&[0; 32], identity, purpose.context().as_bytes())
             .map_err(|_| Error::Crypto)
     }
     fn check_own_signature(
@@ -503,7 +496,6 @@ impl Credential {
         owner: &RetainedBallotOwner,
         roster: &OrganizerSignedRoster,
         message: &CloseIntentMessage,
-        coins: [u8; 32],
     ) -> Result<[u8; 3309], Error> {
         self.check_close_owner(owner, roster, message.poll(), message.inventory())?;
         Self::check_organizer(owner, roster)?;
@@ -517,7 +509,7 @@ impl Credential {
         }
         self.close_intent_signed = true;
         self.lock_intent(message)?;
-        self.sign_close(ClosePurpose::Intent, message.identity(), coins)
+        self.sign_close(ClosePurpose::Intent, message.identity())
     }
     /// Authenticates the organizer's close intent and locks it. A second,
     /// different intent is refused, so an equivocating organizer obtains at
@@ -548,7 +540,6 @@ impl Credential {
         owner: &RetainedBallotOwner,
         roster: &OrganizerSignedRoster,
         message: &CloseResponseMessage,
-        coins: [u8; 32],
     ) -> Result<[u8; 3309], Error> {
         self.check_close_owner(owner, roster, message.poll(), message.inventory())?;
         self.check_unlocked(SigningPurpose::CloseResponse)?;
@@ -566,7 +557,7 @@ impl Credential {
             return Err(Error::Context);
         }
         self.close_response = Some(*message.identity());
-        self.sign_close(ClosePurpose::Response, message.identity(), coins)
+        self.sign_close(ClosePurpose::Response, message.identity())
     }
     /// The organizer's one proposal, which must name its locked intent and
     /// include its own response.
@@ -575,7 +566,6 @@ impl Credential {
         owner: &RetainedBallotOwner,
         roster: &OrganizerSignedRoster,
         message: &CloseProposalMessage,
-        coins: [u8; 32],
     ) -> Result<[u8; 3309], Error> {
         self.check_close_owner(owner, roster, message.poll(), message.inventory())?;
         Self::check_organizer(owner, roster)?;
@@ -591,7 +581,7 @@ impl Credential {
             return Err(Error::Context);
         }
         self.close_proposal_signed = true;
-        self.sign_close(ClosePurpose::Proposal, message.identity(), coins)
+        self.sign_close(ClosePurpose::Proposal, message.identity())
     }
     /// Reconstructs consumed close state only from the original root's
     /// authenticated completed message and its signature. It is not a receipt

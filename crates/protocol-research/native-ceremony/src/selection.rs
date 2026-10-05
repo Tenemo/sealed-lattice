@@ -116,7 +116,7 @@ pub fn run(
     assert!(build_selection(&roster, &duplicate).is_err());
     let signature = enrollments[0]
         .credential
-        .sign_selection_proposal(&roster, &proposal, *crate::random::<32>())
+        .sign_selection_proposal(&roster, &proposal)
         .unwrap();
     crate::write(output.join("selection.bin"), proposal.body());
     crate::write(output.join("selection-signature.bin"), &signature);
@@ -218,9 +218,7 @@ pub fn run(
             .collect::<Vec<_>>();
         let losing = build_selection(&roster, &losing_offers).unwrap();
         assert_ne!(losing.identity(), inputs.identity());
-        let signature = organizer
-            .sign_selection_proposal(&roster, &losing, [37; 32])
-            .unwrap();
+        let signature = organizer.sign_selection_proposal(&roster, &losing).unwrap();
         crate::write(output.join("losing-selection.bin"), losing.body());
         crate::write(output.join("losing-selection-signature.bin"), &signature);
         let losing =
@@ -233,12 +231,7 @@ pub fn run(
         ));
         let packet = enrollments[1]
             .credential
-            .endorse_selection(
-                &roster,
-                losing_inputs.selection().selection(),
-                1,
-                *crate::random::<32>(),
-            )
+            .endorse_selection(&roster, losing_inputs.selection().selection(), 1)
             .unwrap();
         authenticate_endorsement(&roster, losing.selection(), &packet).unwrap();
         crate::write(output.join("losing-selection-endorsement-1.bin"), &packet);
@@ -257,7 +250,7 @@ pub fn run(
         assert!(
             enrollments[1]
                 .credential
-                .endorse_selection(&roster, proposal.selection(), 1, *crate::random::<32>())
+                .endorse_selection(&roster, proposal.selection(), 1)
                 .is_err()
         );
         Some(losing_inputs)
@@ -271,12 +264,7 @@ pub fn run(
         }
         let packet = enrollment
             .credential
-            .endorse_selection(
-                &roster,
-                inputs.selection().selection(),
-                position,
-                *crate::random::<32>(),
-            )
+            .endorse_selection(&roster, inputs.selection().selection(), position)
             .unwrap();
         let endorsement = authenticate_endorsement(&roster, proposal.selection(), &packet).unwrap();
         crate::write(
@@ -308,7 +296,7 @@ pub fn run(
         assert!(
             enrollments[1]
                 .credential
-                .endorse_selection(&roster, proposal.selection(), 1, *crate::random::<32>())
+                .endorse_selection(&roster, proposal.selection(), 1)
                 .is_err()
         );
     }
@@ -318,7 +306,7 @@ pub fn run(
         // Only the declared corrupt participant forks its own signing state.
         // The same q positions carry another valid signature realization.
         let packet = credential
-            .endorse_selection(&roster, proposal.selection(), position, [113; 32])
+            .endorse_selection(&roster, proposal.selection(), position)
             .unwrap();
         let mut alternative = endorsements[..quorum].to_vec();
         let slot = alternative

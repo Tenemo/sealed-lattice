@@ -31,7 +31,7 @@ import type { ParticipantHead } from './storage.js';
 
 // The encrypted root manifest. Its prefix retains the enrollment data keys,
 // the poll and the ordered references of the public and private data records.
-// Generation two appends the organizer's proposal coins. From generation four
+// Generation two appends the organizer's proposal intent. From generation four
 // length-prefixed suffixes follow in a fixed order, each present from its
 // first generation: preparation, then ballot and close together, then target
 // signing, then release.
@@ -94,7 +94,6 @@ export type ParticipantManifest = Readonly<{
     dataKeys: Uint8Array;
     poll: Uint8Array;
     references: readonly RecordReference[];
-    proposalCoins?: Uint8Array;
     suffixes: Readonly<Partial<Record<ManifestSuffix, Uint8Array>>>;
 }>;
 
@@ -139,6 +138,8 @@ export const encodeManifest = (
         !Number.isSafeInteger(generation) ||
         generation < 1 ||
         generation > lastGeneration ||
+        generation === 16 ||
+        generation === 28 ||
         (generation > 4 && generation < 12)
     )
         throw new Error('Invalid participant root generation.');
@@ -149,7 +150,6 @@ export const encodeManifest = (
         return concatenate(unsigned32(bytes.length), bytes);
     });
     if (
-        (generation === 2) !== (manifest.proposalCoins !== undefined) ||
         manifest.dataKeys.length !== dataKeyBytes(generation) ||
         Object.keys(manifest.suffixes).length !== suffixes.length
     )
@@ -157,12 +157,11 @@ export const encodeManifest = (
             'Participant root fields disagree with its generation.',
         );
     return concatenate(
-        encodeText('ERM7'),
+        encodeText('ERM8'),
         manifest.dataKeys,
         manifest.poll,
         unsigned32(manifest.references.length),
         ...manifest.references.map(encodeReference),
-        manifest.proposalCoins ?? new Uint8Array(),
         ...suffixes,
     );
 };
@@ -229,9 +228,11 @@ const decodeManifest = (
         !Number.isSafeInteger(generation) ||
         generation < 1 ||
         generation > lastGeneration ||
+        generation === 16 ||
+        generation === 28 ||
         (generation > 4 && generation < 12) ||
         bytes.length < prefixBytes(generation) ||
-        !equalBytes(bytes.subarray(0, 4), encodeText('ERM7'))
+        !equalBytes(bytes.subarray(0, 4), encodeText('ERM8'))
     )
         throw new Error('Invalid participant root manifest.');
     const prefix = prefixBytes(generation);
@@ -259,13 +260,6 @@ const decodeManifest = (
     }
     checkReferences(references, generation, limits);
     let offset = prefix + referenceBytes * count;
-    let proposalCoins: Uint8Array | undefined;
-    if (generation === 2) {
-        if (bytes.length - offset < 32)
-            throw new Error('Missing proposal signing coins.');
-        proposalCoins = bytes.slice(offset, offset + 32);
-        offset += 32;
-    }
     const suffixes: Partial<Record<ManifestSuffix, Uint8Array>> = {};
     for (const name of presentSuffixes(generation)) {
         if (bytes.length - offset < 4)
@@ -282,7 +276,6 @@ const decodeManifest = (
         dataKeys: bytes.slice(4, keysEnd),
         poll: bytes.slice(keysEnd, keysEnd + 64),
         references,
-        ...(proposalCoins === undefined ? {} : { proposalCoins }),
         suffixes,
     };
 };

@@ -33,7 +33,7 @@ const signatureAt = (
     fill: number,
 ): PreparationSignature =>
     stage === 'intent'
-        ? { stage, body: filled(length, fill), coins: filled(32, fill + 1) }
+        ? { stage, body: filled(length, fill) }
         : {
               stage,
               body: filled(length, fill),
@@ -73,16 +73,15 @@ const unfinished = (phase: 4 | 5 | 6): ContributionState => ({
               })),
     signingRecords: [],
     seed: filled(phase === 5 ? 0 : 64, 61),
-    coins: new Uint8Array(),
 });
 
-// Independent PRE1 framing, useful for hostile inputs the encoder would
+// Independent PRE2 framing, useful for hostile inputs the encoder would
 // never deliberately produce. Each of the three authorities has one length.
 const journal = (fields: readonly Uint8Array[]) => {
     const bytes = new Uint8Array(
         4 + fields.reduce((total, value) => total + 4 + value.length, 0),
     );
-    bytes.set(new TextEncoder().encode('PRE1'));
+    bytes.set(new TextEncoder().encode('PRE2'));
     let offset = 4;
     for (const field of fields) {
         new DataView(bytes.buffer).setUint32(offset, field.length, true);
@@ -182,7 +181,7 @@ describe('independent preparation authority journal', () => {
                     4,
                 );
                 expect(new TextDecoder().decode(root.subarray(0, 4))).toBe(
-                    'ERM7',
+                    'ERM8',
                 );
                 expect(root.subarray(168 + 4)).toEqual(
                     encodePreparationState(state),
@@ -207,7 +206,7 @@ describe('independent preparation authority journal', () => {
         expect(decoded.contribution).toBeUndefined();
         expect(decoded.selection).toBeUndefined();
         // This helper is for active preparation; retirement generation burns
-        // all preparation purposes in enrollment/root, not from empty PRE1.
+        // all preparation purposes in enrollment/root, not from empty PRE2.
         expect(
             decodePreparationState(encodePreparationState({}), profile),
         ).toEqual({});
@@ -222,12 +221,12 @@ describe('independent preparation authority journal', () => {
                     'intent',
                     'signed',
                 ] as const) {
-                    // The pre-profile mask reads only PCS4's authenticated
+                    // The pre-profile mask reads only PCS5's authenticated
                     // structural phase; complete restore additionally decodes it.
                     const contribution =
                         ownPhase === undefined
                             ? new Uint8Array()
-                            : Uint8Array.of(80, 67, 83, 52, ownPhase);
+                            : Uint8Array.of(80, 67, 83, 53, ownPhase);
                     const state: PreparationState = {
                         ...(selected === undefined
                             ? {}
@@ -340,7 +339,7 @@ describe('independent preparation authority journal', () => {
             expect(() =>
                 unusedPreparationPurposes(
                     journal([
-                        Uint8Array.of(80, 67, 83, 52, phase),
+                        Uint8Array.of(80, 67, 83, 53, phase),
                         new Uint8Array(),
                         new Uint8Array(),
                     ]),

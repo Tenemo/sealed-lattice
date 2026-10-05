@@ -935,7 +935,7 @@ export const renderDocumentationCensus = (): string => {
             ]),
         ),
         '',
-        'The preserved through-ballot prefix counts first-evaluated intents, including signatures never delivered. Repeated evaluation of retained coins consumes runtime but no new cached signing-oracle query. Keep this prefix separate from the full-action branches below; neither table supplies a lifetime credential population, repeated-work bound or complete signature-security claim.',
+        'The preserved through-ballot prefix counts first-evaluated intents, including signatures never delivered. Repeated deterministic signing consumes runtime but no new cached signing-oracle query. Keep this prefix separate from the full-action branches below; neither table supplies a lifetime credential population, repeated-work bound or complete signature-security claim.',
         '',
         table(
             [
@@ -1388,7 +1388,7 @@ export const renderDocumentationCensus = (): string => {
         '',
         '## Participant close custody',
         '',
-        'Private close suffix and record bounds, excluding the already retained participant root and its earlier records. The suffix retains the accepted close inputs in arrival order with one key per encrypted record, so restoration replays them into the same state through the owning state machine. Before an intent the suffix only collects, alongside every ballot phase. Held bodies bound the delivery events, since the state machine refuses an input that changes nothing, and only the organizer adds one event per other responder and retains its proposal body and coins when its response completes. The per-roster table uses the completion option count, and the held bodies dominate the record bytes. The encoded suffix supplies no verification or signing authority by itself.',
+        'Private close suffix and record bounds, excluding the already retained participant root and its earlier records. The suffix retains the accepted close inputs in arrival order with one key per encrypted record, so restoration replays them into the same state through the owning state machine. Before an intent the suffix only collects, alongside every ballot phase. Held bodies bound the delivery events, since the state machine refuses an input that changes nothing, and only the organizer adds one event per other responder and retains its proposal exact body when its response completes. The per-roster table uses the completion option count, and the held bodies dominate the record bytes. The encoded suffix supplies no verification or signing authority by itself.',
         '',
         table(
             ['Property', 'Value'],
@@ -3594,7 +3594,7 @@ export const renderDocumentationCensus = (): string => {
             ],
         ),
         '',
-        'Preparation and later roots have distinct inventories. PRE1 frames independent own-offer, selection and endorsement slots; PCS4 carries its own phase. Activation authenticates the complete predecessor before clearing all slots and retiring source material. Later roots therefore retain an empty preparation journal beside ballot, close, target and release state.',
+        'Preparation and later roots have distinct inventories. PRE2 frames independent own-offer, selection and endorsement slots; PCS5 carries its own phase. Activation authenticates the complete predecessor before clearing all slots and retiring source material. Later roots therefore retain an empty preparation journal beside ballot, close, target and release state.',
         '',
         table(
             ['Authenticated journal property', 'Bytes'],

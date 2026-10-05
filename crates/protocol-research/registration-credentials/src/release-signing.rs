@@ -13,7 +13,6 @@ use supported_profile::{
     Profile,
     relation::{PROOF_HEADER_BYTES, RELEASE_HEADER_BYTES, SYSTEMATIC, release_relation},
 };
-use zeroize::Zeroizing;
 
 pub const RELEASE_SIGNATURE_CONTEXT: &[u8] = b"sealed-lattice/release-envelope/v1";
 pub const RELEASE_ENVELOPE_BYTES: usize = 4 + 3 * 64 + 2 + 8 + 64;
@@ -211,7 +210,6 @@ impl Credential {
         owner: &RetainedBallotOwner,
         roster: &OrganizerSignedRoster,
         envelope: &ReleaseEnvelope,
-        coins: [u8; 32],
     ) -> Result<[u8; 3309], Error> {
         self.check_ballot_owner(owner)?;
         self.check_target_predecessors(owner, roster)?;
@@ -233,9 +231,8 @@ impl Credential {
             return Err(Error::Context);
         }
         self.release_signed = true;
-        let coins = Zeroizing::new(coins);
         let (_, key) = ml_dsa_65::KG::keygen_from_seed(&self.signing_seed);
-        key.try_sign_with_seed(&coins, envelope.bytes(), RELEASE_SIGNATURE_CONTEXT)
+        key.try_sign_with_seed(&[0; 32], envelope.bytes(), RELEASE_SIGNATURE_CONTEXT)
             .map_err(|_| Error::Crypto)
     }
     pub fn restore_release(

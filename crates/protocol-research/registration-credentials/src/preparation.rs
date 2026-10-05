@@ -8,7 +8,6 @@ use fips204::{
     ml_dsa_65,
     traits::{KeyGen, Signer},
 };
-use zeroize::Zeroizing;
 
 pub(crate) struct ConfirmedRoster {
     proposal: [u8; 64],
@@ -99,12 +98,10 @@ impl Credential {
         &self,
         identity: &[u8; 64],
         context: &[u8],
-        coins: [u8; 32],
     ) -> Result<[u8; 3309], Error> {
-        let coins = Zeroizing::new(coins);
         let (_, private) = ml_dsa_65::KG::keygen_from_seed(&self.signing_seed);
         private
-            .try_sign_with_seed(&coins, identity, context)
+            .try_sign_with_seed(&[0; 32], identity, context)
             .map_err(|_| Error::Crypto)
     }
 }

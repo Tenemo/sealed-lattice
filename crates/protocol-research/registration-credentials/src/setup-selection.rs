@@ -374,7 +374,6 @@ impl Credential {
         &mut self,
         roster: &OrganizerSignedRoster,
         selection: &SelectionProposal,
-        coins: [u8; 32],
     ) -> Result<[u8; SIGNATURE_BYTES], Error> {
         self.check_unlocked(SigningPurpose::SelectionProposal)?;
         self.check_confirmed_position(roster.proposal(), roster.proposal().organizer_position())?;
@@ -385,14 +384,13 @@ impl Credential {
             return Err(Error::Context);
         }
         self.selection_proposal_signed = Some(selection.identity());
-        self.sign_preparation_digest(&selection.identity(), PROPOSAL_CONTEXT, coins)
+        self.sign_preparation_digest(&selection.identity(), PROPOSAL_CONTEXT)
     }
     pub fn endorse_selection(
         &mut self,
         roster: &OrganizerSignedRoster,
         selection: &SelectionProposal,
         position: usize,
-        coins: [u8; 32],
     ) -> Result<Vec<u8>, Error> {
         self.check_unlocked(SigningPurpose::SelectionEndorsement)?;
         self.check_confirmed_position(roster.proposal(), position)?;
@@ -404,8 +402,7 @@ impl Credential {
         }
         let digest = endorsement_identity(selection.identity(), position)?;
         self.selection_endorsed = Some(selection.identity());
-        let signature =
-            self.sign_preparation_digest(&digest, ENDORSEMENT_PURPOSE.as_bytes(), coins)?;
+        let signature = self.sign_preparation_digest(&digest, ENDORSEMENT_PURPOSE.as_bytes())?;
         Ok(endorsement_packet(
             position,
             selection.identity(),

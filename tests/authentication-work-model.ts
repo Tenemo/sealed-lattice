@@ -39,7 +39,7 @@ export const authenticationContext = (purpose: CompleteAuthenticationPurpose) =>
 
 // One original credential through ballot completion, under the original-state
 // invariant. Each purpose has one fixed first-evaluated intent; repeated
-// evaluation of its retained coins is still work, but not another oracle query.
+// deterministic reevaluation is still work, but not another oracle query.
 // Closing/release purposes and the population of credential creations are absent.
 export const compileCurrentCredentialIntentBounds = () => {
     const owners: Record<AuthenticationPurpose, 'organizer' | 'everyone'> = {

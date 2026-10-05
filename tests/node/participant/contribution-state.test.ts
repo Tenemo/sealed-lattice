@@ -77,7 +77,6 @@ const stateAt = (
             ),
         ),
     seed: new Uint8Array(phase === 4 || phase === 6 ? 64 : 0).fill(61),
-    coins: new Uint8Array(phase === 8 ? 32 : 0).fill(73),
 });
 const decode = (state: ContributionState) =>
     decodeContributionState(encodeContributionState(state), profile);
@@ -95,7 +94,7 @@ describe('independent contribution state framing', () => {
                 );
                 const bytes = encodeContributionState(state);
                 expect(new TextDecoder().decode(bytes.subarray(0, 4))).toBe(
-                    'PCS4',
+                    'PCS5',
                 );
                 expect(decodeContributionState(bytes, profile)).toEqual(state);
                 expect(bytes.length).toBeLessThanOrEqual(
@@ -213,13 +212,11 @@ describe('independent contribution state framing', () => {
         }
     });
 
-    it('rejects wrong seed, signing coins and offer record shapes at their actual phases', () => {
+    it('rejects wrong seed and offer record shapes at their actual phases', () => {
         for (const phase of [4, 5, 6, 7, 8, 9]) {
             const state = stateAt(phase);
             for (const seed of [new Uint8Array(63), new Uint8Array(65)])
                 expect(() => decode({ ...state, seed })).toThrow();
-            for (const coins of [new Uint8Array(31), new Uint8Array(33)])
-                expect(() => decode({ ...state, coins })).toThrow();
         }
         for (const phase of [8, 9]) {
             const state = stateAt(phase);

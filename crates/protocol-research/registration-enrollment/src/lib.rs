@@ -162,9 +162,8 @@ impl Enrollment {
         }
         let mut credential = fresh_credential();
         let nonce = random::<32>();
-        let coins = random::<32>();
         let packet = credential
-            .create_poll(draft, runtime, *nonce, *coins)
+            .create_poll(draft, runtime, *nonce)
             .map_err(|_| Error::State)?;
         let verified = registration_credentials::poll::verify_poll(
             packet.identity,
@@ -264,9 +263,8 @@ impl Enrollment {
         }
         let body = body_output.body.finish().map_err(|_| Error::State)?;
         let sealed_sources = sources.seal(body.bytes(), source_data_key)?;
-        let coins = random::<32>();
         let signature = credential
-            .sign_registration(body, *coins)
+            .sign_registration(body)
             .map_err(|_| Error::State)?;
         let mut key = proof.into_key();
         let sealed_key = key
