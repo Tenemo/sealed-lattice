@@ -65,9 +65,9 @@ const parseRole = (
     const domain = ascii(0),
         owner = ascii(1);
     if (!domain || !owner || !originalOwner(owner)) return undefined;
-    const purpose = (
-        Object.keys(purposes) as Exclude<Purpose, 'registration'>[]
-    ).find((candidate) => domain.equals(Buffer.from(purposes[candidate])));
+    const purpose = (Object.keys(purposes) as Purpose[]).find((candidate) =>
+        domain.equals(Buffer.from(purposes[candidate])),
+    );
     if (
         !purpose ||
         count !== (purpose === 'release' ? 7 : 6) ||

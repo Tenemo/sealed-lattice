@@ -180,3 +180,83 @@ it('derives source-mask operands from the independently modeled complete registr
         }
     }
 });
+
+// DFMS21 Definition 4.1 maximizes over the complete extraction function,
+// including malformed inputs and targets the protocol never requests.
+const extractionMultiplicities = (
+    inputs: readonly string[],
+    outputBits: number,
+    image: (input: string, output: number) => string,
+) => {
+    const outputs = Array.from(
+        { length: 2 ** outputBits },
+        (_, index) => index,
+    );
+    let maximumFibre = 0;
+    let maximumOtherInputFibre = 0;
+    for (const input of inputs) {
+        for (const referenceInput of inputs) {
+            for (const referenceOutput of outputs) {
+                const target = image(referenceInput, referenceOutput);
+                const count = outputs.filter(
+                    (output) => image(input, output) === target,
+                ).length;
+                maximumFibre = Math.max(maximumFibre, count);
+                if (input !== referenceInput)
+                    maximumOtherInputFibre = Math.max(
+                        maximumOtherInputFibre,
+                        count,
+                    );
+            }
+        }
+    }
+    return { maximumFibre, maximumOtherInputFibre };
+};
+
+it.each([1, 2, 3])(
+    'preserves extraction ratios for a %i-bit prefix with independent unused tails',
+    (prefixBits) => {
+        const sources = new Map([
+            ['first coordinate', ['owner-a', 'family-a']],
+            ['second coordinate', ['owner-a', 'family-a']],
+            ['other owner', ['owner-b', 'family-a']],
+            ['other family', ['owner-a', 'family-b']],
+        ]);
+        const inputs = [...sources.keys(), 'truncated input', 'unknown family'];
+        for (const tailBits of [0, 1, 2]) {
+            const image = (input: string, output: number) => {
+                const prefix = output >>> tailBits;
+                const source = sources.get(input);
+                return JSON.stringify(
+                    source
+                        ? ['source', ...source, prefix]
+                        : ['other', input, prefix],
+                );
+            };
+            const actual = extractionMultiplicities(
+                inputs,
+                prefixBits + tailBits,
+                image,
+            );
+            // Distinct coordinates of the same original owner/family attain
+            // the cross-input maximum. A raw complement input retains its
+            // own disjoint target label, including the requested prefix.
+            expect(actual).toEqual({
+                maximumFibre: 2 ** tailBits,
+                maximumOtherInputFibre: 2 ** tailBits,
+            });
+            // An unused constant bottom target is unsafe even if extraction
+            // never requests it: both source maxima range over that target.
+            const constantBottom = extractionMultiplicities(
+                inputs,
+                prefixBits + tailBits,
+                (input, output) =>
+                    sources.has(input) ? image(input, output) : 'bottom',
+            );
+            expect(constantBottom).toEqual({
+                maximumFibre: 2 ** (prefixBits + tailBits),
+                maximumOtherInputFibre: 2 ** (prefixBits + tailBits),
+            });
+        }
+    },
+);

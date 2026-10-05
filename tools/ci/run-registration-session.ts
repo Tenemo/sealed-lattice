@@ -123,7 +123,7 @@ export const runRegistrationSession = async () => {
                             registeredTest: registrationSessionTest,
                             processMemoryLimit: fixtureProcessMemoryLimit,
                             ...result,
-                            scope: 'One genuine registration proof with streamed positive/hostile verification and original-owner partial checkpoint import. Other roster entries and the partial checkpoint are framing fixtures; no complete setup or resumed proof is claimed.',
+                            scope: 'One genuine signed registration with streamed positive/hostile key verification and original-owner partial checkpoint import. Other roster entries and the partial checkpoint are framing fixtures; no complete setup or resumed contribution proof is claimed.',
                         },
                         null,
                         2,

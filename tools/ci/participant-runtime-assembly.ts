@@ -8,6 +8,10 @@ import {
     participantRuntimeIdentity,
 } from '#tools/ci/build-participant-module.js';
 import type { ActiveLocalRunLog } from '#tools/ci/local-run-log.js';
+import {
+    invalidBallotModulePath,
+    invalidBallotWorker,
+} from '#tools/ci/participant-invalid-ballot-client.js';
 
 const root = path.resolve('.');
 const packageOutput = path.join(root, 'packages/sdk/dist');
@@ -93,28 +97,10 @@ export const assembleParticipantRuntime = async (
         invalidBallotModule === undefined
             ? undefined
             : (() => {
-                  const clientPath = 'invalid-ballot-participant.wasm';
-                  const honestCompile =
-                      'await WebAssembly.compile(new Uint8Array(moduleBytes))';
-                  const bundled = worker.toString('utf8');
-                  assert.equal(
-                      bundled.split(honestCompile).length,
-                      2,
-                      'The worker bundle does not compile its module once.',
-                  );
-                  // The replacement names only globals, so it holds whatever
-                  // names the bundler chose.
-                  const patched = Buffer.from(
-                      bundled.replace(
-                          honestCompile,
-                          'await WebAssembly.compile(await (await fetch(location.origin + "/' +
-                              clientPath +
-                              '")).arrayBuffer())',
-                      ),
-                  );
+                  const patched = invalidBallotWorker(worker);
                   const client = {
                       feature: 'invalid-ballot',
-                      path: clientPath,
+                      path: invalidBallotModulePath,
                       module: invalidBallotModule,
                       worker: patched,
                       moduleDigest: sha512(invalidBallotModule),
