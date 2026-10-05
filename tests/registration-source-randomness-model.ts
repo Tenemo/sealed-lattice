@@ -3,6 +3,7 @@ import { operationSeedBytes } from '#tests/operation-seed-model.js';
 import { byteAlignedSpongePermutations } from '#tests/proof-hash-work-model.js';
 import { registrationSigningPublicKeyBytes } from '#tests/registration-enrollment-model.js';
 import { compileRegistrationSetupBindingScreen } from '#tests/registration-setup-binding-model.js';
+import { registrationSourceMask } from '#tests/registration-source-domain-model.js';
 import { setupGaussianParameters } from '#tests/setup-randomness-model.js';
 import { boundSparseSupportSampling } from '#tests/sparse-sampling-bound-model.js';
 
@@ -63,6 +64,14 @@ export const compileRegistrationSourceRandomness = (
             4n +
             family.publicCoordinateBytes;
         const commonOutputBytes = (degree * BigInt(family.sampleBits)) / 8n;
+        const sourceMask = registrationSourceMask(
+            new Uint8Array(Number(registrationSigningPublicKeyBytes)),
+            Uint8Array.from({ length: Number(modulusBytes) }, (_, offset) =>
+                Number((family.modulus >> BigInt(8 * offset)) & 255n),
+            ),
+            BigInt(family.sampleBits),
+            Number(degree),
+        );
         return {
             index,
             modulusBytes,
@@ -77,6 +86,9 @@ export const compileRegistrationSourceRandomness = (
                 136n,
             ),
             commitmentInputBytes,
+            commitmentMaskRawBits: sourceMask.comparedRawBits,
+            commitmentMaskCellBits: sourceMask.comparedCellBits,
+            commitmentInputCellBits: sourceMask.inputClassUpper + 1n,
             commitmentPermutations: byteAlignedSpongePermutations(
                 commitmentInputBytes,
                 64n,
