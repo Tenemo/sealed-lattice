@@ -116,3 +116,9 @@ export const registrationSourceSliceMask = (
         values: Uint8Array.from(values),
     };
 };
+
+// A syntactic lower bound, even allowing an unsupported one-byte modulus
+// and a one-coefficient coordinate. Every real catalogue family is longer.
+export const minimumRegistrationSourceInputBytes = () =>
+    registrationSourceMask(new Uint8Array(1952), Uint8Array.of(1), 1n, 1)
+        .inputBytes;

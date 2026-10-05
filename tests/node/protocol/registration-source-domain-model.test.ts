@@ -1,5 +1,6 @@
 import { expect, it } from 'vitest';
 
+import { compileCurrentSignatureHashInputs } from '#tests/authentication-work-model.js';
 import {
     compileOracleMaskRouting,
     runOracleSliceRouting,
@@ -8,6 +9,7 @@ import { compileRegistrationSetupBindingScreen } from '#tests/registration-setup
 import {
     registrationSourceMask,
     registrationSourceSliceMask,
+    minimumRegistrationSourceInputBytes,
 } from '#tests/registration-source-domain-model.js';
 import { compileRegistrationSourceRandomness } from '#tests/registration-source-randomness-model.js';
 
@@ -39,6 +41,47 @@ const frame = (
         field(4, uint(8, sampleBits)),
         field(1, variable(coordinate)),
     ]);
+
+it('separates the credential hash inputs from the source language by exact lengths', () => {
+    const signature = compileCurrentSignatureHashInputs();
+    // FIPS 204 ML-DSA-65: rho, followed by k encodings of 256 ten-bit t1
+    // coefficients. This is larger than the other current signature inputs.
+    const publicKeyBytes = 32n + (6n * 256n * 10n) / 8n;
+    expect(signature.maximumInputBytes).toBe(publicKeyBytes);
+    const smallest = registrationSourceMask(
+        Buffer.alloc(Number(publicKeyBytes)),
+        Buffer.of(1),
+        1n,
+        1,
+    );
+    const encoded = frame(
+        Buffer.alloc(Number(publicKeyBytes)),
+        Buffer.of(1),
+        1n,
+        Buffer.alloc(2),
+    );
+    expect(smallest.inputBytes).toBe(encoded.length);
+    expect(smallest.inputBytes).toBe(minimumRegistrationSourceInputBytes());
+    for (const row of signature.rows) {
+        expect(row.inputBytes).toBeLessThan(BigInt(smallest.inputBytes));
+        expect(smallest.matches(Buffer.alloc(Number(row.inputBytes), 1))).toBe(
+            false,
+        );
+    }
+    // Custody's ProtocolHash prefix is distinct before any secret or body
+    // bytes. Unbounded retained-body length cannot change that distinction.
+    const retainedPrefix = Buffer.alloc(64);
+    retainedPrefix.write('sealed-lattice/fixed-hash/v1');
+    expect(retainedPrefix[0]).not.toBe(encoded[0]);
+    expect(
+        smallest.matches(
+            Buffer.concat([
+                retainedPrefix,
+                Buffer.alloc(encoded.length - retainedPrefix.length),
+            ]),
+        ),
+    ).toBe(false);
+});
 
 it('routes raw source families and salts without reordering or aliasing their oracle inputs', () => {
     const owner = Buffer.alloc(1952, 11);

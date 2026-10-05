@@ -104,6 +104,7 @@ import {
     compileRegistrationSetupBindingScreen,
     sourceOpeningSaltBytes,
 } from '#tests/registration-setup-binding-model.js';
+import { minimumRegistrationSourceInputBytes } from '#tests/registration-source-domain-model.js';
 import {
     compileRegistrationSourceRandomness,
     compileRegistrationSourceExtractionWork,
@@ -5192,7 +5193,25 @@ export const renderDocumentationCensus = (): string => {
             }),
         ),
         '',
-        'The raw registration-source slice fixes the source grammar, original owner, immutable family and salt at their actual bit positions. Its exact length is checked; poll/runtime and the coordinate payload stay unconstrained. The following query-controller and prepared-extraction counts use the completion poll family inventory, an output prefix equal to the commitment width and a declared extraction database capacity. They exclude the independent query-circuit and returned-coordinate decoding costs.',
+        'The raw registration-source slice fixes the source grammar, original owner, immutable family and salt at their actual bit positions. Its exact length is checked; poll/runtime and the coordinate payload stay unconstrained. Current protocol credential hash calls are shorter than this source language even at its syntactic minimum. This separates raw oracle inputs, not their potentially dependent message values. Retained tags have the distinct fixed ProtocolHash prefix.',
+        '',
+        table(
+            ['Source/credential boundary', 'Bytes'],
+            [
+                [
+                    'Maximum current credential hash input',
+                    formatCount(
+                        compileCurrentSignatureHashInputs().maximumInputBytes,
+                    ),
+                ],
+                [
+                    'Syntactic minimum source input',
+                    formatCount(minimumRegistrationSourceInputBytes()),
+                ],
+            ],
+        ),
+        '',
+        'The following query-controller and prepared-extraction counts use the completion poll family inventory, an output prefix equal to the commitment width and a declared extraction database capacity. They exclude the independent query-circuit and returned-coordinate decoding costs.',
         '',
         table(
             [
