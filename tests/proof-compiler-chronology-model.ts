@@ -5,7 +5,6 @@ import {
 import { compileProofVerifierQueryCensus } from '#tests/proof-verifier-query-model.js';
 import { compileSetupSelectionCensus } from '#tests/setup-selection-model.js';
 import type { SupportedProfile } from '#tests/supported-profile-model.js';
-import { compileThresholdCompletionProfile } from '#tests/threshold-completion-model.js';
 import { proofCompilerCaps } from '#tests/wide-challenge-compiler-model.js';
 
 // Each original participant emits at most one proof of each purpose after
@@ -13,7 +12,7 @@ import { proofCompilerCaps } from '#tests/wide-challenge-compiler-model.js';
 export const proofPurposes = ['setup', 'ballot', 'release'] as const;
 
 // Every eligible position may prove an offer, even when it is not selected.
-export const provingPositions = (
+const provingPositions = (
     purpose: (typeof proofPurposes)[number],
     participantCount: bigint,
 ) =>
@@ -24,59 +23,17 @@ export const provingPositions = (
           )
         : participantCount;
 
-// Reference multi-roster arithmetic, not a clear-candidate population bound.
-// The former H/(n-f) divisor below does not count rosters exposing offers
-// before certification. Local per-roster producer counts include every eligible
-// position; candidate global scopes remain owned by the security argument.
-// The proofs, programming points and commitments that the reference emits when
-// every roster that reaches an honest opening has this profile, against the
-// caps the proof compiler charges. Unselected and abandoned registrations
-// remain in the original credential and source-sampling populations but emit
-// no registration proof. By default there is one original registration per
-// participant and one roster. A corrupt organizer can complete several rosters
-// for disjoint honest groups, but each honest registration confirms at most
-// one, and a roster with at most f corrupt members holds n-f honest ones.
-// Contribution, ballot and release occupy one-shot slots, and one target per
-// roster is certified outside the charged authentication events. A restored
-// participant replays identical bytes and a participant that loses unfinished
-// work stops, so no honest proof is generated twice. The query cap already
-// bounds every oracle call of an experiment within the target, including
-// honest verification and expansion.
-export const compileProofCompilerChronology = (
-    profile: SupportedProfile,
-    honestRegistrations = BigInt(profile.participantCount),
-    rosterCount = 1n,
-) => {
+// Local producer counts for one roster, including unselected eligible offers.
+// The clear-preparation ledger separately counts original registrations,
+// stalled exposure scopes and certified continuations. Local counts cannot
+// determine the complete experiment's query count or security population.
+export const compileProofCompilerChronology = (profile: SupportedProfile) => {
     const participants = BigInt(profile.participantCount);
-    if (honestRegistrations < participants)
-        throw new RangeError('The registrations must cover the roster.');
-    if (rosterCount < 1n)
-        throw new RangeError('A poll completes at least one roster.');
-    const honestMembers =
-        participants -
-        BigInt(
-            compileThresholdCompletionProfile(profile.participantCount)
-                .maximumCorruptParticipantCount,
-        );
-    const rosters =
-        honestRegistrations / honestMembers < rosterCount
-            ? honestRegistrations / honestMembers
-            : rosterCount;
-    const rosterProvers = (purpose: (typeof proofPurposes)[number]) =>
-        rosters * provingPositions(purpose, participants);
-    const honestProofs = proofPurposes.reduce((sum, purpose) => {
-        const provers = rosterProvers(purpose);
-        return (
-            sum +
-            (provers < honestRegistrations ? provers : honestRegistrations)
-        );
-    }, 0n);
-    // Honest participants accept proofs only for their confirmed roster's
-    // proving positions, one role per purpose each.
     const acceptedRoles = proofPurposes.reduce(
-        (sum, purpose) => sum + rosterProvers(purpose),
+        (sum, purpose) => sum + provingPositions(purpose, participants),
         0n,
     );
+    const honestProofs = acceptedRoles;
     // The direct simulator programs only the affine-challenge message.
     const programmedMessages = honestProofs;
     // Every leaf and internal node of every tree and every salted message
@@ -106,8 +63,6 @@ export const compileProofCompilerChronology = (
         0n,
     );
     return {
-        honestRegistrations,
-        rosters,
         honestProofs,
         acceptedRoles,
         programmedMessages,

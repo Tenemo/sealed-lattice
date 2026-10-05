@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 
-import { compileComposedSecurityLedger } from '#tests/composed-security-ledger-model.js';
 import {
     compileProofCompilerChronology,
     proofPurposes,
@@ -8,8 +7,6 @@ import {
 import { framedProofHashBytes } from '#tests/proof-hash-work-model.js';
 import { deriveSupportedProfile } from '#tests/supported-profile-model.js';
 import { proofCompilerCaps } from '#tests/wide-challenge-compiler-model.js';
-
-const population = compileComposedSecurityLedger().maximumCredentialPopulation;
 
 // Every position in the first max(f + 1, 2)+f may prove an offer, with
 // f = floor((n - 1) / 3); every position may prove its ballot and
@@ -33,9 +30,6 @@ describe('proof compiler chronology', () => {
                 deriveSupportedProfile(participantCount, optionCount),
             );
             expect(proofPurposes).toHaveLength(3);
-            expect(chronology.honestRegistrations).toBe(
-                BigInt(participantCount),
-            );
             expect(chronology.honestProofs).toBe(rosterRoles(participantCount));
             expect(chronology.acceptedRoles).toBe(
                 rosterRoles(participantCount),
@@ -43,79 +37,6 @@ describe('proof compiler chronology', () => {
             expect(chronology.programmedMessages).toBe(chronology.honestProofs);
             expect(chronology.withinCaps).toBe(true);
         }
-    });
-
-    it('keeps unused registrations in the population without inventing proofs', () => {
-        const profile = deriveSupportedProfile(20, 20);
-        // Original registrations remain in the population even when this roster
-        // uses none of their proof-producing slots.
-        const chronology = compileProofCompilerChronology(profile, population);
-        // Thirteen eligible setup, twenty ballot and twenty release proofs.
-        const rosterProofs = 13n + 2n * 20n;
-        expect(chronology.honestRegistrations).toBe(population);
-        expect(chronology.rosters).toBe(1n);
-        expect(chronology.honestProofs).toBe(rosterProofs);
-        expect(chronology.acceptedRoles).toBe(rosterRoles(20));
-        expect(chronology.programmedMessages).toBe(chronology.honestProofs);
-        expect(chronology.withinCaps).toBe(true);
-        expect(() => compileProofCompilerChronology(profile, 19n)).toThrow(
-            'The registrations must cover the roster.',
-        );
-        expect(() =>
-            compileProofCompilerChronology(profile, population, 0n),
-        ).toThrow('A poll completes at least one roster.');
-    });
-
-    it('counts the rosters a corrupt organizer can complete from the population', () => {
-        // Each honest registration confirms at most one roster, and a roster
-        // with at most f corrupt members has n-f honest ones, so only as many
-        // rosters of one size as the population fills can reach an opening.
-        for (const [participantCount, corrupt] of [
-            [3, 0],
-            [4, 1],
-            [19, 6],
-            [20, 6],
-        ] as const) {
-            const profile = deriveSupportedProfile(participantCount, 10);
-            const honestMembers = BigInt(participantCount - corrupt);
-            const filled = population / honestMembers;
-            const chronology = compileProofCompilerChronology(
-                profile,
-                population,
-                population,
-            );
-            expect(chronology.rosters).toBe(filled);
-            // Every honest member adds a ballot and release proof and every
-            // honest setup contributor a setup proof, and every roster
-            // accepts one role per purpose and proving position.
-            const bounded = (count: bigint) =>
-                count < population ? count : population;
-            expect(chronology.honestProofs).toBe(
-                2n * bounded(filled * BigInt(participantCount)) +
-                    bounded(filled * setupContributors(participantCount)),
-            );
-            expect(chronology.acceptedRoles).toBe(
-                rosterRoles(participantCount) * filled,
-            );
-            // A smaller roster count caps the rosters instead.
-            expect(
-                compileProofCompilerChronology(profile, population, 2n)
-                    .acceptedRoles,
-            ).toBe(2n * rosterRoles(participantCount));
-        }
-        // Roles beyond the compiler's role budget leave its caps.
-        const profile = deriveSupportedProfile(3, 2);
-        const registrations =
-            3n * (proofCompilerCaps.roleBudget / rosterRoles(3) + 1n);
-        const beyond = compileProofCompilerChronology(
-            profile,
-            registrations,
-            registrations,
-        );
-        expect(beyond.acceptedRoles).toBeGreaterThan(
-            proofCompilerCaps.roleBudget,
-        );
-        expect(beyond.withinCaps).toBe(false);
     });
 
     it('counts every tree node and message root of the emitted proof domain', () => {

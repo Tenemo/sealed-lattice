@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+    compileLocalOracleUpdate,
     compileOracleCellController,
+    compileOraclePrefixReplacement,
+    compilePrefixCopy,
+    compileSparseRouting,
     oracleCellControllerWork,
     prefixOracleWork,
     runOracleCellController,
@@ -9,6 +13,7 @@ import {
 import {
     oracleDomainCells,
     oracleDomainWork,
+    programmedOracleDomainWork,
     verifyOracleDomainAdapter,
 } from '#tests/oracle-domain-model.js';
 
@@ -139,6 +144,110 @@ describe('Full-domain oracle adapter', () => {
                 1n,
             ).queryGates,
         ).toBe(0n);
+    });
+
+    it('matches emitted gates across nested wrappers and changing prefix lengths', () => {
+        const shapes = [
+            { inputCapacity: 1, outputCapacity: 1 },
+            { inputCapacity: 3, outputCapacity: 5 },
+            { inputCapacity: 1, outputCapacity: 3 },
+            { inputCapacity: 2, outputCapacity: 1 },
+            { inputCapacity: 3, outputCapacity: 5 },
+        ];
+        const replacement = {
+            input: Uint8Array.of(1),
+            prefix: Uint8Array.of(1, 0, 1),
+        };
+        const capacities = new Map<string, number>();
+        let emittedGates = 0n;
+        for (const shape of shapes) {
+            const copy = compileOraclePrefixReplacement(
+                shape.inputCapacity,
+                shape.outputCapacity,
+                [replacement],
+            );
+            emittedGates += BigInt(
+                2 * copy.circuit.gates.length + shape.outputCapacity,
+            );
+            // The programmed wrapper calls the complete base adapter twice.
+            for (let baseCall = 0; baseCall < 2; baseCall++) {
+                for (let inputClass = 1; ; inputClass *= 2) {
+                    let start = 0;
+                    let size = 2;
+                    while (start < shape.outputCapacity) {
+                        const controller = compileOracleCellController(
+                            shape.inputCapacity,
+                            shape.outputCapacity,
+                            inputClass,
+                            start,
+                            size,
+                        );
+                        emittedGates += BigInt(
+                            4 * controller.circuit.gates.length +
+                                2 * controller.circuit.output.length,
+                        );
+                        const prefix = compilePrefixCopy(size);
+                        emittedGates += BigInt(
+                            2 * prefix.circuit.gates.length + size,
+                        );
+                        const identity = `${inputClass}:${start}`;
+                        // Its inner prefix wrapper also computes and uncomputes.
+                        for (let innerCall = 0; innerCall < 2; innerCall++) {
+                            const prior = capacities.get(identity) ?? 0;
+                            const routing = compileSparseRouting(
+                                prior,
+                                inputClass + 1,
+                                size,
+                            );
+                            emittedGates += BigInt(
+                                routing.roundTripRoutingGates +
+                                    compileLocalOracleUpdate(size).gates.length,
+                            );
+                            capacities.set(identity, prior + 1);
+                        }
+                        start += size;
+                        if (start > 2) size *= 2;
+                    }
+                    if (inputClass >= shape.inputCapacity) break;
+                }
+            }
+        }
+        const work = programmedOracleDomainWork(
+            shapes.map((shape) => ({
+                count: 1n,
+                inputCapacity: BigInt(shape.inputCapacity),
+                outputCapacity: BigInt(shape.outputCapacity),
+            })),
+            2n,
+            [{ inputBits: 1n, prefixBits: 3n }],
+        );
+        expect(work.queryGates).toBe(emittedGates);
+        for (const cell of work.base.cells)
+            expect(2n * cell.queries).toBe(
+                BigInt(
+                    capacities.get(
+                        `${cell.inputClassUpper}:${cell.outputStart}`,
+                    )!,
+                ),
+            );
+        // Each nested call revisits the same component instead of allocating
+        // a fresh database for its particular declared buffer dimensions.
+        expect(capacities.get('1:0')).toBe(20);
+    });
+
+    it('exposes the withdrawn reduction bound even without extraction or shadows', () => {
+        const queries = 1n << 40n;
+        const work = programmedOracleDomainWork(
+            [{ count: queries, inputCapacity: 256n, outputCapacity: 512n }],
+            512n,
+            [],
+        );
+        // bf35da8b's compileReductionWork(20, 120), evaluated at these
+        // one-permutation SHAKE256 calls. This is a rejected upper bound,
+        // retained solely as a counterexample, not a security parameter.
+        const withdrawnUpperBound = 1534753988146555968014159708160n;
+        expect(work.queryGates).toBeGreaterThan(withdrawnUpperBound);
+        expect(queries * 24n * 1600n).toBeLessThan(1n << 80n);
     });
 
     it('rejects invalid shapes instead of changing the domain', () => {

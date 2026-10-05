@@ -24,6 +24,7 @@ import {
     compileCertificateCustodyCensus,
     fullHolderRequirements,
 } from '#tests/certificate-custody-model.js';
+import { compileClearPreparationLedger } from '#tests/clear-preparation-ledger-model.js';
 import { compileClearPreparationResources } from '#tests/clear-preparation-resource-model.js';
 import { compileCloseResponseCensus } from '#tests/close-response-model.js';
 import { compileCloseWireCensus } from '#tests/close-wire-model.js';
@@ -38,15 +39,6 @@ import {
     compileCommonMatrixSamplingCensus,
     compileCommonMatrixInitializationCensus,
 } from '#tests/common-matrix-sampling-model.js';
-import {
-    ceilingLog2,
-    compileComposedSecurityLedger,
-    compileReductionWork,
-    compileUnitCallCostSensitivity,
-    fheCommonStreamGuesses,
-    keccakReferenceCost,
-    minimumHonestRosterMembers,
-} from '#tests/composed-security-ledger-model.js';
 import {
     sparseRoutingWork,
     labelledHashExtractionWork,
@@ -304,19 +296,6 @@ export const renderDocumentationCensus = (): string => {
             ? `${formatCount(counts[0])} to ${formatCount(counts[counts.length - 1])}`
             : counts.map((count) => formatCount(count)).join(', ');
     };
-    const securityLedger = compileComposedSecurityLedger();
-    const populationLedger = compileComposedSecurityLedger(
-        securityLedger.maximumCredentialPopulation,
-    );
-    const largestLedgerProfile =
-        securityLedger.profiles[securityLedger.profiles.length - 1];
-    const largestRosterWork = compileReductionWork(
-        largestLedgerProfile.potentialCredentialCount,
-        largestLedgerProfile.extractedCommitmentCount,
-    );
-    const unitCallCost = compileUnitCallCostSensitivity();
-    const signedExponent = (exponent: bigint): string =>
-        `\`${exponent < 0n ? '-' : ''}${(exponent < 0n ? -exponent : exponent).toLocaleString('en-US')}\``;
     const distinctJoined = (values: readonly (bigint | number)[]): string =>
         [...new Set(values.map((value) => value.toString()))]
             .map((value) => formatCount(BigInt(value)))
@@ -1989,40 +1968,26 @@ export const renderDocumentationCensus = (): string => {
         '',
         '## Proof compiler chronology',
         '',
-        'Multi-roster population rows retain the historical all-confirmation divisor and are reference arithmetic only. Current local proof counts include every eligible offer, but the divisor does not bound clear-candidate exposure before certification and supplies no current credential scope or security claim.',
-        '',
-        'Proofs, programming points and commitments for the active setup, ballot and release purposes, compared with the reference compiler caps. Registration authenticates the recipient key without a proof; unused and abandoned registrations still count in source sampling, source commitments and original-credential populations. Every eligible contributor can emit one offer proof, including an unselected offer, and every participant can emit one ballot and one release proof under the original one-shot purposes. A restored participant replays identical completed bytes and required-state loss stops it. The reference multi-roster divisor assumes each completed roster consumes at least `n-f` honest registrations; that assumption does not count all current clear-offer exposure scopes. The direct simulator programs one verifier message per simulated proof, and local proof roles are the proving positions of those rosters. Committed nodes count every leaf and internal node of every tree and every salted message root. The non-salt input is the widest salted leaf or message-root input without its salt, over every proof role; each cell is the range over the option counts of one participant count.',
+        'Local producer counts for one roster, including every eligible offer even if it is not selected. Registration has no proof role. These counts do not bound speculative verification or all preselection exposure scopes; the composed ledger below owns those separate populations.',
         '',
         table(
             [
                 'Participants',
-                'Honest proofs, one registration per participant',
-                'Rosters at the largest credential population',
-                'Honest proofs at that population',
-                'Accepted proof roles at that population',
-                'Programmed verifier messages at that population',
+                'Maximum honest proof scopes in one roster',
+                'Accepted role slots',
+                'Programmed verifier messages',
                 'Committed nodes per proof',
                 'Widest non-salt input bits',
             ],
             supportedProfiles.profiles.map((row) => {
-                const chronologies = row.map((profile) =>
-                    compileProofCompilerChronology(
-                        profile,
-                        securityLedger.maximumCredentialPopulation,
-                        securityLedger.maximumRosterCount,
-                    ),
-                );
+                const chronologies = row.map(compileProofCompilerChronology);
                 const [first] = chronologies;
                 if (!chronologies.every((value) => value.withinCaps))
                     throw new Error(
-                        'A supported profile exceeds a charged compiler cap.',
+                        'A supported profile exceeds a local compiler cap.',
                     );
                 return [
                     formatCount(row[0].participantCount),
-                    formatCount(
-                        compileProofCompilerChronology(row[0]).honestProofs,
-                    ),
-                    formatCount(first.rosters),
                     formatCount(first.honestProofs),
                     formatCount(first.acceptedRoles),
                     formatCount(first.programmedMessages),
@@ -4676,160 +4641,81 @@ export const renderDocumentationCensus = (): string => {
         '',
         '## Composed security ledger',
         '',
-        'Reference arithmetic for the all-confirmation chronology; the [candidate ledger scope](security-argument.md#registration-bound-clear-preparation-argument) owns its missing registration-source and replacement-preparation correspondence. These rows set no revised credential scope or security-bits claim. An experiment costs every gate of the adversary and of every honest operation, and each SHAKE call is charged the chi multiplications of the FIPS 202 permutations it runs. A protocol has b bits when its advantage is at most T/2^b at every cost T; the 80-bit target is split equally among the groups below. A corrupt organizer can complete several rosters of one poll, of any supported sizes, for disjoint honest groups; each honest registration confirms at most one roster, and a roster that reaches an honest opening holds at least `n-f` honest registrations, so the honest credential population bounds the number of such rosters. Statistical terms are evaluated at the query cap of the proof compiler and the largest honest credential population of a poll, and each term takes its largest value over every supported profile; every roster has one profile, so the subtotal bounds each roster, and the ledger charges it once for every roster that can reach an honest opening. The last column names the first profile that attains a term that varies between profiles. Every profile reduces the same FHE common streams modulo its own ciphertext modulus, and the adversary may fix the profile after querying them, so the FHE Ring-LWE and circular-security reductions also guess the ciphertext modulus. Required bits are the levels at which each unreduced assumption must hold for the ledger to meet the target. They are not attack estimates, a reduction or admission.',
-        '',
-        table(
-            ['Statistical term', 'Bound exponent', 'Largest at'],
-            [
-                ...populationLedger.statistical.terms.map((term) => [
-                    term.name,
-                    signedExponent(
-                        ceilingLog2({
-                            numerator: term.numerator,
-                            denominator:
-                                1n <<
-                                populationLedger.statistical.denominatorBits,
-                        }),
-                    ),
-                    term.largestAt === undefined
-                        ? 'every profile'
-                        : [
-                              `${term.largestAt.participantCount} participants`,
-                              ...(term.largestAt.optionCount === undefined
-                                  ? []
-                                  : [`${term.largestAt.optionCount} options`]),
-                          ].join(', '),
-                ]),
-                [
-                    'Subtotal per roster',
-                    signedExponent(
-                        populationLedger.statistical.subtotalExponent,
-                    ),
-                    'every profile',
-                ],
-                [
-                    'Charged for every roster',
-                    signedExponent(
-                        populationLedger.statistical.chargedExponent,
-                    ),
-                    'every profile',
-                ],
-            ],
-        ),
-        '',
-        table(
-            ['Property', 'Value'],
-            [
-                [
-                    'Security target bits',
-                    formatCount(securityLedger.securityTargetBits),
-                ],
-                ['Budget groups', formatCount(securityLedger.groups.length)],
-                [
-                    'Budget bits per group',
-                    formatCount(securityLedger.budgetBits),
-                ],
-                [
-                    'Permutation charge gates',
-                    formatCount(keccakReferenceCost.permutationCharge),
-                ],
-                [
-                    'Widest SHAKE rate bits',
-                    formatCount(keccakReferenceCost.widestRateBits),
-                ],
-                [
-                    'Extraction routing coefficient exponent, per squared cost',
-                    signedExponent(
-                        ceilingLog2(largestRosterWork.quadraticCoefficient),
-                    ),
-                ],
-                [
-                    'Cell routing coefficient exponent, per cost',
-                    signedExponent(
-                        ceilingLog2(largestRosterWork.linearCoefficient),
-                    ),
-                ],
-                [
-                    'Extraction selection coefficient exponent, per cost',
-                    signedExponent(
-                        ceilingLog2(largestRosterWork.extractionCoefficient),
-                    ),
-                ],
-                [
-                    'Plain reduction coefficient exponent at the largest roster, per cost',
-                    signedExponent(
-                        ceilingLog2(largestRosterWork.plainCoefficient),
-                    ),
-                ],
-                [
-                    'Honest credential population of one poll within the ML-DSA-65 group',
-                    formatCount(securityLedger.signatureCredentialPopulation),
-                ],
-                [
-                    'Least honest registrations of a roster that reaches an honest opening',
-                    formatCount(minimumHonestRosterMembers),
-                ],
-                [
-                    'Largest honest credential population of one poll',
-                    formatCount(securityLedger.maximumCredentialPopulation),
-                ],
-                [
-                    'Rosters of that population that can reach an honest opening',
-                    formatCount(securityLedger.maximumRosterCount),
-                ],
-                [
-                    'Proof roles accepted across those rosters',
-                    formatCount(securityLedger.maximumAcceptedProofRoles),
-                ],
-                [
-                    'Identity collision exponent, per cost',
-                    signedExponent(securityLedger.identityCollisionExponent),
-                ],
-                [
-                    'Ciphertext moduli guessed by the FHE reductions',
-                    formatCount(fheCommonStreamGuesses()),
-                ],
-                [
-                    'FHE Ring-LWE requirement if every call cost one gate',
-                    formatCount(unitCallCost.requiredBits),
-                ],
-            ],
-        ),
-        '',
-        'Required bits by participant count, with one roster and one potential honest credential per participant:',
+        'The [clear-preparation argument](security-argument.md#clear-candidate-joint-ledger) owns the conditional hybrid interfaces. The table evaluates structural upper bounds at the displayed example original-honest-registration population H, including abandoned and unselected registrations; H is not an admitted population limit. Exposed rosters and certified rosters have different bounds. Primitive comparison counts include the source-family or selected-position guesses where required, but exclude unresolved semantic-use error charges and reduction-time operands. No numerical end-to-end security level or required primitive level is emitted.',
         '',
         table(
             [
                 'Participants',
-                'Extracted commitments',
-                ...largestLedgerProfile.hybrids.map(
-                    (row) =>
-                        `${row.assumption}, ${row.reduction === 'plain' ? 'without' : 'with'} extraction`,
-                ),
+                'Example H',
+                'Exposure scopes',
+                'Certified rosters',
+                'Source entries, option range',
+                'Source-mask scopes',
+                'Corrupt source extractions',
+                'Honest proof scopes',
+                'Recipient key and ciphertext comparisons',
             ],
-            securityLedger.profiles.map((profile) => [
-                formatCount(profile.participantCount),
-                formatCount(profile.extractedCommitmentCount),
-                ...profile.hybrids.map((row) => formatCount(row.requiredBits)),
-            ]),
+            supportedProfiles.profiles.map((row) => {
+                const ledgers = row.map((profile) =>
+                    compileClearPreparationLedger(
+                        profile,
+                        BigInt(profile.participantCount),
+                    ),
+                );
+                const [first] = ledgers;
+                return [
+                    formatCount(row[0].participantCount),
+                    formatCount(first.originalHonestRegistrations),
+                    formatCount(first.maximumExposedRosters),
+                    formatCount(first.maximumCertifiedRosters),
+                    rangeOf(
+                        ledgers.map((value) => value.generatedSourceEntries),
+                    ),
+                    formatCount(first.sourceMaskScopes),
+                    formatCount(first.maximumCorruptSourceExtractions),
+                    formatCount(first.maximumHonestProofScopes),
+                    formatCount(
+                        first.recipientKeyComparisons +
+                            first.recipientCiphertextComparisons,
+                    ),
+                ];
+            }),
         ),
         '',
         table(
             [
-                'Assumption',
-                'Required bits, one roster and one credential per participant',
-                'Required bits at the largest credential population, every roster at the largest size',
+                'Participants',
+                'Selected position sets',
+                'FHE modulus guesses',
+                'FHE tuple comparisons',
+                'Selected FHE key comparisons',
+                'FHE ballot comparisons',
+                'Messages per FHE ballot comparison',
+                'Global auxiliary key comparisons',
+                'Auxiliary ballot comparisons',
+                'Messages per auxiliary comparison',
             ],
-            securityLedger.maximumRequiredBits.map((row) => [
-                row.assumption,
-                formatCount(row.requiredBits),
-                formatCount(
-                    populationLedger.maximumRequiredBits.find(
-                        (value) => value.assumption === row.assumption,
-                    )!.requiredBits,
-                ),
-            ]),
+            supportedProfiles.profiles.map((row) => {
+                const value = compileClearPreparationLedger(
+                    row[0],
+                    BigInt(row[0].participantCount),
+                );
+                return [
+                    row[0].participantCount,
+                    value.selectedPositionSets,
+                    value.sharedFheModulusGuesses,
+                    value.fheTupleComparisons,
+                    value.fheSelectedKeyComparisons,
+                    value.fheBallotComparisons,
+                    value.messagesPerFheBallotComparison,
+                    value.auxiliaryKeyComparisons,
+                    value.auxiliaryBallotComparisons,
+                    value.messagesPerAuxiliaryBallotComparison,
+                ].map(formatCount);
+            }),
         ),
+        '',
+        'Oracle simulation is priced from declared query schedules in the compressed-oracle circuit census. That accounting includes persistent components, clean prefix wrappers and all supplied shadow streams. Deriving admissible capacities from the accepted experiment-cost convention, pricing the complete protocol wrappers and closing the semantic-use inventory remain required before solving for a security population.',
         '',
         '## Proof-field coefficient-fold bounds',
         '',
