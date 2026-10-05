@@ -18,7 +18,7 @@ export const preparationHaltingClient = (
         assert.equal(cut.phase, 1);
         const source = worker.toString('utf8');
         const boundary =
-            /await endorseSetup\(session,\s*relay,\s*published\);/gu;
+            /(await publication\.finish\(\);)(\s*await endorseSetup\(session,\s*relay,\s*retained\);)/gu;
         assert.equal(
             [...source.matchAll(boundary)].length,
             1,
@@ -27,8 +27,8 @@ export const preparationHaltingClient = (
         const patched = Buffer.from(
             source.replace(
                 boundary,
-                (matched) =>
-                    `self.postMessage({type:'participant-preparation-halt',kind:'selection-readback',phase:1});\nawait new Promise(() => undefined);\n${matched}`,
+                (_matched: string, readback: string, endorsement: string) =>
+                    `${readback}\nself.postMessage({type:'participant-preparation-halt',kind:'selection-readback',phase:1});\nawait new Promise(() => undefined);\n${endorsement}`,
             ),
         );
         return {

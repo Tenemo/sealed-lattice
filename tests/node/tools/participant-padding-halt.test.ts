@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash, webcrypto } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
 import { runInNewContext } from 'node:vm';
 
 import { describe, expect, it } from 'vitest';
@@ -22,11 +24,33 @@ const source =
 };`);
 
 describe('instrumented participant padding boundaries', () => {
+    it('finds every preparation and padding interruption boundary in the built participant worker', async () => {
+        const worker = await readFile(
+            path.resolve('packages/sdk/dist/participant-worker.js'),
+        );
+        for (const kind of [
+            'contribution',
+            'selection',
+            'selection-readback',
+            'endorsement',
+        ] as const)
+            for (const phase of kind === 'contribution'
+                ? [4, 5, 6, 7, 8, 9]
+                : kind === 'selection-readback'
+                  ? [1]
+                  : [1, 2])
+                expect(() =>
+                    preparationHaltingClient(worker, { kind, phase }),
+                ).not.toThrow();
+        for (const cut of ['padding', 'final-slot'] as const)
+            expect(() => paddingHaltingClient(worker, cut)).not.toThrow();
+    });
     it('halts after authenticated selection readback and before any endorsement work', async () => {
         const worker = Buffer.from(`globalThis.select = async () => {
-            await globalThis.readback();
-            const session = {}, relay = {}, published = {};
-            await endorseSetup(session, relay, published);
+            const publication = { finish: globalThis.readback };
+            const session = {}, relay = {}, retained = {};
+            await publication.finish();
+            await endorseSetup(session, relay, retained);
         };`);
         const client = preparationHaltingClient(worker, {
             kind: 'selection-readback',
