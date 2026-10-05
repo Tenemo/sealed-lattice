@@ -1,12 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { compileRegistrationWordProofLayout } from '#tests/full-word-proof-layout-model.js';
 import {
     bufferedFieldSamplingFailure,
     compileProofRandomnessBudgets,
     rejectionSubsetBound,
 } from '#tests/proof-randomness-budget-model.js';
-import { compileRegistrationKeyRelationCensus } from '#tests/registration-key-relation-model.js';
 import {
     completionProfile,
     deriveSupportedProfile,
@@ -24,7 +22,7 @@ describe('bounded randomness for complete proof simulation', () => {
             );
             expect(
                 budgets.map((value) => value.programmedMessageBytes),
-            ).toEqual([262144n, setupBytes, 262144n, 262144n]);
+            ).toEqual([setupBytes, 262144n, 262144n]);
             for (const budget of budgets)
                 expect(
                     budget.simulatorBaselineBytes -
@@ -73,11 +71,6 @@ describe('bounded randomness for complete proof simulation', () => {
             }),
         ).toThrow();
     });
-    it('matches the independently encoded registration proof shape', () => {
-        expect(
-            compileRegistrationWordProofLayout().maximumMultiproofBytes,
-        ).toBe(compileRegistrationKeyRelationCensus().maximumProofBytes);
-    });
 
     it('bounds exact small-field rejection events without assuming independent stopping positions', () => {
         // Exhaust all three-byte tapes for a sampler accepting 255 values.
@@ -109,7 +102,6 @@ describe('bounded randomness for complete proof simulation', () => {
     it('charges the complete role population and only adds enough read headroom', () => {
         const budgets = compileProofRandomnessBudgets(completionProfile());
         expect(budgets.map((value) => value.role)).toEqual([
-            'registration',
             'setup contribution',
             'linked ballot',
             'linked release',

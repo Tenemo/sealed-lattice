@@ -8,15 +8,9 @@ import type { SupportedProfile } from '#tests/supported-profile-model.js';
 import { compileThresholdCompletionProfile } from '#tests/threshold-completion-model.js';
 import { proofCompilerCaps } from '#tests/wide-challenge-compiler-model.js';
 
-// Proof purposes of a poll. Every honest registration carries one
-// registration proof, and each participant emits at most one proof of every
-// other purpose.
-export const proofPurposes = [
-    'registration',
-    'setup',
-    'ballot',
-    'release',
-] as const;
+// Each original participant emits at most one proof of each purpose after
+// confirming its roster. Registration authenticates a key without a proof.
+export const proofPurposes = ['setup', 'ballot', 'release'] as const;
 
 // Every eligible position may prove an offer, even when it is not selected.
 export const provingPositions = (
@@ -36,10 +30,9 @@ export const provingPositions = (
 // position; candidate global scopes remain owned by the security argument.
 // The proofs, programming points and commitments that the reference emits when
 // every roster that reaches an honest opening has this profile, against the
-// caps the proof compiler charges. Every honest registration publishes its
-// registration proof before any roster exists, including one no roster
-// takes, and uses its own credential, so the honest credential population
-// bounds the honest registrations of a poll; by default there is one per
+// caps the proof compiler charges. Unselected and abandoned registrations
+// remain in the original credential and source-sampling populations but emit
+// no registration proof. By default there is one original registration per
 // participant and one roster. A corrupt organizer can complete several rosters
 // for disjoint honest groups, but each honest registration confirms at most
 // one, and a roster with at most f corrupt members holds n-f honest ones.
@@ -72,7 +65,6 @@ export const compileProofCompilerChronology = (
     const rosterProvers = (purpose: (typeof proofPurposes)[number]) =>
         rosters * provingPositions(purpose, participants);
     const honestProofs = proofPurposes.reduce((sum, purpose) => {
-        if (purpose === 'registration') return sum + honestRegistrations;
         const provers = rosterProvers(purpose);
         return (
             sum +
@@ -80,7 +72,7 @@ export const compileProofCompilerChronology = (
         );
     }, 0n);
     // Honest participants accept proofs only for their confirmed roster's
-    // registration records and proving positions, one role per purpose each.
+    // proving positions, one role per purpose each.
     const acceptedRoles = proofPurposes.reduce(
         (sum, purpose) => sum + rosterProvers(purpose),
         0n,

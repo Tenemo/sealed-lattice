@@ -1,6 +1,6 @@
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import { compileFullWordProofLayout } from '#tests/full-word-proof-layout-model.js';
-import { compileRegistrationKeyRelationCensus } from '#tests/registration-key-relation-model.js';
+import { compileRecipientKeyCensus } from '#tests/recipient-key-model.js';
 import { sourceOpeningSaltBytes } from '#tests/registration-setup-binding-model.js';
 import { compileSetupSelectionCensus } from '#tests/setup-selection-model.js';
 import type { SupportedProfile } from '#tests/supported-profile-model.js';
@@ -38,7 +38,7 @@ export const compileContributionBodyCensus = (profile: SupportedProfile) => {
     };
     const participantCount = profile.participantCount;
     const proof = compileFullWordProofLayout(profile);
-    const recipient = compileRegistrationKeyRelationCensus();
+    const recipient = compileRecipientKeyCensus();
     const selection = compileSetupSelectionCensus(participantCount);
     const polynomialBytes = (degree: bigint, modulus: bigint) =>
         degree * (1n + BigInt(Math.ceil(modulus.toString(2).length / 8)));

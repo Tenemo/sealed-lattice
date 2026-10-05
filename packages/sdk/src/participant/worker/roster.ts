@@ -40,7 +40,6 @@ import type { AuthenticatedRoot } from './root.js';
 // registration body digest.
 export const registrationFile = {
     publicKey: 'polynomial-01.bin',
-    proof: 'proof.bin',
     header: 'registration-header.bin',
     signature: 'signature.bin',
 } as const;
@@ -73,7 +72,6 @@ const recordStep = {
     begin: 0,
     key: 1,
     keyFinish: 2,
-    proof: 3,
     finish: 4,
     discard: 5,
 } as const;
@@ -155,21 +153,6 @@ export const streamRegistrations = async (
                         new Uint8Array(),
                         'A registration key is incomplete.',
                     );
-                    if (!restoring)
-                        await streamCandidateFile(
-                            relay,
-                            candidate,
-                            registrationFile.proof,
-                            registration.maximumProofBytes,
-                            (bytes) => {
-                                run(
-                                    recordStep.proof,
-                                    position,
-                                    bytes,
-                                    'A registration proof was refused.',
-                                );
-                            },
-                        );
                     run(
                         recordStep.finish,
                         position,

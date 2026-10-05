@@ -1,4 +1,4 @@
-import { compileRegistrationKeyRelationCensus } from '#tests/registration-key-relation-model.js';
+import { compileRecipientKeyCensus } from '#tests/recipient-key-model.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
 
 // For a uniform a in Z_p[X]/(X^N+1), p=1 mod 2N and N a power of two,
@@ -65,7 +65,7 @@ export const compileBoundedKeyUniqueness = (
 };
 
 export const compileRecipientKeyUniquenessBound = () => {
-    const relation = compileRegistrationKeyRelationCensus();
+    const relation = compileRecipientKeyCensus();
     const prime = compileSmallLimbProofFieldCensus().modulus;
     if (relation.modulus % prime !== 0n)
         throw new Error(

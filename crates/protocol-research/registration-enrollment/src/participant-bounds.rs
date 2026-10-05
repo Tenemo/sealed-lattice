@@ -23,7 +23,7 @@ use registration_credentials::{
 };
 use supported_profile::{
     DEGREE, MAXIMUM_SCORE, MINIMUM_SCORE, Profile,
-    relation::{PROOF_HEADER_BYTES, registration_relation, setup_relation},
+    relation::{PROOF_HEADER_BYTES, setup_relation},
 };
 
 /// A packet is a four-byte body length, the body and its signature.
@@ -42,7 +42,6 @@ pub fn limits() -> Vec<u64> {
         *options.start(),
         *options.end(),
         KEY_BYTES,
-        registration_relation().maximum_proof_bytes(),
         RegistrationHeader::maximum_bytes(),
         MAXIMUM_POLL_BYTES,
         MAXIMUM_USERNAME_INGRESS_BYTES,

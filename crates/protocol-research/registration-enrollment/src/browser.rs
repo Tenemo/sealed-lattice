@@ -244,8 +244,8 @@ pub extern "C" fn prepare_creator(length: usize) -> u32 {
         ) else {
             return 1;
         };
-        staged_output(6, 0, &poll.body);
-        staged_output(7, 0, &poll.signature);
+        staged_output(5, 0, &poll.body);
+        staged_output(6, 0, &poll.signature);
         state.poll_identity = poll.identity;
         state.enrollment = Some(enrollment);
         0
@@ -321,7 +321,7 @@ fn restore_enrollment(length: usize, prepared: bool) -> u32 {
         let signing_bytes = registration_credentials::SEALED_SIGNING_SEED_BYTES;
         let base_length = 132
             + header_length
-            + 128
+            + 64
             + key_bytes
             + key_polynomial_bytes
             + recipient_bytes
@@ -341,10 +341,9 @@ fn restore_enrollment(length: usize, prepared: bool) -> u32 {
             return 1;
         }
         let start = 132 + header_length;
-        let proof_hash = input[start..start + 64].try_into().unwrap();
-        let body_digest = input[start + 64..start + 128].try_into().unwrap();
-        let data_keys = &input[start + 128..start + 128 + key_bytes];
-        let public_start = start + 128 + key_bytes;
+        let body_digest = input[start..start + 64].try_into().unwrap();
+        let data_keys = &input[start + 64..start + 64 + key_bytes];
+        let public_start = start + 64 + key_bytes;
         let capsule_start = public_start + key_polynomial_bytes;
         let recipient_capsule = &input[capsule_start..capsule_start + recipient_bytes];
         let signing_capsule = &input[capsule_start + recipient_bytes..base_length];
@@ -372,7 +371,6 @@ fn restore_enrollment(length: usize, prepared: bool) -> u32 {
                     poll,
                     &header,
                     &input[public_start..capsule_start],
-                    proof_hash,
                     body_digest,
                     data_keys.try_into().unwrap(),
                     [recipient_capsule, signing_capsule, &framed[4..]],
@@ -385,7 +383,6 @@ fn restore_enrollment(length: usize, prepared: bool) -> u32 {
                     poll,
                     &header,
                     &input[public_start..capsule_start],
-                    proof_hash,
                     body_digest,
                     data_keys.try_into().unwrap(),
                     [
@@ -407,7 +404,6 @@ fn restore_enrollment(length: usize, prepared: bool) -> u32 {
             return 1;
         };
         if verified.header().encode().ok().as_deref() != Some(&input[132..132 + header_length])
-            || verified.proof_hash() != proof_hash
             || verified.body_digest() != body_digest
             || verified.public_key() != &input[public_start..capsule_start]
         {
@@ -522,7 +518,7 @@ pub extern "C" fn own_registration_poll() -> u32 {
 }
 /// Emits this instance's verification of the participant's own
 /// registration, keyed to the restored credential, so that a later visit
-/// restores it instead of reading and verifying the proof again.
+/// restores it under the original credential instead of verifying its signature again.
 #[unsafe(no_mangle)]
 pub extern "C" fn retain_registration() -> u32 {
     SESSION.with(|state| {
@@ -595,7 +591,6 @@ pub extern "C" fn roster_record(operation: u32, position: usize, length: usize) 
                 0 => roster.begin_record(bytes),
                 1 => roster.push_key(position, bytes),
                 2 if length == 0 => roster.finish_key(position),
-                3 => roster.push_proof(position, bytes),
                 4 if length == 0 => roster.finish_record(position),
                 5 if length == 0 => roster.discard_record(position),
                 _ => return 1,

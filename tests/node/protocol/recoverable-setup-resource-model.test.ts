@@ -7,13 +7,13 @@ import {
     compileWordProofLayout,
 } from '#tests/full-word-proof-layout-model.js';
 import { compilePublicPolynomialOperatorBuffers } from '#tests/public-polynomial-operator-resource-model.js';
+import { compileRecipientKeyCensus } from '#tests/recipient-key-model.js';
 import {
     compileBoundedOpeningShareProofResources,
     compilePublicOperatorScreenResources,
     compileRecoverableSetupResourceScreen,
     compileRecoverableSeedSharingProofResources,
 } from '#tests/recoverable-setup-resource-model.js';
-import { compileRegistrationKeyRelationCensus } from '#tests/registration-key-relation-model.js';
 import { deriveSupportedProfile } from '#tests/supported-profile-model.js';
 
 describe('recoverable setup resource screen', () => {
@@ -161,7 +161,7 @@ describe('recoverable setup resource screen', () => {
     });
 
     it('counts unchanged inner encodings and both recipient ciphertext polynomials from independent operands', () => {
-        const recipient = compileRegistrationKeyRelationCensus();
+        const recipient = compileRecipientKeyCensus();
         const coefficientBytes = (modulus: bigint) =>
             1n + BigInt(Math.ceil(modulus.toString(2).length / 8));
         // The original recipient-key encoder separately fixes its full

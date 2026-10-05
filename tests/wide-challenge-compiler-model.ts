@@ -1,13 +1,12 @@
 import { compileBallotEncryptionRelationCensus } from '#tests/ballot-encryption-relation-model.js';
 import { compileCommonAgreementDegreeCensus } from '#tests/common-agreement-degree-model.js';
 import { compileLinkedReleaseRelationCensus } from '#tests/linked-release-relation-model.js';
-import { compileRegistrationKeyRelationCensus } from '#tests/registration-key-relation-model.js';
 import { deriveSetupContributionShape } from '#tests/setup-contribution-relation-model.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
 import type { SupportedProfile } from '#tests/supported-profile-model.js';
 import { compileWeightedFriBound } from '#tests/weighted-fri-bound-model.js';
 
-type ProofPurpose = 'registration' | 'setup' | 'ballot' | 'release';
+type ProofPurpose = 'setup' | 'ballot' | 'release';
 
 export const wideChallengeLayout = (
     oracleCount: number,
@@ -64,7 +63,7 @@ export const jointModuloDensityBound = (
     return { numerator: space, denominator: space - total };
 };
 
-// The actual supported-profile relation constructors: three fixed words and
+// The actual supported-profile relation constructors: two fixed words and
 // one setup word sized for that relation's complete combination message.
 export const proofVerifierMessageBytes = (
     purpose: ProofPurpose,
@@ -79,8 +78,8 @@ export const proofVerifierMessageBytes = (
 
 // The compiler's charged caps are the same for every supported profile. The
 // ledger charges them, and the proof chronology model checks that one poll of
-// every profile, with a registration for every honest credential of the
-// largest population, stays within them. The query cap bounds every oracle
+// every profile against the reference population. The clear-candidate global
+// population and semantic-use inventory remain separate obligations. The query cap bounds every oracle
 // call of the experiment, including honest proving, verification and
 // expansion, and prefix and role routing make at most four base calls of each.
 // The role budget bounds the corrupt roles whose proofs can be accepted, and
@@ -176,15 +175,9 @@ const proofEvents = (
 
 const activeProofEvents = (profile: SupportedProfile) => {
     const setup = deriveSetupContributionShape(profile);
-    const registration = compileRegistrationKeyRelationCensus();
     const ballot = compileBallotEncryptionRelationCensus(profile);
     const release = compileLinkedReleaseRelationCensus(profile);
     return [
-        proofEvents('registration', {
-            ...registration,
-            lookupEntries: registration.lookups,
-            zeroProducts: registration.disjointPairs,
-        }),
         proofEvents('setup', { ...setup, zeroProducts: setup.disjointPairs }),
         proofEvents('ballot', {
             ...ballot,
@@ -301,7 +294,7 @@ export const compileProofRoundErrorCensus = (profile: SupportedProfile) => {
 
 // Ordinary IOP event counts for one profile's full word relation, which is
 // the largest proof operator of that profile: the union over accepted proof
-// roles charges every role these counts, so the registration, ballot and
+// roles charges every role these counts, so the ballot and
 // release relations must not exceed them in any count. The QROM compilation
 // and whole-protocol assumptions remain separate obligations.
 export const compileWideChallengeCompilerCensus = (
@@ -315,15 +308,9 @@ export const compileWideChallengeCompilerCensus = (
         ...relation,
         zeroProducts: relation.disjointPairs,
     });
-    const registration = compileRegistrationKeyRelationCensus();
     const ballot = compileBallotEncryptionRelationCensus(profile);
     const release = compileLinkedReleaseRelationCensus(profile);
     for (const role of [
-        proofEvents('registration', {
-            ...registration,
-            lookupEntries: registration.lookups,
-            zeroProducts: registration.disjointPairs,
-        }),
         proofEvents('ballot', {
             ...ballot,
             zeroProducts: ballot.additionalQuadraticConstraints,

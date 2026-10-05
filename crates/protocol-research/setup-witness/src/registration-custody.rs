@@ -11,11 +11,7 @@ impl RegistrationKey {
     /// Seals one completed registration key with a fresh, single-use local key.
     /// The caller owns that wrapping key's confidential browser-local custody.
     pub fn seal_retained(&mut self, key: &[u8; 32], associated: &[u8]) -> Result<Vec<u8>, Error> {
-        if self.sealed
-            || self.proof_words.is_some()
-            || associated.is_empty()
-            || associated.len() > 2048
-        {
+        if self.sealed || associated.is_empty() || associated.len() > 2048 {
             return Err(Error::Consumed);
         }
         self.sealed = true;
@@ -76,7 +72,6 @@ impl RegistrationKey {
         let result = Self {
             public,
             secret,
-            proof_words: None,
             sealed: true,
         };
         result.validate_retained()?;
@@ -88,7 +83,7 @@ impl RegistrationKey {
 mod tests {
     use super::*;
     #[test]
-    fn sealed_keys_restore_once_without_restoring_proof_or_resealing_authority() {
+    fn sealed_keys_restore_without_resealing_authority() {
         let mut original = RegistrationKey::new();
         let key = [7; 32];
         assert!(
@@ -96,7 +91,6 @@ mod tests {
                 .seal_retained(&key, b"registration/context")
                 .is_err()
         );
-        original.take_proof_columns().unwrap();
         let sealed = original
             .seal_retained(&key, b"registration/context")
             .unwrap();
@@ -114,7 +108,6 @@ mod tests {
         )
         .unwrap();
         assert_eq!(*original.secret, *restored.secret);
-        assert!(restored.take_proof_columns().is_err());
         assert!(
             restored
                 .seal_retained(&key, b"registration/context")

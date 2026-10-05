@@ -9,7 +9,7 @@ import {
 } from '#tests/proof-relation-catalogue-model.js';
 import { compileProofVerifierQueryCensus } from '#tests/proof-verifier-query-model.js';
 
-// Independent raw-input recognizer for the four fixed proof purposes. It does
+// Independent raw-input recognizer for the three fixed proof purposes. It does
 // not verify a proof, authenticate an identity or observe native hash calls.
 // Source grammar: word-verifier/engine.rs, supported-profile/relation.rs and
 // the original-identity role constructors in registration-credentials.
@@ -17,11 +17,10 @@ const agreement = compileCommonAgreementDegreeCensus();
 const tagBytes = 64;
 const saltBytes = 128;
 const elementBytes = 48;
-const rolePrefix = Buffer.from('registered-recipient-key/1');
 const fixedPrefix = Buffer.alloc(64);
 fixedPrefix.write('sealed-lattice/fixed-hash/v1');
 type Purpose = ProofRelationCatalogueEntry['role'];
-const purposes: Readonly<Record<Exclude<Purpose, 'registration'>, string>> = {
+const purposes: Readonly<Record<Purpose, string>> = {
     setup: 'sealed-lattice/setup-contribution/v2',
     ballot: 'sealed-lattice/ballot-proof/v2',
     release: 'sealed-lattice/certified-release/v2',
@@ -35,15 +34,6 @@ const originalOwner = (bytes: Buffer) =>
 const parseRole = (
     role: Buffer,
 ): { purpose: Purpose; owner: string } | undefined => {
-    if (
-        role.length === rolePrefix.length + 4 * tagBytes &&
-        role.subarray(0, rolePrefix.length).equals(rolePrefix)
-    ) {
-        const owner = role.subarray(rolePrefix.length + 2 * tagBytes);
-        return originalOwner(owner)
-            ? { purpose: 'registration', owner: owner.toString('ascii') }
-            : undefined;
-    }
     if (
         role.length < 8 ||
         role.readUInt16LE(0) !== 1 ||

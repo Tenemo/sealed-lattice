@@ -1,9 +1,9 @@
+import { compileRecipientKeyCensus } from '#tests/recipient-key-model.js';
 import {
     compileRegistrationEnrollmentCensus,
     participantIdentityAsciiBytes,
     retainedRosterBytes,
 } from '#tests/registration-enrollment-model.js';
-import { compileRegistrationKeyRelationCensus } from '#tests/registration-key-relation-model.js';
 
 export const compileRosterProposalCensus = (participantCount: number) => {
     if (
@@ -14,7 +14,7 @@ export const compileRosterProposalCensus = (participantCount: number) => {
         throw new RangeError('Unsupported roster size.');
     const count = BigInt(participantCount);
     const registration = compileRegistrationEnrollmentCensus();
-    const key = compileRegistrationKeyRelationCensus();
+    const key = compileRecipientKeyCensus();
     const bytes = (value: string) => BigInt(Buffer.byteLength(value));
     const roleBytes =
         8n +
@@ -48,7 +48,6 @@ export const compileRosterProposalCensus = (participantCount: number) => {
             registration.signatureBytes +
             count *
                 (key.publicKeyBytes +
-                    key.maximumProofBytes +
                     registration.maximumHeaderBytes +
                     registration.signatureBytes),
     };

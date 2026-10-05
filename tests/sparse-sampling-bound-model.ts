@@ -1,5 +1,5 @@
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
-import { compileRegistrationKeyRelationCensus } from '#tests/registration-key-relation-model.js';
+import { compileRecipientKeyCensus } from '#tests/recipient-key-model.js';
 import type { SupportedProfile } from '#tests/supported-profile-model.js';
 import { shareEncryptionParameters } from '#tests/wide-share-lifting-model.js';
 
@@ -48,7 +48,7 @@ export const boundSparseSupportSampling = (degree: bigint, support: bigint) => {
 export const compileSparseSupportSamplingCensus = (
     profile: SupportedProfile,
 ) => {
-    const registration = compileRegistrationKeyRelationCensus();
+    const registration = compileRecipientKeyCensus();
     const sharing = shareEncryptionParameters;
     return [
         {

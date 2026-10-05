@@ -356,15 +356,14 @@ const registrationIdentity = (records: ReadonlyMap<number, Uint8Array>) => {
             bytes,
         );
     return createHash('shake256', { outputLength: 64 })
-        .update(concatenate(unsigned16(1), unsigned16(1), unsigned32(3)))
+        .update(concatenate(unsigned16(1), unsigned16(1), unsigned32(2)))
         .update(
             variable(
                 2,
-                new TextEncoder().encode('sealed-lattice/registration-body/v1'),
+                new TextEncoder().encode('sealed-lattice/registration-body/v2'),
             ),
         )
         .update(variable(1, records.get(dataKind.header)!))
-        .update(variable(1, records.get(dataKind.proof)!))
         .digest('hex');
 };
 
@@ -398,7 +397,6 @@ const verifyRoster = async (
                 [registrationFile.header, dataKind.header],
                 [registrationFile.signature, dataKind.signature],
                 [registrationFile.publicKey, dataKind.publicKey],
-                [registrationFile.proof, dataKind.proof],
             ].map(
                 ([file, kind]) =>
                     [file as string, records.get(kind as number)!] as const,
@@ -487,7 +485,7 @@ const changed = (
     });
 
 describe('participant helpers with registration work', () => {
-    it('prove the registration the worker proves alone, and verify true and false rosters as it does', async () => {
+    it('generate the registration the worker generates alone, and verify true and false rosters as it does', async () => {
         const alone = await enroll(noParallelHelpers, 'Organizer');
         const creator = await withHelpers((helpers) =>
             enroll(helpers, 'Organizer'),
@@ -515,15 +513,11 @@ describe('participant helpers with registration work', () => {
                 (await withHelpers((helpers) => enroll(helpers, name, poll)))
                     .records,
             );
-        const proofBytes = registrations[1].get(dataKind.proof)!.length;
         const recordIds = registrations.map(registrationIdentity);
-        // The true roster, a proof changed at its middle, a public key
-        // coefficient changed and a signature changed.
+        // The true roster, a public key coefficient changed and a signature changed.
         for (const [candidate, accepted] of [
             [registrations, true],
-            [changed(registrations, 1, dataKind.proof, 0), false],
-            [changed(registrations, 1, dataKind.proof, proofBytes >> 1), false],
-            [changed(registrations, 1, dataKind.proof, proofBytes - 1), false],
+
             [changed(registrations, 2, dataKind.publicKey, 1000), false],
             [changed(registrations, 0, dataKind.signature, 7), false],
             [[registrations[0], registrations[2], registrations[1]], false],

@@ -20,7 +20,6 @@ impl PolynomialOutput for KeyOutput {
 pub struct RegistrationKey {
     public: Vec<BigInt>,
     secret: Zeroizing<Vec<i8>>,
-    proof_words: Option<Zeroizing<Vec<Vec<u16>>>>,
     #[cfg(feature = "custody")]
     sealed: bool,
 }
@@ -57,11 +56,9 @@ impl RegistrationKey {
         key(&mut witness, &mut output, input, products);
         assert_eq!(witness.words.len(), 3);
         assert_eq!(witness.booleans.len(), 2);
-        let proof_words = Zeroizing::new(std::mem::take(&mut witness.words));
         Self {
             public: output.values.unwrap(),
             secret: Zeroizing::new(std::mem::take(&mut *secret.values)),
-            proof_words: Some(proof_words),
             #[cfg(feature = "custody")]
             sealed: false,
         }
@@ -129,18 +126,16 @@ impl RegistrationKey {
         }
         Ok(())
     }
-    pub fn take_proof_columns(&mut self) -> Result<Vec<Vec<u16>>, Error> {
-        let mut words = self.proof_words.take().ok_or(Error::Consumed)?;
-        let mut columns = std::mem::take(&mut *words);
-        for sign in [1i8, -1] {
-            columns.push(
-                self.secret
-                    .iter()
-                    .map(|value| u16::from(*value == sign))
-                    .collect(),
-            );
+    pub fn public_key_bytes(&self) -> Vec<u8> {
+        let width = share_modulus().len();
+        let mut bytes = Vec::with_capacity(DEGREE * (1 + width));
+        for value in &self.public {
+            let (sign, magnitude) = value.to_bytes_le();
+            bytes.push(u8::from(sign == Sign::Minus));
+            bytes.extend(&magnitude);
+            bytes.resize(bytes.len() + width - magnitude.len(), 0);
         }
-        Ok(columns)
+        bytes
     }
 }
 
@@ -156,12 +151,8 @@ pub use custody::SEALED_BYTES as SEALED_KEY_BYTES;
 mod tests {
     use super::*;
     #[test]
-    fn retained_key_survives_proof_handoff_and_rejects_changed_secret_with_the_same_support() {
+    fn retained_key_rejects_changed_secret_with_the_same_support() {
         let mut key = RegistrationKey::new();
-        key.validate_retained().unwrap();
-        let columns = key.take_proof_columns().unwrap();
-        assert_eq!(columns.len(), 5);
-        assert!(key.take_proof_columns().is_err());
         key.validate_retained().unwrap();
         let positive = key.secret.iter().position(|value| *value == 1).unwrap();
         let zero = key.secret.iter().position(|value| *value == 0).unwrap();

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
-import { compileRegistrationKeyRelationCensus } from '#tests/registration-key-relation-model.js';
+import { compileRecipientKeyCensus } from '#tests/recipient-key-model.js';
 import {
     compileSetupAggregateResources,
     partitionAggregatePolynomial,
@@ -15,7 +15,7 @@ describe('setup aggregate cache resources', () => {
         const value = compileSetupAggregateResources(profile);
         const parameters = fixedModulusBfvInputs;
         const participantCount = BigInt(profile.participantCount);
-        const recipient = compileRegistrationKeyRelationCensus();
+        const recipient = compileRecipientKeyCensus();
         const gadgetCount = BigInt(
             Math.ceil(
                 profile.ciphertext.modulus.toString(2).length /

@@ -6,8 +6,8 @@ import { compileCloseWireCensus } from '#tests/close-wire-model.js';
 import { compileContributionBodyCensus } from '#tests/contribution-body-model.js';
 import { compileOrdinaryWorkflowResources } from '#tests/ordinary-workflow-resource-model.js';
 import { compileParticipantReleaseCustody } from '#tests/participant-release-custody-model.js';
+import { compileRecipientKeyCensus } from '#tests/recipient-key-model.js';
 import { compileRegistrationEnrollmentCensus } from '#tests/registration-enrollment-model.js';
-import { compileRegistrationKeyRelationCensus } from '#tests/registration-key-relation-model.js';
 import { compileRosterProposalCensus } from '#tests/roster-proposal-model.js';
 import { compileSetupSelectionWireCensus } from '#tests/setup-selection-wire-model.js';
 import { deriveSupportedProfile } from '#tests/supported-profile-model.js';
@@ -26,7 +26,7 @@ describe('complete ordinary workflow resource graph', () => {
             const n = profile.participantCount;
             const result = compileOrdinaryWorkflowResources(profile, artifact);
             const registration = compileRegistrationEnrollmentCensus();
-            const key = compileRegistrationKeyRelationCensus();
+            const key = compileRecipientKeyCensus();
             const roster = compileRosterProposalCensus(n);
             const body = compileContributionBodyCensus(profile);
             const wire = compileSetupSelectionWireCensus(n);
@@ -113,7 +113,6 @@ describe('complete ordinary workflow resource graph', () => {
             ];
             const registrationFiles: Entry[] = [
                 ['polynomial-01.bin', key.publicKeyBytes],
-                ['proof.bin', key.maximumProofBytes],
                 ['registration-header.bin', registration.maximumHeaderBytes],
                 ['signature.bin', registration.signatureBytes],
             ];
@@ -308,11 +307,9 @@ describe('complete ordinary workflow resource graph', () => {
         expect(ten.rows[0].totalUploadBytes).toBeLessThan(ten.planningBytes);
         expect(ten.publicReaderProtocolBytes).toBeLessThan(ten.planningBytes);
         expect(ten.rows[1].publicCorpusBytes).toBeGreaterThan(
-            ten.planningBytes,
+            ten.rows[0].publicCorpusBytes,
         );
-        expect(ten.rows[1].publicCorpusBytes).toBeLessThan(
-            ten.planningVarianceCeilingBytes,
-        );
+        expect(ten.rows[1].publicCorpusBytes).toBeLessThan(ten.planningBytes);
         expect(twenty.rows[0].publicCorpusBytes).toBeGreaterThan(
             twenty.planningVarianceCeilingBytes,
         );

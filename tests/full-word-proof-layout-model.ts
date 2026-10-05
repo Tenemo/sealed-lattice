@@ -3,7 +3,6 @@ import { compileBallotEncryptionColumnLayout } from '#tests/ballot-encryption-re
 import { compileCommonAgreementDegreeCensus } from '#tests/common-agreement-degree-model.js';
 import { compileLinkedReleaseColumnLayout } from '#tests/linked-release-relation-model.js';
 import { maximumSharedPathSiblings } from '#tests/merkle-path-sharing-model.js';
-import { compileRegistrationKeyRelationCensus } from '#tests/registration-key-relation-model.js';
 import { deriveSetupContributionShape } from '#tests/setup-contribution-relation-model.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
 import type { SupportedProfile } from '#tests/supported-profile-model.js';
@@ -112,14 +111,6 @@ export const compileFullWordProofLayout = (profile: SupportedProfile) => {
     return compileWordProofLayout(
         shape.wordColumns + shape.booleanColumns,
         shape.lookupEntries,
-    );
-};
-
-export const compileRegistrationWordProofLayout = () => {
-    const relation = compileRegistrationKeyRelationCensus();
-    return compileWordProofLayout(
-        relation.wordColumns + relation.booleanColumns,
-        relation.lookups,
     );
 };
 

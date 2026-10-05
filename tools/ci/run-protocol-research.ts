@@ -20,12 +20,12 @@ import { compileCloseWireCensus } from '#tests/close-wire-model.js';
 import { compileContributionBodyCensus } from '#tests/contribution-body-model.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import { compileLinkedReleaseWordProofLayout } from '#tests/full-word-proof-layout-model.js';
+import { compileRecipientKeyCensus } from '#tests/recipient-key-model.js';
 import {
     compileBoundedOpeningShareProofResources,
     compileRecoverableSeedSharingProofResources,
 } from '#tests/recoverable-setup-resource-model.js';
 import { compileRegistrationEnrollmentCensus } from '#tests/registration-enrollment-model.js';
-import { compileRegistrationKeyRelationCensus } from '#tests/registration-key-relation-model.js';
 import { compileRosterProposalCensus } from '#tests/roster-proposal-model.js';
 import { compileSetupAggregateResources } from '#tests/setup-aggregate-resource-model.js';
 import { deriveSupportedProfile } from '#tests/supported-profile-model.js';
@@ -186,7 +186,6 @@ const unitSimulatedHelpers = 3;
 const proofSimulatedHelpers = 8;
 const proofCrates = [
     'word-proof',
-    'registration-proof',
     'ballot-proof',
     'linked-release-proof',
     'contribution-prover',
@@ -342,7 +341,7 @@ await runWithLocalRunLog(
             const ballot = compileBallotBodyCensus(profile);
             const participants = BigInt(contribution.participantCount);
             const contributors = BigInt(contribution.setupContributorCount);
-            const registration = compileRegistrationKeyRelationCensus();
+            const registration = compileRecipientKeyCensus();
             const preparation = compileClearPreparationResources(profile);
             const roster = compileRosterProposalCensus(Number(participants));
             const close = compileCloseWireCensus(profile);
@@ -372,8 +371,7 @@ await runWithLocalRunLog(
                 closeRecordBound +
                 preparation.maximumEligibleOfferBytes +
                 participants *
-                    (registration.maximumProofBytes +
-                        registration.publicKeyBytes +
+                    (registration.publicKeyBytes +
                         enrollment.maximumHeaderBytes +
                         enrollment.signatureBytes) +
                 preparation.selectionProposalBytes +

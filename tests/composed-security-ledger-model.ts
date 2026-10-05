@@ -18,7 +18,6 @@ import {
     compileBallotWordProofLayout,
     compileFullWordProofLayout,
     compileLinkedReleaseWordProofLayout,
-    compileRegistrationWordProofLayout,
     merkleSaltSeedBytes,
 } from '#tests/full-word-proof-layout-model.js';
 import {
@@ -138,7 +137,6 @@ const ceilingSquareRoot = (value: bigint) => {
 // The most trees that one honest proof of the profile commits to.
 const maximumTreesPerProof = (profile: SupportedProfile) =>
     [
-        compileRegistrationWordProofLayout(),
         compileFullWordProofLayout(profile),
         compileBallotWordProofLayout(profile),
         compileLinkedReleaseWordProofLayout(profile),
@@ -214,7 +212,7 @@ export const rosterCountAt = (honestRegistrations: bigint) =>
     honestRegistrations / minimumHonestRosterMembers;
 
 // The proof roles honest participants accept across those rosters: one per
-// purpose and proving position of each, so at most (3n+d)/(n-f) per honest
+// purpose and proving position of each, so at most (2n+k)/(n-f) per honest
 // member.
 export const acceptedProofRolesAt = (honestRegistrations: bigint) =>
     rosterSizes.reduce((maximum, { participantCount, honestMembers }) => {

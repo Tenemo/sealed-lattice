@@ -92,6 +92,7 @@ import {
 } from '#tests/proof-hash-work-model.js';
 import { compileProofRandomnessBudgets } from '#tests/proof-randomness-budget-model.js';
 import { compileProofVerifierQueryCensus } from '#tests/proof-verifier-query-model.js';
+import { compileRecipientKeyCensus } from '#tests/recipient-key-model.js';
 import { compileRecipientKeyUniquenessBound } from '#tests/recipient-key-uniqueness-model.js';
 import { compileOpeningShareResources } from '#tests/recoverable-opening-share-model.js';
 import {
@@ -100,9 +101,7 @@ import {
     compileRecoverableSetupResourceScreen,
     compileRecoverableSeedSharingProofResources,
 } from '#tests/recoverable-setup-resource-model.js';
-import { compileRegistrationCustodyCensus } from '#tests/registration-custody-model.js';
 import { compileRegistrationEnrollmentCensus } from '#tests/registration-enrollment-model.js';
-import { compileRegistrationKeyRelationCensus } from '#tests/registration-key-relation-model.js';
 import { compileRegistrationSetupBindingScreen } from '#tests/registration-setup-binding-model.js';
 import { compileRegistrationSourceRandomness } from '#tests/registration-source-randomness-model.js';
 import { compileReleaseShareLiftingCensus } from '#tests/release-share-lifting-model.js';
@@ -217,8 +216,7 @@ export const renderDocumentationCensus = (): string => {
         completion.participantCount,
         completion.optionCount,
     );
-    const registrationKey = compileRegistrationKeyRelationCensus();
-    const registrationCustody = compileRegistrationCustodyCensus();
+    const registrationKey = compileRecipientKeyCensus();
     const registrationEnrollment = compileRegistrationEnrollmentCensus();
     const hashRowCheckpoint = compileHashRowCheckpointCensus();
     const firstOracleCheckpoint =
@@ -2246,31 +2244,16 @@ export const renderDocumentationCensus = (): string => {
             ],
         ),
         '',
-        '## Registration key relation census',
+        '## Recipient key census',
         '',
-        'The recipient-key relation binds the original balanced sparse secret to its fixed-suite common polynomial and public key. It uses distinct statement/proof domains and the same full verification domain as the contribution proof. The bounds below cover both radix equations and the exact support rows; key ownership, signatures, private-state sealing, and whole-protocol security remain separate obligations.',
+        'Registration authenticates the complete canonical recipient polynomial. The bounded key equation is checked in the linked release relation; registration carries no separate key proof.',
         '',
         table(
             ['Property', 'Value'],
             [
                 ['Polynomial degree', formatCount(registrationKey.degree)],
                 ['Ciphertext modulus', formatCount(registrationKey.modulus)],
-                ['Secret support', formatCount(registrationKey.support)],
-                ['Word columns', formatCount(registrationKey.wordColumns)],
-                [
-                    'Boolean columns',
-                    formatCount(registrationKey.booleanColumns),
-                ],
-                ['Lookup memberships', formatCount(registrationKey.lookups)],
-                ['Affine rows', formatCount(registrationKey.affineRows)],
-                [
-                    'Original oracles',
-                    formatCount(registrationKey.originalOracles),
-                ],
-                [
-                    'Virtual constraint oracles',
-                    formatCount(registrationKey.virtualOracles),
-                ],
+                ['Honest secret support', formatCount(registrationKey.support)],
                 [
                     'Honest quotient magnitude bound',
                     formatCount(registrationKey.honestQuotient),
@@ -2286,114 +2269,6 @@ export const renderDocumentationCensus = (): string => {
                 [
                     'Canonical public-key bytes',
                     formatCount(registrationKey.publicKeyBytes),
-                ],
-                [
-                    'Expanded statement bytes',
-                    formatCount(registrationKey.statementBytes),
-                ],
-                [
-                    'First-oracle leaf bytes',
-                    formatCount(registrationKey.firstLeafBytes),
-                ],
-                [
-                    'Second-oracle leaf bytes',
-                    formatCount(registrationKey.secondLeafBytes),
-                ],
-                [
-                    'Proof header bytes',
-                    formatCount(registrationKey.proofHeaderBytes),
-                ],
-                [
-                    'Maximum encoded proof bytes',
-                    formatCount(registrationKey.maximumProofBytes),
-                ],
-                [
-                    'Maximum public coefficient query bytes',
-                    formatCount(registrationKey.maximumCoefficientQueryBytes),
-                ],
-            ],
-        ),
-        '',
-        '## Registration custody census',
-        '',
-        'This completed-key capsule retains sorted secret positions and a bounded encrypted manifest over every staged public record. Payload totals exclude IndexedDB metadata and the browser-managed CryptoKey representation. The AES block and hash-polynomial counts describe this fixed sealing schedule; they do not establish a primitive-security bound or general checkpoint protocol.',
-        '',
-        table(
-            ['Property', 'Value'],
-            [
-                [
-                    'Secret index bytes',
-                    formatCount(registrationCustody.indexBytes),
-                ],
-                [
-                    'Private capsule plaintext bytes',
-                    formatCount(registrationCustody.secretPlaintextBytes),
-                ],
-                [
-                    'Encrypted capsule bytes',
-                    formatCount(registrationCustody.capsuleBytes),
-                ],
-                [
-                    'Maximum retained data records',
-                    formatCount(registrationCustody.recordCount),
-                ],
-                [
-                    'Manifest prefix bytes',
-                    formatCount(registrationCustody.manifestPrefixBytes),
-                ],
-                [
-                    'Record reference bytes',
-                    formatCount(registrationCustody.recordReferenceBytes),
-                ],
-                [
-                    'Maximum manifest plaintext bytes',
-                    formatCount(registrationCustody.maximumManifestBytes),
-                ],
-                [
-                    'Maximum encrypted root bytes',
-                    formatCount(registrationCustody.maximumRootBytes),
-                ],
-                [
-                    'Maximum root associated-data bytes',
-                    formatCount(registrationCustody.maximumRootAssociatedBytes),
-                ],
-                [
-                    'Maximum capsule associated-data bytes',
-                    formatCount(
-                        registrationCustody.maximumCapsuleAssociatedBytes,
-                    ),
-                ],
-                [
-                    'Maximum restoration input bytes',
-                    formatCount(registrationCustody.maximumRestoreInputBytes),
-                ],
-                [
-                    'Maximum retained payload bytes',
-                    formatCount(registrationCustody.retainedPayloadBytes),
-                ],
-                [
-                    'Capsule seal invocations',
-                    formatCount(registrationCustody.capsuleSealInvocations),
-                ],
-                [
-                    'Root seal invocations',
-                    formatCount(registrationCustody.rootSealInvocations),
-                ],
-                [
-                    'Distinct capsule AES block inputs',
-                    formatCount(registrationCustody.capsuleDistinctBlockInputs),
-                ],
-                [
-                    'Distinct root AES block inputs',
-                    formatCount(registrationCustody.rootDistinctBlockInputs),
-                ],
-                [
-                    'Maximum capsule authentication polynomial degree',
-                    formatCount(registrationCustody.maximumCapsuleHashDegree),
-                ],
-                [
-                    'Maximum root authentication polynomial degree',
-                    formatCount(registrationCustody.maximumRootHashDegree),
                 ],
             ],
         ),
@@ -2452,10 +2327,6 @@ export const renderDocumentationCensus = (): string => {
                 [
                     'Maximum header input bytes',
                     formatCount(registrationEnrollment.maximumHeaderInputBytes),
-                ],
-                [
-                    'Proof-role bytes',
-                    formatCount(registrationEnrollment.proofRoleBytes),
                 ],
                 [
                     'Recipient-key capsule bytes',

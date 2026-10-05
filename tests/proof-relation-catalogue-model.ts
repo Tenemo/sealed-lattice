@@ -11,7 +11,7 @@ import {
 } from '#tests/supported-profile-model.js';
 import { shareEncryptionParameters } from '#tests/wide-share-lifting-model.js';
 
-// Only the four immutable supported-profile constructors belong to this
+// Only the three immutable supported-profile constructors belong to this
 // catalogue. Arbitrary mutable Rust Relation values do not: their serialized
 // parameters omit generic product pairs and narrow a u128 lookup scale to u32.
 const agreement = compileCommonAgreementDegreeCensus();
@@ -45,21 +45,6 @@ export const proofRelationCatalogueEntry = (profile: SupportedProfile) =>
         let header: Buffer;
         let arithmeticKey: string;
         switch (hash.role) {
-            case 'registration':
-                wordColumns = 3;
-                booleanColumns = 2;
-                products = 1;
-                lookups = [0, 1, 2].map((column) => ({ column, factor: 1n }));
-                lookups.push({ column: 2, factor: 512n });
-                parameters = [degree, 3, 2, 4, 256, 96, 16, 7];
-                header = Buffer.concat([
-                    Buffer.from('RKS1'),
-                    words([degree]),
-                    proofCatalogueInteger(sharing.modulus, 20),
-                ]);
-                families = [{ count: 2, degree, modulus: sharing.modulus }];
-                arithmeticKey = 'registration';
-                break;
             case 'setup': {
                 const lifting = profile.shareLifting;
                 const limbs = Math.ceil(profile.ciphertext.bits / 96);

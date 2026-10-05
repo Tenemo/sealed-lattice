@@ -6,13 +6,11 @@ import {
     compileBallotWordProofLayout,
     compileFullWordProofLayout,
     compileLinkedReleaseWordProofLayout,
-    compileRegistrationWordProofLayout,
 } from '#tests/full-word-proof-layout-model.js';
 import { compileLinkedReleaseColumnLayout } from '#tests/linked-release-relation-model.js';
 import { participantReleaseProofRoleBytes } from '#tests/participant-release-custody-model.js';
 import { compileProofVerifierQueryCensus } from '#tests/proof-verifier-query-model.js';
-import { compileRegistrationEnrollmentCensus } from '#tests/registration-enrollment-model.js';
-import { compileRegistrationKeyRelationCensus } from '#tests/registration-key-relation-model.js';
+import { compileRecipientKeyCensus } from '#tests/recipient-key-model.js';
 import { compileRosterProposalCensus } from '#tests/roster-proposal-model.js';
 import { compileSetupContributionRelationCensus } from '#tests/setup-contribution-relation-model.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
@@ -148,7 +146,7 @@ const total = (values: readonly Work[]): Work =>
     );
 
 export const proofHashProfiles = (profile: SupportedProfile) => {
-    const registration = compileRegistrationKeyRelationCensus();
+    const registration = compileRecipientKeyCensus();
     const setup = compileSetupContributionRelationCensus(profile);
     const ballot = compileBallotEncryptionRelationCensus(profile);
     const ballotBody = compileBallotBodyCensus(profile);
@@ -158,18 +156,6 @@ export const proofHashProfiles = (profile: SupportedProfile) => {
     const shareBytes = byteWidth(registration.modulus);
     const releaseBytes = byteWidth(profile.release.modulus);
     const rows = [
-        {
-            role: 'registration',
-            layout: compileRegistrationWordProofLayout(),
-            columns: registration.wordColumns + registration.booleanColumns,
-            booleans: registration.booleanColumns,
-            lookups: registration.lookups,
-            products: registration.disjointPairs,
-            prefixWords: 15n,
-            statementBytes: registration.statementBytes,
-            relationTag: 'recipient-registration-key/1',
-            roleBytes: compileRegistrationEnrollmentCensus().proofRoleBytes,
-        },
         {
             role: 'setup',
             layout: compileFullWordProofLayout(profile),

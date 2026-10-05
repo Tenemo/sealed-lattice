@@ -1,6 +1,6 @@
 import { compileContributionBodyCensus } from '#tests/contribution-body-model.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
-import { compileRegistrationKeyRelationCensus } from '#tests/registration-key-relation-model.js';
+import { compileRecipientKeyCensus } from '#tests/recipient-key-model.js';
 import type { SupportedProfile } from '#tests/supported-profile-model.js';
 
 export const setupAggregateChunkBytes = 524_288n;
@@ -28,7 +28,7 @@ export const partitionAggregatePolynomial = (
 
 export const compileSetupAggregateResources = (profile: SupportedProfile) => {
     const body = compileContributionBodyCensus(profile);
-    const recipient = compileRegistrationKeyRelationCensus();
+    const recipient = compileRecipientKeyCensus();
     const parameters = {
         ...fixedModulusBfvInputs,
         ciphertextModulus: profile.ciphertext.modulus,

@@ -1,8 +1,9 @@
 //! Original-owner role controls at the authenticated local-custody boundary.
-//! These synthetic retained records exercise the real keyed restore operation;
-//! they do not establish public registration-proof acceptance.
+//! Signed canonical recipient keys pass the real registration verifier before
+//! these controls exercise original credential and retained roster authority.
+use crate::registration::CHUNK_LIMIT;
 use crate::{
-    BodyHasher, Credential, Error,
+    BodyDigest, Credential, Error,
     foundation::{
         CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple,
         RegistrationHeader, StabilizedDisplayText,
@@ -15,9 +16,8 @@ use crate::{
     roster_input::RosterInputVerifier,
 };
 use parallel_work::ProtocolHash;
-use registration_proof::CHUNK_LIMIT;
 use std::sync::Arc;
-use supported_profile::{Profile, relation::PROOF_HEADER_BYTES};
+use supported_profile::Profile;
 
 struct CustodyFixture {
     packet: SignedPoll,
@@ -42,34 +42,19 @@ fn retained_registration(
         runtime: poll.runtime(),
         signing_public: *credential.signing_public(),
         recipient_key_hash: ProtocolHash::digest(&key),
-        proof_length: PROOF_HEADER_BYTES + 1,
+
         fhe_key_commitments: vec![[7; 64]; crate::source_binding::fhe_key_families(poll).len()],
     }
     .encode()
     .unwrap();
-    let proof = vec![body; PROOF_HEADER_BYTES + 1];
-    let (mut hasher, consumed) =
-        BodyHasher::from_header(&header, poll.identity(), poll.runtime()).unwrap();
-    assert_eq!(consumed, header.len());
-    hasher.absorb(&proof).unwrap();
-    let digest = hasher.finish().unwrap();
-    let body_digest = digest.bytes();
+    let digest = BodyDigest::from_header(&header, poll.identity(), poll.runtime()).unwrap();
     let signature = credential.sign_registration(digest).unwrap();
-    let digests = [ProtocolHash::digest(&proof), body_digest].concat();
-    let tagged = [
-        (header.len() as u32).to_le_bytes().as_slice(),
-        &header,
-        &digests,
-    ]
-    .concat();
-    let tag = credential.retained_tag(b"sealed-lattice/retained-registration/v1", poll, &tagged);
-    let retained = [digests.as_slice(), &tag].concat();
     let mut verifier = RegistrationVerifier::new(poll, &header, &signature).unwrap();
     for chunk in key.chunks(CHUNK_LIMIT) {
         verifier.push_key(chunk).unwrap();
     }
     verifier.finish_key().unwrap();
-    verifier.restore(credential, poll, &retained).unwrap()
+    verifier.finish().unwrap()
 }
 
 fn custody_fixture(runtime: [u8; 64], nonce: u8) -> CustodyFixture {

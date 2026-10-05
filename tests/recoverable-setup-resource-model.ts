@@ -8,8 +8,8 @@ import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import { compileWordProofLayout } from '#tests/full-word-proof-layout-model.js';
 import { operationSeedBytes } from '#tests/operation-seed-model.js';
 import { compilePublicPolynomialOperatorBuffers } from '#tests/public-polynomial-operator-resource-model.js';
+import { compileRecipientKeyCensus } from '#tests/recipient-key-model.js';
 import { compileOpeningShareResources } from '#tests/recoverable-opening-share-model.js';
-import { compileRegistrationKeyRelationCensus } from '#tests/registration-key-relation-model.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
 import { deriveSupportedProfile } from '#tests/supported-profile-model.js';
 import { proofCompilerCaps } from '#tests/wide-challenge-compiler-model.js';
@@ -92,7 +92,7 @@ export const compileRecoverableSeedSharingProofResources = (
         publicStatementPolynomials *
         polynomialDegree *
         publicCoefficientAllowance;
-    const recipient = compileRegistrationKeyRelationCensus();
+    const recipient = compileRecipientKeyCensus();
     const coefficientBytes =
         1n + BigInt(Math.ceil(recipient.modulus.toString(2).length / 8));
     // n key adjoints, one common adjoint, one sharing basis per nonconstant
@@ -428,7 +428,7 @@ export const compileRecoverableSetupResourceScreen = (
         participantCount,
         optionCount,
     );
-    const recipient = compileRegistrationKeyRelationCensus();
+    const recipient = compileRecipientKeyCensus();
     const maximumFaultCount = Math.floor((participantCount - 1) / 3);
     const selectedContributorCount = Math.max(maximumFaultCount + 1, 2);
     const eligibleContributorCount =

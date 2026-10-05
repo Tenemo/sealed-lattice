@@ -647,7 +647,7 @@ describe('composed security ledger', () => {
                 roles[registrations] = Math.max(
                     roles[registrations],
                     roles[rest] +
-                        3 * participantCount +
+                        2 * participantCount +
                         setupContributors(participantCount) +
                         Math.floor((participantCount - 1) / 3),
                 );
@@ -667,7 +667,7 @@ describe('composed security ledger', () => {
         // Nineteen participants with six corrupt maximize roles per honest
         // member, and the bound is attained at their multiples.
         expect(tight).toBeGreaterThanOrEqual(Math.floor(limit / 13));
-        expect(acceptedProofRolesAt(13n * 7n)).toBe(70n * 7n);
+        expect(acceptedProofRolesAt(13n * 7n)).toBe((2n * 19n + 13n) * 7n);
     });
 
     it('caps the honest credential population by its rosters', () => {

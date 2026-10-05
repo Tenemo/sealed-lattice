@@ -122,7 +122,7 @@ impl Credential {
 mod tests {
     use super::*;
     use crate::{
-        BodyHasher,
+        BodyDigest,
         foundation::{RegistrationHeader, normalize_username},
     };
     #[test]
@@ -131,18 +131,16 @@ mod tests {
         let data_key = [11; 32];
         assert!(original.seal_complete(&data_key).is_err());
         let make = || {
-            let mut hash = BodyHasher::new(RegistrationHeader {
+            BodyDigest::new(RegistrationHeader {
                 username: normalize_username(b"Participant").unwrap(),
                 poll: [1; 64],
                 runtime: [2; 64],
                 signing_public: *original.signing_public(),
                 recipient_key_hash: [3; 64],
-                proof_length: 5000,
+
                 fhe_key_commitments: vec![[7; 64]],
             })
-            .unwrap();
-            hash.absorb(&[4; 5000]).unwrap();
-            hash.finish().unwrap()
+            .unwrap()
         };
         let digest = make();
         let body = digest.bytes();

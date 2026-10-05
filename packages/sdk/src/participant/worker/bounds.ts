@@ -32,7 +32,6 @@ export type ParticipantLimits = Readonly<{
     options: Range;
     registration: Readonly<{
         publicKeyBytes: number;
-        maximumProofBytes: number;
         maximumHeaderBytes: number;
         maximumPollDefinitionBytes: number;
         maximumUsernameIngressBytes: number;
@@ -199,7 +198,6 @@ const readModuleLimits = (kernel: ParticipantKernel) => {
         options: { minimum: take(), maximum: take() },
         registration: {
             publicKeyBytes: take(),
-            maximumProofBytes: take(),
             maximumHeaderBytes: take(),
             maximumPollDefinitionBytes: take(),
             maximumUsernameIngressBytes: take(),
@@ -309,7 +307,6 @@ const dataKindMaximums = (
     retainedRosterBytes: number,
 ) => [
     registration.publicKeyBytes,
-    registration.maximumProofBytes,
     registration.maximumHeaderBytes,
     registration.signatureBytes,
     registration.recipientCapsuleBytes,
@@ -348,7 +345,6 @@ const enrollmentPayloadBytes = (
     retainedRosterBytes: number,
 ) =>
     registration.publicKeyBytes +
-    registration.maximumProofBytes +
     registration.maximumHeaderBytes +
     registration.signatureBytes +
     registration.recipientCapsuleBytes +

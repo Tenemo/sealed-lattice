@@ -1,22 +1,19 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-    compileRegistrationKeyRelationCensus,
-    registrationIntegerRows,
-} from '#tests/registration-key-relation-model.js';
+    compileRecipientKeyCensus,
+    recipientKeyIntegerRows,
+} from '#tests/recipient-key-model.js';
 
-describe('recipient registration key relation', () => {
-    it('derives the complete key-only shape and distinct integer bounds', () => {
-        const value = compileRegistrationKeyRelationCensus();
-        expect(value.affineRows).toBe(2n * 65536n + 2n);
-        expect(value.originalOracles + value.virtualOracles).toBe(22);
-        expect(value.firstLeafBytes).toBe(144n);
-        expect(value.secondLeafBytes).toBe(288n);
+describe('recipient key relation', () => {
+    it('derives the recipient encoding and bounded-key integer operands', () => {
+        const value = compileRecipientKeyCensus();
+
+        expect(value.publicKeyBytes).toBe(65_536n * 21n);
+        expect(value.support).toBe(256n);
+        expect(value.error).toBe(64n);
         expect(value.honestQuotient).toBe(128n);
         expect(value.honestCarry).toBe(384n);
-        expect(value.proofHeaderBytes).toBe(4004n);
-        expect(value.maximumProofBytes).toBeGreaterThan(8_388_608n);
-        expect(value.maximumProofBytes).toBeLessThan(16_777_216n);
     });
     it('checks both signed radix equations against an independently constructed key', () => {
         const degree = 8,
@@ -50,7 +47,7 @@ describe('recipient registration key relation', () => {
         const quotient = convolution.map(
             (value, index) => (value + key[index] - errors[index]) / modulus,
         );
-        const zeroCarry = registrationIntegerRows(
+        const zeroCarry = recipientKeyIntegerRows(
             common,
             key,
             secret,
@@ -65,7 +62,7 @@ describe('recipient registration key relation', () => {
             return value / radix;
         });
         expect(
-            registrationIntegerRows(
+            recipientKeyIntegerRows(
                 common,
                 key,
                 secret,
@@ -79,7 +76,7 @@ describe('recipient registration key relation', () => {
         const changed = [...key];
         changed[degree - 1]++;
         expect(
-            registrationIntegerRows(
+            recipientKeyIntegerRows(
                 common,
                 changed,
                 secret,

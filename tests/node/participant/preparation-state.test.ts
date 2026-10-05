@@ -181,7 +181,7 @@ describe('independent preparation authority journal', () => {
                     4,
                 );
                 expect(new TextDecoder().decode(root.subarray(0, 4))).toBe(
-                    'ERM8',
+                    'ERM9',
                 );
                 expect(root.subarray(168 + 4)).toEqual(
                     encodePreparationState(state),

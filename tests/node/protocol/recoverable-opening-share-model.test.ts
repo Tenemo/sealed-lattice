@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { recipientKeyIntegerRows } from '#tests/recipient-key-model.js';
 import {
     compileOpeningShareResources,
     createOpeningShareExample,
@@ -11,7 +12,6 @@ import {
     openingShareParameters,
     openingShareSeparation,
 } from '#tests/recoverable-opening-share-model.js';
-import { registrationIntegerRows } from '#tests/registration-key-relation-model.js';
 
 const abs = (value: bigint) => (value < 0n ? -value : value);
 const center = (value: bigint, modulus: bigint) => {
@@ -111,7 +111,7 @@ describe('public opening-share relation model', () => {
             );
             const witness = deriveOpeningShareWitness(example, messages);
             expect(witness[0].errors).toEqual(example.keyErrors);
-            const keyRows = registrationIntegerRows(
+            const keyRows = recipientKeyIntegerRows(
                 example.common,
                 example.publicKey,
                 example.secret,
@@ -166,7 +166,7 @@ describe('public opening-share relation model', () => {
                     messages[index],
                     parameters,
                 );
-                const rows = registrationIntegerRows(
+                const rows = recipientKeyIntegerRows(
                     source.linear,
                     difference,
                     example.secret,

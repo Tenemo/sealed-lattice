@@ -1058,7 +1058,10 @@ impl<S: Statement> Verifier<S> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use supported_profile::relation::{PROOF_HEADER_BYTES, registration_relation};
+    use supported_profile::{
+        Profile,
+        relation::{PROOF_HEADER_BYTES, ballot_relation},
+    };
 
     // A statement that refuses every byte, so no proof it opens completes.
     struct Refused;
@@ -1071,13 +1074,17 @@ mod tests {
         }
     }
     fn open(role: &[u8], statement: [u8; 64], bytes: &[u8]) -> Result<Verifier<Refused>, Refusal> {
-        Verifier::open(registration_relation(), role, statement, bytes, |_, _| {
-            Some(Refused)
-        })
+        Verifier::open(
+            ballot_relation(Profile::new(3, 2).unwrap()),
+            role,
+            statement,
+            bytes,
+            |_, _| Some(Refused),
+        )
     }
     fn header() -> Vec<u8> {
         let mut bytes = vec![0; HEADER_LENGTH];
-        bytes[..4].copy_from_slice(registration_relation().proof_magic);
+        bytes[..4].copy_from_slice(ballot_relation(Profile::new(3, 2).unwrap()).proof_magic);
         bytes
     }
     #[test]
@@ -1096,9 +1103,13 @@ mod tests {
             Err(Refusal::Encoding)
         ));
         assert!(matches!(
-            Verifier::<Refused>::open(registration_relation(), b"role", [0; 64], &bytes, |_, _| {
-                None
-            }),
+            Verifier::<Refused>::open(
+                ballot_relation(Profile::new(3, 2).unwrap()),
+                b"role",
+                [0; 64],
+                &bytes,
+                |_, _| { None }
+            ),
             Err(Refusal::Context)
         ));
         for offset in [324, HEADER_LENGTH - 48] {

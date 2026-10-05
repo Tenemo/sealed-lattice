@@ -1,25 +1,20 @@
 //! A roster proposal whose every registration this participant's roster
 //! verifier accepted, retained beneath the participant root and keyed to the
-//! credential. It binds each record's exact header bytes, body digest and
-//! proof hash to the proposal identity, so a later visit of the same
+//! credential. It binds each record's body digest to the proposal identity.
+//! The digest is recomputed from the complete header, so a later visit of the same
 //! participant restores the verifier's result from the published headers and
 //! keys alone: each header must be the one the verifier accepted and each key
 //! must hash to the value its header names.
 use crate::{Credential, Error, RETAINED_TAG_BYTES, poll::VerifiedPoll, roster::RosterProposal};
-use parallel_work::ProtocolHash;
 
-const LABEL: &[u8] = b"sealed-lattice/retained-roster/v1";
-const MAGIC: &[u8; 4] = b"RRV1";
-// Each record's header digest, body digest and proof hash.
-const RECORD_BYTES: usize = 3 * 64;
+const LABEL: &[u8] = b"sealed-lattice/retained-roster/v2";
+const MAGIC: &[u8; 4] = b"RRV2";
+// Each record's body digest, recomputed from its canonical header.
+const RECORD_BYTES: usize = 64;
 
 /// The retained roster of this many registrations has this exact length.
 pub fn retained_roster_bytes(participants: usize) -> usize {
     MAGIC.len() + 64 + 2 + participants * RECORD_BYTES + RETAINED_TAG_BYTES
-}
-
-pub(crate) fn header_digest(header: &[u8]) -> [u8; 64] {
-    ProtocolHash::digest(header)
 }
 
 impl Credential {
@@ -36,9 +31,7 @@ impl Credential {
         bytes.extend(proposal.identity());
         bytes.extend((records.len() as u16).to_le_bytes());
         for record in records {
-            bytes.extend(header_digest(&record.header().encode()?));
             bytes.extend(record.body_digest());
-            bytes.extend(record.proof_hash());
         }
         let tag = self.retained_tag(LABEL, poll, &bytes);
         bytes.extend(tag);
@@ -48,9 +41,7 @@ impl Credential {
 
 /// What the registration verifier accepted for one record.
 pub(crate) struct RetainedRecord {
-    pub(crate) header_digest: [u8; 64],
     pub(crate) body_digest: [u8; 64],
-    pub(crate) proof_hash: [u8; 64],
 }
 
 /// A retained roster of the poll whose tag the credential accepted.
@@ -78,9 +69,7 @@ impl RetainedRoster {
             records: body[70..]
                 .chunks_exact(RECORD_BYTES)
                 .map(|record| RetainedRecord {
-                    header_digest: record[..64].try_into().unwrap(),
-                    body_digest: record[64..128].try_into().unwrap(),
-                    proof_hash: record[128..].try_into().unwrap(),
+                    body_digest: record.try_into().unwrap(),
                 })
                 .collect(),
         })
@@ -90,6 +79,7 @@ impl RetainedRoster {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::registration::CHUNK_LIMIT;
     use crate::{
         foundation::{
             RegistrationHeader, StabilizedDisplayText,
@@ -97,12 +87,11 @@ mod tests {
             normalize_username,
         },
         poll::{PollDraft, SignedPoll, verify_poll},
-        registration::{KEY_BYTES, VerifiedRegistration},
+        registration::KEY_BYTES,
         roster_input::RosterInputVerifier,
     };
-    use registration_proof::CHUNK_LIMIT;
+    use parallel_work::ProtocolHash;
     use std::sync::Arc;
-    use supported_profile::relation::PROOF_HEADER_BYTES;
 
     struct Ceremony {
         packet: SignedPoll,
@@ -136,30 +125,43 @@ mod tests {
         let packet = credentials[0].create_poll(draft, runtime, [5; 32]).unwrap();
         let poll = verify_poll(packet.identity, runtime, &packet.body, &packet.signature).unwrap();
         let keys: Vec<Vec<u8>> = (0..3u8)
-            .map(|seed| (0..KEY_BYTES).map(|index| (index as u8) ^ seed).collect())
+            .map(|seed| {
+                (0..KEY_BYTES / 21)
+                    .flat_map(|index| {
+                        let mut value = [0; 21];
+                        value[1] = (index as u8) ^ seed;
+                        value
+                    })
+                    .collect()
+            })
             .collect();
         let mut headers = Vec::new();
         let mut records = Vec::new();
-        for (position, credential) in credentials.iter().enumerate() {
+        for (position, credential) in credentials.iter_mut().enumerate() {
             let header = RegistrationHeader {
                 username: normalize_username(format!("Participant {position}").as_bytes()).unwrap(),
                 poll: poll.identity(),
                 runtime,
                 signing_public: *credential.signing_public(),
                 recipient_key_hash: ProtocolHash::digest(&keys[position]),
-                proof_length: PROOF_HEADER_BYTES + position,
+
                 fhe_key_commitments: vec![
                     [7; 64];
                     crate::source_binding::fhe_key_families(&poll).len()
                 ],
             };
-            headers.push(header.encode().unwrap());
-            records.push(Arc::new(VerifiedRegistration::restored(
-                header,
-                [position as u8 + 31; 64],
-                [position as u8 + 41; 64],
-                keys[position].clone(),
-            )));
+            let header = header.encode().unwrap();
+            let body =
+                crate::BodyDigest::from_header(&header, poll.identity(), poll.runtime()).unwrap();
+            let signature = credential.sign_registration(body).unwrap();
+            let mut verifier =
+                crate::registration::RegistrationVerifier::new(&poll, &header, &signature).unwrap();
+            for part in keys[position].chunks(CHUNK_LIMIT) {
+                verifier.push_key(part).unwrap();
+            }
+            verifier.finish_key().unwrap();
+            records.push(Arc::new(verifier.finish().unwrap()));
+            headers.push(header);
         }
         let proposal = RosterProposal::new(&poll, records).unwrap();
         Ceremony {
@@ -185,9 +187,13 @@ mod tests {
     }
 
     fn header_input(position: u16, header: &[u8]) -> Vec<u8> {
+        let identity = RegistrationHeader::decode_prefix(header)
+            .and_then(|(header, _)| crate::BodyDigest::new(header))
+            .map(|body| body.bytes())
+            .unwrap_or([0; 64]);
         [
             position.to_le_bytes().as_slice(),
-            &[position as u8 + 31; 64],
+            &identity,
             &(header.len() as u32).to_le_bytes(),
             header,
         ]
@@ -235,7 +241,6 @@ mod tests {
                     right.header().encode().unwrap()
                 );
                 assert_eq!(left.body_digest(), right.body_digest());
-                assert_eq!(left.proof_hash(), right.proof_hash());
                 assert_eq!(left.public_key(), right.public_key());
             }
             // The organizer's signature and every later consumer see the
@@ -297,7 +302,7 @@ mod tests {
     // signature or proof, and exactly the key that header names; any other
     // input refuses the record and the roster.
     #[test]
-    fn restored_records_refuse_other_headers_keys_and_proofs() {
+    fn restored_records_refuse_other_headers_and_keys() {
         let ceremony = ceremony([4; 64]);
         let owner = &ceremony.credentials[0];
         let retained = owner
@@ -337,14 +342,6 @@ mod tests {
         let mut long = ceremony.keys.clone();
         long[0].push(0);
         assert!(restore(&mut verifier(), &ceremony.headers, &long).is_err());
-        // Proof bytes refuse the record, which takes nothing more.
-        let mut proved = verifier();
-        proved
-            .begin_record(&header_input(0, &ceremony.headers[0]))
-            .unwrap();
-        assert!(proved.push_proof(0, &[0; 16]).is_err());
-        assert!(proved.push_key(0, &[0; 16]).is_err());
-        assert!(proved.finish().is_err());
         // A record finished before its key is refused, and a position
         // begins once.
         let mut early = verifier();

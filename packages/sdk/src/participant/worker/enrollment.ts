@@ -28,7 +28,6 @@ import {
     dataKind,
     encodeManifest,
     readDataKind,
-    readDataRecord,
     requiresFheKeySources,
     rootAssociatedData,
     sealRoot,
@@ -189,9 +188,7 @@ export const createEnrollment = async (
             estimate.quota === undefined ||
             estimate.usage === undefined ||
             estimate.quota - estimate.usage <
-                2 *
-                    (limits.registration.publicKeyBytes +
-                        limits.registration.maximumProofBytes)
+                2 * limits.registration.publicKeyBytes
         )
             return 'insufficient storage';
         const associatedData = rootAssociatedData(runtime);
@@ -296,7 +293,6 @@ export const createEnrollment = async (
         const registration = limits.registration;
         if (
             lengths[dataKind.publicKey] !== registration.publicKeyBytes ||
-            lengths[dataKind.proof] === 0 ||
             lengths[dataKind.header] === 0 ||
             lengths[dataKind.signature] !== registration.signatureBytes ||
             lengths[dataKind.recipientCapsule] !==
@@ -411,7 +407,6 @@ export type RestoredEnrollment = Readonly<{
     isOrganizer: boolean;
     poll: VerifiedPoll;
     bodyDigest: Uint8Array;
-    proofHash: Uint8Array;
     header: Uint8Array;
     signature: Uint8Array;
     definition: Uint8Array;
@@ -424,7 +419,7 @@ const retainedRegistrationGeneration = 2;
 
 // The credential keys the module's verification of the participant's own
 // registration, so that later visits restore it instead of reading and
-// verifying the proof again.
+// verifying its signature again.
 export const retainRegistration = (context: ParticipantContext) => {
     const { kernel } = context;
     if (kernel.retain_registration() !== 0)
@@ -469,7 +464,7 @@ const readVerifiedPoll = (context: ParticipantContext): VerifiedPoll => {
 
 // Verifies the retained registration through the module's own registration
 // verifier, or restores that verification from its retained copy in place of
-// the proof, restores the original keys and checks the retained poll
+// the record, restores the original keys and checks the retained poll
 // definition. The purposes the root shows unused stay available; an instance
 // that created the credential in this invocation keeps its live authority.
 export const restoreEnrollment = async (
@@ -506,25 +501,15 @@ export const restoreEnrollment = async (
     for (let offset = 0; offset < publicKey.length; offset += chunkBytes)
         own(1, publicKey.subarray(offset, offset + chunkBytes));
     own(2);
-    let proofHash: Uint8Array;
     let bodyDigest: Uint8Array;
     if (root.head.generation >= retainedRegistrationGeneration) {
         // The module checks the copy's tag once the capsules open the
         // credential it is keyed to.
         const retained = await read(dataKind.retainedRegistration);
         own(5, retained);
-        proofHash = retained.slice(0, 64);
-        bodyDigest = retained.slice(64, 128);
+        bodyDigest = retained.slice(0, 64);
     } else {
-        for (const reference of manifest.references)
-            if (reference.kind === dataKind.proof)
-                own(3, await readDataRecord(context, reference));
         own(4);
-        proofHash = readKernel(
-            kernel,
-            kernel.own_registration_proof_hash_pointer(),
-            64,
-        );
         bodyDigest = readKernel(
             kernel,
             kernel.own_registration_body_digest_pointer(),
@@ -539,7 +524,6 @@ export const restoreEnrollment = async (
         pollContext,
         unsigned32(header.length),
         header,
-        proofHash,
         bodyDigest,
         manifest.dataKeys,
         publicKey,
@@ -596,7 +580,6 @@ export const restoreEnrollment = async (
         isOrganizer,
         poll,
         bodyDigest,
-        proofHash,
         header,
         signature,
         definition,

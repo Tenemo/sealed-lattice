@@ -7,8 +7,8 @@ import { compileEvaluationStorage } from '#tests/evaluation-storage-model.js';
 import { compileParticipantBallotCustody } from '#tests/participant-ballot-custody-model.js';
 import { compileParticipantCustodyCensus } from '#tests/participant-custody-model.js';
 import { compileParticipantReleaseCustody } from '#tests/participant-release-custody-model.js';
+import { compileRecipientKeyCensus } from '#tests/recipient-key-model.js';
 import { compileRegistrationEnrollmentCensus } from '#tests/registration-enrollment-model.js';
-import { compileRegistrationKeyRelationCensus } from '#tests/registration-key-relation-model.js';
 import { compileRosterProposalCensus } from '#tests/roster-proposal-model.js';
 import { compileSetupAggregateResources } from '#tests/setup-aggregate-resource-model.js';
 import { compileSetupSelectionWireCensus } from '#tests/setup-selection-wire-model.js';
@@ -44,7 +44,7 @@ export const compileOrdinaryWorkflowResources = (
     const k = BigInt(preparation.eligibleCount),
         q = BigInt(profile.inventoryCertificateThreshold);
     const registration = compileRegistrationEnrollmentCensus(),
-        key = compileRegistrationKeyRelationCensus();
+        key = compileRecipientKeyCensus();
     const roster = compileRosterProposalCensus(profile.participantCount);
     const offer = compileContributionBodyCensus(profile),
         selection = compileSetupSelectionWireCensus(profile.participantCount);
@@ -60,10 +60,7 @@ export const compileOrdinaryWorkflowResources = (
     const signature = registration.signatureBytes;
     const poll = registration.maximumPollDefinitionBytes + signature;
     const registrationRecord =
-        key.publicKeyBytes +
-        key.maximumProofBytes +
-        registration.maximumHeaderBytes +
-        signature;
+        key.publicKeyBytes + registration.maximumHeaderBytes + signature;
     const registrationCorpus =
         poll + n * registrationRecord + roster.proposalBytes + signature;
     const rosterRestorePayload =

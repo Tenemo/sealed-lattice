@@ -32,7 +32,6 @@ export const kernelFunctions = [
     'own_registration_input_pointer',
     'own_registration_input_capacity',
     'own_registration_command',
-    'own_registration_proof_hash_pointer',
     'own_registration_body_digest_pointer',
     'own_registration_username_pointer',
     'own_registration_username_length',

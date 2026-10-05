@@ -2,7 +2,6 @@ import {
     compileBallotWordProofLayout,
     compileFullWordProofLayout,
     compileLinkedReleaseWordProofLayout,
-    compileRegistrationWordProofLayout,
 } from '#tests/full-word-proof-layout-model.js';
 import { proofHashProfiles } from '#tests/proof-hash-work-model.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
@@ -116,7 +115,6 @@ export const compileProofRandomnessBudgets = (profile: SupportedProfile) => {
         ]),
     );
     const layouts = [
-        ['registration', compileRegistrationWordProofLayout(), 'registration'],
         ['setup contribution', compileFullWordProofLayout(profile), 'setup'],
         ['linked ballot', compileBallotWordProofLayout(profile), 'ballot'],
         [

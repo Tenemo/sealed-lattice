@@ -12,7 +12,7 @@ import {
 } from '#tests/wide-challenge-compiler-model.js';
 
 describe('wide verifier messages and short authentication tags', () => {
-    it('derives the current four source families separately before taking a round-error maximum', () => {
+    it('derives the current three source families separately before taking a round-error maximum', () => {
         const value = compileProofRoundErrorCensus(completionProfile());
         expect(
             value.roles.map((role) => [
@@ -21,7 +21,6 @@ describe('wide verifier messages and short authentication tags', () => {
                 role.virtualOracles,
             ]),
         ).toEqual([
-            ['registration', 13, 9],
             ['setup', 734, 413],
             ['ballot', 68, 42],
             ['release', 133, 73],
@@ -76,7 +75,7 @@ describe('wide verifier messages and short authentication tags', () => {
                 value.roles
                     .filter((role) => role.name !== 'setup')
                     .map((role) => role.messageBytes),
-            ).toEqual([262144, 262144, 262144]);
+            ).toEqual([262144, 262144]);
             expect(value.maximumRoundError).toEqual(value.queryError);
         }
     });

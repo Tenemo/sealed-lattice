@@ -17,7 +17,6 @@ invalid-ballot = ["ballot-proof/invalid-ballot"]
 aes-gcm = { version = "=0.10.3", default-features = false, features = ["aes", "alloc", "zeroize"] }
 aes = { version = "=0.8.4", features = ["zeroize"] }
 registration-credentials = { path = "../registration-credentials" }
-registration-proof = { path = "../registration-proof" }
 contribution-prover = { path = "../contribution-prover" }
 setup-witness = { path = "../setup-witness", features = ["custody"] }
 supported-profile = { path = "../supported-profile" }

@@ -1,4 +1,4 @@
-import { compileRegistrationKeyRelationCensus } from '#tests/registration-key-relation-model.js';
+import { compileRecipientKeyCensus } from '#tests/recipient-key-model.js';
 import { compileRegistrationSetupBindingScreen } from '#tests/registration-setup-binding-model.js';
 import {
     deriveSupportedProfile,
@@ -61,14 +61,12 @@ const maximumSourceInventory = () => {
 };
 
 // A retained roster: its marker, the proposal identity and the record count,
-// each record's header digest, body digest and proof hash, and the SHA3-512
-// tag keyed to the participant's credential.
+// each record's body digest and the tag keyed to the original credential.
 export const retainedRosterBytes = (participants: bigint) =>
-    4n + 64n + 2n + participants * 3n * 64n + 64n;
+    4n + 64n + 2n + participants * 64n + 64n;
 
-// A retained registration: the proof hash, the body digest and the SHA3-512
-// tag keyed to the participant's credential.
-const retainedRegistrationBytes = 64n + 64n + 64n;
+// A retained registration: its body digest and original credential tag.
+const retainedRegistrationBytes = 64n + 64n;
 
 // The largest supported roster's, derived once.
 let largestRetainedRosterBytes: bigint | undefined;
@@ -89,7 +87,7 @@ const registrationEnrollmentInputs = {
 } as const;
 
 export const compileRegistrationEnrollmentCensus = () => {
-    const key = compileRegistrationKeyRelationCensus();
+    const key = compileRecipientKeyCensus();
     const inputs = registrationEnrollmentInputs;
     const source = maximumSourceInventory();
     const ceiling = (value: bigint, divisor: bigint) =>
@@ -97,12 +95,11 @@ export const compileRegistrationEnrollmentCensus = () => {
     const bytes = (value: string) => BigInt(Buffer.byteLength(value, 'utf8'));
     const maximumHeaderBytes =
         8n +
-        8n * 6n +
+        7n * 6n +
         4n +
-        bytes('sealed-lattice/registration-header/v4') +
+        bytes('sealed-lattice/registration-header/v5') +
         3n * 64n +
         inputs.signingPublicKeyBytes +
-        8n +
         4n +
         inputs.maximumUsernameBytes +
         2n +
@@ -111,9 +108,7 @@ export const compileRegistrationEnrollmentCensus = () => {
     const recipientCapsuleBytes = 4n + key.support * 2n + 16n;
     const signingCapsuleBytes = 4n + 32n + 16n;
     const maximumEnrollmentRecords =
-        ceiling(key.publicKeyBytes, 1_048_576n) +
-        ceiling(key.maximumProofBytes, 1_048_576n) +
-        7n;
+        ceiling(key.publicKeyBytes, 1_048_576n) + 7n;
     // The proposal, its signature, the retained roster and the retained
     // registration.
     const maximumRecords = maximumEnrollmentRecords + 4n;
@@ -125,10 +120,6 @@ export const compileRegistrationEnrollmentCensus = () => {
         manifestPrefixBytes + (maximumEnrollmentRecords + 3n) * 73n;
     const maximumManifestBytes = manifestPrefixBytes + maximumRecords * 73n;
     const maximumRootBytes = maximumManifestBytes + 16n;
-    const proofRoleBytes =
-        bytes('registered-recipient-key/1') +
-        2n * 64n +
-        participantIdentityAsciiBytes;
     // Seven items: the purpose, runtime, nonce, organizer key, manifest,
     // result length and participant maximum.
     const pollDefinitionOverheadBytes =
@@ -196,7 +187,6 @@ export const compileRegistrationEnrollmentCensus = () => {
         preparedManifestPrefixBytes,
         maximumManifestBytes,
         maximumRootBytes,
-        proofRoleBytes,
         pollDefinitionOverheadBytes,
         maximumCreatorInputBytes,
         maximumJoinInputBytes:
@@ -207,7 +197,8 @@ export const compileRegistrationEnrollmentCensus = () => {
             4n +
             inputs.maximumUsernameIngressBytes +
             96n,
-        recipientAssociatedBytes: 4n + 4n + proofRoleBytes + 3n * 64n,
+        recipientAssociatedBytes:
+            bytes('sealed-lattice/recipient-key-custody/v1') + 64n,
         signingAssociatedBytes: bytes('registration-signing-seed/1') + 64n,
         sourceAssociatedBytes:
             8n +
@@ -222,7 +213,7 @@ export const compileRegistrationEnrollmentCensus = () => {
             128n +
             4n +
             maximumHeaderBytes +
-            128n +
+            64n +
             key.publicKeyBytes +
             recipientCapsuleBytes +
             signingCapsuleBytes +
@@ -232,7 +223,6 @@ export const compileRegistrationEnrollmentCensus = () => {
             2n,
         maximumRetainedPayloadBytes:
             key.publicKeyBytes +
-            key.maximumProofBytes +
             maximumHeaderBytes +
             inputs.signatureBytes +
             recipientCapsuleBytes +

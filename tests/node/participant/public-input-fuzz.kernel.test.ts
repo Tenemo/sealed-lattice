@@ -143,7 +143,6 @@ const organizer = await (async () => {
         header: record(dataKind.header),
         signature: record(dataKind.signature),
         publicKey: record(dataKind.publicKey),
-        proof: record(dataKind.proof),
     };
 })();
 const pollContext = concatenate(
@@ -178,12 +177,11 @@ const recordBegin = concatenate(
                 bytes,
             );
         return createHash('shake256', { outputLength: 64 })
-            .update(concatenate(unsigned16(1), unsigned16(1), unsigned32(3)))
+            .update(concatenate(unsigned16(1), unsigned16(1), unsigned32(2)))
             .update(
-                variable(2, encodeText('sealed-lattice/registration-body/v1')),
+                variable(2, encodeText('sealed-lattice/registration-body/v2')),
             )
             .update(variable(1, organizer.header))
-            .update(variable(1, organizer.proof))
             .digest();
     })(),
     unsigned32(organizer.header.length),
@@ -503,7 +501,7 @@ describe('participant module public input', () => {
             expect(kernel.setup_selection_body_identity_pointer(0)).toBe(0);
         }
         for (const length of [0, 1, 64, 4095]) {
-            writeSetupInput(kernel, organizer.proof.subarray(0, length));
+            writeSetupInput(kernel, organizer.publicKey.subarray(0, length));
             expect(
                 call(
                     kernel,
@@ -691,7 +689,7 @@ describe('participant module public input', () => {
                 writeInput(kernel, bytes);
                 return kernel.roster_record(operation, 0, bytes.length);
             };
-            // The key and proof in the worker's streamed parts.
+            // The key in the worker's streamed parts.
             const streamed = (operation: number, bytes: Uint8Array) => {
                 const results: number[] = [];
                 for (
@@ -711,13 +709,13 @@ describe('participant module public input', () => {
                 step(0, recordBegin),
                 ...streamed(1, organizer.publicKey),
             ];
-            steps.push(step(2), ...streamed(3, organizer.proof));
+            steps.push(step(2));
             steps.push(step(4));
             return steps;
         };
         const accepted = genuineRecord();
         expect(accepted.every((result) => result === 0)).toBe(true);
-        const pieces = [recordBegin, organizer.publicKey, organizer.proof];
+        const pieces = [recordBegin, organizer.publicKey];
         const positions = [
             0,
             1,
@@ -764,10 +762,9 @@ describe('participant module public input', () => {
             header: Uint8Array;
             signature: Uint8Array;
             publicKey: Uint8Array;
-            proof: Uint8Array;
         }>;
         // Streams a record in parts of drawn sizes, the first few small so
-        // that parts end inside the proof's leading header; a fresh instance
+        // that parts end inside encoded key coefficients; a fresh instance
         // verifies each record, as a verified registration is final.
         const verify = async (record: RegistrationRecord, label: string) => {
             const { kernel } = await instantiate();
@@ -796,7 +793,6 @@ describe('participant module public input', () => {
                 ],
                 ...parts(record.publicKey).map((part) => [1, part] as const),
                 [2, new Uint8Array()],
-                ...parts(record.proof).map((part) => [3, part] as const),
                 [4, new Uint8Array()],
             ];
             // The poll the module verified the registration against, which
@@ -837,7 +833,6 @@ describe('participant module public input', () => {
             ['header', 2],
             ['signature', 1],
             ['publicKey', 1],
-            ['proof', 3],
         ] as const)
             for (let index = 0; index < count; index += 1) {
                 const label = `own/${field}/${String(index)}`;
@@ -862,9 +857,9 @@ describe('participant module public input', () => {
             await verify(
                 {
                     ...organizer,
-                    proof: organizer.proof.subarray(
+                    publicKey: organizer.publicKey.subarray(
                         0,
-                        organizer.proof.length - 1,
+                        organizer.publicKey.length - 1,
                     ),
                 },
                 'own/shortened',

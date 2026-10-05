@@ -12,19 +12,34 @@ import {
     type ProofGraphInput,
 } from '#tests/proof-hash-domain-model.js';
 
-// Independently maintained fixture operands from registration_relation(),
-// context_parameters(), registration_proof_role() and the native hash framing.
+// Independently maintained completion-profile ballot operands from the Rust relation descriptor,
+// original-PID role and native hash framing.
 // This builder shares no framing code with the recognizer under test.
 const number = (value: number) => {
     const bytes = Buffer.alloc(4);
     bytes.writeUInt32LE(value);
     return bytes;
 };
+const item = (type: number, value: Buffer) => {
+    const header = Buffer.alloc(6);
+    header.writeUInt16LE(type);
+    header.writeUInt32LE(value.length, 2);
+    return Buffer.concat([header, value]);
+};
+const ascii = (value: string) =>
+    item(2, Buffer.concat([number(value.length), Buffer.from(value)]));
+const roleHeader = Buffer.alloc(8);
+roleHeader.writeUInt16LE(1);
+roleHeader.writeUInt16LE(1, 2);
+roleHeader.writeUInt32LE(6, 4);
 const role = Buffer.concat([
-    Buffer.from('registered-recipient-key/1'),
-    Buffer.alloc(64, 1),
-    Buffer.alloc(64, 2),
-    Buffer.from('ab'.repeat(64)),
+    roleHeader,
+    ascii('sealed-lattice/ballot-proof/v2'),
+    ascii('ab'.repeat(64)),
+    item(6, Buffer.alloc(64, 1)),
+    item(6, Buffer.alloc(64, 2)),
+    item(6, Buffer.alloc(64, 3)),
+    item(3, Buffer.alloc(2)),
 ]);
 const fixedPrefix = Buffer.alloc(64);
 fixedPrefix.write('sealed-lattice/fixed-hash/v1');
@@ -42,16 +57,16 @@ const state = Buffer.concat([
     Buffer.alloc(262144 - 128, 14),
 ]);
 const contextFields = () => [
-    Buffer.from('recipient-registration-key/1'),
+    Buffer.from('linked-scored-ballot/1'),
     Buffer.alloc(16),
     Buffer.alloc(16),
     Buffer.alloc(16),
-    Buffer.alloc(180),
+    Buffer.alloc(776),
     Buffer.alloc(16),
-    Buffer.alloc(28 + 2 * 65536 * 21),
+    Buffer.alloc(28672136),
 ];
 
-describe('registration hash domain correspondence model', () => {
+describe('ballot hash domain correspondence model', () => {
     it('recognizes the six independently framed full-input families', () => {
         const fixtures = [
             [
@@ -60,7 +75,7 @@ describe('registration hash domain correspondence model', () => {
                     number(0),
                     number(9),
                     Buffer.alloc(128),
-                    Buffer.alloc(144),
+                    Buffer.alloc(576),
                 ]),
                 [],
             ],
@@ -122,8 +137,8 @@ describe('registration hash domain correspondence model', () => {
 
     it('covers every leaf width and the last stage and index boundaries', () => {
         for (const [stage, index, width] of [
-            [0, 262143, 144],
-            [1, 262143, 288],
+            [0, 262143, 576],
+            [1, 262143, 1632],
             [2, 262143, 48],
             [18, 3, 48],
         ]) {
@@ -139,8 +154,8 @@ describe('registration hash domain correspondence model', () => {
             expect(hasProofHashLayout(parsed!)).toBe(true);
         }
         for (const [stage, index, width] of [
-            [0, 262144, 144],
-            [1, 0, 144],
+            [0, 262144, 576],
+            [1, 0, 576],
             [18, 4, 48],
             [19, 0, 48],
         ]) {
@@ -163,7 +178,7 @@ describe('registration hash domain correspondence model', () => {
                 number(0xffffffff),
                 number(0xffffffff),
                 Buffer.alloc(128),
-                Buffer.alloc(144, 255),
+                Buffer.alloc(576, 255),
             ]),
             frame(true, 'node', [
                 number(0),
@@ -199,8 +214,8 @@ describe('registration hash domain correspondence model', () => {
 
     it('routes partial contexts to the auxiliary function even though a generic verifier can hash them', () => {
         const complete = frame(true, 'statement', contextFields());
-        const prefixBytes = complete.length - (28 + 2 * 65536 * 21);
-        for (const suffixLength of [0, 1, 1275, 28 + 2 * 65536 * 21 - 1]) {
+        const prefixBytes = complete.length - 28672136;
+        for (const suffixLength of [0, 1, 1275, 28672136 - 1]) {
             const partial = complete.subarray(0, prefixBytes + suffixLength);
             expect(parseProofHashInput(partial)).toBeUndefined();
         }
@@ -220,7 +235,7 @@ describe('registration hash domain correspondence model', () => {
             number(0),
             number(0),
             Buffer.alloc(128),
-            Buffer.alloc(144),
+            Buffer.alloc(576),
         ]);
         const uppercaseOwner = Buffer.from(good);
         const ownerOffset = good.indexOf(Buffer.from('ab'.repeat(64)));
@@ -239,7 +254,7 @@ describe('registration hash domain correspondence model', () => {
                 number(0),
                 number(0),
                 Buffer.alloc(128),
-                Buffer.alloc(144),
+                Buffer.alloc(576),
             ]),
             frame(true, 'leaf', [
                 number(0),
@@ -373,7 +388,7 @@ const without = (database: readonly ProofGraphEntry[], prefix: number) =>
         (record) => proofGraphPrefix(record.output, alphabet) !== prefix,
     );
 
-describe('reduced registration reference closure', () => {
+describe('reduced ballot reference closure', () => {
     it('extracts the fixed instance, complete challenge and indexed partial oracle', () => {
         expect(extractProofGraphPrefix(graph(), nextQuery, alphabet)).toEqual({
             instance: 'false-a',

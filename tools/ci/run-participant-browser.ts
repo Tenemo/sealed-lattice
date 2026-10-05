@@ -26,7 +26,6 @@ import {
 } from '#packages/sdk/src/participant/worker/candidate-codec.js';
 import { completedClosePhase } from '#packages/sdk/src/participant/worker/close-state.js';
 import { chunkBytes } from '#packages/sdk/src/participant/worker/root.js';
-import { registrationFile } from '#packages/sdk/src/participant/worker/roster.js';
 import {
     evaluatedTargetName,
     namespacedName,
@@ -5978,21 +5977,6 @@ await runWithLocalRunLog(
                 eventType: 'participant-damaged-target-recomputed',
                 details: { position: voteProbe },
             });
-            // A retained roster need not read an old proof, so a result
-            // visit served a changed registration proof combines the same
-            // outcome without reading it.
-            const changedProofName = `registration/${recordIds[0]}/${registrationFile.proof}`;
-            const changedProof = await readFile(
-                path.join(publicDirectory, changedProofName),
-            );
-            changedProof[0] ^= 1;
-            const proofForgery = new Map([[changedProofName, changedProof]]);
-            const cachedProofResult = await probeUnread(
-                voteProbe,
-                proofForgery,
-            );
-            assert.equal(cachedProofResult.encrypted, result.encrypted);
-            assert.deepEqual(cachedProofResult.identifiers, result.identifiers);
             // Altered retained state stops an honest participant at its next
             // visit, and the stop outlasts restoring the exact bytes. The
             // first byte of its first data record is flipped from its own

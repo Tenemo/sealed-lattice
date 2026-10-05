@@ -187,13 +187,12 @@ impl BallotInputs<'_> {
 struct EnrollmentOutput<'a> {
     files: Vec<public_output::PublicOutput>,
     controls: &'a mut [Vec<u8>; 2],
-    offsets: [usize; 4],
+    offsets: [usize; 3],
 }
 impl<'a> EnrollmentOutput<'a> {
     fn new(directory: &Path, controls: &'a mut [Vec<u8>; 2]) -> Self {
         let files: Vec<_> = [
             "polynomial-01.bin",
-            "proof.bin",
             "registration-header.bin",
             "signature.bin",
         ]
@@ -203,14 +202,14 @@ impl<'a> EnrollmentOutput<'a> {
         Self {
             files,
             controls,
-            offsets: [0; 4],
+            offsets: [0; 3],
         }
     }
     fn emit(&mut self, kind: u32, offset: usize, bytes: &[u8]) {
-        if kind < 4 {
+        if kind < 3 {
             let kind = kind as usize;
-            if kind >= 2 {
-                self.controls[kind - 2].extend(bytes);
+            if kind >= 1 {
+                self.controls[kind - 1].extend(bytes);
             }
             assert_eq!(offset, self.offsets[kind]);
             self.files[kind].write_all(bytes).unwrap();
@@ -302,15 +301,15 @@ fn main() {
         |kind, offset, bytes| {
             creator_output.emit(kind, offset, bytes);
             if let Some(capsule) = match kind {
-                4 => Some(0),
-                5 => Some(1),
-                14 => Some(2),
+                3 => Some(0),
+                4 => Some(1),
+                13 => Some(2),
                 _ => None,
             } {
                 assert_eq!(offset, enrollment_capsules[0][capsule].len());
                 enrollment_capsules[0][capsule].extend(bytes);
             }
-            if kind == 5 {
+            if kind == 4 {
                 assert_eq!(offset, signing_capsule.len());
                 signing_capsule.extend(bytes);
             }
@@ -346,15 +345,15 @@ fn main() {
                 |kind, offset, bytes| {
                     record_output.emit(kind, offset, bytes);
                     if let Some(capsule) = match kind {
-                        4 => Some(0),
-                        5 => Some(1),
-                        14 => Some(2),
+                        3 => Some(0),
+                        4 => Some(1),
+                        13 => Some(2),
                         _ => None,
                     } {
                         assert_eq!(offset, enrollment_capsules[position][capsule].len());
                         enrollment_capsules[position][capsule].extend(bytes);
                     }
-                    if retained_corrupt_signer && kind == 5 {
+                    if retained_corrupt_signer && kind == 4 {
                         assert_eq!(offset, corrupt_signing_capsule.len());
                         corrupt_signing_capsule.extend(bytes);
                     }
@@ -385,29 +384,16 @@ fn main() {
             signature.len(),
             controls[position][1].len()
         );
-        let mut verifier = RegistrationVerifier::new(&poll, &header, &signature).unwrap_or_else(|error| {
-            let decoded=registration_credentials::foundation::RegistrationHeader::decode_prefix(&header);
-            let decoded_status=decoded.as_ref().map(|(_,used)|*used);
-            let body_status=registration_credentials::BodyHasher::from_header(&header,poll.identity(),poll.runtime()).map(|(_,used)|used);
-            panic!("Registration prefix {position}: {error:?}, header={}, signature={}, decoded={decoded_status:?}, body={body_status:?}",header.len(),signature.len());
-        });
-        for (name, key) in [("polynomial-01.bin", true), ("proof.bin", false)] {
-            let mut file = File::open(directory.join(name)).unwrap();
-            loop {
-                let length = file.read(&mut buffer).unwrap();
-                if length == 0 {
-                    break;
-                }
-                if key {
-                    verifier.push_key(&buffer[..length]).unwrap();
-                } else {
-                    verifier.push_proof(&buffer[..length]).unwrap();
-                }
+        let mut verifier = RegistrationVerifier::new(&poll, &header, &signature).unwrap();
+        let mut file = File::open(directory.join("polynomial-01.bin")).unwrap();
+        loop {
+            let length = file.read(&mut buffer).unwrap();
+            if length == 0 {
+                break;
             }
-            if key {
-                verifier.finish_key().unwrap();
-            }
+            verifier.push_key(&buffer[..length]).unwrap();
         }
+        verifier.finish_key().unwrap();
         let record = Arc::new(verifier.finish().unwrap());
         let capsules = &enrollment_capsules[position];
         let restore = |source_capsule: &[u8]| {
@@ -415,7 +401,6 @@ fn main() {
                 &poll,
                 record.header(),
                 record.public_key(),
-                record.proof_hash(),
                 record.body_digest(),
                 &enrollment_data_keys[position],
                 [&capsules[0], &capsules[1], source_capsule],

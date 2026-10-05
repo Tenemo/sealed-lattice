@@ -1,9 +1,8 @@
 use parallel_work::ProtocolHash;
 use registration_credentials::{
-    BodyHasher, Credential,
+    BodyDigest, Credential,
     foundation::{RegistrationHeader, normalize_username},
 };
-use registration_proof::{proof::RegistrationProof, statement};
 use setup_witness::registration::RegistrationKey;
 
 use std::io::{self, Write};
@@ -71,7 +70,6 @@ struct RecordWriter<'a, F: FnMut(u32, usize, &[u8])> {
     kind: u32,
     offset: usize,
     buffer: Vec<u8>,
-    hash: ProtocolHash,
     output: &'a mut F,
 }
 impl<'a, F: FnMut(u32, usize, &[u8])> RecordWriter<'a, F> {
@@ -80,7 +78,6 @@ impl<'a, F: FnMut(u32, usize, &[u8])> RecordWriter<'a, F> {
             kind,
             offset: 0,
             buffer: Vec::with_capacity(1 << 20),
-            hash: ProtocolHash::new(),
             output,
         }
     }
@@ -95,7 +92,6 @@ impl<'a, F: FnMut(u32, usize, &[u8])> RecordWriter<'a, F> {
 impl<F: FnMut(u32, usize, &[u8])> Write for RecordWriter<'_, F> {
     fn write(&mut self, mut bytes: &[u8]) -> io::Result<usize> {
         let length = bytes.len();
-        self.hash.update(bytes);
         while !bytes.is_empty() {
             let count = bytes.len().min((1 << 20) - self.buffer.len());
             self.buffer.extend(&bytes[..count]);
@@ -111,39 +107,12 @@ impl<F: FnMut(u32, usize, &[u8])> Write for RecordWriter<'_, F> {
         Ok(())
     }
 }
-struct BodyWriter {
-    body: BodyHasher,
-    hash: ProtocolHash,
-    length: usize,
-}
-impl Write for BodyWriter {
-    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-        for chunk in bytes.chunks(1 << 20) {
-            self.body
-                .absorb(chunk)
-                .map_err(|_| io::Error::other("Registration body changed."))?;
-        }
-        self.hash.update(bytes);
-        self.length += bytes.len();
-        Ok(bytes.len())
-    }
-    fn flush(&mut self) -> io::Result<()> {
-        Ok(())
-    }
-}
-pub fn key_associated(
-    role: &[u8],
-    runtime: [u8; 64],
-    key_hash: [u8; 64],
-    proof_hash: [u8; 64],
-) -> Vec<u8> {
-    let mut bytes = Vec::from(b"RCC1".as_slice());
-    bytes.extend((role.len() as u32).to_le_bytes());
-    bytes.extend(role);
-    bytes.extend(runtime);
-    bytes.extend(key_hash);
-    bytes.extend(proof_hash);
-    bytes
+pub fn key_associated(body_digest: [u8; 64]) -> Vec<u8> {
+    [
+        b"sealed-lattice/recipient-key-custody/v1".as_slice(),
+        &body_digest,
+    ]
+    .concat()
 }
 
 impl Enrollment {
@@ -221,67 +190,42 @@ impl Enrollment {
         let poll = verified_poll.identity();
         let runtime = verified_poll.runtime();
         let mut sources = fhe_sources::Sources::create(verified_poll, &credential)?;
-        let role = credential.proof_role(poll, runtime);
-        let proof = RegistrationProof::create(&role, false, false);
-        proof.check_retained_key().map_err(|_| Error::State)?;
-        let public = proof.public_key_bytes();
+        let mut key = RegistrationKey::new();
+        key.validate_retained().map_err(|_| Error::State)?;
+        let public = key.public_key_bytes();
         let key_hash = ProtocolHash::digest(&public);
         let mut key_output = RecordWriter::new(0, &mut output);
         key_output.write_all(&public).unwrap();
         key_output.flush().unwrap();
         drop(key_output);
-        let mut proof_output = RecordWriter::new(1, &mut output);
-        proof.write(&mut proof_output);
-        proof_output.flush().unwrap();
-        let length = proof_output.offset;
-        let proof_hash: [u8; 64] = proof_output.hash.clone().finalize();
-        drop(proof_output);
         let header = RegistrationHeader {
             username,
             poll,
             runtime,
             signing_public: *credential.signing_public(),
             recipient_key_hash: key_hash,
-            proof_length: length,
             fhe_key_commitments: sources.commitments().to_vec(),
         }
         .encode()
         .map_err(|_| Error::Shape)?;
-        let (body, consumed) =
-            BodyHasher::from_header(&header, poll, runtime).map_err(|_| Error::State)?;
-        if consumed != header.len() {
-            return Err(Error::State);
-        }
-        let mut body_output = BodyWriter {
-            body,
-            hash: ProtocolHash::new(),
-            length: 0,
-        };
-        proof.write(&mut body_output);
-        if body_output.length != length || body_output.hash.finalize() != proof_hash {
-            return Err(Error::State);
-        }
-        let body = body_output.body.finish().map_err(|_| Error::State)?;
-        let sealed_sources = sources.seal(body.bytes(), source_data_key)?;
+        let body = BodyDigest::from_header(&header, poll, runtime).map_err(|_| Error::State)?;
+        let body_digest = body.bytes();
+        let sealed_sources = sources.seal(body_digest, source_data_key)?;
         let signature = credential
             .sign_registration(body)
             .map_err(|_| Error::State)?;
-        let mut key = proof.into_key();
         let sealed_key = key
-            .seal_retained(
-                recipient_data_key,
-                &key_associated(&role, runtime, key_hash, proof_hash),
-            )
+            .seal_retained(recipient_data_key, &key_associated(body_digest))
             .map_err(|_| Error::State)?;
         let sealed_credential = credential
             .seal_complete(credential_data_key)
             .map_err(|_| Error::State)?;
         for (kind, bytes) in [
-            (2, header.as_slice()),
-            (3, signature.as_slice()),
-            (4, sealed_key.as_slice()),
-            (5, sealed_credential.as_slice()),
-            (14, sealed_sources.as_slice()),
+            (1, header.as_slice()),
+            (2, signature.as_slice()),
+            (3, sealed_key.as_slice()),
+            (4, sealed_credential.as_slice()),
+            (13, sealed_sources.as_slice()),
         ] {
             output(kind, 0, bytes);
         }
@@ -324,7 +268,6 @@ impl Enrollment {
         poll: &registration_credentials::poll::VerifiedPoll,
         header: &RegistrationHeader,
         public_bytes: &[u8],
-        proof_hash: [u8; 64],
         body_digest: [u8; 64],
         data_keys: &[u8; 96],
         records: [&[u8]; 3],
@@ -340,7 +283,6 @@ impl Enrollment {
             poll,
             header,
             public_bytes,
-            proof_hash,
             body_digest,
             data_keys[..64].try_into().unwrap(),
             [records[0], records[1]],
@@ -362,7 +304,6 @@ impl Enrollment {
         poll: &registration_credentials::poll::VerifiedPoll,
         header: &RegistrationHeader,
         public_bytes: &[u8],
-        proof_hash: [u8; 64],
         body_digest: [u8; 64],
         data_keys: &[u8; 64],
         records: [&[u8]; 3],
@@ -371,7 +312,6 @@ impl Enrollment {
             poll,
             header,
             public_bytes,
-            proof_hash,
             body_digest,
             data_keys,
             [records[0], records[1]],
@@ -393,7 +333,6 @@ impl Enrollment {
         poll: &registration_credentials::poll::VerifiedPoll,
         header: &RegistrationHeader,
         public_bytes: &[u8],
-        proof_hash: [u8; 64],
         body_digest: [u8; 64],
         data_keys: &[u8; 64],
         records: [&[u8]; 2],
@@ -407,7 +346,7 @@ impl Enrollment {
         {
             return Err(Error::Shape);
         }
-        let modulus = BigInt::from_bytes_le(Sign::Plus, &statement::header()[8..]);
+        let modulus = BigInt::from_bytes_le(Sign::Plus, supported_profile::share_modulus());
         let half = modulus >> 1usize;
         let mut public = Vec::with_capacity(65536);
         for bytes in public_bytes.chunks_exact(21) {
@@ -424,11 +363,10 @@ impl Enrollment {
             records[1],
         )
         .map_err(|_| Error::State)?;
-        let role = credential.proof_role(header.poll, header.runtime);
         let key = RegistrationKey::open_retained(
             public,
             data_keys[..32].try_into().unwrap(),
-            &key_associated(&role, header.runtime, header.recipient_key_hash, proof_hash),
+            &key_associated(body_digest),
             records[0],
         )
         .map_err(|_| Error::State)?;

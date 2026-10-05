@@ -427,7 +427,6 @@ dependencies = [
  "fips204",
  "linked-release-proof",
  "parallel-work",
- "registration-proof",
  "sha3",
  "supported-profile",
  "unicode-normalization",
@@ -449,7 +448,6 @@ dependencies = [
  "num-bigint",
  "parallel-work",
  "registration-credentials",
- "registration-proof",
  "rns-arithmetic-probe",
  "setup-aggregate",
  "setup-stream-kernel",
@@ -458,19 +456,6 @@ dependencies = [
  "supported-profile",
  "word-proof",
  "zeroize",
-]
-
-[[package]]
-name = "registration-proof"
-version = "0.0.0"
-dependencies = [
- "num-bigint",
- "parallel-work",
- "setup-stream-kernel",
- "setup-witness",
- "supported-profile",
- "word-proof",
- "word-verifier",
 ]
 
 [[package]]

@@ -5,7 +5,7 @@
 import { compileWordProverResources } from '#tests/browser-word-prover-resource-model.js';
 import { compileWordProofLayout } from '#tests/full-word-proof-layout-model.js';
 import { compilePublicPolynomialOperatorBuffers } from '#tests/public-polynomial-operator-resource-model.js';
-import { compileRegistrationKeyRelationCensus } from '#tests/registration-key-relation-model.js';
+import { compileRecipientKeyCensus } from '#tests/recipient-key-model.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
 import {
     deriveSupportedShareLifting,
@@ -26,7 +26,7 @@ const centered = (value: bigint, modulus: bigint) => {
 };
 
 export const openingShareParameters = (participantCount: number) => {
-    const registration = compileRegistrationKeyRelationCensus();
+    const registration = compileRecipientKeyCensus();
     const sharing = deriveSupportedShareLifting(participantCount);
     const field = compileSmallLimbProofFieldCensus();
     const { modulus, scale, encryptionSupportWeight, errorBound } =
@@ -97,7 +97,7 @@ export const compileOpeningShareResources = (
     physicalDegree: bigint,
 ) => {
     const parameters = openingShareParameters(participantCount);
-    const registration = compileRegistrationKeyRelationCensus();
+    const registration = compileRecipientKeyCensus();
     if (
         physicalDegree < parameters.recipientSupport ||
         physicalDegree > registration.degree ||

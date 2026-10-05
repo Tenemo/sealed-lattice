@@ -3,7 +3,6 @@ members = [
     "native-ceremony",
     "registration-enrollment",
     "registration-credentials",
-    "registration-proof",
     "setup-witness",
     "word-proof",
     "word-verifier",

@@ -12,7 +12,7 @@ import { proofCompilerCaps } from '#tests/wide-challenge-compiler-model.js';
 const population = compileComposedSecurityLedger().maximumCredentialPopulation;
 
 // Every position in the first max(f + 1, 2)+f may prove an offer, with
-// f = floor((n - 1) / 3); every position proves its registration, ballot and
+// f = floor((n - 1) / 3); every position may prove its ballot and
 // release.
 const setupContributors = (participantCount: number) =>
     BigInt(
@@ -20,7 +20,7 @@ const setupContributors = (participantCount: number) =>
             Math.floor((participantCount - 1) / 3),
     );
 const rosterRoles = (participantCount: number) =>
-    3n * BigInt(participantCount) + setupContributors(participantCount);
+    2n * BigInt(participantCount) + setupContributors(participantCount);
 
 describe('proof compiler chronology', () => {
     it('emits one proof and one programmed message per proving position and purpose', () => {
@@ -32,7 +32,7 @@ describe('proof compiler chronology', () => {
             const chronology = compileProofCompilerChronology(
                 deriveSupportedProfile(participantCount, optionCount),
             );
-            expect(proofPurposes).toHaveLength(4);
+            expect(proofPurposes).toHaveLength(3);
             expect(chronology.honestRegistrations).toBe(
                 BigInt(participantCount),
             );
@@ -45,28 +45,19 @@ describe('proof compiler chronology', () => {
         }
     });
 
-    it('simulates a registration proof for every honest credential of the population', () => {
+    it('keeps unused registrations in the population without inventing proofs', () => {
         const profile = deriveSupportedProfile(20, 20);
-        // Registrations the roster leaves out still published their proofs,
-        // while the corrupt roles an honest participant accepts stay the
-        // roster's.
+        // Original registrations remain in the population even when this roster
+        // uses none of their proof-producing slots.
         const chronology = compileProofCompilerChronology(profile, population);
         // Thirteen eligible setup, twenty ballot and twenty release proofs.
         const rosterProofs = 13n + 2n * 20n;
         expect(chronology.honestRegistrations).toBe(population);
         expect(chronology.rosters).toBe(1n);
-        expect(chronology.honestProofs).toBe(population + rosterProofs);
+        expect(chronology.honestProofs).toBe(rosterProofs);
         expect(chronology.acceptedRoles).toBe(rosterRoles(20));
         expect(chronology.programmedMessages).toBe(chronology.honestProofs);
         expect(chronology.withinCaps).toBe(true);
-        const overflow = compileProofCompilerChronology(
-            profile,
-            proofCompilerCaps.honestProofBudget - rosterProofs + 1n,
-        );
-        expect(overflow.honestProofs).toBe(
-            proofCompilerCaps.honestProofBudget + 1n,
-        );
-        expect(overflow.withinCaps).toBe(false);
         expect(() => compileProofCompilerChronology(profile, 19n)).toThrow(
             'The registrations must cover the roster.',
         );
@@ -100,8 +91,7 @@ describe('proof compiler chronology', () => {
             const bounded = (count: bigint) =>
                 count < population ? count : population;
             expect(chronology.honestProofs).toBe(
-                population +
-                    2n * bounded(filled * BigInt(participantCount)) +
+                2n * bounded(filled * BigInt(participantCount)) +
                     bounded(filled * setupContributors(participantCount)),
             );
             expect(chronology.acceptedRoles).toBe(
@@ -148,7 +138,6 @@ describe('proof compiler chronology', () => {
         const profile = deriveSupportedProfile(20, 20);
         const chronology = compileProofCompilerChronology(profile);
         expect(chronology.roles.map((role) => role.role)).toEqual([
-            'registration',
             'setup',
             'ballot',
             'release',

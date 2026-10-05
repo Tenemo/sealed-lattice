@@ -56,10 +56,7 @@ const fixture = async (): Promise<ParticipantContext> => {
     const limits = readParticipantLimits(kernel);
     vi.spyOn(navigator.storage, 'estimate').mockResolvedValue({
         usage: 0,
-        quota:
-            2 *
-            (limits.registration.publicKeyBytes +
-                limits.registration.maximumProofBytes),
+        quota: 2 * limits.registration.publicKeyBytes,
     });
     return {
         namespace,

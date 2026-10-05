@@ -62,25 +62,24 @@ const suffixOrder: readonly ManifestSuffix[] = [
 // Data record kinds, in manifest order.
 export const dataKind = {
     publicKey: 0,
-    proof: 1,
-    header: 2,
-    signature: 3,
-    recipientCapsule: 4,
-    signingCapsule: 5,
-    pollDefinition: 6,
-    pollSignature: 7,
-    proposal: 8,
-    proposalSignature: 9,
-    setupReference: 10,
+    header: 1,
+    signature: 2,
+    recipientCapsule: 3,
+    signingCapsule: 4,
+    pollDefinition: 5,
+    pollSignature: 6,
+    proposal: 7,
+    proposalSignature: 8,
+    setupReference: 9,
     // The quorum certificate the setup was verified against.
-    setupInventory: 11,
+    setupInventory: 10,
     // This participant's roster verification, keyed to its credential.
-    retainedRoster: 12,
+    retainedRoster: 11,
     // This participant's verification of its own registration, keyed to its
     // credential.
-    retainedRegistration: 13,
+    retainedRegistration: 12,
     // Original private FHE family sources, retired with verified setup.
-    sourceCapsule: 14,
+    sourceCapsule: 13,
 } as const;
 
 export type RecordReference = Readonly<{
@@ -157,7 +156,7 @@ export const encodeManifest = (
             'Participant root fields disagree with its generation.',
         );
     return concatenate(
-        encodeText('ERM8'),
+        encodeText('ERM9'),
         manifest.dataKeys,
         manifest.poll,
         unsigned32(manifest.references.length),
@@ -198,7 +197,6 @@ const checkReferences = (
     const exact = (kind: number, length: number) => lengths[kind] === length;
     if (
         !exact(dataKind.publicKey, registration.publicKeyBytes) ||
-        lengths[dataKind.proof] === 0 ||
         lengths[dataKind.header] === 0 ||
         !exact(dataKind.signature, registration.signatureBytes) ||
         !exact(dataKind.recipientCapsule, registration.recipientCapsuleBytes) ||
@@ -232,7 +230,7 @@ const decodeManifest = (
         generation === 28 ||
         (generation > 4 && generation < 12) ||
         bytes.length < prefixBytes(generation) ||
-        !equalBytes(bytes.subarray(0, 4), encodeText('ERM8'))
+        !equalBytes(bytes.subarray(0, 4), encodeText('ERM9'))
     )
         throw new Error('Invalid participant root manifest.');
     const prefix = prefixBytes(generation);

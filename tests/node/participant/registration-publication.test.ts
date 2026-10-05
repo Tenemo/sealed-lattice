@@ -71,14 +71,16 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 const fixture = async (
-    proofBytes = 2 * chunkBytes + 17,
+    keyBytes = 65_536 * 21,
     organizer = false,
     generation = 1,
 ) => {
     const records = new Map<string, Blob>();
     const references: RecordReference[] = [];
-    for (const kind of Object.values(dataKind).filter((value) => value <= 9)) {
-        const length = kind === dataKind.proof ? proofBytes : 32 + kind;
+    for (const kind of Object.values(dataKind).filter(
+        (value) => value <= dataKind.proposalSignature,
+    )) {
+        const length = kind === dataKind.publicKey ? keyBytes : 32 + kind;
         for (let offset = 0; offset < length; offset += chunkBytes) {
             const bytes = new Uint8Array(Math.min(chunkBytes, length - offset));
             for (let index = 0; index < bytes.length; index++)
@@ -127,7 +129,6 @@ const fixture = async (
     const prefix = `registration/${hexadecimal(enrollment.bodyDigest)}/`;
     const names = new Map([
         [prefix + 'polynomial-01.bin', dataKind.publicKey],
-        [prefix + 'proof.bin', dataKind.proof],
         [prefix + 'registration-header.bin', dataKind.header],
         [prefix + 'signature.bin', dataKind.signature],
         ['poll-definition.bin', dataKind.pollDefinition],
@@ -216,18 +217,18 @@ const fixture = async (
 };
 
 describe('bounded registration publication', () => {
-    it('publishes a proof larger than eight mebibytes in original bounded records after a complete first pass', async () => {
-        const state = await fixture(8_604_512);
+    it('publishes the complete recipient key in bounded records after a complete first pass', async () => {
+        const state = await fixture(65_536 * 21);
         await state.publish();
-        const proof = state.posts.filter(({ name }) =>
-            name.endsWith('/proof.bin'),
+        const recipientKeyChunks = state.posts.filter(({ name }) =>
+            name.endsWith('/polynomial-01.bin'),
         );
-        expect(proof).toHaveLength(9);
-        expect(proof.reduce((total, item) => total + item.length, 0)).toBe(
-            8_604_512,
-        );
-        expect(proof.map(({ offset }) => offset)).toEqual(
-            Array.from({ length: 9 }, (_unused, index) => index * chunkBytes),
+        expect(recipientKeyChunks).toHaveLength(2);
+        expect(
+            recipientKeyChunks.reduce((total, item) => total + item.length, 0),
+        ).toBe(65_536 * 21);
+        expect(recipientKeyChunks.map(({ offset }) => offset)).toEqual(
+            Array.from({ length: 2 }, (_unused, index) => index * chunkBytes),
         );
         for (const reference of state.references) {
             const expectedReads = reference.kind <= dataKind.signature ? 2 : 0;
@@ -242,9 +243,9 @@ describe('bounded registration publication', () => {
             state.copies.every((bytes) => bytes.every((byte) => byte === 0)),
         ).toBe(true);
         // Two snapshots open the guard, then one after each complete preflight
-        // and after each upload. No registration proof or file is concatenated.
+        // and after each upload. No registration file is concatenated.
         expect(local.snapshot).toHaveBeenCalledTimes(
-            2 + 4 + state.posts.length + 1,
+            2 + 3 + state.posts.length + 1,
         );
     });
 
@@ -255,7 +256,6 @@ describe('bounded registration publication', () => {
             await state.publish();
             expect(state.posts.map(({ name }) => name)).toEqual([
                 state.prefix + 'polynomial-01.bin',
-                state.prefix + 'proof.bin',
                 state.prefix + 'registration-header.bin',
                 state.prefix + 'signature.bin',
                 'poll-definition.bin',
@@ -267,15 +267,13 @@ describe('bounded registration publication', () => {
         },
     );
 
-    it('refuses corruption in the final retained proof record before the first proof POST', async () => {
+    it('refuses corruption in the final retained key record before the first key POST', async () => {
         const state = await fixture();
-        await state.corrupt(dataKind.proof, 2 * chunkBytes);
+        await state.corrupt(dataKind.publicKey, chunkBytes);
         await expect(state.publish()).rejects.toThrow(
             'A participant data record changed.',
         );
-        expect(state.posts.map(({ name }) => name)).toEqual([
-            state.prefix + 'polynomial-01.bin',
-        ]);
+        expect(state.posts).toEqual([]);
     });
 
     it('rechecks later records after preflight and never uploads a changed chunk', async () => {
@@ -287,10 +285,10 @@ describe('bounded registration publication', () => {
             if (
                 options?.method === 'POST' &&
                 new URL(url).pathname === '/chunks' &&
-                last?.name.endsWith('/proof.bin') &&
+                last?.name.endsWith('/polynomial-01.bin') &&
                 last.offset === 0
             )
-                await state.corrupt(dataKind.proof, 2 * chunkBytes);
+                await state.corrupt(dataKind.publicKey, chunkBytes);
             return response;
         });
         await expect(state.publish()).rejects.toThrow(
@@ -298,11 +296,11 @@ describe('bounded registration publication', () => {
         );
         expect(
             state.posts
-                .filter(({ name }) => name.endsWith('/proof.bin'))
+                .filter(({ name }) => name.endsWith('/polynomial-01.bin'))
                 .map(({ offset }) => offset),
-        ).toEqual([0, chunkBytes]);
+        ).toEqual([0]);
         expect(state.posts[state.posts.length - 1]?.name).toBe(
-            state.prefix + 'proof.bin',
+            state.prefix + 'polynomial-01.bin',
         );
     });
 
@@ -311,7 +309,11 @@ describe('bounded registration publication', () => {
         state.send.mockRejectedValueOnce(new Error('Network disconnected.'));
         await expect(state.publish()).rejects.toThrow('Network disconnected.');
         expect(state.send).toHaveBeenCalledOnce();
-        expect(state.reads).toEqual([recordKey(0, 0), recordKey(0, 0)]);
+        expect(state.reads).toEqual([
+            recordKey(0, 0),
+            recordKey(0, chunkBytes),
+            recordKey(0, 0),
+        ]);
         expect(
             state.copies.every((bytes) => bytes.every((byte) => byte === 0)),
         ).toBe(true);
@@ -332,7 +334,11 @@ describe('bounded registration publication', () => {
                 'The participant authority changed during delivery.',
             );
             expect(state.send).toHaveBeenCalledOnce();
-            expect(state.reads).toHaveLength(2);
+            expect(state.reads).toEqual([
+                recordKey(0, 0),
+                recordKey(0, chunkBytes),
+                recordKey(0, 0),
+            ]);
             expect(
                 state.copies.every((bytes) =>
                     bytes.every((byte) => byte === 0),
@@ -353,6 +359,9 @@ describe('bounded registration publication', () => {
             'The participant authority changed during delivery.',
         );
         expect(state.send).not.toHaveBeenCalled();
-        expect(state.reads).toHaveLength(1);
+        expect(state.reads).toEqual([
+            recordKey(0, 0),
+            recordKey(0, chunkBytes),
+        ]);
     });
 });

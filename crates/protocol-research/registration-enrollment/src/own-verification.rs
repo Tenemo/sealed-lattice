@@ -18,7 +18,7 @@ struct State {
     poll: Option<VerifiedPoll>,
     options: usize,
     // The retained copy of an earlier visit's verification, which replaces
-    // the proof once the credential it is keyed to is open.
+    // another signature check once its original credential is open.
     retained: Option<Vec<u8>>,
     verified: Option<Arc<VerifiedRegistration>>,
     // Whether the verified registration is that retained copy's rather than
@@ -91,11 +91,6 @@ impl State {
                 .ok_or(Error::Consumed)?
                 .push_key(&self.input[..length]),
             2 if length == 0 => self.pending.as_mut().ok_or(Error::Consumed)?.finish_key(),
-            3 => self
-                .pending
-                .as_mut()
-                .ok_or(Error::Consumed)?
-                .push_proof(&self.input[..length]),
             4 if length == 0 => {
                 let verified = self.pending.take().ok_or(Error::Consumed)?.finish()?;
                 self.verified = Some(Arc::new(verified));
@@ -125,7 +120,7 @@ pub(super) fn with_poll<T>(operation: impl FnOnce(&VerifiedPoll) -> T) -> Option
 }
 
 /// Restores the participant's own registration from the retained copy the
-/// host delivered in place of the proof, for the credential that the
+/// host delivered, for the original credential that the
 /// registration's capsules opened.
 pub(super) fn restore(credential: &Credential) -> Option<Arc<VerifiedRegistration>> {
     STATE.with(|state| {
@@ -240,17 +235,6 @@ pub extern "C" fn own_registration_username_length() -> usize {
             .verified
             .as_ref()
             .map_or(0, |value| value.header().username.as_str().len())
-    })
-}
-#[unsafe(no_mangle)]
-pub extern "C" fn own_registration_proof_hash_pointer() -> usize {
-    STATE.with(|state| {
-        let mut state = state.borrow_mut();
-        let Some(value) = state.verified.as_ref().map(|value| value.proof_hash()) else {
-            return 0;
-        };
-        state.input[..64].copy_from_slice(&value);
-        state.input.as_ptr() as usize
     })
 }
 #[unsafe(no_mangle)]

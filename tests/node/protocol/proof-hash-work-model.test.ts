@@ -29,7 +29,7 @@ describe('proof hash work', () => {
                 .replace(/_/gu, ''),
         );
         expect(fixed).toBe(262144n);
-        expect(source.match(/message_bytes: MESSAGE_BYTES/gu)).toHaveLength(3);
+        expect(source.match(/message_bytes: MESSAGE_BYTES/gu)).toHaveLength(2);
         expect(source).toContain(
             'relation.message_bytes = relation.minimum_message_bytes();',
         );
@@ -41,7 +41,6 @@ describe('proof hash work', () => {
             const profile = deriveSupportedProfile(participants, options);
             const roles = proofHashProfiles(profile);
             expect(roles.map((role) => role.messageBytes)).toEqual([
-                fixed,
                 setupBytes,
                 fixed,
                 fixed,
@@ -119,7 +118,6 @@ describe('proof hash work', () => {
                 value.statementBytes,
             ]),
         ).toEqual([
-            ['registration', 144n, 288n, 180n, 2752540n],
             [
                 'setup',
                 356n * 16n + 48n,
@@ -131,7 +129,6 @@ describe('proof hash work', () => {
             ['release', 1040n, 3360n, 1540n, 8782022n],
         ]);
         expect(profiles.map((value) => value.roleBytes)).toEqual([
-            282n,
             410n,
             404n,
             479n,
@@ -183,7 +180,9 @@ describe('proof hash work', () => {
             18,
             ...Array.from({ length: 16 }, (_value, index) => 17 - index),
         ];
-        const profile = proofHashProfiles(completionProfile())[0];
+        const profile = proofHashProfiles(completionProfile()).find(
+            (value) => value.role === 'ballot',
+        )!;
         for (const roleBytes of [64, 72, 136, 282, 404, 410, 479, 1024]) {
             const prefix = (domain: string, level: boolean) =>
                 Buffer.concat([
@@ -201,7 +200,7 @@ describe('proof hash work', () => {
                 BigInt(roleBytes),
             );
             for (const [index, exponent] of exponents.entries()) {
-                const width = index === 0 ? 144 : index === 1 ? 288 : 48;
+                const width = index === 0 ? 576 : index === 1 ? 1632 : 48;
                 const leafTail = Buffer.concat([
                     frame(Buffer.alloc(4)),
                     frame(Buffer.alloc(128)),
@@ -270,9 +269,7 @@ describe('proof hash work', () => {
                     value.proverCore.permutations,
             ),
         ).toEqual(
-            [2n, 3n, 3n, 4n].map(
-                (prefixBlocks) => reusedPrefixes * prefixBlocks,
-            ),
+            [3n, 3n, 4n].map((prefixBlocks) => reusedPrefixes * prefixBlocks),
         );
         for (const value of values) {
             expect(value.proverCore.queries).toBe(
@@ -305,7 +302,7 @@ describe('proof hash work', () => {
         );
         // Every leaf and node hash of a group but the first of each reuses
         // the prefix blocks, including the fixed 64-byte digest domain: two blocks for
-        // the registration role, three for setup/ballot, and four for release.
+        // three for setup/ballot, and four for release.
         const reusedPrefixes = compileProofVerifierQueryCensus().groups.reduce(
             (sum, group) =>
                 sum +
@@ -320,9 +317,7 @@ describe('proof hash work', () => {
                     value.verifierCore.permutations,
             ),
         ).toEqual(
-            [2n, 3n, 3n, 4n].map(
-                (prefixBlocks) => reusedPrefixes * prefixBlocks,
-            ),
+            [3n, 3n, 4n].map((prefixBlocks) => reusedPrefixes * prefixBlocks),
         );
         for (const value of values) {
             expect(value.verifierCore.queries).toBe(

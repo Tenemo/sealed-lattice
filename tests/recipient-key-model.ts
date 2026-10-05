@@ -1,9 +1,7 @@
-import { compileCommonAgreementDegreeCensus } from '#tests/common-agreement-degree-model.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
-import { maximumSharedPathSiblings } from '#tests/merkle-path-sharing-model.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
 
-export const compileRegistrationKeyRelationCensus = () => {
+export const compileRecipientKeyCensus = () => {
     const degree = fixedModulusBfvInputs.polynomialDegree;
     const prime = compileSmallLimbProofFieldCensus().modulus;
     const modulus = prime * 998244353n;
@@ -25,38 +23,6 @@ export const compileRegistrationKeyRelationCensus = () => {
         honestCarry >= signedWordBound
     )
         throw new Error('Registration lifting bounds fail.');
-    const wordColumns = 3,
-        booleanColumns = 2,
-        lookups = 4,
-        disjointPairs = 1;
-    const originalOracles = wordColumns + booleanColumns + lookups + 4;
-    const virtualOracles = booleanColumns + disjointPairs + lookups + 2;
-    const agreement = compileCommonAgreementDegreeCensus();
-    const firstLeafBytes = BigInt(wordColumns + booleanColumns + 1) * 16n + 48n;
-    const secondLeafBytes = BigInt(lookups + 2) * 48n;
-    const folds = Math.log2(agreement.domainSize / 2);
-    const proofHeaderBytes =
-        4n +
-        5n * 64n +
-        48n +
-        BigInt(folds + 3) * 128n +
-        BigInt(folds - 1) * 64n +
-        48n;
-    const group = (length: number, width: bigint) => {
-        const count = Math.min(2 * agreement.queries, length);
-        return (
-            4n +
-            BigInt(count) * (4n + width + 128n) +
-            BigInt(maximumSharedPathSiblings(length, count)) * 64n
-        );
-    };
-    let maximumProofBytes =
-        proofHeaderBytes +
-        group(agreement.domainSize, firstLeafBytes) +
-        group(agreement.domainSize, secondLeafBytes) +
-        group(agreement.domainSize, 48n);
-    for (let length = agreement.domainSize / 2; length > 2; length /= 2)
-        maximumProofBytes += group(length, 48n);
     return {
         degree,
         modulus,
@@ -66,27 +32,12 @@ export const compileRegistrationKeyRelationCensus = () => {
         honestQuotient,
         honestCarry,
         maximumLimbResidual,
-        wordColumns,
-        booleanColumns,
-        lookups,
-        disjointPairs,
-        originalOracles,
-        virtualOracles,
-        affineRows: 2n * degree + 2n,
-        headerBytes: 4n + 4n + 20n,
-        publicKeyBytes: degree * 21n,
-        statementBytes: 4n + 4n + 20n + 2n * degree * 21n,
-        firstLeafBytes,
-        secondLeafBytes,
-        proofHeaderBytes,
-        maximumProofBytes,
-        maximumCoefficientQueryBytes:
-            BigInt(2 * agreement.queries * (wordColumns + booleanColumns)) *
-            48n,
+        publicKeyBytes:
+            degree * (1n + BigInt(Math.ceil(modulus.toString(2).length / 8))),
     };
 };
 
-export const registrationIntegerRows = (
+export const recipientKeyIntegerRows = (
     common: readonly bigint[],
     key: readonly bigint[],
     secret: readonly bigint[],

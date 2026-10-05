@@ -22,7 +22,6 @@ struct Record {
     header: Vec<u8>,
     signature: Vec<u8>,
     key: Vec<u8>,
-    proof: Vec<u8>,
 }
 
 // A poll and its creator's registration.
@@ -40,7 +39,7 @@ fn registration() -> (VerifiedPoll, Record, Enrollment) {
         .collect();
     let draft = PollDraft::new(Manifest::new(text("Question"), options).unwrap(), 2, 10).unwrap();
     let runtime = [7; 64];
-    let mut parts: [Vec<u8>; 4] = Default::default();
+    let mut parts: [Vec<u8>; 3] = Default::default();
     let (packet, enrollment) = Enrollment::create_creator(
         draft,
         runtime,
@@ -57,14 +56,13 @@ fn registration() -> (VerifiedPoll, Record, Enrollment) {
     )
     .unwrap();
     let poll = verify_poll(packet.identity, runtime, &packet.body, &packet.signature).unwrap();
-    let [key, proof, header, signature] = parts;
+    let [key, header, signature] = parts;
     (
         poll,
         Record {
             header,
             signature,
             key,
-            proof,
         },
         enrollment,
     )
@@ -76,9 +74,6 @@ fn direct(poll: &VerifiedPoll, record: &Record) -> Result<VerifiedRegistration, 
         verifier.push_key(part)?;
     }
     verifier.finish_key()?;
-    for part in record.proof.chunks(CHUNK) {
-        verifier.push_proof(part)?;
-    }
     verifier.finish()
 }
 
@@ -93,15 +88,11 @@ fn streamed(
         session.push_key(part)?;
     }
     session.finish_key()?;
-    for part in record.proof.chunks(division) {
-        session.push_proof(part)?;
-    }
     session.finish()?.wait()
 }
 
 fn same(left: &VerifiedRegistration, right: &VerifiedRegistration) -> bool {
     left.body_digest() == right.body_digest()
-        && left.proof_hash() == right.proof_hash()
         && left.public_key() == right.public_key()
         && left.header().encode().unwrap() == right.header().encode().unwrap()
 }
@@ -133,15 +124,10 @@ fn sessions_verify_and_refuse_a_registration_as_its_verifier_does() {
     for session in &mut sessions {
         session.finish_key().unwrap();
     }
-    for part in record.proof.chunks(333_331) {
-        for session in &mut sessions {
-            session.push_proof(part).unwrap();
-        }
-    }
     for session in sessions {
         assert!(same(&session.finish().unwrap().wait().unwrap(), &expected));
     }
-    // A changed proof, proof header, key or signature and a short proof are
+    // A changed header, key or signature and a short key are
     // refused with the verifier's refusal.
     let changed = |change: fn(&mut Record)| {
         let mut record = record.clone();
@@ -150,12 +136,10 @@ fn sessions_verify_and_refuse_a_registration_as_its_verifier_does() {
     };
     for record in [
         changed(|record| {
-            let middle = record.proof.len() / 2;
-            record.proof[middle] ^= 1;
+            record.header.push(0);
         }),
-        changed(|record| record.proof[10] ^= 1),
         changed(|record| {
-            record.proof.pop();
+            record.key.pop();
         }),
         changed(|record| record.key[5] ^= 1),
         changed(|record| record.signature[0] ^= 1),

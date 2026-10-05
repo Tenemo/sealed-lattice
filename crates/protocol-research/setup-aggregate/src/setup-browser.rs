@@ -180,7 +180,6 @@ pub extern "C" fn setup_roster_record(operation: u32, position: usize, length: u
             0 => roster.begin_record(bytes),
             1 => roster.push_key(position, bytes),
             2 if length == 0 => roster.finish_key(position),
-            3 => roster.push_proof(position, bytes),
             4 if length == 0 => roster.finish_record(position),
             5 if length == 0 => roster.discard_record(position),
             _ => return 1,

@@ -324,28 +324,19 @@ fn main() -> io::Result<()> {
         control.extend(header);
         control.extend(bounded(directory.join("signature.bin"), 3309, &mut work)?);
         roster.begin_record(&control).map_err(refusal)?;
-        for (ordinal, name) in ["polynomial-01.bin", "proof.bin"].into_iter().enumerate() {
-            let mut file = File::open(directory.join(name))?;
-            loop {
-                let count = file.read(&mut buffer)?;
-                work.read_bytes += count as u64;
-                if count == 0 {
-                    break;
-                }
-                if ordinal == 0 {
-                    roster.push_key(position, &buffer[..count])
-                } else {
-                    roster.push_proof(position, &buffer[..count])
-                }
+        let mut file = File::open(directory.join("polynomial-01.bin"))?;
+        loop {
+            let count = file.read(&mut buffer)?;
+            work.read_bytes += count as u64;
+            if count == 0 {
+                break;
+            }
+            roster
+                .push_key(position, &buffer[..count])
                 .map_err(refusal)?;
-            }
-            if ordinal == 0 {
-                roster.finish_key(position)
-            } else {
-                roster.finish_record(position)
-            }
-            .map_err(refusal)?;
         }
+        roster.finish_key(position).map_err(refusal)?;
+        roster.finish_record(position).map_err(refusal)?;
     }
     let proposal = roster.finish().map_err(refusal)?;
     if proposal.body() != proposed {

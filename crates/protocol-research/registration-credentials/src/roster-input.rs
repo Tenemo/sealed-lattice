@@ -1,13 +1,13 @@
+use crate::registration::CHUNK_LIMIT;
 use crate::{
     Credential, Error, SIGNATURE_BYTES, checked_header,
     foundation::RegistrationHeader,
     poll::{VerifiedPoll, verify_poll},
     registration::{KEY_BYTES, VerifiedRegistration, session::RegistrationSession},
-    retained_roster::{RetainedRoster, header_digest},
+    retained_roster::RetainedRoster,
     roster::RosterProposal,
 };
 use parallel_work::ProtocolHash;
-use registration_proof::CHUNK_LIMIT;
 
 use std::sync::Arc;
 
@@ -145,7 +145,14 @@ impl RosterInputVerifier {
             Some(Record::Unread) if self.retained.is_some() && signature.is_empty() => {
                 let record = &self.retained.as_ref().unwrap().records[position];
                 self.records[position] = Record::Refused;
-                if header_digest(header) != record.header_digest {
+                if crate::BodyDigest::from_header(
+                    header,
+                    self.poll.identity(),
+                    self.poll.runtime(),
+                )?
+                .bytes()
+                    != record.body_digest
+                {
                     return Err(Error::Context);
                 }
                 let header = checked_header(header, &self.poll)?;
@@ -205,7 +212,7 @@ impl RosterInputVerifier {
                 key_finished,
                 ..
             }) if !*key_finished
-                && key.len() == KEY_BYTES
+                && crate::registration::canonical_key(key)
                 && ProtocolHash::digest(&key[..]) == header.recipient_key_hash =>
             {
                 *key_finished = true;
@@ -215,14 +222,7 @@ impl RosterInputVerifier {
             _ => Err(Error::Shape),
         }
     }
-    /// Feeds the proof of a record to verify; a restored record takes none.
-    pub fn push_proof(&mut self, position: usize, bytes: &[u8]) -> Result<(), Error> {
-        match self.records.get_mut(position) {
-            Some(Record::Open(session)) => session.push_proof(bytes),
-            Some(Record::Restoring { .. }) => self.refuse(position),
-            _ => Err(Error::Shape),
-        }
-    }
+
     /// Accepts only a complete owning-verifier result with the originally
     /// requested body identity. A retained record instead consumes its exact
     /// credential-keyed predecessor and the complete matching key.
@@ -251,13 +251,9 @@ impl RosterInputVerifier {
                     unreachable!()
                 };
                 let record = &self.retained.as_ref().ok_or(Error::Context)?.records[position];
-                self.records[position] =
-                    Record::Verified(Arc::new(VerifiedRegistration::restored(
-                        header,
-                        record.body_digest,
-                        record.proof_hash,
-                        key,
-                    )));
+                self.records[position] = Record::Verified(Arc::new(
+                    VerifiedRegistration::restored(header, record.body_digest, key),
+                ));
                 Ok(())
             }
             Some(Record::Restoring { .. }) => self.refuse(position),
@@ -306,8 +302,8 @@ impl RosterInputVerifier {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::registration::CHUNK_LIMIT;
     use crate::registration::{KEY_BYTES, session::tests::unproved_record};
-    use registration_proof::CHUNK_LIMIT;
 
     // One record is open for each helper, or one without helpers. Each
     // candidate opens once, every step names an open record, and no failed

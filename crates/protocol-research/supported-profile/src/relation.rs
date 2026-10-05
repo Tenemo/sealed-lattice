@@ -3,10 +3,10 @@
 //! relation's layout from here.
 
 use crate::{
-    AUXILIARY_DEGREE, AUXILIARY_SECRET_SUPPORT, DEGREE, FHE_LIMB_BITS, FHE_SECRET_SUPPORT,
-    MAXIMUM_SCORE, Profile, RECIPIENT_SECRET_SUPPORT, RELEASE_DECODING_LIMB_BITS,
-    RELEASE_LIMB_BITS, SETUP_ERROR_BITS, SETUP_QUOTIENT_BITS, SHARE_EPHEMERAL_SUPPORT, SHARE_SCALE,
-    WORD_BITS, auxiliary_modulus, share_modulus,
+    AUXILIARY_DEGREE, AUXILIARY_SECRET_SUPPORT, DEGREE, FHE_SECRET_SUPPORT, MAXIMUM_SCORE, Profile,
+    RECIPIENT_SECRET_SUPPORT, RELEASE_DECODING_LIMB_BITS, RELEASE_LIMB_BITS, SETUP_ERROR_BITS,
+    SETUP_QUOTIENT_BITS, SHARE_EPHEMERAL_SUPPORT, SHARE_SCALE, WORD_BITS, auxiliary_modulus,
+    share_modulus,
 };
 
 /// Witness columns have one row per ring coefficient.
@@ -38,7 +38,6 @@ pub const PROOF_HEADER_BYTES: usize = 4
 /// Challenges fill messages of this many bytes unless a relation needs more.
 const MESSAGE_BYTES: usize = 262_144;
 /// Registration, ballot and release statement headers.
-const REGISTRATION_HEADER_BYTES: usize = 8 + 20;
 pub const BALLOT_HEADER_BYTES: usize = 4 + 2 * DIGEST_BYTES + 2 + 1 + 1;
 pub const RELEASE_HEADER_BYTES: usize = 4 + 3 * DIGEST_BYTES + 2;
 
@@ -181,35 +180,6 @@ fn narrow_factor(bits: usize) -> u128 {
 }
 fn half_support(stride: usize, support: usize) -> (usize, u64) {
     (stride, (support / 2) as u64)
-}
-
-/// The registration key relation: its quotient, carry and error words and
-/// the positive and negative supports of the recipient's secret. It precedes
-/// the roster, so every profile shares it.
-pub fn registration_relation() -> Relation {
-    let mut relation = Relation {
-        tag: b"recipient-registration-key/1",
-        proof_magic: b"RWP1",
-        words: 3,
-        booleans: 2,
-        narrow: vec![(2, narrow_factor(SETUP_ERROR_BITS))],
-        zero_product_pairs: vec![(3, 4)],
-        supports: vec![half_support(1, RECIPIENT_SECRET_SUPPORT)],
-        message_bytes: MESSAGE_BYTES,
-        statement_bytes: REGISTRATION_HEADER_BYTES + 2 * DEGREE * (1 + share_modulus().len()),
-        parameters: Vec::new(),
-    };
-    relation.parameters = vec![
-        SYSTEMATIC,
-        relation.words(),
-        relation.booleans(),
-        relation.lookups(),
-        RECIPIENT_SECRET_SUPPORT,
-        FHE_LIMB_BITS,
-        SETUP_QUOTIENT_BITS,
-        SETUP_ERROR_BITS,
-    ];
-    relation
 }
 
 /// The complete setup contribution relation of one profile. Each sparse
@@ -460,22 +430,6 @@ mod tests {
 
     #[test]
     fn completion_relations_keep_their_bound_parameters() {
-        let registration = registration_relation();
-        assert_eq!(
-            registration.relation_parameters(),
-            [
-                65_536, 704, 1_409, 262_144, 131_071, 2, 262_144, 65_536, 3, 2, 4, 256, 96, 16, 7
-            ]
-        );
-        assert_eq!(
-            (
-                registration.oracles(),
-                registration.first_width(),
-                registration.second_width(),
-                registration.statement_bytes()
-            ),
-            (22, 144, 288, 28 + 2 * 65_536 * 21)
-        );
         let completion = Profile::new(10, 10).unwrap();
         let setup = setup_relation(completion);
         assert_eq!(
@@ -686,7 +640,7 @@ mod tests {
 
     #[test]
     fn every_relation_fits_its_challenge_messages() {
-        let mut relations = vec![registration_relation()];
+        let mut relations = Vec::new();
         for profile in Profile::all() {
             relations.extend([
                 setup_relation(profile),

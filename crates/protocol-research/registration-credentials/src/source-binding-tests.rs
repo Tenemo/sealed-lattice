@@ -1,6 +1,6 @@
 use super::*;
 use crate::{
-    BodyHasher,
+    BodyDigest,
     foundation::{
         CanonicalDecodeLimits, CanonicalTuple, RegistrationHeader, StabilizedDisplayText,
         ceremony::{Manifest, OptionDefinition},
@@ -14,7 +14,6 @@ use sha3::{
     Shake256,
     digest::{ExtendableOutput, Update, XofReader},
 };
-use supported_profile::relation::PROOF_HEADER_BYTES;
 
 fn poll(maximum: usize, options: usize) -> VerifiedPoll {
     let text = |value: &str| StabilizedDisplayText::from_ingress_utf8(value.as_bytes()).unwrap();
@@ -47,7 +46,7 @@ fn header(poll: &VerifiedPoll, credential: &Credential) -> RegistrationHeader {
         runtime: poll.runtime(),
         signing_public: *credential.signing_public(),
         recipient_key_hash: [5; 64],
-        proof_length: PROOF_HEADER_BYTES,
+
         fhe_key_commitments: vec![[6; 64]; fhe_key_families(poll).len()],
     }
 }
@@ -121,12 +120,7 @@ fn registration_signature_binds_ordered_coordinate_commitments() {
         digest[0] = index as u8;
     }
     let digest = |header: &RegistrationHeader| {
-        let mut body =
-            BodyHasher::from_header(&header.encode().unwrap(), poll.identity(), poll.runtime())
-                .unwrap()
-                .0;
-        body.absorb(&vec![0; PROOF_HEADER_BYTES]).unwrap();
-        body.finish().unwrap()
+        BodyDigest::from_header(&header.encode().unwrap(), poll.identity(), poll.runtime()).unwrap()
     };
     let signature = credential.sign_registration(digest(&header)).unwrap();
     assert!(verify_registration_signature(digest(&header), &signature));
@@ -137,7 +131,7 @@ fn registration_signature_binds_ordered_coordinate_commitments() {
     assert!(!verify_registration_signature(digest(&header), &signature));
     let bytes = header.encode().unwrap();
     let mut changed = CanonicalTuple::decode(&bytes, &CanonicalDecodeLimits::default()).unwrap();
-    changed.items[7] = CanonicalItem::variable_bytes([0; 64]).unwrap();
+    changed.items[6] = CanonicalItem::variable_bytes([0; 64]).unwrap();
     assert!(RegistrationHeader::decode_prefix(&changed.encode().unwrap()).is_err());
 }
 

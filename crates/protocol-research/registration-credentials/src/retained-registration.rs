@@ -3,19 +3,19 @@
 //! credential the header names. A later visit of the same participant
 //! restores the verifier's result from the header and the key alone: the
 //! header must be the one the verifier accepted and the key must hash to the
-//! value that header names, so the proof is neither read nor verified again.
+//! value that header names, so another signature verification is unnecessary.
 use super::{RegistrationVerifier, VerifiedRegistration};
 use crate::{
     Credential, Error, RETAINED_TAG_BYTES, foundation::RegistrationHeader, poll::VerifiedPoll,
 };
 
-const LABEL: &[u8] = b"sealed-lattice/retained-registration/v1";
+const LABEL: &[u8] = b"sealed-lattice/retained-registration/v2";
 
-/// A retained registration: the proof hash, the body digest and the tag.
-pub const RETAINED_REGISTRATION_BYTES: usize = 64 + 64 + RETAINED_TAG_BYTES;
+/// A retained registration: the body digest and the credential tag.
+pub const RETAINED_REGISTRATION_BYTES: usize = 64 + RETAINED_TAG_BYTES;
 
 // The bytes the tag covers: the length-prefixed canonical header, then the
-// proof hash and the body digest.
+// body digest.
 fn tagged_bytes(header: &RegistrationHeader, digests: &[u8]) -> Result<Vec<u8>, Error> {
     let header = header.encode()?;
     Ok([
@@ -47,7 +47,7 @@ impl VerifiedRegistration {
     /// it, to the credential the header names.
     pub fn retain(&self, credential: &Credential, poll: &VerifiedPoll) -> Result<Vec<u8>, Error> {
         check_owner(credential, poll, &self.header)?;
-        let digests = [self.proof_hash, self.body_digest].concat();
+        let digests = self.body_digest.to_vec();
         let tag = credential.retained_tag(LABEL, poll, &tagged_bytes(&self.header, &digests)?);
         Ok([digests.as_slice(), &tag].concat())
     }
@@ -55,7 +55,7 @@ impl VerifiedRegistration {
 
 impl RegistrationVerifier {
     /// Restores the participant's own registration from its retained copy
-    /// in place of the proof, once the key its header names has arrived.
+    /// once the complete canonical key its header names has arrived.
     /// Only the credential that retained it restores it.
     pub fn restore(
         self,
@@ -63,19 +63,18 @@ impl RegistrationVerifier {
         poll: &VerifiedPoll,
         retained: &[u8],
     ) -> Result<VerifiedRegistration, Error> {
-        if self.failed || !self.key_finished || !self.proof_prefix.is_empty() {
+        if self.failed || !self.key_finished {
             return Err(Error::Consumed);
         }
         if retained.len() != RETAINED_REGISTRATION_BYTES {
             return Err(Error::Shape);
         }
         check_owner(credential, poll, &self.header)?;
-        let (digests, tag) = retained.split_at(128);
+        let (digests, tag) = retained.split_at(64);
         credential.check_retained_tag(LABEL, poll, &tagged_bytes(&self.header, digests)?, tag)?;
         Ok(VerifiedRegistration {
             header: self.header,
-            body_digest: digests[64..].try_into().unwrap(),
-            proof_hash: digests[..64].try_into().unwrap(),
+            body_digest: digests.try_into().unwrap(),
             public_key: self.key,
         })
     }
@@ -84,6 +83,7 @@ impl RegistrationVerifier {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::registration::CHUNK_LIMIT;
     use crate::{
         SIGNATURE_BYTES,
         foundation::{
@@ -95,9 +95,6 @@ mod tests {
         registration::KEY_BYTES,
     };
     use parallel_work::ProtocolHash;
-    use registration_proof::CHUNK_LIMIT;
-
-    use supported_profile::relation::PROOF_HEADER_BYTES;
 
     struct Registration {
         poll: VerifiedPoll,
@@ -127,28 +124,39 @@ mod tests {
         let mut organizer = Credential::from_seed([1; 32]);
         let packet = organizer.create_poll(draft, runtime, [5; 32]).unwrap();
         let poll = verify_poll(packet.identity, runtime, &packet.body, &packet.signature).unwrap();
-        let credential = Credential::from_seed([seed; 32]);
-        let key: Vec<u8> = (0..KEY_BYTES).map(|index| (index as u8) ^ seed).collect();
+        let mut credential = Credential::from_seed([seed; 32]);
+        let key: Vec<u8> = (0..KEY_BYTES / 21)
+            .flat_map(|index| {
+                let mut value = [0; 21];
+                value[1] = (index as u8) ^ seed;
+                value
+            })
+            .collect();
         let header = RegistrationHeader {
             username: normalize_username(b"Participant").unwrap(),
             poll: poll.identity(),
             runtime,
             signing_public: *credential.signing_public(),
             recipient_key_hash: ProtocolHash::digest(&key),
-            proof_length: PROOF_HEADER_BYTES + 1,
+
             fhe_key_commitments: vec![
                 [7; 64];
                 crate::source_binding::fhe_key_families(&poll).len()
             ],
         };
+        let header = header.encode().unwrap();
+        let body =
+            crate::BodyDigest::from_header(&header, poll.identity(), poll.runtime()).unwrap();
+        let signature = credential.sign_registration(body).unwrap();
+        let mut verifier = RegistrationVerifier::new(&poll, &header, &signature).unwrap();
+        for part in key.chunks(CHUNK_LIMIT) {
+            verifier.push_key(part).unwrap();
+        }
+        verifier.finish_key().unwrap();
+        let verified = verifier.finish().unwrap();
         Registration {
-            header: header.encode().unwrap(),
-            verified: VerifiedRegistration::restored(
-                header,
-                [seed + 30; 64],
-                [seed + 40; 64],
-                key.clone(),
-            ),
+            header,
+            verified,
             poll,
             credential,
             key,
@@ -181,7 +189,6 @@ mod tests {
             .unwrap();
         assert_eq!(restored.header().encode().unwrap(), registration.header);
         assert_eq!(restored.body_digest(), registration.verified.body_digest());
-        assert_eq!(restored.proof_hash(), registration.verified.proof_hash());
         assert_eq!(restored.public_key(), registration.key);
     }
 
@@ -227,7 +234,7 @@ mod tests {
                 .is_err()
         );
         // Every changed, missing or extra byte.
-        for position in [0, 63, 64, 127, 128, retained.len() - 1] {
+        for position in [0, 31, 63, 64, retained.len() - 1] {
             let mut changed = retained.clone();
             changed[position] ^= 1;
             assert!(refused(credential, poll, &changed), "{position}");
@@ -264,13 +271,6 @@ mod tests {
         assert!(changed.finish_key().is_err());
         assert!(matches!(
             changed.restore(credential, poll, &retained),
-            Err(Error::Consumed)
-        ));
-        // After proof bytes.
-        let mut proved = keyed(poll, &registration.header, &registration.key);
-        proved.push_proof(&[0; 16]).unwrap();
-        assert!(matches!(
-            proved.restore(credential, poll, &retained),
             Err(Error::Consumed)
         ));
     }

@@ -2,8 +2,8 @@ import { compileBallotBodyCensus } from '#tests/ballot-body-model.js';
 import { compileCloseWireCensus } from '#tests/close-wire-model.js';
 import { compileContributionBodyCensus } from '#tests/contribution-body-model.js';
 import { compileParticipantReleaseCustody } from '#tests/participant-release-custody-model.js';
+import { compileRecipientKeyCensus } from '#tests/recipient-key-model.js';
 import { compileRegistrationEnrollmentCensus } from '#tests/registration-enrollment-model.js';
-import { compileRegistrationKeyRelationCensus } from '#tests/registration-key-relation-model.js';
 import { compileRosterProposalCensus } from '#tests/roster-proposal-model.js';
 import { compileSetupSelectionWireCensus } from '#tests/setup-selection-wire-model.js';
 import type { SupportedProfile } from '#tests/supported-profile-model.js';
@@ -123,7 +123,7 @@ export const compileCandidatePublicationCensus = (
 ) => {
     const n = profile.participantCount;
     const registration = compileRegistrationEnrollmentCensus();
-    const key = compileRegistrationKeyRelationCensus();
+    const key = compileRecipientKeyCensus();
     const roster = compileRosterProposalCensus(n);
     const offer = compileContributionBodyCensus(profile);
     const selection = compileSetupSelectionWireCensus(n);
@@ -178,7 +178,6 @@ export const compileCandidatePublicationCensus = (
     publish(0, 'poll', pollFiles);
     const registrationFiles = [
         file('polynomial-01.bin', key.publicKeyBytes),
-        file('proof.bin', key.maximumProofBytes),
         file('registration-header.bin', registration.maximumHeaderBytes),
         file('signature.bin', registration.signatureBytes),
     ];

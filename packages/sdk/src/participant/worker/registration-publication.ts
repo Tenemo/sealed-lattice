@@ -26,7 +26,6 @@ export const publishRegistrationRecords = async (
             registrationCandidateKey(id),
             [
                 [dataKind.publicKey, registrationFile.publicKey],
-                [dataKind.proof, registrationFile.proof],
                 [dataKind.header, registrationFile.header],
                 [dataKind.signature, registrationFile.signature],
             ],

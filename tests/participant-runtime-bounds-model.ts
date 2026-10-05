@@ -14,8 +14,8 @@ import { compileParticipantBallotCustody } from '#tests/participant-ballot-custo
 import { compileParticipantCloseCustody } from '#tests/participant-close-custody-model.js';
 import { compileParticipantCustodyCensus } from '#tests/participant-custody-model.js';
 import { compileParticipantReleaseCustody } from '#tests/participant-release-custody-model.js';
+import { compileRecipientKeyCensus } from '#tests/recipient-key-model.js';
 import { compileRegistrationEnrollmentCensus } from '#tests/registration-enrollment-model.js';
-import { compileRegistrationKeyRelationCensus } from '#tests/registration-key-relation-model.js';
 import { compileRosterProposalCensus } from '#tests/roster-proposal-model.js';
 import { compileSetupContributionRelationCensus } from '#tests/setup-contribution-relation-model.js';
 import { compileSetupSelectionWireCensus } from '#tests/setup-selection-wire-model.js';
@@ -39,7 +39,7 @@ export const compileParticipantRuntimeProfile = (
     optionCount: number,
 ): ParticipantProfile => {
     const profile = deriveSupportedProfile(participantCount, optionCount);
-    const key = compileRegistrationKeyRelationCensus();
+    const key = compileRecipientKeyCensus();
     const enrollment = compileRegistrationEnrollmentCensus();
     const custody = compileParticipantCustodyCensus(profile);
     const body = compileContributionBodyCensus(profile);
@@ -62,7 +62,6 @@ export const compileParticipantRuntimeProfile = (
         ),
         registration: {
             publicKeyBytes: number(key.publicKeyBytes),
-            maximumProofBytes: number(key.maximumProofBytes),
             maximumHeaderBytes: number(enrollment.maximumHeaderBytes),
             maximumPollDefinitionBytes: number(
                 enrollment.maximumPollDefinitionBytes,

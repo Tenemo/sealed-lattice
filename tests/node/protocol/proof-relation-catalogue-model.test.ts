@@ -41,11 +41,6 @@ const role = (purpose: string, release = false) =>
         item(3, integer(1, 2)),
     ]);
 const roles = {
-    registration: Buffer.concat([
-        Buffer.from('registered-recipient-key/1'),
-        Buffer.alloc(128),
-        Buffer.from(owner),
-    ]),
     setup: role('sealed-lattice/setup-contribution/v2'),
     ballot: role('sealed-lattice/ballot-proof/v2'),
     release: role('sealed-lattice/certified-release/v2', true),
@@ -68,10 +63,10 @@ const frame = (
     ]);
 };
 
-describe('fixed four-purpose raw-domain catalogue', () => {
+describe('fixed three-purpose raw-domain catalogue', () => {
     it('uses the independently pinned original-PID role widths and complete state widths', () => {
         expect(Object.values(roles).map((value) => value.length)).toEqual([
-            282, 410, 404, 479,
+            410, 404, 479,
         ]);
         const shapes = [
             [3, 2, 131072],
@@ -83,7 +78,6 @@ describe('fixed four-purpose raw-domain catalogue', () => {
                 deriveSupportedProfile(participants, options),
             );
             expect(entries.map((entry) => Number(entry.messageBytes))).toEqual([
-                262144,
                 setupWidth,
                 262144,
                 262144,
@@ -146,7 +140,7 @@ describe('fixed four-purpose raw-domain catalogue', () => {
 
     it('bounds every static framed family in bits and reuses the source-linked verifier expansion', () => {
         const census = compileProofHashDomainCensus();
-        expect(census.rows).toHaveLength(342 * 4);
+        expect(census.rows).toHaveLength(342 * 3);
         expect(census.sentinelCount).toBe(1n);
         expect(census.maximumAcceptedExpansionQueries).toBe(97827n);
         expect(census.minimumMessageBits).toBe(8n * 131072n);
@@ -169,32 +163,17 @@ describe('fixed four-purpose raw-domain catalogue', () => {
             'utf8',
         );
         for (const tag of [
-            'recipient-registration-key/1',
             'complete-setup-words/2',
             'linked-scored-ballot/1',
             'linked-threshold-release/1',
         ])
             expect(source).toContain(`tag: b"${tag}"`);
-        const registration = proofRelationCatalogue()[0];
-        expect(registration.encodedParameters.subarray(0, 60)).toEqual(
-            Buffer.concat(
-                [
-                    65536, 704, 1409, 262144, 131071, 2, 262144, 65536, 3, 2, 4,
-                    256, 96, 16, 7,
-                ].map((value) => integer(value)),
-            ),
-        );
-        expect(registration.encodedParameters.subarray(-32)).toEqual(
-            Buffer.concat(
-                [0, 1, 1, 1, 2, 1, 2, 512].map((value) => integer(value)),
-            ),
-        );
         // Independent completion operands pinned by the Rust descriptor's
         // existing full-profile tests, rather than copied from this encoder.
         const completion = proofRelationCatalogueEntry(
             deriveSupportedProfile(10, 10),
         );
-        expect(completion[1].encodedParameters.subarray(0, 72)).toEqual(
+        expect(completion[0].encodedParameters.subarray(0, 72)).toEqual(
             Buffer.concat(
                 [
                     65536, 704, 1409, 262144, 131071, 2, 262144, 65536, 331, 24,
@@ -202,14 +181,14 @@ describe('fixed four-purpose raw-domain catalogue', () => {
                 ].map((value) => integer(value)),
             ),
         );
-        expect(completion[2].encodedParameters.subarray(28, 80)).toEqual(
+        expect(completion[1].encodedParameters.subarray(28, 80)).toEqual(
             Buffer.concat(
                 [
                     27, 5, 32, 1024, 256, 32768, 65536, 27, 28, 29, 30, 20, 31,
                 ].map((value) => integer(value)),
             ),
         );
-        expect(completion[3].encodedParameters.subarray(28, 128)).toEqual(
+        expect(completion[2].encodedParameters.subarray(28, 128)).toEqual(
             Buffer.concat(
                 [
                     59,
@@ -243,7 +222,7 @@ describe('fixed four-purpose raw-domain catalogue', () => {
         expect(source).toContain('pub zero_product_pairs: Vec<(usize, usize)>');
         expect(source).toContain('pub narrow: Vec<(usize, u128)>');
         expect(
-            completion[1].encodedParameters.subarray(-44 * 8, -43 * 8),
+            completion[0].encodedParameters.subarray(-44 * 8, -43 * 8),
         ).toEqual(Buffer.concat([integer(30), integer(512)]));
         // Those generic fields are not a public constructor input here.
         expect(
