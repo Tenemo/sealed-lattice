@@ -60,6 +60,7 @@ import {
     operationSeedBytes,
     operationSeedCount,
 } from '#tests/operation-seed-model.js';
+import { compileOraclePermutationBudget } from '#tests/oracle-budget-model.js';
 import {
     oracleDomainWork,
     programmedOracleDomainWork,
@@ -5108,6 +5109,40 @@ export const renderDocumentationCensus = (): string => {
                         work.classicalRecordPayloadBits,
                     ].map(formatCount);
                 },
+            ),
+        ),
+        '',
+        '### Declared maximum-length oracle budget',
+        '',
+        'These are upper bounds for the maintained query circuits when every call is charged at its declared maximum input and output capacities. The permutation budget is the sum of those FIPS 202 reference charges, using the widest SHAKE rate conservatively. The bound sums all persistent input-class/output-chunk databases and squares each nested query multiplier in the routing term. This conditional circuit bound does not normalize arbitrary coherent-length or expected-work algorithms. Extraction, independent shadow streams and their dispatch, programming-record creation, classical circuit generation and the rest of the reduction remain separate.',
+        '',
+        table(
+            [
+                'Maximum-length permutations',
+                'First output chunk bits',
+                'Programmed records',
+                'Controller length-bit bound',
+                'Cell-bit visits bound',
+                'Base query gates bound',
+                'Programmed query gates bound',
+            ],
+            [1n, 1024n, 1n << 40n].flatMap((permutations) =>
+                [0n, 1024n].map((records) => {
+                    const bound = compileOraclePermutationBudget(
+                        permutations,
+                        512n,
+                        records,
+                    );
+                    return [
+                        permutations,
+                        512n,
+                        records,
+                        bound.lengthBitsUpperBound,
+                        bound.componentBitVisitsUpperBound,
+                        bound.baseQueryGatesUpperBound,
+                        bound.programmedQueryGatesUpperBound,
+                    ].map(formatCount);
+                }),
             ),
         ),
         '',
