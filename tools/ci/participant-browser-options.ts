@@ -89,7 +89,8 @@ export const selectParticipantBrowserOptions = (
     );
     assert.ok(
         !(setupDeparture || unselectedCheckpoint || selectionFork) ||
-            (participantCount === 4 &&
+            ((participantCount === 4 ||
+                (setupDeparture && participantCount === 7)) &&
                 optionCount === 2 &&
                 mode === 'result' &&
                 !memoryPressure &&
@@ -98,7 +99,7 @@ export const selectParticipantBrowserOptions = (
                 [setupDeparture, unselectedCheckpoint, selectionFork].filter(
                     Boolean,
                 ).length === 1),
-        'The fixed setup case requires four participants, two options and no other scenario.',
+        'The fixed setup case requires four participants (or seven for combined departure), two options and no other scenario.',
     );
     assert.ok(
         !memoryPressure || mode === 'plain',

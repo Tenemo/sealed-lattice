@@ -162,6 +162,18 @@ describe('participant browser cohort selection', () => {
         expect(
             selectParticipantBrowserOptions(['4', '2', '--setup-departure']),
         ).toMatchObject({ setupDeparture: true });
+        expect(
+            selectParticipantBrowserOptions([
+                '7',
+                '2',
+                '--setup-departure',
+                '--scalar',
+            ]),
+        ).toMatchObject({
+            participantCount: 7,
+            setupDeparture: true,
+            scalar: true,
+        });
         expect(selectParticipantBrowserOptions([])).toMatchObject({
             participantCount: 3,
             optionCount: 2,
@@ -169,6 +181,8 @@ describe('participant browser cohort selection', () => {
         });
         for (const args of [
             ['3', '2', '--setup-departure'],
+            ['6', '2', '--setup-departure'],
+            ['8', '2', '--setup-departure'],
             ['4', '3', '--setup-departure'],
             ['4', '2', 'plain', '--setup-departure'],
             ['--setup-departure', '--sequential'],
@@ -205,6 +219,7 @@ describe('participant browser cohort selection', () => {
         });
         for (const args of [
             ['3', '2', '--unselected-checkpoint'],
+            ['7', '2', '--unselected-checkpoint'],
             ['4', '3', '--unselected-checkpoint'],
             ['--unselected-checkpoint', '--setup-departure'],
             ['--unselected-checkpoint', '--sequential'],

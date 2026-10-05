@@ -2573,12 +2573,10 @@ await runWithLocalRunLog(
                 absent?: number,
             ) => {
                 const organizing = members[0];
-                const active = members.flatMap((member, position) =>
+                let active = members.flatMap((member, position) =>
                     position === absent ? [] : [{ member, position }],
                 );
-                const accepting = active.filter(
-                    ({ position }) => position !== 0,
-                );
+                let accepting = active.filter(({ position }) => position !== 0);
                 const markStage = (stages: number[], actors = active) => {
                     if (measureWorkflow)
                         for (const { member } of actors)
@@ -2710,7 +2708,13 @@ await runWithLocalRunLog(
                 if (absent !== undefined) {
                     assert.deepEqual(
                         contributing.map(({ position }) => position),
-                        [0, 2],
+                        positions
+                            .filter(
+                                (position) =>
+                                    position < eligibleContributorCount &&
+                                    position !== absent,
+                            )
+                            .slice(0, setupContributorCount),
                     );
                     await contribute(contributing[0].member);
                     const badIdentity = 'a5'.repeat(64);
@@ -2739,7 +2743,11 @@ await runWithLocalRunLog(
                         ).catch(() => undefined),
                         undefined,
                     );
-                    await contribute(contributing[1].member);
+                    await Promise.all(
+                        contributing
+                            .slice(1)
+                            .map(({ member }) => contribute(member)),
+                    );
                     const announcements = await inBrowser(
                         2,
                         undefined,
@@ -2775,6 +2783,32 @@ await runWithLocalRunLog(
                     await Promise.all(
                         contributing.map(({ member }) => contribute(member)),
                     );
+                if (
+                    absent !== undefined &&
+                    maximumCorruptParticipantCount === 2
+                ) {
+                    // The original signed offer remains a selected input after
+                    // its author loses its entire profile, before selection.
+                    await depart(members[2].origin);
+                    active = active.filter(({ position }) => position !== 2);
+                    accepting = accepting.filter(
+                        ({ position }) => position !== 2,
+                    );
+                    assert.equal(departed.size, maximumCorruptParticipantCount);
+                    assert.equal(
+                        active.length,
+                        participantCount - maximumCorruptParticipantCount,
+                    );
+                    log.writeEvent({
+                        eventType: 'participant-departed-after-offer',
+                        details: {
+                            position: 2,
+                            originalOffer: (
+                                await generatedOfferIdentity(publicDirectory, 2)
+                            ).toString('hex'),
+                        },
+                    });
+                }
                 markStage([2]);
                 if (selectionFork) {
                     const copy = 'losing-selection';
@@ -3149,7 +3183,14 @@ await runWithLocalRunLog(
                 );
                 let independentOutcome: WorkerResult | undefined;
                 if (setupDeparture || unselectedCheckpoint) {
-                    assert.deepEqual([...departed], setupDeparture ? [1] : []);
+                    assert.deepEqual(
+                        [...departed],
+                        setupDeparture
+                            ? participantCount === 7
+                                ? [1, 2]
+                                : [1]
+                            : [],
+                    );
                     assert.equal(
                         await stat(
                             path.join(publicDirectory, 'contribution-1'),
@@ -3175,15 +3216,22 @@ await runWithLocalRunLog(
                         'hex',
                     );
                     const selected = await Promise.all(
-                        [0, 2].map(async (position) => ({
-                            position,
-                            bodyIdentity: (
-                                await generatedOfferIdentity(
-                                    publicDirectory,
-                                    position,
-                                )
-                            ).toString('hex'),
-                        })),
+                        positions
+                            .filter(
+                                (position) =>
+                                    position < eligibleContributorCount &&
+                                    position !== 1,
+                            )
+                            .slice(0, setupContributorCount)
+                            .map(async (position) => ({
+                                position,
+                                bodyIdentity: (
+                                    await generatedOfferIdentity(
+                                        publicDirectory,
+                                        position,
+                                    )
+                                ).toString('hex'),
+                            })),
                     );
                     assert.deepEqual(
                         selection,
@@ -3231,7 +3279,9 @@ await runWithLocalRunLog(
                                                     .signatureBytes),
                                 ),
                         ),
-                        setupDeparture ? [0, 2, 3] : [0, 1, 2],
+                        positions
+                            .filter((position) => !departed.has(position))
+                            .slice(0, bounds.close.quorum),
                     );
                     independentOutcome = (await inBrowser(
                         leftOut,
@@ -3339,9 +3389,21 @@ await runWithLocalRunLog(
                             ...(setupDeparture
                                 ? {
                                       departedAfterRoster: 1,
+                                      ...(participantCount === 7
+                                          ? { departedAfterOffer: 2 }
+                                          : {}),
                                       cooperativeCorruptPositions: [2],
-                                      activePositions: [0, 2, 3],
-                                      selectedPositions: [0, 2],
+                                      activePositions: positions.filter(
+                                          (position) => !departed.has(position),
+                                      ),
+                                      selectedPositions: positions
+                                          .filter(
+                                              (position) =>
+                                                  position <
+                                                      eligibleContributorCount &&
+                                                  position !== 1,
+                                          )
+                                          .slice(0, setupContributorCount),
                                   }
                                 : {}),
                             ...(unselectedCheckpoint
@@ -3384,7 +3446,7 @@ await runWithLocalRunLog(
                                 : null,
                             scope: [
                                 setupDeparture
-                                    ? 'Four original registrations fix one roster; honest eligible position one disappears immediately after roster publication, before confirmation or contribution. Position two is the cooperative corrupt participant and executes all required valid actions. Positions zero and two supply the selected clear offers; zero, two and three certify setup, vote, close, certify the target and release the verified result. Original positions and thresholds remain unchanged. The corrupt participant also announces an invalid body identity before its valid offer; the organizer stays pending without consuming selection authority and later accepts the valid offer behind that hint. This external Chrome run is development evidence for those cases, not a general adversarial-scheduling proof.'
+                                    ? "Original registrations fix one roster; honest eligible position one disappears immediately after roster publication, before confirmation or contribution. Position two announces an invalid body identity before its valid original offer; the organizer stays pending without consuming selection authority and later accepts the valid offer behind that hint. In the seven-participant case, position two also loses its entire profile after completing its offer but before selection, so the remaining quorum certifies setup containing the departed author's original contribution. Every surviving original member votes, closes, certifies the target and releases the verified result. Original positions and thresholds remain unchanged; the diagnostic fields identify the selected and active sets. This is the named external Chrome schedule, not a general adversarial-scheduling proof."
                                     : unselectedCheckpoint
                                       ? 'All four original participants remain available, with cooperative corrupt position two and no permanent departure in the real branch. Honest eligible position one retains its genuine phase-five checkpoint while positions zero and two are selected. It endorses without completing its own offer, preserves the original nested own state and encrypted records, then retires them only on certified setup activation and casts a ballot and releases. An isolated damaged-checkpoint copy stops before activation or publication; the healthy original continues. Diagnostic fingerprints stay separate from protocol authority. This is desktop development evidence, not phone qualification.'
                                       : 'Browser registration, roster confirmation, signed clear contribution offers, quorum setup selection and verification, ballots, close responses, target votes, release shares and the combined result of one roster, each stage once in the maintained participant runtime in external Chrome.',

@@ -222,9 +222,12 @@ The explicit early-departure browser case uses the same fixed scenario as the na
 
 ```text
 pnpm run research:participant -- 4 2 --setup-departure --scalar
+pnpm run research:participant -- 7 2 --setup-departure --scalar
 ```
 
-It deletes honest eligible position 1's Chrome profile immediately after roster publication, before that participant accepts or confirms the roster. Cooperative corrupt position 2 runs every required valid operation. Before position 2 publishes its valid offer, it announces an invalid body identity after position 0's valid offer is available. Selection must remain pending without consuming its intent; the later valid announcement must remain discoverable behind the invalid hint. The original positions 0, 2 and 3 then finish setup, voting, closing and release; the harness independently checks the selected positions, endorsement positions and public outcome. This flag cannot combine with another scenario, a foreign poll, sequential mode or memory pressure. It leaves the ordinary three-participant baseline available and checks the stated invalid-first discovery strategy, without establishing a general adversarial-scheduling guarantee. These switches select development evidence; they do not qualify a physical phone.
+The seven-participant variant combines two departures in the same execution: one original member leaves before confirmation, and another loses its complete profile after publishing an offer but before selection. The surviving quorum uses the departed author's original public contribution, completes the result, and a fresh standalone reader retrieves it.
+
+The four-participant variant deletes honest eligible position 1's Chrome profile immediately after roster publication, before that participant accepts or confirms the roster. Cooperative corrupt position 2 runs every required valid operation. Before position 2 publishes its valid offer, it announces an invalid body identity after position 0's valid offer is available. Selection must remain pending without consuming its intent; the later valid announcement must remain discoverable behind the invalid hint. The original positions 0, 2 and 3 then finish setup, voting, closing and release; the harness independently checks the selected positions, endorsement positions and public outcome. This flag cannot combine with another scenario, a foreign poll, sequential mode or memory pressure. It leaves the ordinary three-participant baseline available and checks the stated invalid-first discovery strategy, without establishing a general adversarial-scheduling guarantee. These switches select development evidence; they do not qualify a physical phone.
 
 To exercise activation while an eligible participant's own contribution remains unfinished, use:
 
