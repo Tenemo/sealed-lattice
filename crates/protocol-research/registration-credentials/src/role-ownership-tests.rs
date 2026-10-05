@@ -460,6 +460,7 @@ fn restore_roster(fixture: &CustodyFixture) -> RosterProposal {
         let header = record.header().encode().unwrap();
         let input = [
             (position as u16).to_le_bytes().as_slice(),
+            &record.body_digest(),
             &(header.len() as u32).to_le_bytes(),
             &header,
         ]

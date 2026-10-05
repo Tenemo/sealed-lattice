@@ -8,6 +8,7 @@ use registration_credentials::{
     contribution_body::BODY_HEADER_BYTES,
     contribution_offer::{AuthenticatedContributionOffer, MAXIMUM_OFFER_BYTES, authenticate_offer},
     poll::VerifiedPoll,
+    roster::MAXIMUM_PROPOSAL_BYTES,
     roster_authentication::{OrganizerSignedRoster, verify_roster_proposal},
     roster_input::RosterInputVerifier,
     setup_selection::{
@@ -181,6 +182,7 @@ pub extern "C" fn setup_roster_record(operation: u32, position: usize, length: u
             2 if length == 0 => roster.finish_key(position),
             3 => roster.push_proof(position, bytes),
             4 if length == 0 => roster.finish_record(position),
+            5 if length == 0 => roster.discard_record(position),
             _ => return 1,
         };
         u32::from(result.is_err())
@@ -190,16 +192,26 @@ pub extern "C" fn setup_roster_record(operation: u32, position: usize, length: u
 pub extern "C" fn setup_roster_finish(length: usize) -> u32 {
     SESSION.with(|value| {
         let mut value = value.borrow_mut();
-        if value.proposal.is_some() || length != 3309 {
+        if value.proposal.is_some() {
             return 0;
         }
-        let Some(roster) = value.roster.as_mut() else {
+        let Session { input, roster, .. } = &mut *value;
+        let Some((body, signature)) = input
+            .get(..length)
+            .and_then(|bytes| packet(bytes, MAXIMUM_PROPOSAL_BYTES))
+        else {
+            return 0;
+        };
+        let Some(roster) = roster.as_mut() else {
             return 0;
         };
         let Ok(proposal) = roster.finish() else {
             return 0;
         };
-        let Ok(proposal) = verify_roster_proposal(proposal, &value.input[..length]) else {
+        if proposal.body() != body {
+            return 0;
+        }
+        let Ok(proposal) = verify_roster_proposal(proposal, signature) else {
             return 0;
         };
         value.proposal = Some(Arc::new(proposal));

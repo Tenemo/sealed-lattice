@@ -14,6 +14,8 @@ use registration_credentials::{
     },
     contribution_body::BODY_HEADER_BYTES,
     contribution_offer::{MAXIMUM_OFFER_BYTES, authenticate_offer},
+    foundation::{CanonicalDecodeLimits, CanonicalItemType, CanonicalTuple},
+    roster::MAXIMUM_PROPOSAL_BYTES,
     roster_authentication::verify_roster_proposal,
     roster_input::RosterInputVerifier,
     setup_selection::{MAXIMUM_SELECTION_BYTES, authenticate_certificate, certificate_bytes},
@@ -282,11 +284,42 @@ fn main() -> io::Result<()> {
         &mut work,
     )?);
     let mut roster = RosterInputVerifier::new(&control).map_err(refusal)?;
+    // The named proposal supplies the requested ordered body identities.
+    // It grants no authority until every body and its organizer signature
+    // verify below against the byte-identical rebuilt proposal.
+    let proposed = bounded(
+        ceremony.join("proposal.bin"),
+        MAXIMUM_PROPOSAL_BYTES,
+        &mut work,
+    )?;
+    let tuple = CanonicalTuple::decode(
+        &proposed,
+        &CanonicalDecodeLimits {
+            maximum_tuple_byte_length: MAXIMUM_PROPOSAL_BYTES,
+            maximum_item_count: 4,
+            maximum_item_byte_length: MAXIMUM_PROPOSAL_BYTES,
+            ..CanonicalDecodeLimits::default()
+        },
+    )
+    .map_err(refusal)?;
+    let identities = tuple
+        .items
+        .get(3)
+        .filter(|item| item.item_type() == CanonicalItemType::RawBytes)
+        .ok_or_else(|| refusal("proposal record identities"))?
+        .variable_value_bytes()
+        .map_err(refusal)?;
+    if identities.len() != 4 + count * 64
+        || u32::from_le_bytes(identities[..4].try_into().unwrap()) as usize != count
+    {
+        return Err(refusal("proposal record count"));
+    }
     let mut buffer = vec![0; CHUNK_BYTES];
     for position in 0..count {
         let directory = ceremony.join(format!("participant-{position}"));
         let header = bounded(directory.join("registration-header.bin"), 4096, &mut work)?;
         let mut control = Vec::from((position as u16).to_le_bytes());
+        control.extend(&identities[4 + 64 * position..4 + 64 * (position + 1)]);
         control.extend((header.len() as u32).to_le_bytes());
         control.extend(header);
         control.extend(bounded(directory.join("signature.bin"), 3309, &mut work)?);
@@ -315,6 +348,9 @@ fn main() -> io::Result<()> {
         }
     }
     let proposal = roster.finish().map_err(refusal)?;
+    if proposal.body() != proposed {
+        return Err(refusal("proposal body differs from requested records"));
+    }
     let poll = Arc::new(roster.into_poll());
     let proposal = Arc::new(
         verify_roster_proposal(

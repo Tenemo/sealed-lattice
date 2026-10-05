@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { encodeCandidateManifest } from '#packages/sdk/src/participant/worker/candidate-codec.js';
 import { compileClearPreparationResources } from '#tests/clear-preparation-resource-model.js';
 import { compileContributionBodyCensus } from '#tests/contribution-body-model.js';
 import { compileSetupSelectionWireCensus } from '#tests/setup-selection-wire-model.js';
@@ -40,9 +41,6 @@ describe('clear preparation public resource bounds', () => {
                         wire.offerEnvelopeBytes +
                         wire.signatureBytes),
             );
-            expect(result.maximumCertifiedSetupBytes).toBe(
-                result.maximumSelectedOfferBytes + wire.certificateBytes,
-            );
             expect(result.maximumEndorsementPacketBytes).toBe(
                 BigInt(participants) * (2n + 64n + 3309n),
             );
@@ -58,17 +56,88 @@ describe('clear preparation public resource bounds', () => {
             );
             const signedOffer =
                 body.maximumBodyBytes + wire.offerEnvelopeBytes + 3309n;
+            const manifest = (files: readonly (readonly [string, bigint])[]) =>
+                BigInt(
+                    encodeCandidateManifest({
+                        files: files.map(([name, bytes]) => ({
+                            name,
+                            length: Number(bytes),
+                            chunks: Array.from(
+                                {
+                                    length: Number(
+                                        (bytes + 1_048_575n) / 1_048_576n,
+                                    ),
+                                },
+                                () => 'ab'.repeat(16),
+                            ),
+                        })),
+                    }).length,
+                );
+            const offerManifest = manifest([
+                ['offer.bin', wire.offerEnvelopeBytes],
+                ['offer-signature.bin', 3309n],
+                ['body-header.bin', body.headerBytes],
+                ...body.polynomials.map(
+                    (polynomial) =>
+                        [
+                            'polynomial-' +
+                                String(polynomial.expandedIndex).padStart(
+                                    2,
+                                    '0',
+                                ) +
+                                '.bin',
+                            polynomial.bytes,
+                        ] as const,
+                ),
+                ['proof.bin', body.maximumProofBytes],
+            ]);
+            const selectionManifest = manifest([
+                ['selection.bin', wire.selectionBodyBytes],
+                ['signature.bin', 3309n],
+            ]);
+            const endorsementManifest = manifest([
+                ['endorsement.bin', wire.endorsementPacketBytes],
+            ]);
+            const certificateManifest = manifest([
+                ['certificate.bin', wire.certificateBytes],
+            ]);
+            const sourceKeyBytes = BigInt(
+                Buffer.byteLength(
+                    'contribution-' +
+                        String(eligible - 1) +
+                        '/' +
+                        '0'.repeat(128),
+                ),
+            );
+            expect(result.maximumCertifiedSetupBytes).toBe(
+                BigInt(selected) *
+                    (signedOffer + offerManifest + sourceKeyBytes + 16n) +
+                    wire.certificateBytes +
+                    certificateManifest +
+                    BigInt('setup-certificate'.length) +
+                    16n,
+            );
             expect(result.maximumCleanTotalUploadBytes).toBe(
-                BigInt(eligible) * (signedOffer + 64n) +
+                BigInt(eligible) * (signedOffer + offerManifest + 64n) +
                     wire.selectionBodyBytes +
                     3309n +
+                    selectionManifest +
                     BigInt(participants) *
                         (wire.endorsementPacketBytes +
                             wire.certificateBytes +
-                            64n),
+                            endorsementManifest +
+                            certificateManifest),
             );
             expect(result.maximumMatchingCertificateActivationReadBytes).toBe(
-                2n * wire.certificateBytes + 64n,
+                2n * wire.certificateBytes +
+                    certificateManifest +
+                    40n +
+                    12n +
+                    16n * BigInt(participants) +
+                    BigInt(participants) * wire.endorsementPacketBytes +
+                    wire.selectionBodyBytes +
+                    3309n +
+                    result.maximumPreparationRoutingBytes,
             );
             expect(result.extraAggregateReadPassBytes).toBe(
                 BigInt(selected) * body.polynomialPayloadBytes,
@@ -77,12 +146,24 @@ describe('clear preparation public resource bounds', () => {
                 BigInt(eligible * body.polynomials.length) * 64n,
             );
             expect(result.maximumCleanPreparationDownloadBytes).toBe(
-                wire.selectionBodyBytes +
-                    3309n +
-                    BigInt(selected) * (signedOffer + body.minimumProofBytes) +
-                    2n * wire.certificateBytes +
-                    64n +
-                    BigInt(participants) * wire.endorsementPacketBytes,
+                2n * (wire.selectionBodyBytes + 3309n) +
+                    BigInt(selected) *
+                        (signedOffer +
+                            (body.maximumProofBytes < 1_048_576n
+                                ? body.maximumProofBytes
+                                : 1_048_576n)) +
+                    wire.certificateBytes +
+                    BigInt(participants) * wire.endorsementPacketBytes +
+                    result.maximumPreparationRoutingBytes +
+                    result.maximumPublicationReceivedBytes,
+            );
+            expect(result.maximumPreparationRoutingBytes).toBe(
+                BigInt(selected) * (28n + offerManifest) +
+                    2n * (28n + selectionManifest) +
+                    BigInt(participants) * (28n + endorsementManifest) +
+                    12n +
+                    16n * BigInt(participants) +
+                    certificateManifest,
             );
             expect(result.maximumCleanOrganizerPreparationDownloadBytes).toBe(
                 result.maximumCleanPreparationDownloadBytes +

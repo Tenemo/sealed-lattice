@@ -17,6 +17,8 @@ export const selectParticipantBrowserOptions = (
         '--scalar',
         '--setup-departure',
         '--unselected-checkpoint',
+        '--publication-faults',
+        '--selection-fork',
     ]);
     const valuedOptions = new Set([
         '--foreign-poll',
@@ -61,23 +63,41 @@ export const selectParticipantBrowserOptions = (
     );
     const setupDeparture = switches.has('--setup-departure');
     const unselectedCheckpoint = switches.has('--unselected-checkpoint');
+    const selectionFork = switches.has('--selection-fork');
     const [participantCount, optionCount] =
         counts.length === 0
-            ? [setupDeparture || unselectedCheckpoint ? 4 : 3, 2]
+            ? [
+                  setupDeparture || unselectedCheckpoint || selectionFork
+                      ? 4
+                      : 3,
+                  2,
+              ]
             : counts.map(Number);
     const profile = deriveSupportedProfile(participantCount, optionCount);
     const memoryPressure = switches.has('--memory-pressure');
+    const publicationFaults = switches.has('--publication-faults');
     const sequential = switches.has('--sequential');
     const foreignPoll = values.get('--foreign-poll');
     assert.ok(
-        !(setupDeparture || unselectedCheckpoint) ||
+        !publicationFaults ||
+            (mode === 'plain' &&
+                !memoryPressure &&
+                !setupDeparture &&
+                !unselectedCheckpoint &&
+                !selectionFork),
+        'Publication faults require a plain cohort.',
+    );
+    assert.ok(
+        !(setupDeparture || unselectedCheckpoint || selectionFork) ||
             (participantCount === 4 &&
                 optionCount === 2 &&
                 mode === 'result' &&
                 !memoryPressure &&
                 !sequential &&
                 foreignPoll === undefined &&
-                !(setupDeparture && unselectedCheckpoint)),
+                [setupDeparture, unselectedCheckpoint, selectionFork].filter(
+                    Boolean,
+                ).length === 1),
         'The fixed setup case requires four participants, two options and no other scenario.',
     );
     assert.ok(
@@ -127,7 +147,9 @@ export const selectParticipantBrowserOptions = (
         scalar: switches.has('--scalar'),
         setupDeparture,
         unselectedCheckpoint,
+        selectionFork,
         memoryPressure,
+        publicationFaults,
         sequential,
         basePort,
         topCount,

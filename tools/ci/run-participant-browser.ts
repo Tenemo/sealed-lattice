@@ -20,6 +20,10 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { build } from 'tsdown';
 
 import { tupleFields } from '#packages/sdk/src/participant/worker/bytes.js';
+import {
+    decodeCandidateManifest,
+    encodeCandidateManifest,
+} from '#packages/sdk/src/participant/worker/candidate-codec.js';
 import { completedClosePhase } from '#packages/sdk/src/participant/worker/close-state.js';
 import { chunkBytes } from '#packages/sdk/src/participant/worker/root.js';
 import { registrationFile } from '#packages/sdk/src/participant/worker/roster.js';
@@ -38,12 +42,16 @@ import {
     setupSelectionIdentityModel,
 } from '#tests/setup-selection-wire-model.js';
 import { deriveSupportedProfile } from '#tests/supported-profile-model.js';
+import { sampleFileAllocation } from '#tools/ci/file-allocation.js';
 import {
     runArtifactDirectoryPath,
     runWithLocalRunLog,
 } from '#tools/ci/local-run-log.js';
 import { selectParticipantBrowserOptions } from '#tools/ci/participant-browser-options.js';
 import { createBrowserPool } from '#tools/ci/participant-browser-pool.js';
+import { serveParticipantCandidates } from '#tools/ci/participant-candidate-http.js';
+import { participantCandidateView } from '#tools/ci/participant-candidate-view.js';
+import type { ViewedParticipantRecord } from '#tools/ci/participant-candidate-view.js';
 import { summarizeCpuTrace } from '#tools/ci/participant-cpu-profile.js';
 import type { CpuProfileSummary } from '#tools/ci/participant-cpu-profile.js';
 import {
@@ -65,7 +73,7 @@ import type {
     CheckpointCustodyObservation,
     SourceCustodyObservation,
 } from '#tools/ci/participant-preparation-storage.js';
-import { participantRelayWriter } from '#tools/ci/participant-relay-record.js';
+import { participantRelayStore } from '#tools/ci/participant-relay-record.js';
 import { assembleParticipantRuntime } from '#tools/ci/participant-runtime-assembly.js';
 import type {
     CorruptParticipantClient,
@@ -133,7 +141,9 @@ const {
     scalar,
     setupDeparture,
     unselectedCheckpoint,
+    selectionFork,
     memoryPressure,
+    publicationFaults,
     sequential,
     basePort,
     topCount,
@@ -193,21 +203,19 @@ const publicPath = /^(?:[a-z0-9][a-z0-9.-]*\/)*[a-z0-9][a-z0-9.-]*$/u;
 // What a relay view serves a participant instead of a stored record: other
 // bytes, the record another relay stored in the named file, or nothing when
 // the value is undefined.
-type ViewedRecord =
-    | Buffer
-    | Readonly<{ file: string; beforeServe?: () => Promise<void> }>
-    | undefined;
+type ViewedRecord = ViewedParticipantRecord;
 
 type Relay = Readonly<{
     servers: Server[];
-    // Only the first publisher may append; another origin may relay exact
-    // spans already stored, as selected-offer forwarding requires.
-    owners: Map<string, string>;
     views: Map<string, ViewedRecord>[];
     // Publications the relay refuses to store.
     refused: Set<string>;
-    // Offer body records received before their signed envelope.
-    earlyContributionRecords: string[];
+    refusedKeys: Set<string>;
+    publicationFaultEvidence: {
+        key: string;
+        empty: string;
+        changed?: string;
+    }[];
     // The halting client a participant's origin serves instead of the
     // runtime's page and worker while one is set.
     halting: Map<number, HaltingClient>;
@@ -217,8 +225,6 @@ type Relay = Readonly<{
     reads: Map<string, Readonly<{ requests: number; bytes: number }>>[];
     publicationAttempts: number[];
 }>;
-
-const offerEnvelopeRecords = new Set(['offer.bin', 'offer-signature.bin']);
 
 type HaltingClient = Readonly<{
     generation: number;
@@ -250,18 +256,6 @@ const haltingClient = (worker: Buffer, generation: number): HaltingClient => {
         worker: patched,
         digest: createHash('sha512').update(patched).digest('hex'),
     };
-};
-
-const readBody = async (request: IncomingMessage, maximum: number) => {
-    const parts: Buffer[] = [];
-    let length = 0;
-    for await (const chunk of request as AsyncIterable<Buffer>) {
-        length += chunk.length;
-        if (length > maximum)
-            throw new Error('A publication exceeds its bound.');
-        parts.push(chunk);
-    }
-    return Buffer.concat(parts);
 };
 
 // Each participant keeps its state under this namespace of its own origin.
@@ -339,18 +333,25 @@ const startRelay = async (
     secondRoster: string | undefined,
     transfers: readonly ParticipantTransfer[],
 ): Promise<Relay> => {
-    const owners = new Map<string, string>();
     const views = Array.from(
         { length: originCount },
         () => new Map<string, ViewedRecord>(),
     );
     const refused = new Set<string>();
-    const writeRelayRecord = participantRelayWriter(owners);
+    const refusedKeys = new Set<string>();
+    const poisoned = new Set<string>();
+    const publicationFaultEvidence: Relay['publicationFaultEvidence'] = [];
+    const candidateStores = new Map<
+        string,
+        {
+            store: ReturnType<typeof participantRelayStore>;
+            projection: ReturnType<typeof participantCandidateView>;
+        }
+    >();
     const announcementStores = new Map<
         string,
         ReturnType<typeof participantOfferAnnouncements>
     >();
-    const earlyContributionRecords: string[] = [];
     const publicationAttempts = new Array<number>(originCount).fill(0);
     const delivered = Array.from(
         { length: originCount },
@@ -461,70 +462,110 @@ const startRelay = async (
                 response.end(asset.bytes);
                 return;
             }
-            const name = url.pathname.slice('/public/'.length);
-            if (url.pathname.startsWith('/public/') && publicPath.test(name)) {
-                const file = path.join(records, name);
-                const viewed = view.get(name);
-                if (viewed !== undefined && !Buffer.isBuffer(viewed))
-                    await viewed.beforeServe?.();
-                const bytes = !view.has(name)
-                    ? await readFile(file).catch(() => undefined)
-                    : viewed === undefined || Buffer.isBuffer(viewed)
-                      ? viewed
-                      : await readFile(viewed.file);
-                if (bytes !== undefined) {
-                    response.writeHead(200, {
-                        'Content-Type': 'application/octet-stream',
-                        'Cache-Control': 'no-store',
-                    });
-                    response.end(bytes);
+        }
+        if (
+            request.method === 'POST' &&
+            (url.pathname === '/chunks' ||
+                url.pathname.startsWith('/candidates/'))
+        )
+            publicationAttempts[Number(new URL(origin).port) - basePort]++;
+        let candidateStore = candidateStores.get(records);
+        if (candidateStore === undefined) {
+            const store = participantRelayStore(
+                path.join(records, 'transport'),
+            );
+            candidateStore = {
+                store,
+                projection: participantCandidateView(store, records),
+            };
+            candidateStores.set(records, candidateStore);
+        }
+        const { store, projection } = candidateStore;
+        if (
+            await serveParticipantCandidates(store, request, response, url, {
+                ...projection.forReader(view, (name, bytes) => {
                     delivering.add(name);
                     const recordsRead =
                         reads[Number(new URL(origin).port) - basePort];
                     const previous = recordsRead.get(name);
                     recordsRead.set(name, {
                         requests: (previous?.requests ?? 0) + 1,
-                        bytes: (previous?.bytes ?? 0) + bytes.length,
+                        bytes: (previous?.bytes ?? 0) + bytes,
                     });
-                    return;
-                }
-            }
-        }
-        if (request.method === 'POST' && url.pathname.startsWith('/publish/'))
-            publicationAttempts[Number(new URL(origin).port) - basePort]++;
-        const name = url.pathname.slice('/publish/'.length);
-        const offset = Number(url.searchParams.get('offset'));
-        const file = path.join(records, name);
-        if (
-            request.method !== 'POST' ||
-            request.headers.origin !== origin ||
-            !url.pathname.startsWith('/publish/') ||
-            !publicPath.test(name) ||
-            refused.has(name) ||
-            !Number.isSafeInteger(offset) ||
-            offset < 0
-        ) {
-            response.writeHead(404);
-            response.end();
-            return;
-        }
-        const bytes = await readBody(request, 1 << 20);
-        const [directory, identity, record] = name.split('/');
-        if (
-            /^contribution-\d+$/u.test(directory) &&
-            /^[0-9a-f]{128}$/u.test(identity ?? '') &&
-            !offerEnvelopeRecords.has(record) &&
-            (await stat(
-                path.join(records, directory, identity, 'offer-signature.bin'),
-            ).catch(() => undefined)) === undefined
+                }),
+                accept: async (key, bytes) => {
+                    if (
+                        publicationFaults &&
+                        !poisoned.has(records + '/' + key)
+                    ) {
+                        poisoned.add(records + '/' + key);
+                        const empty = await store.append(
+                            key,
+                            encodeCandidateManifest({
+                                files: [
+                                    {
+                                        name: 'empty.bin',
+                                        length: 0,
+                                        chunks: [],
+                                    },
+                                ],
+                            }),
+                        );
+                        const manifest = decodeCandidateManifest(bytes);
+                        const target = manifest.files.find((file) =>
+                            [
+                                'signature.bin',
+                                'offer-signature.bin',
+                                'vote.bin',
+                                'endorsement.bin',
+                                'certificate.bin',
+                                'intent.bin',
+                                'response.bin',
+                                'envelope.bin',
+                            ].includes(file.name),
+                        );
+                        let changed: string | undefined;
+                        if (target !== undefined && target.chunks.length > 0) {
+                            const wrong = await store.chunk(target.chunks[0]);
+                            wrong[0] ^= 1;
+                            const id = await store.putChunk(wrong);
+                            changed = (
+                                await store.append(
+                                    key,
+                                    encodeCandidateManifest({
+                                        files: manifest.files.map((file) =>
+                                            file === target
+                                                ? {
+                                                      ...file,
+                                                      chunks: [
+                                                          id,
+                                                          ...file.chunks.slice(
+                                                              1,
+                                                          ),
+                                                      ],
+                                                  }
+                                                : file,
+                                        ),
+                                    }),
+                                )
+                            ).id;
+                        }
+                        publicationFaultEvidence.push({
+                            key,
+                            empty: empty.id,
+                            ...(changed === undefined ? {} : { changed }),
+                        });
+                    }
+                    return (
+                        !refusedKeys.has(key) &&
+                        projection.accepts(key, bytes, refused)
+                    );
+                },
+                published: projection.published,
+            })
         )
-            earlyContributionRecords.push(name);
-        if (!(await writeRelayRecord(file, origin, offset, bytes))) {
-            response.writeHead(409);
-            response.end();
             return;
-        }
-        response.writeHead(204);
+        response.writeHead(404);
         response.end();
     };
     const halting = new Map<number, HaltingClient>();
@@ -589,10 +630,10 @@ const startRelay = async (
     return {
         servers,
         publicationAttempts,
-        owners,
         views,
         refused,
-        earlyContributionRecords,
+        refusedKeys,
+        publicationFaultEvidence,
         halting,
         delivered,
         reads,
@@ -828,6 +869,8 @@ await runWithLocalRunLog(
         let relay: Relay | undefined;
         let sampling = true;
         let monitor: Promise<void> | undefined;
+        let allocationMonitor: Promise<void> | undefined;
+        let finishAllocation: (() => Promise<void>) | undefined;
         // Failed runs retain their original profiles; a completed run deletes
         // its test profiles.
         let profiles: string | undefined;
@@ -839,7 +882,8 @@ await runWithLocalRunLog(
             mode === 'plain' &&
             !memoryPressure &&
             !setupDeparture &&
-            !unselectedCheckpoint;
+            !unselectedCheckpoint &&
+            !publicationFaults;
         const measuredStages = Array.from({ length: participantCount }, () => [
             0,
         ]);
@@ -874,10 +918,12 @@ await runWithLocalRunLog(
             // The corrupt positions follow the organizer, as in the native
             // ceremonies; forgeries and altered state are shown to honest ones.
             const honest = (position: number) =>
-                setupDeparture || unselectedCheckpoint
-                    ? position !== 2
-                    : position === 0 ||
-                      position > maximumCorruptParticipantCount;
+                selectionFork
+                    ? position !== 0
+                    : setupDeparture || unselectedCheckpoint
+                      ? position !== 2
+                      : position === 0 ||
+                        position > maximumCorruptParticipantCount;
             const copyNames =
                 equivocator === undefined ? [] : ['conflicting', 'late'];
             // In a no-result run the last corrupt position runs a client that
@@ -1044,6 +1090,137 @@ await runWithLocalRunLog(
                 path.join(root, 'temp/participant-browser-'),
             );
             const profileDirectory = profiles;
+            const allocationSummaries = new Map<
+                string,
+                {
+                    samples: number;
+                    peakFileBytes: number;
+                    peakAllocatedBytes: number;
+                    peakIndexedDatabaseFileBytes: number;
+                    peakIndexedDatabaseAllocatedBytes: number;
+                    missingEntries: number;
+                    unreadableEntries: number;
+                    skippedLinks: number;
+                    multiplyLinkedFileObservations: number;
+                }
+            >();
+            const sampleStorageFiles = async (phase: 'running' | 'closed') => {
+                const directories = [
+                    ...(await readdir(profileDirectory)).map((name) => ({
+                        key: name,
+                        directory: path.join(profileDirectory, name),
+                    })),
+                    {
+                        key: 'public transport',
+                        directory: path.join(publicDirectory, 'transport'),
+                    },
+                    {
+                        key: 'public with diagnostics',
+                        directory: publicDirectory,
+                    },
+                    ...(secondRosterDirectory === undefined
+                        ? []
+                        : [
+                              {
+                                  key: 'second roster transport',
+                                  directory: path.join(
+                                      secondRosterDirectory,
+                                      'transport',
+                                  ),
+                              },
+                              {
+                                  key: 'second roster with diagnostics',
+                                  directory: secondRosterDirectory,
+                              },
+                          ]),
+                ];
+                const started = performance.now();
+                const samples = await sampleFileAllocation(
+                    directories.map(({ directory }) => directory),
+                );
+                const finished = performance.now();
+                for (const [index, sample] of samples.entries()) {
+                    const { key } = directories[index];
+                    const summary = allocationSummaries.get(key) ?? {
+                        samples: 0,
+                        peakFileBytes: 0,
+                        peakAllocatedBytes: 0,
+                        peakIndexedDatabaseFileBytes: 0,
+                        peakIndexedDatabaseAllocatedBytes: 0,
+                        missingEntries: 0,
+                        unreadableEntries: 0,
+                        skippedLinks: 0,
+                        multiplyLinkedFileObservations: 0,
+                    };
+                    summary.samples++;
+                    summary.peakFileBytes = Math.max(
+                        summary.peakFileBytes,
+                        sample.fileBytes,
+                    );
+                    summary.peakAllocatedBytes = Math.max(
+                        summary.peakAllocatedBytes,
+                        sample.allocatedBytes,
+                    );
+                    summary.peakIndexedDatabaseFileBytes = Math.max(
+                        summary.peakIndexedDatabaseFileBytes,
+                        sample.indexedDatabaseFileBytes,
+                    );
+                    summary.peakIndexedDatabaseAllocatedBytes = Math.max(
+                        summary.peakIndexedDatabaseAllocatedBytes,
+                        sample.indexedDatabaseAllocatedBytes,
+                    );
+                    summary.missingEntries += sample.missingEntries;
+                    summary.unreadableEntries += sample.unreadableEntries;
+                    summary.skippedLinks += sample.skippedLinks;
+                    summary.multiplyLinkedFileObservations +=
+                        sample.multiplyLinkedFiles;
+                    allocationSummaries.set(key, summary);
+                    log.writeEvent({
+                        eventType: 'participant-file-allocation',
+                        details: { key, phase, started, finished, ...sample },
+                    });
+                }
+            };
+            allocationMonitor = (async () => {
+                while (sampling) {
+                    await sampleStorageFiles('running');
+                    await delay(5000);
+                }
+            })().catch((error: unknown) => {
+                guardFailure ??=
+                    error instanceof Error ? error : new Error(String(error));
+            });
+            let allocationFinished = false;
+            finishAllocation = async () => {
+                if (allocationFinished) return;
+                allocationFinished = true;
+                sampling = false;
+                await monitor;
+                await allocationMonitor;
+                await browsers.closeAll();
+                await sampleStorageFiles('closed');
+                await writeFile(
+                    path.join(
+                        log.runDirectoryPath,
+                        'file-allocation-summary.json',
+                    ),
+                    JSON.stringify(
+                        {
+                            method:
+                                process.platform === 'win32'
+                                    ? 'FILE_STANDARD_INFO AllocationSize and EndOfFile'
+                                    : 'lstat size and blocks times 512',
+                            scope: 'Per-path default file streams, including browser database journals, Blob files and profile overhead. Transport-only directories are nested within the separately reported diagnostic public directories; those rows must not be added. Samples are not atomic snapshots, do not include volume metadata or filesystem journals, and can miss transient peaks and unlinked open files. Multiple hard links count by path and are reported explicitly.',
+                            directories:
+                                Object.fromEntries(allocationSummaries),
+                        },
+                        null,
+                        2,
+                    ) + '\n',
+                    { flag: 'wx' },
+                );
+                if (guardFailure !== undefined) throw guardFailure;
+            };
             const peaks = new Array<number>(originCount).fill(0);
             const sampledResources = Array.from(
                 { length: originCount },
@@ -2332,7 +2509,9 @@ await runWithLocalRunLog(
             // measurement also gives every member target and result work;
             // fault schedules retain quorum target voters and one combiner.
             const setupDiscoveryFaults: Record<string, unknown>[] = [];
+            const publicationRecoveryEvidence: Record<string, unknown>[] = [];
             const unselectedCheckpointEvidence: Record<string, unknown>[] = [];
+            const selectionForkEvidence: Record<string, unknown>[] = [];
             const inspectCheckpoint = async (
                 stage: string,
                 copy?: string,
@@ -2419,8 +2598,18 @@ await runWithLocalRunLog(
                             position < eligibleContributorCount &&
                             !(unselectedCheckpoint && position === 1),
                     )
-                    .slice(0, setupContributorCount);
-                assert.equal(contributing.length, setupContributorCount);
+                    .slice(
+                        0,
+                        selectionFork
+                            ? eligibleContributorCount
+                            : setupContributorCount,
+                    );
+                assert.equal(
+                    contributing.length,
+                    selectionFork
+                        ? eligibleContributorCount
+                        : setupContributorCount,
+                );
                 const confirmAndContribute = async (
                     value: (typeof active)[number],
                 ) => {
@@ -2587,16 +2776,121 @@ await runWithLocalRunLog(
                         contributing.map(({ member }) => contribute(member)),
                     );
                 markStage([2]);
-                assert.equal(
-                    (await act(organizing, 'select-setup')).generation,
-                    4,
-                );
-                await each(accepting, async ({ member }) => {
+                if (selectionFork) {
+                    const copy = 'losing-selection';
+                    await copyState(0, copy);
+                    try {
+                        await act({ origin: 0, copy }, 'select-setup');
+                        const losingBody = await readFile(
+                            path.join(publicDirectory, 'selection.bin'),
+                        );
+                        await act(active[1].member, 'endorse-setup');
+                        const originalEndorsement = await readFile(
+                            path.join(
+                                publicDirectory,
+                                'selection-endorsement-1.bin',
+                            ),
+                        );
+                        const hidden =
+                            'contribution-1/' +
+                            (
+                                await generatedOfferIdentity(publicDirectory, 1)
+                            ).toString('hex') +
+                            '/offer.bin';
+                        views[0].set(hidden, undefined);
+                        try {
+                            await act(organizing, 'select-setup');
+                        } finally {
+                            views[0].delete(hidden);
+                        }
+                        const winningBody = await readFile(
+                            path.join(publicDirectory, 'selection.bin'),
+                        );
+                        const winningSignature = await readFile(
+                            path.join(
+                                publicDirectory,
+                                'selection-signature.bin',
+                            ),
+                        );
+                        assert.notDeepEqual(winningBody, losingBody);
+                        const selectedPositions = (body: Uint8Array) => {
+                            const fields = tupleFields(body);
+                            const entries = Buffer.from(fields[2]);
+                            return Array.from(
+                                { length: entries.readUInt32LE(4) },
+                                (_, index) =>
+                                    entries.readUInt16LE(8 + index * 66),
+                            );
+                        };
+                        assert.deepEqual(selectedPositions(losingBody), [0, 1]);
+                        assert.deepEqual(
+                            selectedPositions(winningBody),
+                            [0, 2],
+                        );
+                        for (const position of [2, 3, 1]) {
+                            const before =
+                                position === 1
+                                    ? await retainedHead(position)
+                                    : undefined;
+                            views[position].set('selection.bin', winningBody);
+                            views[position].set(
+                                'selection-signature.bin',
+                                winningSignature,
+                            );
+                            try {
+                                await act(
+                                    active[position].member,
+                                    'endorse-setup',
+                                );
+                            } finally {
+                                views[position].delete('selection.bin');
+                                views[position].delete(
+                                    'selection-signature.bin',
+                                );
+                            }
+                            if (position === 1)
+                                assert.deepEqual(
+                                    await retainedHead(position),
+                                    before,
+                                );
+                        }
+                        assert.deepEqual(
+                            await readFile(
+                                path.join(
+                                    publicDirectory,
+                                    'selection-endorsement-1.bin',
+                                ),
+                            ),
+                            originalEndorsement,
+                        );
+                        const evidence = {
+                            corruptOrganizer: 0,
+                            losingEndorser: 1,
+                            losingPositions: selectedPositions(losingBody),
+                            winningPositions: selectedPositions(winningBody),
+                            originalEndorsementRetained: true,
+                        };
+                        selectionForkEvidence.push(evidence);
+                        log.writeEvent({
+                            eventType:
+                                'participant-losing-endorsement-retained',
+                            details: evidence,
+                        });
+                    } finally {
+                        await removeCopy(copy);
+                    }
+                } else {
                     assert.equal(
-                        (await act(member, 'endorse-setup')).generation,
+                        (await act(organizing, 'select-setup')).generation,
                         4,
                     );
-                });
+                    await each(accepting, async ({ member }) => {
+                        assert.equal(
+                            (await act(member, 'endorse-setup')).generation,
+                            4,
+                        );
+                    });
+                }
                 if (unselectedCheckpoint) {
                     assert.ok(originalCheckpoint);
                     assert.ok(relay);
@@ -2677,12 +2971,51 @@ await runWithLocalRunLog(
                     sameOwnCheckpoint(originalCheckpoint, healthy);
                     assert.equal(healthy.endorsement, 'signed');
                 }
-                markStage([3]);
-                await each(active, async ({ member, position }) => {
-                    const verified = await act(member, 'verify-setup');
-                    assert.equal(verified.generation, 12);
-                    assert.equal(verified.ballot, 'open');
-                    if (measureWorkflow)
+                const castBallot = async ({
+                    member,
+                    position,
+                }: (typeof active)[number]) => {
+                    if (publicationFaults && position === 0) {
+                        assert.ok(relay);
+                        relay.refusedKeys.add('ballot-0');
+                        try {
+                            const pending = await request(
+                                member.origin,
+                                'ballot',
+                                { scores: scores[position] },
+                                member.copy,
+                            );
+                            assert.equal(pending.status, 'pending');
+                            const head = await retainedHead(
+                                member.origin,
+                                member.copy,
+                            );
+                            assert.equal(head.generation, 17);
+                            assert.equal(
+                                await stat(
+                                    path.join(
+                                        publicDirectory,
+                                        'ballot-0/submission.bin',
+                                    ),
+                                ).catch(() => undefined),
+                                undefined,
+                            );
+                            const evidence = {
+                                position,
+                                stage: 'signed ballot without completed publication',
+                                result: pending,
+                                generation: head.generation,
+                            };
+                            publicationRecoveryEvidence.push(evidence);
+                            log.writeEvent({
+                                eventType:
+                                    'participant-publication-interruption',
+                                details: evidence,
+                            });
+                        } finally {
+                            relay.refusedKeys.delete('ballot-0');
+                        }
+                    } else
                         assert.equal(
                             (
                                 await act(member, 'ballot', {
@@ -2691,6 +3024,13 @@ await runWithLocalRunLog(
                             ).generation,
                             17,
                         );
+                };
+                markStage([3]);
+                await each(active, async ({ member, position }) => {
+                    const verified = await act(member, 'verify-setup');
+                    assert.equal(verified.generation, 12);
+                    assert.equal(verified.ballot, 'open');
+                    if (measureWorkflow) await castBallot({ member, position });
                 });
                 if (unselectedCheckpoint) {
                     const retired = await inspectCheckpoint(
@@ -2709,19 +3049,7 @@ await runWithLocalRunLog(
                         undefined,
                     );
                 }
-                if (!measureWorkflow)
-                    await Promise.all(
-                        active.map(async ({ member, position }) => {
-                            assert.equal(
-                                (
-                                    await act(member, 'ballot', {
-                                        scores: scores[position],
-                                    })
-                                ).generation,
-                                17,
-                            );
-                        }),
-                    );
+                if (!measureWorkflow) await Promise.all(active.map(castBallot));
                 // A close collects every other participant's published ballot
                 // with its body.
                 markStage([4]);
@@ -2729,7 +3057,11 @@ await runWithLocalRunLog(
                 const collectsEvery = (position: number) => [
                     { kind: 'own', position },
                     ...authors
-                        .filter((author) => author !== position)
+                        .filter(
+                            (author) =>
+                                author !== position &&
+                                (!publicationFaults || author !== 0),
+                        )
                         .map((author) => ({ kind: 'held', position: author })),
                 ];
                 await Promise.all(
@@ -2793,7 +3125,12 @@ await runWithLocalRunLog(
                 );
                 return expected;
             };
-            if (mode === 'plain' || setupDeparture || unselectedCheckpoint) {
+            if (
+                mode === 'plain' ||
+                setupDeparture ||
+                unselectedCheckpoint ||
+                selectionFork
+            ) {
                 // Every other participant joins, and the roster completes
                 // each stage once.
                 const joined = await Promise.all(
@@ -2912,8 +3249,72 @@ await runWithLocalRunLog(
                         identifiers,
                     );
                 }
-                // Clear offer bodies follow their durably signed envelope.
-                assert.deepEqual(relay.earlyContributionRecords, []);
+                if (publicationFaults) {
+                    assert.equal(publicationRecoveryEvidence.length, 1);
+                    assert.ok(relay.publicationFaultEvidence.length > 0);
+                    for (const key of [
+                        'poll',
+                        'roster',
+                        'selection',
+                        'setup-certificate',
+                        'close-intent',
+                        'close-proposal',
+                        'target-vote-0',
+                        'release-0',
+                    ])
+                        assert.ok(
+                            relay.publicationFaultEvidence.some(
+                                (entry) =>
+                                    entry.key === key &&
+                                    entry.changed !== undefined,
+                            ),
+                            'Missing genuine-verifier refusal control for ' +
+                                key,
+                        );
+                    for (const position of positions) await depart(position);
+                    independentOutcome = (await inBrowser(
+                        leftOut,
+                        undefined,
+                        (chrome) =>
+                            chrome.evaluate(
+                                'window.verifyOutcome(' +
+                                    JSON.stringify(organizer.poll) +
+                                    ')',
+                            ),
+                    )) as WorkerResult;
+                    assert.ok(independentOutcome.status === 'completed');
+                    assert.deepEqual(
+                        independentOutcome.details.identifiers,
+                        identifiers,
+                    );
+                    log.writeEvent({
+                        eventType:
+                            'participant-publication-candidates-verified',
+                        details: {
+                            candidates: relay.publicationFaultEvidence,
+                            retiredOriginalParticipants: [...departed],
+                            independentOutcome,
+                        },
+                    });
+                }
+                if (selectionFork) {
+                    assert.equal(selectionForkEvidence.length, 1);
+                    independentOutcome = (await inBrowser(
+                        leftOut,
+                        undefined,
+                        (chrome) =>
+                            chrome.evaluate(
+                                'window.verifyOutcome(' +
+                                    JSON.stringify(organizer.poll) +
+                                    ')',
+                            ),
+                    )) as WorkerResult;
+                    assert.ok(independentOutcome.status === 'completed');
+                    assert.deepEqual(
+                        independentOutcome.details.identifiers,
+                        identifiers,
+                    );
+                }
                 await writeFile(
                     path.join(log.runDirectoryPath, 'result.json'),
                     JSON.stringify(
@@ -2925,6 +3326,16 @@ await runWithLocalRunLog(
                             scalar,
                             setupDeparture,
                             unselectedCheckpoint,
+                            publicationFaults,
+                            selectionFork,
+                            ...(selectionFork ? { selectionForkEvidence } : {}),
+                            ...(publicationFaults
+                                ? {
+                                      publicationFaultEvidence:
+                                          relay.publicationFaultEvidence,
+                                      publicationRecoveryEvidence,
+                                  }
+                                : {}),
                             ...(setupDeparture
                                 ? {
                                       departedAfterRoster: 1,
@@ -2963,17 +3374,14 @@ await runWithLocalRunLog(
                                 'Human delays between visits',
                                 'Physical-device performance and power use',
                             ],
-                            workflow:
-                                memoryPressure ||
-                                setupDeparture ||
-                                unselectedCheckpoint
-                                    ? null
-                                    : summarizeParticipantWorkflow(
-                                          ordinaryOperations,
-                                          participantCount,
-                                          sequential,
-                                          ordinaryBootstraps,
-                                      ),
+                            workflow: measureWorkflow
+                                ? summarizeParticipantWorkflow(
+                                      ordinaryOperations,
+                                      participantCount,
+                                      sequential,
+                                      ordinaryBootstraps,
+                                  )
+                                : null,
                             scope: [
                                 setupDeparture
                                     ? 'Four original registrations fix one roster; honest eligible position one disappears immediately after roster publication, before confirmation or contribution. Position two is the cooperative corrupt participant and executes all required valid actions. Positions zero and two supply the selected clear offers; zero, two and three certify setup, vote, close, certify the target and release the verified result. Original positions and thresholds remain unchanged. The corrupt participant also announces an invalid body identity before its valid offer; the organizer stays pending without consuming selection authority and later accepts the valid offer behind that hint. This external Chrome run is development evidence for those cases, not a general adversarial-scheduling proof.'
@@ -2985,9 +3393,19 @@ await runWithLocalRunLog(
                                           'Chrome recorded the CPU samples of every operation, which slows it.',
                                       ]
                                     : []),
+                                ...(selectionFork
+                                    ? [
+                                          'A corrupt organizer signs two selections from the same original credential in separate private copies. Honest position one keeps its one losing endorsement, accepts the certified selection of positions zero and two, and completes its ballot and release without issuing another endorsement. A fresh public reader verifies the same outcome.',
+                                      ]
+                                    : []),
                                 ...(memoryPressure
                                     ? [
                                           'The second contributor first contributed in a browser that caps each WebAssembly memory below what its contribution needs, which left it pending, and its next visit completed the contribution.',
+                                      ]
+                                    : []),
+                                ...(publicationFaults
+                                    ? [
+                                          'Every publication key receives an empty and a corrupted candidate before the genuine carrier. The organizer retains a signed ballot whose publication is refused and closes without retrying that ballot. Its closure publishes the exact required body, and a fresh standalone verifier retrieves the result after every original participant has departed.',
                                       ]
                                     : []),
                             ].join(' '),
@@ -2997,6 +3415,7 @@ await runWithLocalRunLog(
                     ) + '\n',
                     { flag: 'wx' },
                 );
+                await finishAllocation();
                 completed = true;
                 process.stdout.write(log.runDirectoryPath + '\n');
                 return;
@@ -3018,6 +3437,7 @@ await runWithLocalRunLog(
                     'poll-definition.bin',
                     'poll-signature.bin',
                     'registration/' + String(organizer.bodyDigest),
+                    'transport',
                 ])
                     await cp(
                         path.join(publicDirectory, name),
@@ -3149,7 +3569,6 @@ await runWithLocalRunLog(
                     );
                 }
                 // Both rosters retain signed-envelope-before-body ordering.
-                assert.deepEqual(relay.earlyContributionRecords, []);
                 const rostersScope = [
                     "A corrupt organizer's private state is copied after its registration, and the copy proposes a second roster of the same poll to other registrants under its own path of the organizer's origin, where the relay serves that roster's records. Both rosters, whose only corrupt member is the organizer, complete roster agreement, setup contribution and verification, signed ballots, close responses, target votes, release shares and the combined result in parallel in the maintained participant runtime in external Chrome.",
                     `Relay views that serve one roster's ${prose(foreignFamilies.filter(({ reason }) => reason !== undefined).map(({ family }) => family))} under the other roster's names leave a member of each roster pending, and with the relay's own records it reaches its roster's outcome; its ${prose(foreignFamilies.filter(({ reason }) => reason === undefined).map(({ family }) => family))}, which a result visit that restores the verified setup and the evaluated target does not read, leave that member its roster's outcome.`,
@@ -3188,6 +3607,7 @@ await runWithLocalRunLog(
                     ) + '\n',
                     { flag: 'wx' },
                 );
+                await finishAllocation();
                 completed = true;
                 process.stdout.write(log.runDirectoryPath + '\n');
                 return;
@@ -3504,7 +3924,6 @@ await runWithLocalRunLog(
                 ),
                 replayedSignature,
             );
-            assert.deepEqual(relay.earlyContributionRecords, []);
             const selectionReadbackFaults: Record<string, unknown>[] = [];
             await interruptPreparation(0, 'select-setup', {
                 kind: 'selection',
@@ -3750,7 +4169,7 @@ await runWithLocalRunLog(
                 scores: ballotScores(0),
             });
             // A successful POST is insufficient: activation must read back
-            // the named certificate and selector before retiring preparation.
+            // the complete named certificate before retiring preparation.
             // These views affect GET only; the relay still accepts each write.
             const setupPublicationFaults: Record<string, unknown>[] = [];
             const activationHead = await retainedHead(setupReplay);
@@ -3766,18 +4185,19 @@ await runWithLocalRunLog(
                 ).catch(() => undefined),
                 undefined,
             );
-            for (const hidden of [
-                'setup-certificate.bin',
-                'setup-identity.bin',
-            ]) {
-                views[setupReplay].set(hidden, undefined);
+            for (const changed of [undefined, Buffer.from([0])]) {
+                const hidden = 'setup-certificate.bin';
+                views[setupReplay].set(hidden, changed);
                 const before = relay.publicationAttempts[setupReplay];
                 try {
                     const pending = await request(setupReplay, 'verify-setup');
                     assert.deepEqual(pending, {
                         status: 'pending',
                         cause: 'public input',
-                        reason: 'A public record is unavailable.',
+                        reason:
+                            changed === undefined
+                                ? 'A public record is unavailable.'
+                                : 'Published manifest readback differs.',
                     });
                     assert.ok(
                         relay.publicationAttempts[setupReplay] > before,
@@ -4028,6 +4448,7 @@ await runWithLocalRunLog(
                     ) + '\n',
                     { flag: 'wx' },
                 );
+                await finishAllocation();
                 completed = true;
                 process.stdout.write(log.runDirectoryPath + '\n');
                 return;
@@ -5600,14 +6021,23 @@ await runWithLocalRunLog(
                 ) + '\n',
                 { flag: 'wx' },
             );
+            await finishAllocation();
             completed = true;
             process.stdout.write(log.runDirectoryPath + '\n');
         } finally {
             sampling = false;
             await monitor;
+            await allocationMonitor;
             await browsers.closeAll();
             for (const server of relay?.servers ?? [])
                 await new Promise((resolve) => server.close(resolve));
+            try {
+                await finishAllocation?.();
+            } catch (error) {
+                guardFailure ??=
+                    error instanceof Error ? error : new Error(String(error));
+            }
+            if (guardFailure !== undefined) completed = false;
             log.writeEvent({
                 eventType: 'participant-transfer-summary',
                 details: { participants: transfers },

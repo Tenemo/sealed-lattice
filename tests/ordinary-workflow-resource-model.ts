@@ -1,4 +1,5 @@
 import { compileBallotBodyCensus } from '#tests/ballot-body-model.js';
+import { compileCandidatePublicationCensus } from '#tests/candidate-publication-model.js';
 import { compileClearPreparationResources } from '#tests/clear-preparation-resource-model.js';
 import { compileCloseWireCensus } from '#tests/close-wire-model.js';
 import { compileContributionBodyCensus } from '#tests/contribution-body-model.js';
@@ -65,62 +66,36 @@ export const compileOrdinaryWorkflowResources = (
         signature;
     const registrationCorpus =
         poll + n * registrationRecord + roster.proposalBytes + signature;
-    const rosterRestore =
+    const rosterRestorePayload =
         n * (registration.maximumHeaderBytes + key.publicKeyBytes);
     const signedOffer =
         offer.maximumBodyBytes + selection.offerEnvelopeBytes + signature;
-    const announcedOffer = signedOffer + 64n;
-    const signedSelection = selection.selectionBodyBytes + signature;
     const response =
         close.minimumResponseBodyBytes + n * (2n + 64n) + 4n + signature;
     const signedRelease =
         release.maximumBodyBytes + release.envelopeBytes + signature;
-    const ballotPublication =
-        ballot.maximumBodyBytes + close.submissionBytes + 64n;
-    const setupShared =
-        signedSelection +
-        n * selection.endorsementPacketBytes +
-        selection.certificateBytes +
-        64n;
     // All n original responses, q named closure copies, each nonorganizer's
-    // n-envelope listed copy, n organizer closure envelopes, and n-1 closure
-    // bodies. The organizer's own body stays at its original ballot route.
+    // n-envelope listed copy, n organizer closure envelopes and n body
+    // references. The complete closure is independent of original authors.
     const closureCopies =
-        q * response +
-        n * close.submissionBytes +
-        (n - 1n) * ballot.maximumBodyBytes;
-    const listedCopies = (n - 1n) * n * close.submissionBytes;
-    const closeShared =
-        close.intentPacketBytes +
-        close.proposalPacketBytes +
-        n * response +
-        closureCopies +
-        listedCopies +
-        n * 64n;
-    const afterSetupShared =
-        n * ballotPublication +
-        closeShared +
-        n * target.packetBytes +
-        target.maximumBodyBytes +
-        n * signedRelease;
+        q * response + n * close.submissionBytes + n * ballot.maximumBodyBytes;
+    const listedCopies = n * n * close.submissionBytes;
     // Publishing the roster repeats the organizer's registration and poll.
-    // Activators each POST the certificate/selector, even when already stored.
-    // Final close publication repeats the original intent and held list.
+    // Activators each POST their complete certificate. Final close
+    // publication repeats the original intent; the proposal also carries it.
     const duplicateUploads =
         poll +
         registrationRecord +
-        (n - 1n) * (selection.certificateBytes + 64n) +
-        close.intentPacketBytes +
-        n * 64n;
+        (n - 1n) * selection.certificateBytes +
+        2n * close.intentPacketBytes;
     const rows = [
         { name: 'Ordinary selected contributors', offers: d },
         { name: 'All eligible contributors', offers: k },
     ].map(({ name, offers }) => {
-        const publicCorpusBytes =
-            registrationCorpus +
-            offers * announcedOffer +
-            setupShared +
-            afterSetupShared;
+        const transport = compileCandidatePublicationCensus(
+            profile,
+            Number(offers),
+        );
         // Twelve ordinary calls per member: enrollment, publication, roster,
         // confirmation, selection/endorsement, activation, ballot, two close
         // calls, target, release and result. Each offered contribution adds
@@ -129,12 +104,47 @@ export const compileOrdinaryWorkflowResources = (
         return {
             name,
             offers,
-            publicCorpusBytes,
-            totalUploadBytes: publicCorpusBytes + duplicateUploads,
+            publicCorpusBytes: transport.storedPayloadBytes,
+            totalUploadBytes: transport.uploadedPayloadBytes,
+            transport,
             workerInvocations,
             moduleDownloadBytes: workerInvocations * artifact.moduleBytes,
         };
     });
+    const transport = rows[0].transport;
+    const routing = (keyName: string) => {
+        const copies = transport.publications.filter(
+            (value) => value.key === keyName,
+        );
+        return 12n + 16n * BigInt(copies.length) + copies[0].manifestBytes;
+    };
+    const registrationRouting = transport.publications
+        .filter((value) => value.key.startsWith('registration/'))
+        .reduce((keys, value) => keys.add(value.key), new Set<string>());
+    const rosterRoutingBytes = [...registrationRouting].reduce(
+        (total, keyName) => total + routing(keyName),
+        0n,
+    );
+    const rosterRestore = rosterRestorePayload + rosterRoutingBytes;
+    const ballotRoutingBytes = routing('ballot-0');
+    const voteRoutingBytes = Array.from({ length: Number(q) }, (_, position) =>
+        routing('target-vote-' + String(position)),
+    ).reduce((total, bytes) => total + bytes, 0n);
+    const releaseRoutingBytes = Array.from(
+        { length: Number(d) },
+        (_, position) => routing('release-' + String(position)),
+    ).reduce((total, bytes) => total + bytes, 0n);
+    const publicReaderRoutingBytes =
+        routing('poll') +
+        routing('roster') +
+        routing('setup-certificate') +
+        rosterRoutingBytes +
+        transport.publications
+            .filter((value) => value.key.startsWith('contribution-'))
+            .reduce((total, value) => total + routing(value.key), 0n) +
+        routing('close-proposal') +
+        voteRoutingBytes +
+        releaseRoutingBytes;
     // The public reader holds no participant custody. It reads each usable
     // body for the barrier, classification and evaluation import, then q votes
     // and d complete release shares; it does not fetch a producer's target.
@@ -148,18 +158,26 @@ export const compileOrdinaryWorkflowResources = (
         n * close.submissionBytes +
         3n * n * ballot.maximumBodyBytes +
         q * target.packetBytes +
-        d * signedRelease;
+        d * signedRelease +
+        publicReaderRoutingBytes;
     const nonorganizerCloseBytes =
         2n * rosterRestore +
         (n - 1n) * ballot.maximumBodyBytes +
-        2n * (n - 1n) * (close.submissionBytes + 64n) +
+        2n * (n - 1n) * close.submissionBytes +
         close.intentPacketBytes +
-        n * 64n;
+        2n * (n - 1n) * ballotRoutingBytes +
+        12n +
+        routing('close-intent');
     const organizerCloseBytes =
         2n * rosterRestore +
         (n - 1n) * ballot.maximumBodyBytes +
-        2n * (n - 1n) * (close.submissionBytes + 64n) +
-        (n - 1n) * response;
+        2n * (n - 1n) * close.submissionBytes +
+        (q - 1n) * (response + n * close.submissionBytes) +
+        2n * (n - 1n) * ballotRoutingBytes +
+        Array.from({ length: Number(q - 1n) }, (_, index) =>
+            routing('close-response-' + String(index + 1)),
+        ).reduce((total, bytes) => total + bytes, 0n) +
+        12n * (n - 1n);
     // Conservative metadata allowance: locally held responses can avoid
     // these reads, as an existing certificate can avoid preparation assembly.
     // These are upper bounds, not an exact ordinary network trace.
@@ -167,9 +185,12 @@ export const compileOrdinaryWorkflowResources = (
         rosterRestore +
         close.intentPacketBytes +
         close.proposalPacketBytes +
-        q * response;
-    const releaseReadBytes = rosterRestore + q * target.packetBytes;
-    const resultReadBytes = releaseReadBytes + d * signedRelease;
+        q * response +
+        routing('close-proposal');
+    const releaseReadBytes =
+        rosterRestore + q * target.packetBytes + voteRoutingBytes;
+    const resultReadBytes =
+        releaseReadBytes + d * signedRelease + releaseRoutingBytes;
     const preparationReaderBytes =
         preparation.maximumCleanPreparationDownloadBytes + 2n * rosterRestore;
     const preparationOrganizerBytes =
@@ -177,38 +198,40 @@ export const compileOrdinaryWorkflowResources = (
         preparation.organizerDiscoveryReadBytes +
         d * (12n + 64n) +
         2n * rosterRestore;
+    const otherPublicationReceives = transport.participants.map(
+        (participant, position) =>
+            participant.receivedPayloadBytes -
+            transport.preparation.participants[position].receivedPayloadBytes,
+    );
+    const largestOtherPublicationReceives = otherPublicationReceives
+        .slice(1)
+        .reduce((largest, value) => (value > largest ? value : largest), 0n);
     const noncontributorProtocolReads =
         poll +
         n * registrationRecord +
+        rosterRoutingBytes +
         signature +
+        routing('roster') +
+        routing('poll') +
         preparationReaderBytes +
         nonorganizerCloseBytes +
         targetReadBytes +
         releaseReadBytes +
-        resultReadBytes;
+        resultReadBytes +
+        largestOtherPublicationReceives;
     const contributorProtocolReads =
         noncontributorProtocolReads + rosterRestore;
     const organizerProtocolReads =
         n * registrationRecord +
+        rosterRoutingBytes +
         rosterRestore +
         preparationOrganizerBytes +
         organizerCloseBytes +
         targetReadBytes +
         releaseReadBytes +
-        resultReadBytes;
-    const organizerUpload =
-        2n * (poll + registrationRecord) +
-        roster.proposalBytes +
-        signature +
-        preparation.maximumCleanParticipantUploadBytes +
-        ballotPublication +
-        2n * (close.intentPacketBytes + n * 64n) +
-        response +
-        close.proposalPacketBytes +
-        closureCopies +
-        target.packetBytes +
-        target.maximumBodyBytes +
-        signedRelease;
+        resultReadBytes +
+        otherPublicationReceives[0];
+    const organizerUpload = transport.participants[0].uploadedPayloadBytes;
     // Successful logical retained payload. Baseline public enrollment fields
     // remain authenticated; source and own contribution/checkpoint stores retire
     // at activation. Add residual record/head metadata and physical IDB overhead
@@ -248,14 +271,20 @@ export const compileOrdinaryWorkflowResources = (
         signedReleaseBytes: signedRelease,
         organizerClosureCopyBytes: closureCopies,
         responderListedCopyBytes: listedCopies,
-        ordinaryForwardedBodyBytes: 0n,
-        // A missing/malformed held list takes this separate one-publication
-        // fallback. Arbitrary repeated invocations have no finite lifetime cap.
-        maximumForwardedBodyFallbackBytes:
-            (n - 1n) ** 2n * ballot.maximumBodyBytes,
+        ordinaryForwardedBodyUploadBytes: 0n,
+        ordinaryReferencedBodyBytes: transport.referencedBodyBytes,
+        // If original chunks cannot be retrieved, each forwarder uploads the
+        // same retained body. Arbitrary retries have no finite lifetime cap.
+        maximumMissingReferenceUploadBytes: n * n * ballot.maximumBodyBytes,
         duplicateUploadBytes: duplicateUploads,
         organizerUploadBytes: organizerUpload,
         publicReaderProtocolBytes,
+        publicReaderRoutingBytes,
+        publicationReceivedBytes: transport.receivedPayloadBytes,
+        maximumManifestBytes: transport.maximumManifestBytes,
+        maximumManifestFiles: transport.maximumFiles,
+        candidateManifestBytes: transport.manifestBytes,
+        candidatePublicationRequests: transport.requests,
         publicReaderColdDeliveryBytes:
             publicReaderProtocolBytes +
             artifact.moduleBytes +

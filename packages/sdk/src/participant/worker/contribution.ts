@@ -34,10 +34,10 @@ import {
     encodePreparationState,
 } from './preparation-state.js';
 import {
-    publishChunk,
+    createCandidatePublication,
+    findCandidate,
     publishOfferAnnouncement,
-    publishRecord,
-    readPublic,
+    readCandidateFile,
 } from './public.js';
 import type { PublicRelay } from './public.js';
 import {
@@ -52,7 +52,7 @@ import type { AuthenticatedRoot } from './root.js';
 import {
     proposalRecordIds,
     registrationFile,
-    registrationPath,
+    registrationCandidateKey,
 } from './roster.js';
 import type { VerifiedProposal } from './roster.js';
 import {
@@ -969,16 +969,26 @@ export const restoreCheckpoint = async (
         await readDataKind(context, session.root.manifest, dataKind.proposal),
     );
     for (const [position, id] of recordIds.entries()) {
-        const key = await readPublic(
+        await findCandidate(
             relay,
-            registrationPath(id, registrationFile.publicKey),
-            profile.registration.publicKeyBytes,
+            registrationCandidateKey(id),
+            async (candidate) => {
+                const key = await readCandidateFile(
+                    relay,
+                    candidate,
+                    registrationFile.publicKey,
+                    profile.registration.publicKeyBytes,
+                );
+                writeProofInput(kernel, key);
+                if (
+                    kernel.contribution_checkpoint_key(position, key.length) !==
+                    0
+                )
+                    throw new PublicInputFailure(
+                        'A recipient key does not match the checkpoint.',
+                    );
+            },
         );
-        writeProofInput(kernel, key);
-        if (kernel.contribution_checkpoint_key(position, key.length) !== 0)
-            throw new PublicInputFailure(
-                'A recipient key does not match the checkpoint.',
-            );
     }
     if (
         checkpoint(context, checkpointCommand.finish) !== 0 ||
@@ -1245,14 +1255,10 @@ export const signContribution = async (
     return storedOffer(session);
 };
 
-export const contributionDirectory = (
+export const contributionCandidateKey = (
     position: number,
-    bodyIdentity?: Uint8Array,
-) =>
-    'contribution-' +
-    String(position) +
-    '/' +
-    (bodyIdentity === undefined ? '' : hexadecimal(bodyIdentity) + '/');
+    bodyIdentity: Uint8Array,
+) => 'contribution-' + String(position) + '/' + hexadecimal(bodyIdentity);
 
 export const polynomialFile = (expandedIndex: number) =>
     'polynomial-' + String(expandedIndex).padStart(2, '0') + '.bin';
@@ -1400,8 +1406,7 @@ export const contributionRecords = (session: ParticipantSession) =>
           )
         : [];
 
-// Publishes only a complete, durably signed offer. Its immutable directory
-// names the body digest; the discovery announcement is published last.
+// Publishes one correlated complete signed offer, then announces its body.
 export const publishOffer = async (
     session: ContributionSession,
     relay: PublicRelay,
@@ -1412,49 +1417,44 @@ export const publishOffer = async (
     if (fields.length !== 5 || fields[4].length !== 64)
         throw new Error('The retained offer envelope is malformed.');
     const bodyIdentity = fields[4];
-    const directory = contributionDirectory(
-        session.state.position,
-        bodyIdentity,
-    );
+    const key = contributionCandidateKey(session.state.position, bodyIdentity);
     const delivery = await openDelivery(session.context, session.root);
-    await delivery.transfer(() =>
-        publishRecord(relay, directory + 'offer.bin', offer.body),
-    );
-    await delivery.transfer(() =>
-        publishRecord(
-            relay,
-            directory + 'offer-signature.bin',
-            offer.signature,
-        ),
-    );
-    await delivery.transfer(() =>
-        publishRecord(
-            relay,
-            directory + 'body-header.bin',
-            session.state.header,
-        ),
-    );
-    for (const record of session.state.publicRecords.filter(
-        (value) => value.object !== proofObject(profile),
-    )) {
-        const bytes = await openRecord(session, record);
-        await delivery.transfer(
-            () =>
-                publishChunk(
-                    relay,
-                    directory + polynomialFile(record.object - 1),
-                    record.offset,
-                    bytes,
-                ),
-            bytes,
+    const publication = createCandidatePublication(relay, key, delivery);
+    await publication.addBytes('offer.bin', offer.body);
+    await publication.addBytes('offer-signature.bin', offer.signature);
+    await publication.addBytes('body-header.bin', session.state.header);
+    for (const polynomial of profile.contribution.polynomials) {
+        await publication.addStream(
+            polynomialFile(polynomial.expandedIndex),
+            polynomial.bytes,
+            async (accept) => {
+                for (const record of session.state.publicRecords.filter(
+                    (value) => value.object === polynomial.expandedIndex + 1,
+                )) {
+                    const bytes = await openRecord(session, record);
+                    try {
+                        await accept(bytes);
+                    } finally {
+                        bytes.fill(0);
+                    }
+                }
+            },
         );
     }
-    await readRetainedProof(session, (offset, bytes) =>
-        delivery.transfer(
-            () => publishChunk(relay, directory + 'proof.bin', offset, bytes),
-            bytes,
-        ),
+    await publication.addStream(
+        'proof.bin',
+        proofLength(profile.contribution, session.state.header),
+        async (accept) => {
+            await readRetainedProof(session, async (_offset, bytes) => {
+                try {
+                    await accept(bytes);
+                } finally {
+                    bytes.fill(0);
+                }
+            });
+        },
     );
+    await publication.finish();
     await delivery.transfer(() =>
         publishOfferAnnouncement(relay, session.state.position, bodyIdentity),
     );

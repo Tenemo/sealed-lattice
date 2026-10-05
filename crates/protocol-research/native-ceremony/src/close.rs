@@ -899,12 +899,36 @@ pub fn run(
     };
     let known = common[0];
     assert!(lists(known));
+    // The complete valid body may arrive before transport reports failure.
+    // Cancellation must not install it or block its later genuine delivery.
+    probe
+        .command(&mut enrollments[0].credential, 3, 0, &control(known))
+        .unwrap();
+    hashed += read_chunks(&known.body, |bytes| {
+        probe
+            .command(&mut enrollments[0].credential, 4, 0, bytes)
+            .unwrap();
+    });
+    assert!(matches!(
+        probe.command(&mut enrollments[0].credential, 12, 0, &[0]),
+        Err(Error::Shape)
+    ));
+    probe
+        .command(&mut enrollments[0].credential, 12, 0, &[])
+        .unwrap();
+    assert!(matches!(
+        probe.command(&mut enrollments[0].credential, 5, 0, &[]),
+        Err(Error::Context)
+    ));
     deliver(
         &mut probe,
         &mut enrollments[0].credential,
         known,
         &mut hashed,
     );
+    probe
+        .command(&mut enrollments[0].credential, 12, 0, &[])
+        .unwrap();
     // An input that changes nothing is refused, so no log of accepted inputs
     // records it.
     assert!(matches!(

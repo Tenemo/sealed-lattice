@@ -1,4 +1,4 @@
-import { retainedBallotRecords, submissionDirectory } from './ballot.js';
+import { ballotCandidateKey, retainedBallotRecords } from './ballot.js';
 import {
     concatenate,
     equalBytes,
@@ -8,10 +8,10 @@ import {
 } from './bytes.js';
 import { completedClosePhase } from './close-state.js';
 import {
-    closeDirectory,
-    closureBodyRoute,
-    closureResponseRoute,
-    closureSubmissionRoute,
+    closeProposalCandidateKey,
+    closureBodyFile,
+    closureResponseFile,
+    closureSubmissionFile,
     completedCloseRecords,
     heldBallotBody,
     heldResponses,
@@ -19,7 +19,6 @@ import {
     isListedSubmission,
     isResponsePacket,
     proposalResponses,
-    readPublishedSubmission,
     responseIdentity,
     responseListing,
     restoreCompletedClose,
@@ -40,8 +39,14 @@ import {
     ResourceFailure,
     writeChunkInput,
 } from './kernel.js';
-import { publishRecord, readPublic, streamPublic } from './public.js';
-import type { PublicRelay } from './public.js';
+import {
+    createCandidatePublication,
+    findCandidate,
+    readCandidateFile,
+    readCandidates,
+    streamCandidateFile,
+} from './public.js';
+import type { CandidateView, PublicRelay } from './public.js';
 import { commitRoot, dataRecordInventory } from './root.js';
 import { deliverFinalAggregate, readFinalAggregate } from './setup.js';
 import {
@@ -76,7 +81,8 @@ import type { TargetState } from './target-state.js';
 
 const coinBytes = 32;
 const unusedWord = 0xff_ff_ff_ff;
-export const completionDirectory = 'completion/';
+export const targetVoteCandidateKey = (position: number) =>
+    'target-vote-' + String(position);
 const evaluationStore = 'values';
 const evaluatedTargetStore = 'target';
 
@@ -94,17 +100,18 @@ const words = (bytes: Uint8Array) => {
 type UsableSlot = Readonly<{
     submission: Uint8Array;
     identity: Uint8Array;
-    route?: string;
+    source?: Readonly<{ candidate: CandidateView; name: string }>;
 }>;
 
 // Reads a public record, or undefined when the relay lacks it.
 const readCandidate = async (
     relay: PublicRelay,
-    route: string,
+    candidate: CandidateView,
+    name: string,
     maximum: number,
 ) => {
     try {
-        return await readPublic(relay, route, maximum);
+        return await readCandidateFile(relay, candidate, name, maximum);
     } catch (error) {
         if (error instanceof PublicInputFailure) return undefined;
         throw error;
@@ -146,13 +153,14 @@ const readBody = async (
     relay: PublicRelay,
     author: number,
     identity: Uint8Array,
-    route: string | undefined,
+    source: UsableSlot['source'],
     consume: (bytes: Uint8Array) => void | Promise<void>,
 ) => {
-    if (route !== undefined)
-        return streamPublic(
+    if (source !== undefined)
+        return streamCandidateFile(
             relay,
-            route,
+            source.candidate,
+            source.name,
             records.context.profile.ballot.maximumBodyBytes,
             consume,
         );
@@ -190,17 +198,22 @@ const namedResponse = async (
     held: ReadonlyMap<number, Uint8Array>,
     responder: number,
     identity: Uint8Array,
+    publication: CandidateView,
 ) => {
     const { profile } = context;
-    const route = closeDirectory + 'response-' + String(responder) + '.bin';
     const maximum =
         4 +
         profile.close.maximumResponseBodyBytes +
         profile.registration.signatureBytes;
     for (const candidate of [
         () => Promise.resolve(held.get(responder)),
-        () => readCandidate(relay, closureResponseRoute(identity), maximum),
-        () => readCandidate(relay, route, maximum),
+        () =>
+            readCandidate(
+                relay,
+                publication,
+                closureResponseFile(identity),
+                maximum,
+            ),
     ]) {
         const response = await candidate();
         if (
@@ -222,6 +235,7 @@ const listedSubmission = async (
     held: ReadonlyMap<string, Uint8Array>,
     author: number,
     identity: Uint8Array,
+    publication: CandidateView,
 ) => {
     const { profile } = context;
     for (const candidate of [
@@ -229,10 +243,10 @@ const listedSubmission = async (
         () =>
             readCandidate(
                 relay,
-                closureSubmissionRoute(identity),
+                publication,
+                closureSubmissionFile(identity),
                 profile.close.submissionBytes,
             ),
-        () => readPublishedSubmission(profile, relay, author, identity),
     ]) {
         const submission = await candidate();
         if (
@@ -253,13 +267,20 @@ const verifyUsableBody = async (
     relay: PublicRelay,
     author: number,
     identity: Uint8Array,
+    publication: CandidateView,
 ) => {
     const { context } = records;
-    const route = submissionDirectory(author, identity) + 'body.bin';
-    const sources: (string | undefined)[] = [closureBodyRoute(identity), route];
-    if ((await records.heldBody(author, identity)) !== undefined)
-        sources.unshift(undefined);
-    for (const source of sources) {
+    const sources = async function* () {
+        if ((await records.heldBody(author, identity)) !== undefined)
+            yield undefined;
+        yield { candidate: publication, name: closureBodyFile(identity) };
+        for await (const candidate of readCandidates(
+            relay,
+            ballotCandidateKey(author),
+        ))
+            yield { candidate, name: 'body.bin' };
+    };
+    for await (const source of sources()) {
         requireBarrier(context, 4, identity, 'A usable body was refused.');
         try {
             await readBody(
@@ -298,89 +319,122 @@ const verifyCloseBarrier = async (
     const { profile, kernel } = context;
     const { close, registration } = profile;
     const { signatureBytes } = registration;
-    if (!barrierCommand(context, 1))
-        throw new Error('The close verifier has no verified setup.');
-    requireBarrier(
-        context,
-        2,
-        await readPublic(
-            relay,
-            closeDirectory + 'intent.bin',
-            4 + close.intentBodyBytes + signatureBytes,
-        ),
-        'The close intent was refused.',
-    );
-    const proposal = await readPublic(
+    return findCandidate(
         relay,
-        closeDirectory + 'proposal.bin',
-        4 + close.proposalBodyBytes + signatureBytes,
-    );
-    if (proposal.length !== 4 + close.proposalBodyBytes + signatureBytes)
-        throw new PublicInputFailure('The close proposal is incomplete.');
-    const responses = await records.heldResponses();
-    const submissions = await records.heldSubmissions();
-    const listed = new Map<
-        string,
-        { author: number; submission: Uint8Array }
-    >();
-    for (const { responder, identity } of proposalResponses(
-        profile,
-        proposal,
-    )) {
-        const response = await namedResponse(
-            context,
-            relay,
-            responses,
-            responder,
-            identity,
-        );
-        for (const entry of responseListing(profile, response)) {
-            const key = hexadecimal(entry.identity);
-            if (listed.has(key)) continue;
-            const submission = await listedSubmission(
-                context,
-                relay,
-                submissions,
-                entry.author,
-                entry.identity,
-            );
+        closeProposalCandidateKey,
+        async (publication) => {
+            if (!barrierCommand(context, 1))
+                throw new Error('The close verifier has no verified setup.');
             requireBarrier(
                 context,
-                3,
-                submission,
-                'A listed envelope was refused.',
+                2,
+                await readCandidateFile(
+                    relay,
+                    publication,
+                    'intent.bin',
+                    4 + close.intentBodyBytes + signatureBytes,
+                ),
+                'The close intent was refused.',
             );
-            listed.set(key, { author: entry.author, submission });
-        }
-        requireBarrier(context, 7, response, 'A close response was refused.');
-    }
-    // Before any body is delivered, the usable-slot bodies the proposal still
-    // needs are all of them.
-    requireBarrier(context, 8, proposal, 'The close proposal was refused.');
-    const missing = readKernel(
-        kernel,
-        kernel.close_missing_pointer(),
-        kernel.close_missing_count() * 64,
-    );
-    const usable = new Map<number, UsableSlot>();
-    for (let offset = 0; offset < missing.length; offset += 64) {
-        const identity = missing.subarray(offset, offset + 64);
-        const slot = listed.get(hexadecimal(identity));
-        if (slot === undefined)
-            throw new Error('The close verifier needs an unlisted body.');
-        usable.set(slot.author, {
-            submission: slot.submission,
-            identity: identity.slice(),
-            route: await verifyUsableBody(
-                records,
+            const proposal = await readCandidateFile(
                 relay,
-                slot.author,
-                identity,
-            ),
-        });
-    }
-    requireBarrier(context, 9, proposal, 'The close barrier was refused.');
-    return usable;
+                publication,
+                'proposal.bin',
+                4 + close.proposalBodyBytes + signatureBytes,
+            );
+            if (
+                proposal.length !==
+                4 + close.proposalBodyBytes + signatureBytes
+            )
+                throw new PublicInputFailure(
+                    'The close proposal is incomplete.',
+                );
+            const responses = await records.heldResponses();
+            const submissions = await records.heldSubmissions();
+            const listed = new Map<
+                string,
+                { author: number; submission: Uint8Array }
+            >();
+            for (const { responder, identity } of proposalResponses(
+                profile,
+                proposal,
+            )) {
+                const response = await namedResponse(
+                    context,
+                    relay,
+                    responses,
+                    responder,
+                    identity,
+                    publication,
+                );
+                for (const entry of responseListing(profile, response)) {
+                    const key = hexadecimal(entry.identity);
+                    if (listed.has(key)) continue;
+                    const submission = await listedSubmission(
+                        context,
+                        relay,
+                        submissions,
+                        entry.author,
+                        entry.identity,
+                        publication,
+                    );
+                    requireBarrier(
+                        context,
+                        3,
+                        submission,
+                        'A listed envelope was refused.',
+                    );
+                    listed.set(key, { author: entry.author, submission });
+                }
+                requireBarrier(
+                    context,
+                    7,
+                    response,
+                    'A close response was refused.',
+                );
+            }
+            // Before any body is delivered, the usable-slot bodies the proposal still
+            // needs are all of them.
+            requireBarrier(
+                context,
+                8,
+                proposal,
+                'The close proposal was refused.',
+            );
+            const missing = readKernel(
+                kernel,
+                kernel.close_missing_pointer(),
+                kernel.close_missing_count() * 64,
+            );
+            const usable = new Map<number, UsableSlot>();
+            for (let offset = 0; offset < missing.length; offset += 64) {
+                const identity = missing.subarray(offset, offset + 64);
+                const slot = listed.get(hexadecimal(identity));
+                if (slot === undefined)
+                    throw new Error(
+                        'The close verifier needs an unlisted body.',
+                    );
+                usable.set(slot.author, {
+                    submission: slot.submission,
+                    identity: identity.slice(),
+                    source: await verifyUsableBody(
+                        records,
+                        relay,
+                        slot.author,
+                        identity,
+                        publication,
+                    ),
+                });
+            }
+            requireBarrier(
+                context,
+                9,
+                proposal,
+                'The close barrier was refused.',
+            );
+            return usable;
+        },
+    );
 };
 
 const classifierInput = (context: PublicProfileContext, bytes: Uint8Array) => {
@@ -443,7 +497,7 @@ const classifyBallot = async (
         relay,
         author,
         slot.identity,
-        slot.route,
+        slot.source,
         async (bytes) => {
             let rest = bytes;
             if (header.length < headerBytes) {
@@ -904,7 +958,7 @@ const evaluate = async (
                                 relay,
                                 author,
                                 slot.identity,
-                                slot.route,
+                                slot.source,
                                 accept,
                             ),
                         'An accepted ballot changed.',
@@ -1220,22 +1274,12 @@ export const publishTarget = async (
     if (state === undefined || root.head.generation < targetPhase.signed)
         return;
     const delivery = await openDelivery(context, root);
-    await delivery.transfer(() =>
-        publishRecord(
-            relay,
-            completionDirectory +
-                'target-vote-' +
-                String(close.records.position) +
-                '.bin',
-            state.vote,
-        ),
+    const publication = createCandidatePublication(
+        relay,
+        targetVoteCandidateKey(close.records.position),
+        delivery,
     );
-    if (close.organizer)
-        await delivery.transfer(() =>
-            publishRecord(
-                relay,
-                completionDirectory + 'target.bin',
-                state.body,
-            ),
-        );
+    await publication.addBytes('vote.bin', state.vote);
+    if (close.organizer) await publication.addBytes('target.bin', state.body);
+    await publication.finish();
 };

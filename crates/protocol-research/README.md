@@ -206,6 +206,18 @@ Use `--scalar` to run the full cohort without cross-origin isolation or helper w
 pnpm run research:participant -- 3 2 plain --scalar --top-count=2
 ```
 
+Use `--publication-faults` with a plain cohort to put empty and corrupted candidates before genuine publications, refuse the organizer's first signed-ballot publication, and verify the outcome from a fresh reader after every original participant has left. This is a separate fault schedule and reports no ordinary-workflow visit total:
+
+```text
+pnpm run research:participant -- 3 2 plain --scalar --publication-faults
+```
+
+Use `--selection-fork` for the fixed four-participant case in which the corrupt organizer signs competing selections. An honest participant endorses the losing selection, refuses to endorse again and then accepts the certified winner and completes the result. The run also checks a fresh standalone reader:
+
+```text
+pnpm run research:participant -- 4 2 --scalar --selection-fork
+```
+
 The explicit early-departure browser case uses the same fixed scenario as the native departure selector:
 
 ```text
@@ -230,7 +242,7 @@ With `--profile`, Chrome records the CPU samples of every participant operation,
 
 Every run records, with each sample of a participant's process memory, the JavaScript heap use that its page and each of its workers and helpers last reported; a worker busy in a module call reports only when it returns to its event loop.
 
-The local relay serializes writes per record path. It accepts identical stored spans from another origin but permits only the original publisher to append; simultaneous distinct certificate carriers cannot concatenate or overwrite each other. The runner refuses unknown or empty selectors, serializes heavy runs, derives the corpus bound before generation, checks available memory, contains the process tree and records diagnostics under `logs/`. The ceremony's records, the relay's records, the public reader's output and the runtime copies are the run's artifacts, which it writes under `temp/run-artifacts/` with the same date and run name as its diagnostics; a run named as the source of another reads them from there. Native process memory, runtime and public storage measurements remain distinct from unmeasured browser, recovery, network-transfer and participant-visit costs. Failed diagnostics are preserved.
+The local relay gives each uploaded chunk an immutable opaque locator and appends complete correlated manifests to discovery lists. Earlier junk cannot reserve a logical publication key. The worker checks named chunk, manifest and discovery readback; owning verifiers authenticate the actual protocol bytes. Forwarding can reuse chunk locations only after comparing their complete contents with authenticated retained records. The harness also writes diagnostic record copies for inspection; the protocol reads the manifest and chunk store. The runner refuses unknown or empty selectors, serializes heavy runs, derives the corpus bound before generation, checks available memory, contains the process tree and records diagnostics under `logs/`. The ceremony's records, the relay's records, the public reader's output and the runtime copies are the run's artifacts, which it writes under `temp/run-artifacts/` with the same date and run name as its diagnostics; a run named as the source of another reads them from there. Native process memory, runtime and public storage measurements remain distinct from unmeasured browser, recovery, network-transfer and participant-visit costs. Failed diagnostics are preserved.
 
 All sources, parameters and toolchain selection needed by the native generation case are tracked, and the tracked lockfile pins each third-party crate's version and checksum. That case uses `temp/` only for run-owned scratch and the run's artifacts. No prior log, private participant profile, generated target directory or reference checkout is an input to native generation. Source paths are captured in each run; moving code changes the build identity and never authorizes private-state import.
 

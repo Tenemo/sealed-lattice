@@ -14,11 +14,14 @@ import { openDelivery } from './delivery.js';
 import { readKernel, writeSetupInput } from './kernel.js';
 import { discoverContributionOffers } from './offer-discovery.js';
 import type { PreparationEndorsement } from './preparation-state.js';
-import { publishRecord, readOfferAnnouncements } from './public.js';
+import {
+    createCandidatePublication,
+    readOfferAnnouncements,
+} from './public.js';
 import type { PublicRelay } from './public.js';
 import {
     authenticateSelection,
-    endorsementPath,
+    endorsementCandidateKey,
     readSelection,
     setupOutput,
     verifyOffer,
@@ -168,25 +171,17 @@ export const selectSetup = async (
     if (retained?.stage !== 'signed')
         throw new Error('No completed selection is retained.');
     const delivery = await openDelivery(session.context, session.root);
-    await delivery.transfer(() =>
-        publishRecord(relay, 'selection.bin', retained.body),
+    const publication = createCandidatePublication(
+        relay,
+        'selection',
+        delivery,
     );
-    await delivery.transfer(() =>
-        publishRecord(relay, 'selection-signature.bin', retained.signature),
-    );
-    let published: SignedPacket | undefined;
-    await delivery.transfer(async () => {
-        const readback = await readSelection(session.context, relay);
-        authenticateSelection(session.context, readback);
-        if (!equalBytes(readback.body, retained.body))
-            throw new PublicInputFailure(
-                'The published selection differs from the original selection.',
-            );
-        published = readback;
-    });
+    await publication.addBytes('selection.bin', retained.body);
+    await publication.addBytes('signature.bin', retained.signature);
+    await publication.finish();
     // Keep the positive offer holders in this worker. Endorsement still has
     // its own durable intent and one-shot purpose, including after a restart.
-    await endorseSetup(session, relay, published);
+    await endorseSetup(session, relay, retained);
 };
 
 const endorsementPacket = (
@@ -213,6 +208,7 @@ export const endorseSetup = async (
 ) => {
     if (session.root.head.generation !== 4)
         throw new Error('No confirmed roster permits setup endorsement.');
+    await verifySetupRoster(session, relay);
     let retained = session.preparation.endorsement;
     if (retained === undefined) {
         const selection =
@@ -244,7 +240,6 @@ export const endorseSetup = async (
         });
         retained = session.preparation.endorsement;
     } else {
-        await verifySetupRoster(session, relay);
         authenticateSelection(session.context, retained.selection, true);
         sessionInput(session.context, retained.reference);
         if (
@@ -294,7 +289,11 @@ export const endorseSetup = async (
         throw new Error('No completed endorsement is retained.');
     const bytes = endorsementPacket(session, retained);
     const delivery = await openDelivery(session.context, session.root);
-    await delivery.transfer(() =>
-        publishRecord(relay, endorsementPath(session.context.position), bytes),
+    const publication = createCandidatePublication(
+        relay,
+        endorsementCandidateKey(session.context.position),
+        delivery,
     );
+    await publication.addBytes('endorsement.bin', bytes);
+    await publication.finish();
 };

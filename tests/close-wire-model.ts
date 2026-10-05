@@ -122,14 +122,10 @@ export const compileCloseWireCensus = (supportedProfile: SupportedProfile) => {
             maximumReceivedBodies * ballot.maximumSignedBodyBytes,
         maximumKnownEnvelopes,
         maximumOrganizerKnownEnvelopes,
-        // The organizer publishes with its intent the identities of the
-        // bodies it held at its lock. Each other responder publishes with its
-        // response a copy of every envelope it lists and forwards the body of
-        // each other slot it lists alone that the held list lacks.
-        maximumOrganizerHeldListBytes: maximumHeldBodies * identityBytes,
+        // Every response carries its listed envelopes and each singly listed
+        // body's immutable references, with exact-byte reupload when needed.
         maximumListedCopyBytes: maximumResponseEntries * submissionBytes,
-        maximumForwardedBodies: participants - 1n,
-        maximumForwardedBodyBytes:
-            (participants - 1n) * ballot.maximumBodyBytes,
+        maximumForwardedBodies: participants,
+        maximumForwardedBodyBytes: participants * ballot.maximumBodyBytes,
     };
 };

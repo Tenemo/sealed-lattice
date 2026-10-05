@@ -32,10 +32,11 @@ import type { ParallelHelpers } from '#packages/sdk/src/participant/worker/paral
 import { dataKind } from '#packages/sdk/src/participant/worker/root.js';
 import {
     registrationFile,
-    registrationPath,
+    registrationCandidateKey,
     streamRegistrations,
     verifiedRosterUsernames,
 } from '#packages/sdk/src/participant/worker/roster.js';
+import { participantRelayFixture } from '#tests/participant-relay-fixture.js';
 
 // The packaged participant module and worker, whose helper role runs on
 // threads here as the page starts it beside an operation's worker in a
@@ -345,6 +346,28 @@ const pollText = concatenate(
     framedText('Option 1'),
 );
 
+// Independent foundation tuple framing of the exact signed registration body.
+const registrationIdentity = (records: ReadonlyMap<number, Uint8Array>) => {
+    const variable = (type: number, bytes: Uint8Array) =>
+        concatenate(
+            unsigned16(type),
+            unsigned32(bytes.length + 4),
+            unsigned32(bytes.length),
+            bytes,
+        );
+    return createHash('shake256', { outputLength: 64 })
+        .update(concatenate(unsigned16(1), unsigned16(1), unsigned32(3)))
+        .update(
+            variable(
+                2,
+                new TextEncoder().encode('sealed-lattice/registration-body/v1'),
+            ),
+        )
+        .update(variable(1, records.get(dataKind.header)!))
+        .update(variable(1, records.get(dataKind.proof)!))
+        .digest('hex');
+};
+
 // A roster verifier's verdict on the registrations, streamed as the worker
 // streams them from its relay: the proposal body it accepts, or undefined
 // when a step or the roster is refused.
@@ -352,6 +375,7 @@ const verifyRoster = async (
     helpers: ParallelHelpers,
     poll: JoinedPoll,
     registrations: readonly ReadonlyMap<number, Uint8Array>[],
+    recordIds: readonly string[],
 ) => {
     const { kernel } = await instantiateParticipantKernel(
         participantModule,
@@ -367,38 +391,40 @@ const verifyRoster = async (
     );
     writeInput(kernel, begin);
     expect(kernel.roster_begin(begin.length)).toBe(0);
-    const recordIds = registrations.map((_records, position) =>
-        String(position).padStart(128, '0'),
-    );
-    const files = new Map(
-        registrations.flatMap((records, position) =>
-            (
+    const transport = participantRelayFixture();
+    for (const [position, records] of registrations.entries()) {
+        const files = new Map(
+            [
+                [registrationFile.header, dataKind.header],
+                [registrationFile.signature, dataKind.signature],
+                [registrationFile.publicKey, dataKind.publicKey],
+                [registrationFile.proof, dataKind.proof],
+            ].map(
+                ([file, kind]) =>
+                    [file as string, records.get(kind as number)!] as const,
+            ),
+        );
+        const key = registrationCandidateKey(recordIds[position]);
+        // A complete transport manifest can still carry an incomplete key.
+        // The owning verifier must discard that attempt and accept later bytes.
+        transport.publish(
+            key,
+            new Map([
+                ...files,
                 [
-                    [registrationFile.header, dataKind.header],
-                    [registrationFile.signature, dataKind.signature],
-                    [registrationFile.publicKey, dataKind.publicKey],
-                    [registrationFile.proof, dataKind.proof],
-                ] as const
-            ).map(([file, kind]) => [
-                registrationPath(recordIds[position], file),
-                records.get(kind)!,
+                    registrationFile.publicKey,
+                    records.get(dataKind.publicKey)!.subarray(0, 9),
+                ],
             ]),
-        ),
-    );
-    // The relay serves each registration file at its public route.
+        );
+        transport.publish(key, files);
+    }
     const relay = { base: 'https://relay.test/' };
     const served = vi
         .spyOn(globalThis, 'fetch')
-        .mockImplementation((request) => {
-            const bytes = files.get(
-                (request as string).slice((relay.base + 'public/').length),
-            );
-            return Promise.resolve(
-                bytes === undefined
-                    ? new Response(null, { status: 404 })
-                    : new Response(new Uint8Array(bytes)),
-            );
-        });
+        .mockImplementation((request, options) =>
+            transport.fetch(request as string, options),
+        );
     try {
         await streamRegistrations(
             relay,
@@ -490,6 +516,7 @@ describe('participant helpers with registration work', () => {
                     .records,
             );
         const proofBytes = registrations[1].get(dataKind.proof)!.length;
+        const recordIds = registrations.map(registrationIdentity);
         // The true roster, a proof changed at its middle, a public key
         // coefficient changed and a signature changed.
         for (const [candidate, accepted] of [
@@ -499,11 +526,13 @@ describe('participant helpers with registration work', () => {
             [changed(registrations, 1, dataKind.proof, proofBytes - 1), false],
             [changed(registrations, 2, dataKind.publicKey, 1000), false],
             [changed(registrations, 0, dataKind.signature, 7), false],
+            [[registrations[0], registrations[2], registrations[1]], false],
         ] as const) {
             const verdictAlone = await verifyRoster(
                 noParallelHelpers,
                 poll,
                 candidate,
+                recordIds,
             );
             expect(verdictAlone !== undefined).toBe(accepted);
             // The verified roster names its registrations' usernames in
@@ -515,7 +544,7 @@ describe('participant helpers with registration work', () => {
             );
             expect(
                 await withHelpers((helpers) =>
-                    verifyRoster(helpers, poll, candidate),
+                    verifyRoster(helpers, poll, candidate, recordIds),
                 ),
             ).toEqual(verdictAlone);
         }

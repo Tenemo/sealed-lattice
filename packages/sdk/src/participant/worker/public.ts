@@ -1,5 +1,25 @@
-import { readUnsigned32, readUnsigned64 } from './bytes.js';
+import {
+    equalBytes,
+    hexadecimal,
+    readUnsigned32,
+    readUnsigned64,
+} from './bytes.js';
+import {
+    candidateChunkBytes,
+    candidateIdentifierBytes,
+    candidateManifestBytes,
+    candidatePageEntries,
+    decodeCandidateManifest,
+    decodeCandidatePage,
+    decodeCandidateReceipt,
+    encodeCandidateManifest,
+    isCandidateId,
+    isCandidateKey,
+    type CandidateFile,
+    type CandidateManifest,
+} from './candidate-codec.js';
 import { describe, PublicInputFailure } from './context.js';
+import type { Delivery } from './delivery.js';
 
 // Public records come from an untrusted relay. Every read has an exact upper
 // bound checked before the bytes are kept, and every failure leaves the
@@ -8,8 +28,8 @@ const transferChunkBytes = 1 << 20;
 const networkMilliseconds = 60_000;
 
 export type PublicRelay = Readonly<{
-    // The relay's base URL, ending with a slash: it serves each record at
-    // public/<name> and accepts publications at publish/<name>.
+    // The relay's base URL, ending with a slash. Immutable chunks and complete
+    // manifests have opaque locators; logical keys only discover candidates.
     base: string;
 }>;
 
@@ -27,10 +47,11 @@ const withDeadline = async <Value>(
 
 // Streams one resource in chunks of at most one mebibyte and returns its
 // length. A resource longer than its bound is refused before it is kept.
-const streamBounded = async (
+export const streamBounded = async (
     url: string,
     maximum: number,
     accept: (bytes: Uint8Array) => void | Promise<void>,
+    publication?: Uint8Array,
 ): Promise<number> => {
     if (!Number.isSafeInteger(maximum) || maximum < 0)
         throw new PublicInputFailure('A public record has an invalid bound.');
@@ -38,7 +59,16 @@ const streamBounded = async (
     let response: Response;
     try {
         response = await withDeadline(controller, () =>
-            fetch(url, { signal: controller.signal, cache: 'no-store' }),
+            fetch(url, {
+                signal: controller.signal,
+                cache: 'no-store',
+                ...(publication === undefined
+                    ? {}
+                    : {
+                          method: 'POST',
+                          body: new Blob([new Uint8Array(publication)]),
+                      }),
+            }),
         );
     } catch (error) {
         throw new PublicInputFailure(
@@ -87,27 +117,36 @@ const streamBounded = async (
 export const readBounded = async (
     url: string,
     maximum: number,
+    publication?: Uint8Array,
 ): Promise<Uint8Array<ArrayBuffer>> => {
     const pages: Uint8Array<ArrayBuffer>[] = [];
     let length = 0;
     let used = 0;
-    await streamBounded(url, maximum, (bytes) => {
-        for (let offset = 0; offset < bytes.length;) {
-            let page = pages[pages.length - 1];
-            if (page === undefined || used === page.length) {
-                page = new Uint8Array(
-                    Math.min(transferChunkBytes, maximum - length),
+    await streamBounded(
+        url,
+        maximum,
+        (bytes) => {
+            for (let offset = 0; offset < bytes.length;) {
+                let page = pages[pages.length - 1];
+                if (page === undefined || used === page.length) {
+                    page = new Uint8Array(
+                        Math.min(transferChunkBytes, maximum - length),
+                    );
+                    pages.push(page);
+                    used = 0;
+                }
+                const count = Math.min(
+                    page.length - used,
+                    bytes.length - offset,
                 );
-                pages.push(page);
-                used = 0;
+                page.set(bytes.subarray(offset, offset + count), used);
+                offset += count;
+                used += count;
+                length += count;
             }
-            const count = Math.min(page.length - used, bytes.length - offset);
-            page.set(bytes.subarray(offset, offset + count), used);
-            offset += count;
-            used += count;
-            length += count;
-        }
-    });
+        },
+        publication,
+    );
     if (pages.length === 1 && pages[0].length === length) return pages[0];
     const result = new Uint8Array(length);
     let offset = 0;
@@ -119,15 +158,382 @@ export const readBounded = async (
     return result;
 };
 
-export const streamPublic = (
+// A view only correlates one untrusted manifest and its immutable transport
+// locators. It carries no author, byte-identity or proof verification result.
+export type CandidateView = Readonly<{
+    id: string;
+    manifest: () => Promise<CandidateManifest>;
+}>;
+
+const publicCandidate = (relay: PublicRelay, id: string): CandidateView => {
+    if (!isCandidateId(id))
+        throw new PublicInputFailure('Malformed candidate locator.');
+    let loaded: Promise<CandidateManifest> | undefined;
+    return {
+        id,
+        manifest: () =>
+            (loaded ??= (async () => {
+                const bytes = await readBounded(
+                    relay.base + 'candidate/' + id,
+                    candidateManifestBytes,
+                );
+                try {
+                    return decodeCandidateManifest(bytes);
+                } catch {
+                    throw new PublicInputFailure(
+                        'Malformed candidate manifest.',
+                    );
+                }
+            })()),
+    };
+};
+
+// Freeze a finite discovery prefix for this visit. Yield each locator before
+// fetching its manifest, so a malformed candidate cannot monopolize a round
+// of a caller's fair scan across authors. A later visit sees later appends.
+export async function* readCandidates(relay: PublicRelay, key: string) {
+    if (!isCandidateKey(key)) throw new Error('Invalid candidate key.');
+    let offset = 0;
+    let end: number | undefined;
+    for (;;) {
+        let page;
+        try {
+            page = decodeCandidatePage(
+                await readBounded(
+                    relay.base +
+                        'candidates/' +
+                        key +
+                        '?offset=' +
+                        String(offset),
+                    12 + candidatePageEntries * candidateIdentifierBytes,
+                ),
+            );
+        } catch (error) {
+            if (
+                error instanceof PublicInputFailure ||
+                error instanceof RangeError
+            )
+                return;
+            throw error;
+        }
+        end ??= page.total;
+        if (
+            page.total < end ||
+            page.ids.length !==
+                Math.min(candidatePageEntries, Math.max(0, page.total - offset))
+        )
+            return;
+        for (const id of page.ids.slice(0, end - offset))
+            yield publicCandidate(relay, id);
+        offset += page.ids.length;
+        if (offset >= end) return;
+    }
+}
+
+export const findCandidate = async <Value>(
     relay: PublicRelay,
+    key: string,
+    consume: (candidate: CandidateView) => Promise<Value>,
+): Promise<Value> => {
+    for await (const candidate of readCandidates(relay, key)) {
+        try {
+            return await consume(candidate);
+        } catch (error) {
+            if (!(error instanceof PublicInputFailure)) throw error;
+        }
+    }
+    throw new PublicInputFailure(
+        'No valid complete candidate is available: ' + key,
+    );
+};
+
+export const streamCandidateFile = async (
+    relay: PublicRelay,
+    candidate: CandidateView,
     name: string,
     maximum: number,
     accept: (bytes: Uint8Array) => void | Promise<void>,
-) => streamBounded(relay.base + 'public/' + name, maximum, accept);
+) => {
+    const file = (await candidate.manifest()).files.find(
+        (entry) => entry.name === name,
+    );
+    if (
+        !Number.isSafeInteger(maximum) ||
+        maximum < 0 ||
+        file === undefined ||
+        file.length > maximum
+    )
+        throw new PublicInputFailure(
+            'A candidate file is missing or exceeds its bound.',
+        );
+    let remaining = file.length;
+    for (const id of file.chunks) {
+        const length = Math.min(candidateChunkBytes, remaining);
+        const bytes = await readBounded(relay.base + 'chunk/' + id, length);
+        if (bytes.length !== length)
+            throw new PublicInputFailure('A candidate chunk is incomplete.');
+        await accept(bytes);
+        remaining -= length;
+    }
+    return file.length;
+};
 
-export const readPublic = (relay: PublicRelay, name: string, maximum: number) =>
-    readBounded(relay.base + 'public/' + name, maximum);
+export const readCandidateFile = async (
+    relay: PublicRelay,
+    candidate: CandidateView,
+    name: string,
+    maximum: number,
+) => {
+    if (!Number.isSafeInteger(maximum) || maximum < 0)
+        throw new PublicInputFailure('A candidate file has an invalid bound.');
+    let result: Uint8Array | undefined;
+    let offset = 0;
+    const file = (await candidate.manifest()).files.find(
+        (entry) => entry.name === name,
+    );
+    if (file !== undefined && file.length <= maximum)
+        result = new Uint8Array(file.length);
+    await streamCandidateFile(relay, candidate, name, maximum, (bytes) => {
+        result!.set(bytes, offset);
+        offset += bytes.length;
+    });
+    return result!;
+};
+
+type PublicationReader = (
+    accept: (bytes: Uint8Array) => Promise<void>,
+) => Promise<void>;
+
+// Consume owned source fragments into fixed transport chunks. Sent bytes are
+// cleared from the source before an awaited transfer; failure clears its
+// remaining fragment as well. A caller retaining bytes passes a copy.
+const publicationChunks = async (
+    length: number,
+    read: PublicationReader,
+    emit: (bytes: Uint8Array) => Promise<void>,
+) => {
+    let buffer: Uint8Array | undefined;
+    let used = 0;
+    let received = 0;
+    const flush = async () => {
+        await emit(buffer!.subarray(0, used));
+        buffer!.fill(0);
+        used = 0;
+    };
+    try {
+        await read(async (bytes) => {
+            try {
+                if (
+                    bytes.length > candidateChunkBytes ||
+                    bytes.length > length - received
+                )
+                    throw new Error(
+                        'Publication exceeds its declared length or chunk bound.',
+                    );
+                if (
+                    used === 0 &&
+                    (bytes.length === candidateChunkBytes ||
+                        received + bytes.length === length)
+                ) {
+                    received += bytes.length;
+                    if (bytes.length > 0) await emit(bytes);
+                    return;
+                }
+                buffer ??= new Uint8Array(
+                    Math.min(candidateChunkBytes, length),
+                );
+                for (let offset = 0; offset < bytes.length;) {
+                    const count = Math.min(
+                        buffer.length - used,
+                        bytes.length - offset,
+                    );
+                    buffer.set(bytes.subarray(offset, offset + count), used);
+                    bytes.fill(0, offset, offset + count);
+                    used += count;
+                    received += count;
+                    offset += count;
+                    if (used === buffer.length) await flush();
+                }
+            } finally {
+                bytes.fill(0);
+            }
+        });
+        if (received !== length) throw new Error('Publication is incomplete.');
+        if (used > 0) await flush();
+    } finally {
+        buffer?.fill(0);
+    }
+};
+
+// Upload immutable chunks first and append the correlated manifest last.
+// Every request and named readback is guarded by the original local authority;
+// a restart retransmits the same retained bytes without reserving a shared key.
+export const createCandidatePublication = (
+    relay: PublicRelay,
+    key: string,
+    delivery: Delivery,
+) => {
+    if (!isCandidateKey(key)) throw new Error('Invalid candidate key.');
+    const files: CandidateFile[] = [];
+    let completed = false;
+    const checkFile = (name: string, length: number) => {
+        if (
+            completed ||
+            !Number.isSafeInteger(length) ||
+            length < 0 ||
+            files.some((file) => file.name === name)
+        )
+            throw new Error('Invalid publication file.');
+    };
+    const addStream = async (
+        name: string,
+        length: number,
+        read: PublicationReader,
+    ) => {
+        checkFile(name, length);
+        const chunks: string[] = [];
+        await publicationChunks(length, read, async (bytes) => {
+            await delivery.transfer(async () => {
+                const response = await readBounded(
+                    relay.base + 'chunks',
+                    candidateIdentifierBytes,
+                    bytes,
+                );
+                if (response.length !== candidateIdentifierBytes)
+                    throw new PublicInputFailure(
+                        'Malformed chunk publication receipt.',
+                    );
+                const id = hexadecimal(response);
+                const stored = await readBounded(
+                    relay.base + 'chunk/' + id,
+                    bytes.length,
+                );
+                if (!equalBytes(bytes, stored))
+                    throw new PublicInputFailure(
+                        'Published chunk readback differs.',
+                    );
+                chunks.push(id);
+            }, bytes);
+        });
+        files.push({ name, length, chunks });
+    };
+    return {
+        addStream,
+        addBytes: (name: string, bytes: Uint8Array) =>
+            addStream(name, bytes.length, async (accept) => {
+                for (
+                    let offset = 0;
+                    offset < bytes.length;
+                    offset += candidateChunkBytes
+                )
+                    await accept(
+                        bytes.slice(offset, offset + candidateChunkBytes),
+                    );
+            }),
+        // Reuse only locations whose complete contents equal this reader's
+        // authenticated retained body. An unverified hint cannot suppress
+        // forwarding; if no exact copy is retrievable, upload the same body.
+        addRetainedFile: async (
+            name: string,
+            length: number,
+            read: PublicationReader,
+            sourceKey: string,
+            sourceName: string,
+        ) => {
+            checkFile(name, length);
+            for await (const candidate of readCandidates(relay, sourceKey)) {
+                try {
+                    const file = (await candidate.manifest()).files.find(
+                        (value) => value.name === sourceName,
+                    );
+                    if (file === undefined || file.length !== length) continue;
+                    let index = 0;
+                    await publicationChunks(length, read, async (expected) => {
+                        const id = file.chunks[index++];
+                        await delivery.transfer(async () => {
+                            const bytes = await readBounded(
+                                relay.base + 'chunk/' + id,
+                                expected.length,
+                            );
+                            if (!equalBytes(bytes, expected))
+                                throw new PublicInputFailure(
+                                    'A forwarded chunk differs from retained bytes.',
+                                );
+                        }, expected);
+                    });
+                    files.push({ name, length, chunks: file.chunks });
+                    return;
+                } catch (error) {
+                    if (!(error instanceof PublicInputFailure)) throw error;
+                }
+            }
+            await addStream(name, length, read);
+        },
+        finish: async () => {
+            if (completed) throw new Error('Publication already completed.');
+            const bytes = encodeCandidateManifest({ files });
+            await delivery.transfer(async () => {
+                let receipt;
+                try {
+                    receipt = decodeCandidateReceipt(
+                        await readBounded(
+                            relay.base + 'candidates/' + key,
+                            candidateIdentifierBytes + 8,
+                            bytes,
+                        ),
+                    );
+                } catch (error) {
+                    if (error instanceof RangeError)
+                        throw new PublicInputFailure(
+                            'Malformed candidate publication receipt.',
+                        );
+                    throw error;
+                }
+                const stored = await readBounded(
+                    relay.base + 'candidate/' + receipt.id,
+                    candidateManifestBytes,
+                );
+                if (!equalBytes(bytes, stored))
+                    throw new PublicInputFailure(
+                        'Published manifest readback differs.',
+                    );
+                let page;
+                try {
+                    page = decodeCandidatePage(
+                        await readBounded(
+                            relay.base +
+                                'candidates/' +
+                                key +
+                                '?offset=' +
+                                String(receipt.index),
+                            12 +
+                                candidatePageEntries * candidateIdentifierBytes,
+                        ),
+                    );
+                } catch (error) {
+                    if (error instanceof RangeError)
+                        throw new PublicInputFailure(
+                            'Malformed candidate discovery readback.',
+                        );
+                    throw error;
+                }
+                if (
+                    page.ids[0] !== receipt.id ||
+                    page.total <= receipt.index ||
+                    page.ids.length !==
+                        Math.min(
+                            candidatePageEntries,
+                            page.total - receipt.index,
+                        )
+                )
+                    throw new PublicInputFailure(
+                        'Published candidate discovery readback differs.',
+                    );
+            });
+            completed = true;
+        },
+    };
+};
 
 const postPublic = async (url: string, bytes: Uint8Array) => {
     const controller = new AbortController();
@@ -147,21 +553,6 @@ const postPublic = async (url: string, bytes: Uint8Array) => {
     }
     if (!response.ok)
         throw new PublicInputFailure('Public delivery was refused.');
-};
-
-// Immutable protocol records accept exact retransmission only.
-export const publishChunk = async (
-    relay: PublicRelay,
-    name: string,
-    offset: number,
-    bytes: Uint8Array,
-) => {
-    if (bytes.length > transferChunkBytes)
-        throw new Error('A publication chunk exceeds its bound.');
-    await postPublic(
-        relay.base + 'publish/' + name + '?offset=' + String(offset),
-        bytes,
-    );
 };
 
 // Discovery is an append-only list of untrusted body identities. Nobody can
@@ -213,25 +604,4 @@ export const readOfferAnnouncements = async (
             bytes.slice(12 + index * 64, 12 + (index + 1) * 64),
         ),
     };
-};
-
-// Publishes one record in transfer chunks.
-export const publishRecord = async (
-    relay: PublicRelay,
-    name: string,
-    bytes: Uint8Array,
-) => {
-    for (
-        let offset = 0;
-        offset < bytes.length || offset === 0;
-        offset += transferChunkBytes
-    ) {
-        await publishChunk(
-            relay,
-            name,
-            offset,
-            bytes.subarray(offset, offset + transferChunkBytes),
-        );
-        if (bytes.length === 0) break;
-    }
 };

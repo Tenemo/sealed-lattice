@@ -3,6 +3,7 @@ import type { ParticipantLimits } from './bounds.js';
 import {
     concatenate,
     equalBytes,
+    fromHexadecimal,
     hexadecimal,
     readUnsigned32,
     tupleFields,
@@ -19,7 +20,11 @@ import { retainRegistration } from './enrollment.js';
 import type { RestoredEnrollment } from './enrollment.js';
 import { readKernel } from './kernel.js';
 import type { ParticipantKernel } from './kernel.js';
-import { readPublic, streamPublic } from './public.js';
+import {
+    findCandidate,
+    readCandidateFile,
+    streamCandidateFile,
+} from './public.js';
 import type { PublicRelay } from './public.js';
 import {
     addedReferences,
@@ -40,10 +45,8 @@ export const registrationFile = {
     signature: 'signature.bin',
 } as const;
 
-export const registrationPath = (
-    bodyDigest: string,
-    file: (typeof registrationFile)[keyof typeof registrationFile],
-) => 'registration/' + bodyDigest + '/' + file;
+export const registrationCandidateKey = (bodyDigest: string) =>
+    'registration/' + bodyDigest;
 
 // The ordered registration body digests a proposal lists: the fourth tuple
 // value holds its own length, the count and one digest per participant.
@@ -72,6 +75,7 @@ const recordStep = {
     keyFinish: 2,
     proof: 3,
     finish: 4,
+    discard: 5,
 } as const;
 
 // Streams the proposed registration records into a roster verifier, as many
@@ -100,67 +104,92 @@ export const streamRegistrations = async (
     };
     const record = async (position: number) => {
         const id = recordIds[position];
-        const header = await readPublic(
+        await findCandidate(
             relay,
-            registrationPath(id, registrationFile.header),
-            registration.maximumHeaderBytes,
-        );
-        const signature = restoring
-            ? new Uint8Array()
-            : await readPublic(
-                  relay,
-                  registrationPath(id, registrationFile.signature),
-                  registration.signatureBytes,
-              );
-        run(
-            recordStep.begin,
-            position,
-            concatenate(
-                unsigned16(position),
-                unsigned32(header.length),
-                header,
-                signature,
-            ),
-            'A registration header was refused.',
-        );
-        await streamPublic(
-            relay,
-            registrationPath(id, registrationFile.publicKey),
-            registration.publicKeyBytes,
-            (bytes) => {
-                run(
-                    recordStep.key,
-                    position,
-                    bytes,
-                    'A registration key was refused.',
-                );
-            },
-        );
-        run(
-            recordStep.keyFinish,
-            position,
-            new Uint8Array(),
-            'A registration key is incomplete.',
-        );
-        if (!restoring)
-            await streamPublic(
-                relay,
-                registrationPath(id, registrationFile.proof),
-                registration.maximumProofBytes,
-                (bytes) => {
-                    run(
-                        recordStep.proof,
-                        position,
-                        bytes,
-                        'A registration proof was refused.',
+            registrationCandidateKey(id),
+            async (candidate) => {
+                try {
+                    const header = await readCandidateFile(
+                        relay,
+                        candidate,
+                        registrationFile.header,
+                        registration.maximumHeaderBytes,
                     );
-                },
-            );
-        run(
-            recordStep.finish,
-            position,
-            new Uint8Array(),
-            'A registration record was refused.',
+                    const signature = restoring
+                        ? new Uint8Array()
+                        : await readCandidateFile(
+                              relay,
+                              candidate,
+                              registrationFile.signature,
+                              registration.signatureBytes,
+                          );
+                    run(
+                        recordStep.begin,
+                        position,
+                        concatenate(
+                            unsigned16(position),
+                            fromHexadecimal(id),
+                            unsigned32(header.length),
+                            header,
+                            signature,
+                        ),
+                        'A registration header was refused.',
+                    );
+                    await streamCandidateFile(
+                        relay,
+                        candidate,
+                        registrationFile.publicKey,
+                        registration.publicKeyBytes,
+                        (bytes) => {
+                            run(
+                                recordStep.key,
+                                position,
+                                bytes,
+                                'A registration key was refused.',
+                            );
+                        },
+                    );
+                    run(
+                        recordStep.keyFinish,
+                        position,
+                        new Uint8Array(),
+                        'A registration key is incomplete.',
+                    );
+                    if (!restoring)
+                        await streamCandidateFile(
+                            relay,
+                            candidate,
+                            registrationFile.proof,
+                            registration.maximumProofBytes,
+                            (bytes) => {
+                                run(
+                                    recordStep.proof,
+                                    position,
+                                    bytes,
+                                    'A registration proof was refused.',
+                                );
+                            },
+                        );
+                    run(
+                        recordStep.finish,
+                        position,
+                        new Uint8Array(),
+                        'A registration record was refused.',
+                    );
+                } catch (error) {
+                    if (
+                        error instanceof PublicInputFailure &&
+                        !step(recordStep.discard, position, new Uint8Array())
+                    )
+                        throw Object.assign(
+                            new Error(
+                                'The roster verifier could not discard tentative input.',
+                            ),
+                            { cause: error },
+                        );
+                    throw error;
+                }
+            },
         );
     };
     let next = 0;
@@ -460,15 +489,32 @@ export const acceptRoster = async (
         enrollment,
         recordIds,
     );
-    const signature = await readPublic(
+    const signature = await findCandidate(
         relay,
-        'proposal-signature.bin',
-        context.limits.registration.signatureBytes,
+        'roster',
+        async (candidate) => {
+            const body = await readCandidateFile(
+                relay,
+                candidate,
+                'proposal.bin',
+                context.limits.registration.maximumProposalBytes,
+            );
+            const publishedSignature = await readCandidateFile(
+                relay,
+                candidate,
+                'signature.bin',
+                context.limits.registration.signatureBytes,
+            );
+            if (
+                !equalBytes(body, proposal.body) ||
+                !verifySignature(context, publishedSignature)
+            )
+                throw new PublicInputFailure(
+                    'The organizer proposal signature failed.',
+                );
+            return publishedSignature;
+        },
     );
-    if (!verifySignature(context, signature))
-        throw new PublicInputFailure(
-            'The organizer proposal signature failed.',
-        );
     const added = [
         { kind: dataKind.proposal, bytes: proposal.body },
         { kind: dataKind.proposalSignature, bytes: signature },

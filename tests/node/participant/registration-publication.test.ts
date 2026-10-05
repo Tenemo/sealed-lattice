@@ -21,6 +21,7 @@ import type {
 } from '#packages/sdk/src/participant/worker/root.js';
 import { participantStores } from '#packages/sdk/src/participant/worker/storage.js';
 import type { ParticipantStore } from '#packages/sdk/src/participant/worker/storage.js';
+import { participantRelayFixture } from '#tests/participant-relay-fixture.js';
 
 const local = vi.hoisted(() => ({
     read: vi.fn(),
@@ -167,20 +168,21 @@ const fixture = async (
             counts: { ...counts },
         }),
     );
-    const send = vi.fn(async (url: string, options: RequestInit) => {
-        expect(options.method).toBe('POST');
+    const transport = participantRelayFixture();
+    const send = vi.fn(async (url: string, options: RequestInit = {}) => {
+        if (options.method !== 'POST' || new URL(url).pathname !== '/chunks')
+            return transport.fetch(url, options);
         expect(options.body).toBeInstanceOf(Blob);
         const bytes = new Uint8Array(
             await (options.body as Blob).arrayBuffer(),
         );
-        const location = new URL(url);
-        const name = location.pathname.slice('/publish/'.length);
-        const offset = Number(location.searchParams.get('offset'));
-        const kind = names.get(name);
-        const reference = references.find(
-            (item) => item.kind === kind && item.offset === offset,
+        const hash = digest(custodyPurpose.record, bytes);
+        const reference = references.find((item) =>
+            Buffer.from(item.hash).equals(Buffer.from(hash)),
         );
         expect(reference).toBeDefined();
+        const { kind, offset } = reference!;
+        const name = [...names].find(([_name, value]) => value === kind)![0];
         expect(bytes.length).toBe(reference?.length);
         expect(bytes.length).toBeLessThanOrEqual(chunkBytes);
         expect(digest(custodyPurpose.record, bytes)).toEqual(reference?.hash);
@@ -188,7 +190,7 @@ const fixture = async (
         for (const item of references.filter((entry) => entry.kind === kind))
             expect(reads).toContain(recordKey(item.kind, item.offset));
         posts.push({ name, offset, length: bytes.length });
-        return new Response(null, { status: 204 });
+        return transport.fetch(url, options);
     });
     vi.stubGlobal('fetch', send);
     const corrupt = async (kind: number, offset: number) => {
@@ -242,7 +244,7 @@ describe('bounded registration publication', () => {
         // Two snapshots open the guard, then one after each complete preflight
         // and after each upload. No registration proof or file is concatenated.
         expect(local.snapshot).toHaveBeenCalledTimes(
-            2 + 4 + state.posts.length,
+            2 + 4 + state.posts.length + 1,
         );
     });
 
@@ -281,7 +283,13 @@ describe('bounded registration publication', () => {
         const send = state.send.getMockImplementation()!;
         state.send.mockImplementation(async (url, options) => {
             const response = await send(url, options);
-            if (url.endsWith('/proof.bin?offset=0'))
+            const last = state.posts[state.posts.length - 1];
+            if (
+                options?.method === 'POST' &&
+                new URL(url).pathname === '/chunks' &&
+                last?.name.endsWith('/proof.bin') &&
+                last.offset === 0
+            )
                 await state.corrupt(dataKind.proof, 2 * chunkBytes);
             return response;
         });

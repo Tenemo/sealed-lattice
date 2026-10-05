@@ -2,11 +2,11 @@ import { hexadecimal } from './bytes.js';
 import type { ParticipantContext } from './context.js';
 import { openDelivery } from './delivery.js';
 import type { RestoredEnrollment } from './enrollment.js';
-import { publishChunk } from './public.js';
+import { createCandidatePublication } from './public.js';
 import type { PublicRelay } from './public.js';
 import { dataKind, readDataRecord } from './root.js';
 import type { AuthenticatedRoot } from './root.js';
-import { registrationFile, registrationPath } from './roster.js';
+import { registrationFile, registrationCandidateKey } from './roster.js';
 
 // Publishes the registration and the organizer's retained poll and roster.
 // The authenticated manifest has contiguous records of at most one transfer
@@ -21,40 +21,63 @@ export const publishRegistrationRecords = async (
     enrollment: RestoredEnrollment,
 ) => {
     const id = hexadecimal(enrollment.bodyDigest);
-    const files: [number, string][] = [
-        [dataKind.publicKey, registrationPath(id, registrationFile.publicKey)],
-        [dataKind.proof, registrationPath(id, registrationFile.proof)],
-        [dataKind.header, registrationPath(id, registrationFile.header)],
-        [dataKind.signature, registrationPath(id, registrationFile.signature)],
+    const groups: [string, [number, string][]][] = [
+        [
+            registrationCandidateKey(id),
+            [
+                [dataKind.publicKey, registrationFile.publicKey],
+                [dataKind.proof, registrationFile.proof],
+                [dataKind.header, registrationFile.header],
+                [dataKind.signature, registrationFile.signature],
+            ],
+        ],
     ];
     if (enrollment.isOrganizer) {
-        files.push(
-            [dataKind.pollDefinition, 'poll-definition.bin'],
-            [dataKind.pollSignature, 'poll-signature.bin'],
-        );
+        groups.push([
+            'poll',
+            [
+                [dataKind.pollDefinition, 'definition.bin'],
+                [dataKind.pollSignature, 'signature.bin'],
+            ],
+        ]);
         if (root.head.generation >= 3)
-            files.push(
-                [dataKind.proposal, 'proposal.bin'],
-                [dataKind.proposalSignature, 'proposal-signature.bin'],
-            );
+            groups.push([
+                'roster',
+                [
+                    [dataKind.proposal, 'proposal.bin'],
+                    [dataKind.proposalSignature, 'signature.bin'],
+                ],
+            ]);
     }
     const delivery = await openDelivery(context, root);
-    for (const [kind, name] of files) {
-        const references = root.manifest.references.filter(
-            (reference) => reference.kind === kind,
-        );
-        await delivery.transfer(async () => {
-            for (const reference of references)
-                (await readDataRecord(context, reference)).fill(0);
-        });
-        for (const reference of references)
+    for (const [key, files] of groups) {
+        const publication = createCandidatePublication(relay, key, delivery);
+        for (const [kind, name] of files) {
+            const references = root.manifest.references.filter(
+                (reference) => reference.kind === kind,
+            );
             await delivery.transfer(async () => {
-                const bytes = await readDataRecord(context, reference);
-                try {
-                    await publishChunk(relay, name, reference.offset, bytes);
-                } finally {
-                    bytes.fill(0);
-                }
+                for (const reference of references)
+                    (await readDataRecord(context, reference)).fill(0);
             });
+            await publication.addStream(
+                name,
+                references.reduce(
+                    (total, reference) => total + reference.length,
+                    0,
+                ),
+                async (accept) => {
+                    for (const reference of references) {
+                        const bytes = await readDataRecord(context, reference);
+                        try {
+                            await accept(bytes);
+                        } finally {
+                            bytes.fill(0);
+                        }
+                    }
+                },
+            );
+        }
+        await publication.finish();
     }
 };

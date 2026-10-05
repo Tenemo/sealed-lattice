@@ -4,8 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
     readBounded,
-    readPublic,
-    streamPublic,
+    streamBounded,
 } from '#packages/sdk/src/participant/worker/public.js';
 
 const relay = { base: 'https://relay.invalid/' };
@@ -78,9 +77,12 @@ describe('bounded public byte collection', () => {
             source.subarray(pageBytes - 1, pageBytes + 7),
             source.subarray(pageBytes + 7),
         ]);
-        const bytes = await readPublic(relay, 'record.bin', source.length + 5);
+        const bytes = await readBounded(
+            relay.base + 'record.bin',
+            source.length + 5,
+        );
         expect(received.fetch).toHaveBeenCalledWith(
-            relay.base + 'public/record.bin',
+            relay.base + 'record.bin',
             expect.objectContaining({ cache: 'no-store' }),
         );
         expect(bytes.buffer.byteLength).toBe(source.length);
@@ -111,7 +113,7 @@ describe('bounded public byte collection', () => {
         const received = response([new Uint8Array(5), new Uint8Array(1)]);
         const accept = vi.fn();
         await expect(
-            streamPublic(relay, 'record.bin', 4, accept),
+            streamBounded(relay.base + 'record.bin', 4, accept),
         ).rejects.toThrow('exceeds its bound');
         expect(accept).not.toHaveBeenCalled();
         expect(received.cancel).toHaveBeenCalledOnce();
@@ -147,9 +149,8 @@ describe('bounded public byte collection', () => {
         const entered = deferred();
         const released = deferred();
         const lengths: number[] = [];
-        const reading = streamPublic(
-            relay,
-            'record.bin',
+        const reading = streamBounded(
+            relay.base + 'record.bin',
             pageBytes + 7,
             async (bytes) => {
                 lengths.push(bytes.length);

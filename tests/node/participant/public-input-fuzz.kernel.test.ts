@@ -169,6 +169,23 @@ const rosterBegin = (count: number) =>
     );
 const recordBegin = concatenate(
     unsigned16(0),
+    (() => {
+        const variable = (type: number, bytes: Uint8Array) =>
+            concatenate(
+                unsigned16(type),
+                unsigned32(bytes.length + 4),
+                unsigned32(bytes.length),
+                bytes,
+            );
+        return createHash('shake256', { outputLength: 64 })
+            .update(concatenate(unsigned16(1), unsigned16(1), unsigned32(3)))
+            .update(
+                variable(2, encodeText('sealed-lattice/registration-body/v1')),
+            )
+            .update(variable(1, organizer.header))
+            .update(variable(1, organizer.proof))
+            .digest();
+    })(),
     unsigned32(organizer.header.length),
     organizer.header,
     organizer.signature,
@@ -535,10 +552,20 @@ describe('participant module public input', () => {
                     shake(label + '/bytes', length),
                 );
             const result = call(kernel, command.name, values, label);
+            // Empty cancellation discards tentative public input at a roster
+            // position. Success is cleanup, not an accepted registration.
+            const cancellation =
+                (command.name === 'roster_record' ||
+                    command.name === 'setup_roster_record') &&
+                values[0] === 5 &&
+                values[1] < minimumParticipants &&
+                values[2] === 0;
             expect(
-                command.acceptsWithNonzero === true
+                cancellation
                     ? result === 0
-                    : result !== 0,
+                    : command.acceptsWithNonzero === true
+                      ? result === 0
+                      : result !== 0,
                 `${label}: ${command.name}(${values.join(', ')}) returned ${String(result)}`,
             ).toBe(true);
         };

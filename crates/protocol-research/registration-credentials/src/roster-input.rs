@@ -2,11 +2,8 @@ use crate::{
     Credential, Error, SIGNATURE_BYTES, checked_header,
     foundation::RegistrationHeader,
     poll::{VerifiedPoll, verify_poll},
-    registration::{
-        KEY_BYTES, VerifiedRegistration,
-        session::{PendingRegistration, RegistrationSession},
-    },
-    retained_roster::{RetainedRecord, RetainedRoster, header_digest},
+    registration::{KEY_BYTES, VerifiedRegistration, session::RegistrationSession},
+    retained_roster::{RetainedRoster, header_digest},
     roster::RosterProposal,
 };
 use parallel_work::ProtocolHash;
@@ -23,17 +20,13 @@ pub fn open_record_limit() -> usize {
 enum Record {
     Unread,
     Open(RegistrationSession),
-    Finished(PendingRegistration),
-    // A record of a retained roster, awaiting its header.
-    Retained(RetainedRecord),
     // Its accepted header, awaiting the key that header names.
     Restoring {
         header: RegistrationHeader,
-        record: RetainedRecord,
         key: Vec<u8>,
         key_finished: bool,
     },
-    Restored(Arc<VerifiedRegistration>),
+    Verified(Arc<VerifiedRegistration>),
     Refused,
 }
 
@@ -43,8 +36,11 @@ pub struct RosterInputVerifier {
     records: Vec<Record>,
     // The shards no open record's session holds.
     shards: Vec<usize>,
-    // The proposal identity of the retained roster this verifier restores.
-    retained: Option<[u8; 64]>,
+    // The original requested body identity at each position, never replaced
+    // by a failed public candidate or its retry.
+    identities: Vec<Option<[u8; 64]>>,
+    // Credential-keyed predecessors remain independent of candidate state.
+    retained: Option<RetainedRoster>,
     verified: Option<Vec<Arc<VerifiedRegistration>>>,
     failed: bool,
 }
@@ -73,6 +69,7 @@ impl RosterInputVerifier {
         Ok(Self {
             poll,
             records: (0..count).map(|_| Record::Unread).collect(),
+            identities: vec![None; count],
             shards: (0..open_record_limit()).rev().collect(),
             retained: None,
             verified: None,
@@ -87,8 +84,12 @@ impl RosterInputVerifier {
         let mut verifier = Self::new(input)?;
         let roster =
             RetainedRoster::parse(credential, &verifier.poll, verifier.records.len(), retained)?;
-        verifier.records = roster.records.into_iter().map(Record::Retained).collect();
-        verifier.retained = Some(roster.identity);
+        verifier.identities = roster
+            .records
+            .iter()
+            .map(|record| Some(record.body_digest))
+            .collect();
+        verifier.retained = Some(roster);
         Ok(verifier)
     }
     /// Whether this verifier restores a retained roster rather than
@@ -99,21 +100,35 @@ impl RosterInputVerifier {
     pub fn poll(&self) -> &VerifiedPoll {
         &self.poll
     }
-    /// Opens the record at its position, which no earlier record took: a
-    /// record to verify with its header and signature while fewer than the
-    /// open-record limit are open, a retained record with its header alone.
+    /// Opens a candidate under the original requested body identity. The
+    /// control is position, body identity, header length, header and signature;
+    /// a retained record omits the signature. Only discard_record permits
+    /// another candidate at an unfinished position.
     pub fn begin_record(&mut self, input: &[u8]) -> Result<(), Error> {
-        if !(6..=6 + 4096 + 3309).contains(&input.len()) {
+        if self.failed {
+            return Err(Error::Consumed);
+        }
+        if !(70..=70 + 4096 + 3309).contains(&input.len()) {
             return Err(Error::Shape);
         }
         let position = u16::from_le_bytes(input[..2].try_into().unwrap()) as usize;
-        let length = u32::from_le_bytes(input[2..6].try_into().unwrap()) as usize;
-        if length > 4096 || input.len() < 6 + length {
+        let identity = input[2..66].try_into().unwrap();
+        let length = u32::from_le_bytes(input[66..70].try_into().unwrap()) as usize;
+        if length > 4096 || input.len() < 70 + length {
             return Err(Error::Shape);
         }
-        let (header, signature) = input[6..].split_at(length);
+        if !matches!(self.records.get(position), Some(Record::Unread)) {
+            return Err(Error::Shape);
+        }
+        if self.identities[position].is_some_and(|expected| expected != identity) {
+            return Err(Error::Context);
+        }
+        self.identities[position] = Some(identity);
+        let (header, signature) = input[70..].split_at(length);
         match self.records.get(position) {
-            Some(Record::Unread) if signature.len() == SIGNATURE_BYTES => {
+            Some(Record::Unread)
+                if self.retained.is_none() && signature.len() == SIGNATURE_BYTES =>
+            {
                 let shard = self.shards.pop().ok_or(Error::Shape)?;
                 match RegistrationSession::open(&self.poll, shard, header, signature) {
                     Ok(session) => {
@@ -127,19 +142,15 @@ impl RosterInputVerifier {
                     }
                 }
             }
-            Some(Record::Retained(_)) if signature.is_empty() => {
-                let Record::Retained(record) =
-                    std::mem::replace(&mut self.records[position], Record::Refused)
-                else {
-                    unreachable!()
-                };
+            Some(Record::Unread) if self.retained.is_some() && signature.is_empty() => {
+                let record = &self.retained.as_ref().unwrap().records[position];
+                self.records[position] = Record::Refused;
                 if header_digest(header) != record.header_digest {
                     return Err(Error::Context);
                 }
                 let header = checked_header(header, &self.poll)?;
                 self.records[position] = Record::Restoring {
                     header,
-                    record,
                     key: Vec::with_capacity(KEY_BYTES),
                     key_finished: false,
                 };
@@ -148,8 +159,24 @@ impl RosterInputVerifier {
             _ => Err(Error::Shape),
         }
     }
-    // Refuses the restored record at its position, which then refuses the
-    // roster.
+    /// Discards only tentative public input. The requested identity, retained
+    /// predecessor and every positive record survive; no accepted record can
+    /// be replaced through this operation.
+    pub fn discard_record(&mut self, position: usize) -> Result<(), Error> {
+        if self.failed {
+            return Err(Error::Consumed);
+        }
+        let record = self.records.get_mut(position).ok_or(Error::Shape)?;
+        if matches!(record, Record::Verified(_)) {
+            return Err(Error::Consumed);
+        }
+        if let Record::Open(session) = std::mem::replace(record, Record::Unread) {
+            self.shards.push(session.shard());
+            drop(session);
+        }
+        Ok(())
+    }
+    // Refuses only this tentative restored candidate.
     fn refuse(&mut self, position: usize) -> Result<(), Error> {
         self.records[position] = Record::Refused;
         Err(Error::Shape)
@@ -196,9 +223,9 @@ impl RosterInputVerifier {
             _ => Err(Error::Shape),
         }
     }
-    /// Closes the record at its position: a verified record's session
-    /// decides it when the roster finishes, and a restored record is the
-    /// registration its retained roster names once its key is complete.
+    /// Accepts only a complete owning-verifier result with the originally
+    /// requested body identity. A retained record instead consumes its exact
+    /// credential-keyed predecessor and the complete matching key.
     pub fn finish_record(&mut self, position: usize) -> Result<(), Error> {
         match self.records.get(position) {
             Some(Record::Open(_)) => {
@@ -208,23 +235,24 @@ impl RosterInputVerifier {
                     unreachable!()
                 };
                 self.shards.push(session.shard());
-                self.records[position] = Record::Finished(session.finish()?);
+                let verified = session.finish()?.wait()?;
+                if Some(verified.body_digest()) != self.identities[position] {
+                    return Err(Error::Context);
+                }
+                self.records[position] = Record::Verified(Arc::new(verified));
                 Ok(())
             }
             Some(Record::Restoring {
                 key_finished: true, ..
             }) => {
-                let Record::Restoring {
-                    header,
-                    record,
-                    key,
-                    ..
-                } = std::mem::replace(&mut self.records[position], Record::Refused)
+                let Record::Restoring { header, key, .. } =
+                    std::mem::replace(&mut self.records[position], Record::Refused)
                 else {
                     unreachable!()
                 };
+                let record = &self.retained.as_ref().ok_or(Error::Context)?.records[position];
                 self.records[position] =
-                    Record::Restored(Arc::new(VerifiedRegistration::restored(
+                    Record::Verified(Arc::new(VerifiedRegistration::restored(
                         header,
                         record.body_digest,
                         record.proof_hash,
@@ -246,21 +274,14 @@ impl RosterInputVerifier {
             if !self
                 .records
                 .iter()
-                .all(|record| matches!(record, Record::Finished(_) | Record::Restored(_)))
+                .all(|record| matches!(record, Record::Verified(_)))
             {
                 return Err(Error::Shape);
             }
             let mut verified = Vec::with_capacity(self.records.len());
-            for record in std::mem::take(&mut self.records) {
+            for record in &self.records {
                 match record {
-                    Record::Finished(pending) => match pending.wait() {
-                        Ok(registration) => verified.push(Arc::new(registration)),
-                        Err(error) => {
-                            self.failed = true;
-                            return Err(error);
-                        }
-                    },
-                    Record::Restored(registration) => verified.push(registration),
+                    Record::Verified(registration) => verified.push(registration.clone()),
                     _ => unreachable!(),
                 }
             }
@@ -269,7 +290,8 @@ impl RosterInputVerifier {
         let proposal = RosterProposal::new(&self.poll, self.verified.clone().unwrap())?;
         if self
             .retained
-            .is_some_and(|identity| identity != proposal.identity())
+            .as_ref()
+            .is_some_and(|roster| roster.identity != proposal.identity())
         {
             self.failed = true;
             return Err(Error::Context);
@@ -288,10 +310,8 @@ mod tests {
     use registration_proof::CHUNK_LIMIT;
 
     // One record is open for each helper, or one without helpers. Each
-    // position opens once, every step names an open record, and the roster
-    // finishes only once every record has finished and its session's verdict
-    // accepts it; a refused record refuses the roster, and the roster stays
-    // refused.
+    // candidate opens once, every step names an open record, and no failed
+    // proof becomes a positive record or poisons other positions.
     #[test]
     fn records_open_within_the_limit_and_the_roster_waits_for_every_verdict() {
         let (packet, header) = unproved_record([4; 64]);
@@ -315,6 +335,7 @@ mod tests {
         let record = |position: u16| {
             [
                 position.to_le_bytes().as_slice(),
+                &[11; 64],
                 &(header.len() as u32).to_le_bytes(),
                 &header,
                 &[0; 3309],
@@ -343,7 +364,7 @@ mod tests {
                 roster.push_key(position.into(), part).unwrap();
             }
             roster.finish_key(position.into()).unwrap();
-            roster.finish_record(position.into()).unwrap();
+            assert!(roster.finish_record(position.into()).is_err());
             assert!(matches!(
                 roster.begin_record(&record(position)),
                 Err(Error::Shape)
@@ -352,9 +373,18 @@ mod tests {
                 roster.finish_record(position.into()),
                 Err(Error::Shape)
             ));
+            roster.discard_record(position.into()).unwrap();
+            let mut other_identity = record(position);
+            other_identity[2] ^= 1;
+            assert!(matches!(
+                roster.begin_record(&other_identity),
+                Err(Error::Context)
+            ));
+            roster.begin_record(&record(position)).unwrap();
+            roster.discard_record(position.into()).unwrap();
         }
         assert!(matches!(roster.begin_record(&record(3)), Err(Error::Shape)));
         assert!(matches!(roster.finish(), Err(Error::Shape)));
-        assert!(matches!(roster.finish(), Err(Error::Consumed)));
+        assert!(matches!(roster.finish(), Err(Error::Shape)));
     }
 }

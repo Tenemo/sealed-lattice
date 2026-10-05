@@ -2,6 +2,7 @@ import { retainedBallotRecords } from './ballot.js';
 import {
     concatenate,
     equalBytes,
+    readUnsigned16,
     readUnsigned32,
     readUnsigned64,
     unsigned32,
@@ -21,10 +22,10 @@ import {
     writeChunkInput,
 } from './kernel.js';
 import {
-    publishChunk,
-    publishRecord,
-    readPublic,
-    streamPublic,
+    createCandidatePublication,
+    readCandidateFile,
+    readCandidates,
+    streamCandidateFile,
 } from './public.js';
 import type { PublicRelay } from './public.js';
 import { openRecord, sealRecord } from './records.js';
@@ -44,10 +45,10 @@ import { targetPhase } from './target-state.js';
 import type { BallotStatus, TargetState } from './target-state.js';
 import {
     certifiedBallotStatus,
-    completionDirectory,
     discardEvaluation,
     restoreOrEvaluateTarget,
     resumeTarget,
+    targetVoteCandidateKey,
 } from './target.js';
 
 // A participant's release of its share of the certified target. The release
@@ -220,28 +221,52 @@ export const certifyTarget = async (
     const [count, threshold] = words(completionCommand(context, 0));
     let accepted = 0;
     let refused = false;
-    for (
-        let position = 0;
-        position < count && accepted < threshold;
-        position++
-    ) {
-        let vote: Uint8Array;
-        try {
-            vote = await readPublic(
-                relay,
-                completionDirectory +
-                    'target-vote-' +
-                    String(position) +
-                    '.bin',
-                context.profile.target.votePacketBytes,
-            );
-        } catch (error) {
-            if (error instanceof PublicInputFailure) continue;
-            throw error;
+    const pending = new Map(
+        Array.from(
+            { length: count },
+            (_, position) =>
+                [
+                    position,
+                    readCandidates(relay, targetVoteCandidateKey(position))[
+                        Symbol.asyncIterator
+                    ](),
+                ] as const,
+        ),
+    );
+    while (pending.size > 0 && accepted < threshold) {
+        for (const [position, candidates] of pending) {
+            const next = await candidates.next();
+            if (next.done) {
+                pending.delete(position);
+                continue;
+            }
+            let vote: Uint8Array;
+            try {
+                vote = await readCandidateFile(
+                    relay,
+                    next.value,
+                    'vote.bin',
+                    context.profile.target.votePacketBytes,
+                );
+            } catch (error) {
+                if (error instanceof PublicInputFailure) continue;
+                throw error;
+            }
+            // A copied valid vote in another author's discovery list must
+            // not consume that list's opportunity to supply its own vote.
+            if (
+                vote.length !== context.profile.target.votePacketBytes ||
+                readUnsigned16(vote, 0) !== position
+            )
+                continue;
+            const inserted = tryCompletionCommand(context, 1, 0, vote);
+            if (inserted === undefined) refused = true;
+            else {
+                accepted = words(inserted)[1];
+                pending.delete(position);
+                if (accepted >= threshold) break;
+            }
         }
-        const inserted = tryCompletionCommand(context, 1, 0, vote);
-        if (inserted === undefined) refused = true;
-        else accepted = words(inserted)[1];
     }
     const certified = tryCompletionCommand(context, 2);
     if (certified === undefined) {
@@ -600,31 +625,36 @@ export const publishRelease = async (
     if (state === undefined || generationOf(session) < releasePhase.signed)
         return;
     const { context, root } = session.close.participant;
-    const position = String(session.close.records.position);
     const delivery = await openDelivery(context, root, {
         release: state.bodyKeys.length,
     });
-    for (let index = 0; index < state.bodyKeys.length; index++) {
-        const bytes = await openReleaseRecord(session, index);
-        await delivery.transfer(
-            () =>
-                publishChunk(
-                    relay,
-                    completionDirectory + 'release-' + position + '.bin',
-                    index * context.profile.release.recordBytes,
-                    bytes,
-                ),
-            bytes,
-        );
-    }
-    await delivery.transfer(() =>
-        publishRecord(
-            relay,
-            completionDirectory + 'release-envelope-' + position + '.bin',
-            concatenate(state.envelope, state.signature),
-        ),
+    const publication = createCandidatePublication(
+        relay,
+        releaseCandidateKey(session.close.records.position),
+        delivery,
     );
+    await publication.addStream(
+        'body.bin',
+        state.bodyLength,
+        async (accept) => {
+            for (let index = 0; index < state.bodyKeys.length; index++) {
+                const bytes = await openReleaseRecord(session, index);
+                try {
+                    await accept(bytes);
+                } finally {
+                    bytes.fill(0);
+                }
+            }
+        },
+    );
+    await publication.addBytes(
+        'envelope.bin',
+        concatenate(state.envelope, state.signature),
+    );
+    await publication.finish();
 };
+
+const releaseCandidateKey = (position: number) => 'release-' + String(position);
 
 // Combines the published release shares of the target this instance
 // certified into the result: the ordered option identifiers, or none for a
@@ -639,62 +669,78 @@ export const combineReleaseShares = async (
     const { profile } = context;
     const bounds = profile.release;
     let result = encrypted ? undefined : tryCompletionCommand(context, 10);
-    for (
-        let position = 0;
-        result === undefined && position < profile.participantCount;
-        position++
-    ) {
-        let packet: Uint8Array;
-        try {
-            packet = await readPublic(
-                relay,
-                completionDirectory +
-                    'release-envelope-' +
-                    String(position) +
-                    '.bin',
-                bounds.envelopeBytes + profile.registration.signatureBytes,
-            );
-        } catch (error) {
-            if (error instanceof PublicInputFailure) continue;
-            throw error;
+    const pending = new Map(
+        Array.from(
+            { length: profile.participantCount },
+            (_, position) =>
+                [
+                    position,
+                    readCandidates(relay, releaseCandidateKey(position))[
+                        Symbol.asyncIterator
+                    ](),
+                ] as const,
+        ),
+    );
+    while (result === undefined && pending.size > 0) {
+        for (const [position, candidates] of pending) {
+            const next = await candidates.next();
+            if (next.done) {
+                pending.delete(position);
+                continue;
+            }
+            let packet: Uint8Array;
+            try {
+                packet = await readCandidateFile(
+                    relay,
+                    next.value,
+                    'envelope.bin',
+                    bounds.envelopeBytes + profile.registration.signatureBytes,
+                );
+            } catch (error) {
+                if (error instanceof PublicInputFailure) continue;
+                throw error;
+            }
+            await establishReleaseContext(context, position);
+            const authenticated = tryCompletionCommand(context, 6, 0, packet);
+            if (authenticated === undefined) continue;
+            let header: Uint8Array = new Uint8Array();
+            let accepted = true;
+            try {
+                await streamCandidateFile(
+                    relay,
+                    next.value,
+                    'body.bin',
+                    bounds.maximumBodyBytes,
+                    (bytes) => {
+                        let rest = bytes;
+                        if (header.length < bounds.bodyHeaderBytes) {
+                            const taken = rest.subarray(
+                                0,
+                                bounds.bodyHeaderBytes - header.length,
+                            );
+                            header = concatenate(header, taken);
+                            rest = rest.subarray(taken.length);
+                            if (header.length < bounds.bodyHeaderBytes) return;
+                            accepted &&=
+                                tryCompletionCommand(context, 7, 0, header) !==
+                                undefined;
+                        }
+                        if (rest.length > 0 && accepted)
+                            accepted =
+                                tryCompletionCommand(context, 8, 0, rest) !==
+                                undefined;
+                    },
+                );
+            } catch (error) {
+                if (!(error instanceof PublicInputFailure)) throw error;
+                accepted = false;
+            }
+            if (!accepted || tryCompletionCommand(context, 9) === undefined)
+                continue;
+            pending.delete(position);
+            result = tryCompletionCommand(context, 10);
+            if (result !== undefined) break;
         }
-        await establishReleaseContext(context, position);
-        const authenticated = tryCompletionCommand(context, 6, 0, packet);
-        if (authenticated === undefined) continue;
-        let header: Uint8Array = new Uint8Array();
-        let accepted = true;
-        try {
-            await streamPublic(
-                relay,
-                completionDirectory + 'release-' + String(position) + '.bin',
-                bounds.maximumBodyBytes,
-                (bytes) => {
-                    let rest = bytes;
-                    if (header.length < bounds.bodyHeaderBytes) {
-                        const taken = rest.subarray(
-                            0,
-                            bounds.bodyHeaderBytes - header.length,
-                        );
-                        header = concatenate(header, taken);
-                        rest = rest.subarray(taken.length);
-                        if (header.length < bounds.bodyHeaderBytes) return;
-                        accepted &&=
-                            tryCompletionCommand(context, 7, 0, header) !==
-                            undefined;
-                    }
-                    if (rest.length > 0 && accepted)
-                        accepted =
-                            tryCompletionCommand(context, 8, 0, rest) !==
-                            undefined;
-                },
-            );
-        } catch (error) {
-            if (!(error instanceof PublicInputFailure)) throw error;
-            accepted = false;
-        }
-        if (!accepted || tryCompletionCommand(context, 9) === undefined)
-            continue;
-        result = tryCompletionCommand(context, 10);
     }
     if (result === undefined)
         throw new PublicInputFailure('The release shares are incomplete.');

@@ -1,3 +1,4 @@
+import { compileCandidatePublicationCensus } from '#tests/candidate-publication-model.js';
 import { compileContributionBodyCensus } from '#tests/contribution-body-model.js';
 import { compileSetupSelectionWireCensus } from '#tests/setup-selection-wire-model.js';
 import type { SupportedProfile } from '#tests/supported-profile-model.js';
@@ -11,6 +12,26 @@ export const compileClearPreparationResources = (profile: SupportedProfile) => {
     const eligible = BigInt(wire.eligibleCount);
     const selected = BigInt(wire.selectedCount);
     const participants = BigInt(profile.participantCount);
+    const transport = compileCandidatePublicationCensus(
+        profile,
+        wire.eligibleCount,
+    ).preparation;
+    const manifest = (prefix: string) =>
+        transport.publications.find((publication) =>
+            publication.key.startsWith(prefix),
+        )!.manifestBytes;
+    const certificatePublication = transport.publications.find(
+        (publication) => publication.key === 'setup-certificate',
+    )!;
+    const largestStoredOffer = transport.publications
+        .filter((publication) => publication.key.startsWith('contribution-'))
+        .reduce(
+            (largest, publication) =>
+                publication.storedPayloadBytes > largest
+                    ? publication.storedPayloadBytes
+                    : largest,
+            0n,
+        );
     const signedOfferBytes = wire.offerEnvelopeBytes + wire.signatureBytes;
     const selectionProposalBytes =
         wire.selectionBodyBytes + wire.signatureBytes;
@@ -18,17 +39,29 @@ export const compileClearPreparationResources = (profile: SupportedProfile) => {
         selected * (body.maximumBodyBytes + signedOfferBytes);
     const selectedPolynomialRereadBytes =
         selected * body.polynomialPayloadBytes;
-    const selectedProofLookaheadBytes = selected * body.minimumProofBytes;
+    const selectedProofLookaheadBytes =
+        selected *
+        (body.maximumProofBytes < 1_048_576n
+            ? body.maximumProofBytes
+            : 1_048_576n);
     const maximumOfferVerificationReadBytes =
         maximumSelectedOfferBytes + selectedProofLookaheadBytes;
     const maximumCertificateAssemblyReadBytes =
         participants * wire.endorsementPacketBytes;
+    const maximumPreparationRoutingBytes =
+        selected * (28n + manifest('contribution-')) +
+        2n * (28n + manifest('selection')) +
+        participants * (28n + manifest('selection-endorsement-')) +
+        12n +
+        16n * participants +
+        manifest('setup-certificate');
     const maximumCleanPreparationDownloadBytes =
-        selectionProposalBytes +
+        2n * selectionProposalBytes +
         maximumOfferVerificationReadBytes +
-        2n * wire.certificateBytes +
-        64n +
-        maximumCertificateAssemblyReadBytes;
+        wire.certificateBytes +
+        maximumCertificateAssemblyReadBytes +
+        maximumPreparationRoutingBytes +
+        transport.maximumParticipantReceivedBytes;
     // Selection and endorsement share a worker's complete verified holders.
     // Discovery still verifies offers before selection, so the organizer's
     // aggregation rereads their polynomials. Fresh participants fuse that
@@ -43,18 +76,8 @@ export const compileClearPreparationResources = (profile: SupportedProfile) => {
         selectedPolynomialRereadBytes +
         organizerDiscoveryReadBytes;
     const maximumCleanParticipantUploadBytes =
-        body.maximumBodyBytes +
-        signedOfferBytes +
-        selectionProposalBytes +
-        wire.endorsementPacketBytes +
-        wire.certificateBytes +
-        64n +
-        64n;
-    const maximumCleanTotalUploadBytes =
-        eligible * (body.maximumBodyBytes + signedOfferBytes + 64n) +
-        selectionProposalBytes +
-        participants *
-            (wire.endorsementPacketBytes + wire.certificateBytes + 64n);
+        transport.maximumParticipantUploadBytes;
+    const maximumCleanTotalUploadBytes = transport.uploadedPayloadBytes;
     const transferPlanningBytes = 2_147_483_648n;
     return {
         eligibleCount: wire.eligibleCount,
@@ -74,7 +97,8 @@ export const compileClearPreparationResources = (profile: SupportedProfile) => {
         // All bytes that must remain public for selected contribution and
         // certificate retrieval, beside the previously published registrations.
         maximumCertifiedSetupBytes:
-            maximumSelectedOfferBytes + wire.certificateBytes,
+            selected * largestStoredOffer +
+            certificatePublication.storedPayloadBytes,
         // An eligible participant can generate and continue one proof even
         // when its offer is not selected. No author is required after publication.
         maximumGenerationAndContinuationSeeds: 2n * eligible,
@@ -91,10 +115,17 @@ export const compileClearPreparationResources = (profile: SupportedProfile) => {
         // this is separately reserved, not asserted as exact network traffic.
         maximumLookaheadIngressBytes: selected * (1n << 20n),
         maximumMatchingCertificateActivationReadBytes:
-            2n * wire.certificateBytes + 64n,
+            wire.certificateBytes +
+            certificatePublication.receivedPayloadBytes +
+            maximumCertificateAssemblyReadBytes +
+            selectionProposalBytes +
+            maximumPreparationRoutingBytes,
         maximumFreshCertificateActivationReadBytes:
-            2n * wire.certificateBytes +
-            64n +
+            wire.certificateBytes +
+            certificatePublication.receivedPayloadBytes +
+            maximumCertificateAssemblyReadBytes +
+            selectionProposalBytes +
+            maximumPreparationRoutingBytes +
             maximumOfferVerificationReadBytes,
         maximumCertificateAssemblyReadBytes,
         maximumCleanPreparationDownloadBytes,
@@ -104,6 +135,9 @@ export const compileClearPreparationResources = (profile: SupportedProfile) => {
         eligibleOfferDiscoveryUploadBytes: eligible * 64n,
         maximumCleanParticipantUploadBytes,
         maximumCleanTotalUploadBytes,
+        maximumPreparationRoutingBytes,
+        maximumPublicationReceivedBytes:
+            transport.maximumParticipantReceivedBytes,
         transferPlanningBytes,
         planningVarianceCeilingBytes: (3n * transferPlanningBytes) / 2n,
         cleanParticipantPolynomialReadFloorBytes: selectedPolynomialRereadBytes,

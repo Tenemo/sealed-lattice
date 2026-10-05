@@ -597,6 +597,7 @@ pub extern "C" fn roster_record(operation: u32, position: usize, length: usize) 
                 2 if length == 0 => roster.finish_key(position),
                 3 => roster.push_proof(position, bytes),
                 4 if length == 0 => roster.finish_record(position),
+                5 if length == 0 => roster.discard_record(position),
                 _ => return 1,
             }
             .is_err(),

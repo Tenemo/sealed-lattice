@@ -3861,7 +3861,7 @@ export const renderDocumentationCensus = (): string => {
         '',
         '## Complete ordinary workflow resource screen',
         '',
-        'The [workflow model](../tests/ordinary-workflow-resource-model.ts) follows one successful ordinary traversal with all roster members casting, responding, evaluating, voting, releasing and reading the result. Its ordinary schedule generates only the selected contributors; the separate eligible-corpus row allows every eligible author to publish. Body sizes are canonical maxima, not predictions of sampled proof sizes. The model counts complete named offers, close response/envelope copies, organizer closure bodies, repeated certificate/selector uploads, the organizer’s repeated registration/poll publication and repeated close intent/held list. Clean forwarding is zero with the complete organizer-held list; the missing-list fallback is separate. Invalid inputs, retransmissions, retries and arbitrary extra visits have no finite lifetime population here.',
+        'The [workflow model](../tests/ordinary-workflow-resource-model.ts) follows one successful ordinary traversal with all roster members casting, responding, evaluating, voting, releasing and reading the result. Its ordinary schedule generates only the selected contributors; the separate eligible-corpus row allows every eligible author to publish. Body sizes are canonical maxima, not predictions of sampled proof sizes. The [candidate publication model](../tests/candidate-publication-model.ts) enumerates each complete manifest, immutable uploaded chunk, discovery entry, logical-key record, receipt and named readback. It includes repeated registration, poll, certificate and close-intent publications. Responders and the organizer forward immutable body references only after comparing every referenced byte with their authenticated custody; unavailable original chunks require uploading those same retained bytes. The stored-corpus figures count protocol payload and routing records, with filesystem allocation and journal costs separate. Publication readback totals are additional to ordinary public-input reads. Invalid inputs, retries and arbitrary extra visits have no finite lifetime population here.',
         '',
         'The artifact operands below come from the existing shared SDK build. Census generation verifies every recorded source digest and the packaged runtime identity, refuses a missing or stale build, and never triggers a build. Regenerate and check this section after the shared SDK build. These byte lengths identify delivered artifacts, not a phone measurement. The SDK embeds the worker source and creates worker/helper Blob URLs, so network bootstrap is one SDK bundle per page load plus one module per actual primary-worker invocation; the embedded worker is not charged twice. The ordinary target-signing call uses one worker, and the subsequent release/result calls restore its intact target. A cache-miss release/result call can automatically start a second worker and must charge both module fetches. Host-page bytes, transport headers and application delivery remain separate operands.',
         '',
@@ -3937,9 +3937,44 @@ export const renderDocumentationCensus = (): string => {
                         value.responderListedCopyBytes,
                 ],
                 [
-                    'Missing-held-list body-forwarding fallback',
+                    'Maximum body reupload when original references are unavailable',
                     (value: (typeof workflowResources)[number]) =>
-                        value.maximumForwardedBodyFallbackBytes,
+                        value.maximumMissingReferenceUploadBytes,
+                ],
+                [
+                    'Bodies forwarded by byte-checked references',
+                    (value: (typeof workflowResources)[number]) =>
+                        value.ordinaryReferencedBodyBytes,
+                ],
+                [
+                    'Publication readbacks, reference checks and receipts',
+                    (value: (typeof workflowResources)[number]) =>
+                        value.publicationReceivedBytes,
+                ],
+                [
+                    'Publication requests including reference checks',
+                    (value: (typeof workflowResources)[number]) =>
+                        value.candidatePublicationRequests,
+                ],
+                [
+                    'Uploaded candidate manifest bytes',
+                    (value: (typeof workflowResources)[number]) =>
+                        value.candidateManifestBytes,
+                ],
+                [
+                    'Largest emitted candidate manifest',
+                    (value: (typeof workflowResources)[number]) =>
+                        value.maximumManifestBytes,
+                ],
+                [
+                    'Largest emitted candidate file count',
+                    (value: (typeof workflowResources)[number]) =>
+                        value.maximumManifestFiles,
+                ],
+                [
+                    'Standalone reader routing metadata',
+                    (value: (typeof workflowResources)[number]) =>
+                        value.publicReaderRoutingBytes,
                 ],
                 [
                     'Fresh standalone reader protocol bytes',
@@ -5861,12 +5896,11 @@ export const renderDocumentationCensus = (): string => {
             }),
         ),
         '',
-        "The organizer publishes with its intent the identities of the bodies it held at its intent lock. With its response, each other responder publishes a copy of every envelope it lists, in listing order, and forwards the body of each other slot it lists alone that this held list lacks, or every such body when the list is missing or malformed. The organizer reads a body it lacks from its author or from such a copy, and a listed envelope from its author or the responder's copies.",
+        'Each response carries its listed envelopes in order and a retrievable body for each singly listed slot, including its author. The organizer publishes every usable body in its proposal closure. Body locators are reused only after complete byte comparison with authenticated custody; unavailable originals are uploaded from that same custody. The following payload bounds are separate from the routing records and readback costs in the complete workflow screen.',
         '',
         table(
             [
                 'Participants',
-                'Organizer held list bytes',
                 'Listed envelope copy bytes',
                 'Most forwarded bodies',
                 'Most forwarded body bytes',
@@ -5880,7 +5914,6 @@ export const renderDocumentationCensus = (): string => {
                 );
                 return [
                     formatCount(participantCount),
-                    formatCount(value.maximumOrganizerHeldListBytes),
                     formatCount(value.maximumListedCopyBytes),
                     formatCount(value.maximumForwardedBodies),
                     formatCount(value.maximumForwardedBodyBytes),

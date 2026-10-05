@@ -543,6 +543,15 @@ impl CloseWork {
                 )?;
                 Ok(Vec::new())
             }
+            // A failed transport discards its tentative body without
+            // accepting even a complete prefix or changing held records.
+            12 => {
+                if !input.is_empty() {
+                    return Err(Error::Shape);
+                }
+                self.pending = None;
+                Ok(Vec::new())
+            }
             // The bodies the organizer still needs, as consecutive two-byte
             // author positions and envelope identities: at most one per slot,
             // each listed by an authenticated response.

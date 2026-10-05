@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { encodeCandidateManifest } from '#packages/sdk/src/participant/worker/candidate-codec.js';
 import { compileBallotBodyCensus } from '#tests/ballot-body-model.js';
 import { compileCloseWireCensus } from '#tests/close-wire-model.js';
 import { compileContributionBodyCensus } from '#tests/contribution-body-model.js';
@@ -19,129 +20,212 @@ const artifact = {
 
 describe('complete ordinary workflow resource graph', () => {
     it.each(['selected', 'eligible'] as const)(
-        'matches an independently enumerated named-publication inventory for %s offers',
+        'matches an independent emitted inventory with immutable body references for %s offers',
         (mode) => {
-            const profile = deriveSupportedProfile(10, 10),
-                n = profile.participantCount;
+            const profile = deriveSupportedProfile(10, 10);
+            const n = profile.participantCount;
             const result = compileOrdinaryWorkflowResources(profile, artifact);
-            const registration = compileRegistrationEnrollmentCensus(),
-                key = compileRegistrationKeyRelationCensus(),
-                roster = compileRosterProposalCensus(n);
-            const body = compileContributionBodyCensus(profile),
-                wire = compileSetupSelectionWireCensus(n),
-                ballot = compileBallotBodyCensus(profile),
-                close = compileCloseWireCensus(profile),
-                release = compileParticipantReleaseCustody(profile);
-            const files = new Map<string, bigint>();
-            let uploads = 0n;
-            const publish = (name: string, bytes: bigint) => {
-                const existing = files.get(name);
-                if (existing !== undefined && existing !== bytes)
-                    throw new Error('Changed named record.');
-                files.set(name, bytes);
-                uploads += bytes;
-            };
-            const registrationFiles = (position: number) => {
-                publish(
-                    `registration/${position}/header`,
-                    registration.maximumHeaderBytes,
-                );
-                publish(`registration/${position}/key`, key.publicKeyBytes);
-                publish(
-                    `registration/${position}/proof`,
-                    key.maximumProofBytes,
-                );
-                publish(
-                    `registration/${position}/signature`,
-                    registration.signatureBytes,
-                );
-            };
-            const poll = () => {
-                publish('poll', registration.maximumPollDefinitionBytes);
-                publish('poll-signature', registration.signatureBytes);
-            };
-            poll();
-            for (let position = 0; position < n; position++)
-                registrationFiles(position);
-            // The roster publication currently sends the organizer's earlier
-            // enrollment and poll again before the new signed proposal.
-            poll();
-            registrationFiles(0);
-            publish('proposal', roster.proposalBytes);
-            publish('proposal-signature', registration.signatureBytes);
+            const registration = compileRegistrationEnrollmentCensus();
+            const key = compileRegistrationKeyRelationCensus();
+            const roster = compileRosterProposalCensus(n);
+            const body = compileContributionBodyCensus(profile);
+            const wire = compileSetupSelectionWireCensus(n);
+            const ballot = compileBallotBodyCensus(profile);
+            const close = compileCloseWireCensus(profile);
+            const release = compileParticipantReleaseCustody(profile);
             const offers =
                 mode === 'selected' ? wire.selectedCount : wire.eligibleCount;
-            for (let position = 0; position < offers; position++) {
-                publish(`offer/${position}/body`, body.maximumBodyBytes);
-                publish(`offer/${position}/envelope`, wire.offerEnvelopeBytes);
-                publish(
-                    `offer/${position}/signature`,
-                    registration.signatureBytes,
+            const chunkBytes = 1_048_576n;
+            const bodies = new Map<number, string[]>();
+            const objects = new Map<string, bigint>();
+            let serial = 0;
+            let uploaded = BigInt(offers) * 64n;
+            let stored = uploaded;
+            let received = 0n;
+            let requests = BigInt(offers);
+            let ballotManifest = 0n;
+            const identity = (position: number) =>
+                String(position).padStart(128, '0');
+            type Entry = readonly [string, bigint, number?];
+            const publish = (scope: string, entries: readonly Entry[]) => {
+                let newBytes = 0n,
+                    newChunks = 0n,
+                    readBytes = 0n,
+                    readChunks = 0n,
+                    references = 0n;
+                const files = entries.map(([name, length, sourceAuthor]) => {
+                    const count = (length + chunkBytes - 1n) / chunkBytes;
+                    const locators =
+                        sourceAuthor === undefined
+                            ? Array.from(
+                                  { length: Number(count) },
+                                  (_unused, index) => {
+                                      const id = (++serial)
+                                          .toString(16)
+                                          .padStart(32, '0');
+                                      const remaining =
+                                          length - BigInt(index) * chunkBytes;
+                                      const size =
+                                          remaining < chunkBytes
+                                              ? remaining
+                                              : chunkBytes;
+                                      objects.set(id, size);
+                                      newBytes += size;
+                                      newChunks++;
+                                      return id;
+                                  },
+                              )
+                            : bodies.get(sourceAuthor)!;
+                    if (sourceAuthor !== undefined) {
+                        references++;
+                        readChunks += count;
+                    }
+                    readBytes += length;
+                    return { name, length: Number(length), chunks: locators };
+                });
+                const encoded = BigInt(
+                    encodeCandidateManifest({ files }).length,
                 );
-                publish(`announcements/${position}`, 64n);
-            }
-            publish('selection', wire.selectionBodyBytes);
-            publish('selection-signature', registration.signatureBytes);
+                if (/^ballot-/u.test(scope)) {
+                    const author = Number(scope.slice('ballot-'.length));
+                    bodies.set(
+                        author,
+                        files.find((entry) => entry.name === 'body.bin')!
+                            .chunks,
+                    );
+                    ballotManifest = encoded;
+                }
+                uploaded += newBytes + encoded;
+                stored += encoded + BigInt(Buffer.byteLength(scope)) + 16n;
+                received +=
+                    readBytes +
+                    encoded +
+                    16n * newChunks +
+                    24n +
+                    references * (28n + ballotManifest) +
+                    12n +
+                    16n * (scope === 'setup-certificate' ? BigInt(n) : 1n);
+                requests += 2n * newChunks + readChunks + 2n * references + 3n;
+            };
+            const pollFiles: Entry[] = [
+                ['definition.bin', registration.maximumPollDefinitionBytes],
+                ['signature.bin', registration.signatureBytes],
+            ];
+            const registrationFiles: Entry[] = [
+                ['polynomial-01.bin', key.publicKeyBytes],
+                ['proof.bin', key.maximumProofBytes],
+                ['registration-header.bin', registration.maximumHeaderBytes],
+                ['signature.bin', registration.signatureBytes],
+            ];
+            publish('poll', pollFiles);
+            for (let position = 0; position < n; position++)
+                publish(
+                    'registration/' + identity(position),
+                    registrationFiles,
+                );
+            publish('poll', pollFiles);
+            publish('registration/' + identity(0), registrationFiles);
+            publish('roster', [
+                ['proposal.bin', roster.proposalBytes],
+                ['signature.bin', registration.signatureBytes],
+            ]);
+            for (let position = 0; position < offers; position++)
+                publish(
+                    'contribution-' +
+                        String(position) +
+                        '/' +
+                        identity(position),
+                    [
+                        ['offer.bin', wire.offerEnvelopeBytes],
+                        ['offer-signature.bin', registration.signatureBytes],
+                        ['body-header.bin', body.headerBytes],
+                        ...body.polynomials.map((polynomial): Entry => [
+                            'polynomial-' +
+                                String(polynomial.expandedIndex).padStart(
+                                    2,
+                                    '0',
+                                ) +
+                                '.bin',
+                            polynomial.bytes,
+                        ]),
+                        ['proof.bin', body.maximumProofBytes],
+                    ],
+                );
+            publish('selection', [
+                ['selection.bin', wire.selectionBodyBytes],
+                ['signature.bin', registration.signatureBytes],
+            ]);
             for (let position = 0; position < n; position++) {
-                publish(`endorsement/${position}`, wire.endorsementPacketBytes);
-                publish('certificate', wire.certificateBytes);
-                publish('setup-selector', 64n);
-                publish(`ballot/${position}/body`, ballot.maximumBodyBytes);
-                publish(`ballot/${position}/envelope`, ballot.envelopeBytes);
-                publish(
-                    `ballot/${position}/signature`,
-                    registration.signatureBytes,
-                );
-                publish(`ballot/${position}/pointer`, 64n);
+                publish('selection-endorsement-' + String(position), [
+                    ['endorsement.bin', wire.endorsementPacketBytes],
+                ]);
+                publish('setup-certificate', [
+                    ['certificate.bin', wire.certificateBytes],
+                ]);
+                publish('ballot-' + String(position), [
+                    ['body.bin', ballot.maximumBodyBytes],
+                    ['envelope.bin', ballot.envelopeBytes],
+                    ['signature.bin', registration.signatureBytes],
+                ]);
             }
-            publish('close/intent', close.intentPacketBytes);
-            publish('close/held', 64n * BigInt(n));
             const response =
                 close.minimumResponseBodyBytes +
                 66n * BigInt(n) +
                 4n +
                 registration.signatureBytes;
-            for (let position = 0; position < n; position++) {
-                publish(`close/response/${position}`, response);
-                if (position > 0)
-                    publish(
-                        `close/listed/${position}`,
-                        BigInt(n) * close.submissionBytes,
-                    );
-            }
-            for (let position = 0; position < wire.quorum; position++)
-                publish(`closure/response/${position}`, response);
-            for (let position = 0; position < n; position++) {
-                publish(
-                    `closure/submission/${position}`,
+            const reference = (author: number): Entry => [
+                'body-' + identity(author) + '.bin',
+                ballot.maximumBodyBytes,
+                author,
+            ];
+            publish('close-intent', [['intent.bin', close.intentPacketBytes]]);
+            for (let position = 0; position < n; position++)
+                publish('close-response-' + String(position), [
+                    ['response.bin', response],
+                    ['submissions.bin', BigInt(n) * close.submissionBytes],
+                    ...(position === 0
+                        ? []
+                        : [...bodies.keys()].map(reference)),
+                ]);
+            publish('close-intent', [['intent.bin', close.intentPacketBytes]]);
+            publish('close-proposal', [
+                ['intent.bin', close.intentPacketBytes],
+                ['proposal.bin', close.proposalPacketBytes],
+                ...Array.from(
+                    { length: wire.quorum },
+                    (_unused, position): Entry => [
+                        'response-' + identity(position) + '.bin',
+                        response,
+                    ],
+                ),
+                ...Array.from({ length: n }, (_unused, position): Entry => [
+                    'submission-' + identity(position) + '.bin',
                     close.submissionBytes,
-                );
-                if (position > 0)
-                    publish(
-                        `closure/body/${position}`,
-                        ballot.maximumBodyBytes,
-                    );
-            }
-            publish('close/intent', close.intentPacketBytes);
-            publish('close/held', 64n * BigInt(n));
-            publish('close/proposal', close.proposalPacketBytes);
+                ]),
+                ...[...bodies.keys()].map(reference),
+            ]);
             for (let position = 0; position < n; position++) {
-                publish(
-                    `target-vote/${position}`,
-                    2n + 64n + registration.signatureBytes,
-                );
-                publish(`release/${position}/body`, release.maximumBodyBytes);
-                publish(
-                    `release/${position}/envelope`,
-                    release.envelopeBytes + registration.signatureBytes,
-                );
+                publish('target-vote-' + String(position), [
+                    ['vote.bin', 2n + 64n + registration.signatureBytes],
+                    ...(position === 0 ? [['target.bin', 2048n] as const] : []),
+                ]);
+                publish('release-' + String(position), [
+                    ['body.bin', release.maximumBodyBytes],
+                    [
+                        'envelope.bin',
+                        release.envelopeBytes + registration.signatureBytes,
+                    ],
+                ]);
             }
-            publish('target', 2048n);
+            stored += [...objects.values()].reduce(
+                (sum, bytes) => sum + bytes,
+                0n,
+            );
             const row = result.rows[mode === 'selected' ? 0 : 1];
-            expect(
-                [...files.values()].reduce((sum, bytes) => sum + bytes, 0n),
-            ).toBe(row.publicCorpusBytes);
-            expect(uploads).toBe(row.totalUploadBytes);
+            expect(row.publicCorpusBytes).toBe(stored);
+            expect(row.totalUploadBytes).toBe(uploaded);
+            expect(row.transport.receivedPayloadBytes).toBe(received);
+            expect(row.transport.requests).toBe(requests);
             expect(row.workerInvocations).toBe(BigInt(12 * n + offers + 1));
         },
     );
@@ -157,21 +241,26 @@ describe('complete ordinary workflow resource graph', () => {
             expect(
                 result.rows[1].publicCorpusBytes -
                     result.rows[0].publicCorpusBytes,
-            ).toBe(f * (result.signedOfferBytes + 64n));
-            expect(
-                result.rows.map(
-                    (row) => row.totalUploadBytes - row.publicCorpusBytes,
-                ),
-            ).toEqual([
-                result.duplicateUploadBytes,
-                result.duplicateUploadBytes,
-            ]);
+            ).toBeGreaterThan(f * (result.signedOfferBytes + 64n));
+            for (const row of result.rows)
+                expect(row.publicCorpusBytes - row.totalUploadBytes).toBe(
+                    row.transport.publications.reduce(
+                        (total, publication) =>
+                            total +
+                            BigInt(Buffer.byteLength(publication.key)) +
+                            16n,
+                        0n,
+                    ),
+                );
             expect(result.cleanResponseBytes).toBe(278n + 66n * n + 4n + 3309n);
             expect(result.responderListedCopyBytes).toBe(
-                n * (n - 1n) * (214n + 3309n),
+                n * n * (214n + 3309n),
             );
-            expect(result.ordinaryForwardedBodyBytes).toBe(0n);
-            expect(result.maximumForwardedBodyFallbackBytes).toBeGreaterThan(
+            expect(result.ordinaryForwardedBodyUploadBytes).toBe(0n);
+            expect(result.ordinaryReferencedBodyBytes).toBe(
+                n * n * compileBallotBodyCensus(profile).maximumBodyBytes,
+            );
+            expect(result.maximumMissingReferenceUploadBytes).toBeGreaterThan(
                 result.organizerClosureCopyBytes,
             );
             expect(result.ordinaryOrganizerDiscoveryBytes).toBe(d * 76n);

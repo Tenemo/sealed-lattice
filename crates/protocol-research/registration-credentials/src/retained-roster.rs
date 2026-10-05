@@ -189,6 +189,7 @@ mod tests {
     fn header_input(position: u16, header: &[u8]) -> Vec<u8> {
         [
             position.to_le_bytes().as_slice(),
+            &[position as u8 + 31; 64],
             &(header.len() as u32).to_le_bytes(),
             header,
         ]
@@ -363,6 +364,79 @@ mod tests {
             restore(&mut verifier(), &ceremony.headers[..2], &ceremony.keys[..2]),
             Err(Error::Shape)
         ));
+    }
+
+    #[test]
+    fn candidate_retry_preserves_retained_predecessors_and_verified_positions() {
+        let ceremony = ceremony([4; 64]);
+        let owner = &ceremony.credentials[0];
+        let retained = owner
+            .retain_roster(&ceremony.poll, &ceremony.proposal)
+            .unwrap();
+        let mut verifier =
+            RosterInputVerifier::retained(&begin_input(&ceremony, 3), owner, &retained).unwrap();
+        let complete = |verifier: &mut RosterInputVerifier, position: usize| {
+            verifier
+                .begin_record(&header_input(position as u16, &ceremony.headers[position]))
+                .unwrap();
+            for chunk in ceremony.keys[position].chunks(CHUNK_LIMIT) {
+                verifier.push_key(position, chunk).unwrap();
+            }
+            verifier.finish_key(position).unwrap();
+            verifier.finish_record(position).unwrap();
+        };
+        complete(&mut verifier, 0);
+        complete(&mut verifier, 2);
+        assert!(matches!(verifier.discard_record(0), Err(Error::Consumed)));
+        assert!(
+            verifier
+                .begin_record(&header_input(0, &ceremony.headers[1]))
+                .is_err()
+        );
+
+        // An early malformed begin never consumes the original expected ID.
+        assert!(verifier.begin_record(&[1, 0]).is_err());
+        verifier.discard_record(1).unwrap();
+        let mut wrong_identity = header_input(1, &ceremony.headers[1]);
+        wrong_identity[2] ^= 1;
+        assert!(matches!(
+            verifier.begin_record(&wrong_identity),
+            Err(Error::Context)
+        ));
+        verifier.discard_record(1).unwrap();
+        // A wrong header and wrong key each lose only their candidate.
+        assert!(matches!(
+            verifier.begin_record(&header_input(1, &ceremony.headers[2])),
+            Err(Error::Context)
+        ));
+        verifier.discard_record(1).unwrap();
+        verifier
+            .begin_record(&header_input(1, &ceremony.headers[1]))
+            .unwrap();
+        for chunk in ceremony.keys[2].chunks(CHUNK_LIMIT) {
+            verifier.push_key(1, chunk).unwrap();
+        }
+        assert!(verifier.finish_key(1).is_err());
+        assert!(verifier.finish_record(1).is_err());
+        assert!(verifier.finish().is_err());
+        verifier.discard_record(1).unwrap();
+        // A transport interruption after a complete key is cancellation,
+        // not permission to install a record from incomplete delivery.
+        verifier
+            .begin_record(&header_input(1, &ceremony.headers[1]))
+            .unwrap();
+        for chunk in ceremony.keys[1].chunks(CHUNK_LIMIT) {
+            verifier.push_key(1, chunk).unwrap();
+        }
+        verifier.finish_key(1).unwrap();
+        verifier.discard_record(1).unwrap();
+        assert!(verifier.finish_record(1).is_err());
+        complete(&mut verifier, 1);
+        let proposal = verifier.finish().unwrap();
+        assert_eq!(proposal.body(), ceremony.proposal.body());
+        assert_eq!(proposal.identity(), ceremony.proposal.identity());
+        assert!(verifier.discard_record(1).is_err());
+        assert_eq!(verifier.finish().unwrap().identity(), proposal.identity());
     }
 
     // A tagged roster whose identity is not its records' proposal restores

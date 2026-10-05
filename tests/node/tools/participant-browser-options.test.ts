@@ -3,6 +3,23 @@ import { describe, expect, it } from 'vitest';
 import { selectParticipantBrowserOptions } from '#tools/ci/participant-browser-options.js';
 
 describe('participant browser cohort selection', () => {
+    it('selects the original-credential losing-endorsement case', () => {
+        expect(
+            selectParticipantBrowserOptions(['--selection-fork', '--scalar']),
+        ).toMatchObject({
+            participantCount: 4,
+            optionCount: 2,
+            mode: 'result',
+            selectionFork: true,
+        });
+        for (const args of [
+            ['--selection-fork', '--setup-departure'],
+            ['--selection-fork', '--unselected-checkpoint'],
+            ['3', '2', '--selection-fork'],
+            ['--selection-fork', '--sequential'],
+        ])
+            expect(() => selectParticipantBrowserOptions(args)).toThrow();
+    });
     it('preserves the ordinary profile and enables the scalar path explicitly', () => {
         expect(selectParticipantBrowserOptions([])).toMatchObject({
             participantCount: 3,
@@ -84,6 +101,8 @@ describe('participant browser cohort selection', () => {
             ['--base-port=65530'],
             ['--base-port=1023'],
             ['--memory-pressure'],
+            ['--publication-faults'],
+            ['plain', '--publication-faults', '--memory-pressure'],
             ['--sequential'],
             ['rosters'],
             ['plain', '--foreign-poll=other-run'],
@@ -95,6 +114,22 @@ describe('participant browser cohort selection', () => {
                 () => selectParticipantBrowserOptions(arguments_),
                 arguments_.join(' '),
             ).toThrow();
+    });
+
+    it('selects publication interference separately from the clean workload', () => {
+        expect(
+            selectParticipantBrowserOptions([
+                '4',
+                '2',
+                'plain',
+                '--scalar',
+                '--publication-faults',
+            ]),
+        ).toMatchObject({
+            publicationFaults: true,
+            scalar: true,
+            mode: 'plain',
+        });
     });
 
     it('selects the original preparation prefix with explicit scalar execution', () => {
