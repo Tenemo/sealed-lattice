@@ -132,6 +132,7 @@ import { compileSetupSelectionWireCensus } from '#tests/setup-selection-wire-mod
 import { compileSigningLoopSourceComparison } from '#tests/signing-loop-estimate-model.js';
 import { compileSimulatorKeyKnowledgeCensus } from '#tests/simulator-key-knowledge-model.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
+import { compileSourceCoefficientAllocation } from '#tests/source-coefficient-allocation-model.js';
 import { compileSparseSupportSamplingCensus } from '#tests/sparse-sampling-bound-model.js';
 import { compileFixedSpongeInitializationCensus } from '#tests/sponge-initialization-model.js';
 import {
@@ -1215,6 +1216,36 @@ export const renderDocumentationCensus = (): string => {
                 formatCount(value.maximumBrowserRandomBytes),
                 formatCount(value.failureBits),
             ]),
+        ),
+        '',
+        '## Source coefficient normalization comparison',
+        '',
+        'For one original FHE source coordinate, this conditional comparison counts the centered residues that make the pinned scalar BigUint constructor shrink its allocation. It uses independent source randomness and a uniform common polynomial: one nonzero sparse coefficient is a unit, so every output coefficient has a uniform marginal. The coordinate union bound needs no independence between coefficients. The table does not bound allocation for fixed adversarial inputs, all registrations, all source families, complete operations or provider failures; the source-stream and common-sampling comparisons retain their separate costs.',
+        '',
+        table(
+            [
+                'Participants / options',
+                'Modulus bits',
+                'Constructor u32 capacity',
+                'Shrink below magnitude bits',
+                'Coefficients',
+                'One-coordinate exception bits',
+            ],
+            [
+                deriveSupportedProfile(3, 2),
+                completion,
+                deriveSupportedProfile(20, 20),
+            ].map((profile) => {
+                const row = compileSourceCoefficientAllocation(profile);
+                return [
+                    `${profile.participantCount} / ${profile.optionCount}`,
+                    formatCount(row.modulusBits),
+                    formatCount(row.constructorWords),
+                    formatCount(row.shrinkMagnitudeBits),
+                    formatCount(row.coefficientCount),
+                    formatCount(row.exceptionBits),
+                ];
+            }),
         ),
         '',
         '## Proof simulator randomness budgets',
