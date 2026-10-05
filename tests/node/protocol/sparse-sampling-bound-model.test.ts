@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import {
     boundSparseSupportSampling,
     compileSparseSupportSamplingCensus,
+    sparseSupportWaitingLaw,
 } from '#tests/sparse-sampling-bound-model.js';
 import { completionProfile } from '#tests/supported-profile-model.js';
 
@@ -156,6 +157,125 @@ describe('bounded sparse-support sampling comparison', () => {
         expect(unfinished).toBe(4);
         expect(completed.size).toBe(12);
         expect([...completed.values()]).toEqual(Array(12).fill(21));
+    });
+
+    it('factors complete waiting histories from the support and the next reader on finite tapes', () => {
+        for (const [degree, support, tapeLength, readerBlock] of [
+            [2, 2, 7, 2],
+            [4, 2, 7, 3],
+            [4, 4, 8, 3],
+            [8, 2, 5, 2],
+        ] as const) {
+            // Enumerate raw tapes, run the sampler directly, and collect both
+            // immediate continuation and continuation after discarding the
+            // current reader's unused block tail. Neither traversal uses the
+            // probability formula or an occupancy recurrence.
+            for (const block of [1, readerBlock]) {
+                const histories = new Map<
+                    string,
+                    { waiting: bigint[]; orders: Map<string, bigint[]> }
+                >();
+                const allTapes = degree ** tapeLength;
+                for (let encoded = 0; encoded < allTapes; encoded++) {
+                    let digits = encoded;
+                    const tape = Array.from({ length: tapeLength }, () => {
+                        const symbol = digits % degree;
+                        digits = Math.floor(digits / degree);
+                        return symbol;
+                    });
+                    const positions: number[] = [];
+                    const waiting = Array<bigint>(support).fill(0n);
+                    let consumed = 0;
+                    while (
+                        positions.length < support &&
+                        consumed < tapeLength
+                    ) {
+                        waiting[positions.length]++;
+                        const position = tape[consumed++];
+                        if (!positions.includes(position))
+                            positions.push(position);
+                    }
+                    const next = Math.ceil(consumed / block) * block;
+                    if (positions.length < support || next >= tapeLength)
+                        continue;
+                    const key = waiting.join(',');
+                    let history = histories.get(key);
+                    if (history === undefined) {
+                        history = { waiting, orders: new Map() };
+                        histories.set(key, history);
+                    }
+                    const order = positions.join(',');
+                    let counts = history.orders.get(order);
+                    if (counts === undefined) {
+                        counts = Array<bigint>(degree).fill(0n);
+                        history.orders.set(order, counts);
+                    }
+                    counts[tape[next]]++;
+                }
+                expect(histories.size).toBeGreaterThan(1);
+                for (const history of histories.values()) {
+                    const law = sparseSupportWaitingLaw(
+                        BigInt(degree),
+                        history.waiting,
+                    );
+                    expect(BigInt(history.orders.size)).toBe(
+                        law.orderedSupports,
+                    );
+                    let historyCount = 0n;
+                    for (const counts of history.orders.values()) {
+                        const orderCount = counts.reduce(
+                            (sum, count) => sum + count,
+                            0n,
+                        );
+                        expect(orderCount * law.denominator).toBe(
+                            law.jointNumerator * BigInt(allTapes),
+                        );
+                        expect(counts).toEqual(
+                            Array<bigint>(degree).fill(
+                                orderCount / BigInt(degree),
+                            ),
+                        );
+                        historyCount += orderCount;
+                    }
+                    expect(historyCount * law.denominator).toBe(
+                        law.historyNumerator * BigInt(allTapes),
+                    );
+                }
+            }
+        }
+    });
+
+    it('does not extend waiting-count independence to the rejected positions', () => {
+        // For waiting counts (1, 2), the middle symbol was rejected because
+        // it equals the first selected position. Revealing that symbol fixes
+        // part of the secret even though revealing the counts does not.
+        const completed: [number, number, number][] = [];
+        for (let first = 0; first < 4; first++)
+            for (let rejected = 0; rejected < 4; rejected++)
+                for (let second = 0; second < 4; second++)
+                    if (rejected === first && second !== first)
+                        completed.push([first, rejected, second]);
+        const exposed = completed.filter((row) => row[1] === 0);
+        expect(exposed).toHaveLength(3);
+        expect(exposed.every((row) => row[0] === 0)).toBe(true);
+        expect(completed.filter((row) => row[0] === 0)).toHaveLength(3);
+        expect(completed).toHaveLength(12);
+        expect(sparseSupportWaitingLaw(4n, [2n, 1n]).jointNumerator).toBe(0n);
+    });
+
+    it('refuses waiting histories outside the emitted sampler contract', () => {
+        for (const [degree, waiting] of [
+            [3n, [1n, 1n]],
+            [4n, []],
+            [4n, [1n]],
+            [2n, [1n, 1n, 1n, 1n]],
+            [4n, [1n, 0n]],
+            [4n, [1n, -1n]],
+            [1n << 33n, [1n, 1n]],
+        ] as const)
+            expect(() => sparseSupportWaitingLaw(degree, waiting)).toThrow(
+                'Invalid balanced-support waiting history.',
+            );
     });
 
     it('charges full browser fills and independently recomputes the emitted bounds', () => {

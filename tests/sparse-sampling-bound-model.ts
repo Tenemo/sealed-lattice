@@ -3,6 +3,41 @@ import { compileRecipientKeyCensus } from '#tests/recipient-key-model.js';
 import type { SupportedProfile } from '#tests/supported-profile-model.js';
 import { shareEncryptionParameters } from '#tests/wide-share-lifting-model.js';
 
+// Joint law of one prescribed ordered distinct support and its complete
+// waiting-count tuple on an independent uniform position stream. At stage j,
+// each rejected draw has j choices; the prescribed next index has one.
+export const sparseSupportWaitingLaw = (
+    degree: bigint,
+    waitingDraws: readonly bigint[],
+) => {
+    const support = BigInt(waitingDraws.length);
+    if (
+        degree < 2n ||
+        degree > 1n << 32n ||
+        (degree & (degree - 1n)) !== 0n ||
+        support < 2n ||
+        support > degree ||
+        support % 2n !== 0n ||
+        waitingDraws.some((draws) => draws < 1n)
+    )
+        throw new RangeError('Invalid balanced-support waiting history.');
+    let orderedSupports = 1n;
+    let jointNumerator = 1n;
+    let draws = 0n;
+    for (const [selected, waiting] of waitingDraws.entries()) {
+        orderedSupports *= degree - BigInt(selected);
+        jointNumerator *= BigInt(selected) ** (waiting - 1n);
+        draws += waiting;
+    }
+    const denominator = degree ** draws;
+    return {
+        orderedSupports,
+        jointNumerator,
+        historyNumerator: orderedSupports * jointNumerator,
+        denominator,
+    };
+};
+
 // Proof-only truncation of the existing sampler, coupled to the same random
 // tape. This does not impose a new runtime limit or authorize another attempt.
 export const boundSparseSupportSampling = (degree: bigint, support: bigint) => {
