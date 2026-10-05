@@ -22,9 +22,15 @@ import { build } from 'tsdown';
 import { tupleFields } from '#packages/sdk/src/participant/worker/bytes.js';
 import {
     decodeCandidateManifest,
+    decodeCandidatePage,
+    decodeCandidateReceipt,
     encodeCandidateManifest,
 } from '#packages/sdk/src/participant/worker/candidate-codec.js';
 import { completedClosePhase } from '#packages/sdk/src/participant/worker/close-state.js';
+import {
+    closureBodyFile,
+    closureSubmissionFile,
+} from '#packages/sdk/src/participant/worker/close.js';
 import { chunkBytes } from '#packages/sdk/src/participant/worker/root.js';
 import {
     evaluatedTargetName,
@@ -144,6 +150,7 @@ const {
     memoryPressure,
     publicationFaults,
     sequential,
+    recovery: measureRecovery,
     basePort,
     topCount,
     commandLineArguments,
@@ -220,6 +227,7 @@ type Relay = Readonly<{
     halting: Map<number, HaltingClient>;
     // The public records the relay delivered to each position, by name.
     delivered: Set<string>[];
+    candidateReads: Set<string>[];
     // Successfully served public payloads, by exact route, for cost accounting.
     reads: Map<string, Readonly<{ requests: number; bytes: number }>>[];
     publicationAttempts: number[];
@@ -352,6 +360,10 @@ const startRelay = async (
         ReturnType<typeof participantOfferAnnouncements>
     >();
     const publicationAttempts = new Array<number>(originCount).fill(0);
+    const candidateReads = Array.from(
+        { length: originCount },
+        () => new Set<string>(),
+    );
     const delivered = Array.from(
         { length: originCount },
         () => new Set<string>(),
@@ -480,18 +492,24 @@ const startRelay = async (
             candidateStores.set(records, candidateStore);
         }
         const { store, projection } = candidateStore;
+        const reader = projection.forReader(view, (name, bytes) => {
+            delivering.add(name);
+            const recordsRead = reads[Number(new URL(origin).port) - basePort];
+            const previous = recordsRead.get(name);
+            recordsRead.set(name, {
+                requests: (previous?.requests ?? 0) + 1,
+                bytes: (previous?.bytes ?? 0) + bytes,
+            });
+        });
         if (
             await serveParticipantCandidates(store, request, response, url, {
-                ...projection.forReader(view, (name, bytes) => {
-                    delivering.add(name);
-                    const recordsRead =
-                        reads[Number(new URL(origin).port) - basePort];
-                    const previous = recordsRead.get(name);
-                    recordsRead.set(name, {
-                        requests: (previous?.requests ?? 0) + 1,
-                        bytes: (previous?.bytes ?? 0) + bytes,
-                    });
-                }),
+                ...reader,
+                manifest: async (candidate) => {
+                    candidateReads[Number(new URL(origin).port) - basePort].add(
+                        candidate.id,
+                    );
+                    return reader.manifest(candidate);
+                },
                 accept: async (key, bytes) => {
                     if (refusedKeys.has(key)) {
                         refusedCandidates.set(key, new Uint8Array(bytes));
@@ -630,6 +648,7 @@ const startRelay = async (
     return {
         servers,
         publicationAttempts,
+        candidateReads,
         views,
         refusedKeys,
         refusedCandidates,
@@ -1080,7 +1099,12 @@ await runWithLocalRunLog(
                 secondRosterDirectory,
                 transfers,
             );
-            const { views, halting, delivered: deliveredRecords } = relay;
+            const {
+                views,
+                halting,
+                delivered: deliveredRecords,
+                candidateReads,
+            } = relay;
             profiles = await mkdtemp(
                 path.join(root, 'temp/participant-browser-'),
             );
@@ -1398,7 +1422,11 @@ await runWithLocalRunLog(
                                 started: launching,
                                 finished: performance.now(),
                             };
-                            if (measureWorkflow && copy === undefined)
+                            if (
+                                measureWorkflow &&
+                                copy === undefined &&
+                                position < participantCount
+                            )
                                 ordinaryBootstraps.push(bootstrap);
                             log.writeEvent({
                                 eventType:
@@ -1416,7 +1444,11 @@ await runWithLocalRunLog(
                         };
                         browserDetails.set(key, details);
                         browserSessions.set(chrome, session);
-                        if (measureWorkflow && copy === undefined)
+                        if (
+                            measureWorkflow &&
+                            copy === undefined &&
+                            position < participantCount
+                        )
                             ordinaryBootstraps.push(bootstrap);
                         log.writeEvent({
                             eventType: 'participant-browser',
@@ -1455,7 +1487,9 @@ await runWithLocalRunLog(
                 inBrowser(position, copy, async (chrome) => {
                     const started = performance.now();
                     const measured =
-                        measureWorkflow && copy === undefined
+                        measureWorkflow &&
+                        copy === undefined &&
+                        position < participantCount
                             ? {
                                   id: nextMeasuredOperation++,
                                   position,
@@ -2619,11 +2653,20 @@ await runWithLocalRunLog(
                         contributing.some(
                             ({ position }) => position === value.position,
                         )
-                    )
+                    ) {
+                        if (measureRecovery && value.position === 0) {
+                            assert.equal(value.member.copy, undefined);
+                            await interruptPreparation(
+                                value.member.origin,
+                                'contribute',
+                                { kind: 'contribution', phase: 5 },
+                            );
+                        }
                         assert.equal(
                             (await act(value.member, 'contribute')).generation,
                             4,
                         );
+                    }
                 };
                 markStage([1]);
                 assert.equal(
@@ -3053,7 +3096,14 @@ await runWithLocalRunLog(
                         } finally {
                             relay.refusedKeys.delete(key);
                         }
-                    } else
+                    } else {
+                        if (measureRecovery && position === 0)
+                            await interrupt(
+                                member.origin,
+                                'ballot',
+                                { scores: scores[position] },
+                                15,
+                            );
                         assert.equal(
                             (
                                 await act(member, 'ballot', {
@@ -3062,6 +3112,7 @@ await runWithLocalRunLog(
                             ).generation,
                             17,
                         );
+                    }
                 };
                 markStage([3]);
                 await each(active, async ({ member, position }) => {
@@ -3230,7 +3281,14 @@ await runWithLocalRunLog(
                     measureWorkflow
                         ? active
                         : active.slice(0, bounds.close.quorum),
-                    async ({ member }) => {
+                    async ({ member, position }) => {
+                        if (measureRecovery && position === 0)
+                            await interrupt(
+                                member.origin,
+                                'target',
+                                {},
+                                targetPhase.intent,
+                            );
                         const voted = await act(member, 'target');
                         assert.equal(voted.generation, 24);
                         assert.equal(voted.ballotStatus, 'included');
@@ -3239,7 +3297,9 @@ await runWithLocalRunLog(
                     },
                 );
                 markStage([6]);
-                await each(active, async ({ member }) => {
+                await each(active, async ({ member, position }) => {
+                    if (measureRecovery && position === 0)
+                        await interrupt(member.origin, 'release', {}, 27);
                     const details = await act(member, 'release');
                     assert.equal(details.generation, 29);
                     assert.equal(details.encrypted, true);
@@ -3281,6 +3341,57 @@ await runWithLocalRunLog(
                     setupDeparture ? 1 : undefined,
                 );
                 let independentOutcome: WorkerResult | undefined;
+                let standaloneMilliseconds: number | undefined;
+                if (measureRecovery) {
+                    assert.deepEqual(
+                        interruptions.map((cut) => [
+                            cut.position,
+                            cut.operation,
+                            cut.preparation?.phase ?? cut.generation,
+                        ]),
+                        [
+                            [0, 'contribute', 5],
+                            [0, 'ballot', 15],
+                            [0, 'target', targetPhase.intent],
+                            [0, 'release', 27],
+                        ],
+                    );
+                    assert.equal(
+                        ordinaryOperations.filter(
+                            (operation) => operation.outcome === 'interrupted',
+                        ).length,
+                        4,
+                    );
+                    assert.equal(recoveryOperations.size, 0);
+                    for (const position of positions) await depart(position);
+                    const started = performance.now();
+                    independentOutcome = (await inBrowser(
+                        leftOut,
+                        undefined,
+                        (chrome) =>
+                            chrome.evaluate(
+                                'window.verifyOutcome(' +
+                                    JSON.stringify(organizer.poll) +
+                                    ')',
+                            ),
+                    )) as WorkerResult;
+                    standaloneMilliseconds = performance.now() - started;
+                    assert.ok(independentOutcome.status === 'completed');
+                    assert.deepEqual(
+                        independentOutcome.details.identifiers,
+                        identifiers,
+                    );
+                    if (scalar) requireScalarMemory(independentOutcome.details);
+                    log.writeEvent({
+                        eventType: 'participant-recovery-public-outcome',
+                        details: {
+                            milliseconds: standaloneMilliseconds,
+                            retiredOriginalParticipants: [...departed],
+                            independentOutcome,
+                        },
+                    });
+                }
+
                 if (setupDeparture || unselectedCheckpoint) {
                     assert.deepEqual(
                         [...departed],
@@ -3480,6 +3591,13 @@ await runWithLocalRunLog(
                             optionCount,
                             mode,
                             sequential,
+                            recovery: measureRecovery,
+                            ...(measureRecovery
+                                ? {
+                                      interruptions,
+                                      standaloneMilliseconds,
+                                  }
+                                : {}),
                             scalar,
                             setupDeparture,
                             unselectedCheckpoint,
@@ -3557,7 +3675,12 @@ await runWithLocalRunLog(
                                     ? "Original registrations fix one roster; honest eligible position one disappears immediately after roster publication, before confirmation or contribution. Position two announces an invalid body identity before its valid original offer; the organizer stays pending without consuming selection authority and later accepts the valid offer behind that hint. In the seven-participant case, position two also loses its entire profile after completing its offer but before selection, so the remaining quorum certifies setup containing the departed author's original contribution. Every surviving original member votes, closes, certifies the target and releases the verified result. Original positions and thresholds remain unchanged; the diagnostic fields identify the selected and active sets. This is the named external Chrome schedule, not a general adversarial-scheduling proof."
                                     : unselectedCheckpoint
                                       ? 'All four original participants remain available, with cooperative corrupt position two and no permanent departure in the real branch. Honest eligible position one retains its genuine phase-five checkpoint while positions zero and two are selected. It endorses without completing its own offer, preserves the original nested own state and encrypted records, then retires them only on certified setup activation and casts a ballot and releases. An isolated damaged-checkpoint copy stops before activation or publication; the healthy original continues. Diagnostic fingerprints stay separate from protocol authority. This is desktop development evidence, not phone qualification.'
-                                      : 'Browser registration, roster confirmation, signed clear contribution offers, quorum setup selection and verification, ballots, close responses, target votes, release shares and the combined result of one roster, each stage once in the maintained participant runtime in external Chrome.',
+                                      : 'Browser registration, roster confirmation, signed clear contribution offers, quorum setup selection and verification, ballots, close responses, target votes, release shares and the combined result of one roster, with the recorded stage and recovery schedule in the maintained participant runtime in external Chrome.',
+                                ...(measureRecovery
+                                    ? [
+                                          'Original participant zero loses its worker and browser at the retained contribution checkpoint, ballot body, target signing intent and release body. Each following visit restores the original state. Workflow totals include every interrupted attempt, cold startup and completed recovery; the recorded cuts define this recovery workload. A fresh public reader verifies the outcome after every original participant departs, with its startup and work reported separately.',
+                                      ]
+                                    : []),
                                 ...(profiling
                                     ? [
                                           'Chrome recorded the CPU samples of every operation, which slows it.',
@@ -5637,6 +5760,76 @@ await runWithLocalRunLog(
             );
             const relabeledVote = Buffer.from(lastVote);
             relabeledVote.writeUInt16LE(hiddenVoter, 0);
+            // Replay genuine immutable candidates through the public transport.
+            // A flat diagnostic path alone cannot populate an empty discovery key.
+            const replayCandidate = async (
+                sourceKey: string,
+                targetKey: string,
+            ) => {
+                const base = origin(leftOut);
+                const listed = await fetch(
+                    base + '/candidates/' + sourceKey + '?offset=0',
+                );
+                assert.equal(listed.status, 200);
+                const page = decodeCandidatePage(
+                    new Uint8Array(await listed.arrayBuffer()),
+                );
+                assert.ok(page.ids.length > 0);
+                const source = await fetch(base + '/candidate/' + page.ids[0]);
+                assert.equal(source.status, 200);
+                const manifest = new Uint8Array(await source.arrayBuffer());
+                decodeCandidateManifest(manifest);
+                const posted = await fetch(base + '/candidates/' + targetKey, {
+                    method: 'POST',
+                    body: manifest,
+                });
+                assert.equal(posted.status, 200);
+                const receipt = decodeCandidateReceipt(
+                    new Uint8Array(await posted.arrayBuffer()),
+                );
+                const readback = await fetch(base + '/candidate/' + receipt.id);
+                assert.equal(readback.status, 200);
+                assert.deepEqual(
+                    new Uint8Array(await readback.arrayBuffer()),
+                    manifest,
+                );
+                const discovery = await fetch(
+                    base +
+                        '/candidates/' +
+                        targetKey +
+                        '?offset=' +
+                        String(receipt.index),
+                );
+                assert.equal(discovery.status, 200);
+                assert.equal(
+                    decodeCandidatePage(
+                        new Uint8Array(await discovery.arrayBuffer()),
+                    ).ids[0],
+                    receipt.id,
+                );
+                log.writeEvent({
+                    eventType: 'participant-replayed-candidate',
+                    details: { sourceKey, targetKey, candidate: receipt.id },
+                });
+                return receipt.id;
+            };
+            const voteReplays: string[] = [];
+            for (const position of silent)
+                voteReplays.push(
+                    await replayCandidate(
+                        'target-vote-' + String(lastVoter),
+                        'target-vote-' + String(position),
+                    ),
+                );
+            const shareReplays: string[] = [];
+            if (!noResult)
+                for (const position of departed)
+                    shareReplays.push(
+                        await replayCandidate(
+                            'release-' + String(combiningPosition),
+                            'release-' + String(position),
+                        ),
+                    );
             const voteForgeries = new Map([
                 [publicName('target-vote-', hiddenVoter), relabeledVote],
                 ...silent.map(
@@ -5749,6 +5942,22 @@ await runWithLocalRunLog(
                 assert.ok(replacingAuthor !== undefined);
                 const directory = await submissionDirectory(forgedAuthor);
                 const replacing = await submissionDirectory(replacingAuthor);
+                const submissionIdentity = Buffer.from(
+                    path.basename(directory),
+                    'hex',
+                );
+                const forwardedBody =
+                    'close/closure/' + closureBodyFile(submissionIdentity);
+                const forwardedSubmission =
+                    'close/closure/' +
+                    closureSubmissionFile(submissionIdentity);
+                const originalEnvelope = await readFile(
+                    path.join(directory, 'envelope.bin'),
+                );
+                const replacingSubmission = Buffer.concat([
+                    await readFile(path.join(replacing, 'envelope.bin')),
+                    await readFile(path.join(replacing, 'signature.bin')),
+                ]);
                 const ballotName = (file: string) =>
                     path
                         .relative(publicDirectory, path.join(directory, file))
@@ -5767,34 +5976,37 @@ await runWithLocalRunLog(
                         forgery: 'altered body',
                         forgeries: new Map<string, ViewedRecord>([
                             [ballotName('body.bin'), alteredBody],
+                            [forwardedBody, alteredBody],
                         ]),
-                        reason: 'A usable body was refused.',
+                        reason: 'No valid complete candidate is available: close-proposal',
                     },
                     {
                         forgery: 'withheld body',
                         forgeries: new Map<string, ViewedRecord>([
                             [ballotName('body.bin'), undefined],
+                            [forwardedBody, undefined],
                         ]),
-                        reason: 'A public record is unavailable.',
+                        reason: 'No valid complete candidate is available: close-proposal',
                     },
                     {
                         forgery: 'replaced submission',
-                        forgeries: new Map<string, ViewedRecord>(
-                            ['envelope.bin', 'signature.bin', 'body.bin'].map(
-                                (file) => [
-                                    ballotName(file),
-                                    { file: path.join(replacing, file) },
-                                ],
-                            ),
-                        ),
-                        reason: 'A listed envelope is unavailable.',
+                        forgeries: new Map<string, ViewedRecord>([
+                            [forwardedSubmission, replacingSubmission],
+                        ]),
+                        reason: 'No valid complete candidate is available: close-proposal',
                     },
                     {
                         forgery: 'altered signature',
                         forgeries: new Map<string, ViewedRecord>([
-                            [ballotName('signature.bin'), alteredSignature],
+                            [
+                                forwardedSubmission,
+                                Buffer.concat([
+                                    originalEnvelope,
+                                    alteredSignature,
+                                ]),
+                            ],
                         ]),
-                        reason: 'A listed envelope was refused.',
+                        reason: 'No valid complete candidate is available: close-proposal',
                     },
                 );
             }
@@ -5846,16 +6058,22 @@ await runWithLocalRunLog(
             const probe = async (
                 position: number,
                 forgeries: ReadonlyMap<string, ViewedRecord>,
-                reason: string,
+                reason: string | readonly string[],
             ) => {
                 deliveredRecords[position].clear();
+                candidateReads[position].clear();
                 for (const [name, bytes] of forgeries)
                     views[position].set(name, bytes);
                 try {
-                    assert.deepEqual(await request(position, 'result'), {
+                    const result = await request(position, 'result');
+                    assert.ok(result.status === 'pending');
+                    const reasons =
+                        typeof reason === 'string' ? [reason] : reason;
+                    assert.ok(reasons.includes(result.reason), result.reason);
+                    assert.deepEqual(result, {
                         status: 'pending',
                         cause: 'public input',
-                        reason,
+                        reason: result.reason,
                     });
                     if (
                         [...forgeries.values()].some(
@@ -5906,20 +6124,37 @@ await runWithLocalRunLog(
                                 voteForgeries,
                                 'The target votes are incomplete.',
                             );
+                            for (const id of voteReplays)
+                                assert.ok(
+                                    candidateReads[position].has(id),
+                                    'The verifier did not encounter the replayed target candidate.',
+                                );
                             for (const { forgeries, reason } of ballotForgeries)
                                 await probe(position, forgeries, reason);
                             await probe(
                                 position,
                                 registrationForgeries,
-                                'A registration header was refused.',
+                                recordIds
+                                    .slice(0, 2)
+                                    .map(
+                                        (id) =>
+                                            'No valid complete candidate is available: registration/' +
+                                            id,
+                                    ),
                             );
                         }
-                        if (position === shareProbe && !noResult)
+                        if (position === shareProbe && !noResult) {
                             await probe(
                                 position,
                                 shareForgeries,
                                 'The release shares are incomplete.',
                             );
+                            for (const id of shareReplays)
+                                assert.ok(
+                                    candidateReads[position].has(id),
+                                    'The verifier did not encounter the replayed release candidate.',
+                                );
+                        }
                         if (position === voteProbe)
                             await probeForeignPoll(position);
                     },

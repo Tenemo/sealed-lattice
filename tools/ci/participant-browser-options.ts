@@ -19,6 +19,7 @@ export const selectParticipantBrowserOptions = (
         '--unselected-checkpoint',
         '--publication-faults',
         '--selection-fork',
+        '--recovery',
     ]);
     const valuedOptions = new Set([
         '--foreign-poll',
@@ -77,6 +78,17 @@ export const selectParticipantBrowserOptions = (
     const memoryPressure = switches.has('--memory-pressure');
     const publicationFaults = switches.has('--publication-faults');
     const sequential = switches.has('--sequential');
+    const recovery = switches.has('--recovery');
+    assert.ok(
+        !recovery ||
+            (mode === 'plain' &&
+                !memoryPressure &&
+                !publicationFaults &&
+                !setupDeparture &&
+                !unselectedCheckpoint &&
+                !selectionFork),
+        'Recovery measurements require an ordinary plain cohort.',
+    );
     const foreignPoll = values.get('--foreign-poll');
     assert.ok(
         !publicationFaults ||
@@ -152,6 +164,7 @@ export const selectParticipantBrowserOptions = (
         memoryPressure,
         publicationFaults,
         sequential,
+        recovery,
         basePort,
         topCount,
         commandLineArguments: argumentsList,

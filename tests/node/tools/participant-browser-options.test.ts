@@ -3,6 +3,32 @@ import { describe, expect, it } from 'vitest';
 import { selectParticipantBrowserOptions } from '#tools/ci/participant-browser-options.js';
 
 describe('participant browser cohort selection', () => {
+    it('measures recovery within the ordinary scalar stage schedule', () => {
+        expect(
+            selectParticipantBrowserOptions([
+                '10',
+                '10',
+                'plain',
+                '--scalar',
+                '--sequential',
+                '--recovery',
+            ]),
+        ).toMatchObject({
+            participantCount: 10,
+            optionCount: 10,
+            mode: 'plain',
+            scalar: true,
+            sequential: true,
+            recovery: true,
+        });
+        for (const args of [
+            ['--recovery'],
+            ['plain', '--recovery', '--publication-faults'],
+            ['plain', '--recovery', '--memory-pressure'],
+            ['--recovery', '--setup-departure'],
+        ])
+            expect(() => selectParticipantBrowserOptions(args)).toThrow();
+    });
     it('selects the original-credential losing-endorsement case', () => {
         expect(
             selectParticipantBrowserOptions(['--selection-fork', '--scalar']),
