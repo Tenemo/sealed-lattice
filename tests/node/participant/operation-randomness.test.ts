@@ -9,7 +9,7 @@ import type { ParticipantKernel } from '#packages/sdk/src/participant/worker/ker
 // A module memory whose randomness state accepts one seed and answers each
 // stream's requests with a counter pattern of that stream, so a test can
 // tell which stream served a request.
-const seededKernel = (refuseSeed = false) => {
+const seededKernel = (refuseSeed = false, growOnRead = false) => {
     const memory = new WebAssembly.Memory({ initial: 2 });
     const inputPointer = 1024;
     const outputPointer = 65_536;
@@ -30,6 +30,7 @@ const seededKernel = (refuseSeed = false) => {
                 return 0;
             }
             if (operation === 1 || operation === 2) {
+                if (growOnRead) memory.grow(1);
                 const output = new Uint8Array(
                     memory.buffer,
                     outputPointer,
@@ -51,6 +52,61 @@ const seed = Uint8Array.from(
 );
 
 describe('seeded operation randomness', () => {
+    it('fills the original destination and counts bytes when the nested command grows memory', () => {
+        const { kernel, memory, outputPointer, calls } = seededKernel(
+            false,
+            true,
+        );
+        const randomness = seededRandomness(
+            kernel,
+            'contribution',
+            seed,
+            'witness',
+        );
+        const destinationOffset = 8192;
+        for (const [source, length, firstByte] of [
+            ['witness', 17, 100],
+            ['proof', 31, 200],
+            ['witness', 5, 117],
+        ] as const) {
+            const before = new Uint8Array(
+                memory.buffer,
+                destinationOffset - 1,
+                length + 2,
+            );
+            before.fill(77);
+            const target = new Uint8Array(
+                memory.buffer,
+                destinationOffset,
+                length,
+            );
+            randomness.random(source, target);
+            expect(target.byteLength).toBe(0);
+            expect([
+                ...new Uint8Array(memory.buffer, destinationOffset, length),
+            ]).toEqual(Array.from({ length }, (_, index) => firstByte + index));
+            expect(
+                new Uint8Array(memory.buffer, destinationOffset - 1, 1)[0],
+            ).toBe(77);
+            expect(
+                new Uint8Array(memory.buffer, destinationOffset + length, 1)[0],
+            ).toBe(77);
+            expect(
+                new Uint8Array(memory.buffer, outputPointer, length).every(
+                    (value) => value === 0,
+                ),
+            ).toBe(true);
+        }
+        expect(randomness.drawn()).toBe(53);
+        expect(randomness.proofDrawn()).toBe(31);
+        expect(calls).toEqual([
+            [0, 64],
+            [1, 17],
+            [2, 31],
+            [1, 5],
+        ]);
+    });
+
     it('installs each purpose under its own command and serves its two streams in order', () => {
         for (const [purpose, command, first] of [
             ['contribution', 0, 'witness'],

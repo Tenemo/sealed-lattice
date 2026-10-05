@@ -414,6 +414,8 @@ export const seededRandomness = (
     let drawn = 0;
     let proofDrawn = 0;
     const random: NonNullable<KernelHandlers['random']> = (source, target) => {
+        const pointer = target.byteOffset;
+        const length = target.byteLength;
         const stream =
             source === 'proof'
                 ? operationStream.proof
@@ -422,20 +424,22 @@ export const seededRandomness = (
                   : undefined;
         if (
             stream === undefined ||
-            kernel.operation_random_command(stream, target.length) !== 0
+            kernel.operation_random_command(stream, length) !== 0
         )
             throw new Error(
                 'The ' + purpose + ' randomness refused a request.',
             );
+        const outputPointer = kernel.operation_random_output_pointer() >>> 0;
         const output = new Uint8Array(
             kernel.memory.buffer,
-            kernel.operation_random_output_pointer() >>> 0,
-            target.length,
+            outputPointer,
+            length,
         );
-        target.set(output);
+        // The import supplied a module-memory view; nested calls may detach it.
+        new Uint8Array(kernel.memory.buffer, pointer, length).set(output);
         output.fill(0);
-        drawn += target.length;
-        if (stream === operationStream.proof) proofDrawn += target.length;
+        drawn += length;
+        if (stream === operationStream.proof) proofDrawn += length;
     };
     return {
         random,
