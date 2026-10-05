@@ -46,6 +46,8 @@ export type ChromeParticipant = Readonly<{
     version: string;
     launchArguments: readonly string[];
     evaluate(expression: string): Promise<unknown>;
+    // Reloads an idle page to install a test client without another crash.
+    reload(): Promise<void>;
     // The JavaScript heaps that the page and its current workers last
     // reported; each that has no request outstanding is asked again. A
     // worker answers only between tasks, so one whose code runs without
@@ -309,28 +311,33 @@ export const launchChromeParticipant = async (
             { autoAttach: true, waitForDebuggerOnStart: false, flatten: true },
             pageSession,
         );
-        let timer: ReturnType<typeof setTimeout> | undefined;
-        const loaded = new Promise<void>((resolve, reject) => {
-            onLoad = resolve;
-            timer = setTimeout(
-                () => reject(new Error('Chrome navigation deadline.')),
-                30_000,
-            );
-        });
-        try {
-            await Promise.all([
-                loaded,
-                send('Page.navigate', { url: origin }, pageSession).then(
-                    (value) => {
-                        if (value.errorText !== undefined)
-                            throw new Error('Chrome could not open the page.');
-                    },
-                ),
-            ]);
-        } finally {
-            clearTimeout(timer);
-            onLoad = undefined;
-        }
+        const navigate = async () => {
+            let timer: ReturnType<typeof setTimeout> | undefined;
+            const loaded = new Promise<void>((resolve, reject) => {
+                onLoad = resolve;
+                timer = setTimeout(
+                    () => reject(new Error('Chrome navigation deadline.')),
+                    30_000,
+                );
+            });
+            try {
+                await Promise.all([
+                    loaded,
+                    send('Page.navigate', { url: origin }, pageSession).then(
+                        (value) => {
+                            if (value.errorText !== undefined)
+                                throw new Error(
+                                    'Chrome could not open the page.',
+                                );
+                        },
+                    ),
+                ]);
+            } finally {
+                clearTimeout(timer);
+                onLoad = undefined;
+            }
+        };
+        await navigate();
         const version = String((await send('Browser.getVersion')).product);
         if (child.pid === undefined)
             throw new Error('Chrome has no process identifier.');
@@ -338,6 +345,7 @@ export const launchChromeParticipant = async (
             processIdentifier: child.pid,
             version,
             launchArguments,
+            reload: navigate,
             close,
             crash,
             heaps: () => {

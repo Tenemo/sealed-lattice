@@ -755,7 +755,17 @@ const foreignFamilies = [
     {
         family: 'registrations',
         pattern: /^registration\//u,
-        reason: 'A registration header was refused.',
+        reason: (
+            recordIds: readonly string[],
+            foreignRecordIds: readonly string[],
+        ) =>
+            recordIds
+                .filter((id, position) => id !== foreignRecordIds[position])
+                .map(
+                    (id) =>
+                        'No valid complete candidate is available: registration/' +
+                        id,
+                ),
     },
     {
         family: 'contributions',
@@ -770,12 +780,12 @@ const foreignFamilies = [
     {
         family: 'target votes',
         pattern: /^completion\/target-vote-\d+\.bin$/u,
-        reason: 'The target votes are incomplete.',
+        reason: () => ['The target votes are incomplete.'],
     },
     {
         family: 'release shares',
         pattern: /^completion\/release-(?:envelope-)?\d+\.bin$/u,
-        reason: 'The release shares are incomplete.',
+        reason: () => ['The release shares are incomplete.'],
     },
 ] as const;
 
@@ -2062,15 +2072,17 @@ await runWithLocalRunLog(
                     await removeCopy(copy);
                 }
             };
-            // Loads a halting client in the participant's next browser, whose
-            // participant stops for good once it durably enters the
-            // generation.
+            // Installs a halting client by reloading the idle page. The
+            // requested protocol cut performs the crash; arming a hook must
+            // not add another crash during inspection or browser recovery.
             const armHalt = async (position: number, generation: number) => {
                 assert.ok(honest(position), 'Only an honest client halts.');
-                await endBrowser(position);
                 halting.set(
                     position,
                     haltingClient(runtime.worker, generation),
+                );
+                await inBrowser(position, undefined, (chrome) =>
+                    chrome.reload(),
                 );
             };
             // Runs an operation in a halting client. The browser crashes once
@@ -2133,10 +2145,12 @@ await runWithLocalRunLog(
                 cut: PreparationCut,
             ) => {
                 assert.ok(honest(position));
-                await endBrowser(position);
                 halting.set(
                     position,
                     preparationHaltingClient(runtime.worker, cut),
+                );
+                await inBrowser(position, undefined, (chrome) =>
+                    chrome.reload(),
                 );
                 try {
                     const pending = request(position, operation);
@@ -2282,8 +2296,10 @@ await runWithLocalRunLog(
             ) => {
                 const client = paddingClients?.get(cut);
                 assert.ok(client);
-                await endBrowser(position);
                 halting.set(position, client);
+                await inBrowser(position, undefined, (chrome) =>
+                    chrome.reload(),
+                );
                 try {
                     const before = await retainedHead(position);
                     assert.equal(before.generation, 4);
@@ -3318,6 +3334,63 @@ await runWithLocalRunLog(
                 );
                 return expected;
             };
+            const probe = async (
+                position: number,
+                forgeries: ReadonlyMap<string, ViewedRecord>,
+                reason: string | readonly string[],
+            ) => {
+                deliveredRecords[position].clear();
+                candidateReads[position].clear();
+                for (const [name, bytes] of forgeries)
+                    views[position].set(name, bytes);
+                try {
+                    const result = await request(position, 'result');
+                    assert.ok(result.status === 'pending');
+                    const reasons =
+                        typeof reason === 'string' ? [reason] : reason;
+                    assert.ok(reasons.includes(result.reason), result.reason);
+                    assert.deepEqual(result, {
+                        status: 'pending',
+                        cause: 'public input',
+                        reason: result.reason,
+                    });
+                    if (
+                        [...forgeries.values()].some(
+                            (value) => value !== undefined,
+                        )
+                    )
+                        assert.ok(
+                            [...forgeries.keys()].some((name) =>
+                                deliveredRecords[position].has(name),
+                            ),
+                            'The refused operation did not read its forged inputs.',
+                        );
+                    return result.reason;
+                } finally {
+                    views[position].clear();
+                }
+            };
+            // A result visit that reads none of the served records completes.
+            const probeUnread = async (
+                position: number,
+                forgeries: ReadonlyMap<string, ViewedRecord>,
+            ) => {
+                deliveredRecords[position].clear();
+                for (const [name, bytes] of forgeries)
+                    views[position].set(name, bytes);
+                try {
+                    const result = await run(position, 'result');
+                    assert.ok(
+                        [...forgeries.keys()].every(
+                            (name) => !deliveredRecords[position].has(name),
+                        ),
+                        'The cached result consumed a replaced input.',
+                    );
+                    return result;
+                } finally {
+                    views[position].clear();
+                }
+            };
             if (
                 mode === 'plain' ||
                 setupDeparture ||
@@ -3828,32 +3901,25 @@ await runWithLocalRunLog(
                             served > 0,
                             `The other roster has no ${family}.`,
                         );
-                        for (const [name, bytes] of view)
-                            views[member.origin].set(name, bytes);
-                        try {
-                            if (reason === undefined)
-                                assert.deepEqual(
-                                    (await act(member, 'result')).identifiers,
-                                    identifiers,
-                                );
-                            else
-                                assert.deepEqual(
-                                    await request(member.origin, 'result'),
-                                    {
-                                        status: 'pending',
-                                        cause: 'public input',
-                                        reason,
-                                    },
-                                );
-                        } finally {
-                            views[member.origin].clear();
-                        }
+                        let refusal: string | undefined;
+                        if (reason === undefined)
+                            assert.deepEqual(
+                                (await probeUnread(member.origin, view))
+                                    .identifiers,
+                                identifiers,
+                            );
+                        else
+                            refusal = await probe(
+                                member.origin,
+                                view,
+                                reason(recordIds, other.recordIds),
+                            );
                         crossRosterProbes.push({
                             origin: member.origin,
                             family,
                             served,
                             hidden: view.size - served,
-                            reason,
+                            reason: refusal,
                         });
                     }
                     assert.deepEqual(
@@ -6040,75 +6106,25 @@ await runWithLocalRunLog(
                     );
                     if (family === 'release shares' && served === 0) continue;
                     assert.ok(served > 0, `The foreign poll has no ${family}.`);
+                    let refusal: string | undefined;
                     if (reason === undefined) {
                         const { encrypted, identifiers } = await probeUnread(
                             position,
                             view,
                         );
                         unreadOutcomes.push({ family, encrypted, identifiers });
-                    } else await probe(position, view, reason);
+                    } else
+                        refusal = await probe(
+                            position,
+                            view,
+                            reason(recordIds, foreign.recordIds),
+                        );
                     foreignProbes.push({
                         family,
                         served,
                         hidden: view.size - served,
-                        reason,
+                        reason: refusal,
                     });
-                }
-            };
-            const probe = async (
-                position: number,
-                forgeries: ReadonlyMap<string, ViewedRecord>,
-                reason: string | readonly string[],
-            ) => {
-                deliveredRecords[position].clear();
-                candidateReads[position].clear();
-                for (const [name, bytes] of forgeries)
-                    views[position].set(name, bytes);
-                try {
-                    const result = await request(position, 'result');
-                    assert.ok(result.status === 'pending');
-                    const reasons =
-                        typeof reason === 'string' ? [reason] : reason;
-                    assert.ok(reasons.includes(result.reason), result.reason);
-                    assert.deepEqual(result, {
-                        status: 'pending',
-                        cause: 'public input',
-                        reason: result.reason,
-                    });
-                    if (
-                        [...forgeries.values()].some(
-                            (value) => value !== undefined,
-                        )
-                    )
-                        assert.ok(
-                            [...forgeries.keys()].some((name) =>
-                                deliveredRecords[position].has(name),
-                            ),
-                            'The refused operation did not read its forged inputs.',
-                        );
-                } finally {
-                    views[position].clear();
-                }
-            };
-            // A result visit that reads none of the served records completes.
-            const probeUnread = async (
-                position: number,
-                forgeries: ReadonlyMap<string, ViewedRecord>,
-            ) => {
-                deliveredRecords[position].clear();
-                for (const [name, bytes] of forgeries)
-                    views[position].set(name, bytes);
-                try {
-                    const result = await run(position, 'result');
-                    assert.ok(
-                        [...forgeries.keys()].every(
-                            (name) => !deliveredRecords[position].has(name),
-                        ),
-                        'The cached result consumed a replaced input.',
-                    );
-                    return result;
-                } finally {
-                    views[position].clear();
                 }
             };
             const [result] = await Promise.all([
