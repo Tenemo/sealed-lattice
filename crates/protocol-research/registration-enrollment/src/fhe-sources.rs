@@ -7,7 +7,7 @@ use aes_gcm::{
     Aes256Gcm, Nonce,
     aead::{AeadInPlace, KeyInit},
 };
-use num_bigint::{BigInt, Sign};
+use num_bigint::BigInt;
 use registration_credentials::{
     Credential,
     contribution_body::{BODY_HEADER_BYTES, body_header},
@@ -106,18 +106,20 @@ impl PolynomialOutput for CoordinateHash {
     fn polynomial(&mut self, values: &[BigInt], _modulus: &BigInt, width: usize) {
         let mut hash = self.hash.take().expect("One FHE source coordinate");
         let mut offset = 0;
-        let mut bytes = Vec::with_capacity(1 << 20);
-        let count = (1 << 20) / (1 + width);
+        let coefficient_bytes = 1 + width;
+        let count = (1 << 20) / coefficient_bytes;
+        let mut bytes = vec![0; count * coefficient_bytes];
         for chunk in values.chunks(count) {
-            bytes.clear();
-            for value in chunk {
-                let (sign, magnitude) = value.to_bytes_le();
-                bytes.push(u8::from(sign == Sign::Minus));
-                bytes.extend(&magnitude);
-                bytes.resize(bytes.len() + width - magnitude.len(), 0);
+            let encoded = &mut bytes[..chunk.len() * coefficient_bytes];
+            for (value, coefficient) in chunk
+                .iter()
+                .zip(encoded.chunks_exact_mut(coefficient_bytes))
+            {
+                setup_witness::encode_coefficient(value, coefficient);
             }
-            hash.push(offset, &bytes).expect("Canonical FHE coordinate");
-            offset += bytes.len();
+            hash.push(offset, encoded)
+                .expect("Canonical FHE coordinate");
+            offset += encoded.len();
         }
         self.result = Some(hash.finish().expect("Complete FHE coordinate"));
     }
@@ -288,6 +290,49 @@ mod tests {
             verify_poll(signed.identity, [7; 64], &signed.body, &signed.signature).unwrap(),
             credential,
         )
+    }
+
+    #[test]
+    fn coordinate_hash_matches_canonical_coefficients_across_chunk_boundaries() {
+        use num_bigint::Sign;
+        use supported_profile::{DEGREE, Family};
+
+        let (poll, credential) = poll();
+        let profile = Profile::new(3, 2).unwrap();
+        let modulus = BigInt::from_bytes_le(Sign::Plus, &profile.family_modulus(Family::Fhe));
+        let half = &modulus >> 1usize;
+        let samples = [
+            -&half,
+            half,
+            BigInt::from(0),
+            BigInt::from(1),
+            BigInt::from(-1),
+        ];
+        let values: Vec<_> = (0..DEGREE)
+            .map(|index| samples[index % samples.len()].clone())
+            .collect();
+        let width = profile.family_magnitude_bytes(Family::Fhe);
+        let hasher = || {
+            FheKeyCommitmentHasher::for_registration(&poll, &credential, profile, &[41; SALT_BYTES])
+                .unwrap()
+        };
+        let mut output = CoordinateHash {
+            hash: Some(hasher()),
+            result: None,
+        };
+        output.polynomial(&values, &modulus, width);
+
+        // Independent canonical conversion, delivered one coefficient at a
+        // time instead of through the producer's reused fixed-size chunk.
+        let mut expected = hasher();
+        for (index, value) in values.iter().enumerate() {
+            let (sign, magnitude) = value.to_bytes_le();
+            let mut encoded = vec![0; 1 + width];
+            encoded[0] = u8::from(sign == Sign::Minus);
+            encoded[1..1 + magnitude.len()].copy_from_slice(&magnitude);
+            expected.push(index * encoded.len(), &encoded).unwrap();
+        }
+        assert_eq!(output.result, Some(expected.finish().unwrap()));
     }
 
     #[test]

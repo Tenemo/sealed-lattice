@@ -100,7 +100,7 @@ impl PolynomialOutput for PublicOutput {
         let mut encoded = vec![0u8; 1 + width];
         for value in values {
             assert!(value.magnitude() <= half.magnitude());
-            crate::coefficient_encoding::encode(value, &mut encoded);
+            setup_witness::encode_coefficient(value, &mut encoded);
             self.append(&encoded);
         }
         self.flush();

@@ -2,7 +2,7 @@ use num_bigint::{BigInt, Sign};
 
 /// Writes the existing fixed-width signed magnitude without allocating a
 /// temporary magnitude for each coefficient. The caller checks centering.
-pub(crate) fn encode(value: &BigInt, encoded: &mut [u8]) {
+pub fn encode_coefficient(value: &BigInt, encoded: &mut [u8]) {
     assert!(encoded.len() > 1);
     let width = encoded.len() - 1;
     assert!(value.magnitude().bits().div_ceil(8) <= width as u64);
@@ -18,7 +18,7 @@ pub(crate) fn encode(value: &BigInt, encoded: &mut [u8]) {
 
 #[cfg(test)]
 mod tests {
-    use super::encode;
+    use super::encode_coefficient;
     use num_bigint::{BigInt, Sign};
     use supported_profile::{Family, Profile};
 
@@ -27,7 +27,7 @@ mod tests {
         let mut expected = vec![0; encoded.len()];
         expected[0] = u8::from(sign == Sign::Minus);
         expected[1..1 + magnitude.len()].copy_from_slice(&magnitude);
-        encode(value, encoded);
+        encode_coefficient(value, encoded);
         assert_eq!(encoded, expected);
     }
 
@@ -73,6 +73,6 @@ mod tests {
     #[test]
     #[should_panic]
     fn rejects_an_overwidth_magnitude() {
-        encode(&(BigInt::from(1) << 72usize), &mut [0; 10]);
+        encode_coefficient(&(BigInt::from(1) << 72usize), &mut [0; 10]);
     }
 }
