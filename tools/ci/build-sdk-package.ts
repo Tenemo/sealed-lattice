@@ -10,8 +10,6 @@ import {
     participantSourceManifest,
 } from './build-participant-module.js';
 import { recordBundleSources } from './compiled-inputs.js';
-import { resolvePackageManagerRunner } from './package-manager-runner.js';
-import { runPackageManagerAndCaptureOutput } from './run-command.js';
 import { sdkPackageOptions } from './sdk-package-tsdown.config.js';
 
 const repositoryRoot = fileURLToPath(new URL('../../', import.meta.url));
@@ -121,30 +119,9 @@ export const buildSdkPackage = async (): Promise<void> => {
     };
     if (!Buffer.from(participantRuntime.worker, 'utf8').equals(worker))
         throw new Error('The participant worker is not canonical UTF-8.');
-    const runner = resolvePackageManagerRunner();
-    const output = runPackageManagerAndCaptureOutput(
-        runner,
-        [
-            'exec',
-            'tsdown',
-            '--config',
-            path.join(
-                repositoryRoot,
-                'tools',
-                'ci',
-                'sdk-package-tsdown.config.ts',
-            ),
-        ],
-        repositoryRoot,
-        {
-            environment: {
-                ...process.env,
-                SEALED_LATTICE_PARTICIPANT_RUNTIME:
-                    JSON.stringify(participantRuntime),
-            },
-        },
-    );
-    if (output.length > 0) process.stdout.write(output);
+    // Pass the worker directly: its source exceeds Linux's per-string limit
+    // for a child process's arguments and environment.
+    await build({ ...sdkPackageOptions(participantRuntime), config: false });
 
     await mkdir(sdkOutputDirectoryPath, { recursive: true });
     for (const [name, bytes] of [
