@@ -6,6 +6,7 @@ import {
     runOracleSliceRouting,
     compileOraclePrefixReplacement,
     runOraclePrefixReplacement,
+    compileOracleMaskRouting,
 } from '#tests/compressed-oracle-model.js';
 import {
     oracleDomainWork,
@@ -13,6 +14,115 @@ import {
 } from '#tests/oracle-domain-model.js';
 
 describe('Hidden-slice oracle routing', () => {
+    it('binds an honest private source before revealing its receiver slice', () => {
+        const bits = (value: number, width: number) =>
+            Uint8Array.from({ length: width }, (_, bit) => (value >> bit) & 1);
+        const hidden = compileOracleMaskRouting(3, 4, [
+            { inputLength: 3, positions: [0], values: Uint8Array.of(0) },
+        ]);
+        const revealed = compileOracleMaskRouting(3, 4, []);
+        let lateBindingFailures = 0;
+        let earlyRevealDifferences = 0;
+        for (let announced = 0; announced < 4; announced++) {
+            // The selected point may depend on the already announced prefix.
+            // Its input still belongs to the one fixed hidden source slice.
+            const point = 2 * announced;
+            const replacement = compileOraclePrefixReplacement(3, 4, [
+                { input: bits(point, 3), prefix: bits(announced, 2) },
+            ]);
+            for (let seed = 0; seed < 4; seed++)
+                for (let input = 0; input < 8; input++)
+                    for (let inputLength = 0; inputLength <= 3; inputLength++)
+                        for (let requested = 0; requested <= 4; requested++)
+                            for (const output of [0, 10]) {
+                                const raw = input & ((1 << inputLength) - 1);
+                                const base = bits(
+                                    5 * raw + 7 * inputLength + seed,
+                                    4,
+                                );
+                                const shadow = bits(
+                                    3 * raw + inputLength + seed + 1,
+                                    4,
+                                );
+                                const data = bits(input, 3);
+                                const response = bits(output, 4);
+                                const belongs =
+                                    inputLength === 3 && input % 2 === 0;
+                                const isPoint =
+                                    inputLength === 3 && input === point;
+                                const privateAnswer =
+                                    runOraclePrefixReplacement(
+                                        replacement,
+                                        data,
+                                        inputLength,
+                                        requested,
+                                        base,
+                                        response,
+                                    );
+                                const receiver = (routing: typeof hidden) => {
+                                    const lengths = runOracleSliceRouting(
+                                        routing,
+                                        data,
+                                        inputLength,
+                                        requested,
+                                    );
+                                    const answer = runOraclePrefixReplacement(
+                                        replacement,
+                                        data,
+                                        inputLength,
+                                        lengths[0],
+                                        base,
+                                        response,
+                                    );
+                                    for (let bit = 0; bit < lengths[1]; bit++)
+                                        answer[bit] ^= shadow[bit];
+                                    return answer;
+                                };
+                                const expectedPrivate = response.slice();
+                                const expectedHidden = response.slice();
+                                for (let bit = 0; bit < requested; bit++) {
+                                    const patched =
+                                        isPoint && bit < 2
+                                            ? (announced >> bit) & 1
+                                            : base[bit];
+                                    expectedPrivate[bit] ^= patched;
+                                    expectedHidden[bit] ^= belongs
+                                        ? shadow[bit]
+                                        : patched;
+                                }
+                                expect(privateAnswer).toEqual(expectedPrivate);
+                                const beforeExposure = receiver(hidden);
+                                expect(beforeExposure).toEqual(expectedHidden);
+                                // An attempt with no public exposure, or retirement
+                                // while still unexposed, keeps this shadow and patch.
+                                expect(receiver(hidden)).toEqual(
+                                    beforeExposure,
+                                );
+                                const afterExposure = receiver(revealed);
+                                expect(afterExposure).toEqual(expectedPrivate);
+                                if (
+                                    beforeExposure.some(
+                                        (value, bit) =>
+                                            value !== afterExposure[bit],
+                                    )
+                                )
+                                    earlyRevealDifferences++;
+                                if (
+                                    isPoint &&
+                                    requested >= 2 &&
+                                    output === 0 &&
+                                    (base[0] !== (announced & 1) ||
+                                        base[1] !== ((announced >> 1) & 1))
+                                )
+                                    lateBindingFailures++;
+                            }
+        }
+        // These are ordering counterexamples, not a second commitment bound:
+        // waiting to bind fails a local check, while early reveal changes reads.
+        expect(lateBindingFailures).toBeGreaterThan(0);
+        expect(earlyRevealDifferences).toBeGreaterThan(0);
+    });
+
     it('restores the entire background slice and only replaces the disclosed point', () => {
         const prefixes = [Uint8Array.of(0), Uint8Array.of(1)],
             before = compileOracleSliceRouting(2, 1, prefixes),
