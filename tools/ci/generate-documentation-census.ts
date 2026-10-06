@@ -122,6 +122,7 @@ import { compileReleaseShareLiftingCensus } from '#tests/release-share-lifting-m
 import { compileReleaseVerificationWorkload } from '#tests/release-verification-work-model.js';
 import { compileRnsArithmeticResourceCensus } from '#tests/rns-arithmetic-resource-model.js';
 import { compileRosterProposalCensus } from '#tests/roster-proposal-model.js';
+import { compileSecurityMarginScreen } from '#tests/security-margin-screen-model.js';
 import { compileSelectedOpeningTransformCensus } from '#tests/selected-opening-transform-model.js';
 import { compileSetupAggregateResources } from '#tests/setup-aggregate-resource-model.js';
 import {
@@ -5188,6 +5189,45 @@ export const renderDocumentationCensus = (): string => {
         ),
         '',
         'Oracle simulation is priced from declared query schedules in the compressed-oracle circuit census. That accounting includes persistent components, clean prefix wrappers and all supplied shadow streams. Deriving admissible capacities from the accepted experiment-cost convention, pricing the complete protocol wrappers and closing the semantic-use inventory remain required before solving for a security population.',
+        '',
+        '### FHE security margin screen',
+        '',
+        'The [margin model](../tests/security-margin-screen-model.ts) tests whether the current FHE comparisons can reach the target with the current parameters. It charges every single-key FHE Ring-LWE comparison of the [clear-preparation ledger](security-argument.md#clear-candidate-joint-ledger) at one original honest registration per participant, expanding each multi-message ballot comparison over its messages. The withdrawn ledger’s seven assumption groups share the 2^-80 budget equally. Each requirement prices only the maintained query circuits at a complete experiment of 2^80 gates, where the reduction ratio is largest. A lattice challenger supplies no random oracle, so even a reduction without extraction implements the background function. The FHE embedding fixes honest coordinates after their registration commitments, which keeps one commitment shadow per potential sender scope. The reader column applies the classical fixed-input reader conversion that participant code uses. The last requirement column applies the larger conversion for setup first-oracle leaf hashes resumed from an authenticated checkpoint, conditional on the original input staying available to the adapter. Extraction, proof simulation, record creation and every other reduction cost only add work, and H registrations instead of n add log2(H/n) bits. Each row uses the largest FHE modulus at that participant count. The estimates are the core-SVP screens that the [security argument](security-argument.md#ledger) cites; a screen at one modulus bounds the same attack at every smaller supported modulus. The quantum model’s sieving speedup assumes quantum random-access memory, which the accepted cost convention excludes, and neither model counts gates as that convention does.',
+        '',
+        table(
+            [
+                'Participants',
+                'Options',
+                'Modulus bits',
+                'Selected position sets',
+                'FHE Ring-LWE comparisons',
+                'Required bits, background oracle',
+                'Required bits, commitment shadows',
+                'Required bits, shadows and readers',
+                'Resume factor',
+                'Required bits, shadows and resumed hashes',
+                'Quantum primal-hybrid estimate',
+                'Quantum screened-attack floor',
+                'Classical primal-hybrid estimate',
+            ],
+            compileSecurityMarginScreen().map((row) => [
+                formatCount(row.participantCount),
+                formatCount(row.optionCount),
+                formatCount(row.modulusBits),
+                formatCount(row.selectedPositionSets),
+                formatCount(row.comparisons),
+                ...row.requirements
+                    .slice(0, 3)
+                    .map((value) => formatCount(value.requiredBits)),
+                formatCount(row.resumeFactor),
+                formatCount(row.requirements[3].requiredBits),
+                `\`${row.primal.log2Cost.toFixed(2)}\` at ${formatCount(row.primal.modulusBits)} bits`,
+                `\`${row.floor.log2Cost.toFixed(2)}\`, ${row.floor.attack} at ${formatCount(row.floor.modulusBits)} bits`,
+                `\`${row.classicalPrimal.log2Cost.toFixed(2)}\` at ${formatCount(row.classicalPrimal.modulusBits)} bits`,
+            ]),
+        ),
+        '',
+        'This screen is a necessary condition, not a security level. Where a requirement exceeds an attack estimate that the accepted cost convention adopts, the priced reduction cannot establish the target at those parameters, whatever its remaining costs. Where it stays below, the margin must still absorb every omitted reduction cost and the actual credential population.',
         '',
         '## Proof-field coefficient-fold bounds',
         '',
