@@ -18,9 +18,6 @@ members = [
     "contribution-prover",
     "supported-profile",
     "parallel-work",
-    "seed-sharing-proof",
-    "opening-share-proof",
-    "public-operator-screen",
 ]
 resolver = "3"
 

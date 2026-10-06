@@ -5,7 +5,7 @@ import { sourceOpeningSaltBytes } from '#tests/registration-setup-binding-model.
 import { compileSetupSelectionCensus } from '#tests/setup-selection-model.js';
 import type { SupportedProfile } from '#tests/supported-profile-model.js';
 
-export const contributionBodyHeaderBytes = 4n + 8n + sourceOpeningSaltBytes;
+const contributionBodyHeaderBytes = 4n + 8n + sourceOpeningSaltBytes;
 const bodyDomain = Buffer.from('sealed-lattice/contribution-body/v1', 'ascii');
 
 // Ordinary body-hash framing; the source-opening salt is already inside

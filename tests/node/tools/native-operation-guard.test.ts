@@ -49,10 +49,9 @@ describe('native operation sampling handshake', () => {
         expect(() => screen.observeStdout('{broken event}\n')).toThrow();
         screen.stop();
     });
-    it.each(['verifier', 'operator', 'operator host'] as const)(
+    it.each(['operator', 'operator host'] as const)(
         'keeps a fast %s child behind initial and final observations without timing sleeps',
         async (name) => {
-            const operation = name === 'verifier' ? 'verifier' : 'operator';
             const files = await scratch();
             const initialRequested = deferred<void>();
             const initialSample = deferred<number>();
@@ -62,7 +61,6 @@ describe('native operation sampling handshake', () => {
             const events: string[] = [];
             const guard = createNativeOperationGuard({
                 ...files,
-                operation,
                 memoryLimit: 1024,
                 readMemory: (phase) => {
                     if (phase === 'initial') {
@@ -96,17 +94,16 @@ describe('native operation sampling handshake', () => {
             import { existsSync, watch } from 'node:fs';
             import path from 'node:path';
             const [start, finish] = process.argv.slice(1);
-            const operation=${JSON.stringify(operation)};
             const emit = (event, extra = {}) => process.stdout.write(JSON.stringify({event, ...extra}) + '\\n');
             const wait = (file) => new Promise((resolve) => {
                 const check = () => { if (existsSync(file)) { watcher.close(); resolve(); } };
                 const watcher = watch(path.dirname(file), check);
                 check();
             });
-            emit('native-'+operation+'-ready');
+            emit('native-operator-ready');
             await wait(start);
             emit('work-started');
-            emit('native-'+operation+'-completed', {[operation==='operator'?'operationMilliseconds':'verificationMilliseconds']: 0});
+            emit('native-operator-completed', {operationMilliseconds: 0});
             await wait(finish);
         `,
                     files.startFile,
@@ -193,7 +190,7 @@ describe('native operation sampling handshake', () => {
                 },
             });
             try {
-                guard.observeStdout('{"event":"native-verifier-ready"}\n');
+                guard.observeStdout('{"event":"native-operator-ready"}\n');
                 await expect(guard.monitor()).rejects.toThrow();
                 await expect(stat(files.startFile)).rejects.toMatchObject({
                     code: 'ENOENT',

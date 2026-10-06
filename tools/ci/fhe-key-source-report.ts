@@ -1,10 +1,276 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { open, readdir } from 'node:fs/promises';
+import { open, readFile, readdir, stat } from 'node:fs/promises';
+import type { FileHandle } from 'node:fs/promises';
 import path from 'node:path';
 
 import { compileFheKeySourceScreenResources } from '#tests/fhe-key-source-resource-model.js';
-import { readNativeSourceMetadata } from '#tools/ci/seed-sharing-scalar-source.js';
+import { fileDigest } from '#tools/ci/fixture-sources.js';
+import { runArtifactDirectoryPath } from '#tools/ci/local-run-log.js';
+
+type NativeSourceEntry = Readonly<{
+    file: string;
+    sha512: string;
+    bytes: number;
+}>;
+
+type NativeReferenceArtifact = Readonly<{
+    name: string;
+    file: string;
+    bytes: number;
+    sha512: string;
+}>;
+
+// Diagnostics describe only this recorded native run. A consuming build
+// separately checks its actual compiled inputs against this recorded closure.
+const readNativeSourceMetadata = async (source: string, root: string) => {
+    const directory = path.resolve(source);
+    const relative = path.relative(path.join(root, 'logs'), directory);
+    assert.ok(
+        relative && !relative.startsWith('..') && !path.isAbsolute(relative),
+        'The source must be a repository run directory.',
+    );
+    const readJson = async (name: string) => {
+        const file = path.join(directory, name);
+        assert.ok(
+            (await stat(file)).size <= 16 * 1024 * 1024,
+            'The source diagnostic is oversized.',
+        );
+        const bytes = await readFile(file);
+        return {
+            value: JSON.parse(bytes.toString('utf8')) as Record<
+                string,
+                unknown
+            >,
+            sha512: createHash('sha512').update(bytes).digest('hex'),
+        };
+    };
+    const summary = await readJson('summary.json');
+    const result = await readJson('result.json');
+    const manifest = await readJson('source-manifest.json');
+    assert.equal(summary.value.result, 'passed');
+    assert.equal(summary.value.exitCode, 0);
+    assert.equal(summary.value.scriptName, 'research:protocol');
+    assert.equal(result.value.case, 'native-fhe-key-source');
+    assert.equal(result.value.participantCount, 3);
+    assert.equal(result.value.optionCount, 2);
+    assert.equal(result.value.simulatedHelpers, 0);
+    const artifactDirectory = runArtifactDirectoryPath(directory);
+    assert.match(String(result.value.runtimeIdentity), /^[0-9a-f]{128}$/u);
+    const expectedRuntimeBytes =
+        String(result.value.runtimeIdentity).length / 2;
+    const runtime = await open(
+        path.join(artifactDirectory, 'runtime.bin'),
+        'r',
+    );
+    try {
+        const details = await runtime.stat();
+        assert.ok(details.isFile());
+        assert.equal(
+            details.size,
+            expectedRuntimeBytes,
+            'The recorded runtime digest has another length.',
+        );
+        const buffer = Buffer.alloc(expectedRuntimeBytes + 1);
+        let read = 0;
+        while (read < buffer.length) {
+            const { bytesRead } = await runtime.read(
+                buffer,
+                read,
+                buffer.length - read,
+                read,
+            );
+            if (bytesRead === 0) break;
+            read += bytesRead;
+        }
+        assert.equal(
+            read,
+            expectedRuntimeBytes,
+            'The runtime digest length changed while reading.',
+        );
+        assert.equal(
+            buffer.subarray(0, read).toString('hex'),
+            result.value.runtimeIdentity,
+        );
+    } finally {
+        await runtime.close();
+    }
+    assert.ok(
+        typeof manifest.value.compiler === 'string' &&
+            Array.isArray(manifest.value.sources),
+    );
+    const sources = new Map<string, NativeSourceEntry>();
+    for (const entry of manifest.value.sources as NativeSourceEntry[]) {
+        assert.equal(typeof entry.file, 'string');
+        const file = entry.file.replace(/\\/gu, '/');
+        assert.ok(
+            !path.isAbsolute(file) &&
+                !file.split('/').includes('..') &&
+                !sources.has(file),
+        );
+        assert.match(entry.sha512, /^[0-9a-f]{128}$/u);
+        assert.ok(Number.isSafeInteger(entry.bytes) && entry.bytes > 0);
+        sources.set(file, { ...entry, file });
+    }
+    const compiledInputs = new Map<string, NativeSourceEntry>();
+    if (result.value.compiledInputs !== undefined) {
+        assert.ok(Array.isArray(result.value.compiledInputs));
+        for (const entry of result.value
+            .compiledInputs as NativeSourceEntry[]) {
+            assert.equal(typeof entry.file, 'string');
+            const file = entry.file.replace(/\\/gu, '/');
+            assert.ok(
+                !compiledInputs.has(file),
+                'A native compiled input is duplicated.',
+            );
+            const snapshot = sources.get(file);
+            assert.ok(
+                snapshot,
+                'A native compiled input is absent from its source manifest.',
+            );
+            assert.deepEqual(
+                { file, bytes: entry.bytes, sha512: entry.sha512 },
+                snapshot,
+                'A native compiled input differs from its source manifest.',
+            );
+            compiledInputs.set(file, snapshot);
+        }
+    }
+    return {
+        directory,
+        artifactDirectory,
+        report: result.value,
+        sources,
+        compiledInputs,
+        compiler: manifest.value.compiler,
+        nativeExecutableSha512: String(result.value.runtimeIdentity),
+        diagnosticDigests: {
+            summary: summary.sha512,
+            result: result.sha512,
+            manifest: manifest.sha512,
+        },
+    };
+};
+
+// The scalar-only entropy adapter has no native binary compilation claim.
+// Pin its exact bytes separately; every other Rust input, including
+// manifests and native wrappers, must belong to the native compiled closure.
+export const assertScalarNativeInputs = async (
+    source: Pick<
+        Awaited<ReturnType<typeof readNativeSourceMetadata>>,
+        'compiler' | 'sources' | 'compiledInputs'
+    >,
+    files: readonly string[],
+    compiler: string,
+    root: string,
+) => {
+    assert.equal(
+        compiler,
+        source.compiler,
+        'The native source used another compiler.',
+    );
+    const adapters = new Set([
+        'crates/protocol-research/setup-witness/src/browser_random.rs',
+    ]);
+    const rustInputs = [
+        ...new Set(files.map((file) => file.replace(/\\/gu, '/'))),
+    ]
+        .filter((file) => file.startsWith('crates/'))
+        .sort();
+    assert.ok(rustInputs.length > 0, 'The scalar Rust input closure is empty.');
+    const targetAdapters: string[] = [];
+    const unchangedNativeInputs: string[] = [];
+    for (const file of rustInputs) {
+        const adapter = adapters.has(file);
+        const previous = adapter
+            ? source.sources.get(file)
+            : source.compiledInputs.get(file);
+        assert.ok(
+            previous,
+            adapter
+                ? 'The native source did not snapshot a scalar target adapter: ' +
+                      file
+                : 'The native source did not compile a scalar shared input: ' +
+                      file,
+        );
+        const bytes = await readFile(path.join(root, file));
+        assert.equal(
+            bytes.length,
+            previous.bytes,
+            'A native input changed: ' + file,
+        );
+        assert.equal(
+            createHash('sha512').update(bytes).digest('hex'),
+            previous.sha512,
+            'A native input changed: ' + file,
+        );
+        (adapter ? targetAdapters : unchangedNativeInputs).push(file);
+    }
+    return { unchangedNativeInputs, targetAdapters };
+};
+
+// A native archive is a deterministic comparison vector here. Its old
+// shared sources do not authorize a newly compiled consumer.
+export const compareNativeReferenceArtifacts = async (
+    artifacts: readonly NativeReferenceArtifact[],
+    output: string,
+) => {
+    const comparisons = [];
+    for (const proof of artifacts) {
+        const currentFile = path.join(output, proof.name);
+        assert.equal((await stat(currentFile)).size, proof.bytes);
+        const historical = await open(proof.file, 'r');
+        let current: FileHandle | undefined;
+        try {
+            current = await open(currentFile, 'r');
+            const left = Buffer.alloc(1 << 20);
+            const right = Buffer.alloc(left.length);
+            for (let offset = 0; offset < proof.bytes;) {
+                const length = Math.min(left.length, proof.bytes - offset);
+                for (const [file, buffer] of [
+                    [historical, left],
+                    [current, right],
+                ] as const) {
+                    let read = 0;
+                    while (read < length) {
+                        const { bytesRead } = await file.read(
+                            buffer,
+                            read,
+                            length - read,
+                            offset + read,
+                        );
+                        assert.ok(
+                            bytesRead > 0,
+                            'A deterministic reference proof was truncated.',
+                        );
+                        read += bytesRead;
+                    }
+                }
+                assert.ok(
+                    left.subarray(0, length).equals(right.subarray(0, length)),
+                    'A freshly generated proof differs from its deterministic reference: ' +
+                        proof.name,
+                );
+                offset += length;
+            }
+        } finally {
+            try {
+                await current?.close();
+            } finally {
+                await historical.close();
+            }
+        }
+        const sha512 = await fileDigest(currentFile);
+        assert.equal(sha512, proof.sha512);
+        assert.equal(
+            await fileDigest(proof.file),
+            proof.sha512,
+            'A historical reference changed during comparison.',
+        );
+        comparisons.push({ name: proof.name, bytes: proof.bytes, sha512 });
+    }
+    return comparisons;
+};
 
 export const fheKeySourceProgressLines = [
     'Generated encryption-0',
@@ -125,7 +391,7 @@ export const readFheKeySourceNativeSource = async (
     root: string,
 ) => {
     const { report, artifactDirectory, ...base } =
-        await readNativeSourceMetadata(source, root, 'native-fhe-key-source');
+        await readNativeSourceMetadata(source, root);
     const archive = path.join(artifactDirectory, 'fhe-key-source');
     assert.equal(path.resolve(String(report.output)), archive);
     const name = 'key-source-0.bin';

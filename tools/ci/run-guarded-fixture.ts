@@ -28,7 +28,7 @@ export const runGuardedFixture = async ({
     command: string;
     args: string[];
     name: string;
-    handshake?: 'verifier' | 'operator';
+    handshake?: boolean;
     parseResult?: (output: string) => Record<string, unknown>;
     nativeProgressLines?: readonly string[];
 }>) => {
@@ -123,7 +123,6 @@ export const runGuardedFixture = async ({
                     active = true;
                     if (gateFiles !== undefined) {
                         nativeGuard = createNativeOperationGuard({
-                            operation: handshake,
                             allowedProgressLines: nativeProgressLines,
                             ...gateFiles,
                             memoryLimit: processMemoryLimit,
@@ -195,7 +194,7 @@ export const runGuardedFixture = async ({
     assert.equal(
         reports.length,
         1,
-        'The verifier emitted an ambiguous final report.',
+        'The fixture emitted an ambiguous final report.',
     );
     return {
         result: reports[0],
@@ -205,10 +204,7 @@ export const runGuardedFixture = async ({
         ...(guardResult === undefined
             ? {}
             : {
-                  [handshake === 'operator'
-                      ? 'operationMilliseconds'
-                      : 'verificationMilliseconds']:
-                      guardResult.operationMilliseconds,
+                  operationMilliseconds: guardResult.operationMilliseconds,
                   samplesByPhase: guardResult.samples,
                   samplingScope:
                       'Initial sample before work is released, periodic samples while it runs, and a fresh final sample after completion before process exit. Wall time includes coordination; the native operation duration excludes it. Sampled peaks do not bound transient peaks between observations.',

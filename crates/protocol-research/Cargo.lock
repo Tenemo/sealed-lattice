@@ -333,20 +333,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "opening-share-proof"
-version = "0.0.0"
-dependencies = [
- "num-bigint",
- "parallel-work",
- "seed-sharing-proof",
- "setup-stream-kernel",
- "supported-profile",
- "word-proof",
- "word-verifier",
- "zeroize",
-]
-
-[[package]]
 name = "parallel-work"
 version = "0.0.0"
 dependencies = [
@@ -380,19 +366,6 @@ dependencies = [
 name = "proof-lookup-table"
 version = "0.0.0"
 dependencies = [
- "supported-profile",
- "word-proof",
-]
-
-[[package]]
-name = "public-operator-screen"
-version = "0.0.0"
-dependencies = [
- "num-bigint",
- "opening-share-proof",
- "parallel-work",
- "seed-sharing-proof",
- "setup-stream-kernel",
  "supported-profile",
  "word-proof",
 ]
@@ -468,18 +441,6 @@ dependencies = [
  "registration-credentials",
  "supported-profile",
  "zeroize",
-]
-
-[[package]]
-name = "seed-sharing-proof"
-version = "0.0.0"
-dependencies = [
- "num-bigint",
- "parallel-work",
- "setup-stream-kernel",
- "supported-profile",
- "word-proof",
- "word-verifier",
 ]
 
 [[package]]

@@ -8,14 +8,13 @@ export const registrationSessionTest =
     'registration_session_tests::sessions_verify_and_refuse_a_registration_as_its_verifier_does';
 
 // Only the native ceremony cases take a profile; the build check and the
-// requested-output and seed-sharing probes cover fixed profiles.
+// requested-output probe cover fixed profiles.
 const protocolResearchCases = {
     check: { execution: false, noResult: false, profile: false },
     'native-result': { execution: true, noResult: false, profile: true },
     'native-empty': { execution: true, noResult: true, profile: true },
     'native-invalid-only': { execution: true, noResult: true, profile: true },
     'native-prefix': { execution: true, noResult: false, profile: false },
-    'native-seed-sharing': { execution: true, noResult: false, profile: false },
 } as const;
 
 type ProtocolResearchSelection = {
@@ -25,29 +24,12 @@ type ProtocolResearchSelection = {
     optionCount: number;
     simulatedHelpers: number;
 } & (
-    | { name: keyof typeof protocolResearchCases; reference?: string }
-    | { name: 'native-public-operator' | 'native-fhe-key-source' }
+    | { name: keyof typeof protocolResearchCases }
+    | { name: 'native-fhe-key-source' }
     | { name: 'registration-session' }
     | { name: 'native-setup-departure' | 'native-selection-fork' }
     | {
-          name:
-              | 'scalar-public-operator'
-              | 'browser-public-operator'
-              | 'scalar-fhe-key-source'
-              | 'browser-fhe-key-source';
-          source: string;
-      }
-    | { name: 'native-opening-share'; source: string; reference?: string }
-    | {
-          name:
-              | 'scalar-seed-sharing'
-              | 'browser-seed-sharing'
-              | 'scalar-seed-sharing-generation'
-              | 'browser-seed-sharing-generation'
-              | 'scalar-opening-share'
-              | 'browser-opening-share'
-              | 'scalar-opening-share-generation'
-              | 'browser-opening-share-generation';
+          name: 'scalar-fhe-key-source' | 'browser-fhe-key-source';
           source: string;
       }
 );
@@ -88,9 +70,6 @@ export const selectProtocolResearchCase = (
         };
     }
     if (
-        values[0] === 'native-public-operator' ||
-        values[0] === 'scalar-public-operator' ||
-        values[0] === 'browser-public-operator' ||
         values[0] === 'native-fhe-key-source' ||
         values[0] === 'scalar-fhe-key-source' ||
         values[0] === 'browser-fhe-key-source'
@@ -98,108 +77,23 @@ export const selectProtocolResearchCase = (
         const settings = {
             execution: true,
             noResult: false,
-            participantCount: values[0].endsWith('fhe-key-source') ? 3 : 4,
+            participantCount: 3,
             optionCount: 2,
             simulatedHelpers: 0,
         };
-        if (
-            values[0] === 'native-public-operator' ||
-            values[0] === 'native-fhe-key-source'
-        ) {
+        if (values[0] === 'native-fhe-key-source') {
             if (values.length !== 1)
                 throw new Error(
-                    'The native public operator screen accepts no additional options.',
+                    'The native FHE key source screen accepts no additional options.',
                 );
             return { name: values[0], ...settings };
         }
         const source = values[1];
         if (values.length !== 2 || !source?.trim() || source.startsWith('--'))
             throw new Error(
-                'A scalar or browser public operator screen requires exactly one native source.',
+                'A scalar or browser FHE key source screen requires exactly one native source.',
             );
         return { name: values[0], source, ...settings };
-    }
-
-    if (values[0] === 'native-opening-share') {
-        const source = values[1];
-        const reference = values[3];
-        if (
-            (values.length !== 2 &&
-                !(
-                    values.length === 4 &&
-                    values[2] === '--compare-reference' &&
-                    reference?.trim() &&
-                    !reference.startsWith('--')
-                )) ||
-            !source?.trim() ||
-            source.startsWith('--')
-        )
-            throw new Error(
-                'Select native-opening-share with exactly one passed fresh native seed-sharing run.',
-            );
-        return {
-            name: values[0],
-            source,
-            ...(reference === undefined ? {} : { reference }),
-            execution: true,
-            noResult: false,
-            participantCount: 4,
-            optionCount: 2,
-            simulatedHelpers: 0,
-        };
-    }
-    if (
-        values[0] === 'native-seed-sharing' &&
-        values[1] === '--compare-reference'
-    ) {
-        const reference = values[2];
-        if (
-            values.length !== 3 ||
-            !reference?.trim() ||
-            reference.startsWith('--')
-        )
-            throw new Error(
-                'Select one historical native seed-sharing run for deterministic comparison.',
-            );
-        return {
-            name: 'native-seed-sharing',
-            reference,
-            execution: true,
-            noResult: false,
-            participantCount: 4,
-            optionCount: 2,
-            simulatedHelpers: 0,
-        };
-    }
-    if (
-        values[0] === 'scalar-seed-sharing' ||
-        values[0] === 'browser-seed-sharing' ||
-        values[0] === 'scalar-seed-sharing-generation' ||
-        values[0] === 'browser-seed-sharing-generation' ||
-        values[0] === 'scalar-opening-share' ||
-        values[0] === 'browser-opening-share' ||
-        values[0] === 'scalar-opening-share-generation' ||
-        values[0] === 'browser-opening-share-generation'
-    ) {
-        const source = values[1];
-        if (
-            values.length !== 2 ||
-            source === undefined ||
-            !source.trim() ||
-            source.startsWith('--')
-        )
-            throw new Error(
-                'Select one scalar or browser proof verification or generation case with exactly one matching passed native run and no profile or helper options.',
-            );
-        return {
-            name: values[0],
-            source,
-            execution: true,
-            noResult: false,
-            participantCount: 4,
-            optionCount: 2,
-            simulatedHelpers: 0,
-        };
     }
     const option = values.indexOf('--simulated-helpers');
     const helpers = option === -1 ? undefined : values[option + 1];
@@ -216,7 +110,6 @@ export const selectProtocolResearchCase = (
     if (
         option !== -1 &&
         (!selected.execution ||
-            name === 'native-seed-sharing' ||
             helpers === undefined ||
             !/^[1-9][0-9]*$/u.test(helpers) ||
             Number(helpers) > maximumSimulatedHelpers ||
@@ -239,14 +132,12 @@ export const selectProtocolResearchCase = (
         );
     }
     const [participantCount, optionCount] =
-        name === 'native-seed-sharing'
-            ? [4, 2]
-            : counts.length === 0
-              ? [
-                    completionProfileCounts.participantCount,
-                    completionProfileCounts.optionCount,
-                ]
-              : counts.map(Number);
+        counts.length === 0
+            ? [
+                  completionProfileCounts.participantCount,
+                  completionProfileCounts.optionCount,
+              ]
+            : counts.map(Number);
     return {
         name: caseName,
         ...selected,

@@ -4,36 +4,29 @@ import { freemem } from 'node:os';
 import path from 'node:path';
 
 import { compileFheKeySourceScreenResources } from '#tests/fhe-key-source-resource-model.js';
-import { compilePublicOperatorScreenResources } from '#tests/recoverable-setup-resource-model.js';
+import {
+    boundedBrowserSources,
+    runFheKeySourceInChrome,
+} from '#tools/ci/bounded-output-browser.js';
 import {
     assertFheKeySourceStable,
+    assertScalarNativeInputs,
+    compareNativeReferenceArtifacts,
     fheKeySourceProgressLines,
     parseFheKeySourceOutput,
     parseFheKeySourceReport,
     readFheKeySourceNativeSource,
 } from '#tools/ci/fhe-key-source-report.js';
+import { fheKeySourcePhases } from '#tools/ci/fhe-key-source-scalar.mjs';
 import {
     checkFixtureSources,
     compiledFixtureFiles,
+    fileDigest,
     snapshotResearchSources,
 } from '#tools/ci/fixture-sources.js';
 import { runWithLocalRunLog } from '#tools/ci/local-run-log.js';
 import { acquireProtocolResearchLock } from '#tools/ci/protocol-research-lock.js';
-import {
-    publicOperatorPhases,
-    fheKeySourcePhases,
-} from '#tools/ci/public-operator-scalar.mjs';
-import {
-    assertPublicOperatorSourceStable,
-    parsePublicOperatorReport,
-    readPublicOperatorNativeSource,
-} from '#tools/ci/public-operator-source.js';
 import { runGuardedFixture } from '#tools/ci/run-guarded-fixture.js';
-import {
-    boundedBrowserSources,
-    runPublicOperatorInChrome,
-    runFheKeySourceInChrome,
-} from '#tools/ci/run-seed-sharing-browser.js';
 import {
     buildScalarFixtureModule,
     executeFixtureCommand,
@@ -42,47 +35,30 @@ import {
     scalarFixtureBuildFlags,
     scalarLinearMemoryLimit,
 } from '#tools/ci/scalar-fixture-build.js';
-import {
-    assertScalarNativeInputs,
-    compareNativeReferenceArtifacts,
-    fileDigest,
-} from '#tools/ci/seed-sharing-scalar-source.js';
 
-const kinds = ['seed', 'opening'] as const;
+const screenKind = 'fhe-key-source';
+const packageName = 'setup-witness';
+const binaryName = 'screen-fhe-key-source';
+const features = ['--features', 'key-source-screen'];
 const sourcesForHost = [
     'tools/ci/run-arithmetic-screen.ts',
     'tools/ci/fhe-key-source-report.ts',
     'tests/fhe-key-source-resource-model.ts',
-    'tools/ci/public-operator-source.ts',
     'tools/ci/fixture-sources.ts',
     'tools/ci/protocol-research-registry.ts',
     'tools/ci/run-guarded-fixture.ts',
     'tools/ci/native-operation-guard.ts',
     'tools/ci/scalar-fixture-build.ts',
     'tools/ci/compiled-inputs.ts',
-    'tools/ci/seed-sharing-scalar-source.ts',
     'tools/ci/bounded-output-worker.mjs',
     'tools/ci/operator-process-gates.mjs',
-    'tools/ci/scalar-proof-file-reader.mjs',
-    'tools/ci/seed-sharing-scalar-prover.mjs',
-    'tools/ci/seed-sharing-scalar-verifier.mjs',
-    'tests/recoverable-setup-resource-model.ts',
-    'tests/recoverable-opening-share-model.ts',
-    'tests/public-polynomial-operator-resource-model.ts',
     ...boundedBrowserSources,
 ];
 
 export const runArithmeticScreenFixture = async (
     host: 'native' | 'node' | 'chrome',
     sourceDirectory?: string,
-    screenKind: 'public-operator' | 'fhe-key-source' = 'public-operator',
 ) => {
-    const keySource = screenKind === 'fhe-key-source';
-    const packageName = keySource ? 'setup-witness' : 'public-operator-screen';
-    const binaryName = keySource
-        ? 'screen-fhe-key-source'
-        : 'screen-public-operator';
-    const features = keySource ? ['--features', 'key-source-screen'] : [];
     assert.equal(sourceDirectory === undefined, host === 'native');
     const name =
         (host === 'node'
@@ -116,24 +92,17 @@ export const runArithmeticScreenFixture = async (
             );
             try {
                 assert.ok(freemem() >= 2 * fixtureProcessMemoryLimit);
-                const models = keySource
-                    ? (() => {
-                          const model = compileFheKeySourceScreenResources();
-                          return [
-                              {
-                                  ...model,
-                                  kind: 'key-source' as const,
-                                  planningBytes:
-                                      host === 'native'
-                                          ? model.nativePlanningBytes
-                                          : model.scalarPlanningBytes,
-                              },
-                          ];
-                      })()
-                    : kinds.map((kind) =>
-                          compilePublicOperatorScreenResources(kind),
-                      );
-                assert.ok(models.length > 0);
+                const resources = compileFheKeySourceScreenResources();
+                const models = [
+                    {
+                        ...resources,
+                        kind: 'key-source' as const,
+                        planningBytes:
+                            host === 'native'
+                                ? resources.nativePlanningBytes
+                                : resources.scalarPlanningBytes,
+                    },
+                ];
                 for (const model of models) {
                     assert.ok(
                         model.planningBytes < BigInt(fixtureProcessMemoryLimit),
@@ -151,14 +120,10 @@ export const runArithmeticScreenFixture = async (
                     JSON.stringify(
                         {
                             models,
-                            phaseLabels: keySource
-                                ? fheKeySourcePhases
-                                : publicOperatorPhases,
+                            phaseLabels: fheKeySourcePhases,
                             processMemoryLimit: fixtureProcessMemoryLimit,
                             linearMemoryLimit: scalarLinearMemoryLimit,
-                            scope: keySource
-                                ? 'Original FHE source creation, public-coordinate emission, restoration into a contribution, first-gadget generation and independent coordinate checks. Planning and sampled process/linear limits remain distinct; no proof or participant capability is created.'
-                                : 'Public recipe and operator construction is phase 1; actual query evaluation is phase 4. Coordinate checks, whole-operator digest, query references and report comparison are instrumentation. Planning counts buffers and its stated allowance; enforced sampled process/linear limits remain independent.',
+                            scope: 'Original FHE source creation, public-coordinate emission, restoration into a contribution, first-gadget generation and independent coordinate checks. Planning and sampled process/linear limits remain distinct; no proof or participant capability is created.',
                         },
                         (_key, value: unknown) =>
                             typeof value === 'bigint' ? String(value) : value,
@@ -179,11 +144,10 @@ export const runArithmeticScreenFixture = async (
                 const source =
                     sourceDirectory === undefined
                         ? undefined
-                        : await (
-                              keySource
-                                  ? readFheKeySourceNativeSource
-                                  : readPublicOperatorNativeSource
-                          )(sourceDirectory, root);
+                        : await readFheKeySourceNativeSource(
+                              sourceDirectory,
+                              root,
+                          );
                 if (source)
                     await writeFile(
                         path.join(log.runDirectoryPath, 'native-inputs.json'),
@@ -290,19 +254,12 @@ export const runArithmeticScreenFixture = async (
                     );
                 } else {
                     assert.ok(source);
-                    module = await buildScalarFixtureModule(
-                        context,
-                        screenKind,
-                    );
+                    module = await buildScalarFixtureModule(context);
                     const dependencyFile = path.join(
                         root,
                         'target/' +
                             screenKind +
-                            '-scalar/wasm32-unknown-unknown/release/' +
-                            (keySource
-                                ? 'setup_witness'
-                                : 'public_operator_screen') +
-                            '.d',
+                            '-scalar/wasm32-unknown-unknown/release/setup_witness.d',
                     );
                     files = await compiledFixtureFiles(
                         dependencyFile,
@@ -313,7 +270,6 @@ export const runArithmeticScreenFixture = async (
                         files,
                         compiler,
                         root,
-                        screenKind,
                     );
                 }
                 const compiledInputs = await checkFixtureSources(
@@ -362,10 +318,7 @@ export const runArithmeticScreenFixture = async (
                 const artifacts = [];
                 const reports = [];
                 for (const model of models) {
-                    const artifactName =
-                        (keySource ? 'key-source-' : 'operator-') +
-                        model.caseId +
-                        '.bin';
+                    const artifactName = 'key-source-' + model.caseId + '.bin';
                     const file = path.join(output, artifactName);
                     if (executable !== undefined) {
                         const result = await runGuardedFixture({
@@ -374,25 +327,16 @@ export const runArithmeticScreenFixture = async (
                             environment,
                             processMemoryLimit: fixtureProcessMemoryLimit,
                             command: executable,
-                            args: keySource
-                                ? [file]
-                                : [String(model.caseId), file],
+                            args: [file],
                             name: 'native-operator-' + model.kind,
-                            handshake: 'operator',
-                            ...(keySource
-                                ? {
-                                      nativeProgressLines:
-                                          fheKeySourceProgressLines,
-                                      parseResult: parseFheKeySourceOutput,
-                                  }
-                                : {}),
+                            handshake: true,
+                            nativeProgressLines: fheKeySourceProgressLines,
+                            parseResult: parseFheKeySourceOutput,
                         });
                         assert.equal(
                             result.result.kind,
                             screenKind + '-screen',
                         );
-                        if (!keySource)
-                            assert.equal(result.result.case, model.kind);
                         assert.equal(
                             result.result.reportBytes,
                             Number(model.reportBytes),
@@ -403,11 +347,7 @@ export const runArithmeticScreenFixture = async (
                         const expected = source.artifacts[model.caseId];
                         let result;
                         if (host === 'chrome')
-                            result = await (
-                                keySource
-                                    ? runFheKeySourceInChrome
-                                    : runPublicOperatorInChrome
-                            )({
+                            result = await runFheKeySourceInChrome({
                                 root,
                                 log,
                                 moduleFile: module.moduleFile,
@@ -417,7 +357,6 @@ export const runArithmeticScreenFixture = async (
                                 expectedSha512: expected.sha512,
                                 processMemoryLimit: fixtureProcessMemoryLimit,
                                 linearMemoryLimit: scalarLinearMemoryLimit,
-                                caseIndex: model.caseId as 0 | 1,
                             });
                         else {
                             const configuration = path.join(
@@ -451,7 +390,7 @@ export const runArithmeticScreenFixture = async (
                                     configuration,
                                 ],
                                 name: 'scalar-operator-' + model.kind,
-                                handshake: 'operator',
+                                handshake: true,
                             });
                         }
                         assert.equal(
@@ -482,14 +421,7 @@ export const runArithmeticScreenFixture = async (
                         BigInt((await stat(file)).size),
                         model.reportBytes,
                     );
-                    reports.push(
-                        keySource
-                            ? parseFheKeySourceReport(await readFile(file))
-                            : parsePublicOperatorReport(
-                                  await readFile(file),
-                                  model.kind as 'seed' | 'opening',
-                              ),
-                    );
+                    reports.push(parseFheKeySourceReport(await readFile(file)));
                     artifacts.push({
                         name: artifactName,
                         bytes: Number(model.reportBytes),
@@ -497,11 +429,7 @@ export const runArithmeticScreenFixture = async (
                     });
                 }
                 if (source !== undefined)
-                    await (
-                        keySource
-                            ? assertFheKeySourceStable
-                            : assertPublicOperatorSourceStable
-                    )(source, root);
+                    await assertFheKeySourceStable(source, root);
                 await checkFixtureSources(
                     root,
                     pinnedSources,
@@ -519,7 +447,7 @@ export const runArithmeticScreenFixture = async (
                     JSON.stringify(
                         {
                             case: name,
-                            participantCount: keySource ? 3 : 4,
+                            participantCount: 3,
                             optionCount: 2,
                             simulatedHelpers: 0,
                             output,
@@ -537,9 +465,7 @@ export const runArithmeticScreenFixture = async (
                                       module: module?.inspected,
                                       scalar,
                                   }),
-                            scope: keySource
-                                ? 'A fixed synthetic FHE source emits its original public coordinate and restores that coordinate into the first contribution gadget. Independent coordinate checks and identical public reports compare native and scalar execution. Other gadget randomness comes from the native operating system or secure scalar host. No proof, registration, participant capability or phone qualification is created.'
-                                : 'Public arithmetic at the full physical ring using streamed synthetic public polynomials and the full paired query list. Original-equation coordinate checks and streamed column/query references check the operator; matching reports compare native and scalar execution. Construction/query timings are separated from reference/digest instrumentation. No witness, proof, predecessor capability, disclosure, participant state or phone qualification is created.',
+                            scope: 'A fixed synthetic FHE source emits its original public coordinate and restores that coordinate into the first contribution gadget. Independent coordinate checks and identical public reports compare native and scalar execution. Other gadget randomness comes from the native operating system or secure scalar host. No proof, registration, participant capability or phone qualification is created.',
                         },
                         null,
                         2,

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
@@ -8,13 +8,14 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { compileFheKeySourceScreenResources } from '#tests/fhe-key-source-resource-model.js';
 import {
     assertFheKeySourceStable,
+    assertScalarNativeInputs,
+    compareNativeReferenceArtifacts,
     fheKeySourceProgressLines,
     parseFheKeySourceOutput,
     parseFheKeySourceReport,
     readFheKeySourceNativeSource,
 } from '#tools/ci/fhe-key-source-report.js';
 import { runArtifactDirectoryPath } from '#tools/ci/local-run-log.js';
-import { assertScalarNativeInputs } from '#tools/ci/seed-sharing-scalar-source.js';
 
 const digest = (bytes: Uint8Array | string) =>
     createHash('sha512').update(bytes).digest('hex');
@@ -159,8 +160,19 @@ const nativeFixture = async () => {
             );
     };
     await save();
-    return { root, source, archive, fixture, summary, result, save };
+    return {
+        root,
+        source,
+        archive,
+        fixture,
+        summary,
+        manifest,
+        result,
+        save,
+    };
 };
+
+type NativeFixture = Awaited<ReturnType<typeof nativeFixture>>;
 
 afterEach(async () => {
     for (const root of roots.splice(0)) {
@@ -320,7 +332,6 @@ describe('FHE key source report and source intake', () => {
                 files,
                 source.compiler,
                 fixture.root,
-                'fhe-key-source',
             ),
         ).resolves.toEqual({
             unchangedNativeInputs: [...source.compiledInputs.keys()].sort(),
@@ -338,7 +349,6 @@ describe('FHE key source report and source intake', () => {
                 [...files, unrelated.file],
                 source.compiler,
                 fixture.root,
-                'fhe-key-source',
             ),
         ).rejects.toThrow('did not compile a scalar shared input');
         source.compiledInputs.delete(
@@ -350,8 +360,186 @@ describe('FHE key source report and source intake', () => {
                 files,
                 source.compiler,
                 fixture.root,
-                'fhe-key-source',
             ),
         ).rejects.toThrow('did not compile a scalar shared input');
+    });
+    it('refuses an empty Rust closure, another compiler, any changed input and an unsnapshotted adapter', async () => {
+        const fixture = await nativeFixture();
+        const source = await readFheKeySourceNativeSource(
+            fixture.source,
+            fixture.root,
+        );
+        const adapter = {
+            file: 'crates/protocol-research/setup-witness/src/browser_random.rs',
+            bytes: 1,
+            sha512: digest('x'),
+        };
+        source.sources.set(adapter.file, adapter);
+        await writeFile(path.join(fixture.root, adapter.file), 'x');
+        const files = [...source.compiledInputs.keys(), adapter.file];
+        const inspect = (
+            inputs: readonly string[] = files,
+            compiler = source.compiler,
+            admitted: Parameters<typeof assertScalarNativeInputs>[0] = source,
+        ) => assertScalarNativeInputs(admitted, inputs, compiler, fixture.root);
+        await expect(inspect([])).rejects.toThrow('closure is empty');
+        await expect(inspect(['tools/ci/fixture-sources.ts'])).rejects.toThrow(
+            'closure is empty',
+        );
+        await expect(inspect(files, 'other compiler')).rejects.toThrow(
+            'another compiler',
+        );
+        for (const file of files)
+            for (const changed of ['y', 'xx']) {
+                await writeFile(path.join(fixture.root, file), changed);
+                await expect(inspect()).rejects.toThrow(
+                    'native input changed: ' + file,
+                );
+                await writeFile(path.join(fixture.root, file), 'x');
+            }
+        await expect(inspect()).resolves.toMatchObject({
+            targetAdapters: [adapter.file],
+        });
+        const sources = new Map(source.sources);
+        sources.delete(adapter.file);
+        await expect(
+            inspect(files, source.compiler, { ...source, sources }),
+        ).rejects.toThrow('did not snapshot a scalar target adapter');
+    });
+    it('refuses runtime digests of another length, foreign runs and compiled inventories that differ from their snapshots', async () => {
+        const fixture = await nativeFixture();
+        const runtime = path.join(path.dirname(fixture.archive), 'runtime.bin');
+        for (const length of [63, 65]) {
+            await writeFile(runtime, Buffer.alloc(length, 19));
+            await expect(
+                readFheKeySourceNativeSource(fixture.source, fixture.root),
+            ).rejects.toThrow('runtime digest has another length');
+        }
+        await writeFile(runtime, Buffer.alloc(64, 19));
+        await expect(
+            readFheKeySourceNativeSource(fixture.source, fixture.root),
+        ).resolves.toMatchObject({ compiler: 'synthetic compiler' });
+        const changes: {
+            change: (value: NativeFixture) => void;
+            message?: string;
+        }[] = [
+            {
+                change: (value) => {
+                    value.result.runtimeIdentity = 'b'.repeat(128);
+                },
+            },
+            {
+                change: (value) => {
+                    value.result.case = 'native-result';
+                },
+            },
+            {
+                change: (value) => {
+                    value.result.participantCount = 4;
+                },
+            },
+            {
+                change: (value) => {
+                    value.result.simulatedHelpers = 1;
+                },
+            },
+            {
+                change: (value) => {
+                    value.manifest.sources[0] = {
+                        ...value.manifest.sources[0],
+                        file: '../outside.rs',
+                    };
+                },
+            },
+            {
+                change: (value) => {
+                    value.result.compiledInputs[0] = {
+                        ...value.result.compiledInputs[0],
+                        sha512: 'f'.repeat(128),
+                    };
+                },
+                message: 'differs from its source manifest',
+            },
+            {
+                change: (value) => {
+                    value.result.compiledInputs.push(
+                        value.result.compiledInputs[0],
+                    );
+                },
+                message: 'duplicated',
+            },
+        ];
+        for (const { change, message } of changes) {
+            const value = await nativeFixture();
+            change(value);
+            await value.save();
+            await expect(
+                readFheKeySourceNativeSource(value.source, value.root),
+            ).rejects.toThrow(message);
+        }
+    });
+    it('compares deterministic references across read-chunk boundaries and detects every changed byte', async () => {
+        await mkdir('temp', { recursive: true });
+        const root = await mkdtemp(
+            path.resolve('temp/fhe-source-reference-test-'),
+        );
+        roots.push(root);
+        const historical = path.join(root, 'historical');
+        const output = path.join(root, 'fresh');
+        await mkdir(historical);
+        await mkdir(output);
+        const long = Buffer.alloc((1 << 20) + 7, 31);
+        const short = Buffer.from([1, 2, 3]);
+        const artifacts = [];
+        for (const [name, bytes] of [
+            ['long.bin', long],
+            ['short.bin', short],
+        ] as const) {
+            await writeFile(path.join(historical, name), bytes);
+            await writeFile(path.join(output, name), bytes);
+            artifacts.push({
+                name,
+                file: path.join(historical, name),
+                bytes: bytes.length,
+                sha512: digest(bytes),
+            });
+        }
+        await expect(
+            compareNativeReferenceArtifacts(artifacts, output),
+        ).resolves.toEqual(
+            artifacts.map(({ name, bytes, sha512 }) => ({
+                name,
+                bytes,
+                sha512,
+            })),
+        );
+        for (const [name, position] of [
+            ['long.bin', 0],
+            ['long.bin', 1 << 20],
+            ['long.bin', (1 << 20) + 6],
+            ['short.bin', 2],
+        ] as const) {
+            const file = path.join(output, name);
+            const original = await readFile(file);
+            const changed = Buffer.from(original);
+            changed[position] ^= 1;
+            await writeFile(file, changed);
+            await expect(
+                compareNativeReferenceArtifacts(artifacts, output),
+            ).rejects.toThrow(
+                'differs from its deterministic reference: ' + name,
+            );
+            await writeFile(file, original);
+        }
+        await writeFile(path.join(output, 'short.bin'), short.subarray(0, 2));
+        await expect(
+            compareNativeReferenceArtifacts(artifacts, output),
+        ).rejects.toThrow();
+        const replaced = Buffer.from([1, 2, 4]);
+        await writeFile(path.join(historical, 'short.bin'), replaced);
+        await writeFile(path.join(output, 'short.bin'), replaced);
+        await expect(
+            compareNativeReferenceArtifacts(artifacts, output),
+        ).rejects.toThrow();
     });
 });

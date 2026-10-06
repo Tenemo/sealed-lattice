@@ -9,17 +9,12 @@ import {
 } from 'node:worker_threads';
 
 import { createBoundedOutputSink } from './bounded-output-sink.mjs';
+import { runFheKeySourceScreen } from './fhe-key-source-scalar.mjs';
 import { withOperatorProcessGates } from './operator-process-gates.mjs';
-import {
-    runPublicOperatorScreen,
-    runFheKeySourceScreen,
-} from './public-operator-scalar.mjs';
-import { withPinnedProofReaders } from './scalar-proof-file-reader.mjs';
-import { generateBoundedProof } from './seed-sharing-scalar-prover.mjs';
 
-/** @typedef {{module:string,moduleSha512:string,outputFile:string,expectedBytes:number,expectedSha512:string,operation?:'public-operator'|'fhe-key-source',caseIndex?:number,relation?:'seed-sharing'|'opening-share',predecessors?:import('./scalar-proof-file-reader.mjs').Proof[]}} Configuration */
-/** @typedef {Awaited<ReturnType<typeof import('./bounded-output.mjs').driveBoundedOutput>>} GenerationResult */
-/** @typedef {import('./seed-sharing-scalar-prover.mjs').OutputAcknowledgment} OutputAcknowledgment */
+/** @typedef {{module:string,moduleSha512:string,outputFile:string,expectedBytes:number,expectedSha512:string,operation:'fhe-key-source',caseIndex:number}} Configuration */
+/** @typedef {Awaited<ReturnType<typeof runFheKeySourceScreen>>} GenerationResult */
+/** @typedef {import('./bounded-output.mjs').OutputAcknowledgment} OutputAcknowledgment */
 
 if (isMainThread) {
     const configuration = /** @type {Configuration} */ (
@@ -61,12 +56,7 @@ if (isMainThread) {
                             console.log(
                                 JSON.stringify({
                                     event:
-                                        configuration.operation !== undefined
-                                            ? configuration.operation +
-                                              '-progress'
-                                            : (configuration.relation ??
-                                                  'seed-sharing') +
-                                              '-generation-progress',
+                                        configuration.operation + '-progress',
                                     ...message.progress,
                                 }),
                             );
@@ -137,19 +127,12 @@ if (isMainThread) {
                     else resolve(generated);
                 });
             });
-            const proof = sink.finish();
+            const output = sink.finish();
             console.log(
                 JSON.stringify({
-                    kind:
-                        configuration.operation !== undefined
-                            ? 'scalar-' + configuration.operation + '-screen'
-                            : 'scalar-' +
-                              (configuration.relation ?? 'seed-sharing') +
-                              '-generation',
+                    kind: 'scalar-' + configuration.operation + '-screen',
                     ...result,
-                    ...(configuration.operation !== undefined
-                        ? { output: proof }
-                        : { proof }),
+                    output,
                 }),
             );
         } finally {
@@ -158,12 +141,7 @@ if (isMainThread) {
             await sink.close();
         }
     };
-    if (configuration.operation !== undefined)
-        await withOperatorProcessGates(process.argv.slice(3), run);
-    else {
-        assert.equal(process.argv.length, 3);
-        await run();
-    }
+    await withOperatorProcessGates(process.argv.slice(3), run);
 } else {
     const configuration = /** @type {Configuration} */ (workerData);
     const moduleBytes = await readFile(configuration.module);
@@ -201,9 +179,9 @@ if (isMainThread) {
     };
     port.on('message', acknowledgment);
     try {
-        /** @type {Parameters<typeof generateBoundedProof>[0]} */
-        const outputInput = {
+        const result = await runFheKeySourceScreen({
             moduleBytes,
+            caseIndex: configuration.caseIndex ?? -1,
             expectedBytes: configuration.expectedBytes,
             onProgress: (progress) =>
                 port.postMessage({ kind: 'progress', progress }),
@@ -219,31 +197,7 @@ if (isMainThread) {
                         bytes.buffer,
                     ]);
                 }),
-        };
-        /** @param {((index:number,length:number,position:number)=>Promise<Uint8Array>)|undefined} readPredecessor */
-        const generate = (readPredecessor) =>
-            generateBoundedProof({
-                ...outputInput,
-                relation: configuration.relation,
-                predecessors: configuration.predecessors,
-                readPredecessor,
-            });
-        const result =
-            configuration.operation !== undefined
-                ? await (
-                      configuration.operation === 'fhe-key-source'
-                          ? runFheKeySourceScreen
-                          : runPublicOperatorScreen
-                  )({
-                      ...outputInput,
-                      caseIndex: configuration.caseIndex ?? -1,
-                  })
-                : configuration.relation === 'opening-share'
-                  ? await withPinnedProofReaders(
-                        configuration.predecessors ?? [],
-                        generate,
-                    )
-                  : await generate(undefined);
+        });
         port.postMessage({ kind: 'result', result });
     } finally {
         port.off('message', acknowledgment);

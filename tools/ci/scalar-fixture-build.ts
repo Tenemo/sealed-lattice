@@ -6,7 +6,6 @@ import path from 'node:path';
 
 import binaryen from 'binaryen';
 
-import { compiledRustSources } from '#tools/ci/compiled-inputs.js';
 import type { ActiveLocalRunLog } from '#tools/ci/local-run-log.js';
 import { runCommandAndCaptureOutput } from '#tools/ci/run-command.js';
 
@@ -78,33 +77,22 @@ const allowedImports = new Set([
     'read',
 ]);
 
-export const inspectScalarFixtureModule = async (
-    bytes: Uint8Array,
-    generation = false,
-    relation:
-        | 'seed-sharing'
-        | 'opening-share'
-        | 'public-operator'
-        | 'fhe-key-source' = 'seed-sharing',
-) => {
-    assert.ok(
-        (relation !== 'public-operator' && relation !== 'fhe-key-source') ||
-            !generation,
-        'A public operator screen has no proof-generation mode.',
-    );
+// The key source screen module may import only the scalar helper queries and
+// its setup entropy, and must export its bounded screen ABI.
+export const inspectScalarFixtureModule = async (bytes: Uint8Array) => {
     const inspected = binaryen.readBinary(bytes);
     try {
         assert.doesNotMatch(
             inspected.emitText(),
             /\b(?:v128|i8x16|i16x8|i32x4|i64x2|f32x4|f64x2)\./u,
-            'The verifier must contain scalar instructions only.',
+            'The scalar module must contain scalar instructions only.',
         );
         const memory = inspected.getMemoryInfo();
         assert.ok(
             !memory.shared &&
                 !memory.is64 &&
                 memory.max === scalarLinearMemoryLimit / 65_536,
-            'The verifier memory is not bounded unshared scalar memory.',
+            'The scalar module memory is not bounded unshared scalar memory.',
         );
     } finally {
         inspected.dispose();
@@ -117,108 +105,44 @@ export const inspectScalarFixtureModule = async (
                 entry.kind === 'function' &&
                 ((entry.module === 'parallel' &&
                     allowedImports.has(entry.name)) ||
-                    (generation &&
-                        entry.module === 'word_proof' &&
-                        entry.name === 'fill_random') ||
-                    (relation === 'fhe-key-source' &&
-                        entry.module === 'setup_witness' &&
+                    (entry.module === 'setup_witness' &&
                         entry.name === 'fill_random')),
         ),
-        'The verifier declares an unknown host import.',
+        'The scalar module declares an unknown host import.',
     );
     const exports = WebAssembly.Module.exports(module);
-    const required =
-        relation === 'public-operator' || relation === 'fhe-key-source'
-            ? [
-                  'begin',
-                  'phase',
-                  'step',
-                  'next_output',
-                  'output_pointer',
-                  'output_length',
-                  'output_capacity',
-                  'ack_output',
-              ].map(
-                  (name) =>
-                      (relation === 'fhe-key-source'
-                          ? 'key_source_screen_'
-                          : 'operator_screen_') + name,
-              )
-            : relation === 'opening-share'
-              ? [
-                    'opening_input_pointer',
-                    'opening_input_capacity',
-                    'opening_header_length',
-                    ...['source', 'verifier'].flatMap((role) =>
-                        ['begin', 'push', 'finish'].map(
-                            (name) => 'opening_' + role + '_' + name,
-                        ),
-                    ),
-                ]
-              : [
-                    'input_pointer',
-                    'input_capacity',
-                    'header_length',
-                    'begin',
-                    'push',
-                    'finish',
-                ].map((name) => 'seed_verifier_' + name);
-    for (const name of required)
+    for (const name of [
+        'begin',
+        'phase',
+        'step',
+        'next_output',
+        'output_pointer',
+        'output_length',
+        'output_capacity',
+        'ack_output',
+    ])
         assert.ok(
             exports.some(
-                (entry) => entry.kind === 'function' && entry.name === name,
+                (entry) =>
+                    entry.kind === 'function' &&
+                    entry.name === 'key_source_screen_' + name,
             ),
-            'The verifier is missing its bounded ABI.',
+            'The scalar module is missing its bounded ABI.',
         );
     assert.ok(
         exports.some(
             (entry) => entry.kind === 'memory' && entry.name === 'memory',
         ),
     );
-    if (generation)
-        for (const name of [
-            'begin',
-            'phase',
-            'step',
-            'next_output',
-            'output_pointer',
-            'output_length',
-            'output_capacity',
-            'ack_output',
-        ])
-            assert.ok(
-                exports.some(
-                    (entry) =>
-                        entry.kind === 'function' &&
-                        entry.name ===
-                            (relation === 'opening-share'
-                                ? 'opening'
-                                : 'seed') +
-                                '_prover_' +
-                                name,
-                ),
-                'The prover is missing its bounded ABI.',
-            );
     return { imports, exports };
 };
 
 export const buildScalarFixtureModule = async (
     context: FixtureBuildContext,
-    kind:
-        'seed-sharing' | 'opening-share' | 'public-operator' | 'fhe-key-source',
-    feature?: 'scalar-fixture' | 'scalar-prover-fixture',
 ) => {
-    const generation = feature === 'scalar-prover-fixture';
-    const crateName =
-        kind === 'fhe-key-source'
-            ? 'setup-witness'
-            : kind === 'public-operator'
-              ? 'public-operator-screen'
-              : kind + '-proof';
-    const stem = crateName.replace(/-/gu, '_');
     const targetDirectory = path.join(
         context.root,
-        'target/' + kind + '-scalar' + (generation ? '-prover' : ''),
+        'target/fhe-key-source-scalar',
     );
     const cargoHome = path.resolve(
         process.env.CARGO_HOME ?? path.join(homedir(), '.cargo'),
@@ -238,55 +162,38 @@ export const buildScalarFixtureModule = async (
         'cargo',
         [
             '+1.95.0',
-            kind === 'fhe-key-source' ? 'rustc' : 'build',
+            'rustc',
             '--offline',
             '--locked',
             '--release',
             '--no-default-features',
             '-p',
-            crateName,
-            ...(feature === undefined ? [] : ['--features', feature]),
-            ...(kind === 'fhe-key-source'
-                ? ['--features', 'key-source-screen', '--crate-type', 'cdylib']
-                : []),
+            'setup-witness',
+            '--features',
+            'key-source-screen',
+            '--crate-type',
+            'cdylib',
             '--lib',
             '--target',
             'wasm32-unknown-unknown',
         ],
-        generation ? 'build-scalar-prover' : 'build-scalar',
-    );
-    const builtDirectory = path.join(
-        targetDirectory,
-        'wasm32-unknown-unknown/release',
+        'build-scalar',
     );
     const moduleBytes = await readFile(
-        path.join(builtDirectory, stem + '.wasm'),
+        path.join(
+            targetDirectory,
+            'wasm32-unknown-unknown/release/setup_witness.wasm',
+        ),
     );
-    const inspected = await inspectScalarFixtureModule(
-        moduleBytes,
-        generation,
-        kind,
-    );
+    const inspected = await inspectScalarFixtureModule(moduleBytes);
     const moduleFile = path.join(
         context.log.artifactDirectoryPath,
-        kind +
-            (kind === 'public-operator' || kind === 'fhe-key-source'
-                ? ''
-                : generation
-                  ? '-prover'
-                  : '-verifier') +
-            '.wasm',
+        'fhe-key-source.wasm',
     );
     await writeFile(moduleFile, moduleBytes, { flag: 'wx' });
-    const compiled = await compiledRustSources(
-        path.join(builtDirectory, stem + '.d'),
-    );
     return {
-        feature,
-        moduleBytes,
         moduleFile,
         inspected,
-        compiled,
         moduleSha512: createHash('sha512').update(moduleBytes).digest('hex'),
     };
 };

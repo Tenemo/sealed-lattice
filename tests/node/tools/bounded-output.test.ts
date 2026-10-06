@@ -1,9 +1,9 @@
 import binaryen from 'binaryen';
 import { describe, expect, it, vi } from 'vitest';
 
-import { generateBoundedProof } from '#tools/ci/seed-sharing-scalar-prover.mjs';
+import { runFheKeySourceScreen } from '#tools/ci/fhe-key-source-scalar.mjs';
 
-// A transport fixture, not a cryptographic proof. Its pending span is changed
+// A transport fixture, not a key source screen. Its pending span is changed
 // by memory growth only after acknowledgment, exposing stale-view mistakes.
 const fixture = (
     bytes = 13,
@@ -17,16 +17,16 @@ const fixture = (
       (global $offset (mut i32) (i32.const 0))
       (global $length (mut i32) (i32.const 0))
       (global $acks (mut i32) (i32.const 0))
-      (func (export "seed_prover_output_capacity") (result i32) (i32.const ${String(capacity)}))
-      (func (export "seed_prover_phase") (result i32) (global.get $phase))
-      (func (export "seed_prover_output_length") (result i32) (global.get $length))
-      (func (export "seed_prover_output_pointer") (result i32) (i32.const 16))
+      (func (export "key_source_screen_output_capacity") (result i32) (i32.const ${String(capacity)}))
+      (func (export "key_source_screen_phase") (result i32) (global.get $phase))
+      (func (export "key_source_screen_output_length") (result i32) (global.get $length))
+      (func (export "key_source_screen_output_pointer") (result i32) (i32.const 16))
       (func (export "fixture_acks") (result i32) (global.get $acks))
-      (func (export "seed_prover_begin") (result i32)
+      (func (export "key_source_screen_begin") (result i32)
         (if (i32.ne (global.get $phase) (i32.const 0)) (then (return (i32.const 6))))
         ${flaw === 'randomness' ? '(drop (call $random (i32.const 16) (i32.const 1)))' : ''}
         (global.set $phase (i32.const 1)) (drop (memory.grow (i32.const 1))) (i32.const 0))
-      (func (export "seed_prover_step") (result i32)
+      (func (export "key_source_screen_step") (result i32)
         (if (i32.ne (global.get $length) (i32.const 0)) (then
           ${flaw === 'bytes' ? '(i32.store8 (i32.const 16) (i32.const 99))' : ''}
           ${flaw === 'phase' ? '(global.set $phase (i32.const 13))' : ''}
@@ -37,7 +37,7 @@ const fixture = (
         (if (i32.eq (global.get $phase) (i32.const 2))
           (then (global.set $phase (i32.const 12)) (return (i32.const 0))))
         (i32.const 6))
-      (func (export "seed_prover_next_output") (result i32) (local $index i32)
+      (func (export "key_source_screen_next_output") (result i32) (local $index i32)
         (if (i32.ne (global.get $length) (i32.const 0)) (then (return (i32.const 6))))
         (if (i32.eq (global.get $offset) (i32.const ${String(bytes)}))
           (then (global.set $phase (i32.const 13)) (return (i32.const 0))))
@@ -50,7 +50,7 @@ const fixture = (
           (local.set $index (i32.add (local.get $index) (i32.const 1)))
           (br_if $write (i32.lt_u (local.get $index) (global.get $length))))
         (i32.const 0))
-      (func (export "seed_prover_ack_output") (result i32)
+      (func (export "key_source_screen_ack_output") (result i32)
         (if (i32.eqz (global.get $length)) (then (return (i32.const 6))))
         (global.set $offset (i32.add (global.get $offset) (global.get $length)))
         (global.set $length (i32.const 0))
@@ -79,7 +79,7 @@ const captureInstance = () => {
     };
 };
 
-describe('bounded scalar prover transport', () => {
+describe('bounded scalar output transport', () => {
     it('copies each grown-memory span and never acknowledges before its sink receipt', async () => {
         const observed = captureInstance();
         let release!: () => void;
@@ -92,7 +92,8 @@ describe('bounded scalar prover transport', () => {
         });
         const chunks: Uint8Array[] = [];
         try {
-            const generation = generateBoundedProof({
+            const generation = runFheKeySourceScreen({
+                caseIndex: 0,
                 moduleBytes: fixture(),
                 expectedBytes: 13,
                 emitChunk: async (index, offset, bytes) => {
@@ -145,14 +146,15 @@ describe('bounded scalar prover transport', () => {
         }
     });
 
-    it('detects a refusal that mutates pending output and never supplies fallback randomness', async () => {
+    it('detects a refusal that mutates pending output and refuses an unknown case or proof randomness import', async () => {
         for (const flaw of ['bytes', 'phase', 'length'] as const) {
             const sink = vi.fn(
                 (index: number, offset: number, bytes: Uint8Array) =>
                     Promise.resolve({ index, offset, length: bytes.length }),
             );
             await expect(
-                generateBoundedProof({
+                runFheKeySourceScreen({
+                    caseIndex: 0,
                     moduleBytes: fixture(13, 5, flaw),
                     expectedBytes: 13,
                     emitChunk: sink,
@@ -164,12 +166,21 @@ describe('bounded scalar prover transport', () => {
             Promise.resolve({ index, offset, length: bytes.length }),
         );
         await expect(
-            generateBoundedProof({
+            runFheKeySourceScreen({
+                caseIndex: 1,
+                moduleBytes: fixture(),
+                expectedBytes: 13,
+                emitChunk: sink,
+            }),
+        ).rejects.toThrow('Unknown key source screen case');
+        await expect(
+            runFheKeySourceScreen({
+                caseIndex: 0,
                 moduleBytes: fixture(13, 5, 'randomness'),
                 expectedBytes: 13,
                 emitChunk: sink,
             }),
-        ).rejects.toThrow('Scalar generation invoked word_proof.fill_random');
+        ).rejects.toThrow('Unknown scalar import');
         expect(sink).not.toHaveBeenCalled();
     });
 
@@ -182,7 +193,8 @@ describe('bounded scalar prover transport', () => {
             const observed = captureInstance();
             try {
                 await expect(
-                    generateBoundedProof({
+                    runFheKeySourceScreen({
+                        caseIndex: 0,
                         moduleBytes: fixture(),
                         expectedBytes: 13,
                         emitChunk: () => Promise.resolve(wrong),
@@ -196,7 +208,8 @@ describe('bounded scalar prover transport', () => {
         const observed = captureInstance();
         try {
             await expect(
-                generateBoundedProof({
+                runFheKeySourceScreen({
+                    caseIndex: 0,
                     moduleBytes: fixture(),
                     expectedBytes: 13,
                     emitChunk: (index, offset, bytes) =>
@@ -218,7 +231,8 @@ describe('bounded scalar prover transport', () => {
         const failure = new Error('The output write failed.');
         try {
             await expect(
-                generateBoundedProof({
+                runFheKeySourceScreen({
+                    caseIndex: 0,
                     moduleBytes: fixture(),
                     expectedBytes: 13,
                     emitChunk: () => Promise.reject(failure),
@@ -232,14 +246,16 @@ describe('bounded scalar prover transport', () => {
             Promise.resolve({ index, offset, length: bytes.length });
         for (const expectedBytes of [12, 14])
             await expect(
-                generateBoundedProof({
+                runFheKeySourceScreen({
+                    caseIndex: 0,
                     moduleBytes: fixture(),
                     expectedBytes,
                     emitChunk,
                 }),
             ).rejects.toThrow();
         await expect(
-            generateBoundedProof({
+            runFheKeySourceScreen({
+                caseIndex: 0,
                 moduleBytes: fixture(13, 1_048_577),
                 expectedBytes: 13,
                 emitChunk,

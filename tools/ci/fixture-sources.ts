@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { createReadStream } from 'node:fs';
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
@@ -8,9 +9,15 @@ import {
     requireCheckoutBytes,
 } from '#tools/ci/compiled-inputs.js';
 import type { ActiveLocalRunLog } from '#tools/ci/local-run-log.js';
-import { fileDigest } from '#tools/ci/seed-sharing-scalar-source.js';
 
 type SourceEntry = Readonly<{ file: string; bytes: number; sha512: string }>;
+
+export const fileDigest = async (file: string): Promise<string> => {
+    const digest = createHash('sha512');
+    for await (const chunk of createReadStream(file))
+        digest.update(chunk as Buffer);
+    return digest.digest('hex');
+};
 
 const snapshotFixtureFiles = async (
     log: ActiveLocalRunLog,

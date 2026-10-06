@@ -11,7 +11,7 @@ import type { SupportedProfile } from '#tests/supported-profile-model.js';
 
 export const publicCoefficientAllowance = 1024n;
 
-export const compileWordProverResources = (
+const compileWordProverResources = (
     input: Readonly<{
         columns: number;
         lookups: number;

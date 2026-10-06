@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import {
-    copyFile,
     mkdir,
     mkdtemp,
     readFile,
@@ -21,19 +20,11 @@ import { compileContributionBodyCensus } from '#tests/contribution-body-model.js
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import { compileLinkedReleaseWordProofLayout } from '#tests/full-word-proof-layout-model.js';
 import { compileRecipientKeyCensus } from '#tests/recipient-key-model.js';
-import {
-    compileBoundedOpeningShareProofResources,
-    compileRecoverableSeedSharingProofResources,
-} from '#tests/recoverable-setup-resource-model.js';
 import { compileRegistrationEnrollmentCensus } from '#tests/registration-enrollment-model.js';
 import { compileRosterProposalCensus } from '#tests/roster-proposal-model.js';
 import { compileSetupAggregateResources } from '#tests/setup-aggregate-resource-model.js';
 import { deriveSupportedProfile } from '#tests/supported-profile-model.js';
-import {
-    snapshotResearchSources,
-    compiledFixtureFiles,
-    checkFixtureSources,
-} from '#tools/ci/fixture-sources.js';
+import { snapshotResearchSources } from '#tools/ci/fixture-sources.js';
 import { runWithLocalRunLog } from '#tools/ci/local-run-log.js';
 import { readProtocolProcessTree } from '#tools/ci/protocol-process-memory.js';
 import { acquireProtocolResearchLock } from '#tools/ci/protocol-research-lock.js';
@@ -45,39 +36,9 @@ import {
     runCommandsInSeries,
 } from '#tools/ci/run-command.js';
 import { runRegistrationSession } from '#tools/ci/run-registration-session.js';
-import { runScalarProofFixture } from '#tools/ci/run-seed-sharing-scalar.js';
-import {
-    assertSeedSharingSourceStable,
-    assertSeedSharingSharedInputs,
-    compareNativeReferenceArtifacts,
-    assertOpeningShareSourceStable,
-    readOpeningShareNativeSource,
-    fileDigest,
-    readSeedSharingNativeSource,
-} from '#tools/ci/seed-sharing-scalar-source.js';
 
 type NativeResult = {
     kind: string;
-    positive?: number;
-    falseWitnesses?: number;
-    falseStatements?: number;
-    hostileCases?: number;
-    participants?: number;
-    degree?: number;
-    seedBits?: number;
-    proofDomain?: number;
-    wordColumns?: number;
-    booleanColumns?: number;
-    lookupEntries?: number;
-    affineRows?: number;
-    statementBytes?: number;
-    proofBytes?: number[] | number;
-    selected?: number;
-    recipient?: number;
-    predecessors?: number;
-    sourceIdentities?: string[];
-    secondSourceProofBytes?: number;
-    shiftedProofBytes?: number;
     accepted?: number[];
     invalid?: number[];
     conflicting?: number[];
@@ -105,9 +66,6 @@ if (selected.name === 'registration-session') {
     process.exit(process.exitCode ?? 0);
 }
 if (
-    selected.name === 'native-public-operator' ||
-    selected.name === 'scalar-public-operator' ||
-    selected.name === 'browser-public-operator' ||
     selected.name === 'native-fhe-key-source' ||
     selected.name === 'scalar-fhe-key-source' ||
     selected.name === 'browser-fhe-key-source'
@@ -119,46 +77,11 @@ if (
               ? 'node'
               : 'chrome',
         'source' in selected ? selected.source : undefined,
-        selected.name.endsWith('fhe-key-source')
-            ? 'fhe-key-source'
-            : 'public-operator',
     );
     process.exit(process.exitCode ?? 0);
 }
 
-if ('source' in selected && selected.name !== 'native-opening-share') {
-    await runScalarProofFixture(
-        selected.source,
-        selected.name.startsWith('browser-') ? 'chrome' : 'node',
-        selected.name.endsWith('-generation') ? 'generate' : 'verify',
-        selected.name.includes('opening-share')
-            ? 'opening-share'
-            : 'seed-sharing',
-    );
-    // The selected runner has finished its diagnostics and process cleanup.
-    process.exit(process.exitCode ?? 0);
-}
 const prefixCase = selected.name === 'native-prefix';
-const seedSharingCase = selected.name === 'native-seed-sharing';
-const openingShareCase = selected.name === 'native-opening-share';
-const fragmentCase = seedSharingCase || openingShareCase;
-const fragmentPackage = openingShareCase
-    ? 'opening-share-proof'
-    : 'seed-sharing-proof';
-const fragmentBinary = 'check-' + fragmentPackage;
-const referenceDirectory =
-    'reference' in selected ? selected.reference : undefined;
-const seedSharingResources = fragmentCase
-    ? compileRecoverableSeedSharingProofResources(
-          selected.participantCount,
-          selected.optionCount,
-          256n,
-          4n,
-      )
-    : undefined;
-const openingShareResources = openingShareCase
-    ? compileBoundedOpeningShareProofResources()
-    : undefined;
 // The ceremony's roles and expected outcome for the selected profile.
 const scenario = deriveResearchScenario(
     selected.participantCount,
@@ -192,28 +115,21 @@ const proofCrates = [
 ];
 // A native ceremony generates and proves one contribution per participant,
 // which dominates its duration.
-const executionTimeout =
-    prefixCase || fragmentCase
-        ? 3_600_000
-        : 900_000 * selected.participantCount;
+const executionTimeout = prefixCase
+    ? 3_600_000
+    : 900_000 * selected.participantCount;
 
 await runWithLocalRunLog(
     {
         commandLineArguments: [
             selected.name,
-            ...(openingShareCase
-                ? [selected.source]
-                : seedSharingCase ||
-                    selected.name === 'native-setup-departure' ||
-                    selected.name === 'native-selection-fork'
-                  ? []
-                  : [
-                        String(selected.participantCount),
-                        String(selected.optionCount),
-                    ]),
-            ...(referenceDirectory === undefined
+            ...(selected.name === 'native-setup-departure' ||
+            selected.name === 'native-selection-fork'
                 ? []
-                : ['--compare-reference', referenceDirectory]),
+                : [
+                      String(selected.participantCount),
+                      String(selected.optionCount),
+                  ]),
             ...(selected.simulatedHelpers === 0
                 ? []
                 : ['--simulated-helpers', String(selected.simulatedHelpers)]),
@@ -222,13 +138,9 @@ await runWithLocalRunLog(
             'Pinned protocol research build',
             ...(selected.execution
                 ? [
-                      fragmentCase
-                          ? openingShareCase
-                              ? 'Bounded opening-share proof gates'
-                              : 'Bounded seed-sharing proof gates'
-                          : prefixCase
-                            ? 'Encrypted requested-output gates'
-                            : 'Native original-credential completion',
+                      prefixCase
+                          ? 'Encrypted requested-output gates'
+                          : 'Native original-credential completion',
                   ]
                 : []),
         ],
@@ -240,47 +152,6 @@ await runWithLocalRunLog(
             root,
         );
         try {
-            const openingReference =
-                referenceDirectory !== undefined && openingShareCase
-                    ? await readOpeningShareNativeSource(
-                          referenceDirectory,
-                          root,
-                      )
-                    : undefined;
-            const seedReference =
-                referenceDirectory !== undefined && !openingShareCase
-                    ? await readSeedSharingNativeSource(
-                          referenceDirectory,
-                          root,
-                      )
-                    : undefined;
-            const reference = openingReference ?? seedReference;
-            const predecessor = openingShareCase
-                ? await readSeedSharingNativeSource(selected.source, root)
-                : undefined;
-            for (const [name, source] of [
-                ['deterministic-reference', reference],
-                ['predecessor', predecessor],
-            ] as const) {
-                if (source === undefined) continue;
-                await writeFile(
-                    path.join(log.runDirectoryPath, name + '-inputs.json'),
-                    JSON.stringify(
-                        {
-                            directory: source.directory,
-                            diagnosticDigests: source.diagnosticDigests,
-                            artifacts:
-                                name === 'deterministic-reference' &&
-                                openingReference !== undefined
-                                    ? openingReference.artifacts
-                                    : source.proofs,
-                        },
-                        null,
-                        2,
-                    ) + '\n',
-                    { flag: 'wx' },
-                );
-            }
             const inherited: NodeJS.ProcessEnv = { ...process.env };
             delete inherited[simulatedHelpersVariable];
             const environment: NodeJS.ProcessEnv = {
@@ -396,40 +267,24 @@ await runWithLocalRunLog(
                     (ballot.maximumSignedBodyBytes +
                         ballot.envelopeBytes +
                         enrollment.signatureBytes);
-            const publicPayloadBound = openingShareResources
-                ? openingShareResources.maximumNewArtifactBytes
-                : seedSharingResources
-                  ? 3n * seedSharingResources.layout.maximumMultiproofBytes
-                  : sourceBound +
-                    2048n +
-                    2n * degree * coefficientBytes +
-                    participants *
-                        (2n +
-                            64n +
-                            enrollment.signatureBytes +
-                            releaseBody +
-                            270n +
-                            enrollment.signatureBytes) +
-                    enrollment.maximumPollDefinitionBytes;
-            const diagnosticBound = seedSharingResources
-                ? publicPayloadBound
-                : publicPayloadBound +
-                  contributors *
-                      aggregate.aggregateBytes *
-                      (selected.name === 'native-selection-fork' ? 2n : 1n) +
-                  ballot.maximumProofBytes;
-            if (seedSharingResources)
-                assert.ok(
-                    seedSharingResources.nativeProofPlanningBytes <
-                        BigInt(memoryLimit),
-                    'The seed-sharing proof planning screen exceeds the memory guard.',
-                );
-            if (openingShareResources)
-                assert.ok(
-                    openingShareResources.nativeProofPlanningBytes <
-                        BigInt(memoryLimit),
-                    'The opening-share proof planning screen exceeds the memory guard.',
-                );
+            const publicPayloadBound =
+                sourceBound +
+                2048n +
+                2n * degree * coefficientBytes +
+                participants *
+                    (2n +
+                        64n +
+                        enrollment.signatureBytes +
+                        releaseBody +
+                        270n +
+                        enrollment.signatureBytes) +
+                enrollment.maximumPollDefinitionBytes;
+            const diagnosticBound =
+                publicPayloadBound +
+                contributors *
+                    aggregate.aggregateBytes *
+                    (selected.name === 'native-selection-fork' ? 2n : 1n) +
+                ballot.maximumProofBytes;
             assert.equal(participants, BigInt(selected.participantCount));
             assert.ok(
                 freemem() >= 2 * memoryLimit,
@@ -441,19 +296,8 @@ await runWithLocalRunLog(
                     {
                         participantCount: selected.participantCount,
                         optionCount: selected.optionCount,
-                        ...(seedSharingResources
-                            ? { seedSharingResources }
-                            : {}),
-                        ...(openingShareResources
-                            ? { openingShareResources }
-                            : {}),
                         publicPayloadBound: String(publicPayloadBound),
                         diagnosticBound: String(diagnosticBound),
-                        copiedPredecessorBytes:
-                            predecessor?.proofs.reduce(
-                                (sum, proof) => sum + proof.bytes,
-                                0,
-                            ) ?? 0,
                         memoryLimit,
                         memoryKind:
                             process.platform === 'win32'
@@ -473,15 +317,6 @@ await runWithLocalRunLog(
             );
             const sources = await snapshotResearchSources(log, root, [
                 'tools/ci/fixture-sources.ts',
-                ...(fragmentCase
-                    ? [
-                          'tools/ci/protocol-research-registry.ts',
-                          'tools/ci/seed-sharing-scalar-source.ts',
-                          'tools/ci/compiled-inputs.ts',
-                          'tests/recoverable-setup-resource-model.ts',
-                          'tests/recoverable-opening-share-model.ts',
-                      ]
-                    : []),
             ]);
             await writeFile(
                 path.join(log.runDirectoryPath, 'source-manifest.json'),
@@ -493,238 +328,147 @@ await runWithLocalRunLog(
                 await readFile(import.meta.filename),
                 { flag: 'wx' },
             );
-            if (fragmentCase) {
-                const fixturePackage = ['-p', fragmentPackage];
-                await execute(
-                    'cargo',
-                    ['+1.95.0', 'fmt', ...fixturePackage, '--', '--check'],
-                    'format',
-                );
-                await execute(
-                    'cargo',
-                    [
-                        '+1.95.0',
-                        'clippy',
-                        '--offline',
-                        '--locked',
-                        '--no-default-features',
-                        ...fixturePackage,
-                        '--features',
-                        'native-fixture',
-                        '--all-targets',
-                        '--',
-                        '-D',
-                        'warnings',
-                    ],
-                    'clippy',
-                );
-                await execute(
-                    'cargo',
-                    [
-                        '+1.95.0',
-                        'test',
-                        '--offline',
-                        '--locked',
-                        ...fixturePackage,
-                        '--lib',
-                    ],
-                    'unit-verification',
-                );
-                await execute(
-                    'cargo',
-                    [
-                        '+1.95.0',
-                        'build',
-                        '--offline',
-                        '--locked',
-                        '--release',
-                        '--no-default-features',
-                        ...fixturePackage,
-                        '--features',
-                        'native-fixture',
-                        '--bin',
-                        fragmentBinary,
-                    ],
-                    'build-native',
-                );
-            } else {
-                // Every workspace member.
-                await execute(
-                    'cargo',
-                    ['+1.95.0', 'fmt', '--all', '--', '--check'],
-                    'format',
-                );
-                await execute(
-                    'cargo',
-                    [
-                        '+1.95.0',
-                        'clippy',
-                        '--offline',
-                        '--locked',
-                        '--no-default-features',
-                        '--workspace',
-                        '--all-targets',
-                        '--',
-                        '-D',
-                        'warnings',
-                    ],
-                    'clippy',
-                );
-                // The numerical probes decrypt synthetic test ciphertexts, so only
-                // their explicit feature compiles them; lint that build as well.
-                await execute(
-                    'cargo',
-                    [
-                        '+1.95.0',
-                        'clippy',
-                        '--offline',
-                        '--locked',
-                        '--no-default-features',
-                        '-p',
-                        'rns-arithmetic-probe',
-                        '--features',
-                        'numerical-probes',
-                        '--all-targets',
-                        '--',
-                        '-D',
-                        'warnings',
-                    ],
-                    'clippy-numerical-probes',
-                );
-                // A corrupt participant's browser module signs false ballot
-                // statements only under its explicit feature; lint that build.
-                await execute(
-                    'cargo',
-                    [
-                        '+1.95.0',
-                        'clippy',
-                        '--offline',
-                        '--locked',
-                        '--target',
-                        'wasm32-unknown-unknown',
-                        '-p',
-                        'registration-enrollment',
-                        '--features',
-                        'invalid-ballot',
-                        '--lib',
-                        '--',
-                        '-D',
-                        'warnings',
-                    ],
-                    'clippy-invalid-ballot',
-                );
-                // The participant module is a wasm32 cdylib whose host supplies
-                // randomness, so its dependency graph must build there without an
-                // operating-system generator.
-                await execute(
-                    'cargo',
-                    [
-                        '+1.95.0',
-                        'check',
-                        '--offline',
-                        '--locked',
-                        '--target',
-                        'wasm32-unknown-unknown',
-                        '-p',
-                        'registration-enrollment',
-                        '--lib',
-                    ],
-                    'browser-target',
-                );
-                // Unit tests of every member, including the ceremony's
-                // profile-derived roles, alone and then with every job on a
-                // simulated helper.
-                const unitTests = [
+            // Every workspace member.
+            await execute(
+                'cargo',
+                ['+1.95.0', 'fmt', '--all', '--', '--check'],
+                'format',
+            );
+            await execute(
+                'cargo',
+                [
                     '+1.95.0',
-                    'test',
+                    'clippy',
                     '--offline',
                     '--locked',
+                    '--no-default-features',
                     '--workspace',
+                    '--all-targets',
+                    '--',
+                    '-D',
+                    'warnings',
+                ],
+                'clippy',
+            );
+            // The numerical probes decrypt synthetic test ciphertexts, so only
+            // their explicit feature compiles them; lint that build as well.
+            await execute(
+                'cargo',
+                [
+                    '+1.95.0',
+                    'clippy',
+                    '--offline',
+                    '--locked',
+                    '--no-default-features',
+                    '-p',
+                    'rns-arithmetic-probe',
+                    '--features',
+                    'numerical-probes',
+                    '--all-targets',
+                    '--',
+                    '-D',
+                    'warnings',
+                ],
+                'clippy-numerical-probes',
+            );
+            // A corrupt participant's browser module signs false ballot
+            // statements only under its explicit feature; lint that build.
+            await execute(
+                'cargo',
+                [
+                    '+1.95.0',
+                    'clippy',
+                    '--offline',
+                    '--locked',
+                    '--target',
+                    'wasm32-unknown-unknown',
+                    '-p',
+                    'registration-enrollment',
+                    '--features',
+                    'invalid-ballot',
                     '--lib',
-                    '--bins',
-                ];
-                await execute('cargo', unitTests, 'unit-verification');
-                await execute(
-                    'cargo',
-                    unitTests,
-                    'unit-verification-simulated-helpers',
-                    withSimulatedHelpers(unitSimulatedHelpers),
-                );
-                await execute(
-                    'cargo',
-                    [
-                        ...unitTests.filter(
-                            (argument) => argument !== '--workspace',
-                        ),
-                        ...proofCrates.flatMap((name) => ['-p', name]),
-                    ],
-                    'unit-verification-proof-helpers',
-                    withSimulatedHelpers(proofSimulatedHelpers),
-                );
-                await execute(
-                    'cargo',
-                    [
-                        '+1.95.0',
-                        'build',
-                        '--offline',
-                        '--locked',
-                        '--release',
-                        '--no-default-features',
-                        ...['native-ceremony', 'rns-arithmetic-probe'].flatMap(
-                            (name) => ['-p', name],
-                        ),
-                        ...(prefixCase
-                            ? [
-                                  '--features',
-                                  'rns-arithmetic-probe/numerical-probes',
-                              ]
-                            : []),
-                        '--bins',
-                    ],
-                    'build-native',
-                );
-            }
-            let compiledInputs: {
-                file: string;
-                sha512: string;
-                bytes: number;
-            }[] = [];
-            let sharedInputs: string[] = [];
-            if (fragmentCase) {
-                const files = await compiledFixtureFiles(
-                    path.join(
-                        workspace,
-                        'target/release/' + fragmentBinary + '.d',
+                    '--',
+                    '-D',
+                    'warnings',
+                ],
+                'clippy-invalid-ballot',
+            );
+            // The participant module is a wasm32 cdylib whose host supplies
+            // randomness, so its dependency graph must build there without an
+            // operating-system generator.
+            await execute(
+                'cargo',
+                [
+                    '+1.95.0',
+                    'check',
+                    '--offline',
+                    '--locked',
+                    '--target',
+                    'wasm32-unknown-unknown',
+                    '-p',
+                    'registration-enrollment',
+                    '--lib',
+                ],
+                'browser-target',
+            );
+            // Unit tests of every member, including the ceremony's
+            // profile-derived roles, alone and then with every job on a
+            // simulated helper.
+            const unitTests = [
+                '+1.95.0',
+                'test',
+                '--offline',
+                '--locked',
+                '--workspace',
+                '--lib',
+                '--bins',
+            ];
+            await execute('cargo', unitTests, 'unit-verification');
+            await execute(
+                'cargo',
+                unitTests,
+                'unit-verification-simulated-helpers',
+                withSimulatedHelpers(unitSimulatedHelpers),
+            );
+            await execute(
+                'cargo',
+                [
+                    ...unitTests.filter(
+                        (argument) => argument !== '--workspace',
                     ),
-                    sources,
-                );
-                compiledInputs = await checkFixtureSources(
-                    root,
-                    sources,
-                    files,
-                );
-                sharedInputs = files.filter(
-                    (file) =>
-                        !file.startsWith(
-                            'crates/protocol-research/opening-share-proof/',
-                        ),
-                );
-                if (predecessor !== undefined)
-                    await assertSeedSharingSharedInputs(
-                        predecessor,
-                        sharedInputs,
-                        compiler,
-                        root,
-                    );
-            }
+                    ...proofCrates.flatMap((name) => ['-p', name]),
+                ],
+                'unit-verification-proof-helpers',
+                withSimulatedHelpers(proofSimulatedHelpers),
+            );
+            await execute(
+                'cargo',
+                [
+                    '+1.95.0',
+                    'build',
+                    '--offline',
+                    '--locked',
+                    '--release',
+                    '--no-default-features',
+                    ...['native-ceremony', 'rns-arithmetic-probe'].flatMap(
+                        (name) => ['-p', name],
+                    ),
+                    ...(prefixCase
+                        ? [
+                              '--features',
+                              'rns-arithmetic-probe/numerical-probes',
+                          ]
+                        : []),
+                    '--bins',
+                ],
+                'build-native',
+            );
             const executable = path.join(
                 workspace,
                 'target/release/' +
-                    (fragmentCase
-                        ? fragmentBinary
-                        : prefixCase
-                          ? 'check-requested-output'
-                          : 'native-ceremony') +
+                    (prefixCase
+                        ? 'check-requested-output'
+                        : 'native-ceremony') +
                     (process.platform === 'win32' ? '.exe' : ''),
             );
             const runtime = createHash('sha512')
@@ -757,46 +501,14 @@ await runWithLocalRunLog(
                 'runtime.bin',
             );
             await writeFile(runtimeFile, runtime, { flag: 'wx' });
-            const predecessorDirectory =
-                predecessor === undefined
-                    ? undefined
-                    : path.join(
-                          log.artifactDirectoryPath,
-                          'seed-sharing-predecessors',
-                      );
-            if (
-                predecessor !== undefined &&
-                predecessorDirectory !== undefined
-            ) {
-                await mkdir(predecessorDirectory);
-                for (const proof of predecessor.proofs) {
-                    const file = path.join(predecessorDirectory, proof.name);
-                    await copyFile(proof.file, file);
-                    assert.equal(
-                        await fileDigest(file),
-                        proof.sha512,
-                        'A predecessor proof changed while it was copied.',
-                    );
-                    assert.equal((await stat(file)).size, proof.bytes);
-                }
-            }
-            const scratch =
-                prefixCase || fragmentCase
-                    ? undefined
-                    : await mkdtemp(path.join(root, 'temp/protocol-research-'));
+            const scratch = prefixCase
+                ? undefined
+                : await mkdtemp(path.join(root, 'temp/protocol-research-'));
             const output = path.join(
                 log.artifactDirectoryPath,
-                fragmentCase
-                    ? openingShareCase
-                        ? 'opening-share'
-                        : 'seed-sharing'
-                    : prefixCase
-                      ? 'requested-output'
-                      : 'ceremony',
+                prefixCase ? 'requested-output' : 'ceremony',
             );
-            if (fragmentCase) await mkdir(output);
             const controller = new AbortController();
-            let seedSharingOutput = '';
             let active = false,
                 monitor: Promise<void> | undefined,
                 peakMemory = 0,
@@ -808,39 +520,33 @@ await runWithLocalRunLog(
                     [
                         {
                             command: executable,
-                            args: openingShareCase
-                                ? [predecessorDirectory!, output]
-                                : prefixCase || seedSharingCase
-                                  ? [output]
-                                  : [
-                                        output,
-                                        runtimeFile,
-                                        scratch!,
-                                        String(selected.participantCount),
-                                        String(selected.optionCount),
-                                        ...(selected.name ===
-                                        'native-selection-fork'
-                                            ? ['selection-fork']
+                            args: prefixCase
+                                ? [output]
+                                : [
+                                      output,
+                                      runtimeFile,
+                                      scratch!,
+                                      String(selected.participantCount),
+                                      String(selected.optionCount),
+                                      ...(selected.name ===
+                                      'native-selection-fork'
+                                          ? ['selection-fork']
+                                          : selected.name ===
+                                              'native-setup-departure'
+                                            ? ['setup-departure']
                                             : selected.name ===
-                                                'native-setup-departure'
-                                              ? ['setup-departure']
-                                              : selected.name ===
-                                                  'native-invalid-only'
-                                                ? ['invalid-only']
-                                                : selected.noResult
-                                                  ? ['empty']
-                                                  : []),
-                                    ],
+                                                'native-invalid-only'
+                                              ? ['invalid-only']
+                                              : selected.noResult
+                                                ? ['empty']
+                                                : []),
+                                  ],
                             env: withSimulatedHelpers(
                                 selected.simulatedHelpers,
                             ),
-                            description: fragmentCase
-                                ? openingShareCase
-                                    ? 'Verify predecessors and prove bounded opening shares'
-                                    : 'Prove and reject bounded seed-sharing statements'
-                                : prefixCase
-                                  ? 'Verify encrypted requested-output coefficients'
-                                  : 'Execute original credentials through terminal verification',
+                            description: prefixCase
+                                ? 'Verify encrypted requested-output coefficients'
+                                : 'Execute original credentials through terminal verification',
                             logFileSlug: 'completion',
                         },
                     ],
@@ -852,17 +558,6 @@ await runWithLocalRunLog(
                             AbortSignal.timeout(executionTimeout),
                         ]),
                         observer: {
-                            onCommandOutput({ chunk, streamName }) {
-                                if (!fragmentCase || streamName !== 'stdout')
-                                    return;
-                                seedSharingOutput += chunk;
-                                if (seedSharingOutput.length > 1_048_576)
-                                    controller.abort(
-                                        new Error(
-                                            'Proof fixture diagnostic output exceeds its bound.',
-                                        ),
-                                    );
-                            },
                             onCommandStart({ processIdentifier }) {
                                 assert.ok(processIdentifier);
                                 active = true;
@@ -920,187 +615,15 @@ await runWithLocalRunLog(
             assert.equal(exitCode, 0);
             assert.ok(samples > 0);
             const result = JSON.parse(
-                fragmentCase
-                    ? seedSharingOutput.trim().split(/\r?\n/u).pop()!
-                    : await readFile(
-                          path.join(
-                              output,
-                              prefixCase
-                                  ? 'result.json'
-                                  : 'completion/result.json',
-                          ),
-                          'utf8',
-                      ),
+                await readFile(
+                    path.join(
+                        output,
+                        prefixCase ? 'result.json' : 'completion/result.json',
+                    ),
+                    'utf8',
+                ),
             ) as NativeResult;
-            const proofArtifacts: {
-                name: string;
-                bytes: number;
-                sha512: string;
-            }[] = [];
-            const statementArtifacts: {
-                name: string;
-                bytes: number;
-                sha512: string;
-            }[] = [];
-            if (seedSharingCase && seedSharingResources) {
-                assert.equal(result.kind, 'seed-sharing-proof-fragment');
-                assert.equal(result.positive, 1);
-                assert.equal(result.falseWitnesses, 1);
-                assert.equal(result.falseStatements, 1);
-                assert.equal(result.participants, selected.participantCount);
-                assert.equal(
-                    result.degree,
-                    Number(seedSharingResources.polynomialDegree),
-                );
-                assert.equal(
-                    result.seedBits,
-                    Number(seedSharingResources.seedBits),
-                );
-                assert.equal(
-                    result.proofDomain,
-                    Number(seedSharingResources.verificationDomainSize),
-                );
-                assert.equal(result.hostileCases, 14);
-                assert.equal(
-                    result.wordColumns,
-                    seedSharingResources.relation.wordColumns,
-                );
-                assert.equal(
-                    result.booleanColumns,
-                    seedSharingResources.relation.booleanColumns,
-                );
-                assert.equal(
-                    result.affineRows,
-                    Number(seedSharingResources.relation.affineRows),
-                );
-                assert.ok(Array.isArray(result.proofBytes));
-                assert.equal(result.proofBytes.length, 3);
-                const proofFiles = [
-                    'proof-honest.bin',
-                    'proof-false-seed.bin',
-                    'proof-false-share.bin',
-                ];
-                assert.deepEqual(
-                    (await readdir(output)).sort(),
-                    [...proofFiles].sort(),
-                );
-                for (const [index, name] of proofFiles.entries()) {
-                    const bytes = (await stat(path.join(output, name))).size;
-                    assert.ok(
-                        bytes > 0 &&
-                            BigInt(bytes) <=
-                                seedSharingResources.layout
-                                    .maximumMultiproofBytes,
-                    );
-                    assert.equal(result.proofBytes[index], bytes);
-                    proofArtifacts.push({
-                        name,
-                        bytes,
-                        sha512: await fileDigest(path.join(output, name)),
-                    });
-                }
-            } else if (openingShareResources) {
-                const { seed, opening } = openingShareResources;
-                assert.equal(result.kind, 'bounded-opening-share-proof');
-                assert.equal(result.positive, 1);
-                assert.equal(result.falseStatements, 1);
-                assert.equal(result.hostileCases, 10);
-                assert.equal(result.participants, selected.participantCount);
-                assert.equal(result.degree, Number(opening.physicalDegree));
-                assert.equal(result.selected, opening.parameters.selectedCount);
-                assert.equal(result.recipient, 2);
-                assert.equal(
-                    result.predecessors,
-                    opening.parameters.selectedCount,
-                );
-                assert.equal(
-                    result.proofDomain,
-                    Number(seed.verificationDomainSize),
-                );
-                assert.equal(result.wordColumns, opening.wordColumns);
-                assert.equal(result.booleanColumns, opening.booleanColumns);
-                assert.equal(result.lookupEntries, opening.lookupEntries);
-                assert.equal(result.affineRows, Number(opening.affineRows));
-                assert.equal(
-                    result.statementBytes,
-                    Number(openingShareResources.openingStatementBytes),
-                );
-                assert.ok(Array.isArray(result.sourceIdentities));
-                assert.equal(
-                    result.sourceIdentities.length,
-                    opening.parameters.selectedCount,
-                );
-                assert.equal(
-                    new Set(result.sourceIdentities).size,
-                    opening.parameters.selectedCount,
-                );
-                for (const identity of result.sourceIdentities)
-                    assert.match(identity, /^[0-9a-f]{128}$/u);
-                const proofFiles = [
-                    [
-                        'proof-second-source.bin',
-                        result.secondSourceProofBytes,
-                        seed.layout.headerBytes,
-                        seed.layout.maximumMultiproofBytes,
-                    ],
-                    [
-                        'proof-opening-honest.bin',
-                        result.proofBytes,
-                        opening.layout.headerBytes,
-                        opening.layout.maximumMultiproofBytes,
-                    ],
-                    [
-                        'proof-opening-shifted.bin',
-                        result.shiftedProofBytes,
-                        opening.layout.headerBytes,
-                        opening.layout.maximumMultiproofBytes,
-                    ],
-                ] as const;
-                const statementFiles = [
-                    [
-                        'statement-second-source.bin',
-                        openingShareResources.seedStatementBytes,
-                    ],
-                    [
-                        'statement-opening-honest.bin',
-                        openingShareResources.openingStatementBytes,
-                    ],
-                    [
-                        'statement-opening-shifted.bin',
-                        openingShareResources.openingStatementBytes,
-                    ],
-                ] as const;
-                assert.deepEqual(
-                    (await readdir(output)).sort(),
-                    [
-                        ...proofFiles.map(([name]) => name),
-                        ...statementFiles.map(([name]) => name),
-                    ].sort(),
-                );
-                for (const [name, declared, header, maximum] of proofFiles) {
-                    const file = path.join(output, name);
-                    const bytes = (await stat(file)).size;
-                    assert.ok(
-                        BigInt(bytes) > header && BigInt(bytes) <= maximum,
-                    );
-                    assert.equal(bytes, declared);
-                    proofArtifacts.push({
-                        name,
-                        bytes,
-                        sha512: await fileDigest(file),
-                    });
-                }
-                for (const [name, expected] of statementFiles) {
-                    const file = path.join(output, name);
-                    const bytes = (await stat(file)).size;
-                    assert.equal(BigInt(bytes), expected);
-                    statementArtifacts.push({
-                        name,
-                        bytes,
-                        sha512: await fileDigest(file),
-                    });
-                }
-            } else if (prefixCase) {
+            if (prefixCase) {
                 assert.equal(result.kind, 'requested-output');
                 assert.ok(result.cases);
                 const cases = result.cases.map((value) => value.result);
@@ -1202,7 +725,7 @@ await runWithLocalRunLog(
                     );
                 }
             }
-            if (!prefixCase && !fragmentCase && !selected.noResult) {
+            if (!prefixCase && !selected.noResult) {
                 // The reference ranking of the accepted ballots; ties go to
                 // the lower option position.
                 assert.deepEqual(result.identifiers, scenario.identifiers);
@@ -1271,47 +794,6 @@ await runWithLocalRunLog(
                 BigInt(publicDiagnosticBytes) <=
                     (prefixCase ? 16_384n : diagnosticBound),
             );
-            const deterministicReference =
-                reference === undefined
-                    ? undefined
-                    : {
-                          directory: reference.directory,
-                          diagnosticDigests: reference.diagnosticDigests,
-                          artifacts: await compareNativeReferenceArtifacts(
-                              openingReference?.artifacts ?? reference.proofs,
-                              output,
-                          ),
-                      };
-            if (openingReference !== undefined)
-                await assertOpeningShareSourceStable(openingReference, root);
-            if (seedReference !== undefined)
-                await assertSeedSharingSourceStable(seedReference, root);
-            if (
-                predecessor !== undefined &&
-                predecessorDirectory !== undefined
-            ) {
-                await assertSeedSharingSourceStable(predecessor, root);
-                for (const proof of predecessor.proofs)
-                    assert.equal(
-                        await fileDigest(
-                            path.join(predecessorDirectory, proof.name),
-                        ),
-                        proof.sha512,
-                        'A pinned predecessor changed during execution.',
-                    );
-            }
-            for (const file of compiledInputs)
-                assert.equal(
-                    await fileDigest(path.join(root, file.file)),
-                    file.sha512,
-                    'A compiled source changed during execution: ' + file.file,
-                );
-            if (fragmentCase)
-                assert.equal(
-                    await fileDigest(executable),
-                    runtime.toString('hex'),
-                    'The native executable changed during execution.',
-                );
             await writeFile(
                 path.join(log.runDirectoryPath, 'result.json'),
                 JSON.stringify(
@@ -1320,27 +802,10 @@ await runWithLocalRunLog(
                         participantCount: selected.participantCount,
                         optionCount: selected.optionCount,
                         simulatedHelpers: selected.simulatedHelpers,
-                        ...(fragmentCase ? {} : { unitSimulatedHelpers }),
+                        unitSimulatedHelpers,
                         output,
                         runtimeIdentity: runtime.toString('hex'),
                         result,
-                        ...(fragmentCase ? { proofArtifacts } : {}),
-                        ...(openingShareCase ? { statementArtifacts } : {}),
-                        ...(deterministicReference === undefined
-                            ? {}
-                            : { deterministicReference }),
-                        ...(fragmentCase ? { compiledInputs } : {}),
-                        ...(predecessor === undefined
-                            ? {}
-                            : {
-                                  predecessor: {
-                                      directory: predecessor.directory,
-                                      diagnosticDigests:
-                                          predecessor.diagnosticDigests,
-                                      proofs: predecessor.proofs,
-                                      sharedInputs,
-                                  },
-                              }),
                         milliseconds: performance.now() - started,
                         peakMemory,
                         samples,
@@ -1353,15 +818,11 @@ await runWithLocalRunLog(
                             networkTransfers: null,
                             recoveryWork: null,
                         },
-                        scope: openingShareCase
-                            ? 'Reduced public opening-share relation for one fixed recipient and two distinct verified seed-sharing records. The native fixture verifies its original outer predecessor, generates and verifies the second, then accepts the honest batched opening and rejects a fresh proof of an unsatisfiable shifted share. Exact source statements and proof bytes are retained. The externally fixed selection descriptor creates no broadcast decision, registered-key capability, disclosure authorization, sealed-body acceptance, participant state or complete recovery protocol.'
-                            : seedSharingCase
-                              ? 'Reduced seed-sharing relation over a 256-coefficient physical ring and four synthetic seed bits with the unchanged word-proof domain and four-recipient profile. Real proof generation and verification cover one valid case, one false supplied seed witness and one provably unsatisfiable ciphertext statement. Both fresh negative proofs must fail the relation check. This creates no setup capability, distributed recovery, participant state or terminal, and establishes no complete protocol security or browser qualification.'
-                              : prefixCase
-                                ? 'Real full-degree BFV coefficient-selection operations on deterministic synthetic ciphertexts encrypting known rank powers. A test-only secret decoder checks every plaintext coefficient against direct interpolation, including all omitted ranks and padding. No participant, ballot proof, certificate, release share or terminal is created.'
-                                : selected.noResult
-                                  ? 'Fresh native certified no-result execution using original credentials. No release shares are generated. This is not durable browser participation, security admission or physical qualification.'
-                                  : 'Fresh native cryptographic execution using tracked sources and original credentials. Subset controls run after share generation. This is not durable browser participation, security admission or physical qualification.',
+                        scope: prefixCase
+                            ? 'Real full-degree BFV coefficient-selection operations on deterministic synthetic ciphertexts encrypting known rank powers. A test-only secret decoder checks every plaintext coefficient against direct interpolation, including all omitted ranks and padding. No participant, ballot proof, certificate, release share or terminal is created.'
+                            : selected.noResult
+                              ? 'Fresh native certified no-result execution using original credentials. No release shares are generated. This is not durable browser participation, security admission or physical qualification.'
+                              : 'Fresh native cryptographic execution using tracked sources and original credentials. Subset controls run after share generation. This is not durable browser participation, security admission or physical qualification.',
                     },
                     null,
                     2,

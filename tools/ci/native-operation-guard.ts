@@ -11,7 +11,6 @@ export const createNativeOperationGuard = (
         startFile: string;
         finishFile: string;
         memoryLimit: number;
-        operation?: 'verifier' | 'operator';
         allowedProgressLines?: readonly string[];
         readMemory: (
             phase: NativeOperationSamplePhase,
@@ -22,11 +21,6 @@ export const createNativeOperationGuard = (
         ) => void;
     }>,
 ) => {
-    const operation = input.operation ?? 'verifier';
-    const elapsedField =
-        operation === 'operator'
-            ? 'operationMilliseconds'
-            : 'verificationMilliseconds';
     let readySeen = false;
     let started = false;
     let completionSeen = false;
@@ -58,22 +52,19 @@ export const createNativeOperationGuard = (
                 if (!line) continue;
                 if (input.allowedProgressLines?.includes(line)) continue;
                 const event = JSON.parse(line) as Record<string, unknown>;
-                if (event.event === 'native-' + operation + '-ready') {
+                if (event.event === 'native-operator-ready') {
                     assert.ok(
                         !readySeen,
                         'The native operation announced readiness twice.',
                     );
                     readySeen = true;
                     readyResolve();
-                } else if (
-                    event.event ===
-                    'native-' + operation + '-completed'
-                ) {
+                } else if (event.event === 'native-operator-completed') {
                     assert.ok(
                         started && !completionSeen,
                         'The native operation completed outside its guarded operation.',
                     );
-                    const milliseconds = event[elapsedField];
+                    const milliseconds = event.operationMilliseconds;
                     assert.ok(
                         typeof milliseconds === 'number' &&
                             Number.isFinite(milliseconds) &&

@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 
+import { browserChunkBytes } from '#tools/ci/bounded-output-browser-transport.mjs';
 import { createBoundedOutputSink } from '#tools/ci/bounded-output-sink.mjs';
-import { seedSharingChunkBytes } from '#tools/ci/seed-sharing-browser-input.mjs';
 
 // Invalid HTTP envelopes are refused before the shared writer consumes work.
 // A valid chunk receives a receipt only after that writer's durable write.
@@ -40,7 +40,7 @@ export const createBrowserOutputSink = async (
             assert.ok(
                 Number.isSafeInteger(length) &&
                     length > 0 &&
-                    length <= seedSharingChunkBytes &&
+                    length <= browserChunkBytes &&
                     length <= expectedBytes - state.bytes,
                 'The output chunk exceeds its bound.',
             );

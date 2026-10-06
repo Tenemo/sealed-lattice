@@ -5,21 +5,21 @@ import { Readable } from 'node:stream';
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { serveBoundedBrowserInputs } from '#tools/ci/run-seed-sharing-browser.js';
+import { createBrowserOutputSink } from '#tools/ci/bounded-output-browser-sink.js';
 import {
+    browserChunkBytes,
     emitBrowserOutputChunk,
-    seedSharingChunkBytes,
-} from '#tools/ci/seed-sharing-browser-input.mjs';
-import { createBrowserOutputSink } from '#tools/ci/seed-sharing-browser-sink.js';
+} from '#tools/ci/bounded-output-browser-transport.mjs';
+import { serveBoundedBrowserInputs } from '#tools/ci/bounded-output-browser.js';
 
 const digest = (bytes: Uint8Array) =>
     createHash('sha512').update(bytes).digest('hex');
 const fixture = async () => {
     await mkdir('temp', { recursive: true });
-    const directory = await mkdtemp(path.resolve('temp/browser-proof-sink-'));
+    const directory = await mkdtemp(path.resolve('temp/browser-output-sink-'));
     return {
         directory,
-        file: path.join(directory, 'proof.data'),
+        file: path.join(directory, 'output.data'),
         cleanup: async () => {
             expect(directory.startsWith(path.resolve('temp') + path.sep)).toBe(
                 true,
@@ -43,7 +43,7 @@ describe('browser bounded-output sink', () => {
             for (const [index, offset, length, hash, body] of [
                 [1, 0, 3, digest(first), first],
                 [0, 1, 3, digest(first), first],
-                [0, 0, seedSharingChunkBytes + 1, digest(first), first],
+                [0, 0, browserChunkBytes + 1, digest(first), first],
                 [0, 0, 3, digest(first), first.subarray(0, 2)],
                 [0, 0, 2, digest(first), first],
                 [0, 0, 3, digest(second), first],
@@ -137,7 +137,7 @@ describe('browser bounded-output sink', () => {
         }
     });
 
-    it('waits for an exact HTTP write receipt before allowing the next prover action', async () => {
+    it('waits for an exact HTTP write receipt before allowing the next operator action', async () => {
         const bytes = new Uint8Array([2, 7, 1]);
         const headers = {
             'X-Chunk-Sha512': digest(bytes),
@@ -209,7 +209,6 @@ describe('browser bounded-output sink', () => {
             server = await serveBoundedBrowserInputs(
                 path.resolve('.'),
                 moduleFile,
-                [],
                 {
                     file: files.file,
                     expectedBytes: 5,

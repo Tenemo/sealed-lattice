@@ -1,15 +1,12 @@
 // Scalar execution has no helper workers. Only the actual helper-count
-// query returns zero. Only the key source screen may request setup entropy;
-// every other host operation must fail if called.
-/** @param {Uint8Array} bytes @param {{operation:'generation'|'verification'|'operator'|'fhe-key-source',allowRandomnessFallback?:boolean}} options */
-export const instantiateScalarModule = async (
-    bytes,
-    { operation, allowRandomnessFallback = false },
-) => {
+// query returns zero, and only the key source screen's setup entropy request
+// is served; every other host operation must fail if called.
+/** @param {Uint8Array} bytes */
+export const instantiateScalarModule = async (bytes) => {
     /** @type {WebAssembly.Instance|undefined} */
     let instance;
     const unavailable = (name) => () => {
-        throw new Error('Scalar ' + operation + ' invoked ' + name);
+        throw new Error('Scalar fhe-key-source invoked ' + name);
     };
     const imports = {
         parallel: {
@@ -23,13 +20,11 @@ export const instantiateScalarModule = async (
             ended: unavailable('parallel.ended'),
             read: unavailable('parallel.read'),
         },
-        word_proof: { fill_random: unavailable('word_proof.fill_random') },
         setup_witness: {
             /** @param {number} pointer @param {number} length */
             fill_random: (pointer, length) => {
                 const memory = instance?.exports.memory;
                 if (
-                    operation !== 'fhe-key-source' ||
                     !(memory instanceof WebAssembly.Memory) ||
                     !Number.isSafeInteger(pointer) ||
                     pointer < 0 ||
@@ -57,11 +52,7 @@ export const instantiateScalarModule = async (
             !(
                 (entry.module === 'parallel' &&
                     Object.keys(imports.parallel).includes(entry.name)) ||
-                (allowRandomnessFallback &&
-                    entry.module === 'word_proof' &&
-                    entry.name === 'fill_random') ||
-                (operation === 'fhe-key-source' &&
-                    entry.module === 'setup_witness' &&
+                (entry.module === 'setup_witness' &&
                     entry.name === 'fill_random')
             )
         )

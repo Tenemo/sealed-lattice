@@ -18,7 +18,7 @@ pnpm run research:profiles -- --output crates/protocol-research/supported-profil
 
 ## Build and run
 
-The FHE key source screen generates the first public encryption coordinate from a fixed synthetic source, discards working state, reconstructs the source and checks the coordinate emitted by the first contribution gadget. It checks selected coefficients with direct integer convolution and compares identical public report bytes across native, scalar Node and external Chrome. It creates no registration, proof, authenticated checkpoint or setup capability. It does not establish the clear-offer selection or its departure behavior.
+The FHE key source screen generates the first public encryption coordinate from a fixed synthetic source, discards working state, reconstructs the source and checks the coordinate emitted by the first contribution gadget. It checks selected coefficients with direct integer convolution and compares identical public report bytes across native, scalar Node and external Chrome. Both scalar hosts acknowledge each bounded output span to Rust only after the run's local sink has durably written it and returned a receipt for that exact span; the sink refuses out-of-order, overlapping or excess output and never overwrites an existing artifact. It creates no registration, proof, authenticated checkpoint or setup capability. It does not establish the clear-offer selection or its departure behavior.
 
 ```text
 pnpm run research:protocol -- native-fhe-key-source
@@ -64,66 +64,6 @@ pnpm run research:protocol -- native-invalid-only 3 2 --simulated-helpers 3
 The build check, ceremony cases and requested-output probe run the workspace unit tests alone and then with three simulated helpers, and the proof crates' also with eight, whose proof rows hold two residue classes of each coset.
 
 For a ceremony, the runner derives the expected roles, ranking and checked set counts from the independent TypeScript threshold and ranking models, not from the ceremony, and scales its deadline with the participant count.
-
-The seed-sharing, opening-share and public-operator cases below are isolated research comparisons; the current clear-offer preparation does not use them to establish setup authority. The isolated seed-sharing proof case uses the four-participant, two-option parameter profile with a reduced 256-coefficient ring and four synthetic seed bits, while retaining the word-proof engine's full verification domain:
-
-```text
-pnpm run research:protocol -- native-seed-sharing
-pnpm run research:protocol -- native-seed-sharing --compare-reference <historical-native-run>
-```
-
-This fixed scalar case accepts no profile counts or simulated-helper option. Its runner checks formatting, Clippy and the library unit tests of the isolated `seed-sharing-proof` crate, then builds its explicit `native-fixture` binary and runs one valid proof, one freshly generated proof from an inconsistent seed witness and one freshly generated proof for a provably unsatisfiable ciphertext statement, together with hostile verification controls. Both fresh negative proofs must fail the relation check; a false supplied witness alone is not evidence that the public statement has no satisfying witness. The fixture feature enables deterministic test randomness only for this native research executable; the participant runtime does not consume it. Source snapshots, the executable digest, model-derived resource inputs, stage output and measured process-tree memory remain in the run diagnostics. Proof files and the runtime digest are written only to the corresponding run-artifact directory. The same research lock, available-memory preflight, 1 GiB process-tree guard and process containment govern this case; a planning estimate does not raise that guard. This experiment creates no participant, accepted setup, recovery protocol, ballot, certificate or terminal, and supplies no complete-protocol security or browser qualification.
-
-The explicit reference option pins a completed historical native run before execution and compares all three freshly generated proof files byte for byte using bounded reads. It records proof lengths and hashes in the new run and checks that the historical files and diagnostics remain unchanged. The historical archive supplies deterministic comparison bytes; a consumer of changed shared proof sources must use a fresh native baseline.
-
-The native opening-share case consumes a fresh seed-sharing baseline:
-
-```text
-pnpm run research:protocol -- native-opening-share <fresh-native-seed-run>
-pnpm run research:protocol -- native-opening-share <fresh-native-seed-run> --compare-reference <historical-native-opening-run>
-```
-
-It requires the baseline's exact compiler and recorded compiled shared inputs, while pinning the new opening crate separately. The same guarded runner copies the three source proofs and verifies their identities before and after execution. The Rust fixture verifies the original positive outer record, generates and verifies a second distinct outer record, and uses those verifier-created records to construct one recipient's batched opening statement. It accepts an honest proof and rejects a freshly generated proof for an unsatisfiable shifted share, together with hostile predecessor, context and framing controls. Its six new statement/proof files have independently modeled bounds and recorded identities. The externally fixed selection descriptor is a fixture input; it grants no broadcast, registration, opening-release or sealed-body authority. This case does not execute participant recovery or a complete setup.
-
-The matching native opening archive also supplies the scalar worker cases:
-
-```text
-pnpm run research:protocol -- scalar-opening-share <fresh-native-opening-run>
-pnpm run research:protocol -- browser-opening-share <fresh-native-opening-run>
-pnpm run research:protocol -- scalar-opening-share-generation <fresh-native-opening-run>
-pnpm run research:protocol -- browser-opening-share-generation <fresh-native-opening-run>
-```
-
-These reuse the bounded Node and external Chrome harnesses. Every fresh worker streams both outer proofs through the owning verifier before it may verify or generate an opening proof. Incomplete, reordered, duplicated and damaged predecessors retain their refusal; the genuine shifted-share proof is checked against its own statement. Generation uses the fixed native fixture randomness inside Rust and waits for a durable sink acknowledgment after each bounded output span. Its positive proof must match the native file literally before the normal verifier controls run. Shared compiled inputs and the compiler must match the native baseline; the separately identified scalar adapter must match its recorded source bytes. A changed shared source requires a fresh native run, whose reference option checks all statement and proof files against the earlier archive.
-
-Scalar and browser seed-sharing cases require a native baseline with recorded compiled inputs and the same compiler. Shared source files and manifests must match that compiled inventory; the target-only browser adapters are separately checked against the baseline snapshot. Historical archives remain usable for deterministic comparison after shared code changes, but do not authorize scalar execution of that changed code.
-
-The public operator screen exercises both factored operators at the full physical ring without constructing witnesses or proofs:
-
-```text
-pnpm run research:protocol -- native-public-operator
-pnpm run research:protocol -- scalar-public-operator <passed-native-operator-run>
-pnpm run research:protocol -- browser-public-operator <passed-native-operator-run>
-```
-
-Each case streams a fixed synthetic public polynomial recipe, checks selected coefficients against original equation sums, and evaluates the actual operator on the complete paired query inventory. It hashes the combined operator one column at a time and compares query values through the existing interpolation kernel. Small canonical reports contain the target, lookup weight, selected values and the digests of the complete operator and query outputs; Node and Chrome must reproduce the native report bytes exactly. The same source, bounded-memory, process-containment and output-acknowledgment rules apply. Native and Node cases wait for initial and final process observations. Timings distinguish recipe and operator construction, actual query evaluation, and reference/digest instrumentation; they do not measure participant completion or qualify a phone.
-
-The same pinned native proof files can also be checked in a dedicated worker in the installed external desktop Chrome:
-
-```text
-pnpm run research:protocol -- browser-seed-sharing <passed-native-run>
-```
-
-This case reuses the scalar source validation, module build and import admission, native verification of identical bytes, source and artifact identity checks, and research lock. Its owned local server serves only the verifier files and bounded proof chunks on an ephemeral loopback port. The browser authenticates each chunk with WebCrypto SHA-512 against hashes computed from the pinned inputs, retaining one chunk and one bounded read buffer. Every case runs in a fresh dedicated worker, which ends before the next case; the harness records the Chrome version and sampled process-tree memory without network-body capture. The honest proof, false witness, false statement and context, truncation, trailing-byte and changed-proof cases exercise the same verifier loop as Node. This is desktop development evidence and does not qualify a phone, generate a proof in a browser or create a protocol capability.
-
-The bounded generation screen creates the reduced fixture's honest proof through scalar WebAssembly, either in a Node worker or a dedicated external Chrome worker:
-
-```text
-pnpm run research:protocol -- scalar-seed-sharing-generation <passed-native-run>
-pnpm run research:protocol -- browser-seed-sharing-generation <passed-native-run>
-```
-
-The original native run remains unchanged. Each generation run writes a fresh proof artifact and requires its exact length and SHA-512 identity to match the pinned deterministic native fixture before independent native and scalar verification. Generation uses bounded prover steps and records their call costs and live linear memory. The Chrome worker sends one bounded output chunk at a time to its owned local sink, waits for that chunk's completed write and matching hash/coordinate receipt before acknowledging the output to Rust, and keeps only the latest progress snapshot for diagnostic sampling. The sink rejects out-of-order or overlapping writes and never overwrites an existing artifact. The existing process-tree memory guard and experiment deadline remain enforced. This is a reduced synthetic proof-generation screen, not a participant setup, durable private-state workflow, complete resource bound or phone qualification.
 
 The focused numerical case checks complete and shorter output prefixes at the smallest, the ten-participant and the largest profile, each prefix from the same deterministic BFV ciphertext inputs as its complete ordering:
 

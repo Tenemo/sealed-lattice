@@ -1,17 +1,6 @@
 import { driveBoundedOutput } from './bounded-output.mjs';
 import { instantiateScalarModule } from './scalar-module.mjs';
 
-export const publicOperatorPhases = {
-    0: 'initialization',
-    1: 'public recipe and operator construction',
-    2: 'independent coordinate checks',
-    3: 'operator digest and query reference',
-    4: 'operator query evaluation',
-    5: 'comparison and report',
-    12: 'report output',
-    13: 'complete',
-};
-
 export const fheKeySourcePhases = {
     0: 'initialization',
     1: 'original source',
@@ -24,22 +13,19 @@ export const fheKeySourcePhases = {
 };
 
 /** @param {{moduleBytes:Uint8Array,caseIndex:number,expectedBytes:number,emitChunk:(index:number,offset:number,bytes:Uint8Array)=>Promise<import('./bounded-output.mjs').OutputAcknowledgment>,onProgress?:(progress:import('./bounded-output.mjs').OutputProgress)=>void}} input */
-const runArithmeticScreen = async (
-    { moduleBytes, caseIndex, expectedBytes, emitChunk, onProgress },
-    keySource = false,
-) => {
-    if (caseIndex !== 0 && (keySource || caseIndex !== 1))
-        throw new Error('Unknown public operator case.');
+export const runFheKeySourceScreen = async ({
+    moduleBytes,
+    caseIndex,
+    expectedBytes,
+    emitChunk,
+    onProgress,
+}) => {
+    if (caseIndex !== 0) throw new Error('Unknown key source screen case.');
     const started = performance.now();
-    const instance = await instantiateScalarModule(moduleBytes, {
-        operation: keySource ? 'fhe-key-source' : 'operator',
-    });
+    const instance = await instantiateScalarModule(moduleBytes);
     /** @param {string} name */
     const binding = (name) => {
-        const method =
-            instance.exports[
-                (keySource ? 'key_source_screen_' : 'operator_screen_') + name
-            ];
+        const method = instance.exports['key_source_screen_' + name];
         if (typeof method !== 'function')
             throw new Error('The operator screen is missing its bounded ABI.');
         return /** @type {(...values:number[])=>number} */ (method);
@@ -68,13 +54,6 @@ const runArithmeticScreen = async (
         caseIndex,
         initializationMilliseconds,
         milliseconds: performance.now() - started,
-        phaseLabels: keySource ? fheKeySourcePhases : publicOperatorPhases,
+        phaseLabels: fheKeySourcePhases,
     };
 };
-
-/** @param {Parameters<typeof runArithmeticScreen>[0]} input */
-export const runPublicOperatorScreen = (input) => runArithmeticScreen(input);
-
-/** @param {Parameters<typeof runArithmeticScreen>[0]} input */
-export const runFheKeySourceScreen = (input) =>
-    runArithmeticScreen(input, true);

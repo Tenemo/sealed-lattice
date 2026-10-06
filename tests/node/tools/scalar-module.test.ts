@@ -20,7 +20,6 @@ describe('scalar source entropy boundary', () => {
     it('fills only the requested live source buffer across secure entropy chunk limits and memory growth', async () => {
         const instance = await instantiateScalarModule(
             entropyFixture('setup_witness'),
-            { operation: 'fhe-key-source' },
         );
         const memory = instance.exports.memory as WebAssembly.Memory;
         const fill = instance.exports.fill as (
@@ -44,31 +43,10 @@ describe('scalar source entropy boundary', () => {
         expect(() => fill(memory.buffer.byteLength - 1, 2)).toThrow();
         expect(() => fill(-1, 1)).toThrow();
     });
-    it('keeps source entropy out of verification, fixed proof generation and operator modules', async () => {
-        for (const operation of [
-            'verification',
-            'generation',
-            'operator',
-        ] as const)
+    it('refuses proof randomness and every other unknown host import', async () => {
+        for (const owner of ['word_proof', 'parallel', 'other'])
             await expect(
-                instantiateScalarModule(entropyFixture('setup_witness'), {
-                    operation,
-                }),
+                instantiateScalarModule(entropyFixture(owner)),
             ).rejects.toThrow('Unknown scalar import');
-        await expect(
-            instantiateScalarModule(entropyFixture('word_proof'), {
-                operation: 'fhe-key-source',
-            }),
-        ).rejects.toThrow('Unknown scalar import');
-        const proof = await instantiateScalarModule(
-            entropyFixture('word_proof'),
-            { operation: 'generation', allowRandomnessFallback: true },
-        );
-        expect(() =>
-            (proof.exports.fill as (pointer: number, length: number) => number)(
-                0,
-                1,
-            ),
-        ).toThrow('word_proof.fill_random');
     });
 });
