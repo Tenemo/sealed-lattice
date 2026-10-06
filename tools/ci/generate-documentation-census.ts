@@ -2518,7 +2518,7 @@ export const renderDocumentationCensus = (): string => {
         '',
         '## First-oracle checkpoint census',
         '',
-        'The complete first-oracle checkpoint retains the actual witness, masks, leaf-salt seed, and partial row hashes. Lookup multiplicities, empty tree nodes, and the initial transcript are reconstructed. Each private record uses a separate data key. The browser root also retains encrypted generated public inputs; fixed common polynomials and verified recipient keys are reconstructed from predecessors. Counts exclude database overhead and later proof phases, repeated checkpoints, and their security and resource unions.',
+        'The complete first-oracle checkpoint retains the actual witness, masks, leaf-salt seed, and partial row hashes. Lookup multiplicities, empty tree nodes, and the initial transcript are reconstructed. Each private record uses a separate data key. The browser root also retains encrypted generated public inputs; fixed common polynomials and verified recipient keys are reconstructed from predecessors. The proof-randomness minima split at this checkpoint: generation supplies the first-oracle masks and tree seed, while continuation supplies every response salt, starting with the salt preceding the lookup challenge. These minima exclude witness sampling and extra reads caused by rejected field candidates. Storage counts exclude database overhead and later proof phases, repeated checkpoints, and their security and resource unions.',
         '',
         table(
             ['Private field', 'Plaintext bytes', 'Encrypted records'],
@@ -2532,6 +2532,18 @@ export const renderDocumentationCensus = (): string => {
         table(
             ['Property', 'Value'],
             [
+                [
+                    'Minimum generation proof-randomness bytes',
+                    formatCount(
+                        firstOracleCheckpoint.minimumGenerationProofRandomBytes,
+                    ),
+                ],
+                [
+                    'Minimum continuation proof-randomness bytes',
+                    formatCount(
+                        firstOracleCheckpoint.minimumContinuationProofRandomBytes,
+                    ),
+                ],
                 [
                     'Private encrypted records',
                     formatCount(firstOracleCheckpoint.recordCount),

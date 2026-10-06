@@ -72,6 +72,11 @@ export const compileWordProofLayout = (
         maximumMultiproofBytes += multiproofGroup(length, extensionBytes);
         treeCount++;
     }
+    const minimumFirstOracleRandomBytes =
+        merkleSaltSeedBytes +
+        BigInt(wordCount + 1) *
+            randomFieldBytes(BigInt(agreement.maskDimension)) +
+        randomFieldBytes(3n * BigInt(agreement.codeDimension));
     return {
         foldCount,
         headerBytes,
@@ -85,12 +90,11 @@ export const compileWordProofLayout = (
         expandedSecondOracleBytes: secondWidth * BigInt(agreement.domainSize),
         treeCount,
         saltSeedBytes: treeCount * merkleSaltSeedBytes,
+        minimumFirstOracleRandomBytes,
         minimumRequestedRandomBytes:
-            treeCount * merkleSaltSeedBytes +
+            minimumFirstOracleRandomBytes +
+            (treeCount - 1n) * merkleSaltSeedBytes +
             BigInt(foldCount + 3) * saltBytes +
-            BigInt(wordCount + 1) *
-                randomFieldBytes(BigInt(agreement.maskDimension)) +
-            randomFieldBytes(3n * BigInt(agreement.codeDimension)) +
             BigInt(lookupCount + 1) *
                 randomFieldBytes(3n * BigInt(agreement.maskDimension)) +
             randomFieldBytes(3n * BigInt(agreement.witnessDegree + 1)),

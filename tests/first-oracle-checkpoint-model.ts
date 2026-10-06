@@ -1,6 +1,9 @@
 import { compileCommonAgreementDegreeCensus } from '#tests/common-agreement-degree-model.js';
 import { compileContributionBodyCensus } from '#tests/contribution-body-model.js';
-import { merkleSaltSeedBytes } from '#tests/full-word-proof-layout-model.js';
+import {
+    compileFullWordProofLayout,
+    merkleSaltSeedBytes,
+} from '#tests/full-word-proof-layout-model.js';
 import { compileRosterProposalCensus } from '#tests/roster-proposal-model.js';
 import { compileSetupContributionRelationCensus } from '#tests/setup-contribution-relation-model.js';
 import type { SupportedProfile } from '#tests/supported-profile-model.js';
@@ -14,6 +17,7 @@ export const compileFirstOracleCheckpointCensus = (
     const proof = compileCommonAgreementDegreeCensus();
     const relation = compileSetupContributionRelationCensus(profile);
     const body = compileContributionBodyCensus(profile);
+    const layout = compileFullWordProofLayout(profile);
     const systematic = BigInt(proof.systematicSize);
     const domain = BigInt(proof.domainSize);
     const columns = BigInt(relation.wordColumns + relation.booleanColumns);
@@ -82,6 +86,12 @@ export const compileFirstOracleCheckpointCensus = (
         80n + maximumHeaderBytes + 106n * publicRecordCount + 96n * recordCount;
     return {
         fields,
+        // All first-oracle masks and its tree seed precede the checkpoint.
+        // The first transcript response salt belongs to continuation.
+        minimumGenerationProofRandomBytes: layout.minimumFirstOracleRandomBytes,
+        minimumContinuationProofRandomBytes:
+            layout.minimumRequestedRandomBytes -
+            layout.minimumFirstOracleRandomBytes,
         recordCount,
         plaintextBytes,
         ciphertextBytes: plaintextBytes + 16n * recordCount,

@@ -11,7 +11,7 @@ import {
 } from './run-command.js';
 import {
     rustKernelCommand,
-    rustKernelTestArguments,
+    rustKernelTestCommands,
 } from './run-rust-kernel-tests.js';
 
 type Lane = {
@@ -219,17 +219,7 @@ const buildLanes = (): {
                         ],
                         'cargo-clippy',
                     ),
-                    rustKernelCommand(
-                        'cargo test (optimized test profile, fast)',
-                        [
-                            ...rustKernelTestArguments,
-                            '--',
-                            '--test-threads',
-                            '1',
-                            '--show-output',
-                        ],
-                        'cargo-test',
-                    ),
+                    ...rustKernelTestCommands(),
                 ],
                 name: 'Rust kernel (fmt, clippy, fast test)',
             },

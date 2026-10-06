@@ -1,9 +1,58 @@
+import { readFile } from 'node:fs/promises';
+
 import { describe, expect, it } from 'vitest';
 
 import { compileFirstOracleCheckpointCensus } from '#tests/first-oracle-checkpoint-model.js';
 import { completionProfile } from '#tests/supported-profile-model.js';
 
 describe('complete first-oracle proof checkpoint', () => {
+    it('keeps the first response salt after the checkpoint and prices separate field reads', async () => {
+        const model = compileFirstOracleCheckpointCensus(completionProfile());
+        const read = (file: string) =>
+            readFile(new URL('../../../' + file, import.meta.url), 'utf8');
+        const [worker, bridge, transcript, checkpoint] = await Promise.all([
+            read('packages/sdk/src/participant/worker/contribution.ts'),
+            read('crates/protocol-research/word-proof/src/bridge.rs'),
+            read('crates/protocol-research/word-proof/src/transcript.rs'),
+            read('crates/protocol-research/word-proof/src/first-checkpoint.rs'),
+        ]);
+        const position = (source: string, text: string) => {
+            const index = source.indexOf(text);
+            expect(index).toBeGreaterThanOrEqual(0);
+            return index;
+        };
+        const continuation = worker.slice(
+            position(worker, 'export const continueContribution'),
+        );
+        expect(position(continuation, 'await commitContribution')).toBeLessThan(
+            position(continuation, 'const run = proverRun'),
+        );
+        expect(position(bridge, 'first.finish_commitment();')).toBeLessThan(
+            position(bridge, 'transcript.respond(&[&first.tree.root()]);'),
+        );
+        expect(transcript).toContain('let mut salt = [0; 128];');
+        expect(transcript).toContain('crate::random::fill(&mut salt);');
+        expect(checkpoint).toContain('tree: Tree::with_seed(');
+
+        // Independent request schedule for the completion profile: one full
+        // read for each base mask, the degree mask, then one retained seed.
+        const buffer = 65_536n;
+        const firstMasks = 356n;
+        const degreeMaskWords = 3n * 131_072n;
+        const generation = firstMasks * buffer + degreeMaskWords * 16n + 64n;
+        expect(model.minimumGenerationProofRandomBytes).toBe(generation);
+        // Batching the short mask requests incorrectly preserves bytes that
+        // each real random_base call discards.
+        const incorrectlyBatched =
+            ((firstMasks * 1409n * 16n + buffer - 1n) / buffer) * buffer;
+        expect(incorrectlyBatched).toBeLessThan(firstMasks * buffer);
+        // The remaining eighteen tree seeds, all twenty response salts,
+        // the 376 extension masks (two reads each), and the sum mask.
+        expect(model.minimumContinuationProofRandomBytes).toBe(
+            18n * 64n + 20n * 128n + (376n * 2n + 50n) * buffer,
+        );
+    });
+
     it('accounts for every required private field without deterministic caches', () => {
         const model = compileFirstOracleCheckpointCensus(completionProfile());
         expect(model.fields.map((field) => field.plaintextBytes)).toEqual([

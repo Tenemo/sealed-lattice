@@ -35,16 +35,51 @@ export const rustKernelCommand = (
     workingDirectoryPath: workspace,
 });
 
-// The canonical encoding, hashing and registration credentials that the
-// participant module signs and verifies with, and their ML-DSA-65
-// conformance vectors.
-export const rustKernelTestArguments = [
-    'test',
-    '--offline',
-    '--locked',
-    '-p',
-    'registration-credentials',
+// Credential conformance and the small transcript integration target. The
+// explicit latter target keeps heavy proof-generation unit tests in their
+// guarded lane.
+const rustKernelTestSuites = [
+    {
+        name: 'registration-credentials',
+        arguments: [
+            'test',
+            '--offline',
+            '--locked',
+            '-p',
+            'registration-credentials',
+        ],
+    },
+    {
+        name: 'continuation-transcript',
+        arguments: [
+            'test',
+            '--offline',
+            '--locked',
+            '-p',
+            'word-proof',
+            '--test',
+            'continuation-transcript',
+        ],
+    },
 ] as const;
+
+export const rustKernelTestCommands = (filter?: string): CommandInvocation[] =>
+    rustKernelTestSuites.map((suite) =>
+        rustKernelCommand(
+            `cargo test ${suite.name}${filter === undefined ? '' : ` (${filter})`}`,
+            [
+                ...suite.arguments,
+                ...(filter === undefined || filter === suite.name
+                    ? []
+                    : [filter]),
+                '--',
+                '--test-threads',
+                '1',
+                '--show-output',
+            ],
+            `cargo-test-${suite.name}`,
+        ),
+    );
 
 const parseFilter = (rawArguments: readonly string[]): string | undefined => {
     const arguments_ = rawArguments.filter((argument) => argument !== '--');
@@ -72,34 +107,42 @@ const parseFilter = (rawArguments: readonly string[]): string | undefined => {
 const requireTestMatch = async (
     filter: string,
     runLog: ActiveLocalRunLog,
-): Promise<void> => {
-    const result = await runCommandAndCaptureOutput(
-        rustKernelCommand(
-            `list Rust kernel tests matching ${filter}`,
-            [
-                ...rustKernelTestArguments,
-                filter,
-                '--',
-                '--list',
-                '--format',
-                'terse',
-            ],
-            'cargo-test-rust-kernel-inventory',
-        ),
-        { runLog },
-    );
-    if (result.exitCode !== 0 || result.terminationSignal !== null) {
-        throw new Error(`Unable to list Rust kernel tests matching ${filter}.`);
+): Promise<CommandInvocation[]> => {
+    const commands = rustKernelTestCommands(filter);
+    const matched: CommandInvocation[] = [];
+    for (const [index, suite] of rustKernelTestSuites.entries()) {
+        const result = await runCommandAndCaptureOutput(
+            rustKernelCommand(
+                `list ${suite.name} tests matching ${filter}`,
+                [
+                    ...suite.arguments,
+                    ...(filter === suite.name ? [] : [filter]),
+                    '--',
+                    '--list',
+                    '--format',
+                    'terse',
+                ],
+                `cargo-test-${suite.name}-inventory`,
+            ),
+            { runLog },
+        );
+        if (result.exitCode !== 0 || result.terminationSignal !== null)
+            throw new Error(
+                `Unable to list Rust kernel tests matching ${filter}.`,
+            );
+        if (
+            result.stdout
+                .split(/\r?\n/gu)
+                .some((line) => line.trim().endsWith(': test'))
+        )
+            matched.push(commands[index]);
     }
-    if (
-        !result.stdout
-            .split(/\r?\n/gu)
-            .some((line) => line.trim().endsWith(': test'))
-    ) {
+    if (matched.length === 0) {
         throw new Error(
             `test:rust:kernel filter ${filter} selects zero tests.`,
         );
     }
+    return matched;
 };
 
 const main = async (): Promise<void> => {
@@ -112,26 +155,14 @@ const main = async (): Promise<void> => {
         },
         async (runLog) => {
             const filter = parseFilter(rawArguments);
-            if (filter !== undefined) await requireTestMatch(filter, runLog);
-            process.exitCode = await runCommandsInSeries(
-                [
-                    rustKernelCommand(
-                        filter === undefined
-                            ? 'cargo test Rust kernel'
-                            : `cargo test Rust kernel (${filter})`,
-                        [
-                            ...rustKernelTestArguments,
-                            ...(filter === undefined ? [] : [filter]),
-                            '--',
-                            '--test-threads',
-                            '1',
-                            '--show-output',
-                        ],
-                        'cargo-test-rust-kernel',
-                    ),
-                ],
-                { outputMode: 'inherit', runLog },
-            );
+            const commands =
+                filter === undefined
+                    ? rustKernelTestCommands()
+                    : await requireTestMatch(filter, runLog);
+            process.exitCode = await runCommandsInSeries(commands, {
+                outputMode: 'inherit',
+                runLog,
+            });
         },
     );
 };
