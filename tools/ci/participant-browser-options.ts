@@ -2,6 +2,110 @@ import assert from 'node:assert/strict';
 
 import { deriveSupportedProfile } from '#tests/supported-profile-model.js';
 
+// The points at which a departing member leaves for good, in stage order:
+// each follows the member's earlier work and precedes the named step.
+export const participantDepartureBoundaries = [
+    'before-confirmation',
+    'before-offer',
+    'before-selection',
+    'before-setup-verification',
+    'before-close-response',
+    'before-target-vote',
+] as const;
+
+export type ParticipantDepartureBoundary =
+    (typeof participantDepartureBoundaries)[number];
+
+// Spreads the profile's f tolerated departures over the boundaries, so the
+// n - f remaining members complete every later quorum alone. The organizer
+// never departs. Members leaving before their offer are eligible authors
+// that never offer, so the selection holds the first selected-count eligible
+// positions that remain. The members leaving after their offer and before
+// their target vote are selected authors; the others come from the positions
+// after the eligible ones.
+export const scheduleParticipantDepartures = (
+    participantCount: number,
+    optionCount: number,
+) => {
+    const {
+        maximumCorruptParticipantCount: faults,
+        setupContributorCount: selectedCount,
+    } = deriveSupportedProfile(participantCount, optionCount);
+    const last = participantDepartureBoundaries.length - 1;
+    assert.ok(
+        faults >= 1 && faults <= participantDepartureBoundaries.length,
+        'The profile tolerates no departure to schedule.',
+    );
+    const boundaries = Array.from(
+        { length: faults },
+        (_unused, index) =>
+            participantDepartureBoundaries[
+                faults === 1 ? last : Math.round((index * last) / (faults - 1))
+            ],
+    );
+    const eligibleCount = selectedCount + faults;
+    const eligible = Array.from(
+        { length: eligibleCount },
+        (_unused, position) => position,
+    );
+    const leavesBeforeOffer = (boundary: ParticipantDepartureBoundary) =>
+        boundary === 'before-confirmation' || boundary === 'before-offer';
+    // Every other eligible position from the second never offers.
+    const unoffered = boundaries
+        .filter(leavesBeforeOffer)
+        .map((_unused, index) => 2 + 2 * index);
+    assert.ok(unoffered.every((position) => position < eligibleCount));
+    const selectedPositions = eligible
+        .filter((position) => !unoffered.includes(position))
+        .slice(0, selectedCount);
+    const selectedAuthors = selectedPositions.filter(
+        (position) => position !== 0,
+    );
+    const later = Array.from(
+        { length: participantCount - eligibleCount },
+        (_unused, index) => eligibleCount + index,
+    );
+    const unselected = eligible.filter(
+        (position) =>
+            position !== 0 &&
+            !unoffered.includes(position) &&
+            !selectedPositions.includes(position),
+    );
+    const used = new Set([0, ...unoffered]);
+    const free = (candidates: readonly number[]) =>
+        candidates.filter((position) => !used.has(position));
+    const laterOrUnselected = () =>
+        free(later).length > 0 ? free(later) : free(unselected);
+    const claim = (position: number | undefined) => {
+        assert.ok(
+            position !== undefined,
+            'No member remains to depart at a boundary.',
+        );
+        used.add(position);
+        return position;
+    };
+    let nextUnoffered = 0;
+    const departures = boundaries.map((boundary) => {
+        const authors = free(selectedAuthors);
+        const others = laterOrUnselected();
+        return {
+            boundary,
+            position: leavesBeforeOffer(boundary)
+                ? unoffered[nextUnoffered++]
+                : boundary === 'before-selection'
+                  ? claim(authors[Math.floor(authors.length / 2)])
+                  : boundary === 'before-target-vote'
+                    ? claim(authors[authors.length - 1])
+                    : claim(
+                          boundary === 'before-setup-verification'
+                              ? others[0]
+                              : others[others.length - 1],
+                      ),
+        };
+    });
+    return { departures, selectedPositions };
+};
+
 // These select a development cohort, not supported-phone qualification.
 export const selectParticipantBrowserOptions = (
     arguments_: readonly string[],
@@ -20,6 +124,7 @@ export const selectParticipantBrowserOptions = (
         '--publication-faults',
         '--selection-fork',
         '--recovery',
+        '--departures',
     ]);
     const valuedOptions = new Set([
         '--foreign-poll',
@@ -113,6 +218,17 @@ export const selectParticipantBrowserOptions = (
                 ).length === 1),
         'The fixed setup case requires four participants (or seven for combined departure), two options and no other scenario.',
     );
+    const departures = switches.has('--departures');
+    assert.ok(
+        !departures ||
+            (mode === 'plain' &&
+                profile.maximumCorruptParticipantCount >= 1 &&
+                !sequential &&
+                !recovery &&
+                !memoryPressure &&
+                !publicationFaults),
+        'Departures need a concurrent plain cohort whose profile tolerates one.',
+    );
     assert.ok(
         !memoryPressure || mode === 'plain',
         'Only a plain run applies memory pressure.',
@@ -165,6 +281,7 @@ export const selectParticipantBrowserOptions = (
         publicationFaults,
         sequential,
         recovery,
+        departures,
         basePort,
         topCount,
         commandLineArguments: argumentsList,

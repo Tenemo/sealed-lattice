@@ -52,7 +52,11 @@ import {
     runArtifactDirectoryPath,
     runWithLocalRunLog,
 } from '#tools/ci/local-run-log.js';
-import { selectParticipantBrowserOptions } from '#tools/ci/participant-browser-options.js';
+import {
+    scheduleParticipantDepartures,
+    selectParticipantBrowserOptions,
+} from '#tools/ci/participant-browser-options.js';
+import type { ParticipantDepartureBoundary } from '#tools/ci/participant-browser-options.js';
 import { createBrowserPool } from '#tools/ci/participant-browser-pool.js';
 import { serveParticipantCandidates } from '#tools/ci/participant-candidate-http.js';
 import { participantCandidateView } from '#tools/ci/participant-candidate-view.js';
@@ -137,6 +141,9 @@ import { acquireProtocolResearchLock } from '#tools/ci/protocol-research-lock.js
 // --unselected-checkpoint instead keeps all four original members available:
 // position one endorses and activates the winning setup while its unused
 // own contribution remains at the genuine first-oracle checkpoint.
+// --departures has a plain run lose the profile's f tolerated members for
+// good, spread from the roster's publication to the target vote, so the
+// remaining n - f complete every later quorum and the result alone.
 const {
     participantCount,
     optionCount,
@@ -151,6 +158,7 @@ const {
     publicationFaults,
     sequential,
     recovery: measureRecovery,
+    departures,
     basePort,
     topCount,
     commandLineArguments,
@@ -912,7 +920,8 @@ await runWithLocalRunLog(
             !memoryPressure &&
             !setupDeparture &&
             !unselectedCheckpoint &&
-            !publicationFaults;
+            !publicationFaults &&
+            !departures;
         const measuredStages = Array.from({ length: participantCount }, () => [
             0,
         ]);
@@ -968,6 +977,16 @@ await runWithLocalRunLog(
                 optionCount,
             );
             const eligibleContributorCount = bounds.eligibleContributorCount;
+            // The schedule derives the eligible pool as the selected count
+            // and the tolerated departures, which the bounds model must give.
+            const departureSchedule = departures
+                ? scheduleParticipantDepartures(participantCount, optionCount)
+                : undefined;
+            if (departureSchedule !== undefined)
+                assert.equal(
+                    setupContributorCount + maximumCorruptParticipantCount,
+                    eligibleContributorCount,
+                );
             // The proof randomness an honest ballot and release draw from
             // their seeds when no candidate is rejected, as the independent
             // models derive it.
@@ -2627,6 +2646,35 @@ await runWithLocalRunLog(
                     position === absent ? [] : [{ member, position }],
                 );
                 let accepting = active.filter(({ position }) => position !== 0);
+                // Scheduled members leave for good at their boundary; the
+                // ballots of those leaving after casting still count.
+                const departedVoters: number[] = [];
+                const departAt = async (
+                    boundary: ParticipantDepartureBoundary,
+                ) => {
+                    for (const {
+                        position,
+                    } of departureSchedule?.departures.filter(
+                        (value) => value.boundary === boundary,
+                    ) ?? []) {
+                        await depart(members[position].origin);
+                        active = active.filter(
+                            (value) => value.position !== position,
+                        );
+                        accepting = accepting.filter(
+                            (value) => value.position !== position,
+                        );
+                        if (
+                            boundary === 'before-close-response' ||
+                            boundary === 'before-target-vote'
+                        )
+                            departedVoters.push(position);
+                        log.writeEvent({
+                            eventType: 'participant-departed',
+                            details: { position, boundary },
+                        });
+                    }
+                };
                 const markStage = (stages: number[], actors = active) => {
                     if (measureWorkflow)
                         for (const { member } of actors)
@@ -2644,7 +2692,11 @@ await runWithLocalRunLog(
                     .filter(
                         ({ position }) =>
                             position < eligibleContributorCount &&
-                            !(unselectedCheckpoint && position === 1),
+                            !(unselectedCheckpoint && position === 1) &&
+                            (departureSchedule === undefined ||
+                                departureSchedule.selectedPositions.includes(
+                                    position,
+                                )),
                     )
                     .slice(
                         0,
@@ -2692,6 +2744,7 @@ await runWithLocalRunLog(
                 );
                 await act(organizing, 'publish');
                 if (absent !== undefined) await depart(members[absent].origin);
+                await departAt('before-confirmation');
                 if (measureWorkflow) {
                     await confirmAndContribute(active[0]);
                     await each(accepting, async (value) => {
@@ -2721,6 +2774,7 @@ await runWithLocalRunLog(
                         }),
                     );
                 }
+                await departAt('before-offer');
                 let originalCheckpoint:
                     CheckpointCustodyObservation | undefined;
                 if (unselectedCheckpoint) {
@@ -2842,6 +2896,7 @@ await runWithLocalRunLog(
                     await Promise.all(
                         contributing.map(({ member }) => contribute(member)),
                     );
+                await departAt('before-selection');
                 if (
                     absent !== undefined &&
                     maximumCorruptParticipantCount === 2
@@ -2984,6 +3039,7 @@ await runWithLocalRunLog(
                         );
                     });
                 }
+                await departAt('before-setup-verification');
                 if (unselectedCheckpoint) {
                     assert.ok(originalCheckpoint);
                     assert.ok(relay);
@@ -3159,6 +3215,7 @@ await runWithLocalRunLog(
                 // with its body.
                 markStage([4]);
                 const authors = active.map(({ position }) => position);
+                await departAt('before-close-response');
                 const collectsEvery = (position: number) => [
                     { kind: 'own', position },
                     ...authors
@@ -3249,6 +3306,7 @@ await runWithLocalRunLog(
                         ({ position }) => position !== incompleteResponder,
                     );
                 }
+                await departAt('before-target-vote');
                 markStage([4, 5], [active[0]]);
                 const concluded = await act(organizing, 'close');
                 assert.equal(concluded.generation, 22);
@@ -3308,8 +3366,14 @@ await runWithLocalRunLog(
                         const voted = await act(member, 'target');
                         assert.equal(voted.generation, 24);
                         assert.equal(voted.ballotStatus, 'included');
-                        assert.equal(voted.usableBallots, active.length);
-                        assert.equal(voted.validBallots, active.length);
+                        assert.equal(
+                            voted.usableBallots,
+                            active.length + departedVoters.length,
+                        );
+                        assert.equal(
+                            voted.validBallots,
+                            active.length + departedVoters.length,
+                        );
                     },
                 );
                 markStage([6]);
@@ -3321,9 +3385,10 @@ await runWithLocalRunLog(
                     assert.equal(details.encrypted, true);
                 });
                 markStage([7]);
-                const expected = rankedIdentifiers(
-                    active.map(({ position }) => scores[position]),
-                );
+                const expected = rankedIdentifiers([
+                    ...active.map(({ position }) => scores[position]),
+                    ...departedVoters.map((position) => scores[position]),
+                ]);
                 await each(
                     measureWorkflow ? active : [active[active.length - 1]],
                     async ({ member }) => {
@@ -3415,6 +3480,7 @@ await runWithLocalRunLog(
                 );
                 let independentOutcome: WorkerResult | undefined;
                 let standaloneMilliseconds: number | undefined;
+                let certificateEndorsers: number[] | undefined;
                 if (measureRecovery) {
                     assert.deepEqual(
                         interruptions.map((cut) => [
@@ -3582,6 +3648,104 @@ await runWithLocalRunLog(
                         identifiers,
                     );
                 }
+                if (departureSchedule !== undefined) {
+                    assert.deepEqual(
+                        [...departed],
+                        departureSchedule.departures.map(
+                            ({ position }) => position,
+                        ),
+                    );
+                    // The certified selection holds the first remaining
+                    // eligible authors' offers, including those of authors
+                    // that left after offering.
+                    const selection = await readFile(
+                        path.join(publicDirectory, 'selection.bin'),
+                    );
+                    const fields = tupleFields(selection);
+                    assert.equal(fields.length, 3);
+                    const rosterIdentity = Buffer.from(fields[1]).toString(
+                        'hex',
+                    );
+                    const selected = await Promise.all(
+                        departureSchedule.selectedPositions.map(
+                            async (position) => ({
+                                position,
+                                bodyIdentity: (
+                                    await generatedOfferIdentity(
+                                        publicDirectory,
+                                        position,
+                                    )
+                                ).toString('hex'),
+                            }),
+                        ),
+                    );
+                    assert.deepEqual(
+                        selection,
+                        encodeSetupSelectionModel(
+                            participantCount,
+                            rosterIdentity,
+                            selected,
+                        ),
+                    );
+                    // Its certificate carries a quorum of distinct endorsers,
+                    // none of which left before endorsing.
+                    const certificate = await readFile(
+                        path.join(publicDirectory, 'setup-certificate.bin'),
+                    );
+                    assert.equal(
+                        certificate.subarray(0, 4).toString('ascii'),
+                        'SSC1',
+                    );
+                    const endorsementOffset =
+                        8 +
+                        certificate.readUInt32LE(4) +
+                        bounds.registration.signatureBytes;
+                    certificateEndorsers = Array.from(
+                        { length: bounds.close.quorum },
+                        (_, ordinal) =>
+                            certificate.readUInt16LE(
+                                endorsementOffset +
+                                    ordinal *
+                                        (2 +
+                                            bounds.registration.signatureBytes),
+                            ),
+                    );
+                    const unendorsed = departureSchedule.departures
+                        .filter(
+                            ({ boundary }) =>
+                                boundary === 'before-confirmation' ||
+                                boundary === 'before-offer' ||
+                                boundary === 'before-selection',
+                        )
+                        .map(({ position }) => position);
+                    assert.equal(
+                        new Set(certificateEndorsers).size,
+                        bounds.close.quorum,
+                    );
+                    assert.ok(
+                        certificateEndorsers.every(
+                            (position) =>
+                                position < participantCount &&
+                                !unendorsed.includes(position),
+                        ),
+                    );
+                    independentOutcome = (await inBrowser(
+                        leftOut,
+                        undefined,
+                        (chrome) =>
+                            chrome.evaluate(
+                                'window.verifyOutcome(' +
+                                    JSON.stringify(organizer.poll) +
+                                    ')',
+                            ),
+                    )) as WorkerResult;
+                    assert.ok(independentOutcome.status === 'completed');
+                    assert.equal(independentOutcome.details.encrypted, true);
+                    assert.deepEqual(
+                        independentOutcome.details.identifiers,
+                        identifiers,
+                    );
+                }
                 if (publicationFaults) {
                     assert.equal(
                         publicationRecoveryEvidence.length,
@@ -3676,6 +3840,19 @@ await runWithLocalRunLog(
                             unselectedCheckpoint,
                             publicationFaults,
                             selectionFork,
+                            departures,
+                            ...(departureSchedule !== undefined
+                                ? {
+                                      departureSchedule:
+                                          departureSchedule.departures,
+                                      selectedPositions:
+                                          departureSchedule.selectedPositions,
+                                      activePositions: positions.filter(
+                                          (position) => !departed.has(position),
+                                      ),
+                                      certificateEndorsers,
+                                  }
+                                : {}),
                             ...(selectionFork ? { selectionForkEvidence } : {}),
                             ...(publicationFaults
                                 ? {
@@ -3752,6 +3929,11 @@ await runWithLocalRunLog(
                                 ...(measureRecovery
                                     ? [
                                           'Original participant zero loses its worker and browser at the retained contribution checkpoint, ballot body, target signing intent and release body. Each following visit restores the original state. Workflow totals include every interrupted attempt, cold startup and completed recovery; the recorded cuts define this recovery workload. A fresh public reader verifies the outcome after every original participant departs, with its startup and work reported separately.',
+                                      ]
+                                    : []),
+                                ...(departureSchedule !== undefined
+                                    ? [
+                                          'Members other than the organizer, as many as the profile tolerates, leave for good at the scheduled boundaries between the roster’s publication and the target vote, each losing its browser and private state. Members leaving before their offer never offer, and selected authors leave after offering. The remaining quorum completes setup certification, close, target certification, release and the combined result without them, counting the ballots of departed voters, and a fresh standalone reader verifies the same outcome. This is one named schedule, not every departure combination.',
                                       ]
                                     : []),
                                 ...(profiling

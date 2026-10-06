@@ -1,8 +1,123 @@
 import { describe, expect, it } from 'vitest';
 
-import { selectParticipantBrowserOptions } from '#tools/ci/participant-browser-options.js';
+import {
+    participantDepartureBoundaries,
+    scheduleParticipantDepartures,
+    selectParticipantBrowserOptions,
+} from '#tools/ci/participant-browser-options.js';
 
 describe('participant browser cohort selection', () => {
+    it('selects tolerated departures only for a concurrent plain cohort', () => {
+        expect(
+            selectParticipantBrowserOptions([
+                '20',
+                '2',
+                'plain',
+                '--departures',
+                '--scalar',
+                '--base-port=45200',
+            ]),
+        ).toMatchObject({
+            participantCount: 20,
+            optionCount: 2,
+            mode: 'plain',
+            departures: true,
+            sequential: false,
+        });
+        expect(
+            selectParticipantBrowserOptions(['4', '2', 'plain']),
+        ).toMatchObject({ departures: false });
+        for (const args of [
+            ['--departures'],
+            ['3', '2', 'plain', '--departures'],
+            ['4', '2', 'no-result', '--departures'],
+            ['4', '2', 'preparation', '--departures'],
+            ['4', '2', 'plain', '--departures', '--sequential'],
+            ['4', '2', 'plain', '--departures', '--recovery'],
+            ['4', '2', 'plain', '--departures', '--memory-pressure'],
+            ['4', '2', 'plain', '--departures', '--publication-faults'],
+            ['4', '2', 'plain', '--departures', '--departures'],
+            ['4', '2', 'plain', '--departures=6'],
+        ])
+            expect(
+                () => selectParticipantBrowserOptions(args),
+                args.join(' '),
+            ).toThrow();
+    });
+
+    it('spreads every tolerated departure so that exactly the quorum remains', () => {
+        for (let participants = 4; participants <= 20; participants++) {
+            // The frozen thresholds, independent of the profile model.
+            const faults = Math.floor((participants - 1) / 3);
+            const selectedCount = Math.max(faults + 1, 2);
+            const eligibleCount = selectedCount + faults;
+            const { departures, selectedPositions } =
+                scheduleParticipantDepartures(participants, 2);
+            expect(departures).toHaveLength(faults);
+            const leavers = departures.map(({ position }) => position);
+            expect(new Set(leavers).size).toBe(faults);
+            expect(
+                leavers.every(
+                    (position) => position > 0 && position < participants,
+                ),
+            ).toBe(true);
+            // Distinct boundaries in stage order, ending at the target vote.
+            const stages = departures.map(({ boundary }) =>
+                participantDepartureBoundaries.indexOf(boundary),
+            );
+            expect(new Set(stages).size).toBe(faults);
+            expect(stages).toEqual(
+                [...stages].sort((left, right) => left - right),
+            );
+            expect(stages[stages.length - 1]).toBe(
+                participantDepartureBoundaries.length - 1,
+            );
+            const unoffered = departures
+                .filter(
+                    ({ boundary }) =>
+                        boundary === 'before-confirmation' ||
+                        boundary === 'before-offer',
+                )
+                .map(({ position }) => position);
+            expect(selectedPositions).toEqual(
+                Array.from({ length: eligibleCount }, (_, position) => position)
+                    .filter((position) => !unoffered.includes(position))
+                    .slice(0, selectedCount),
+            );
+            expect(selectedPositions).toHaveLength(selectedCount);
+            for (const { boundary, position } of departures)
+                expect(selectedPositions.includes(position), boundary).toBe(
+                    boundary === 'before-selection' ||
+                        boundary === 'before-target-vote',
+                );
+            expect(
+                unoffered.every((position) => position < eligibleCount),
+            ).toBe(true);
+        }
+    });
+
+    it('schedules the largest roster’s six departures across every boundary', () => {
+        expect(scheduleParticipantDepartures(20, 2)).toEqual({
+            departures: [
+                { boundary: 'before-confirmation', position: 2 },
+                { boundary: 'before-offer', position: 4 },
+                { boundary: 'before-selection', position: 6 },
+                { boundary: 'before-setup-verification', position: 13 },
+                { boundary: 'before-close-response', position: 19 },
+                { boundary: 'before-target-vote', position: 8 },
+            ],
+            selectedPositions: [0, 1, 3, 5, 6, 7, 8],
+        });
+        expect(scheduleParticipantDepartures(20, 20)).toEqual(
+            scheduleParticipantDepartures(20, 2),
+        );
+        expect(scheduleParticipantDepartures(4, 2)).toEqual({
+            departures: [{ boundary: 'before-target-vote', position: 1 }],
+            selectedPositions: [0, 1],
+        });
+        expect(() => scheduleParticipantDepartures(3, 2)).toThrow();
+    });
+
     it('measures recovery within the ordinary scalar stage schedule', () => {
         expect(
             selectParticipantBrowserOptions([
