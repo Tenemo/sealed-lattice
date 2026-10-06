@@ -66,6 +66,7 @@ import {
     operationSeedCount,
 } from '#tests/operation-seed-model.js';
 import {
+    compileClassicalReaderOracleBudget,
     compileFullCircuitOracleBudget,
     compileOraclePermutationBudget,
     shakePermutationGateCharge,
@@ -5525,6 +5526,43 @@ export const renderDocumentationCensus = (): string => {
                     gates,
                     work.maximumLogicalQueries,
                     work.maximumLengthPermutations,
+                    records,
+                    shadows,
+                    work.shadowQueryGatesUpperBound,
+                ].map(formatCount);
+            }),
+        ),
+        '',
+        'The following alternative also covers classical fixed-input XOF readers whose roots pay their complete input absorption and whose effective stream stays unchanged. Their cursor clones share a cache; separate initializations still use the same underlying XOF. An initial prefix scaled to absorption work, followed by doubling, bounds the adapter at five times the reference permutations. These rows replace the complete-query-only conversion above for this mixed interface; they are not an additional multiplier applied to it. All extra reduction-producer reads need their own caller budget. Cache payload bounds exclude handles, cursor/lookup logic, output copying, circuit construction and the oracle circuit itself. Shared unfinished input hashes and mutable oracle epochs remain outside this conversion.',
+        '',
+        table(
+            [
+                'Charged caller gates',
+                'Covered prefix permutations',
+                'Cached input bits bound',
+                'Cached output bits bound',
+                'Output growth overlap bits bound',
+                'Programmed records',
+                'Shadow streams',
+                'All shadow query gates bound',
+            ],
+            [
+                [shakePermutationGateCharge, 0n, 0n],
+                [1n << 40n, 10n, 20n],
+                [1n << 80n, 1024n, 1024n],
+            ].map(([gates, records, shadows]) => {
+                const work = compileClassicalReaderOracleBudget(
+                    gates,
+                    512n,
+                    records,
+                    shadows,
+                );
+                return [
+                    gates,
+                    work.maximumLengthPermutations,
+                    work.cacheInputBitsUpperBound,
+                    work.cacheOutputBitsUpperBound,
+                    work.cacheGrowthOverlapBitsUpperBound,
                     records,
                     shadows,
                     work.shadowQueryGatesUpperBound,
