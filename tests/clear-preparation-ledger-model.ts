@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 
 import { compileCommonMatrixSamplingCensus } from '#tests/common-matrix-sampling-model.js';
+import { sourceCacheWork } from '#tests/compressed-oracle-model.js';
+import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import { compileRegistrationSetupBindingScreen } from '#tests/registration-setup-binding-model.js';
 import { compileSetupSelectionCensus } from '#tests/setup-selection-model.js';
 import {
@@ -14,7 +16,13 @@ import { compileThresholdCompletionProfile } from '#tests/threshold-completion-m
 // offer. H includes abandoned and unselected original honest registrations.
 // These counts supply no primitive advantages, reduction times, semantic-use
 // errors or numerical security limit on H.
-let sourceCatalogue: { families: bigint; ciphertextModuli: bigint } | undefined;
+let sourceCatalogue:
+    | {
+          families: bigint;
+          ciphertextModuli: bigint;
+          maximumModulusBytes: bigint;
+      }
+    | undefined;
 const fixedSourceCatalogue = () => {
     if (sourceCatalogue !== undefined) return sourceCatalogue;
     const families = new Set<string>();
@@ -28,6 +36,10 @@ const fixedSourceCatalogue = () => {
     sourceCatalogue = {
         families: BigInt(families.size),
         ciphertextModuli: BigInt(moduli.size),
+        maximumModulusBytes: [...moduli].reduce((maximum, modulus) => {
+            const bytes = BigInt(Math.ceil(modulus.toString(2).length / 8));
+            return bytes > maximum ? bytes : maximum;
+        }, 0n),
     };
     return sourceCatalogue;
 };
@@ -82,6 +94,29 @@ export const compileClearPreparationLedger = (
         maximumStartedPreparationRosters *
         selectedPositionSets *
         catalogue.ciphertextModuli;
+    // One lookup per corrupt eligible record at each first honest generation.
+    // Replaying the retained generation intent reuses its already resolved
+    // cache references. Cache misses, including unsuccessful extraction, are
+    // immutable entries. No hit is counted as another oracle extraction.
+    const maximumSourceCacheLookups =
+        maximumStartedPreparationRosters * corrupt;
+    const familyIndexBits = BigInt(
+        (catalogue.families - 1n).toString(2).length,
+    );
+    const sourceCache = sourceCacheWork(
+        maximumSourceCacheLookups,
+        // The authenticated registration digest binds its original owner,
+        // context, recipient key and ordered source commitments. The fixed
+        // family ordinal selects the particular commitment within that body.
+        512n + familyIndexBits,
+        // Canonical salt/coordinate plus the decoder's separate valid bit;
+        // shorter families are zero-padded to the fixed catalogue maximum.
+        1n +
+            8n *
+                (64n +
+                    fixedModulusBfvInputs.polynomialDegree *
+                        (1n + catalogue.maximumModulusBytes)),
+    );
     return {
         originalHonestRegistrations,
         honestEndorsersPerCertificate,
@@ -99,6 +134,8 @@ export const compileClearPreparationLedger = (
         sourceMaskScopes: originalHonestRegistrations * catalogue.families,
         maximumCorruptSourceExtractions:
             maximumStartedPreparationRosters * corrupt,
+        maximumSourceCacheLookups,
+        sourceCache,
         maximumHonestRecipientRows,
         recipientKeyComparisons: 2n * originalHonestRegistrations,
         recipientCiphertextComparisons: 2n * maximumHonestRecipientRows,

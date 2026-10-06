@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
     compileSourceCoordinateDecoding,
-    runSourceCoordinateDecoding,
+    runCleanCircuit,
     sourceCoordinateDecodingWork,
 } from '#tests/compressed-oracle-model.js';
 import { listSupportedProfiles } from '#tests/supported-profile-model.js';
@@ -56,9 +56,7 @@ describe('extracted source coordinate decoding circuit', () => {
                         magnitude <= limit &&
                         (sign === 0 || magnitude !== 0n);
                     const payload = source.subarray(5);
-                    expect(
-                        runSourceCoordinateDecoding(circuit, source),
-                    ).toEqual(
+                    expect(runCleanCircuit(circuit, source)).toEqual(
                         Uint8Array.from([
                             ...payload.map((bit) => (valid ? bit : 0)),
                             Number(valid),
@@ -101,11 +99,7 @@ describe('extracted source coordinate decoding circuit', () => {
                             (_, index) => index % 2,
                         );
                         const original = output.slice();
-                        const result = runSourceCoordinateDecoding(
-                            circuit,
-                            source,
-                            output,
-                        );
+                        const result = runCleanCircuit(circuit, source, output);
                         expect(result).toEqual(
                             Uint8Array.from([
                                 ...source
@@ -119,11 +113,7 @@ describe('extracted source coordinate decoding circuit', () => {
                             ]),
                         );
                         expect(
-                            runSourceCoordinateDecoding(
-                                circuit,
-                                source,
-                                result,
-                            ),
+                            runCleanCircuit(circuit, source, result),
                         ).toEqual(original);
                     }
     });
@@ -169,7 +159,7 @@ describe('extracted source coordinate decoding circuit', () => {
                         1024,
                         512,
                     );
-                    const result = runSourceCoordinateDecoding(one, source);
+                    const result = runCleanCircuit(one, source);
                     const valid =
                         magnitude <= limit && (sign === 0 || magnitude !== 0n);
                     expect(result[result.length - 1]).toBe(Number(valid));

@@ -309,8 +309,8 @@ export function sourceCoordinateDecodingWork(
     };
 }
 
-export function runSourceCoordinateDecoding(
-    circuit: ReturnType<typeof compileSourceCoordinateDecoding>,
+export function runCleanCircuit(
+    circuit: Circuit,
     input: Uint8Array,
     output = new Uint8Array(circuit.output.length),
 ) {
@@ -596,6 +596,75 @@ function firstMatchingEntry(
         found = builder.or(found, take);
     }
     return [...output, found];
+}
+
+// A classical simulator cache, separate from the compressed oracle database.
+// Rows hold value, key, occupied. The value includes the decoder's own valid
+// bit, so a cached unsuccessful extraction is still a cache hit.
+export function compileSourceCacheLookup(
+    capacity: number,
+    keyBits: number,
+    valueBits: number,
+) {
+    assert.ok([capacity, keyBits, valueBits].every(Number.isSafeInteger));
+    assert.ok(capacity >= 0 && keyBits > 0 && valueBits > 0);
+    const rowBits = keyBits + valueBits + 1;
+    const builder = new Builder(keyBits + capacity * rowBits);
+    const query = Array.from({ length: keyBits }, (_, bit) => bit);
+    const rows = Array.from({ length: capacity }, (_, index) =>
+        Array.from(
+            { length: rowBits },
+            (_value, bit) => keyBits + index * rowBits + bit,
+        ),
+    );
+    const matches = rows.map((row) =>
+        builder.equal(query, row.slice(valueBits, valueBits + keyBits)),
+    );
+    return builder.finish(
+        firstMatchingEntry(builder, rows, matches, valueBits),
+    );
+}
+
+// Each request has a new predetermined zero row, even on a hit. Only misses
+// occupy their row. This avoids an unpriced dynamically addressed insertion.
+export function compileSourceCacheInsert(keyBits: number, valueBits: number) {
+    assert.ok([keyBits, valueBits].every(Number.isSafeInteger));
+    assert.ok(keyBits > 0 && valueBits > 0);
+    const builder = new Builder(1 + valueBits + keyBits);
+    const missed = builder.not(0);
+    return builder.finish([
+        ...Array.from({ length: valueBits + keyBits }, (_, bit) =>
+            builder.and(missed, bit + 1),
+        ),
+        missed,
+    ]);
+}
+
+export function sourceCacheWork(
+    requests: bigint,
+    keyBits: bigint,
+    valueBits: bigint,
+) {
+    assert.ok(requests >= 0n && keyBits > 0n && valueBits > 0n);
+    const rowBits = keyBits + valueBits + 1n;
+    // Lookups scan 0, 1, ..., requests-1 reserved rows. All slots, including
+    // unoccupied hit slots, are charged. Copying and uncomputation are included.
+    const lookupGates =
+        requests * (requests - 1n) * (11n + 5n * keyBits + 3n * valueBits) +
+        requests * (valueBits + 1n);
+    const insertionGates = requests * (5n + 3n * (keyBits + valueBits));
+    // Conservatively charge preparation of every fresh zero cache bit too.
+    const initializationGates = requests * rowBits;
+    return {
+        requests,
+        keyBits,
+        valueBits,
+        maximumRetainedBits: requests * rowBits,
+        lookupGates,
+        insertionGates,
+        initializationGates,
+        totalGates: lookupGates + insertionGates + initializationGates,
+    };
 }
 
 // Selection consumes coherently computed relation bits, never public claims.

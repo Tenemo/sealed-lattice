@@ -38,6 +38,9 @@ describe('Clear-preparation comparison populations', () => {
             expect(row.messagesPerFheBallotComparison).toBe(
                 BigInt(participants),
             );
+            expect(row.maximumSourceCacheLookups).toBe(101n * BigInt(corrupt));
+            expect(row.sourceCache.requests).toBe(101n * BigInt(corrupt));
+            expect(row.sourceCache.totalGates === 0n).toBe(corrupt === 0);
         }
     });
 
@@ -112,6 +115,7 @@ describe('Clear-preparation comparison populations', () => {
         // The all-confirmation divisor would count only two exposure scopes.
         expect(exposed.length).toBeGreaterThan(Math.floor(honest.length / 3));
         expect(row.maximumCorruptSourceExtractions).toBe(6n);
+        expect(row.maximumSourceCacheLookups).toBe(6n);
     });
 
     it('counts abandoned registrations and every source family without adding proof roles', () => {

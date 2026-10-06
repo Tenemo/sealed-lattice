@@ -4804,6 +4804,35 @@ export const renderDocumentationCensus = (): string => {
             }),
         ),
         '',
+        'The source-extraction cache has one lookup per corrupt eligible registration at a roster’s first honest generation. Repeated original-generation work reuses its resolved references. Each lookup reserves a fresh row, with only misses occupying it; unsuccessful extraction is cached with a false coordinate-validity bit and a true presence bit. Keys contain the verified registration body identity and an immutable source-family ordinal, under the separately charged identity-binding premise. Values use the largest catalogue coordinate width. The following circuit bound charges complete linear scans, copying, cleanup and zero-row initialization, including unused rows after hits. It excludes the oracle extraction and coordinate decoding priced below, circuit construction and the rest of the protocol simulator.',
+        '',
+        table(
+            [
+                'Participants',
+                'Example H',
+                'Maximum cache lookups',
+                'Cache key bits',
+                'Cache value bits',
+                'Retained cache bits',
+                'Cache gates',
+            ],
+            supportedProfiles.profiles.map((row) => {
+                const ledger = compileClearPreparationLedger(
+                    row[0],
+                    BigInt(row[0].participantCount),
+                );
+                return [
+                    row[0].participantCount,
+                    ledger.originalHonestRegistrations,
+                    ledger.maximumSourceCacheLookups,
+                    ledger.sourceCache.keyBits,
+                    ledger.sourceCache.valueBits,
+                    ledger.sourceCache.maximumRetainedBits,
+                    ledger.sourceCache.totalGates,
+                ].map(formatCount);
+            }),
+        ),
+        '',
         'Oracle simulation is priced from declared query schedules in the compressed-oracle circuit census. That accounting includes persistent components, clean prefix wrappers and all supplied shadow streams. Deriving admissible capacities from the accepted experiment-cost convention, pricing the complete protocol wrappers and closing the semantic-use inventory remain required before solving for a security population.',
         '',
         '## Proof-field coefficient-fold bounds',
