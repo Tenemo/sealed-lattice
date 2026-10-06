@@ -9,10 +9,11 @@ import {
 } from '#tests/supported-profile-model.js';
 import { compileThresholdCompletionProfile } from '#tests/threshold-completion-model.js';
 
-// Structural comparison counts for the clear-offer chronology. H includes
-// abandoned and unselected original honest registrations. These counts do not
-// supply primitive advantages, reduction times, semantic-use errors or a
-// numerical security limit on H.
+// Structural comparison counts start at an original retained contribution
+// intent's first private generation, including work that never publishes an
+// offer. H includes abandoned and unselected original honest registrations.
+// These counts supply no primitive advantages, reduction times, semantic-use
+// errors or numerical security limit on H.
 let sourceCatalogue: { families: bigint; ciphertextModuli: bigint } | undefined;
 const fixedSourceCatalogue = () => {
     if (sourceCatalogue !== undefined) return sourceCatalogue;
@@ -57,47 +58,52 @@ export const compileClearPreparationLedger = (
     );
     const catalogue = fixedSourceCatalogue();
     const honestEndorsersPerCertificate = participants - 2n * corrupt;
-    const maximumExposedRosters = originalHonestRegistrations;
+    const maximumStartedPreparationRosters = originalHonestRegistrations;
     const maximumCertifiedRosters =
         originalHonestRegistrations / honestEndorsersPerCertificate;
-    const maximumHonestOffers = originalHonestRegistrations;
+    const maximumHonestContributionScopes = originalHonestRegistrations;
     const certifiedBallotSlots = maximumCertifiedRosters * participants;
     const maximumHonestBallots =
         certifiedBallotSlots < originalHonestRegistrations
             ? certifiedBallotSlots
             : originalHonestRegistrations;
     const maximumHonestReleases = maximumHonestBallots;
-    const maximumHonestRecipientRows = participants * maximumHonestOffers;
+    const maximumHonestRecipientRows =
+        participants * maximumHonestContributionScopes;
     const selectedPositionSets = choose(
         BigInt(selection.eligibleCount),
         BigInt(selection.selectedCount),
     );
-    // The embedding precedes the certificate and guesses the exposure ordinal,
-    // position set and (where necessary) shared-stream modulus. It cannot use
-    // the smaller number of eventually certified rosters as its sample space.
+    // The embedding precedes private generation and guesses the ordinal of a
+    // roster's first honest generation, the selected positions and (where
+    // necessary) shared-stream modulus. Publication or certification counts
+    // cannot supply an earlier online guess space.
     const selectedKeyEventComparisons =
-        maximumExposedRosters *
+        maximumStartedPreparationRosters *
         selectedPositionSets *
         catalogue.ciphertextModuli;
     return {
         originalHonestRegistrations,
         honestEndorsersPerCertificate,
-        maximumExposedRosters,
+        maximumStartedPreparationRosters,
         maximumCertifiedRosters,
-        maximumHonestOffers,
+        maximumHonestContributionScopes,
         maximumHonestBallots,
         maximumHonestReleases,
         maximumHonestProofScopes:
-            maximumHonestOffers + maximumHonestBallots + maximumHonestReleases,
+            maximumHonestContributionScopes +
+            maximumHonestBallots +
+            maximumHonestReleases,
         generatedSourceEntries:
             originalHonestRegistrations * source.coordinateCount,
         sourceMaskScopes: originalHonestRegistrations * catalogue.families,
-        maximumCorruptSourceExtractions: maximumExposedRosters * corrupt,
+        maximumCorruptSourceExtractions:
+            maximumStartedPreparationRosters * corrupt,
         maximumHonestRecipientRows,
         recipientKeyComparisons: 2n * originalHonestRegistrations,
         recipientCiphertextComparisons: 2n * maximumHonestRecipientRows,
         fheTupleComparisons:
-            2n * maximumHonestOffers * catalogue.ciphertextModuli,
+            2n * maximumHonestContributionScopes * catalogue.ciphertextModuli,
         selectedPositionSets,
         sharedFheModulusGuesses: catalogue.ciphertextModuli,
         fheSelectedKeyComparisons: 2n * selectedKeyEventComparisons,

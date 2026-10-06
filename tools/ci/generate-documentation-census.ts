@@ -4718,13 +4718,13 @@ export const renderDocumentationCensus = (): string => {
         '',
         '## Composed security ledger',
         '',
-        'The [clear-preparation argument](security-argument.md#clear-candidate-joint-ledger) owns the conditional hybrid interfaces. The table evaluates structural upper bounds at the displayed example original-honest-registration population H, including abandoned and unselected registrations; H is not an admitted population limit. Exposed rosters and certified rosters have different bounds. Primitive comparison counts include the source-family or selected-position guesses where required, but exclude unresolved semantic-use error charges and reduction-time operands. No numerical end-to-end security level or required primitive level is emitted.',
+        'The [clear-preparation argument](security-argument.md#clear-candidate-joint-ledger) owns the conditional hybrid interfaces. The table evaluates structural upper bounds at the displayed example original-honest-registration population H, including abandoned and unselected registrations; H is not an admitted population limit. Started private preparation and certified rosters have different bounds. Original contribution scopes include failed or unfinished generation before publication; a replay of the same retained intent adds work but no new scope. Primitive comparison counts include the source-family or selected-position guesses where required, but exclude unresolved semantic-use error charges and reduction-time operands. No numerical end-to-end security level or required primitive level is emitted.',
         '',
         table(
             [
                 'Participants',
                 'Example H',
-                'Exposure scopes',
+                'Started preparation rosters',
                 'Certified rosters',
                 'Source entries, option range',
                 'Source-mask scopes',
@@ -4743,7 +4743,7 @@ export const renderDocumentationCensus = (): string => {
                 return [
                     formatCount(row[0].participantCount),
                     formatCount(first.originalHonestRegistrations),
-                    formatCount(first.maximumExposedRosters),
+                    formatCount(first.maximumStartedPreparationRosters),
                     formatCount(first.maximumCertifiedRosters),
                     rangeOf(
                         ledgers.map((value) => value.generatedSourceEntries),

@@ -102,9 +102,11 @@ describe('Clear-preparation comparison populations', () => {
             deriveSupportedProfile(4, 2),
             6n,
         );
-        expect(row.maximumExposedRosters).toBe(BigInt(exposed.length));
+        expect(row.maximumStartedPreparationRosters).toBe(
+            BigInt(exposed.length),
+        );
         expect(row.maximumCertifiedRosters).toBe(3n);
-        expect(row.maximumExposedRosters).toBeGreaterThan(
+        expect(row.maximumStartedPreparationRosters).toBeGreaterThan(
             row.maximumCertifiedRosters,
         );
         // The all-confirmation divisor would count only two exposure scopes.
@@ -132,6 +134,76 @@ describe('Clear-preparation comparison populations', () => {
         expect(one.maximumHonestBallots).toBe(0n);
         expect(one.maximumHonestProofScopes).toBe(1n);
         expect(() => compileClearPreparationLedger(profile, -1n)).toThrow();
+    });
+
+    it('counts private starts before the first published offer and does not count replays twice', () => {
+        // One corrupt creator shows three losing views to different honest
+        // owners. Their generation fails before publication; other named
+        // registrants never confirm those views. Only the last roster closes.
+        const rosters = [
+            [0, 1, 4, 5],
+            [0, 2, 4, 5],
+            [0, 3, 4, 5],
+            [0, 4, 5, 6],
+        ];
+        const confirmations = new Map([
+            [1, 0],
+            [2, 1],
+            [3, 2],
+            [4, 3],
+            [5, 3],
+            [6, 3],
+        ]);
+        const attempts = [
+            { owner: 1, roster: 0, published: false },
+            { owner: 2, roster: 1, published: false },
+            { owner: 3, roster: 2, published: false },
+            { owner: 4, roster: 3, published: false },
+            { owner: 4, roster: 3, published: true },
+        ];
+        for (const attempt of attempts) {
+            expect(confirmations.get(attempt.owner)).toBe(attempt.roster);
+            expect(
+                rosters[attempt.roster].indexOf(attempt.owner),
+            ).toBeGreaterThan(0);
+            expect(rosters[attempt.roster].indexOf(attempt.owner)).toBeLessThan(
+                3,
+            );
+        }
+        const started = [...new Set(attempts.map((attempt) => attempt.roster))];
+        const published = [
+            ...new Set(
+                attempts
+                    .filter((attempt) => attempt.published)
+                    .map((attempt) => attempt.roster),
+            ),
+        ];
+        const winning = 3;
+        expect(started.indexOf(winning) + 1).toBe(4);
+        expect(published.indexOf(winning) + 1).toBe(1);
+        // The losing views violate no confirmation lock; a winning quorum
+        // can use two different honest owners who confirmed only its roster.
+        expect(
+            [4, 5].every((owner) => confirmations.get(owner) === winning),
+        ).toBe(true);
+        const row = compileClearPreparationLedger(
+            deriveSupportedProfile(4, 2),
+            BigInt(confirmations.size),
+        );
+        expect(BigInt(started.length)).toBeLessThanOrEqual(
+            row.maximumStartedPreparationRosters,
+        );
+        expect(BigInt(started.length)).toBeGreaterThan(
+            row.maximumCertifiedRosters,
+        );
+        expect(new Set(attempts.map((attempt) => attempt.owner)).size).toBe(4);
+        expect(row.maximumHonestContributionScopes).toBe(6n);
+        // The same corrupt original coordinate can be cached; zero early
+        // public offers still does not imply zero required source extraction.
+        expect(
+            attempts.slice(0, 3).every((attempt) => !attempt.published),
+        ).toBe(true);
+        expect(row.maximumCorruptSourceExtractions).toBeGreaterThan(0n);
     });
 
     it('uses the original poll family inventory when the final roster is smaller', () => {
