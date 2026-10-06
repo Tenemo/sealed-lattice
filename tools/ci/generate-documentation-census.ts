@@ -132,7 +132,10 @@ import { compileSetupSelectionWireCensus } from '#tests/setup-selection-wire-mod
 import { compileSigningLoopSourceComparison } from '#tests/signing-loop-estimate-model.js';
 import { compileSimulatorKeyKnowledgeCensus } from '#tests/simulator-key-knowledge-model.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
-import { compileSourceCoefficientAllocation } from '#tests/source-coefficient-allocation-model.js';
+import {
+    compileSourceArithmeticBounds,
+    compileSourceCoefficientAllocation,
+} from '#tests/source-coefficient-allocation-model.js';
 import { compileSparseSupportSamplingCensus } from '#tests/sparse-sampling-bound-model.js';
 import { compileFixedSpongeInitializationCensus } from '#tests/sponge-initialization-model.js';
 import {
@@ -1216,6 +1219,36 @@ export const renderDocumentationCensus = (): string => {
                 formatCount(value.maximumBrowserRandomBytes),
                 formatCount(value.failureBits),
             ]),
+        ),
+        '',
+        '## Original-source arithmetic bounds',
+        '',
+        'These bounds apply to the original first FHE key coordinate with centered common coefficients, the fixed sparse-secret support and the bounded source error. Every supported profile is checked against the transform range, signed machine integers, reducer leading-digit and one-correction premises, and the emitted quotient/carry widths. They rule out the named arithmetic refusals for those source inputs; they are not peak-allocation bounds or claims about other setup equations.',
+        '',
+        table(
+            [
+                'Participants / options',
+                'Limbs',
+                'Leading modulus digit',
+                'Maximum quotient estimate',
+                'Maximum centered quotient magnitude',
+                'Maximum witness carry magnitude',
+            ],
+            [
+                deriveSupportedProfile(3, 2),
+                completion,
+                deriveSupportedProfile(20, 20),
+            ].map((profile) => {
+                const row = compileSourceArithmeticBounds(profile);
+                return [
+                    `${profile.participantCount} / ${profile.optionCount}`,
+                    formatCount(row.limbs),
+                    formatCount(row.leadingModulusDigit),
+                    formatCount(row.maximumQuotientEstimate),
+                    formatCount(row.maximumQuotient),
+                    formatCount(row.maximumWitnessCarry),
+                ];
+            }),
         ),
         '',
         '## Source coefficient normalization comparison',
