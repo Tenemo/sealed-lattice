@@ -1,3 +1,4 @@
+import { compileCommonAgreementDegreeCensus } from '#tests/common-agreement-degree-model.js';
 import {
     compileBallotWordProofLayout,
     compileFullWordProofLayout,
@@ -14,6 +15,87 @@ const binomial = (population: bigint, count: bigint) => {
     for (let index = 1n; index <= count; index++)
         result = (result * (population - index + 1n)) / index;
     return result;
+};
+
+// One specified accepted output vector and the number of candidate words
+// examined through each next acceptance. Rounding to complete reads discards
+// an unexamined suffix; the next consumer starts after that whole suffix.
+// This is an ideal independent-stream law, not a seed-expansion comparison.
+export const bufferedFieldWaitingLaw = (
+    candidateValues: bigint,
+    acceptedValues: bigint,
+    waitingDraws: readonly bigint[],
+    bufferWords: bigint,
+) => {
+    if (
+        candidateValues < 1n ||
+        acceptedValues < 1n ||
+        acceptedValues > candidateValues ||
+        bufferWords < 1n ||
+        waitingDraws.length === 0 ||
+        waitingDraws.some((draws) => draws < 1n)
+    )
+        throw new RangeError('Invalid buffered field waiting history.');
+    const outputs = BigInt(waitingDraws.length);
+    const examinedWords = waitingDraws.reduce((sum, draws) => sum + draws, 0n);
+    const reads = (examinedWords + bufferWords - 1n) / bufferWords;
+    const outputVectors = acceptedValues ** outputs;
+    const jointNumerator =
+        (candidateValues - acceptedValues) ** (examinedWords - outputs);
+    return {
+        examinedWords,
+        reads,
+        requestedWords: reads * bufferWords,
+        discardedWords: reads * bufferWords - examinedWords,
+        outputVectors,
+        jointNumerator,
+        historyNumerator: outputVectors * jointNumerator,
+        denominator: candidateValues ** examinedWords,
+    };
+};
+
+// The degree mask's accepted-value count is an exact multiple of the
+// native read width. Any rejection in its minimum prefix needs another
+// read. Bonferroni and the union bound enclose that probability without
+// materializing an integer with one exponent per requested field element.
+export const compileFirstOracleReadVariation = () => {
+    const agreement = compileCommonAgreementDegreeCensus();
+    const field = compileSmallLimbProofFieldCensus();
+    const requiredValues = 3n * BigInt(agreement.codeDimension);
+    const bufferWords = 65_536n / field.packedFieldElementByteLength;
+    if (requiredValues % bufferWords !== 0n)
+        throw new Error(
+            'The degree-mask prefix no longer fills complete reads.',
+        );
+    const candidateValues = 1n << field.modulusBitLength;
+    const rejectedValues = candidateValues - field.modulus;
+    const denominator = candidateValues * candidateValues;
+    const upperNumerator = requiredValues * rejectedValues * candidateValues;
+    const lowerNumerator =
+        upperNumerator -
+        binomial(requiredValues, 2n) * rejectedValues * rejectedValues;
+    if (lowerNumerator <= 0n || upperNumerator >= denominator)
+        throw new Error(
+            'The degree-mask read-variation interval needs another bound.',
+        );
+    let upperProbabilityExponent = 0n;
+    while (upperNumerator << (upperProbabilityExponent + 1n) <= denominator)
+        upperProbabilityExponent++;
+    let lowerProbabilityExponent = 0n;
+    while (lowerNumerator << lowerProbabilityExponent < denominator)
+        lowerProbabilityExponent++;
+    return {
+        requiredValues,
+        bufferWords,
+        minimumReads: requiredValues / bufferWords,
+        candidateValues,
+        rejectedValues,
+        lowerNumerator,
+        upperNumerator,
+        denominator,
+        lowerProbabilityExponent,
+        upperProbabilityExponent,
+    };
 };
 
 export const rejectionSubsetBound = (input: {

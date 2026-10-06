@@ -91,7 +91,10 @@ import {
     compileProofHashWork,
     proofHashProfiles,
 } from '#tests/proof-hash-work-model.js';
-import { compileProofRandomnessBudgets } from '#tests/proof-randomness-budget-model.js';
+import {
+    compileFirstOracleReadVariation,
+    compileProofRandomnessBudgets,
+} from '#tests/proof-randomness-budget-model.js';
 import { compileProofVerifierQueryCensus } from '#tests/proof-verifier-query-model.js';
 import { compileRecipientKeyCensus } from '#tests/recipient-key-model.js';
 import { compileRecipientKeyUniquenessBound } from '#tests/recipient-key-uniqueness-model.js';
@@ -1384,6 +1387,38 @@ export const renderDocumentationCensus = (): string => {
                 formatCount(value.failureAllocationBits),
             ]),
         ),
+        '',
+        '## Buffered field-sampling observations',
+        '',
+        'The native private-mask sampler reads complete buffers, accepts words below the field prime and discards the unread tail of its final buffer. In an independent uniform stream, its complete waiting-count tuple is independent of the ordered accepted values; rounding to full reads preserves that independence, and the next consumer starts at the fresh buffer boundary. This is a conditional sampler law, not the seed-expansion comparison or complete private-state argument. Replays retain the original tape and counts.',
+        '',
+        table(
+            ['Degree-mask observation', 'Value'],
+            (() => {
+                const value = compileFirstOracleReadVariation();
+                return [
+                    [
+                        'Required base-field values',
+                        formatCount(value.requiredValues),
+                    ],
+                    [
+                        'Words in one native read',
+                        formatCount(value.bufferWords),
+                    ],
+                    ['Minimum reads', formatCount(value.minimumReads)],
+                    [
+                        'Probability of an extra read, lower bound',
+                        `2^-${value.lowerProbabilityExponent}`,
+                    ],
+                    [
+                        'Probability of an extra read, upper bound',
+                        `2^-${value.upperProbabilityExponent}`,
+                    ],
+                ];
+            })(),
+        ),
+        '',
+        'The interval follows from the union and two-term Bonferroni bounds on a rejection in the exactly filled minimum degree-mask prefix. The event is sampler-work variation, not a privacy failure. Its probability is too large to omit at the end-to-end target; a causal observation argument must retain it through the exact independence law or another justified construction.',
         '',
         '## Operation randomness seeds',
         '',

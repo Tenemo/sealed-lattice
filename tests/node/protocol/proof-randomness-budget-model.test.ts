@@ -1,7 +1,11 @@
+import { readFile } from 'node:fs/promises';
+
 import { describe, expect, it } from 'vitest';
 
 import {
     bufferedFieldSamplingFailure,
+    bufferedFieldWaitingLaw,
+    compileFirstOracleReadVariation,
     compileProofRandomnessBudgets,
     rejectionSubsetBound,
 } from '#tests/proof-randomness-budget-model.js';
@@ -11,6 +15,141 @@ import {
 } from '#tests/supported-profile-model.js';
 
 describe('bounded randomness for complete proof simulation', () => {
+    it('separates batched read counts from accepted values and the next consumer’s words', () => {
+        for (const [alphabet, accepted, required, batch, maximumReads] of [
+            [4, 2, 2, 2, 3],
+            [3, 2, 3, 2, 3],
+            [4, 3, 1, 3, 2],
+            [2, 2, 3, 2, 2],
+        ] as const) {
+            const futureWords = 2;
+            const length = batch * maximumReads + futureWords;
+            const groups = new Map<number, Map<string, number>>();
+            for (let encoded = 0; encoded < alphabet ** length; encoded++) {
+                let rest = encoded;
+                const tape = Array.from({ length }, () => {
+                    const word = rest % alphabet;
+                    rest = Math.floor(rest / alphabet);
+                    return word;
+                });
+                const output: number[] = [];
+                let cursor = 0;
+                let reads = 0;
+                while (reads < maximumReads && output.length < required) {
+                    const end = cursor + batch;
+                    while (cursor < end && output.length < required) {
+                        const word = tape[cursor++];
+                        if (word < accepted) output.push(word);
+                    }
+                    cursor = end;
+                    reads++;
+                }
+                if (output.length !== required) continue;
+                const key =
+                    output.join(',') +
+                    '|' +
+                    tape.slice(cursor, cursor + futureWords).join(',');
+                const group = groups.get(reads) ?? new Map<string, number>();
+                group.set(key, (group.get(key) ?? 0) + 1);
+                groups.set(reads, group);
+            }
+            expect(groups.size).toBeGreaterThan(0);
+            for (const group of groups.values()) {
+                expect(group.size).toBe(
+                    accepted ** required * alphabet ** futureWords,
+                );
+                expect(new Set(group.values()).size).toBe(1);
+            }
+        }
+    });
+
+    it('matches the exact waiting-tuple law while preserving discarded read tails', () => {
+        for (const waiting of [
+            [1n, 1n],
+            [1n, 2n],
+            [2n, 2n],
+            [1n, 3n],
+        ]) {
+            const law = bufferedFieldWaitingLaw(4n, 3n, waiting, 3n);
+            const words = Number(law.examinedWords);
+            const counts = new Map<string, bigint>();
+            for (let encoded = 0; encoded < 4 ** words; encoded++) {
+                let rest = encoded;
+                const output: number[] = [];
+                const observed: bigint[] = [];
+                let since = 0n;
+                for (let index = 0; index < words; index++) {
+                    const word = rest % 4;
+                    rest = Math.floor(rest / 4);
+                    since++;
+                    if (word < 3) {
+                        output.push(word);
+                        observed.push(since);
+                        since = 0n;
+                    }
+                }
+                if (since !== 0n || observed.join() !== waiting.join())
+                    continue;
+                const key = output.join();
+                counts.set(key, (counts.get(key) ?? 0n) + 1n);
+            }
+            expect(BigInt(counts.size)).toBe(law.outputVectors);
+            expect(new Set(counts.values())).toEqual(
+                new Set([law.jointNumerator]),
+            );
+            expect(
+                [...counts.values()].reduce((sum, count) => sum + count, 0n),
+            ).toBe(law.historyNumerator);
+            expect(law.denominator).toBe(4n ** BigInt(words));
+            expect(law.requestedWords % 3n).toBe(0n);
+            expect(law.discardedWords).toBe(law.requestedWords - BigInt(words));
+        }
+        const noRejections = bufferedFieldWaitingLaw(4n, 4n, [1n, 1n], 3n);
+        expect(noRejections.historyNumerator).toBe(noRejections.denominator);
+        expect(noRejections.discardedWords).toBe(1n);
+        expect(bufferedFieldWaitingLaw(4n, 4n, [2n], 3n).jointNumerator).toBe(
+            0n,
+        );
+        expect(() => bufferedFieldWaitingLaw(4n, 3n, [0n], 3n)).toThrow();
+    });
+
+    it('keeps the native degree-mask read variation instead of treating the minimum as fixed', async () => {
+        const source = await readFile(
+            new URL(
+                '../../../crates/protocol-research/supported-profile/src/relation.rs',
+                import.meta.url,
+            ),
+            'utf8',
+        );
+        expect(source).toContain('pub const RANDOM_WORD_BYTES: usize = 16;');
+        expect(source).toContain(
+            'pub const RANDOM_READ_BYTES: usize = 65_536;',
+        );
+        const result = compileFirstOracleReadVariation();
+        expect(result.requiredValues).toBe(3n * 2n * 65_536n);
+        expect(result.bufferWords).toBe(65_536n / 16n);
+        const rejected = 133n * (1n << 64n) - 1n;
+        const alphabet = 1n << 128n;
+        expect(result.rejectedValues).toBe(rejected);
+        expect(result.lowerNumerator).toBe(
+            result.requiredValues * rejected * alphabet -
+                ((result.requiredValues * (result.requiredValues - 1n)) / 2n) *
+                    rejected *
+                    rejected,
+        );
+        expect(
+            result.lowerNumerator << result.lowerProbabilityExponent,
+        ).toBeGreaterThanOrEqual(result.denominator);
+        expect(
+            result.upperNumerator << result.upperProbabilityExponent,
+        ).toBeLessThanOrEqual(result.denominator);
+        // This is observable sampler work, not a negligible privacy error
+        // that may be omitted. The exact independence argument is needed.
+        expect(result.lowerNumerator << 80n).toBeGreaterThan(
+            result.denominator,
+        );
+    });
+
     it('programs the complete role-specific word without borrowing the setup width', () => {
         for (const [participants, options, setupBytes] of [
             [3, 2, 131072n],
