@@ -111,11 +111,16 @@ export function compileSparseRouting(
         }
         for (let bit = 0; bit < outputBits; bit++) {
             let value = builder.zero;
-            for (let index = 0; index <= previousCapacity; index++)
+            // Visit this output column directly. Materializing tuple(index)
+            // here would allocate a whole row for every selected output bit.
+            let entryBit = 2 * inputBits + bit;
+            for (let index = 0; index <= previousCapacity; index++) {
                 value = builder.xor(
                     value,
-                    builder.and(matches[index], tuple(index)[inputBits + bit]),
+                    builder.and(matches[index], entryBit),
                 );
+                entryBit += width;
+            }
             output.push(value);
         }
         let present = builder.zero;
@@ -547,6 +552,10 @@ export function sparseRoutingWork(
         routingGates,
         roundTripRoutingGates: 2n * routingGates,
         routingQubits: inputBits + 2n * databaseBits + maximumCleanWorkBits,
+        // Wire-index entries materialized in row tuples while constructing
+        // both circuits, not bit gates or a complete constructor-time bound.
+        // Remove uses C+1 comparison rows and 2C shift rows; insert uses 2C.
+        constructorTupleIndexWords: (5n * priorQueries + 1n) * width,
         localUpdate,
         localUpdateGates: 13n * outputBits - 2n,
     };

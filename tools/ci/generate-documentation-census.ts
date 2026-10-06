@@ -5315,6 +5315,7 @@ export const renderDocumentationCensus = (): string => {
                 'Clean routing gates',
                 'Oracle-call gates',
                 'Oracle qubits',
+                'Constructed tuple-index words',
             ],
             [
                 [0n, 2n, 1n],
@@ -5332,9 +5333,12 @@ export const renderDocumentationCensus = (): string => {
                     work.routingGates,
                     work.roundTripRoutingGates + work.localUpdateGates,
                     work.routingQubits + output,
+                    work.constructorTupleIndexWords,
                 ].map(formatCount);
             }),
         ),
+        '',
+        'Tuple-index words count the row arrays constructed by the sparse routing emitter. Direct column indexing removes the repeated row materialization inside output-bit selection. This is a constructor allocation operand, not a bit-operation, dispatch, or complete construction-time bound; emitted gates are unchanged.',
         '',
         table(
             [
