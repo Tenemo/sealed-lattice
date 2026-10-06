@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 
 import {
+    bufferedFieldPrefixLaw,
     bufferedFieldSamplingFailure,
     bufferedFieldWaitingLaw,
     compileFirstOracleReadVariation,
@@ -15,6 +16,210 @@ import {
 } from '#tests/supported-profile-model.js';
 
 describe('bounded randomness for complete proof simulation', () => {
+    it('keeps unfinished read prefixes independent of the latent complete mask', () => {
+        for (const [alphabet, accepted, required, batch, maximumReads] of [
+            [3, 2, 3, 2, 3],
+            [4, 3, 2, 1, 4],
+            [2, 2, 3, 2, 2],
+            [3, 1, 2, 2, 2],
+        ] as const) {
+            for (let reads = 0; reads <= maximumReads; reads++) {
+                const length = reads * batch;
+                const counts = new Map<number, Map<string, bigint>>();
+                for (let encoded = 0; encoded < alphabet ** length; encoded++) {
+                    let remaining = encoded;
+                    const prefix: number[] = [];
+                    for (let position = 0; position < length; position++) {
+                        const word = remaining % alphabet;
+                        remaining = Math.floor(remaining / alphabet);
+                        if (word < accepted) prefix.push(word);
+                    }
+                    if (prefix.length >= required) continue;
+                    const group =
+                        counts.get(prefix.length) ?? new Map<string, bigint>();
+                    const key = prefix.join(',');
+                    group.set(key, (group.get(key) ?? 0n) + 1n);
+                    counts.set(prefix.length, group);
+                }
+                for (
+                    let found = 0;
+                    found < Math.min(required, length + 1);
+                    found++
+                ) {
+                    const law = bufferedFieldPrefixLaw(
+                        BigInt(alphabet),
+                        BigInt(accepted),
+                        BigInt(required),
+                        BigInt(reads),
+                        BigInt(batch),
+                        BigInt(found),
+                    );
+                    const group =
+                        counts.get(found) ?? new Map<string, bigint>();
+                    const total = [...group.values()].reduce(
+                        (sum, count) => sum + count,
+                        0n,
+                    );
+                    expect(total).toBe(law.historyNumerator);
+                    expect(law.denominator).toBe(
+                        BigInt(alphabet) ** BigInt(length),
+                    );
+                    expect(BigInt(group.size)).toBe(
+                        total === 0n ? 0n : law.prefixVectors,
+                    );
+                    expect(new Set(group.values())).toEqual(
+                        new Set(total === 0n ? [] : [law.prefixNumerator]),
+                    );
+                    // Complete any unfinished mask from its independent
+                    // latent suffix. Every full vector has the same mass
+                    // within this read/acceptance-count history.
+                    expect(law.prefixVectors * law.latentSuffixVectors).toBe(
+                        BigInt(accepted) ** BigInt(required),
+                    );
+                    expect(
+                        law.prefixNumerator *
+                            BigInt(accepted) ** BigInt(required) *
+                            law.denominator,
+                    ).toBe(
+                        law.historyNumerator *
+                            law.completedVectorJointDenominator,
+                    );
+                }
+            }
+        }
+        expect(() => bufferedFieldPrefixLaw(3n, 2n, 2n, 1n, 2n, 2n)).toThrow(
+            'unfinished',
+        );
+        expect(() => bufferedFieldPrefixLaw(3n, 2n, 2n, 0n, 2n, 1n)).toThrow(
+            'unfinished',
+        );
+    });
+
+    it('preserves failed prefixes on replay and conditions later work only on the read history', () => {
+        const alphabet = 3;
+        const accepted = 2;
+        const required = 2;
+        const batch = 2;
+        const maximumReads = 3;
+        const length = batch * maximumReads + 1;
+        const run = (
+            tape: readonly number[],
+            fail: (read: number, prefix: readonly number[]) => boolean,
+        ) => {
+            const output: number[] = [];
+            const events: string[] = [];
+            let cursor = 0;
+            for (let read = 1; read <= maximumReads; read++) {
+                events.push(`read:${read}`);
+                if (fail(read, output))
+                    return {
+                        output,
+                        cursor,
+                        events: [...events, 'failed'],
+                        completed: false,
+                    };
+                const end = cursor + batch;
+                while (cursor < end && output.length < required) {
+                    const value = tape[cursor++];
+                    if (value < accepted) output.push(value);
+                }
+                cursor = end;
+                if (output.length === required)
+                    return {
+                        output,
+                        cursor,
+                        events: [...events, 'completed'],
+                        completed: true,
+                    };
+            }
+            return {
+                output,
+                cursor,
+                events: [...events, 'unfinished'],
+                completed: false,
+            };
+        };
+        const groups = new Map<string, Map<string, number>>();
+        const valueDependentGroups = new Map<string, Set<string>>();
+        let interruptedThenCompleted = 0;
+        for (let encoded = 0; encoded < alphabet ** length; encoded++) {
+            let remaining = encoded;
+            const tape = Array.from({ length }, () => {
+                const word = remaining % alphabet;
+                remaining = Math.floor(remaining / alphabet);
+                return word;
+            });
+            const first = run(tape, (read) => read === 2);
+            const repeated = first.completed
+                ? first
+                : run(tape, (read) => read === 3);
+            const final = repeated.completed
+                ? repeated
+                : run(tape, () => false);
+            if (!final.completed) continue;
+            if (!first.completed) interruptedThenCompleted++;
+            const history = [first.events, repeated.events, final.events]
+                .map((events) => events.join(','))
+                .join('|');
+            const result = `${final.output.join(',')}|${tape[final.cursor]}`;
+            const group = groups.get(history) ?? new Map<string, number>();
+            group.set(result, (group.get(result) ?? 0) + 1);
+            groups.set(history, group);
+
+            // A private-value-dependent failure is outside the coupling:
+            // an otherwise identical provider can disclose the first mask.
+            const revealing = run(
+                tape,
+                (read, prefix) => read === 2 && prefix[0] === 0,
+            );
+            if (revealing.events[revealing.events.length - 1] === 'failed') {
+                const observed = revealing.events.join(',');
+                const outputs =
+                    valueDependentGroups.get(observed) ?? new Set<string>();
+                outputs.add(final.output.join(','));
+                valueDependentGroups.set(observed, outputs);
+            }
+        }
+        expect(interruptedThenCompleted).toBeGreaterThan(0);
+        expect(groups.size).toBeGreaterThan(1);
+        for (const group of groups.values()) {
+            expect(group.size).toBe(accepted ** required * alphabet);
+            expect(new Set(group.values()).size).toBe(1);
+        }
+        expect(valueDependentGroups.size).toBeGreaterThan(0);
+        expect(
+            [...valueDependentGroups.values()].some(
+                (outputs) => outputs.size < accepted ** required,
+            ),
+        ).toBe(true);
+
+        // Repeated failure at the same boundary is one original event.
+        // Enumerate fresh second tapes independently to demonstrate why
+        // counting replay as a new sampling trial gives a different law.
+        let failedPrefixes = 0n;
+        let twoFreshFailures = 0n;
+        const unfinished = (encoded: number) =>
+            Number(encoded % alphabet < accepted) +
+                Number(Math.floor(encoded / alphabet) < accepted) <
+            required;
+        for (let first = 0; first < alphabet ** batch; first++) {
+            if (unfinished(first)) failedPrefixes++;
+            for (let second = 0; second < alphabet ** batch; second++)
+                if (unfinished(first) && unfinished(second)) twoFreshFailures++;
+        }
+        const originalPrefixMass = [0n, 1n].reduce(
+            (sum, found) =>
+                sum +
+                bufferedFieldPrefixLaw(3n, 2n, 2n, 1n, 2n, found)
+                    .historyNumerator,
+            0n,
+        );
+        expect(failedPrefixes).toBe(originalPrefixMass);
+        expect(failedPrefixes * BigInt(alphabet ** batch)).toBeGreaterThan(
+            twoFreshFailures,
+        );
+    });
+
     it('separates batched read counts from accepted values and the next consumer’s words', () => {
         for (const [alphabet, accepted, required, batch, maximumReads] of [
             [4, 2, 2, 2, 3],

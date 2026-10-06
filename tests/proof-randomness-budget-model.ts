@@ -54,6 +54,51 @@ export const bufferedFieldWaitingLaw = (
     };
 };
 
+// An unfinished prefix after whole buffer reads. The accepted prefix is
+// specified; unseen accepted values are independent latent values on the
+// same original tape. A provider failure before the next read must not be
+// conditioned on those private values. Replaying the tape repeats this
+// prefix, rather than supplying another independent sampling trial.
+export const bufferedFieldPrefixLaw = (
+    candidateValues: bigint,
+    acceptedValues: bigint,
+    requiredValues: bigint,
+    completedReads: bigint,
+    bufferWords: bigint,
+    acceptedPrefixLength: bigint,
+) => {
+    const examinedWords = completedReads * bufferWords;
+    if (
+        candidateValues < 1n ||
+        acceptedValues < 1n ||
+        acceptedValues > candidateValues ||
+        requiredValues < 1n ||
+        completedReads < 0n ||
+        bufferWords < 1n ||
+        acceptedPrefixLength < 0n ||
+        acceptedPrefixLength >= requiredValues ||
+        acceptedPrefixLength > examinedWords
+    )
+        throw new RangeError('Invalid unfinished buffered field prefix.');
+    const prefixNumerator =
+        binomial(examinedWords, acceptedPrefixLength) *
+        (candidateValues - acceptedValues) **
+            (examinedWords - acceptedPrefixLength);
+    const prefixVectors = acceptedValues ** acceptedPrefixLength;
+    const latentSuffixVectors =
+        acceptedValues ** (requiredValues - acceptedPrefixLength);
+    const denominator = candidateValues ** examinedWords;
+    return {
+        examinedWords,
+        prefixNumerator,
+        prefixVectors,
+        latentSuffixVectors,
+        historyNumerator: prefixNumerator * prefixVectors,
+        denominator,
+        completedVectorJointDenominator: denominator * latentSuffixVectors,
+    };
+};
+
 // The degree mask's accepted-value count is an exact multiple of the
 // native read width. Any rejection in its minimum prefix needs another
 // read. Bonferroni and the union bound enclose that probability without
