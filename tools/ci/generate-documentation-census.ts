@@ -91,6 +91,7 @@ import { compileProofFieldReductionCensus } from '#tests/proof-field-reduction-m
 import { compileProofHashDomainCensus } from '#tests/proof-hash-domain-model.js';
 import {
     compileProofHashWork,
+    firstOracleResumeHashWork,
     proofHashProfiles,
 } from '#tests/proof-hash-work-model.js';
 import {
@@ -269,6 +270,19 @@ export const renderDocumentationCensus = (): string => {
     const ballotRelation = compileBallotEncryptionRelationCensus(completion);
     const fixedModulusBfv = compileProfileBfvCensus(completion);
     const supportedProfiles = compileSupportedProfileCensus();
+    const maximumFirstOracleResume = supportedProfiles.profiles
+        .flat()
+        .map((profile) => {
+            const setup = proofHashProfiles(profile).find(
+                (value) => value.role === 'setup',
+            )!;
+            return firstOracleResumeHashWork(
+                setup.firstWidth,
+                setup.roleBytes,
+                (setup.firstWidth - 48n) / 16n,
+            ).completeInputFactor;
+        })
+        .reduce((maximum, factor) => (factor > maximum ? factor : maximum), 0n);
     const recoverableSetup = compileRecoverableSetupResourceScreen(
         completion.participantCount,
         completion.optionCount,
@@ -1157,6 +1171,56 @@ export const renderDocumentationCensus = (): string => {
                     formatCount(value.proverHashSubtotal.permutations),
                 ];
             }),
+        ),
+        '',
+        'A first-oracle checkpoint may retain all base columns while leaving the extension degree-mask column unhashed. The following rows use that latest cut, which maximizes the complete-input/resumed-permutation ratio for each fixed role and profile. The bound applies separately to every completed replay without recharging historical absorption. Original input availability, its reconstruction and storage, authentication, incomplete calls and private-state coupling remain separate. Use the larger of this factor and the covered reader/Merkle factor in a mixed oracle schedule; do not multiply those alternative conversions.',
+        '',
+        table(
+            [
+                'Participants / options',
+                'First leaf bytes including framing',
+                'Retained prefix bytes per leaf',
+                'Remaining input bytes per leaf',
+                'Complete-input permutations per leaf',
+                'Resumed permutations per leaf',
+                'Complete-input factor',
+            ],
+            [
+                [3, 2],
+                [10, 10],
+                [20, 20],
+            ].map(([participants, options]) => {
+                const profile = deriveSupportedProfile(participants, options);
+                const setup = proofHashProfiles(profile).find(
+                    (value) => value.role === 'setup',
+                )!;
+                const work = firstOracleResumeHashWork(
+                    setup.firstWidth,
+                    setup.roleBytes,
+                    (setup.firstWidth - 48n) / 16n,
+                );
+                return [
+                    `${participants} / ${options}`,
+                    ...[
+                        work.completeInputBytes,
+                        work.retainedPrefixBytes,
+                        work.remainingInputBytes,
+                        work.completeInputPermutations,
+                        work.resumedPermutations,
+                        work.completeInputFactor,
+                    ].map(formatCount),
+                ];
+            }),
+        ),
+        '',
+        table(
+            ['Scope', 'Complete-input factor'],
+            [
+                [
+                    'Maximum over every supported profile with its emitted setup role',
+                    formatCount(maximumFirstOracleResume),
+                ],
+            ],
         ),
         '',
         '## Release verification attempts',
@@ -5592,11 +5656,12 @@ export const renderDocumentationCensus = (): string => {
             }),
         ),
         '',
-        'The following alternative also covers classical fixed-input XOF readers whose roots pay their complete input absorption and whose effective stream stays unchanged. Their cursor clones share a cache; separate initializations still use the same underlying XOF. An initial prefix scaled to absorption work, followed by doubling, bounds the adapter at five times the reference permutations. These rows replace the complete-query-only conversion above for this mixed interface; they are not an additional multiplier applied to it. All extra reduction-producer reads need their own caller budget. Cache payload bounds exclude handles, cursor/lookup logic, output copying, circuit construction and the oracle circuit itself. Shared unfinished input hashes and mutable oracle epochs remain outside this conversion.',
+        'The following alternative also covers classical fixed-input XOF readers whose roots pay their complete input absorption and whose effective stream stays unchanged. Their cursor clones share a cache; separate initializations still use the same underlying XOF. An initial prefix scaled to absorption work, followed by doubling, bounds the adapter at five times the reference permutations. Each budget also has a row using the maximum emitted first-oracle replay factor derived in the proof-hash section, conditional on authenticated original-input availability. These rows replace the complete-query-only conversion above for their respective mixed interface; the conversion factors are not multiplied. All extra reduction-producer reads need their own caller budget. Reader-cache payload bounds exclude resumed hash inputs and their reconstruction/storage, handles, cursor/lookup logic, output copying, circuit construction and the oracle circuit itself. Other shared unfinished input hashes and mutable oracle epochs remain outside these conversions.',
         '',
         table(
             [
                 'Charged caller gates',
+                'Complete-input factor',
                 'Covered prefix permutations',
                 'Cached input bits bound',
                 'Cached output bits bound',
@@ -5609,24 +5674,28 @@ export const renderDocumentationCensus = (): string => {
                 [shakePermutationGateCharge, 0n, 0n],
                 [1n << 40n, 10n, 20n],
                 [1n << 80n, 1024n, 1024n],
-            ].map(([gates, records, shadows]) => {
-                const work = compileClassicalReaderOracleBudget(
-                    gates,
-                    512n,
-                    records,
-                    shadows,
-                );
-                return [
-                    gates,
-                    work.maximumLengthPermutations,
-                    work.cacheInputBitsUpperBound,
-                    work.cacheOutputBitsUpperBound,
-                    work.cacheGrowthOverlapBitsUpperBound,
-                    records,
-                    shadows,
-                    work.shadowQueryGatesUpperBound,
-                ].map(formatCount);
-            }),
+            ].flatMap(([gates, records, shadows]) =>
+                [5n, maximumFirstOracleResume].map((factor) => {
+                    const work = compileClassicalReaderOracleBudget(
+                        gates,
+                        512n,
+                        records,
+                        shadows,
+                        factor,
+                    );
+                    return [
+                        gates,
+                        factor,
+                        work.maximumLengthPermutations,
+                        work.cacheInputBitsUpperBound,
+                        work.cacheOutputBitsUpperBound,
+                        work.cacheGrowthOverlapBitsUpperBound,
+                        records,
+                        shadows,
+                        work.shadowQueryGatesUpperBound,
+                    ].map(formatCount);
+                }),
+            ),
         ),
         '',
         'The raw registration-source slice fixes the source grammar, original owner, immutable family and salt at their actual bit positions. Its exact length is checked; poll/runtime and the coordinate payload stay unconstrained. Current protocol credential hash calls are shorter than this source language even at its syntactic minimum. This separates raw oracle inputs, not their potentially dependent message values. Retained tags have the distinct fixed ProtocolHash prefix.',

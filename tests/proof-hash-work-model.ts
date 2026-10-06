@@ -61,6 +61,54 @@ const protocolHashPrefixBytes = 64n;
 const fixedHashInputBytes = (domain: string, parts: readonly bigint[]) =>
     protocolHashPrefixBytes + framedProofHashBytes(domain, parts);
 
+// The authenticated first-oracle checkpoint is taken before the extension
+// degree-mask column. A completed resume hashes the remaining base columns,
+// that extension value and final padding. This prices HASH work only: an
+// adapter still needs the original absorbed bytes and their reconstruction,
+// storage and private-state correspondence.
+export const firstOracleResumeHashWork = (
+    firstWidth: bigint,
+    roleBytes: bigint,
+    committedBaseColumns: bigint,
+) => {
+    const extensionBytes = 48n;
+    const baseBytes = 16n;
+    const baseColumns = (firstWidth - extensionBytes) / baseBytes;
+    if (
+        firstWidth < extensionBytes + baseBytes ||
+        (firstWidth - extensionBytes) % baseBytes !== 0n ||
+        roleBytes < 1n ||
+        roleBytes > 1024n ||
+        committedBaseColumns < 0n ||
+        committedBaseColumns > baseColumns
+    )
+        throw new RangeError('Invalid first-oracle checkpoint shape.');
+    const completeInputBytes = fixedHashInputBytes('bounded-proof/leaf', [
+        roleBytes,
+        4n,
+        4n,
+        128n,
+        firstWidth,
+    ]);
+    const retainedPrefixBytes =
+        completeInputBytes - firstWidth + baseBytes * committedBaseColumns;
+    const remainingInputBytes = completeInputBytes - retainedPrefixBytes;
+    const resumedPermutations =
+        ((retainedPrefixBytes % 136n) + remainingInputBytes) / 136n + 1n;
+    const completeInputPermutations = completeInputBytes / 136n + 1n;
+    return {
+        baseColumns,
+        completeInputBytes,
+        retainedPrefixBytes,
+        remainingInputBytes,
+        resumedPermutations,
+        completeInputPermutations,
+        completeInputFactor:
+            (completeInputPermutations + resumedPermutations - 1n) /
+            resumedPermutations,
+    };
+};
+
 // Independent operands for tree::SUBTREE_LEAVES and rows::ROWS_PER_JOB.
 // The first three trees use row shards; folding trees hash their rows in
 // subtree jobs. Supported helper counts leave each row shard at least one

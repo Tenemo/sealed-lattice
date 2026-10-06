@@ -213,6 +213,9 @@ export const compileClassicalXofReaderBudget = (
 // twice their own slots, so five covers every mixture. The input budget must
 // include additional conceptual producer calls made by a reduction, before
 // expanding their oracle implementation; it is not automatically original T.
+// A larger completeInputFactor may cover authenticated resumed hashes only
+// after their full-input/resumed-work ratio and original-input availability
+// are established separately. Five alone does not cover deep checkpoints.
 // Cache lookup, cursor/handle control, copying returned bits, circuit
 // construction, input-state sharing and other reduction work remain separate.
 export const compileClassicalReaderOracleBudget = (
@@ -220,14 +223,16 @@ export const compileClassicalReaderOracleBudget = (
     firstChunkBits: bigint,
     programmedRecords = 0n,
     shadowStreams = 0n,
+    completeInputFactor = 5n,
 ) => {
-    assert.ok(callerReferenceGates >= 0n);
+    assert.ok(callerReferenceGates >= 0n && completeInputFactor >= 5n);
     const permutations = callerReferenceGates / shakePermutationGateCharge;
-    const maximumLengthPermutations = 5n * permutations;
+    const maximumLengthPermutations = completeInputFactor * permutations;
     return {
         maximumLogicalQueries: permutations,
         maximumLengthPermutations,
-        // Payload only, excluding handles, indices and oracle-circuit memory.
+        // Covered reader-cache payload only. Resumed hash inputs, handles,
+        // indices and oracle-circuit memory remain separate.
         cacheInputBitsUpperBound: 1344n * permutations,
         cacheOutputBitsUpperBound: 2n * 1344n * permutations,
         cacheGrowthOverlapBitsUpperBound: 3n * 1344n * permutations,
