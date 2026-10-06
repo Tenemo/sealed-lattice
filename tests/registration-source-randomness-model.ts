@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 
-import { labelledHashExtractionWork } from '#tests/compressed-oracle-model.js';
+import {
+    labelledHashExtractionWork,
+    sourceCoordinateDecodingWork,
+} from '#tests/compressed-oracle-model.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import { operationSeedBytes } from '#tests/operation-seed-model.js';
 import { byteAlignedSpongePermutations } from '#tests/proof-hash-work-model.js';
@@ -132,8 +135,9 @@ export const compileRegistrationSourceRandomness = (
 
 // The first output component has the complete 512-bit commitment prefix.
 // fullValueQueries is the caller's actual component-capacity bound, including
-// every nested wrapper. Query simulation, decoding, cache construction and
-// the DFMS disturbance/mismatch terms are separate from this selection cost.
+// every nested wrapper. The post-extraction decoder separately checks the
+// context and coordinate and retains their canonical bytes. Query simulation,
+// cache indexing and the DFMS disturbance/mismatch terms remain separate.
 export const compileRegistrationSourceExtractionWork = (
     originalPollMaximumParticipants: number,
     optionCount: number,
@@ -157,6 +161,10 @@ export const compileRegistrationSourceExtractionWork = (
         // copy afterward. Static zero bits only make this bound smaller.
         const targetPreparationGates =
             2n * (family.commitmentMaskCellBits + 512n);
+        const coordinateDecodingGates = sourceCoordinateDecodingWork(
+            fixedModulusBfvInputs.polynomialDegree,
+            8n * family.modulusBytes,
+        ).decodingGates;
         return {
             family: family.index,
             inputCellBits: family.commitmentInputCellBits,
@@ -165,6 +173,11 @@ export const compileRegistrationSourceExtractionWork = (
             targetPreparationGates,
             preparedSelectionGates:
                 selection.extractionGates + targetPreparationGates,
+            coordinateDecodingGates,
+            preparedSelectionAndDecodingGates:
+                selection.extractionGates +
+                targetPreparationGates +
+                coordinateDecodingGates,
         };
     });
     const maximumGatesPerRequest = families.reduce(
@@ -174,9 +187,18 @@ export const compileRegistrationSourceExtractionWork = (
                 : maximum,
         0n,
     );
+    const maximumDecodedGatesPerRequest = families.reduce(
+        (maximum, family) =>
+            family.preparedSelectionAndDecodingGates > maximum
+                ? family.preparedSelectionAndDecodingGates
+                : maximum,
+        0n,
+    );
     return {
         families,
         maximumPreparedSelectionGates:
             extractionRequests * maximumGatesPerRequest,
+        maximumPreparedSelectionAndDecodingGates:
+            extractionRequests * maximumDecodedGatesPerRequest,
     };
 };

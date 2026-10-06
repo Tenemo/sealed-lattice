@@ -5287,7 +5287,7 @@ export const renderDocumentationCensus = (): string => {
             ],
         ),
         '',
-        'The following query-controller and prepared-extraction counts use the completion poll family inventory, an output prefix equal to the commitment width and a declared extraction database capacity. They exclude the independent query-circuit and returned-coordinate decoding costs.',
+        'The following query-controller and prepared-extraction counts use the completion poll family inventory, an output prefix equal to the commitment width and a declared extraction database capacity. The separate returned-coordinate circuit checks the extracted poll/runtime, canonical centered coefficients and absence of negative zero, then copies the salt and coordinate or a zero dummy with a distinct validity bit. It includes clean compute/copy/uncompute even on missing or malformed extraction. The independent query circuit, cache indexing, circuit construction and later polynomial arithmetic remain separate costs.',
         '',
         table(
             [
@@ -5297,6 +5297,8 @@ export const renderDocumentationCensus = (): string => {
                 'One-slice clean routing gates',
                 'Extraction component capacity',
                 'Prepared selection gates per request',
+                'Coordinate decoding gates per request',
+                'Prepared selection and decoding gates per request',
             ],
             (() => {
                 const extraction = compileRegistrationSourceExtractionWork(
@@ -5321,6 +5323,9 @@ export const renderDocumentationCensus = (): string => {
                             routing.computeAndUncomputeGates,
                             1n << 40n,
                             extraction.families[index].preparedSelectionGates,
+                            extraction.families[index].coordinateDecodingGates,
+                            extraction.families[index]
+                                .preparedSelectionAndDecodingGates,
                         ].map(formatCount);
                     },
                 );

@@ -223,6 +223,101 @@ function applyClean(
     assert.deepEqual(bits.subarray(query.length, circuit.inputs), input);
 }
 
+// After source-labelled extraction, framing, owner and family have already
+// matched the extraction predicate. This separate total circuit checks the
+// expected poll/runtime and canonical sign-magnitude coefficients. It copies
+// the salt and coordinate only on success, with a distinct validity bit.
+// It neither checks a key witness nor creates participant authority.
+export function compileSourceCoordinateDecoding(
+    coefficients: number,
+    magnitudeBits: number,
+    halfModulus: bigint,
+    contextBits = 1024,
+    saltBits = 512,
+) {
+    assert.ok(
+        [coefficients, magnitudeBits, contextBits, saltBits].every(
+            (value) => Number.isSafeInteger(value) && value > 0,
+        ),
+    );
+    assert.ok(halfModulus > 0n && halfModulus < 1n << BigInt(magnitudeBits));
+    const payloadBits = saltBits + coefficients * (8 + magnitudeBits);
+    const builder = new Builder(1 + 2 * contextBits + payloadBits);
+    const wires = (start: number, length: number) =>
+        Array.from({ length }, (_, bit) => start + bit);
+    const one = builder.not(builder.zero);
+    const limit = Array.from({ length: magnitudeBits }, (_, bit) =>
+        (halfModulus >> BigInt(bit)) & 1n ? one : builder.zero,
+    );
+    let valid = builder.and(
+        0,
+        builder.equal(
+            wires(1, contextBits),
+            wires(1 + contextBits, contextBits),
+        ),
+    );
+    const payload = 1 + 2 * contextBits;
+    for (let index = 0; index < coefficients; index++) {
+        const start = payload + saltBits + index * (8 + magnitudeBits);
+        const sign = wires(start, 8);
+        const magnitude = wires(start + 8, magnitudeBits);
+        const zero = builder.equal(
+            magnitude,
+            Array<number>(magnitudeBits).fill(builder.zero),
+        );
+        const canonicalSign = builder.equal(
+            sign.slice(1),
+            Array<number>(7).fill(builder.zero),
+        );
+        const noNegativeZero = builder.not(builder.and(sign[0], zero));
+        const bounded = builder.not(builder.less(limit, magnitude));
+        valid = builder.and(
+            valid,
+            builder.and(canonicalSign, builder.and(noNegativeZero, bounded)),
+        );
+    }
+    return builder.finish([
+        ...wires(payload, payloadBits).map((wire) => builder.and(valid, wire)),
+        valid,
+    ]);
+}
+
+export function sourceCoordinateDecodingWork(
+    coefficients: bigint,
+    magnitudeBits: bigint,
+    contextBits = 1024n,
+    saltBits = 512n,
+) {
+    assert.ok(
+        coefficients > 0n &&
+            magnitudeBits > 0n &&
+            contextBits > 0n &&
+            saltBits > 0n,
+    );
+    const payloadBits = saltBits + coefficients * (8n + magnitudeBits);
+    // Compute, copy the payload plus its validity bit, then uncompute.
+    // Public modulus bits share one prepared constant-one wire. Context
+    // equality, every coefficient and all output bits are charged even on
+    // missing extraction or a failed early coefficient.
+    return {
+        payloadBits,
+        decodingGates:
+            11n +
+            10n * contextBits +
+            coefficients * (24n * magnitudeBits + 94n) +
+            3n * payloadBits,
+    };
+}
+
+export function runSourceCoordinateDecoding(
+    circuit: ReturnType<typeof compileSourceCoordinateDecoding>,
+    input: Uint8Array,
+    output = new Uint8Array(circuit.output.length),
+) {
+    applyClean(circuit, new Uint8Array(0), input, output);
+    return output;
+}
+
 function runSparseRouting(
     compiled: ReturnType<typeof compileSparseRouting>,
     query: Uint8Array,

@@ -51,6 +51,7 @@ describe('original registration source randomness and hash work', () => {
         );
         const inventory = compileRegistrationSourceRandomness(10, 10);
         let largest = 0n;
+        let largestDecoded = 0n;
         for (const [index, family] of inventory.families.entries()) {
             // Recover the raw mask from its independent byte framing: only
             // salt, poll/runtime and the coordinate payload are unconstrained.
@@ -74,6 +75,25 @@ describe('original registration source randomness and hash work', () => {
                 expected,
             );
             expect(result.families[index].comparedInputBits).toBe(label);
+            // The native source binder uses one sign byte followed by a
+            // fixed-width little-endian magnitude, bounded by floor(q/2).
+            const magnitudeBits = 8n * family.modulusBytes;
+            const payloadBits = 512n + 65536n * (8n + magnitudeBits);
+            const decoding =
+                11n +
+                10n * 1024n +
+                65536n * (24n * magnitudeBits + 94n) +
+                3n * payloadBits;
+            expect(result.families[index].coordinateDecodingGates).toBe(
+                decoding,
+            );
+            expect(
+                result.families[index].preparedSelectionAndDecodingGates,
+            ).toBe(expected + decoding);
+            largestDecoded =
+                expected + decoding > largestDecoded
+                    ? expected + decoding
+                    : largestDecoded;
             const withoutPadding =
                 2n * queries * (14n + 5n * (rawMask + 512n) + 3n * input) +
                 input +
@@ -83,6 +103,9 @@ describe('original registration source randomness and hash work', () => {
             largest = expected > largest ? expected : largest;
         }
         expect(result.maximumPreparedSelectionGates).toBe(requests * largest);
+        expect(result.maximumPreparedSelectionAndDecodingGates).toBe(
+            requests * largestDecoded,
+        );
         expect(
             compileRegistrationSourceExtractionWork(3, 2, 0n, 0n)
                 .maximumPreparedSelectionGates,
