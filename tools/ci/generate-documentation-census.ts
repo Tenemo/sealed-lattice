@@ -1068,7 +1068,7 @@ export const renderDocumentationCensus = (): string => {
         '',
         '## Proof hash byte and permutation work',
         '',
-        'Count initial commitment-tree leaf/node hashing once, the Fiat-Shamir transcript and context once, or one canonical verifier pass. Prover prefixes are initialized per row/subtree job and per level above those subtrees. Logical hash inputs and outputs are unchanged by prefix reuse; the permutation columns retain the actual initialization multiplicity. Private salt/seed expansion, opening-block regeneration, clone/allocation work, statement-digest passes, fixed-matrix generation, wrappers, checkpoint/replay work and lifetime multiplicities remain separate. The Merkle expansion factor bounds a complete-input hash against its remaining uncached permutations, not the full reduction. These are not quantum gate bounds or a full participant total. The release row uses the authenticated protocol role specified by the foundation owner.',
+        'The first table counts initial commitment-tree leaf/node hashing, the Fiat-Shamir transcript and context once, or one canonical verifier pass. Prover prefixes are initialized per row/subtree job and per level above those subtrees. Logical hash inputs and outputs are unchanged by prefix reuse; the permutation columns retain the actual initialization multiplicity. The second table adds bounded opening-block reconstruction and leaf-salt expansion. Operation/mask randomness streams, clone/allocation work, statement-digest passes, fixed-matrix generation, wrappers, checkpoint/replay work and lifetime multiplicities remain separate. The Merkle expansion factor bounds a complete-input hash against its remaining uncached permutations, not the full reduction. These are FIPS reference-permutation counts, not native timings, quantum gate bounds or a full participant total. The release row uses the authenticated protocol role specified by the foundation owner.',
         '',
         table(
             [
@@ -1118,6 +1118,43 @@ export const renderDocumentationCensus = (): string => {
                     ),
                     formatCount(value.verifierCore.permutations),
                     formatCount(value.statementDigestPass.permutations),
+                ];
+            }),
+        ),
+        '',
+        'The first two trees retain leaf digests. The linear and folding trees restore the complete aligned blocks containing queried leaves, then rebuild the lower internal-node cache used by path writing. Each emitted record also expands its original leaf salt again. Counts below bound one complete producer pass at the independently bounded query counts; repeated calls are work, not new salt-seed scopes. Correlations between stages can make the sum conservative.',
+        '',
+        table(
+            [
+                'Role',
+                'Opening leaf hashes bound',
+                'Opening node hashes bound',
+                'Leaf-salt expansions bound',
+                'Opening fixed-hash permutations bound',
+                'Tree/transcript/salt permutations subtotal',
+            ],
+            proofHashProfiles(completion).map((profile) => {
+                const value = compileProofHashWork(completion, profile);
+                return [
+                    profile.role,
+                    formatCount(
+                        value.groups.reduce(
+                            (sum, group) =>
+                                sum +
+                                BigInt(group.openingCounts.restoredLeaves),
+                            0n,
+                        ),
+                    ),
+                    formatCount(
+                        value.groups.reduce(
+                            (sum, group) =>
+                                sum + BigInt(group.openingCounts.nodeHashes),
+                            0n,
+                        ),
+                    ),
+                    formatCount(value.proverLeafSaltExpansion.queries),
+                    formatCount(value.proverOpeningHashes.permutations),
+                    formatCount(value.proverHashSubtotal.permutations),
                 ];
             }),
         ),

@@ -42,6 +42,51 @@ const prefixInitializations = (
 };
 
 describe('proof hash work', () => {
+    it('adds opening regeneration and every leaf-salt expansion without treating them as fresh seeds', () => {
+        const profile = completionProfile();
+        for (const role of proofHashProfiles(profile)) {
+            const value = compileProofHashWork(profile, role);
+            let saltCalls = 0n,
+                leafHashes = 0n,
+                nodeHashes = 0n;
+            for (const [index, group] of value.groups.entries()) {
+                const count = group.openingCounts;
+                expect(count.restoredLeaves === 0).toBe(index < 2);
+                saltCalls += BigInt(
+                    group.length + count.restoredLeaves + count.openedLeaves,
+                );
+                leafHashes += BigInt(count.restoredLeaves);
+                nodeHashes += BigInt(
+                    count.restoredNodes + count.reconstructedNodes,
+                );
+            }
+            // tree::salt uses three length-framed parts, without the fixed
+            // ProtocolHash prefix. Re-expansion of an index reuses its seed.
+            const saltInput = BigInt(
+                3 * 4 + Buffer.byteLength('bounded-proof/salt') + 64 + 4,
+            );
+            expect(value.proverLeafSaltExpansion.queries).toBe(saltCalls);
+            expect(value.proverLeafSaltExpansion.inputBytes).toBe(
+                saltCalls * saltInput,
+            );
+            expect(value.proverLeafSaltExpansion.outputBytes).toBe(
+                saltCalls * 128n,
+            );
+            expect(value.proverLeafSaltExpansion.permutations).toBe(saltCalls);
+            expect(value.proverOpeningHashes.queries).toBe(
+                leafHashes + nodeHashes,
+            );
+            expect(value.proverHashSubtotal.queries).toBe(
+                value.proverCore.queries + saltCalls + leafHashes + nodeHashes,
+            );
+            expect(value.proverHashSubtotal.permutations).toBe(
+                value.proverCore.permutations +
+                    value.proverOpeningHashes.permutations +
+                    saltCalls,
+            );
+        }
+    });
+
     it('uses each actual Rust descriptor word width across small and large profiles', async () => {
         const source = await readFile(
             new URL(

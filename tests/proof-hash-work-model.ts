@@ -8,6 +8,7 @@ import {
     compileLinkedReleaseWordProofLayout,
 } from '#tests/full-word-proof-layout-model.js';
 import { compileLinkedReleaseColumnLayout } from '#tests/linked-release-relation-model.js';
+import { maximumMerkleOpeningWork } from '#tests/merkle-opening-work-model.js';
 import { participantReleaseProofRoleBytes } from '#tests/participant-release-custody-model.js';
 import { compileProofVerifierQueryCensus } from '#tests/proof-verifier-query-model.js';
 import { compileRecipientKeyCensus } from '#tests/recipient-key-model.js';
@@ -258,6 +259,7 @@ export const compileProofHashWork = (
         tag,
     ]);
     const salted = saltedProofHashInputs(profile, roleBytes);
+    const leafSaltInput = framedProofHashBytes('bounded-proof/salt', [64n, 4n]);
     const groups = query.groups.map((group, index) => {
         const width = salted.widths[index];
         const leafInput = salted.leaves[index];
@@ -312,6 +314,38 @@ export const compileProofHashWork = (
             work(BigInt(group.maximumLeafQueries), leafInput, tag, 136n),
             work(BigInt(group.maximumNodeQueries), nodeInput, tag, 136n),
         ]);
+        // First and second oracles retain leaf digests. The linear oracle
+        // and folding layers regenerate complete queried blocks from rows.
+        const openingCounts = maximumMerkleOpeningWork(
+            group.length,
+            group.maximumLeafQueries,
+            index >= 2,
+        );
+        const openingWithoutPrefixReuse = total([
+            work(BigInt(openingCounts.restoredLeaves), leafInput, tag, 136n),
+            work(BigInt(openingCounts.nodeHashes), nodeInput, tag, 136n),
+        ]);
+        const opening = {
+            ...openingWithoutPrefixReuse,
+            permutations:
+                openingWithoutPrefixReuse.permutations -
+                BigInt(
+                    openingCounts.restoredLeaves -
+                        openingCounts.leafPrefixInitializations,
+                ) *
+                    leafPrefixPermutations -
+                BigInt(
+                    openingCounts.nodeHashes -
+                        openingCounts.nodePrefixInitializations,
+                ) *
+                    nodePrefixPermutations,
+        };
+        const leafSaltExpansion = work(
+            BigInt(group.length + openingCounts.saltExpansions),
+            leafSaltInput,
+            salted.saltBytes,
+            136n,
+        );
         return {
             length: group.length,
             width,
@@ -339,6 +373,9 @@ export const compileProofHashWork = (
                         verifierNodePrefixPermutations,
             },
             verifierWithoutPrefixReuse,
+            openingCounts,
+            opening,
+            leafSaltExpansion,
         };
     });
     const contextInput = fixedHashInputBytes('bounded-proof/statement', [
@@ -401,6 +438,20 @@ export const compileProofHashWork = (
         verifierCoreWithoutPrefixReuse: total([
             transcript,
             ...groups.map((group) => group.verifierWithoutPrefixReuse),
+        ]),
+        proverOpeningHashes: total(groups.map((group) => group.opening)),
+        proverLeafSaltExpansion: total(
+            groups.map((group) => group.leafSaltExpansion),
+        ),
+        // One bounded commitment/opening/transcript hash subtotal, excluding
+        // mask/operation streams, statement-identity passes and outer work.
+        proverHashSubtotal: total([
+            transcript,
+            ...groups.flatMap((group) => [
+                group.prover,
+                group.opening,
+                group.leafSaltExpansion,
+            ]),
         ]),
         // A separate operand for callers' plain statement-identity passes.
         // Multiplicity, common-matrix generation and outer envelopes are not
