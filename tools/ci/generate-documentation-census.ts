@@ -1418,7 +1418,7 @@ export const renderDocumentationCensus = (): string => {
             })(),
         ),
         '',
-        'The interval follows from the union and two-term Bonferroni bounds on a rejection in the exactly filled minimum degree-mask prefix. The event is sampler-work variation, not a privacy failure. Its probability is too large to omit at the end-to-end target; a causal observation argument must retain it through the exact independence law or another justified construction.',
+        'The interval follows from the union and two-term Bonferroni bounds on a rejection in the exactly filled minimum degree-mask prefix. The event is sampler-work variation, not a privacy failure, and is not itself a 2^-80-small term. Discarding it would require an explicit population and whole-experiment cost charge under the accepted normalized target. The observation argument instead retains its exact waiting law; these probability bounds alone give no security verdict.',
         '',
         '## Operation randomness seeds',
         '',

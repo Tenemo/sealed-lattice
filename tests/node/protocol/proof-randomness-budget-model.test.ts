@@ -143,8 +143,9 @@ describe('bounded randomness for complete proof simulation', () => {
         expect(
             result.upperNumerator << result.upperProbabilityExponent,
         ).toBeLessThanOrEqual(result.denominator);
-        // This is observable sampler work, not a negligible privacy error
-        // that may be omitted. The exact independence argument is needed.
+        // This work variation is not itself 2^-80-small. That comparison
+        // gives no cost-normalized security verdict; the coupling retains
+        // the actual request history without assigning it a privacy error.
         expect(result.lowerNumerator << 80n).toBeGreaterThan(
             result.denominator,
         );
