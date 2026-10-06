@@ -141,6 +141,7 @@ import { compileSimulatorKeyKnowledgeCensus } from '#tests/simulator-key-knowled
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
 import {
     compileFheGadgetArithmeticBounds,
+    compileRecipientKeyArithmeticBounds,
     compileSourceArithmeticBounds,
     compileSourceCoefficientAllocation,
 } from '#tests/source-coefficient-allocation-model.js';
@@ -1227,6 +1228,31 @@ export const renderDocumentationCensus = (): string => {
                 formatCount(value.maximumBrowserRandomBytes),
                 formatCount(value.failureBits),
             ]),
+        ),
+        '',
+        '## Recipient-key arithmetic bounds',
+        '',
+        'The original recipient key uses the same fixed-limb generator at the share modulus. Its retained-key check reduces a*s+b; the centered public key adds one bounded coefficient term to the sparse product, not another secret-support position. Both rows check normalization, leading-prefix reduction and signed machine ranges. For an authentic generated key the restored residue is its original error, whose negative endpoint is permitted and whose positive endpoint is excluded by the native check. Public-key validation, source-stream comparisons, allocation history and custody remain separate obligations.',
+        '',
+        table(
+            [
+                'Operation',
+                'Limbs',
+                'Maximum quotient estimate',
+                'Maximum centered quotient magnitude',
+                'Maximum normalization carry magnitude',
+            ],
+            Object.entries(compileRecipientKeyArithmeticBounds()).map(
+                ([operation, row]) => [
+                    operation === 'generated'
+                        ? 'Generation'
+                        : 'Retained-key validation',
+                    formatCount(row.limbs),
+                    formatCount(row.maximumQuotientEstimate),
+                    formatCount(row.maximumQuotient),
+                    formatCount(row.maximumNormalizationCarry),
+                ],
+            ),
         ),
         '',
         '## Original-source arithmetic bounds',

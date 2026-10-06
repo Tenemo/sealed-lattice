@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 
 import { integerLimbConvolutionMagnitudeBound } from '#tests/exact-integer-convolution-model.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
+import { compileRecipientKeyCensus } from '#tests/recipient-key-model.js';
 import { setupGaussianParameters } from '#tests/setup-randomness-model.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
 import type { SupportedProfile } from '#tests/supported-profile-model.js';
@@ -77,6 +78,24 @@ export const boundSetupKeyArithmetic = (
     };
 };
 
+const checkKeyArithmeticWidths = (
+    row: ReturnType<typeof boundSetupKeyArithmetic>,
+    radix: bigint,
+) => {
+    assert.ok(row.limbs <= 16);
+    assert.ok(row.leadingModulusDigit > 65_536n);
+    assert.ok(row.maximumQuotientEstimate < 1n << 16n);
+    assert.ok(row.maximumQuotientEstimate < row.leadingModulusDigit);
+    assert.ok(row.maximumQuotient < 1n << 15n);
+    assert.ok(row.maximumWitnessCarry < 1n << 15n);
+    const signedLimit = 1n << 127n;
+    assert.ok(row.maximumRawLimb + row.maximumNormalizationCarry < signedLimit);
+    assert.ok((row.maximumNormalizationCarry + 1n) * radix - 1n < signedLimit);
+    assert.ok(((1n << 16n) - 1n) * row.leadingModulusDigit < signedLimit);
+    assert.ok(radix * row.maximumQuotientEstimate < signedLimit);
+    assert.ok(row.maximumWitnessRow < signedLimit);
+};
+
 // Checks the scalar key equation's value-dependent arithmetic refusals
 // against its pinned integer, reduction and witness contracts. Share
 // ciphertexts and complete allocation histories are separate obligations.
@@ -102,19 +121,42 @@ const checkedSetupKeyArithmeticBounds = (
     assert.ok(setupGaussianParameters.minimum >= -(1 << 6));
     assert.ok(setupGaussianParameters.maximum < 1 << 6);
     assert.ok(BigInt(setupGaussianParameters.maximum) <= errorBound);
-    assert.ok(row.limbs <= 16);
-    assert.ok(row.leadingModulusDigit > 65_536n);
-    assert.ok(row.maximumQuotientEstimate < 1n << 16n);
-    assert.ok(row.maximumQuotientEstimate < row.leadingModulusDigit);
-    assert.ok(row.maximumQuotient < 1n << 15n);
-    assert.ok(row.maximumWitnessCarry < 1n << 15n);
-    const signedLimit = 1n << 127n;
-    assert.ok(row.maximumRawLimb + row.maximumNormalizationCarry < signedLimit);
-    assert.ok((row.maximumNormalizationCarry + 1n) * radix - 1n < signedLimit);
-    assert.ok(((1n << 16n) - 1n) * row.leadingModulusDigit < signedLimit);
-    assert.ok(radix * row.maximumQuotientEstimate < signedLimit);
-    assert.ok(row.maximumWitnessRow < signedLimit);
+    checkKeyArithmeticWidths(row, radix);
     return row;
+};
+
+export const compileRecipientKeyArithmeticBounds = () => {
+    const parameters = compileRecipientKeyCensus();
+    const generated = boundSetupKeyArithmetic(
+        parameters.modulus,
+        parameters.radix,
+        parameters.support,
+        parameters.error,
+    );
+    // Retained validation reduces a*s+b. Its centered public key adds one
+    // coefficient bound to the sparse product; it is not another secret
+    // support term or an assumed valid witness for an arbitrary public key.
+    const restored = boundSetupKeyArithmetic(
+        parameters.modulus,
+        parameters.radix,
+        parameters.support + 1n,
+        0n,
+    );
+    assert.equal(
+        generated.maximumLimbProduct,
+        integerLimbConvolutionMagnitudeBound(
+            parameters.radix,
+            parameters.support,
+            compileSmallLimbProofFieldCensus().modulus,
+        ),
+    );
+    assert.ok(BigInt(-setupGaussianParameters.minimum) <= parameters.error);
+    assert.ok(BigInt(setupGaussianParameters.maximum) < parameters.error);
+    for (const row of [generated, restored]) {
+        assert.equal(row.limbs, 2);
+        checkKeyArithmeticWidths(row, parameters.radix);
+    }
+    return { generated, restored };
 };
 
 export const compileSourceArithmeticBounds = (profile: SupportedProfile) =>
