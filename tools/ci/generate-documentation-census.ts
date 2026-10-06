@@ -61,6 +61,7 @@ import { compileHashRowCheckpointCensus } from '#tests/hash-row-checkpoint-model
 import { compileLinkedReleaseRelationCensus } from '#tests/linked-release-relation-model.js';
 import {
     compileOperationProofDraws,
+    compilePrivateRandomnessScopes,
     operationSeedBytes,
     operationSeedCount,
 } from '#tests/operation-seed-model.js';
@@ -1476,6 +1477,70 @@ export const renderDocumentationCensus = (): string => {
                 ],
             ],
         ),
+        '',
+        '## Private randomness scope inventory',
+        '',
+        'These whole-poll upper bounds count original source entries and original operation intents, including unfinished work. The example uses the completion-profile poll maximum and option count, with its participant count as an illustrative original-registration budget; it is not a security limit on that population or a one-roster workload. Each registration can contribute at most one original generation/continuation pair, ballot and release. A tree scope fixes one seed and permits every encoded leaf index; it is not one XOF query. Setup samplers consume the retained operation stream directly, and replay adds work without a new seed or scope.',
+        '',
+        ...(() => {
+            const registrations = BigInt(completion.participantCount);
+            const value = compilePrivateRandomnessScopes(
+                registrations * registrationSourceRandomness.sourceSeedCount,
+                registrations,
+                registrations,
+                registrations,
+            );
+            return [
+                table(
+                    ['Raw purpose', 'Potential scopes', 'Scopes with reads'],
+                    value.domains.map((row) => [
+                        row.domain,
+                        formatCount(row.initialized),
+                        formatCount(row.read),
+                    ]),
+                ),
+                '',
+                table(
+                    ['Property', 'Upper bound'],
+                    [
+                        [
+                            'Original registration budget in this example',
+                            formatCount(registrations),
+                        ],
+                        [
+                            'Original operation seeds',
+                            formatCount(value.operationSeeds),
+                        ],
+                        [
+                            'Salt seeds per complete proof',
+                            formatCount(value.treesPerProof),
+                        ],
+                        [
+                            'Original tree-seed scopes',
+                            formatCount(value.treeSeedScopes),
+                        ],
+                        [
+                            'All seeded-randomness draws in this inventory',
+                            formatCount(value.maximumSeedDraws),
+                        ],
+                        [
+                            'All potential scopes',
+                            formatCount(value.maximumInitializedScopes),
+                        ],
+                        [
+                            'All scopes with reads',
+                            formatCount(value.maximumReadScopes),
+                        ],
+                        [
+                            'Seed-pair union bound after an independent-tape comparison',
+                            `${formatCount(value.seedCollisionPairs)}/2^${value.seedCollisionDenominator.toString(2).length - 1}`,
+                        ],
+                    ],
+                ),
+            ];
+        })(),
+        '',
+        'These scopes are separate from commitment-salt shadow scopes and explicit proof-programming records. A simulation using one shadow function per private-randomness scope must account for the additional scopes and their full query histories. Unread initialized streams still have construction and sponge work. The conditional seed-pair term is not an adversarial query-hit bound, and none of these counts supplies a complete reduction time or a new primitive assumption.',
         '',
         '## Registration source randomness and hash work',
         '',
