@@ -60,6 +60,13 @@ const protocolHashPrefixBytes = 64n;
 const fixedHashInputBytes = (domain: string, parts: readonly bigint[]) =>
     protocolHashPrefixBytes + framedProofHashBytes(domain, parts);
 
+// Independent operands for tree::SUBTREE_LEAVES and rows::ROWS_PER_JOB.
+// The first three trees use row shards; folding trees hash their rows in
+// subtree jobs. Supported helper counts leave each row shard at least one
+// complete row-job span, so their initialization total equals the scalar one.
+const maximumSubtreeLeaves = 16_384;
+const maximumRowsPerJob = 16_384;
+
 // Every salted proof-hash input shape of one role: a leaf of each opened
 // group, in verifier order, and the three message-root shapes.
 export const saltedProofHashInputs = (
@@ -264,9 +271,39 @@ export const compileProofHashWork = (
         const verifierNodePrefixPermutations =
             fixedHashInputBytes('bounded-proof/node', [roleBytes, 4n]) / 136n;
         const levels = BigInt(Math.log2(group.length));
+        const subtreeLeaves = Math.min(group.length, maximumSubtreeLeaves);
+        const subtrees = BigInt(group.length / subtreeLeaves);
+        const subtreeLevels = BigInt(Math.log2(subtreeLeaves));
+        const leafInitializations =
+            index < 3
+                ? 4n * BigInt(Math.ceil(group.length / 4 / maximumRowsPerJob))
+                : subtrees;
+        const nodeInitializations =
+            subtrees * subtreeLevels + levels - subtreeLevels;
         const savedPermutations =
-            BigInt(group.length - 1) * leafPrefixPermutations +
-            (BigInt(group.length - 1) - levels) * nodePrefixPermutations;
+            (BigInt(group.length) - leafInitializations) *
+                leafPrefixPermutations +
+            (BigInt(group.length - 1) - nodeInitializations) *
+                nodePrefixPermutations;
+        const leafPermutations = byteAlignedSpongePermutations(
+            leafInput,
+            tag,
+            136n,
+        );
+        const nodePermutations = byteAlignedSpongePermutations(
+            nodeInput,
+            tag,
+            136n,
+        );
+        const factor = (whole: bigint, prefix: bigint) => {
+            const remaining = whole - prefix;
+            return (whole + remaining - 1n) / remaining;
+        };
+        const completeInputFactor = [
+            factor(leafPermutations, leafPrefixPermutations),
+            factor(nodePermutations, nodePrefixPermutations),
+            factor(nodePermutations, verifierNodePrefixPermutations),
+        ].reduce((maximum, value) => (value > maximum ? value : maximum));
         const proverWithoutPrefixReuse = total([
             work(BigInt(group.length), leafInput, tag, 136n),
             work(BigInt(group.length - 1), nodeInput, tag, 136n),
@@ -287,7 +324,10 @@ export const compileProofHashWork = (
             prefixReuse: {
                 savedPermutations,
                 stateClones: 2n * BigInt(group.length) - 1n,
-                initializations: 1n + levels,
+                leafInitializations,
+                nodeInitializations,
+                initializations: leafInitializations + nodeInitializations,
+                completeInputFactor,
             },
             verifier: {
                 ...verifierWithoutPrefixReuse,

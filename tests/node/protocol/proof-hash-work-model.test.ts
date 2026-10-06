@@ -14,6 +14,33 @@ import {
     deriveSupportedProfile,
 } from '#tests/supported-profile-model.js';
 
+// Traverse the source's row jobs and subtree/upper-level jobs independently
+// of the model's closed initialization formulas.
+const prefixInitializations = (
+    length: number,
+    rowShards: boolean,
+    helpers = 0,
+) => {
+    let leaf = 0,
+        node = 0,
+        subtrees = 0;
+    for (let first = 0; first < length; first += 16384) {
+        subtrees++;
+        if (!rowShards) leaf++;
+        for (let width = Math.min(16384, length - first); width > 1; width /= 2)
+            node++;
+    }
+    for (let roots = subtrees; roots > 1; roots /= 2) node++;
+    if (rowShards) {
+        let classes = 1;
+        while (8 * classes <= helpers) classes *= 2;
+        for (let shard = 0; shard < 4 * classes; shard++)
+            for (let first = 0; first < length / (4 * classes); first += 16384)
+                leaf++;
+    }
+    return { leaf, node };
+};
+
 describe('proof hash work', () => {
     it('uses each actual Rust descriptor word width across small and large profiles', async () => {
         const source = await readFile(
@@ -211,12 +238,16 @@ describe('proof hash work', () => {
                     frame(Buffer.alloc(64)),
                 ]);
                 const length = 2 ** exponent;
+                const initializations = prefixInitializations(
+                    length,
+                    index < 3,
+                );
                 // Longer prefixes need not cost more after caching: their
                 // remainder can save a block in every leaf or node.
                 const expected =
-                    leaf.permutations +
+                    initializations.leaf * leaf.permutations +
                     length * finish(leaf.position, leafTail) +
-                    exponent * node.permutations +
+                    initializations.node * node.permutations +
                     (length - 1) * finish(node.position, nodeTail);
                 expect(measured.groups[index].prover.permutations).toBe(
                     BigInt(expected),
@@ -249,19 +280,21 @@ describe('proof hash work', () => {
             compileProofHashWork(completionProfile(), profile),
         );
         // First, second and linear trees, followed by the emitted FRI trees.
-        // Each tree reuses a leaf prefix after the first leaf and a node
-        // prefix after the first node of each level.
+        // Prefixes are local to row and subtree jobs, including an upper
+        // node prefix for each level above the subtrees.
         const exponents = [
             18,
             18,
             18,
             ...Array.from({ length: 16 }, (_, index) => 17 - index),
         ];
-        const reusedPrefixes = exponents.reduce(
-            (sum, exponent) =>
-                sum + 2n * ((1n << BigInt(exponent)) - 1n) - BigInt(exponent),
-            0n,
-        );
+        let initializations = 0n;
+        const reusedPrefixes = exponents.reduce((sum, exponent, index) => {
+            const length = 2 ** exponent;
+            const prefixes = prefixInitializations(length, index < 3);
+            initializations += BigInt(prefixes.leaf + prefixes.node);
+            return sum + BigInt(2 * length - 1 - prefixes.leaf - prefixes.node);
+        }, 0n);
         expect(
             values.map(
                 (value) =>
@@ -286,13 +319,114 @@ describe('proof hash work', () => {
                     (sum, group) => sum + group.prefixReuse.initializations,
                     0n,
                 ),
-            ).toBe(225n);
+            ).toBe(initializations);
             expect(
                 value.groups.reduce(
                     (sum, group) => sum + group.prefixReuse.stateClones,
                     0n,
                 ),
             ).toBe(2097125n);
+        }
+    });
+
+    it('retains every subtree and row-job initialization under the supported helper bound', async () => {
+        const [tree, rows, parallel, verifier, digest] = await Promise.all([
+            readFile('crates/protocol-research/word-proof/src/tree.rs', 'utf8'),
+            readFile('crates/protocol-research/word-proof/src/rows.rs', 'utf8'),
+            readFile(
+                'crates/protocol-research/parallel-work/src/lib.rs',
+                'utf8',
+            ),
+            readFile(
+                'crates/protocol-research/word-verifier/src/engine.rs',
+                'utf8',
+            ),
+            readFile(
+                'crates/protocol-research/parallel-work/src/protocol-hash.rs',
+                'utf8',
+            ),
+        ]);
+        expect(tree).toContain('const SUBTREE_LEAVES: usize = 1 << 14;');
+        expect(tree).toContain('const SALT_BYTES: usize = 128;');
+        expect(rows).toContain('const ROWS_PER_JOB: usize = 16_384;');
+        expect(parallel).toContain('const MAXIMUM_HELPERS: usize = 8;');
+        expect(verifier).toContain('role.is_empty() || role.len() > 1024');
+        expect(digest).toContain('const RATE: usize = 136;');
+        expect(digest).toContain('const PREFIX_BYTES: usize = 64;');
+        const work = compileProofHashWork(
+            completionProfile(),
+            proofHashProfiles(completionProfile())[0],
+        );
+        for (const [index, group] of work.groups.entries()) {
+            for (let helpers = 0; helpers <= 8; helpers++) {
+                const counts = prefixInitializations(
+                    group.length,
+                    index < 3,
+                    helpers,
+                );
+                expect(group.prefixReuse.leafInitializations).toBe(
+                    BigInt(counts.leaf),
+                );
+                expect(group.prefixReuse.nodeInitializations).toBe(
+                    BigInt(counts.node),
+                );
+            }
+        }
+        const first = work.groups[0];
+        expect(first.prefixReuse.initializations).toBeGreaterThan(
+            1n + BigInt(Math.log2(first.length)),
+        );
+    });
+
+    it('bounds full-input Merkle hashes by their remaining uncached permutations', () => {
+        const profile = completionProfile();
+        for (const role of proofHashProfiles(profile)) {
+            const actual = compileProofHashWork(profile, role);
+            expect(
+                actual.groups.every(
+                    (group) => group.prefixReuse.completeInputFactor <= 3n,
+                ),
+            ).toBe(true);
+            const maximum = compileProofHashWork(profile, role, 1024n);
+            expect(
+                maximum.groups.every(
+                    (group) => group.prefixReuse.completeInputFactor <= 5n,
+                ),
+            ).toBe(true);
+        }
+        // A long arbitrary cached prefix would invalidate the same factor;
+        // it is not covered just because its final digest is short.
+        const longPrefix =
+            64n + framedProofHashBytes('bounded-proof/node', [8192n, 4n, 4n]);
+        const full = byteAlignedSpongePermutations(
+            longPrefix + 136n,
+            64n,
+            136n,
+        );
+        const remaining = full - longPrefix / 136n;
+        expect(full).toBeGreaterThan(5n * remaining);
+        // Exhaust the accepted role-length range. Larger leaf payloads only
+        // increase the uncached work, so the smallest emitted row suffices.
+        for (let roleBytes = 1n; roleBytes <= 1024n; roleBytes++) {
+            const leafPrefix =
+                64n +
+                framedProofHashBytes('bounded-proof/leaf', [roleBytes, 4n]);
+            const nodePrefix =
+                64n +
+                framedProofHashBytes('bounded-proof/node', [roleBytes, 4n, 4n]);
+            const verifierPrefix =
+                64n +
+                framedProofHashBytes('bounded-proof/node', [roleBytes, 4n]);
+            for (const [prefix, tail] of [
+                [leafPrefix, 8n + 132n + 4n + 48n],
+                [nodePrefix, 136n],
+                [verifierPrefix, 144n],
+            ]) {
+                const whole = (prefix + tail) / 136n + 1n;
+                const suffix = ((prefix % 136n) + tail) / 136n + 1n;
+                expect(whole).toBe(prefix / 136n + suffix);
+                expect(whole).toBeLessThanOrEqual(5n * suffix);
+            }
         }
     });
 

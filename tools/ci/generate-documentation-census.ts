@@ -1068,7 +1068,7 @@ export const renderDocumentationCensus = (): string => {
         '',
         '## Proof hash byte and permutation work',
         '',
-        "Construct each commitment tree once, process the Fiat-Shamir transcript and context once, or consume one canonical verifier pass. Logical hash inputs and outputs are unchanged by the prover's and the verifier's public-prefix reuse; the permutation columns separate that implementation from recomputing every prefix. Clone/allocation work, statement-digest passes, fixed-matrix generation, wrappers, checkpoint/replay work and lifetime multiplicities remain separate. These are not quantum gate bounds or a full participant total. The release row uses the authenticated protocol role specified by the foundation owner.",
+        'Count initial commitment-tree leaf/node hashing once, the Fiat-Shamir transcript and context once, or one canonical verifier pass. Prover prefixes are initialized per row/subtree job and per level above those subtrees. Logical hash inputs and outputs are unchanged by prefix reuse; the permutation columns retain the actual initialization multiplicity. Private salt/seed expansion, opening-block regeneration, clone/allocation work, statement-digest passes, fixed-matrix generation, wrappers, checkpoint/replay work and lifetime multiplicities remain separate. The Merkle expansion factor bounds a complete-input hash against its remaining uncached permutations, not the full reduction. These are not quantum gate bounds or a full participant total. The release row uses the authenticated protocol role specified by the foundation owner.',
         '',
         table(
             [
@@ -1078,6 +1078,8 @@ export const renderDocumentationCensus = (): string => {
                 'Prover core logical input bytes',
                 'Prover permutations without prefix reuse',
                 'Prover permutations with prefix reuse',
+                'Prover prefix initializations',
+                'Merkle complete-input factor',
                 'Verifier core hash input bytes',
                 'Verifier permutations without prefix reuse',
                 'Verifier permutations with prefix reuse',
@@ -1094,6 +1096,22 @@ export const renderDocumentationCensus = (): string => {
                         value.proverCoreWithoutPrefixReuse.permutations,
                     ),
                     formatCount(value.proverCore.permutations),
+                    formatCount(
+                        value.groups.reduce(
+                            (sum, group) =>
+                                sum + group.prefixReuse.initializations,
+                            0n,
+                        ),
+                    ),
+                    formatCount(
+                        value.groups.reduce(
+                            (maximum, group) =>
+                                group.prefixReuse.completeInputFactor > maximum
+                                    ? group.prefixReuse.completeInputFactor
+                                    : maximum,
+                            0n,
+                        ),
+                    ),
                     formatCount(value.verifierCore.inputBytes),
                     formatCount(
                         value.verifierCoreWithoutPrefixReuse.permutations,
