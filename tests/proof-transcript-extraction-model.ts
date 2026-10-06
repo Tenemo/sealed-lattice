@@ -45,14 +45,20 @@ const indexRecords = (
     records: readonly RawProofHashRecord[],
     honestOwners: ReadonlySet<string>,
 ) => {
-    const inputs: IndexedRecord[] = [];
+    // Literal end bytes only select a bucket. Equality still compares the
+    // complete input, including any middle bytes omitted from this key.
+    // Adversarial buckets can remain quadratic; no reduction-time bound is
+    // inferred from the ordinary captured-trace lookup performance.
+    const inputs = new Map<string, IndexedRecord[]>();
     const tags = new Map<string, IndexedRecord>();
     for (const record of records) {
         const parsed = parseProofHashInput(record.input);
         if (parsed === undefined || honestOwners.has(parsed.owner)) continue;
         if (record.output.length < tagBytes)
             throw new RangeError('A challenged record lacks its tag prefix.');
-        const duplicate = inputs.find((known) =>
+        const bucketKey = `${record.input.length}:${record.input.subarray(0, tagBytes).toString('hex')}:${record.input.subarray(-tagBytes).toString('hex')}`;
+        const bucket = inputs.get(bucketKey) ?? [];
+        const duplicate = bucket.find((known) =>
             known.input.equals(record.input),
         );
         if (duplicate !== undefined) {
@@ -73,7 +79,8 @@ const indexRecords = (
         const key = `${parsed.role}:${record.output.subarray(0, tagBytes).toString('hex')}`;
         if (tags.has(key)) return undefined;
         const indexed = { ...record, parsed };
-        inputs.push(indexed);
+        bucket.push(indexed);
+        inputs.set(bucketKey, bucket);
         tags.set(key, indexed);
     }
     return (role: string, tag: Buffer) =>

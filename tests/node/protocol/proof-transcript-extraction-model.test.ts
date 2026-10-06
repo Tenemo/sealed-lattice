@@ -213,6 +213,63 @@ const fixture = (entry: ProofRelationCatalogueEntry, rounds = 21) => {
 };
 
 describe('raw proof transcript backward extraction', () => {
+    it('distinguishes complete raw inputs sharing their length and end bytes', () => {
+        const role = originalRole('setup');
+        const records = [3, 4].map((value) => {
+            const input = frame(role, true, 'node', [
+                integer(0, 4),
+                integer(1, 4),
+                Buffer.alloc(64, value),
+                Buffer.alloc(64, 11),
+            ]);
+            const output = createHash('shake256', { outputLength: 64 })
+                .update(input)
+                .digest();
+            return { input, output };
+        });
+        expect(records[0].input.length).toBe(records[1].input.length);
+        expect(
+            records[0].input
+                .subarray(0, 64)
+                .equals(records[1].input.subarray(0, 64)),
+        ).toBe(true);
+        expect(
+            records[0].input
+                .subarray(-64)
+                .equals(records[1].input.subarray(-64)),
+        ).toBe(true);
+        expect(rawProofHashHasCollision(records, new Set())).toBe(false);
+        expect(
+            rawProofHashHasCollision(
+                [
+                    ...records,
+                    {
+                        input: Buffer.from(records[0].input),
+                        output: Buffer.from(records[0].output),
+                    },
+                ],
+                new Set(),
+            ),
+        ).toBe(false);
+        const conflicting = Buffer.from(records[0].output);
+        conflicting[0] ^= 1;
+        expect(() =>
+            rawProofHashHasCollision(
+                [...records, { input: records[0].input, output: conflicting }],
+                new Set(),
+            ),
+        ).toThrow('Inconsistent');
+        expect(
+            rawProofHashHasCollision(
+                [
+                    records[0],
+                    { input: records[1].input, output: records[0].output },
+                ],
+                new Set(),
+            ),
+        ).toBe(true);
+    });
+
     it('reconstructs every full native-shaped chain and its available leaves for all three purposes', () => {
         for (const entry of descriptors) {
             const value = fixture(entry);

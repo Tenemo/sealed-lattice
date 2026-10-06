@@ -20,6 +20,10 @@ const elementBytes = 48;
 const fixedPrefix = Buffer.alloc(64);
 fixedPrefix.write('sealed-lattice/fixed-hash/v1');
 type Purpose = ProofRelationCatalogueEntry['role'];
+const purposeCatalogues = new Map<
+    Purpose,
+    readonly ProofRelationCatalogueEntry[]
+>();
 const purposes: Readonly<Record<Purpose, string>> = {
     setup: 'sealed-lattice/setup-contribution/v2',
     ballot: 'sealed-lattice/ballot-proof/v2',
@@ -117,9 +121,13 @@ export const parseProofHashInput = (
     if (!domain || !role) return undefined;
     const scope = parseRole(role);
     if (!scope) return undefined;
-    const candidates = proofRelationCatalogue().filter(
-        (entry) => entry.role === scope.purpose,
-    );
+    let candidates = purposeCatalogues.get(scope.purpose);
+    if (candidates === undefined) {
+        candidates = proofRelationCatalogue().filter(
+            (entry) => entry.role === scope.purpose,
+        );
+        purposeCatalogues.set(scope.purpose, candidates);
+    }
     const fields: Buffer[] = [];
     while (position < bytes.length) {
         const field = part();
