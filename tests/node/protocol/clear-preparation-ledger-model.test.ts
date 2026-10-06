@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { compileClearPreparationLedger } from '#tests/clear-preparation-ledger-model.js';
+import {
+    compileClearPreparationLedger,
+    compileClearPreparationPollPopulations,
+} from '#tests/clear-preparation-ledger-model.js';
 import { deriveSupportedProfile } from '#tests/supported-profile-model.js';
 
 function* subsets(
@@ -18,6 +21,162 @@ function* subsets(
 }
 
 describe('Clear-preparation comparison populations', () => {
+    it('bounds smaller certified forks independently of the maximum roster denominator', () => {
+        const honest = Array.from({ length: 10 }, (_, index) => index + 1);
+        const confirmations = new Map<number, number>();
+        const rosters = Array.from({ length: 5 }, (_, index) => {
+            const endorsers = honest.slice(2 * index, 2 * index + 2);
+            for (const owner of endorsers) confirmations.set(owner, index);
+            return {
+                members: [
+                    0,
+                    ...endorsers,
+                    honest[(2 * index + 2) % honest.length],
+                ],
+                endorsers: [0, ...endorsers],
+            };
+        });
+        for (const [index, roster] of rosters.entries()) {
+            const faults = Math.floor((roster.members.length - 1) / 3);
+            expect(new Set(roster.members).size).toBe(roster.members.length);
+            expect(roster.members.filter((owner) => owner === 0)).toHaveLength(
+                1,
+            );
+            expect(roster.endorsers).toHaveLength(
+                roster.members.length - faults,
+            );
+            expect(
+                roster.endorsers
+                    .filter((owner) => owner !== 0)
+                    .every((owner) => confirmations.get(owner) === index),
+            ).toBe(true);
+        }
+        const fixed = compileClearPreparationLedger(
+            deriveSupportedProfile(10, 2),
+            BigInt(honest.length),
+        );
+        const poll = compileClearPreparationPollPopulations(10, 2, 10n);
+        expect(BigInt(rosters.length)).toBeGreaterThan(
+            fixed.maximumCertifiedRosters,
+        );
+        expect(poll.maximumCertifiedRosters).toBe(BigInt(rosters.length));
+    });
+
+    it('counts larger stalled rosters even when a smaller roster can finish', () => {
+        const honest = Array.from({ length: 11 }, (_, index) => index + 1);
+        const stalled = honest.slice(0, 9).map((owner, index) => ({
+            author: owner,
+            members: [
+                0,
+                12 + 2 * index,
+                13 + 2 * index,
+                owner,
+                ...honest.filter((other) => other !== owner).slice(0, 6),
+            ],
+        }));
+        const completing = { members: [0, 10, 11, 1], authors: [10, 11] };
+        let recipientRows = 0;
+        let cacheLookups = 0;
+        const corruptOwners = new Set<number>();
+        for (const roster of [...stalled, completing]) {
+            const faults = Math.floor((roster.members.length - 1) / 3);
+            const eligible = Math.max(faults + 1, 2) + faults;
+            const corrupt = roster.members.filter(
+                (owner) => !honest.includes(owner),
+            );
+            expect(new Set(roster.members).size).toBe(roster.members.length);
+            expect(corrupt.length).toBeLessThanOrEqual(faults);
+            const authors =
+                'author' in roster ? [roster.author] : roster.authors;
+            expect(
+                authors.every(
+                    (owner) => roster.members.indexOf(owner) < eligible,
+                ),
+            ).toBe(true);
+            recipientRows +=
+                authors.length * (roster.members.length - corrupt.length);
+            cacheLookups += roster.members
+                .slice(0, eligible)
+                .filter((owner) => corrupt.includes(owner)).length;
+            for (const owner of corrupt) corruptOwners.add(owner);
+        }
+        expect(
+            new Set([
+                ...stalled.map((roster) => roster.author),
+                ...completing.authors,
+            ]).size,
+        ).toBe(honest.length);
+        const fixed = compileClearPreparationLedger(
+            deriveSupportedProfile(4, 2),
+            BigInt(honest.length),
+            10,
+        );
+        const poll = compileClearPreparationPollPopulations(
+            10,
+            2,
+            BigInt(honest.length),
+        );
+        expect(BigInt(recipientRows)).toBeGreaterThan(
+            fixed.maximumHonestRecipientRows,
+        );
+        expect(BigInt(cacheLookups)).toBeGreaterThan(
+            fixed.maximumSourceCacheLookups,
+        );
+        expect(BigInt(corruptOwners.size)).toBeGreaterThan(
+            fixed.maximumCorruptSourceExtractions,
+        );
+        expect(poll.maximumHonestRecipientRows).toBeGreaterThanOrEqual(
+            BigInt(recipientRows),
+        );
+        expect(poll.maximumSourceCacheLookups).toBeGreaterThanOrEqual(
+            BigInt(cacheLookups),
+        );
+        expect(poll.maximumCorruptSourceExtractions).toBeGreaterThanOrEqual(
+            BigInt(corruptOwners.size),
+        );
+    });
+
+    it('uses the minimum endorsement consumption over every permitted roster size', () => {
+        for (let maximum = 3; maximum <= 20; maximum++) {
+            const costs = Array.from({ length: maximum - 2 }, (_, index) => {
+                const size = index + 3;
+                return size - 2 * Math.floor((size - 1) / 3);
+            });
+            for (const population of [0n, 1n, 2n, 3n, 31n]) {
+                let remaining = population;
+                let packed = 0n;
+                while (costs.some((cost) => BigInt(cost) <= remaining)) {
+                    remaining -= BigInt(
+                        [...costs].sort((left, right) => left - right)[0],
+                    );
+                    packed++;
+                }
+                const poll = compileClearPreparationPollPopulations(
+                    maximum,
+                    2,
+                    population,
+                );
+                expect(poll.maximumCertifiedRosters).toBe(packed);
+                expect(poll.maximumStartedPreparationRosters).toBe(population);
+                expect(poll.sourceCache.requests).toBe(
+                    poll.maximumSourceCacheLookups,
+                );
+            }
+        }
+        expect(() =>
+            compileClearPreparationPollPopulations(2, 2, 1n),
+        ).toThrow();
+        expect(() =>
+            compileClearPreparationPollPopulations(21, 2, 1n),
+        ).toThrow();
+        expect(() =>
+            compileClearPreparationPollPopulations(10, 1, 1n),
+        ).toThrow();
+        expect(() =>
+            compileClearPreparationPollPopulations(10, 2, -1n),
+        ).toThrow();
+    });
+
     it('charges every possible selected set before selection, across supported rosters', () => {
         for (let participants = 3; participants <= 20; participants++) {
             const corrupt = Math.floor((participants - 1) / 3);

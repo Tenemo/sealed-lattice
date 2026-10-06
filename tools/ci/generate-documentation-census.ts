@@ -24,7 +24,10 @@ import {
     compileCertificateCustodyCensus,
     fullHolderRequirements,
 } from '#tests/certificate-custody-model.js';
-import { compileClearPreparationLedger } from '#tests/clear-preparation-ledger-model.js';
+import {
+    compileClearPreparationLedger,
+    compileClearPreparationPollPopulations,
+} from '#tests/clear-preparation-ledger-model.js';
 import { compileClearPreparationResources } from '#tests/clear-preparation-resource-model.js';
 import { compileCloseResponseCensus } from '#tests/close-response-model.js';
 import { compileCloseWireCensus } from '#tests/close-wire-model.js';
@@ -4730,7 +4733,7 @@ export const renderDocumentationCensus = (): string => {
         '',
         '## Composed security ledger',
         '',
-        'The [clear-preparation argument](security-argument.md#clear-candidate-joint-ledger) owns the conditional hybrid interfaces. The table evaluates structural upper bounds at the displayed example original-honest-registration population H, including abandoned and unselected registrations; H is not an admitted population limit. Started private preparation and certified rosters have different bounds. Original contribution scopes include failed or unfinished generation before publication; a replay of the same retained intent adds work but no new scope. Primitive comparison counts include the source-family or selected-position guesses where required, but exclude unresolved semantic-use error charges and reduction-time operands. No numerical end-to-end security level or required primitive level is emitted.',
+        'The [clear-preparation argument](security-argument.md#clear-candidate-joint-ledger) owns the conditional hybrid interfaces. The first tables evaluate fixed-roster-size structural upper bounds at the displayed example original-honest-registration population H, including abandoned and unselected registrations; H is not an admitted population limit. Whole-poll bounds permitting different roster sizes follow separately. Started private preparation and certified rosters have different bounds. Original contribution scopes include failed or unfinished generation before publication; a replay of the same retained intent adds work but no new scope. Primitive comparison counts include the source-family or selected-position guesses where required, but exclude unresolved semantic-use error charges and reduction-time operands. No numerical end-to-end security level or required primitive level is emitted.',
         '',
         table(
             [
@@ -4804,11 +4807,39 @@ export const renderDocumentationCensus = (): string => {
             }),
         ),
         '',
-        'The source-extraction cache has one lookup per corrupt eligible registration at a roster’s first honest generation. Repeated original-generation work reuses its resolved references. Each lookup reserves a fresh row, with only misses occupying it; unsuccessful extraction is cached with a false coordinate-validity bit and a true presence bit. Keys contain the verified registration body identity and an immutable source-family ordinal, under the separately charged identity-binding premise. Values use the largest catalogue coordinate width. The following circuit bound charges complete linear scans, copying, cleanup and zero-row initialization, including unused rows after hits. It excludes the oracle extraction and coordinate decoding priced below, circuit construction and the rest of the protocol simulator.',
+        'A whole poll can contain forked rosters of different permitted sizes. The next table minimizes honest endorsement consumption over that entire size range and bounds recipient rows and extraction requests by its largest permitted roster and corruption budget. A fixed completion-profile denominator does not cover smaller certified rosters, and a smaller selected-roster bound does not cover larger stalled offers. Primitive advantages must still maximize each complete family/profile summand with its own loss and reduction time, not just substitute the numerically largest dimensions.',
         '',
         table(
             [
-                'Participants',
+                'Poll maximum participants',
+                'Example H',
+                'Minimum honest endorsers per certificate',
+                'Maximum certified rosters',
+                'Maximum honest-recipient rows',
+                'Maximum source-extraction requests',
+            ],
+            supportedProfiles.profiles.map((row) => {
+                const poll = compileClearPreparationPollPopulations(
+                    row[0].participantCount,
+                    row[0].optionCount,
+                    BigInt(row[0].participantCount),
+                );
+                return [
+                    poll.pollMaximumParticipants,
+                    poll.originalHonestRegistrations,
+                    poll.minimumHonestEndorsersPerCertificate,
+                    poll.maximumCertifiedRosters,
+                    poll.maximumHonestRecipientRows,
+                    poll.maximumCorruptSourceExtractions,
+                ].map(formatCount);
+            }),
+        ),
+        '',
+        'The source-extraction cache has one lookup per corrupt eligible registration at a roster’s first honest generation. Repeated original-generation work reuses its resolved references. Each lookup reserves a fresh row, with only misses occupying it; unsuccessful extraction is cached with a false coordinate-validity bit and a true presence bit. Keys contain the verified registration body identity and an immutable source-family ordinal, under the separately charged identity-binding premise. Values use the largest catalogue coordinate width. The following whole-poll circuit bound charges complete linear scans, copying, cleanup and zero-row initialization, including unused rows after hits. It excludes the oracle extraction and coordinate decoding priced below, circuit construction and the rest of the protocol simulator.',
+        '',
+        table(
+            [
+                'Poll maximum participants',
                 'Example H',
                 'Maximum cache lookups',
                 'Cache key bits',
@@ -4817,8 +4848,9 @@ export const renderDocumentationCensus = (): string => {
                 'Cache gates',
             ],
             supportedProfiles.profiles.map((row) => {
-                const ledger = compileClearPreparationLedger(
-                    row[0],
+                const ledger = compileClearPreparationPollPopulations(
+                    row[0].participantCount,
+                    row[0].optionCount,
                     BigInt(row[0].participantCount),
                 );
                 return [

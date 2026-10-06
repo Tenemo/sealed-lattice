@@ -14,8 +14,9 @@ import { compileThresholdCompletionProfile } from '#tests/threshold-completion-m
 // Structural comparison counts start at an original retained contribution
 // intent's first private generation, including work that never publishes an
 // offer. H includes abandoned and unselected original honest registrations.
-// These counts supply no primitive advantages, reduction times, semantic-use
-// errors or numerical security limit on H.
+// Profile rows assume that roster size throughout; the separate poll census
+// covers mixed-size forks. Neither supplies primitive advantages, complete
+// reduction times, semantic-use errors or a numerical security limit on H.
 let sourceCatalogue:
     | {
           families: bigint;
@@ -49,6 +50,75 @@ const choose = (population: bigint, selected: bigint) => {
     for (let index = 0n; index < selected; index++)
         result = (result * (population - index)) / (index + 1n);
     return result;
+};
+
+const compileSourceCache = (requests: bigint) => {
+    const catalogue = fixedSourceCatalogue();
+    const familyIndexBits = BigInt(
+        (catalogue.families - 1n).toString(2).length,
+    );
+    return sourceCacheWork(
+        requests,
+        // The authenticated registration digest binds its original owner,
+        // context, recipient key and ordered source commitments. The fixed
+        // family ordinal selects the particular commitment within that body.
+        512n + familyIndexBits,
+        // Canonical salt/coordinate plus the decoder's separate valid bit;
+        // shorter families are zero-padded to the fixed catalogue maximum.
+        1n +
+            8n *
+                (64n +
+                    fixedModulusBfvInputs.polynomialDegree *
+                        (1n + catalogue.maximumModulusBytes)),
+    );
+};
+
+export const compileClearPreparationPollPopulations = (
+    pollMaximumParticipants: number,
+    optionCount: number,
+    originalHonestRegistrations: bigint,
+) => {
+    assert.ok(originalHonestRegistrations >= 0n);
+    const source = compileRegistrationSetupBindingScreen(
+        pollMaximumParticipants,
+        optionCount,
+    );
+    const thresholds = Array.from(
+        { length: pollMaximumParticipants - 2 },
+        (_, index) => compileThresholdCompletionProfile(index + 3),
+    );
+    const minimumHonestEndorsersPerCertificate = BigInt(
+        Math.min(
+            ...thresholds.map(
+                (row, index) =>
+                    index + 3 - 2 * row.maximumCorruptParticipantCount,
+            ),
+        ),
+    );
+    const maximumCorruptParticipants = BigInt(
+        Math.max(
+            ...thresholds.map((row) => row.maximumCorruptParticipantCount),
+        ),
+    );
+    const maximumSourceCacheLookups =
+        originalHonestRegistrations * maximumCorruptParticipants;
+    return {
+        pollMaximumParticipants,
+        originalHonestRegistrations,
+        minimumHonestEndorsersPerCertificate,
+        maximumStartedPreparationRosters: originalHonestRegistrations,
+        maximumCertifiedRosters:
+            originalHonestRegistrations / minimumHonestEndorsersPerCertificate,
+        maximumHonestRecipientRows:
+            BigInt(pollMaximumParticipants) * originalHonestRegistrations,
+        maximumSourceCacheLookups,
+        maximumCorruptSourceExtractions: maximumSourceCacheLookups,
+        generatedSourceEntries:
+            originalHonestRegistrations * source.coordinateCount,
+        sourceMaskScopes:
+            originalHonestRegistrations * fixedSourceCatalogue().families,
+        sourceCache: compileSourceCache(maximumSourceCacheLookups),
+    };
 };
 
 export const compileClearPreparationLedger = (
@@ -100,23 +170,6 @@ export const compileClearPreparationLedger = (
     // immutable entries. No hit is counted as another oracle extraction.
     const maximumSourceCacheLookups =
         maximumStartedPreparationRosters * corrupt;
-    const familyIndexBits = BigInt(
-        (catalogue.families - 1n).toString(2).length,
-    );
-    const sourceCache = sourceCacheWork(
-        maximumSourceCacheLookups,
-        // The authenticated registration digest binds its original owner,
-        // context, recipient key and ordered source commitments. The fixed
-        // family ordinal selects the particular commitment within that body.
-        512n + familyIndexBits,
-        // Canonical salt/coordinate plus the decoder's separate valid bit;
-        // shorter families are zero-padded to the fixed catalogue maximum.
-        1n +
-            8n *
-                (64n +
-                    fixedModulusBfvInputs.polynomialDegree *
-                        (1n + catalogue.maximumModulusBytes)),
-    );
     return {
         originalHonestRegistrations,
         honestEndorsersPerCertificate,
@@ -135,7 +188,7 @@ export const compileClearPreparationLedger = (
         maximumCorruptSourceExtractions:
             maximumStartedPreparationRosters * corrupt,
         maximumSourceCacheLookups,
-        sourceCache,
+        sourceCache: compileSourceCache(maximumSourceCacheLookups),
         maximumHonestRecipientRows,
         recipientKeyComparisons: 2n * originalHonestRegistrations,
         recipientCiphertextComparisons: 2n * maximumHonestRecipientRows,
