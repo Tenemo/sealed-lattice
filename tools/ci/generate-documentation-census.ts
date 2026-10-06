@@ -132,10 +132,12 @@ import {
     preparationStagePath,
 } from '#tests/setup-selection-model.js';
 import { compileSetupSelectionWireCensus } from '#tests/setup-selection-wire-model.js';
+import { compileSetupShareArithmeticBounds } from '#tests/setup-share-arithmetic-model.js';
 import { compileSigningLoopSourceComparison } from '#tests/signing-loop-estimate-model.js';
 import { compileSimulatorKeyKnowledgeCensus } from '#tests/simulator-key-knowledge-model.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
 import {
+    compileFheGadgetArithmeticBounds,
     compileSourceArithmeticBounds,
     compileSourceCoefficientAllocation,
 } from '#tests/source-coefficient-allocation-model.js';
@@ -1252,6 +1254,80 @@ export const renderDocumentationCensus = (): string => {
                     formatCount(row.maximumWitnessCarry),
                 ];
             }),
+        ),
+        '',
+        '## Generated setup arithmetic bounds',
+        '',
+        'The FHE-key bound additionally covers both signs of every gadget power multiplying a ternary source or its signed automorphism. It checks all supported profiles against the same scalar reducer, machine ranges and quotient/carry widths as the original first-coordinate case. The table summarizes all gadget powers in each displayed profile. These are arithmetic refusal bounds, not a complete generation/allocation or proof-simulation result.',
+        '',
+        table(
+            [
+                'Participants / options',
+                'Gadget powers',
+                'Largest direct multiplier bits',
+                'Maximum quotient estimate',
+                'Maximum centered quotient magnitude',
+                'Maximum witness carry magnitude',
+            ],
+            [
+                deriveSupportedProfile(3, 2),
+                completion,
+                deriveSupportedProfile(20, 20),
+            ].map((profile) => {
+                const rows = compileFheGadgetArithmeticBounds(profile);
+                const maximum = (values: bigint[]) =>
+                    values.reduce(
+                        (largest, value) => (value > largest ? value : largest),
+                        0n,
+                    );
+                return [
+                    `${profile.participantCount} / ${profile.optionCount}`,
+                    formatCount(rows.length),
+                    formatCount(
+                        maximum(
+                            rows.map((row) => row.directMultiplierMagnitude),
+                        ).toString(2).length,
+                    ),
+                    formatCount(
+                        maximum(rows.map((row) => row.maximumQuotientEstimate)),
+                    ),
+                    formatCount(
+                        maximum(rows.map((row) => row.maximumQuotient)),
+                    ),
+                    formatCount(
+                        maximum(rows.map((row) => row.maximumWitnessCarry)),
+                    ),
+                ];
+            }),
+        ),
+        '',
+        'Share generation is checked for arbitrary canonical recipient polynomials without assuming a valid key witness. The bounds cover signed sharing evaluations, low/high decomposition and offset, both ciphertext components, normalization, reduction and emitted carry widths. Every supported profile is checked; the table shows the constant component and its linear counterpart separately. A wider unsupported limb control exceeds the signed offset range, so passing the actual profile checks is load-bearing.',
+        '',
+        table(
+            [
+                'Participants / options',
+                'Component',
+                'Limb bits',
+                'Offset magnitude bits',
+                'Maximum quotient estimate',
+                'Maximum witness carry magnitude',
+                'Signed carry bits',
+            ],
+            [
+                deriveSupportedProfile(3, 2),
+                completion,
+                deriveSupportedProfile(20, 20),
+            ].flatMap((profile) =>
+                compileSetupShareArithmeticBounds(profile).map((row) => [
+                    `${profile.participantCount} / ${profile.optionCount}`,
+                    row.component,
+                    formatCount(profile.shareLifting.limbBits),
+                    formatCount(row.maximumOffset.toString(2).length),
+                    formatCount(row.maximumQuotientEstimate),
+                    formatCount(row.maximumWitnessCarry),
+                    formatCount(row.carryBits),
+                ]),
+            ),
         ),
         '',
         '## Source coefficient normalization comparison',

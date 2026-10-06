@@ -6,13 +6,15 @@ import { setupGaussianParameters } from '#tests/setup-randomness-model.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
 import type { SupportedProfile } from '#tests/supported-profile-model.js';
 
-// Bounds for b = -a*s + e, with centered a, ||s||_1 <= support and
-// |e| <= errorBound. No assumption on the distribution of a or s is used.
-export const boundSourceKeyArithmetic = (
+// Bounds for b = -a*s + multiplier*t + e, with centered a, ||s||_1 <=
+// support, ||t||_infinity <= 1 and |e| <= errorBound. The original first
+// coordinate uses multiplier zero. No distributional assumption is used.
+export const boundSetupKeyArithmetic = (
     modulus: bigint,
     radix: bigint,
     support: bigint,
     errorBound: bigint,
+    directMultiplierMagnitude = 0n,
 ) => {
     if (
         modulus < 3n ||
@@ -21,9 +23,11 @@ export const boundSourceKeyArithmetic = (
         (radix & (radix - 1n)) !== 0n ||
         support < 1n ||
         errorBound < 0n ||
-        errorBound >= radix
+        errorBound >= radix ||
+        directMultiplierMagnitude < 0n ||
+        directMultiplierMagnitude >= modulus
     )
-        throw new RangeError('Invalid original-source arithmetic operands.');
+        throw new RangeError('Invalid setup-key arithmetic operands.');
     let limbs = 1;
     let leadingScale = 1n;
     while (modulus >= leadingScale * radix) {
@@ -31,21 +35,36 @@ export const boundSourceKeyArithmetic = (
         limbs++;
     }
     const leadingModulusDigit = modulus / leadingScale;
+    let maximumDirectDigit = 0n;
+    for (
+        let remaining = directMultiplierMagnitude;
+        remaining > 0n;
+        remaining /= radix
+    ) {
+        const digit = remaining % radix;
+        if (digit > maximumDirectDigit) maximumDirectDigit = digit;
+    }
+    const directAllowance = directMultiplierMagnitude === 0n ? 0n : 1n;
     const maximumLimbProduct = support * (radix - 1n);
-    const maximumRawLimb = maximumLimbProduct + errorBound;
-    const maximumNormalizationCarry = support + 1n;
-    const maximumRawInteger = support * (modulus / 2n) + errorBound;
+    const maximumRawLimb = maximumLimbProduct + maximumDirectDigit + errorBound;
+    const maximumNormalizationCarry = support + directAllowance + 1n;
+    const maximumRawInteger =
+        support * (modulus / 2n) + directMultiplierMagnitude + errorBound;
     const maximumPrefix = maximumRawInteger / leadingScale;
     const maximumQuotientEstimate = maximumPrefix / leadingModulusDigit;
     const maximumQuotient = (maximumRawInteger + modulus / 2n) / modulus;
-    const maximumWitnessCarry = support + maximumQuotient + 2n;
+    const maximumWitnessCarry =
+        support + maximumQuotient + directAllowance + 2n;
     const maximumWitnessRow =
         (support + maximumQuotient + 1n) * (radix - 1n) +
+        maximumDirectDigit +
         errorBound +
         maximumWitnessCarry;
     return {
         limbs,
         leadingModulusDigit,
+        directMultiplierMagnitude,
+        maximumDirectDigit,
         maximumLimbProduct,
         maximumRawLimb,
         maximumNormalizationCarry,
@@ -58,18 +77,22 @@ export const boundSourceKeyArithmetic = (
     };
 };
 
-// Checks every value-dependent arithmetic refusal on the scalar original
-// source path against its pinned integer, reduction and witness contracts.
-// This is not an allocation bound or a proof for other setup equations.
-export const compileSourceArithmeticBounds = (profile: SupportedProfile) => {
+// Checks the scalar key equation's value-dependent arithmetic refusals
+// against its pinned integer, reduction and witness contracts. Share
+// ciphertexts and complete allocation histories are separate obligations.
+const checkedSetupKeyArithmeticBounds = (
+    profile: SupportedProfile,
+    directMultiplierMagnitude: bigint,
+) => {
     const radix = 1n << 96n;
     const support = fixedModulusBfvInputs.secretSupportWeight;
     const errorBound = -BigInt(setupGaussianParameters.minimum);
-    const row = boundSourceKeyArithmetic(
+    const row = boundSetupKeyArithmetic(
         profile.ciphertext.modulus,
         radix,
         support,
         errorBound,
+        directMultiplierMagnitude,
     );
     const transformModulus = compileSmallLimbProofFieldCensus().modulus;
     assert.equal(
@@ -93,6 +116,21 @@ export const compileSourceArithmeticBounds = (profile: SupportedProfile) => {
     assert.ok(row.maximumWitnessRow < signedLimit);
     return row;
 };
+
+export const compileSourceArithmeticBounds = (profile: SupportedProfile) =>
+    checkedSetupKeyArithmeticBounds(profile, 0n);
+
+// Relinearization uses both signs of a gadget power and automorphism keys
+// use a signed permutation of a ternary source. Their infinity bound is
+// one in each case, so the same absolute direct-multiplier bound applies.
+export const compileFheGadgetArithmeticBounds = (profile: SupportedProfile) =>
+    Array.from({ length: Number(profile.gadgetLength) }, (_, gadget) => ({
+        gadget,
+        ...checkedSetupKeyArithmeticBounds(
+            profile,
+            fixedModulusBfvInputs.gadgetBase ** BigInt(gadget),
+        ),
+    }));
 
 // num-bigint 0.5.1 normalizes a heap vector's logical length, then changes
 // its allocation only when that length is below floor(capacity / 2).
