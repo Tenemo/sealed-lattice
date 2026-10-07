@@ -219,6 +219,31 @@ const buildLanes = (): {
                         ],
                         'cargo-clippy',
                     ),
+                    // The participant module's browser exports and session
+                    // state compile only for WebAssembly, including its
+                    // corrupt-participant build.
+                    ...[[], ['--features', 'invalid-ballot']].map((features) =>
+                        rustKernelCommand(
+                            `cargo clippy WebAssembly${features.length === 0 ? '' : ' invalid-ballot'}`,
+                            [
+                                'clippy',
+                                '--offline',
+                                '--locked',
+                                '-p',
+                                'registration-enrollment',
+                                '--lib',
+                                '--target',
+                                'wasm32-unknown-unknown',
+                                ...features,
+                                '--',
+                                '-D',
+                                'warnings',
+                            ],
+                            features.length === 0
+                                ? 'cargo-clippy-wasm'
+                                : 'cargo-clippy-wasm-invalid-ballot',
+                        ),
+                    ),
                     ...rustKernelTestCommands(),
                 ],
                 name: 'Rust kernel (fmt, clippy, fast test)',
