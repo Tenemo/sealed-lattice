@@ -39,10 +39,12 @@ export const budgetSplitBits = ceilingLog2(budgetGroupCount);
 // instance: ring degree 65,536, a balanced sparse ternary secret with 512
 // entries of each sign and error width 3.2. Every supported FHE modulus shares
 // the dimension and both distributions, so an estimate at a modulus bounds
-// the same attack at every smaller supported modulus from below. The quantum
-// model's sieving speedup assumes quantum random-access memory, which the
-// accepted cost convention does not provide; the classical model omits it.
-// Neither counts gates the way the convention does, so both remain screens.
+// the same attack at every smaller supported modulus from below. Attack costs
+// follow the accepted convention, without quantum random-access memory. The
+// quantum model's sieving speedup assumes that memory, so its estimates are a
+// stress test, and the classical estimates stand in for the criterion until
+// screens without it cover every attack. Neither model counts gates the way
+// the convention does, so both remain screens.
 export const fheAttackScreens = [
     {
         attack: 'primal hybrid',
@@ -144,19 +146,24 @@ export const fheKnownAttackFloor = (modulusBits: bigint) => {
 };
 
 // The oracle-simulation operand of an FHE comparison at an experiment of
-// `experimentGates`, in three nested interfaces. A lattice challenger
-// supplies no random oracle, so every reduction implements the background
-// function itself. Each variant prices only the maintained query circuits, so
-// each requirement below is a lower bound on what that reduction needs;
-// extraction, proof simulation, record creation and every other part of the
-// reduction only add work.
+// `experimentGates`. The lattice assumptions hold relative to the ideal SHAKE
+// oracle, so a reduction that never reads or programs the attacker's queries
+// forwards them and simulates nothing; programming a point adds a wrapper
+// that this floor omits. A reduction that implements the whole function
+// itself, as one without that assumption or one that extracts must, pays the
+// three nested interfaces after it. Each variant prices only the maintained
+// query circuits, so each requirement below is a lower bound on what that
+// reduction needs; extraction, proof simulation, record creation and every
+// other part of the reduction only add work.
 export type OracleSimulationVariant =
+    | 'forwarded oracle'
     | 'background oracle'
     | 'commitment shadows'
     | 'commitment shadows and readers'
     | 'commitment shadows and resumed hashes';
 
 export const oracleSimulationVariants: readonly OracleSimulationVariant[] = [
+    'forwarded oracle',
     'background oracle',
     'commitment shadows',
     'commitment shadows and readers',
@@ -183,6 +190,7 @@ export const oracleSimulationGates = (
     sourceMaskScopes: bigint,
     resumeFactor = 5n,
 ) => {
+    if (variant === 'forwarded oracle') return 0n;
     // The commitment digest width is the first output chunk.
     const firstChunkBits = 512n;
     if (variant === 'background oracle')

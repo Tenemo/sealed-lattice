@@ -145,13 +145,32 @@ describe('FHE security margin screen', () => {
             }
             // The quadratic routing term grows with the square of the
             // conversion factor's permutation budget.
-            const [, , readers, resumed] = row.requirements;
+            const named = (variant: string) =>
+                row.requirements.find((value) => value.variant === variant)!;
+            const readers = named('commitment shadows and readers');
+            const resumed = named('commitment shadows and resumed hashes');
             const growth =
                 Number(resumed.simulationGates) /
                 Number(readers.simulationGates);
             const factorSquared = (Number(row.resumeFactor) / 5) ** 2;
             expect(growth).toBeGreaterThan(factorSquared * 0.9);
             expect(growth).toBeLessThan(factorSquared * 1.1);
+        }
+    });
+
+    it('charges a forwarded oracle only the comparison count and the budget split', () => {
+        for (const row of screen) {
+            const forwarded = row.requirements.find(
+                (value) => value.variant === 'forwarded oracle',
+            )!;
+            expect(forwarded.simulationGates).toBe(0n);
+            // The bit length of comparisons - 1 is the smallest k with
+            // comparisons <= 2^k.
+            expect(forwarded.requiredBits).toBe(
+                80n + 3n + BigInt((row.comparisons - 1n).toString(2).length),
+            );
+            // Even the quantum stress test leaves it a positive margin.
+            expect(forwarded.marginToFloor).toBeGreaterThan(0);
         }
     });
 
