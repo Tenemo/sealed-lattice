@@ -35,30 +35,24 @@ export const rustKernelCommand = (
     workingDirectoryPath: workspace,
 });
 
-// Credential conformance and the small transcript integration target. The
-// explicit latter target keeps heavy proof-generation unit tests in their
-// guarded lane.
+// Every member's unit and integration tests except the ballot and release
+// provers', whose proof-generation tests run in the guarded research check.
 const rustKernelTestSuites = [
     {
-        name: 'registration-credentials',
+        name: 'workspace',
         arguments: [
             'test',
             '--offline',
             '--locked',
-            '-p',
-            'registration-credentials',
-        ],
-    },
-    {
-        name: 'continuation-transcript',
-        arguments: [
-            'test',
-            '--offline',
-            '--locked',
-            '-p',
-            'word-proof',
+            '--workspace',
+            '--exclude',
+            'ballot-proof',
+            '--exclude',
+            'linked-release-proof',
+            '--lib',
+            '--bins',
             '--test',
-            'continuation-transcript',
+            '*',
         ],
     },
 ] as const;

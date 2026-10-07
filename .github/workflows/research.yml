@@ -1,0 +1,46 @@
+name: research
+
+on:
+    pull_request:
+        paths:
+            - crates/protocol-research/**
+            - tools/ci/run-protocol-research.ts
+            - tools/ci/protocol-research-*.ts
+            - tools/ci/protocol-process-memory.ts
+    push:
+        branches:
+            - master
+        paths:
+            - crates/protocol-research/**
+    workflow_dispatch:
+
+permissions:
+    contents: read
+
+concurrency:
+    group: ${{ format('research-{0}-{1}', github.workflow, github.ref) }}
+    cancel-in-progress: true
+
+jobs:
+    research:
+        name: protocol research check
+        runs-on: ubuntu-24.04
+        timeout-minutes: 90
+        steps:
+            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+              with:
+                  persist-credentials: false
+            - uses: ./.github/actions/bootstrap-pnpm
+            - uses: ./.github/actions/participant-toolchain
+            - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
+              with:
+                  workspaces: crates/protocol-research
+            - name: Run the guarded protocol research check
+              run: pnpm run research:protocol -- check
+            - name: Upload research diagnostics
+              if: ${{ failure() }}
+              uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+              with:
+                  if-no-files-found: warn
+                  name: research-logs-${{ github.run_id }}-${{ github.run_attempt }}
+                  path: logs
