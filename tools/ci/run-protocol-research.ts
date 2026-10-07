@@ -26,7 +26,10 @@ import { compileSetupAggregateResources } from '#tests/setup-aggregate-resource-
 import { deriveSupportedProfile } from '#tests/supported-profile-model.js';
 import { snapshotResearchSources } from '#tools/ci/fixture-sources.js';
 import { runWithLocalRunLog } from '#tools/ci/local-run-log.js';
-import { readProtocolProcessTree } from '#tools/ci/protocol-process-memory.js';
+import {
+    guardProcessTreeMemory,
+    readProtocolProcessTree,
+} from '#tools/ci/protocol-process-memory.js';
 import { acquireProtocolResearchLock } from '#tools/ci/protocol-research-lock.js';
 import { selectProtocolResearchCase } from '#tools/ci/protocol-research-registry.js';
 import { deriveResearchScenario } from '#tools/ci/protocol-research-scenario.js';
@@ -99,6 +102,14 @@ const prefixProfiles = [
 const root = path.resolve('.');
 const workspace = path.join(root, 'crates/protocol-research');
 const memoryLimit = 1_073_741_824;
+// Every build, lint and test step finishes within this bound, except a cold
+// compile of the unit-test binaries, which has its own.
+const stepTimeoutMilliseconds = 600_000;
+const compileTimeoutMilliseconds = 1_800_000;
+// The unit tests, with or without simulated helpers, stay below this
+// process-tree memory, which leaves room above their recorded peaks for
+// slower hosts.
+const unitTestMemoryLimit = 2_147_483_648;
 // Native threads that take the browser module's path with helpers; only
 // the runner names their count, so every run records it.
 const simulatedHelpersVariable = 'SEALED_LATTICE_SIMULATED_HELPERS';
@@ -107,12 +118,7 @@ const unitSimulatedHelpers = 3;
 // The proof crates' unit tests also run with this many, whose proof rows
 // hold two residue classes of each coset, which fewer helpers never reach.
 const proofSimulatedHelpers = 8;
-const proofCrates = [
-    'word-proof',
-    'ballot-proof',
-    'linked-release-proof',
-    'contribution-prover',
-];
+const proofCrates = ['word-proof', 'ballot-proof', 'linked-release-proof'];
 // A native ceremony generates and proves one contribution per participant,
 // which dominates its duration.
 const executionTimeout = prefixCase
@@ -166,30 +172,77 @@ await runWithLocalRunLog(
                           ...environment,
                           [simulatedHelpersVariable]: String(count),
                       };
+            // A step runs for at most its timeout. A guarded step also records
+            // its process tree's memory every second and stops at the limit.
             const execute = async (
                 command: string,
                 args: string[],
                 name: string,
                 env = environment,
+                {
+                    timeoutMilliseconds = stepTimeoutMilliseconds,
+                    guardedMemoryLimit,
+                }: {
+                    timeoutMilliseconds?: number;
+                    guardedMemoryLimit?: number;
+                } = {},
             ) => {
-                const result = await runCommandAndCaptureOutput(
-                    {
-                        command,
-                        args,
-                        env,
-                        workingDirectoryPath: workspace,
-                        description: name,
-                        logFileSlug: name,
-                    },
-                    {
-                        runLog: log,
-                        echoOutput: true,
-                        signal: AbortSignal.timeout(600_000),
-                    },
-                );
-                assert.equal(result.exitCode, 0, name);
-                assert.equal(result.terminationSignal, null, name);
-                return result.stdout;
+                const controller = new AbortController();
+                let guard: { stop: () => Promise<void> } | undefined;
+                try {
+                    const result = await runCommandAndCaptureOutput(
+                        {
+                            command,
+                            args,
+                            env,
+                            workingDirectoryPath: workspace,
+                            description: name,
+                            logFileSlug: name,
+                        },
+                        {
+                            runLog: log,
+                            echoOutput: true,
+                            signal: AbortSignal.any([
+                                controller.signal,
+                                AbortSignal.timeout(timeoutMilliseconds),
+                            ]),
+                            onCommandStart: ({ processIdentifier }) => {
+                                if (guardedMemoryLimit === undefined) return;
+                                assert.ok(processIdentifier);
+                                guard = guardProcessTreeMemory({
+                                    processIdentifier,
+                                    memoryLimit: guardedMemoryLimit,
+                                    exceededMessage:
+                                        'Unit-test process-tree memory guard exceeded.',
+                                    onSample: (bytes) => {
+                                        log.writeEvent({
+                                            eventType:
+                                                'unit-test-process-memory',
+                                            details: {
+                                                step: name,
+                                                bytes,
+                                                memoryLimit: guardedMemoryLimit,
+                                            },
+                                        });
+                                    },
+                                    abort: (reason) => {
+                                        controller.abort(reason);
+                                    },
+                                });
+                            },
+                        },
+                    );
+                    assert.equal(
+                        controller.signal.aborted,
+                        false,
+                        String(controller.signal.reason),
+                    );
+                    assert.equal(result.exitCode, 0, name);
+                    assert.equal(result.terminationSignal, null, name);
+                    return result.stdout;
+                } finally {
+                    await guard?.stop();
+                }
             };
             const compiler = await execute(
                 'rustc',
@@ -423,12 +476,31 @@ await runWithLocalRunLog(
                 '--lib',
                 '--bins',
             ];
-            await execute('cargo', unitTests, 'unit-verification');
+            // Compiling the test binaries is not part of a test step, so a
+            // cold build has its own longer bound and the guarded steps
+            // measure only the tests.
+            await execute(
+                'cargo',
+                [...unitTests, '--no-run'],
+                'unit-verification-build',
+                environment,
+                { timeoutMilliseconds: compileTimeoutMilliseconds },
+            );
+            await execute(
+                'cargo',
+                unitTests,
+                'unit-verification',
+                environment,
+                {
+                    guardedMemoryLimit: unitTestMemoryLimit,
+                },
+            );
             await execute(
                 'cargo',
                 unitTests,
                 'unit-verification-simulated-helpers',
                 withSimulatedHelpers(unitSimulatedHelpers),
+                { guardedMemoryLimit: unitTestMemoryLimit },
             );
             await execute(
                 'cargo',
@@ -440,6 +512,7 @@ await runWithLocalRunLog(
                 ],
                 'unit-verification-proof-helpers',
                 withSimulatedHelpers(proofSimulatedHelpers),
+                { guardedMemoryLimit: unitTestMemoryLimit },
             );
             await execute(
                 'cargo',

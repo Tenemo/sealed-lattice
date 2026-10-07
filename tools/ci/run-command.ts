@@ -552,6 +552,7 @@ export const runCommandAndCaptureOutput = async (
     invocation: CommandInvocation,
     input: {
         readonly echoOutput?: boolean;
+        readonly onCommandStart?: CommandRunObserver['onCommandStart'];
         readonly runLog?: ActiveLocalRunLog;
         readonly signal?: AbortSignal;
     } = {},
@@ -561,6 +562,7 @@ export const runCommandAndCaptureOutput = async (
     let terminationSignal: NodeJS.Signals | null = null;
     const exitCode = await runCommand(invocation, {
         observer: {
+            onCommandStart: input.onCommandStart,
             onCommandExit: (event) => {
                 terminationSignal = event.terminationSignal;
             },

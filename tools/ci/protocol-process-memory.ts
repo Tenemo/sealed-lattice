@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
+import { setTimeout } from 'node:timers/promises';
 import { promisify } from 'node:util';
 
 // A process's identifier, its recorded parent's, its private bytes and,
@@ -104,4 +105,38 @@ export const readProtocolProcessTree = async (
 ): Promise<number | undefined> => {
     assert.ok(Number.isSafeInteger(identifier) && identifier > 0);
     return sumProtocolProcessTree(identifier, await readProtocolProcesses());
+};
+
+// Samples a process tree's memory once a second until stopped. Every sample
+// reaches `onSample`, and a sample above the limit aborts the guarded run with
+// the guard's message.
+export const guardProcessTreeMemory = (input: {
+    readonly processIdentifier: number;
+    readonly memoryLimit: number;
+    readonly exceededMessage: string;
+    readonly onSample: (bytes: number) => void;
+    readonly abort: (reason: unknown) => void;
+}): { readonly stop: () => Promise<void> } => {
+    let active = true;
+    const sampling = (async () => {
+        while (active) {
+            const bytes = await readProtocolProcessTree(
+                input.processIdentifier,
+            );
+            if (bytes !== undefined) {
+                input.onSample(bytes);
+                if (bytes > input.memoryLimit)
+                    throw new Error(input.exceededMessage);
+            }
+            if (active) await setTimeout(1000);
+        }
+    })().catch((error: unknown) => {
+        input.abort(error);
+    });
+    return {
+        stop: async () => {
+            active = false;
+            await sampling;
+        },
+    };
 };
