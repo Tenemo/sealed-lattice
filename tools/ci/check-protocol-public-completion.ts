@@ -201,9 +201,12 @@ await runWithLocalRunLog(
                 'temp',
                 'threshold-reader-' + path.basename(log.runDirectoryPath),
             );
+            // The reader runs the binary at the workspace's own target
+            // directory, so an inherited one cannot substitute a stale build.
             const workspace = path.resolve('crates/protocol-research'),
                 environment = {
                     ...process.env,
+                    CARGO_TARGET_DIR: path.join(workspace, 'target'),
                     RUSTFLAGS: '',
                 };
             const execute = async (
