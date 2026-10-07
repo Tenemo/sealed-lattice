@@ -65,6 +65,14 @@ type Equation = Readonly<{
 // FHE equations use 96-bit limbs; share equations use the
 // profile's share-lifting limb.
 const fheRadix = 1n << 96n;
+// Every setup equation has a signed quotient and error of these widths. The
+// FHE key equations and the linear share equations have carries of the FHE
+// carry width; the constant share equations use the profile's share carry.
+export const setupEquationWidths = {
+    quotientBits: 16,
+    fheCarryBits: 16,
+    errorBits: 7,
+} as const;
 const prime = compileSmallLimbProofFieldCensus().modulus;
 const shareScale = shareEncryptionParameters.scale;
 const shareModulus = shareEncryptionParameters.modulus;
@@ -404,7 +412,11 @@ export const createSetupContributionRelationModel = (
             assert.equal(value % values.modulus, 0n);
             return value / values.modulus;
         });
-        const quotient = signed(`${name}/quotient`, 16, quotientValues);
+        const quotient = signed(
+            `${name}/quotient`,
+            setupEquationWidths.quotientBits,
+            quotientValues,
+        );
         const carries = Array.from(
             { length: values.limbs - 1 },
             (_unused, limb) =>
@@ -414,7 +426,11 @@ export const createSetupContributionRelationModel = (
                     Array.from({ length: values.degree }, () => 0n),
                 ),
         );
-        const error = signed(`${name}/error`, 7, errorValues);
+        const error = signed(
+            `${name}/error`,
+            setupEquationWidths.errorBits,
+            errorValues,
+        );
         const equation = { name, ...values, quotient, carries, error };
         for (let limb = 0; limb < carries.length; limb++) {
             const rows = compileEquation(equation).slice(
@@ -516,7 +532,7 @@ export const createSetupContributionRelationModel = (
                 },
                 raw,
                 error,
-                16,
+                setupEquationWidths.fheCarryBits,
             );
         }
     }
@@ -628,7 +644,7 @@ export const createSetupContributionRelationModel = (
                     value + error1[position] - second[position],
             ),
             error1,
-            16,
+            setupEquationWidths.fheCarryBits,
         );
         const phase = addPolynomials(
             first,
@@ -883,12 +899,13 @@ export const deriveSetupContributionShape = (profile: SupportedProfile) => {
     );
     const gadgetLength = Number(profile.gadgetLength);
     const fheEquations = 4 * gadgetLength;
+    const { quotientBits, fheCarryBits, errorBits } = setupEquationWidths;
     const variableBits = [
         // FHE key equations: quotient, carries and error.
         ...Array.from({ length: fheEquations }, () => [
-            16,
-            ...Array.from({ length: fheLimbs - 1 }, () => 16),
-            7,
+            quotientBits,
+            ...Array.from({ length: fheLimbs - 1 }, () => fheCarryBits),
+            errorBits,
         ]).flat(),
         // Sharing coefficients: low and high limb parts.
         ...Array.from({ length: sharingDegree }, () => [
@@ -897,12 +914,12 @@ export const deriveSetupContributionShape = (profile: SupportedProfile) => {
         ]).flat(),
         // Each recipient's constant and linear share equations.
         ...Array.from({ length: participants }, () => [
-            16,
+            quotientBits,
             carryBits,
-            7,
-            16,
-            16,
-            7,
+            errorBits,
+            quotientBits,
+            fheCarryBits,
+            errorBits,
         ]).flat(),
     ];
     const columns = variableBits.map(signedVariableColumns);
@@ -921,7 +938,7 @@ export const deriveSetupContributionShape = (profile: SupportedProfile) => {
     return {
         wordColumns,
         booleanColumns,
-        errorColumns: variableBits.filter((bits) => bits === 7).length,
+        errorColumns: variableBits.filter((bits) => bits === errorBits).length,
         disjointPairs,
         supportRows,
         lookupEntries: wordColumns + narrowWords,

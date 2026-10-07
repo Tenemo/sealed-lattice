@@ -108,10 +108,11 @@ export const compileBallotEncryptionRelationCensus = (
     // carry recurrences therefore contain no large plaintext product.
     assert.equal(scale % radix ** BigInt(limbs - 1), 0n);
     const trueCarryBound = support + trueQuotientBound + 3n;
+    // One public ciphertext digit per row; a single limb has no carries.
     const residualBound =
-        (support + quotientBound + plaintextBound + 2n) * (radix - 1n) +
+        (support + quotientBound + plaintextBound + 1n) * (radix - 1n) +
         error +
-        carryBound * (radix + 1n);
+        (limbs > 1 ? carryBound * (radix + 1n) : 0n);
     // The real fixed pair has no participant-held secret. This decoding
     // bound belongs only to its single-good-key proof game.
     const auxiliaryGoodKeyNoiseBound = (2n * auxiliary.support + 1n) * error;

@@ -107,6 +107,7 @@ import {
     compileRegistrationSourceRandomness,
     compileRegistrationSourceExtractionWork,
 } from '#tests/registration-source-randomness-model.js';
+import { compileRelationIntegerLiftingCensus } from '#tests/relation-integer-lifting-model.js';
 import { compileReleaseShareLiftingCensus } from '#tests/release-share-lifting-model.js';
 import { compileReleaseVerificationWorkload } from '#tests/release-verification-work-model.js';
 import { compileRnsArithmeticResourceCensus } from '#tests/rns-arithmetic-resource-model.js';
@@ -323,6 +324,7 @@ export const renderDocumentationCensus = (): string => {
     const rnsArithmetic = compileRnsArithmeticResourceCensus(completion);
     const setupRelation = compileSetupContributionRelationCensus(completion);
     const linkedRelease = compileLinkedReleaseRelationCensus(completion);
+    const relationLifting = compileRelationIntegerLiftingCensus();
     const linkedReleaseProof = compileLinkedReleaseWordProofLayout(completion);
     const ballotRelation = compileBallotEncryptionRelationCensus(completion);
     const fixedModulusBfv = compileProfileBfvCensus(completion);
@@ -2079,6 +2081,37 @@ export const renderDocumentationCensus = (): string => {
         ),
         '',
         'The query-transform subtotal includes the coefficient and scratch vectors, one base-field twiddle table, and the queried output vector. It excludes input chunks, parser records, query-index groups, allocator behavior, stack, JavaScript, and the rest of proof verification. The experimental expanded statement repeats common matrices and recipient public keys in the verifier input; its length is not the contributor upload size. The encoded operator includes the statement digest, target, final row weight, and queried coefficients.',
+        '',
+        '## Relation integer-lifting census',
+        '',
+        `Each accepted affine row of the setup, ballot and release relations has an integer residual bounded by the sum of its terms over the accepted witness box. A bound below the proof field makes field equality integer equality; complete public limbs and zero end carries then recover each original equation. Each row is the largest bound over the ${relationLifting.profileCount} supported profiles, with the first profile that attains it.`,
+        '',
+        table(
+            [
+                'Relation',
+                'Row family',
+                'Limb bits',
+                'Limbs',
+                'Largest accepted residual bound',
+                'Bits below the proof field, rounded down',
+                'First profile at the bound',
+            ],
+            relationLifting.families.map((family) => [
+                family.relation,
+                family.family,
+                family.limbBits.length === 0
+                    ? 'whole field elements'
+                    : family.limbBits
+                          .map((value) => formatCount(value))
+                          .join(' or '),
+                family.limbs.length === 1
+                    ? formatCount(family.limbs[0])
+                    : `${formatCount(family.limbs[0])} to ${formatCount(family.limbs[family.limbs.length - 1])}`,
+                formatCount(family.residualBound),
+                `\`${(Number(family.hundredthsBelowField) / 100).toFixed(2)}\``,
+                `${formatCount(family.participantCount)} participants and ${formatCount(family.optionCount)} options`,
+            ]),
+        ),
         '',
         '## Exact RNS arithmetic census',
         '',
