@@ -30,7 +30,7 @@ fn release_proofs_verify_only_for_their_role_and_true_partial() {
     let profile = Profile::new(3, 2).unwrap();
     let role = b"release-proof-test";
     let (prepared, _) = synthetic_release(profile);
-    let (statement, proof) = ReleaseRelationProof::from_prepared(role, prepared);
+    let (statement, proof) = prove(role, prepared);
     let mut bytes = Vec::new();
     proof.write(&mut bytes);
     assert!(bytes.len() <= release_relation(profile).maximum_proof_bytes());
@@ -61,7 +61,15 @@ fn release_proofs_verify_only_for_their_role_and_true_partial() {
         std::mem::take(&mut *prepared.columns),
     )
     .unwrap();
-    let proof = ReleaseRelationProof::create(role, &relation, &prepared.statement, witness, true);
+    let statement = &prepared.statement;
+    let proof = OneShotProof::create(
+        role,
+        witness,
+        &statement.header,
+        &statement.polynomials,
+        |alpha| statement.operator(alpha).unwrap(),
+        true,
+    );
     let mut bytes = Vec::new();
     proof.write(&mut bytes);
     assert!(!verify(profile, role, &prepared.statement, &bytes));
@@ -78,7 +86,7 @@ fn a_replayed_mask_draw_repeats_its_release() {
     let release = |seed| {
         word_proof::random::REPLAYED.with(|replayed| replayed.set(Some(seed)));
         let (prepared, _) = synthetic_release(profile);
-        let (statement, proof) = ReleaseRelationProof::from_prepared(role, prepared);
+        let (statement, proof) = prove(role, prepared);
         let mut bytes = Vec::new();
         proof.write(&mut bytes);
         (statement, bytes)

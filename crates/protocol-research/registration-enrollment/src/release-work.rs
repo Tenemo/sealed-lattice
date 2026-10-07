@@ -1,10 +1,11 @@
 use evaluation_target::release::ReleaseContext;
-use linked_release_proof::{proof::ReleaseRelationProof, statement::PublicStatement};
+use linked_release_proof::{proof::prove, statement::PublicStatement};
 use registration_credentials::{
     Credential, Error, ballot_authentication::RetainedBallotOwner, target_signing::TargetMessage,
 };
 use setup_witness::registration::RegistrationKey;
 use std::sync::Arc;
+use word_proof::one_shot::OneShotProof;
 
 /// Private generation is reachable only from an actual verified target
 /// certificate and the corresponding original participant/root context.
@@ -34,7 +35,7 @@ impl ReleaseWork {
         self,
         key: &RegistrationKey,
         credential: &mut Credential,
-    ) -> Result<(Arc<ReleaseContext>, PublicStatement, ReleaseRelationProof), Error> {
+    ) -> Result<(Arc<ReleaseContext>, PublicStatement, OneShotProof), Error> {
         if self.owner.position() != self.context.position()
             || key.public_key() != self.context.public_key()
         {
@@ -55,7 +56,7 @@ impl ReleaseWork {
             )
             .map_err(|_| Error::Crypto)?;
         let role = self.context.proof_role().map_err(|_| Error::Context)?;
-        let (statement, proof) = ReleaseRelationProof::from_prepared(&role, prepared);
+        let (statement, proof) = prove(&role, prepared);
         let expected = self
             .context
             .statement(&statement.polynomials[5])

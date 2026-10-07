@@ -3,6 +3,7 @@ use crate::{
     field::{self, Element},
     fri::{self, Fri},
     linear::{AffineSum, Challenges, LinearOracle, PreparedPolynomial},
+    one_shot::write_header,
     oracles::{FirstOracle, SecondOracle, Witness},
     parameters::*,
     transcript::{self, Transcript},
@@ -289,25 +290,20 @@ impl Prover {
         let folding = self.folding.as_ref().unwrap();
         if !self.output_started {
             self.output_started = true;
-            let transcript = self.transcript.as_ref().unwrap();
-            output.extend(self.relation.proof_magic);
-            output.extend(self.expected);
-            output.extend(transcript.context);
-            for root in [
-                self.first.as_ref().unwrap().tree.root(),
-                self.second.as_ref().unwrap().tree.root(),
-                self.linear.as_ref().unwrap().tree.root(),
-            ] {
-                output.extend(root);
-            }
-            output.extend(field::encode(self.second.as_ref().unwrap().mask_sum));
-            for salt in &transcript.salts {
-                output.extend(salt);
-            }
-            for layer in &folding.layers {
-                output.extend(layer.tree.root());
-            }
-            output.extend(field::encode(folding.terminal));
+            let second = self.second.as_ref().unwrap();
+            write_header(
+                output,
+                &self.relation,
+                &self.expected,
+                self.transcript.as_ref().unwrap(),
+                [
+                    self.first.as_ref().unwrap().tree.root(),
+                    second.tree.root(),
+                    self.linear.as_ref().unwrap().tree.root(),
+                ],
+                second.mask_sum,
+                folding,
+            );
             return Ok(());
         }
         if self.output_stage == 3 + folding.layers.len() {

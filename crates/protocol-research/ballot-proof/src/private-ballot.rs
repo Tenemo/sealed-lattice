@@ -1,7 +1,7 @@
 use crate::{
     columns,
     context::private_proof_role,
-    proof::BallotProof,
+    proof::prove,
     statement::{PublicStatement, coefficient_bytes, encode_polynomial, setup_input},
 };
 use ballot_encryption::{context::BallotComputationContext, encryption::LinkedBallotWitness};
@@ -114,7 +114,7 @@ pub fn create(
     .map_err(|_| Error::Encoding)?;
     let role = private_proof_role(&encryption.context).map_err(|_| Error::Context)?;
     let context = encryption.into_context();
-    let proof = BallotProof::create(&role, &public, witness, FALSE_STATEMENT);
+    let proof = prove(&role, &public, witness, FALSE_STATEMENT);
     let mut proof_bytes = Vec::with_capacity(*ballot_body::proof_lengths(profile).end());
     proof.write(&mut proof_bytes);
     drop(proof);

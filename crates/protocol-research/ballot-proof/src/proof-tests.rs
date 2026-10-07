@@ -1,5 +1,8 @@
 use super::*;
-use crate::{CHUNK_LIMIT, HEADER_LENGTH, statement::tests::synthetic_ballot, verifier};
+use crate::{
+    CHUNK_LIMIT, HEADER_LENGTH, parameters::ballot_relation, statement::tests::synthetic_ballot,
+    verifier,
+};
 use supported_profile::Profile;
 
 fn verify(profile: Profile, role: &[u8], statement: &PublicStatement, proof: &[u8]) -> bool {
@@ -32,7 +35,7 @@ fn ballot_proofs_verify_only_for_their_role_profile_and_true_ciphertext() {
     let (statement, columns) = synthetic_ballot(profile);
     let relation = ballot_relation(profile);
     let witness = Witness::from_columns(&relation, statement.digest(), columns).unwrap();
-    let proof = BallotProof::create(role, &statement, witness, false);
+    let proof = prove(role, &statement, witness, false);
     let mut bytes = Vec::new();
     proof.write(&mut bytes);
     drop(proof);
@@ -53,7 +56,7 @@ fn ballot_proofs_verify_only_for_their_role_profile_and_true_ciphertext() {
     let (mut statement, columns) = synthetic_ballot(profile);
     statement.polynomials[2][1] ^= 1;
     let witness = Witness::from_columns(&relation, statement.digest(), columns).unwrap();
-    let proof = BallotProof::create(role, &statement, witness, true);
+    let proof = prove(role, &statement, witness, true);
     let mut bytes = Vec::new();
     proof.write(&mut bytes);
     assert!(!verify(profile, role, &statement, &bytes));
@@ -74,7 +77,7 @@ fn a_replayed_mask_draw_repeats_its_proof() {
         let witness =
             Witness::from_columns(&relation, statement.digest(), columns.clone()).unwrap();
         let mut bytes = Vec::new();
-        BallotProof::create(role, &statement, witness, false).write(&mut bytes);
+        prove(role, &statement, witness, false).write(&mut bytes);
         bytes
     };
     let first = prove(1);

@@ -126,11 +126,10 @@ impl Builder {
             );
         }
     }
-    fn polynomial(&mut self, index: usize, polynomial: Polynomial) -> Result<(), Error> {
+    fn polynomial(&mut self, index: usize, polynomial: PolynomialStream) -> Result<(), Error> {
         if index != self.consumed {
             return Err(Error::Shape);
         }
-        polynomial.complete()?;
         self.consumed += 1;
         match index {
             0 | 3 => {
@@ -147,11 +146,14 @@ impl Builder {
                         field::subtract(self.coefficients[self.words + 1][position], value);
                 }
             }
-            1 => self.target = field::subtract(self.target, polynomial.total),
+            1 => self.target = field::subtract(self.target, polynomial.finish_value()?),
             2 => {
                 self.target = field::subtract(
                     self.target,
-                    field::multiply(power(self.alpha, 2 * SYSTEMATIC), polynomial.total),
+                    field::multiply(
+                        power(self.alpha, 2 * SYSTEMATIC),
+                        polynomial.finish_value()?,
+                    ),
                 )
             }
             4 => {
@@ -165,7 +167,10 @@ impl Builder {
             5 => {
                 self.target = field::add(
                     self.target,
-                    field::multiply(power(self.alpha, 4 * SYSTEMATIC), polynomial.total),
+                    field::multiply(
+                        power(self.alpha, 4 * SYSTEMATIC),
+                        polynomial.finish_value()?,
+                    ),
                 )
             }
             _ => return Err(Error::Shape),
@@ -284,8 +289,8 @@ pub(crate) fn operator(statement: &PublicStatement, alpha: Element) -> Result<De
         return Err(Error::Shape);
     }
     for (index, bytes) in statement.polynomials.iter().enumerate() {
-        let mut parser = Polynomial::new(statement.profile, index, alpha)?;
-        for chunk in bytes.chunks(1048576) {
+        let mut parser = polynomial_stream(statement.profile, index, alpha)?;
+        for chunk in bytes.chunks(CHUNK_LIMIT) {
             parser.push(chunk)?;
         }
         builder.polynomial(index, parser)?;

@@ -2,6 +2,7 @@ use crate::parameters::*;
 use num_bigint::{BigInt, Sign};
 use parallel_work::ProtocolHash;
 pub use setup_stream_kernel::SetupStatementOutput as StatementOutput;
+use setup_stream_kernel::{CHUNK_LIMIT, PolynomialStream};
 use word_proof::{
     affine::{Operator, PublicColumn, Term},
     field::{self, Element, MODULUS, ONE, ZERO},
@@ -39,6 +40,17 @@ pub enum Error {
     Encoding,
     Binding,
     Arithmetic,
+}
+impl From<setup_stream_kernel::Error> for Error {
+    fn from(error: setup_stream_kernel::Error) -> Self {
+        use setup_stream_kernel::Error as Stream;
+        match error {
+            Stream::Parameters | Stream::Length | Stream::Incomplete => Self::Shape,
+            Stream::Encoding => Self::Encoding,
+            Stream::Binding => Self::Binding,
+            Stream::Arithmetic => Self::Arithmetic,
+        }
+    }
 }
 pub fn share_modulus() -> BigInt {
     BigInt::from_bytes_le(Sign::Plus, supported_profile::share_modulus())
@@ -117,102 +129,28 @@ pub fn encode_polynomial(values: &[BigInt], width: usize) -> Result<Vec<u8>, Err
     }
     Ok(output)
 }
-struct Polynomial {
-    width: usize,
-    chunk: usize,
-    half: Vec<u8>,
+/// The stream that fingerprints the statement's polynomial at the index:
+/// share-modulus polynomials in decoding limbs and release-modulus
+/// polynomials in release limbs.
+fn polynomial_stream(
+    profile: Profile,
+    index: usize,
     alpha: Element,
-    weight: Element,
-    geometric: Element,
-    total: Element,
-    values: Vec<Element>,
-    buffer: Vec<u8>,
-    consumed: usize,
-}
-impl Polynomial {
-    fn new(profile: Profile, index: usize, alpha: Element) -> Result<Self, Error> {
-        if index >= POLYNOMIALS || alpha.iter().any(|value| *value >= MODULUS) {
-            return Err(Error::Shape);
-        }
-        let (modulus, chunk) = if index < SHARE_POLYNOMIALS {
-            (share_modulus(), DECODING_CHUNK)
-        } else {
-            (release_modulus(profile), RELEASE_CHUNK)
-        };
-        let width = coefficient_bytes(profile, index);
-        let mut half = (modulus >> 1usize).to_bytes_le().1;
-        half.resize(width - 1, 0);
-        Ok(Self {
-            width,
-            chunk,
-            half,
-            alpha,
-            weight: power(alpha, SYSTEMATIC),
-            geometric: ONE,
-            total: ZERO,
-            values: Vec::with_capacity(SYSTEMATIC),
-            buffer: Vec::with_capacity(width),
-            consumed: 0,
-        })
+) -> Result<PolynomialStream, Error> {
+    if index >= POLYNOMIALS {
+        return Err(Error::Shape);
     }
-    fn push(&mut self, mut bytes: &[u8]) -> Result<(), Error> {
-        if bytes.len() > 1048576 || bytes.len() > SYSTEMATIC * self.width - self.consumed {
-            return Err(Error::Shape);
-        }
-        self.consumed += bytes.len();
-        while !bytes.is_empty() {
-            let count = bytes.len().min(self.width - self.buffer.len());
-            self.buffer.extend_from_slice(&bytes[..count]);
-            bytes = &bytes[count..];
-            if self.buffer.len() == self.width {
-                let magnitude = &self.buffer[1..];
-                if self.buffer[0] > 1
-                    || magnitude.iter().rev().cmp(self.half.iter().rev()).is_gt()
-                    || (self.buffer[0] == 1 && magnitude.iter().all(|value| *value == 0))
-                {
-                    return Err(Error::Encoding);
-                }
-                let value = fingerprint(magnitude, self.chunk, self.weight);
-                let value = if self.buffer[0] == 1 {
-                    field::subtract(ZERO, value)
-                } else {
-                    value
-                };
-                self.total = field::add(self.total, field::multiply(self.geometric, value));
-                self.geometric = field::multiply(self.geometric, self.alpha);
-                self.values.push(value);
-                self.buffer.clear();
-            }
-        }
-        Ok(())
-    }
-    fn complete(&self) -> Result<(), Error> {
-        if self.values.len() != SYSTEMATIC
-            || !self.buffer.is_empty()
-            || self.consumed != SYSTEMATIC * self.width
-        {
-            return Err(Error::Shape);
-        }
-        Ok(())
-    }
-    fn adjoint(mut self) -> Result<Vec<Element>, Error> {
-        self.complete()?;
-        self.values.reverse();
-        let mut current = self.total;
-        let wrap = field::add(self.weight, ONE);
-        for value in &mut self.values {
-            let next = field::subtract(
-                field::multiply(self.alpha, current),
-                field::multiply(wrap, *value),
-            );
-            *value = current;
-            current = next;
-        }
-        if current != field::subtract(ZERO, self.total) {
-            return Err(Error::Arithmetic);
-        }
-        Ok(self.values)
-    }
+    let (modulus, limb_bits) = if index < SHARE_POLYNOMIALS {
+        (
+            supported_profile::share_modulus().to_vec(),
+            RELEASE_DECODING_LIMB_BITS,
+        )
+    } else {
+        (profile.release_modulus().to_bytes(), RELEASE_LIMB_BITS)
+    };
+    Ok(PolynomialStream::new(
+        &modulus, SYSTEMATIC, limb_bits, alpha,
+    )?)
 }
 /// The public polynomials whose multiples a release variable's words take:
 /// the powers of alpha, or the share polynomial's adjoint.
@@ -339,11 +277,10 @@ impl Builder {
             self.part(variable, first, width, top, basis, weight(limb));
         }
     }
-    fn polynomial(&mut self, index: usize, polynomial: Polynomial) -> Result<(), Error> {
+    fn polynomial(&mut self, index: usize, polynomial: PolynomialStream) -> Result<(), Error> {
         if index != self.consumed {
             return Err(Error::Shape);
         }
-        polynomial.complete()?;
         self.consumed += 1;
         match index {
             0 | 3 => {
@@ -356,11 +293,14 @@ impl Builder {
                     *target = field::add(*target, field::multiply(weight, value));
                 }
             }
-            1 => self.target = field::subtract(self.target, polynomial.total),
+            1 => self.target = field::subtract(self.target, polynomial.finish_value()?),
             2 => {
                 self.target = field::subtract(
                     self.target,
-                    field::multiply(power(self.alpha, 2 * SYSTEMATIC), polynomial.total),
+                    field::multiply(
+                        power(self.alpha, 2 * SYSTEMATIC),
+                        polynomial.finish_value()?,
+                    ),
                 )
             }
             4 => {
@@ -376,7 +316,10 @@ impl Builder {
             5 => {
                 self.target = field::add(
                     self.target,
-                    field::multiply(power(self.alpha, 4 * SYSTEMATIC), polynomial.total),
+                    field::multiply(
+                        power(self.alpha, 4 * SYSTEMATIC),
+                        polynomial.finish_value()?,
+                    ),
                 )
             }
             _ => return Err(Error::Shape),
@@ -513,8 +456,8 @@ impl PublicStatement {
             return Err(Error::Shape);
         }
         for (index, bytes) in self.polynomials.iter().enumerate() {
-            let mut parser = Polynomial::new(self.profile, index, alpha)?;
-            for chunk in bytes.chunks(1048576) {
+            let mut parser = polynomial_stream(self.profile, index, alpha)?;
+            for chunk in bytes.chunks(CHUNK_LIMIT) {
                 parser.push(chunk)?;
             }
             builder.polynomial(index, parser)?;
@@ -534,7 +477,7 @@ pub struct StatementStream {
     hash: ProtocolHash,
     header: Vec<u8>,
     builder: Option<Builder>,
-    parser: Option<Polynomial>,
+    parser: Option<PolynomialStream>,
     index: usize,
     polynomial_bytes: usize,
     consumed: usize,
@@ -601,7 +544,7 @@ impl StatementStream {
             }
             let size = SYSTEMATIC * coefficient_bytes(self.profile, self.index);
             if self.parser.is_none() {
-                self.parser = Some(Polynomial::new(self.profile, self.index, self.alpha)?);
+                self.parser = Some(polynomial_stream(self.profile, self.index, self.alpha)?);
             }
             let count = bytes.len().min(size - self.polynomial_bytes);
             self.parser.as_mut().unwrap().push(&bytes[..count])?;
@@ -640,3 +583,7 @@ impl StatementStream {
         })
     }
 }
+
+#[cfg(test)]
+#[path = "statement-tests.rs"]
+mod tests;
