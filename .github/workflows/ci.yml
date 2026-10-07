@@ -73,9 +73,9 @@ jobs:
             - run: cargo +1.95.0 clippy --manifest-path crates/protocol-research/Cargo.toml --offline --locked --no-default-features --workspace --all-targets -- -D warnings
             - run: cargo +1.95.0 clippy --manifest-path crates/protocol-research/Cargo.toml --offline --locked -p registration-enrollment --lib --target wasm32-unknown-unknown -- -D warnings
             - run: cargo +1.95.0 clippy --manifest-path crates/protocol-research/Cargo.toml --offline --locked -p registration-enrollment --lib --target wasm32-unknown-unknown --features invalid-ballot -- -D warnings
-            - name: Run Rust kernel tests
+            - name: Run fast Rust tests
               timeout-minutes: 110
-              run: pnpm run test:rust:kernel
+              run: pnpm run test:rust:fast
             - name: Upload Rust diagnostics
               if: ${{ failure() }}
               uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a

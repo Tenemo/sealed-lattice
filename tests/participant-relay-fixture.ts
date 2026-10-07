@@ -8,7 +8,7 @@ import {
 } from '#packages/sdk/src/participant/worker/candidate-codec.js';
 
 // In-memory transport only: it never authenticates a protocol record. Tests
-// may alter these public bytes independently of the owning kernel verifier.
+// may alter these public bytes independently of the owning verifier.
 export const participantRelayFixture = () => {
     const chunks = new Map<string, Uint8Array>();
     const manifests = new Map<string, Uint8Array>();

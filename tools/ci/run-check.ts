@@ -10,9 +10,9 @@ import {
     type CommandRunObserver,
 } from './run-command.js';
 import {
-    rustKernelCommand,
-    rustKernelTestCommands,
-} from './run-rust-kernel-tests.js';
+    rustFastTestCommands,
+    rustWorkspaceCommand,
+} from './run-rust-fast-tests.js';
 
 type Lane = {
     readonly commands: readonly CommandInvocation[];
@@ -199,12 +199,12 @@ const buildLanes = (): {
             lane('Lint', 'lint', ['run', 'lint']),
             {
                 commands: [
-                    rustKernelCommand(
+                    rustWorkspaceCommand(
                         'cargo fmt --check',
                         ['fmt', '--all', '--', '--check'],
                         'cargo-fmt',
                     ),
-                    rustKernelCommand(
+                    rustWorkspaceCommand(
                         'cargo clippy',
                         [
                             'clippy',
@@ -223,7 +223,7 @@ const buildLanes = (): {
                     // state compile only for WebAssembly, including its
                     // corrupt-participant build.
                     ...[[], ['--features', 'invalid-ballot']].map((features) =>
-                        rustKernelCommand(
+                        rustWorkspaceCommand(
                             `cargo clippy WebAssembly${features.length === 0 ? '' : ' invalid-ballot'}`,
                             [
                                 'clippy',
@@ -244,9 +244,9 @@ const buildLanes = (): {
                                 : 'cargo-clippy-wasm-invalid-ballot',
                         ),
                     ),
-                    ...rustKernelTestCommands(),
+                    ...rustFastTestCommands(),
                 ],
-                name: 'Rust kernel (fmt, clippy, fast test)',
+                name: 'Rust (fmt, clippy, fast test)',
             },
             lane('Knip unused-code scan', 'knip', ['exec', 'knip']),
             lane('Node tests', 'node', [

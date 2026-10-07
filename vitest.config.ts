@@ -21,23 +21,25 @@ const browserServerHost = '127.0.0.1';
 // 49152+ ephemeral port range Windows reserves; strictPort: false still increments it
 // for concurrent browser lanes and clones.
 const browserServerBasePort = 41000;
-const nodeHookTimeoutMs = 240_000;
-const nodeTestTimeoutMs = 60_000;
-const nodeKernelTestTimeoutMs = 15 * 60_000;
+const nodeHookTimeoutMilliseconds = 240_000;
+const nodeTestTimeoutMilliseconds = 60_000;
+const participantModuleTestTimeoutMilliseconds = 15 * 60_000;
 
-const kernelNodeTestGlobs = ['tests/node/**/*.kernel.test.ts'] as const;
+const participantModuleNodeTestGlobs = [
+    'tests/node/participant-module/**/*.test.ts',
+] as const;
 const censusNodeTestGlobs = [
     'tests/node/tools/documentation-census.test.ts',
 ] as const;
 const nodeTestProjectDefinitions = [
     {
-        exclude: [...kernelNodeTestGlobs, ...censusNodeTestGlobs],
+        exclude: [...participantModuleNodeTestGlobs, ...censusNodeTestGlobs],
         include: [
             'packages/*/tests/node/**/*.test.ts',
             'tests/node/**/*.test.ts',
         ],
         projectName: 'node',
-        testTimeout: nodeTestTimeoutMs,
+        testTimeout: nodeTestTimeoutMilliseconds,
     },
     {
         // Rendering the complete deterministic model census exceeds a fast
@@ -47,13 +49,13 @@ const nodeTestProjectDefinitions = [
         groupOrder: 1,
         include: censusNodeTestGlobs,
         projectName: 'node-census',
-        testTimeout: nodeHookTimeoutMs,
+        testTimeout: nodeHookTimeoutMilliseconds,
     },
     {
         fileParallelism: false,
-        include: kernelNodeTestGlobs,
-        projectName: 'node-kernel-fast',
-        testTimeout: nodeKernelTestTimeoutMs,
+        include: participantModuleNodeTestGlobs,
+        projectName: 'node-participant-module',
+        testTimeout: participantModuleTestTimeoutMilliseconds,
     },
 ] as const;
 
@@ -158,7 +160,7 @@ const makeNodeProject = ({
             resolveFromRepoRoot('tools/ci/test-process-exit-diagnostics.ts'),
         ],
         testTimeout,
-        hookTimeout: nodeHookTimeoutMs,
+        hookTimeout: nodeHookTimeoutMilliseconds,
     },
 });
 
@@ -183,7 +185,7 @@ const makeBrowserProject = ({
             name: projectName,
             include: [...include],
             ...projectAttachments(projectName),
-            // Each real-WASM browser file can instantiate a large kernel and
+            // Each real-WASM browser file can instantiate a large module and
             // create workers. Keep the canonical Chromium lane serialized so
             // concurrent files cannot inflate the measured working set.
             fileParallelism: false,

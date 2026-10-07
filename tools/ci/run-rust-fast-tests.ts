@@ -9,14 +9,14 @@ import {
 } from './run-command.js';
 
 const usage =
-    'Usage: run-rust-kernel-tests.ts [<test name, module name, or Rust file filter>].';
+    'Usage: run-rust-fast-tests.ts [<test name, module name, or Rust file filter>].';
 // The participant module's crates build in their own workspace with its
 // pinned compiler and locked offline dependencies.
 const workspace = fileURLToPath(
     new URL('../../crates/protocol-research/', import.meta.url),
 );
 
-export const rustKernelCommand = (
+export const rustWorkspaceCommand = (
     description: string,
     args: readonly string[],
     logFileSlug: string,
@@ -37,7 +37,7 @@ export const rustKernelCommand = (
 
 // Every member's unit and integration tests except the ballot and release
 // provers', whose proof-generation tests run in the guarded research check.
-const rustKernelTestSuites = [
+const rustFastTestSuites = [
     {
         name: 'workspace',
         arguments: [
@@ -57,9 +57,9 @@ const rustKernelTestSuites = [
     },
 ] as const;
 
-export const rustKernelTestCommands = (filter?: string): CommandInvocation[] =>
-    rustKernelTestSuites.map((suite) =>
-        rustKernelCommand(
+export const rustFastTestCommands = (filter?: string): CommandInvocation[] =>
+    rustFastTestSuites.map((suite) =>
+        rustWorkspaceCommand(
             `cargo test ${suite.name}${filter === undefined ? '' : ` (${filter})`}`,
             [
                 ...suite.arguments,
@@ -76,16 +76,16 @@ export const rustKernelTestCommands = (filter?: string): CommandInvocation[] =>
     );
 
 const parseFilter = (rawArguments: readonly string[]): string | undefined => {
-    const arguments_ = rawArguments.filter((argument) => argument !== '--');
+    const commandLineArguments = rawArguments.filter(
+        (argument) => argument !== '--',
+    );
     if (
-        arguments_.length > 1 ||
-        arguments_.some((argument) => argument.startsWith('-'))
+        commandLineArguments.length > 1 ||
+        commandLineArguments.some((argument) => argument.startsWith('-'))
     ) {
-        throw new Error(
-            `Rust kernel tests accept one optional filter. ${usage}`,
-        );
+        throw new Error(`Fast Rust tests accept one optional filter. ${usage}`);
     }
-    const rawFilter = arguments_[0];
+    const rawFilter = commandLineArguments[0];
     if (rawFilter === undefined) return undefined;
     const pathParts = rawFilter.replace(/\\/gu, '/').split('/');
     const fileName = pathParts[pathParts.length - 1] ?? '';
@@ -93,7 +93,7 @@ const parseFilter = (rawArguments: readonly string[]): string | undefined => {
         ? fileName.slice(0, -'.rs'.length)
         : fileName;
     if (filter.length === 0) {
-        throw new Error(`Rust kernel test filters must not be empty. ${usage}`);
+        throw new Error(`Fast Rust test filters must not be empty. ${usage}`);
     }
     return filter;
 };
@@ -102,11 +102,11 @@ const requireTestMatch = async (
     filter: string,
     runLog: ActiveLocalRunLog,
 ): Promise<CommandInvocation[]> => {
-    const commands = rustKernelTestCommands(filter);
+    const commands = rustFastTestCommands(filter);
     const matched: CommandInvocation[] = [];
-    for (const [index, suite] of rustKernelTestSuites.entries()) {
+    for (const [index, suite] of rustFastTestSuites.entries()) {
         const result = await runCommandAndCaptureOutput(
-            rustKernelCommand(
+            rustWorkspaceCommand(
                 `list ${suite.name} tests matching ${filter}`,
                 [
                     ...suite.arguments,
@@ -122,7 +122,7 @@ const requireTestMatch = async (
         );
         if (result.exitCode !== 0 || result.terminationSignal !== null)
             throw new Error(
-                `Unable to list Rust kernel tests matching ${filter}.`,
+                `Unable to list fast Rust tests matching ${filter}.`,
             );
         if (
             result.stdout
@@ -132,9 +132,7 @@ const requireTestMatch = async (
             matched.push(commands[index]);
     }
     if (matched.length === 0) {
-        throw new Error(
-            `test:rust:kernel filter ${filter} selects zero tests.`,
-        );
+        throw new Error(`test:rust:fast filter ${filter} selects zero tests.`);
     }
     return matched;
 };
@@ -144,14 +142,14 @@ const main = async (): Promise<void> => {
     await runWithLocalRunLog(
         {
             commandLineArguments: rawArguments,
-            lanes: ['Rust kernel'],
-            scriptName: 'test:rust:kernel',
+            lanes: ['Fast Rust tests'],
+            scriptName: 'test:rust:fast',
         },
         async (runLog) => {
             const filter = parseFilter(rawArguments);
             const commands =
                 filter === undefined
-                    ? rustKernelTestCommands()
+                    ? rustFastTestCommands()
                     : await requireTestMatch(filter, runLog);
             process.exitCode = await runCommandsInSeries(commands, {
                 outputMode: 'inherit',
