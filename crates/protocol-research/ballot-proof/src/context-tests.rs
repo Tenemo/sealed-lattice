@@ -1,8 +1,9 @@
 use super::*;
+use registration_credentials::SIGNING_PUBLIC_KEY_BYTES;
 #[test]
 fn proof_roles_separate_every_variable_context_input() {
-    let owner = derive_participant_identity(&[7; 1952]).unwrap();
-    let other_owner = derive_participant_identity(&[8; 1952]).unwrap();
+    let owner = derive_participant_identity(&[7; SIGNING_PUBLIC_KEY_BYTES]).unwrap();
+    let other_owner = derive_participant_identity(&[8; SIGNING_PUBLIC_KEY_BYTES]).unwrap();
     let original = encode_role(owner, [1; 64], [2; 64], [3; 64], 0).unwrap();
     for changed in [
         encode_role(other_owner, [1; 64], [2; 64], [3; 64], 0),

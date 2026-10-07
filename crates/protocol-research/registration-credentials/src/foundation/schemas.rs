@@ -1,3 +1,4 @@
+use crate::SIGNING_PUBLIC_KEY_BYTES;
 use core::{fmt, str};
 use std::collections::BTreeSet;
 
@@ -6,7 +7,7 @@ use supported_profile::Profile;
 use super::canonical_tuple::CanonicalDecodeBudget;
 use super::{
     CanonicalCodecError, CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple,
-    ML_DSA_65_VERIFICATION_KEY_BYTE_LENGTH, RefusalReason, derive_participant_identity,
+    RefusalReason, derive_participant_identity,
 };
 
 const FOUNDATION_SCHEMA_VERSION: u16 = 1;
@@ -50,13 +51,13 @@ pub(super) type SchemaResult<Value> = Result<Value, FoundationSchemaError>;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RosterEntry {
     pub roster_position: u16,
-    pub signing_verification_key: [u8; ML_DSA_65_VERIFICATION_KEY_BYTE_LENGTH],
+    pub signing_verification_key: [u8; SIGNING_PUBLIC_KEY_BYTES],
 }
 
 impl RosterEntry {
     pub fn new(
         roster_position: u16,
-        signing_verification_key: [u8; ML_DSA_65_VERIFICATION_KEY_BYTE_LENGTH],
+        signing_verification_key: [u8; SIGNING_PUBLIC_KEY_BYTES],
     ) -> SchemaResult<Self> {
         let entry = Self {
             roster_position,

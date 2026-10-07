@@ -1,20 +1,20 @@
-use crate::{Credential, Error, SigningPurpose, roster::RosterProposal};
+use crate::{Credential, Error, SIGNATURE_BYTES, SigningPurpose, roster::RosterProposal};
 use fips204::{
     ml_dsa_65,
-    traits::{KeyGen, SerDes, Signer, Verifier},
+    traits::{SerDes, Verifier},
 };
 
 pub const ROSTER_SIGNATURE_CONTEXT: &[u8] = b"sealed-lattice/roster-proposal/v1";
 
 pub struct OrganizerSignedRoster {
     proposal: RosterProposal,
-    signature: [u8; 3309],
+    signature: [u8; SIGNATURE_BYTES],
 }
 impl OrganizerSignedRoster {
     pub fn proposal(&self) -> &RosterProposal {
         &self.proposal
     }
-    pub fn signature(&self) -> &[u8; 3309] {
+    pub fn signature(&self) -> &[u8; SIGNATURE_BYTES] {
         &self.signature
     }
 }
@@ -33,13 +33,13 @@ impl Credential {
         }
         Ok(())
     }
-    pub fn sign_roster_proposal(&mut self, proposal: &RosterProposal) -> Result<[u8; 3309], Error> {
+    pub fn sign_roster_proposal(
+        &mut self,
+        proposal: &RosterProposal,
+    ) -> Result<[u8; SIGNATURE_BYTES], Error> {
         self.validate_roster_proposal_target(proposal)?;
         self.proposal_signed = true;
-        let (_, private) = ml_dsa_65::KG::keygen_from_seed(&self.signing_seed);
-        private
-            .try_sign_with_seed(&[0; 32], &proposal.identity(), ROSTER_SIGNATURE_CONTEXT)
-            .map_err(|_| Error::Crypto)
+        self.sign_deterministically(&proposal.identity(), ROSTER_SIGNATURE_CONTEXT)
     }
 }
 
@@ -47,7 +47,7 @@ pub fn verify_roster_proposal(
     proposal: RosterProposal,
     signature: &[u8],
 ) -> Result<OrganizerSignedRoster, Error> {
-    let signature: [u8; 3309] = signature.try_into().map_err(|_| Error::Shape)?;
+    let signature: [u8; SIGNATURE_BYTES] = signature.try_into().map_err(|_| Error::Shape)?;
     let key = proposal.records()[proposal.organizer_position()]
         .header()
         .signing_public;

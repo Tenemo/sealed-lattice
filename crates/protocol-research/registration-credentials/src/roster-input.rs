@@ -46,14 +46,14 @@ pub struct RosterInputVerifier {
 }
 impl RosterInputVerifier {
     pub fn new(input: &[u8]) -> Result<Self, Error> {
-        if !(134 + 3309..=1_572_864).contains(&input.len()) {
+        if !(134 + SIGNATURE_BYTES..=1_572_864).contains(&input.len()) {
             return Err(Error::Shape);
         }
         let count = u16::from_le_bytes(input[128..130].try_into().unwrap()) as usize;
         let length = u32::from_le_bytes(input[130..134].try_into().unwrap()) as usize;
         if !supported_profile::Profile::participant_range().contains(&count)
             || length > crate::poll::MAXIMUM_POLL_BYTES
-            || input.len() != 134 + length + 3309
+            || input.len() != 134 + length + SIGNATURE_BYTES
         {
             return Err(Error::Shape);
         }
@@ -108,7 +108,7 @@ impl RosterInputVerifier {
         if self.failed {
             return Err(Error::Consumed);
         }
-        if !(70..=70 + 4096 + 3309).contains(&input.len()) {
+        if !(70..=70 + 4096 + SIGNATURE_BYTES).contains(&input.len()) {
             return Err(Error::Shape);
         }
         let position = u16::from_le_bytes(input[..2].try_into().unwrap()) as usize;

@@ -1,4 +1,5 @@
 use super::*;
+use fips204::traits::{KeyGen, Signer};
 fn identity(value: u8) -> [u8; 64] {
     [value; 64]
 }

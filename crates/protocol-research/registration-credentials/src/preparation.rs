@@ -4,10 +4,6 @@ use crate::{
     Credential, Error, SigningPurpose,
     roster::{RetainedContributionContext, RosterProposal},
 };
-use fips204::{
-    ml_dsa_65,
-    traits::{KeyGen, Signer},
-};
 
 pub(crate) struct ConfirmedRoster {
     proposal: [u8; 64],
@@ -93,15 +89,5 @@ impl Credential {
         self.locked_purposes |= SigningPurpose::Offer.mask()
             | SigningPurpose::SelectionProposal.mask()
             | SigningPurpose::SelectionEndorsement.mask();
-    }
-    pub(crate) fn sign_preparation_digest(
-        &self,
-        identity: &[u8; 64],
-        context: &[u8],
-    ) -> Result<[u8; 3309], Error> {
-        let (_, private) = ml_dsa_65::KG::keygen_from_seed(&self.signing_seed);
-        private
-            .try_sign_with_seed(&[0; 32], identity, context)
-            .map_err(|_| Error::Crypto)
     }
 }

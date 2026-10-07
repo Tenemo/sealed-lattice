@@ -1,5 +1,5 @@
 use crate::{
-    Credential, Error,
+    Credential, Error, SIGNATURE_BYTES, SIGNING_PUBLIC_KEY_BYTES,
     foundation::{
         CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple,
         ceremony::Manifest, hash_foundation_tuple_512,
@@ -7,14 +7,22 @@ use crate::{
 };
 use fips204::{
     ml_dsa_65,
-    traits::{KeyGen, SerDes, Signer, Verifier},
+    traits::{SerDes, Verifier},
 };
 use supported_profile::Profile;
 
 pub const POLL_SIGNATURE_CONTEXT: &[u8] = b"sealed-lattice/poll-definition/v2";
 pub const MAXIMUM_POLL_BYTES: usize = 1_048_576;
-pub const POLL_BODY_OVERHEAD: usize =
-    8 + 7 * 6 + 4 + b"sealed-lattice/poll-definition/v2".len() + 64 + 32 + 1952 + 4 + 2 + 2;
+pub const POLL_BODY_OVERHEAD: usize = 8
+    + 7 * 6
+    + 4
+    + b"sealed-lattice/poll-definition/v2".len()
+    + 64
+    + 32
+    + SIGNING_PUBLIC_KEY_BYTES
+    + 4
+    + 2
+    + 2;
 
 pub struct PollDraft {
     manifest: Manifest,
@@ -51,7 +59,11 @@ impl PollDraft {
             top_count,
             maximum_participants,
         };
-        if value.body([0; 64], [0; 32], [0; 1952])?.len() > MAXIMUM_POLL_BYTES {
+        if value
+            .body([0; 64], [0; 32], [0; SIGNING_PUBLIC_KEY_BYTES])?
+            .len()
+            > MAXIMUM_POLL_BYTES
+        {
             return Err(Error::Shape);
         }
         Ok(value)
@@ -60,7 +72,7 @@ impl PollDraft {
         &self,
         runtime: [u8; 64],
         nonce: [u8; 32],
-        organizer: [u8; 1952],
+        organizer: [u8; SIGNING_PUBLIC_KEY_BYTES],
     ) -> Result<Vec<u8>, Error> {
         let manifest = self.manifest.encode().map_err(|_| Error::Shape)?;
         if manifest.len() > MAXIMUM_POLL_BYTES - POLL_BODY_OVERHEAD {
@@ -91,13 +103,13 @@ impl PollDraft {
 
 pub struct SignedPoll {
     pub body: Vec<u8>,
-    pub signature: [u8; 3309],
+    pub signature: [u8; SIGNATURE_BYTES],
     pub identity: [u8; 64],
 }
 pub struct VerifiedPoll {
     identity: [u8; 64],
     runtime: [u8; 64],
-    organizer: [u8; 1952],
+    organizer: [u8; SIGNING_PUBLIC_KEY_BYTES],
     manifest: Manifest,
     top_count: u16,
     maximum_participants: u16,
@@ -109,7 +121,7 @@ impl VerifiedPoll {
     pub fn runtime(&self) -> [u8; 64] {
         self.runtime
     }
-    pub fn organizer(&self) -> &[u8; 1952] {
+    pub fn organizer(&self) -> &[u8; SIGNING_PUBLIC_KEY_BYTES] {
         &self.organizer
     }
     pub fn manifest(&self) -> &Manifest {
@@ -145,10 +157,7 @@ impl Credential {
         let body = draft.body(runtime, nonce, self.signing_public)?;
         let identity = identity(&body)?;
         self.poll_creation_consumed = true;
-        let (_, private) = ml_dsa_65::KG::keygen_from_seed(&self.signing_seed);
-        let signature = private
-            .try_sign_with_seed(&[0; 32], &identity, POLL_SIGNATURE_CONTEXT)
-            .map_err(|_| Error::Crypto)?;
+        let signature = self.sign_deterministically(&identity, POLL_SIGNATURE_CONTEXT)?;
         Ok(SignedPoll {
             body,
             signature,
@@ -164,7 +173,7 @@ pub fn verify_poll(
     signature: &[u8],
 ) -> Result<VerifiedPoll, Error> {
     if body.len() > MAXIMUM_POLL_BYTES
-        || signature.len() != 3309
+        || signature.len() != SIGNATURE_BYTES
         || identity(body)? != expected_identity
     {
         return Err(Error::Shape);
@@ -196,7 +205,7 @@ pub fn verify_poll(
     {
         return Err(Error::Context);
     }
-    let organizer: [u8; 1952] = items[3]
+    let organizer: [u8; SIGNING_PUBLIC_KEY_BYTES] = items[3]
         .canonical_bytes()
         .try_into()
         .map_err(|_| Error::Shape)?;

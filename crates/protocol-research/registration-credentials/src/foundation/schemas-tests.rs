@@ -5,7 +5,7 @@ use super::*;
 fn roster_entries(participant_count: u16) -> Vec<RosterEntry> {
     (0..participant_count)
         .map(|roster_position| {
-            let mut signing_verification_key = [0x23_u8; ML_DSA_65_VERIFICATION_KEY_BYTE_LENGTH];
+            let mut signing_verification_key = [0x23_u8; SIGNING_PUBLIC_KEY_BYTES];
             signing_verification_key[0..2].copy_from_slice(&roster_position.to_le_bytes());
             RosterEntry {
                 roster_position,
@@ -61,7 +61,7 @@ fn roster_refuses_duplicates_reordering_and_unsupported_sizes() {
     assert_eq!(
         RosterEntry::new(
             *GOAL_PARTICIPANT_COUNTS.end(),
-            [0x23_u8; ML_DSA_65_VERIFICATION_KEY_BYTE_LENGTH],
+            [0x23_u8; SIGNING_PUBLIC_KEY_BYTES],
         )
         .expect_err("a position beyond the largest roster must refuse")
         .refusal_reason,

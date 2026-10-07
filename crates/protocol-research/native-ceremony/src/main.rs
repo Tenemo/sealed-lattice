@@ -14,7 +14,7 @@ mod selection;
 use aggregate::{ballot_key, final_keys, polynomial_bytes};
 use participants::OriginalEnrollments;
 use registration_credentials::{
-    RETAINED_TAG_BYTES,
+    RETAINED_TAG_BYTES, SIGNATURE_BYTES,
     ballot_authentication::BallotEnvelope,
     foundation::{
         StabilizedDisplayText,
@@ -152,7 +152,7 @@ impl BallotInputs<'_> {
         let coins = random::<32>();
         let signing = [envelope.bytes().as_slice(), coins.as_slice()].concat();
         work.command(credential, 8, 0, &signing).unwrap();
-        let signature: [u8; 3309] = work
+        let signature: [u8; SIGNATURE_BYTES] = work
             .command(credential, 12, 0, &[])
             .unwrap()
             .try_into()
@@ -849,7 +849,7 @@ fn main() {
     );
     work.command(&mut enrollments[0].credential, 8, 0, &signing)
         .unwrap();
-    let signature: [u8; 3309] = work
+    let signature: [u8; SIGNATURE_BYTES] = work
         .command(&mut enrollments[0].credential, 12, 0, &[])
         .unwrap()
         .try_into()

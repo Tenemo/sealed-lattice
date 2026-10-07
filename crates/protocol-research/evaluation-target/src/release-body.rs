@@ -6,6 +6,7 @@ use fips204::{
 use linked_release_proof::{CHUNK_LIMIT, HEADER_LENGTH, Verifier, verifier};
 use num_bigint::BigInt;
 use registration_credentials::{
+    SIGNATURE_BYTES,
     identity::BodyHasher,
     release_signing::{
         RELEASE_BODY_HEADER_BYTES, RELEASE_ENVELOPE_BYTES, RELEASE_SIGNATURE_CONTEXT,
@@ -16,19 +17,19 @@ use std::sync::Arc;
 
 pub struct AuthenticatedReleaseEnvelope {
     envelope: ReleaseEnvelope,
-    signature: [u8; 3309],
+    signature: [u8; SIGNATURE_BYTES],
 }
 impl AuthenticatedReleaseEnvelope {
     pub fn envelope(&self) -> &ReleaseEnvelope {
         &self.envelope
     }
-    pub fn signature(&self) -> &[u8; 3309] {
+    pub fn signature(&self) -> &[u8; SIGNATURE_BYTES] {
         &self.signature
     }
 }
 impl ReleaseContext {
     pub fn authenticate(&self, packet: &[u8]) -> Result<AuthenticatedReleaseEnvelope, Error> {
-        if packet.len() != RELEASE_ENVELOPE_BYTES + 3309 {
+        if packet.len() != RELEASE_ENVELOPE_BYTES + SIGNATURE_BYTES {
             return Err(Error::Encoding);
         }
         let envelope = ReleaseEnvelope::decode(self.profile(), &packet[..RELEASE_ENVELOPE_BYTES])

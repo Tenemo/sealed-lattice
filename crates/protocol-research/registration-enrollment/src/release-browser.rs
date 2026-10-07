@@ -1,7 +1,7 @@
 use super::{SESSION, Session};
 use evaluation_target::release_body::{ReleaseBodyVerifier, VerifiedReleaseBody};
 use registration_credentials::{
-    Error,
+    Error, SIGNATURE_BYTES,
     identity::BodyHasher,
     release_signing::{
         RELEASE_BODY_HEADER_BYTES, RELEASE_ENVELOPE_BYTES, ReleaseEnvelope, body_hasher,
@@ -207,13 +207,15 @@ fn command(session: &mut Session, operation: u32, input: &[u8]) -> Result<Vec<u8
             Ok(packet)
         }
         6 => {
-            if session.release.is_some() || input.len() < 4 + RELEASE_ENVELOPE_BYTES + 3309 {
+            if session.release.is_some()
+                || input.len() < 4 + RELEASE_ENVELOPE_BYTES + SIGNATURE_BYTES
+            {
                 return Err(Error::Consumed);
             }
             let length = u32::from_le_bytes(input[..4].try_into().unwrap()) as usize;
             if length == 0
                 || length > MAXIMUM_TARGET_BODY_BYTES
-                || input.len() != 4 + length + RELEASE_ENVELOPE_BYTES + 3309
+                || input.len() != 4 + length + RELEASE_ENVELOPE_BYTES + SIGNATURE_BYTES
             {
                 return Err(Error::Shape);
             }

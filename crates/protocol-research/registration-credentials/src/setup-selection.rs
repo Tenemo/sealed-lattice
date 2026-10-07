@@ -384,7 +384,7 @@ impl Credential {
             return Err(Error::Context);
         }
         self.selection_proposal_signed = Some(selection.identity());
-        self.sign_preparation_digest(&selection.identity(), PROPOSAL_CONTEXT)
+        self.sign_deterministically(&selection.identity(), PROPOSAL_CONTEXT)
     }
     pub fn endorse_selection(
         &mut self,
@@ -402,7 +402,7 @@ impl Credential {
         }
         let digest = endorsement_identity(selection.identity(), position)?;
         self.selection_endorsed = Some(selection.identity());
-        let signature = self.sign_preparation_digest(&digest, ENDORSEMENT_PURPOSE.as_bytes())?;
+        let signature = self.sign_deterministically(&digest, ENDORSEMENT_PURPOSE.as_bytes())?;
         Ok(endorsement_packet(
             position,
             selection.identity(),

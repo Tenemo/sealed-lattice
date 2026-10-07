@@ -6,7 +6,7 @@ use ballot_proof::{
     },
 };
 use registration_credentials::{
-    Credential, Error,
+    Credential, Error, SIGNATURE_BYTES,
     ballot_authentication::{BallotEnvelope, ENVELOPE_BYTES, RetainedBallotOwner},
     close_signing::{
         CloseIntentMessage, CloseMessage, CloseProposalMessage, ClosePurpose, CloseResponseMessage,
@@ -68,16 +68,16 @@ fn packet(bytes: &[u8], maximum: usize) -> Result<(&[u8], &[u8]), Error> {
     if !rest.is_empty() {
         return Err(Error::Shape);
     }
-    Ok(packet[4..].split_at(packet.len() - 4 - 3309))
+    Ok(packet[4..].split_at(packet.len() - 4 - SIGNATURE_BYTES))
 }
 /// A packet and the bytes that follow it.
 fn leading_packet(bytes: &[u8], maximum: usize) -> Result<(&[u8], &[u8]), Error> {
     let length =
         u32::from_le_bytes(bytes.get(..4).ok_or(Error::Shape)?.try_into().unwrap()) as usize;
-    if length > maximum || bytes.len() < 4 + length + 3309 {
+    if length > maximum || bytes.len() < 4 + length + SIGNATURE_BYTES {
         return Err(Error::Shape);
     }
-    Ok(bytes.split_at(4 + length + 3309))
+    Ok(bytes.split_at(4 + length + SIGNATURE_BYTES))
 }
 impl CloseWork {
     pub fn new(
@@ -246,7 +246,7 @@ impl CloseWork {
             // body timed after a locked close time or a new envelope for a
             // slot with two known ones.
             3 => {
-                if !ready || input.len() != ENVELOPE_BYTES + 3309 {
+                if !ready || input.len() != ENVELOPE_BYTES + SIGNATURE_BYTES {
                     return Err(Error::Shape);
                 }
                 let authentication = authenticate_envelope(
@@ -349,7 +349,7 @@ impl CloseWork {
                 let maximum = maximum_close_message_bytes(ClosePurpose::Response, self.count());
                 let (leading, rest) = leading_packet(input, maximum)?;
                 let (body, signature) = packet(leading, maximum)?;
-                let submission = ENVELOPE_BYTES + 3309;
+                let submission = ENVELOPE_BYTES + SIGNATURE_BYTES;
                 if !rest.len().is_multiple_of(submission) {
                     return Err(Error::Shape);
                 }
@@ -523,7 +523,7 @@ impl CloseWork {
             // Restores the spent ballot purpose before close work. This
             // requires the original completed local envelope and signature.
             11 => {
-                if input.len() != ENVELOPE_BYTES + 3309 {
+                if input.len() != ENVELOPE_BYTES + SIGNATURE_BYTES {
                     return Err(Error::Shape);
                 }
                 let envelope = BallotEnvelope::decode(

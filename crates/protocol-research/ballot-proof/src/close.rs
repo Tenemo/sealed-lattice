@@ -1,5 +1,6 @@
 use crate::submission::{AuthenticatedBallotBody, AuthenticatedBallotEnvelope};
 use registration_credentials::{
+    SIGNATURE_BYTES, SIGNING_PUBLIC_KEY_BYTES,
     close_signing::{
         CloseIntentMessage, CloseProposalMessage, ClosePurpose, CloseResponseMessage,
         MAXIMUM_LISTED_ENVELOPES_PER_SLOT, verify_close_signature,
@@ -27,13 +28,13 @@ pub struct CloseContext {
 #[derive(Clone)]
 pub struct AuthenticatedCloseIntent {
     message: CloseIntentMessage,
-    signature: [u8; 3309],
+    signature: [u8; SIGNATURE_BYTES],
 }
 impl AuthenticatedCloseIntent {
     pub fn message(&self) -> &CloseIntentMessage {
         &self.message
     }
-    pub fn signature(&self) -> &[u8; 3309] {
+    pub fn signature(&self) -> &[u8; SIGNATURE_BYTES] {
         &self.signature
     }
 }
@@ -43,14 +44,14 @@ impl AuthenticatedCloseIntent {
 #[derive(Clone)]
 pub struct AuthenticatedCloseResponse {
     message: CloseResponseMessage,
-    signature: [u8; 3309],
+    signature: [u8; SIGNATURE_BYTES],
     listed: Vec<AuthenticatedBallotEnvelope>,
 }
 impl AuthenticatedCloseResponse {
     pub fn message(&self) -> &CloseResponseMessage {
         &self.message
     }
-    pub fn signature(&self) -> &[u8; 3309] {
+    pub fn signature(&self) -> &[u8; SIGNATURE_BYTES] {
         &self.signature
     }
     /// The listed envelopes in listing order.
@@ -77,7 +78,7 @@ pub struct VerifiedCloseBarrier {
     setup: Arc<VerifiedSetupAggregate>,
     intent: AuthenticatedCloseIntent,
     proposal: CloseProposalMessage,
-    signature: [u8; 3309],
+    signature: [u8; SIGNATURE_BYTES],
     responses: Vec<AuthenticatedCloseResponse>,
     slots: Vec<ClosedSlot>,
 }
@@ -94,7 +95,7 @@ impl VerifiedCloseBarrier {
     pub fn proposal(&self) -> &CloseProposalMessage {
         &self.proposal
     }
-    pub fn proposal_signature(&self) -> &[u8; 3309] {
+    pub fn proposal_signature(&self) -> &[u8; SIGNATURE_BYTES] {
         &self.signature
     }
     /// The used responses in ascending responder order.
@@ -134,7 +135,7 @@ impl CloseContext {
     pub fn organizer(&self) -> usize {
         self.setup.roster().proposal().organizer_position()
     }
-    fn key(&self, position: usize) -> Result<&[u8; 1952], Error> {
+    fn key(&self, position: usize) -> Result<&[u8; SIGNING_PUBLIC_KEY_BYTES], Error> {
         Ok(&self
             .setup
             .roster()

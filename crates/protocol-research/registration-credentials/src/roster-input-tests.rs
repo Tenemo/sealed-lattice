@@ -31,7 +31,7 @@ fn records_open_within_the_limit_and_the_roster_waits_for_every_verdict() {
             &[11; 64],
             &(header.len() as u32).to_le_bytes(),
             &header,
-            &[0; 3309],
+            &[0; SIGNATURE_BYTES],
         ]
         .concat()
     };

@@ -3,6 +3,7 @@ use fips204::{
     ml_dsa_65,
     traits::{SerDes, Verifier},
 };
+use registration_credentials::SIGNING_PUBLIC_KEY_BYTES;
 use registration_credentials::target_signing::{CERTIFICATION_CONTEXT, TargetVote};
 use std::sync::Arc;
 
@@ -16,7 +17,7 @@ pub enum Error {
 
 fn verify_vote(
     identity: &[u8; 64],
-    keys: &[[u8; 1952]],
+    keys: &[[u8; SIGNING_PUBLIC_KEY_BYTES]],
     packet: &[u8],
 ) -> Result<TargetVote, Error> {
     let vote = TargetVote::parse(packet).map_err(|_| Error::Shape)?;
@@ -35,7 +36,7 @@ fn verify_vote(
 /// claimed target body, claimed acceptance vector or supplied public-key list.
 pub struct CertificateCollector {
     target: Arc<VerifiedEvaluationTarget>,
-    keys: Vec<[u8; 1952]>,
+    keys: Vec<[u8; SIGNING_PUBLIC_KEY_BYTES]>,
     votes: Vec<Option<TargetVote>>,
 }
 impl CertificateCollector {

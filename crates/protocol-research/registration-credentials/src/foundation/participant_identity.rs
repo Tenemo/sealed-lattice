@@ -1,8 +1,8 @@
+use crate::SIGNING_PUBLIC_KEY_BYTES;
 use core::fmt;
 
 use super::{CanonicalCodecError, CanonicalItem, hash_foundation_tuple_512 as hash512};
 
-pub const ML_DSA_65_VERIFICATION_KEY_BYTE_LENGTH: usize = 1_952;
 const PARTICIPANT_IDENTITY_BYTE_LENGTH: usize = 64;
 
 /// A participant identity derived from exactly one ML-DSA-65 verification key.
@@ -51,7 +51,7 @@ impl fmt::Display for ParticipantIdentity {
 }
 
 pub fn derive_participant_identity(
-    signing_verification_key: &[u8; ML_DSA_65_VERIFICATION_KEY_BYTE_LENGTH],
+    signing_verification_key: &[u8; SIGNING_PUBLIC_KEY_BYTES],
 ) -> Result<ParticipantIdentity, CanonicalCodecError> {
     let participant_identity_hash = hash512(
         "sealed-lattice/foundation/participant-id/v1",

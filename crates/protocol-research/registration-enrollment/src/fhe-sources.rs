@@ -9,7 +9,7 @@ use aes_gcm::{
 };
 use num_bigint::BigInt;
 use registration_credentials::{
-    Credential,
+    Credential, SIGNING_PUBLIC_KEY_BYTES,
     contribution_body::{BODY_HEADER_BYTES, body_header},
     foundation::{CanonicalItem, CanonicalItemType, CanonicalTuple},
     poll::VerifiedPoll,
@@ -38,7 +38,7 @@ struct Entry {
 pub(crate) struct Sources {
     poll: [u8; 64],
     runtime: [u8; 64],
-    owner: [u8; 1952],
+    owner: [u8; SIGNING_PUBLIC_KEY_BYTES],
     families: Vec<Profile>,
     entries: Vec<Entry>,
     commitments: Vec<[u8; 64]>,
@@ -71,7 +71,7 @@ fn associated(body: [u8; 64]) -> Vec<u8> {
 fn stream(
     poll: [u8; 64],
     runtime: [u8; 64],
-    owner: &[u8; 1952],
+    owner: &[u8; SIGNING_PUBLIC_KEY_BYTES],
     profile: Profile,
     seed: &[u8; SEED_BYTES],
 ) -> Shake256Reader {

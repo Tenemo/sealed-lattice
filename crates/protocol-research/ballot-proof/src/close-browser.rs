@@ -8,6 +8,7 @@ use crate::{
     },
 };
 use registration_credentials::{
+    SIGNATURE_BYTES,
     ballot_authentication::ENVELOPE_BYTES,
     close_signing::{
         CloseProposalMessage, ClosePurpose, MAXIMUM_LISTED_ENVELOPES_PER_SLOT,
@@ -87,7 +88,7 @@ impl Session {
             // at most two envelopes for each slot.
             3 => {
                 if self.envelopes.len() >= MAXIMUM_LISTED_ENVELOPES_PER_SLOT * count * count
-                    || bytes.len() != ENVELOPE_BYTES + 3309
+                    || bytes.len() != ENVELOPE_BYTES + SIGNATURE_BYTES
                 {
                     return Err(());
                 }
@@ -224,7 +225,7 @@ impl Session {
 }
 fn packet(bytes: &[u8], maximum: usize) -> Result<(&[u8], &[u8]), ()> {
     let length = u32::from_le_bytes(bytes.get(..4).ok_or(())?.try_into().map_err(|_| ())?) as usize;
-    if length > maximum || bytes.len() != 4 + length + 3309 {
+    if length > maximum || bytes.len() != 4 + length + SIGNATURE_BYTES {
         return Err(());
     }
     Ok((&bytes[4..4 + length], &bytes[4 + length..]))

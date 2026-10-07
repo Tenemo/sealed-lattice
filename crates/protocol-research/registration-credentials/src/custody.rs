@@ -1,4 +1,4 @@
-use crate::{Credential, Error};
+use crate::{Credential, Error, SIGNING_PUBLIC_KEY_BYTES};
 use aes_gcm::{
     Aes256Gcm, Nonce,
     aead::{AeadInPlace, KeyInit},
@@ -55,7 +55,7 @@ impl Credential {
         Ok(std::mem::take(&mut *bytes))
     }
     pub fn open_complete(
-        signing_public: [u8; 1952],
+        signing_public: [u8; SIGNING_PUBLIC_KEY_BYTES],
         body: [u8; 64],
         key: &[u8; 32],
         sealed: &[u8],

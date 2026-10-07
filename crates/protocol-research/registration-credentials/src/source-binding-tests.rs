@@ -1,6 +1,6 @@
 use super::*;
 use crate::{
-    BodyDigest,
+    BodyDigest, SIGNATURE_BYTES,
     foundation::{
         CanonicalDecodeLimits, CanonicalTuple, RegistrationHeader, StabilizedDisplayText,
         ceremony::{Manifest, OptionDefinition},
@@ -99,16 +99,16 @@ fn public_and_helper_registration_ingress_require_the_verified_poll_inventory() 
     let credential = Credential::from_seed([7; 32]);
     let mut header = header(&poll, &credential);
     let encoded = header.encode().unwrap();
-    assert!(RegistrationVerifier::new(&poll, &encoded, &[0; 3309]).is_ok());
-    assert!(RegistrationSession::open(&poll, 0, &encoded, &[0; 3309]).is_ok());
+    assert!(RegistrationVerifier::new(&poll, &encoded, &[0; SIGNATURE_BYTES]).is_ok());
+    assert!(RegistrationSession::open(&poll, 0, &encoded, &[0; SIGNATURE_BYTES]).is_ok());
     header.fhe_key_commitments.pop();
     let missing = header.encode().unwrap();
-    assert!(RegistrationVerifier::new(&poll, &missing, &[0; 3309]).is_err());
-    assert!(RegistrationSession::open(&poll, 0, &missing, &[0; 3309]).is_err());
+    assert!(RegistrationVerifier::new(&poll, &missing, &[0; SIGNATURE_BYTES]).is_err());
+    assert!(RegistrationSession::open(&poll, 0, &missing, &[0; SIGNATURE_BYTES]).is_err());
     header.fhe_key_commitments.extend([[8; 64], [9; 64]]);
     let extra = header.encode().unwrap();
-    assert!(RegistrationVerifier::new(&poll, &extra, &[0; 3309]).is_err());
-    assert!(RegistrationSession::open(&poll, 0, &extra, &[0; 3309]).is_err());
+    assert!(RegistrationVerifier::new(&poll, &extra, &[0; SIGNATURE_BYTES]).is_err());
+    assert!(RegistrationSession::open(&poll, 0, &extra, &[0; SIGNATURE_BYTES]).is_err());
 }
 
 #[test]

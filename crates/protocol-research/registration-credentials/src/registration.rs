@@ -1,5 +1,5 @@
 use crate::{
-    BodyDigest, Error, foundation::RegistrationHeader, poll::VerifiedPoll,
+    BodyDigest, Error, SIGNATURE_BYTES, foundation::RegistrationHeader, poll::VerifiedPoll,
     verify_registration_signature,
 };
 use parallel_work::ProtocolHash;
@@ -73,7 +73,7 @@ pub(crate) fn canonical_key(bytes: &[u8]) -> bool {
 pub struct RegistrationVerifier {
     header: RegistrationHeader,
     body: BodyDigest,
-    signature: [u8; 3309],
+    signature: [u8; SIGNATURE_BYTES],
     key: Vec<u8>,
     key_finished: bool,
     failed: bool,

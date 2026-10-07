@@ -3,6 +3,7 @@ use crate::{
     body::{BallotBodyClassification, BallotInputs, SignedBallotVerifier},
     submission::authenticate_envelope,
 };
+use registration_credentials::SIGNATURE_BYTES;
 use registration_credentials::ballot_authentication::ENVELOPE_BYTES;
 use registration_credentials::ballot_body::HEADER_BYTES;
 use std::{cell::RefCell, sync::Arc};
@@ -34,7 +35,7 @@ pub extern "C" fn ballot_classification_begin(length: usize) -> u32 {
         *classifier = None;
         *classification = None;
         let result = (|| {
-            if length != ENVELOPE_BYTES + 3309 + HEADER_BYTES {
+            if length != ENVELOPE_BYTES + SIGNATURE_BYTES + HEADER_BYTES {
                 return Err(());
             }
             let bytes = input.get(..length).ok_or(())?;
@@ -47,14 +48,14 @@ pub extern "C" fn ballot_classification_begin(length: usize) -> u32 {
             let authentication = authenticate_envelope(
                 &setup,
                 &bytes[..ENVELOPE_BYTES],
-                &bytes[ENVELOPE_BYTES..ENVELOPE_BYTES + 3309],
+                &bytes[ENVELOPE_BYTES..ENVELOPE_BYTES + SIGNATURE_BYTES],
             )
             .map_err(|_| ())?;
             SignedBallotVerifier::new(
                 poll,
                 setup,
                 authentication,
-                &bytes[ENVELOPE_BYTES + 3309..],
+                &bytes[ENVELOPE_BYTES + SIGNATURE_BYTES..],
                 inputs.clone(),
             )
             .map_err(|_| ())

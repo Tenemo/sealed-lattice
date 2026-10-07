@@ -221,7 +221,7 @@ impl Credential {
             return Err(Error::Context);
         }
         self.offer_signed = Some(envelope.identity());
-        self.sign_preparation_digest(&envelope.identity(), OFFER_PURPOSE.as_bytes())
+        self.sign_deterministically(&envelope.identity(), OFFER_PURPOSE.as_bytes())
     }
     pub fn restore_offer(
         &mut self,

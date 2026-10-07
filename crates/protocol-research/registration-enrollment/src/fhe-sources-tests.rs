@@ -75,7 +75,7 @@ fn coordinate_hash_matches_canonical_coefficients_across_chunk_boundaries() {
 #[test]
 fn source_stream_matches_canonical_tuple_and_binds_each_original_context() {
     let profile = Profile::new(3, 2).unwrap();
-    let owner = [23; 1952];
+    let owner = [23; SIGNING_PUBLIC_KEY_BYTES];
     let seed = [29; 64];
     let canonical = CanonicalTuple::new(
         1,
@@ -96,16 +96,23 @@ fn source_stream_matches_canonical_tuple_and_binds_each_original_context() {
     hash.update(&canonical);
     let mut expected = [0; 160];
     hash.finalize_xof().read(&mut expected);
-    let output = |poll, runtime, owner: &[u8; 1952], profile, seed: &[u8; 64]| {
-        let mut bytes = [0; 160];
-        stream(poll, runtime, owner, profile, seed).read(&mut bytes);
-        bytes
-    };
+    let output =
+        |poll, runtime, owner: &[u8; SIGNING_PUBLIC_KEY_BYTES], profile, seed: &[u8; 64]| {
+            let mut bytes = [0; 160];
+            stream(poll, runtime, owner, profile, seed).read(&mut bytes);
+            bytes
+        };
     assert_eq!(output([3; 64], [5; 64], &owner, profile, &seed), expected);
     assert_ne!(output([4; 64], [5; 64], &owner, profile, &seed), expected);
     assert_ne!(output([3; 64], [6; 64], &owner, profile, &seed), expected);
     assert_ne!(
-        output([3; 64], [5; 64], &[24; 1952], profile, &seed),
+        output(
+            [3; 64],
+            [5; 64],
+            &[24; SIGNING_PUBLIC_KEY_BYTES],
+            profile,
+            &seed
+        ),
         expected
     );
     assert_ne!(

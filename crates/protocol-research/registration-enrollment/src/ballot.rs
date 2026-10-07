@@ -1,7 +1,7 @@
 use ballot_encryption::{context::BallotComputationContext, encryption::check_ballot_scores};
 use ballot_proof::statement::setup_input;
 use registration_credentials::{
-    Credential, Error, RETAINED_TAG_BYTES,
+    Credential, Error, RETAINED_TAG_BYTES, SIGNATURE_BYTES,
     ballot_authentication::{BallotEnvelope, ENVELOPE_BYTES, RetainedBallotOwner},
     poll::{VerifiedPoll, verify_poll},
     roster::RetainedContributionContext,
@@ -39,7 +39,7 @@ pub struct BallotWork {
     body: Vec<u8>,
     pending: Option<BallotEnvelope>,
     envelope: Option<BallotEnvelope>,
-    signature: Option<[u8; 3309]>,
+    signature: Option<[u8; SIGNATURE_BYTES]>,
     failed: bool,
 }
 impl BallotWork {
@@ -56,7 +56,7 @@ impl BallotWork {
         }
         let definition_length = u32::from_le_bytes(input[128..132].try_into().unwrap()) as usize;
         if definition_length > registration_credentials::poll::MAXIMUM_POLL_BYTES
-            || input.len() < 132 + definition_length + 3309 + 64 + RETAINED_TAG_BYTES
+            || input.len() < 132 + definition_length + SIGNATURE_BYTES + 64 + RETAINED_TAG_BYTES
         {
             return Err(Error::Shape);
         }
@@ -65,9 +65,9 @@ impl BallotWork {
             input[..64].try_into().unwrap(),
             input[64..128].try_into().unwrap(),
             &input[132..offset],
-            &input[offset..offset + 3309],
+            &input[offset..offset + SIGNATURE_BYTES],
         )?);
-        offset += 3309;
+        offset += SIGNATURE_BYTES;
         let inventory = input[offset..offset + 64].try_into().unwrap();
         offset += 64;
         let retained = &input[offset..];
@@ -241,7 +241,9 @@ impl BallotWork {
                     Some(credential.sign_retained_ballot_envelope(&self.owner, envelope)?);
             }
             9 => {
-                if argument != 0 || input.len() != ENVELOPE_BYTES + 3309 || self.signature.is_some()
+                if argument != 0
+                    || input.len() != ENVELOPE_BYTES + SIGNATURE_BYTES
+                    || self.signature.is_some()
                 {
                     return Err(Error::Consumed);
                 }

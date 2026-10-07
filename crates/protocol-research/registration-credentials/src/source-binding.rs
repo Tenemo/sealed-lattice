@@ -2,7 +2,7 @@
 //! A digest fixes bytes; only the later contribution verifier checks their
 //! complete key and encrypted-sharing relation.
 use crate::{
-    Credential, Error,
+    Credential, Error, SIGNING_PUBLIC_KEY_BYTES,
     foundation::CanonicalItem,
     identity::IdentityHasher,
     poll::VerifiedPoll,
@@ -128,7 +128,7 @@ impl FheKeyCommitmentHasher {
     fn new(
         poll: [u8; 64],
         runtime: [u8; 64],
-        signing_public: &[u8; 1952],
+        signing_public: &[u8; SIGNING_PUBLIC_KEY_BYTES],
         profile: Profile,
         salt: &[u8; SOURCE_SALT_BYTES],
     ) -> Result<Self, Error> {

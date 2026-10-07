@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn signing_key_derivation_returns_the_identity_type() {
-    let signing_verification_key = [0x5a; ML_DSA_65_VERIFICATION_KEY_BYTE_LENGTH];
+    let signing_verification_key = [0x5a; SIGNING_PUBLIC_KEY_BYTES];
     let identity = derive_participant_identity(&signing_verification_key)
         .expect("fixed signing key derives an identity");
     let expected_hash = hash512(

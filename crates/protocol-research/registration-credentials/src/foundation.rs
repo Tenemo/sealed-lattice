@@ -6,15 +6,14 @@ pub mod refusal;
 pub mod schemas;
 pub mod text;
 
+use crate::SIGNING_PUBLIC_KEY_BYTES;
 pub use canonical_tuple::{
     CANONICAL_TUPLE_SCHEMA_IDENTIFIER, CANONICAL_TUPLE_VERSION, CanonicalCodecError,
     CanonicalCodecErrorKind, CanonicalDecodeLimits, CanonicalItem, CanonicalItemType,
     CanonicalTuple,
 };
 pub use hash::{Hash512, hash_foundation_tuple_512};
-pub(crate) use participant_identity::{
-    ML_DSA_65_VERIFICATION_KEY_BYTE_LENGTH, derive_participant_identity,
-};
+pub(crate) use participant_identity::derive_participant_identity;
 pub use refusal::RefusalReason;
 pub(crate) use schemas::FoundationSchemaError;
 pub use text::StabilizedDisplayText;
@@ -37,7 +36,7 @@ pub struct RegistrationHeader {
     pub username: StabilizedDisplayText,
     pub poll: [u8; 64],
     pub runtime: [u8; 64],
-    pub signing_public: [u8; 1952],
+    pub signing_public: [u8; SIGNING_PUBLIC_KEY_BYTES],
     pub recipient_key_hash: [u8; 64],
 
     pub fhe_key_commitments: Vec<[u8; 64]>,
@@ -51,7 +50,7 @@ impl RegistrationHeader {
             username,
             poll: [0; 64],
             runtime: [0; 64],
-            signing_public: [0; 1952],
+            signing_public: [0; SIGNING_PUBLIC_KEY_BYTES],
             recipient_key_hash: [0; 64],
 
             fhe_key_commitments: vec![
@@ -94,7 +93,7 @@ impl RegistrationHeader {
         let limits = CanonicalDecodeLimits {
             maximum_tuple_byte_length: 4096,
             maximum_item_count: 7.max(crate::source_binding::maximum_fhe_key_family_count()),
-            maximum_item_byte_length: 1952,
+            maximum_item_byte_length: SIGNING_PUBLIC_KEY_BYTES,
             maximum_nesting_depth: 0,
             maximum_cumulative_work_byte_length: 16384,
             maximum_cumulative_allocation_byte_length: 8192,

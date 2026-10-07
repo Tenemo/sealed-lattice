@@ -10,7 +10,7 @@ use ballot_proof::{
     },
 };
 use registration_credentials::{
-    Credential, Error, RETAINED_TAG_BYTES,
+    Credential, Error, RETAINED_TAG_BYTES, SIGNATURE_BYTES,
     ballot_authentication::{BallotEnvelope, RetainedBallotOwner},
     close_signing::{
         CloseIntentMessage, CloseMessage, ClosePurpose, CloseResponseMessage, close_quorum,
@@ -35,7 +35,7 @@ use std::{
 #[derive(Clone)]
 pub struct Submission {
     pub envelope: BallotEnvelope,
-    pub signature: [u8; 3309],
+    pub signature: [u8; SIGNATURE_BYTES],
     pub body: PathBuf,
 }
 

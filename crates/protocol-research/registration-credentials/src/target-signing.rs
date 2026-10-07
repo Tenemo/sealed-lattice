@@ -1,5 +1,5 @@
 use crate::{
-    Credential, Error, SigningPurpose,
+    Credential, Error, SIGNATURE_BYTES, SigningPurpose,
     ballot_authentication::RetainedBallotOwner,
     foundation::{
         CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple,
@@ -9,7 +9,7 @@ use crate::{
 };
 use fips204::{
     ml_dsa_65,
-    traits::{KeyGen, SerDes, Signer, Verifier},
+    traits::{SerDes, Verifier},
 };
 use supported_profile::Profile;
 
@@ -169,7 +169,7 @@ impl TargetMessage {
 pub struct TargetVote {
     position: usize,
     target: [u8; 64],
-    signature: [u8; 3309],
+    signature: [u8; SIGNATURE_BYTES],
 }
 impl TargetVote {
     pub fn parse(bytes: &[u8]) -> Result<Self, Error> {
@@ -192,7 +192,7 @@ impl TargetVote {
     pub fn target(&self) -> &[u8; 64] {
         &self.target
     }
-    pub fn signature(&self) -> &[u8; 3309] {
+    pub fn signature(&self) -> &[u8; SIGNATURE_BYTES] {
         &self.signature
     }
     pub fn encode(&self) -> Vec<u8> {
@@ -258,10 +258,7 @@ impl Credential {
         }
         self.target_signed = true;
         self.target_lock = Some(*message.identity());
-        let (_, key) = ml_dsa_65::KG::keygen_from_seed(&self.signing_seed);
-        let signature = key
-            .try_sign_with_seed(&[0; 32], message.identity(), CERTIFICATION_CONTEXT)
-            .map_err(|_| Error::Crypto)?;
+        let signature = self.sign_deterministically(message.identity(), CERTIFICATION_CONTEXT)?;
         Ok(TargetVote {
             position: owner.position(),
             target: *message.identity(),

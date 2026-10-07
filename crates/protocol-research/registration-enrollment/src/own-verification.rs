@@ -1,12 +1,11 @@
 use registration_credentials::{
-    Credential, Error,
+    Credential, Error, SIGNATURE_BYTES,
     poll::{MAXIMUM_POLL_BYTES, VerifiedPoll, verify_poll},
     registration::{RETAINED_REGISTRATION_BYTES, RegistrationVerifier, VerifiedRegistration},
 };
 use std::{cell::RefCell, sync::Arc};
 
 const CHUNK_BYTES: usize = 1 << 20;
-const SIGNATURE_BYTES: usize = 3309;
 const MAXIMUM_HEADER_BYTES: usize = 4096;
 const CONTROL_BYTES: usize =
     128 + 4 + MAXIMUM_POLL_BYTES + SIGNATURE_BYTES + 4 + MAXIMUM_HEADER_BYTES + SIGNATURE_BYTES;

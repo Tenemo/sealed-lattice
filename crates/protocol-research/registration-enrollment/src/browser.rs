@@ -3,6 +3,7 @@ use registration_credentials::foundation::{
     MAXIMUM_USERNAME_INGRESS_BYTES, RegistrationHeader, normalize_username,
 };
 use registration_credentials::{
+    SIGNATURE_BYTES,
     roster::{RetainedContributionContext, RosterProposal},
     roster_authentication::{OrganizerSignedRoster, verify_roster_proposal},
     roster_input::RosterInputVerifier,
@@ -48,7 +49,7 @@ struct Session {
     poll_identity: [u8; 64],
     roster: Option<RosterInputVerifier>,
     proposal: Option<RosterProposal>,
-    proposal_signature: Option<[u8; 3309]>,
+    proposal_signature: Option<[u8; SIGNATURE_BYTES]>,
     signed_proposal: Option<Arc<OrganizerSignedRoster>>,
     offer: OfferSigning,
     contribution_output: Vec<u8>,
@@ -147,7 +148,7 @@ fn join_context(
     }
     let length = u32::from_le_bytes(input[128..132].try_into().ok()?) as usize;
     if length > registration_credentials::poll::MAXIMUM_POLL_BYTES
-        || input.len() < 132 + length + 3309 + 4
+        || input.len() < 132 + length + SIGNATURE_BYTES + 4
     {
         return None;
     }
@@ -155,10 +156,10 @@ fn join_context(
         input[..64].try_into().ok()?,
         input[64..128].try_into().ok()?,
         &input[132..132 + length],
-        &input[132 + length..132 + length + 3309],
+        &input[132 + length..132 + length + SIGNATURE_BYTES],
     )
     .ok()?;
-    let name_start = 132 + length + 3309 + 4;
+    let name_start = 132 + length + SIGNATURE_BYTES + 4;
     let name_length =
         u32::from_le_bytes(input[name_start - 4..name_start].try_into().ok()?) as usize;
     if name_length > MAXIMUM_USERNAME_INGRESS_BYTES || input.len() < name_start + name_length {
@@ -729,7 +730,7 @@ pub extern "C" fn roster_signature_pointer() -> usize {
 pub extern "C" fn verify_roster_signature(length: usize) -> u32 {
     SESSION.with(|state| {
         let mut state = state.borrow_mut();
-        if length != 3309 {
+        if length != SIGNATURE_BYTES {
             return 0;
         }
         let Some(roster) = state.roster.as_mut() else {
@@ -750,7 +751,7 @@ pub extern "C" fn verify_roster_signature(length: usize) -> u32 {
 fn signed_packet(bytes: &[u8]) -> Option<(&[u8], &[u8])> {
     let length = u32::from_le_bytes(bytes.get(..4)?.try_into().ok()?) as usize;
     if length > registration_credentials::setup_selection::MAXIMUM_SELECTION_BYTES
-        || bytes.len() != 4 + length + 3309
+        || bytes.len() != 4 + length + SIGNATURE_BYTES
     {
         return None;
     }
@@ -980,19 +981,19 @@ fn selection_operation(
             let prefix = input.get(..4).ok_or(Error::Shape)?;
             let length = u32::from_le_bytes(prefix.try_into().unwrap()) as usize;
             if length > setup_selection::MAXIMUM_SELECTION_BYTES
-                || input.len() != 4 + length + 3309 + setup_selection::ENDORSEMENT_BYTES
+                || input.len() != 4 + length + SIGNATURE_BYTES + setup_selection::ENDORSEMENT_BYTES
             {
                 return Err(Error::Shape);
             }
             let proposal = setup_selection::authenticate_selection(
                 roster.clone(),
                 &input[4..4 + length],
-                &input[4 + length..4 + length + 3309],
+                &input[4 + length..4 + length + SIGNATURE_BYTES],
             )?;
             let endorsement = setup_selection::authenticate_endorsement(
                 &roster,
                 proposal.selection(),
-                &input[4 + length + 3309..],
+                &input[4 + length + SIGNATURE_BYTES..],
             )?;
             state
                 .enrollment

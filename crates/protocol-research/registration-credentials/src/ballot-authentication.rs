@@ -1,6 +1,6 @@
 use crate::{
-    Credential, Error, RETAINED_TAG_BYTES, SigningPurpose,
-    roster_authentication::OrganizerSignedRoster,
+    Credential, Error, RETAINED_TAG_BYTES, SIGNATURE_BYTES, SIGNING_PUBLIC_KEY_BYTES,
+    SigningPurpose, roster_authentication::OrganizerSignedRoster,
 };
 use crate::{
     foundation::{CanonicalItem, hash_foundation_tuple_512},
@@ -9,7 +9,7 @@ use crate::{
 };
 use fips204::{
     ml_dsa_65,
-    traits::{KeyGen, SerDes, Signer, Verifier},
+    traits::{SerDes, Verifier},
 };
 use supported_profile::Profile;
 
@@ -26,7 +26,7 @@ pub struct RetainedBallotOwner {
     inventory: [u8; 64],
     position: usize,
     owner_body: [u8; 64],
-    signing_public: [u8; 1952],
+    signing_public: [u8; SIGNING_PUBLIC_KEY_BYTES],
 }
 impl RetainedBallotOwner {
     pub fn participant_identity(
@@ -212,7 +212,7 @@ impl Credential {
         &mut self,
         owner: &RetainedBallotOwner,
         envelope: &BallotEnvelope,
-    ) -> Result<[u8; 3309], Error> {
+    ) -> Result<[u8; SIGNATURE_BYTES], Error> {
         if self.completed_body != Some(owner.owner_body)
             || self.signing_public != owner.signing_public
             || envelope.poll() != owner.poll()
@@ -255,7 +255,7 @@ impl Credential {
         &mut self,
         roster: &OrganizerSignedRoster,
         envelope: &BallotEnvelope,
-    ) -> Result<[u8; 3309], Error> {
+    ) -> Result<[u8; SIGNATURE_BYTES], Error> {
         if self.signed_ballot.is_some() {
             return Err(Error::Consumed);
         }
@@ -272,17 +272,17 @@ impl Credential {
         }
         self.sign_ballot_bytes(envelope)
     }
-    fn sign_ballot_bytes(&mut self, envelope: &BallotEnvelope) -> Result<[u8; 3309], Error> {
+    fn sign_ballot_bytes(
+        &mut self,
+        envelope: &BallotEnvelope,
+    ) -> Result<[u8; SIGNATURE_BYTES], Error> {
         self.check_unlocked(SigningPurpose::Ballot)?;
         // An attempt locked before the close intent completes; a new one never starts.
         if self.signed_ballot.is_some() || (self.close_lock.is_some() && !self.ballot_attempted) {
             return Err(Error::Consumed);
         }
         self.signed_ballot = Some((envelope.identity(), envelope.ballot_time()));
-        let (_, private) = ml_dsa_65::KG::keygen_from_seed(&self.signing_seed);
-        private
-            .try_sign_with_seed(&[0; 32], envelope.bytes(), BALLOT_SIGNATURE_CONTEXT)
-            .map_err(|_| Error::Crypto)
+        self.sign_deterministically(envelope.bytes(), BALLOT_SIGNATURE_CONTEXT)
     }
 }
 
@@ -298,7 +298,7 @@ pub fn verify_ballot_signature(
     if envelope.poll() != &record.header().poll || envelope.inventory() != expected_inventory {
         return false;
     }
-    let Ok(signature) = <[u8; 3309]>::try_from(signature) else {
+    let Ok(signature) = <[u8; SIGNATURE_BYTES]>::try_from(signature) else {
         return false;
     };
     let Ok(public) = ml_dsa_65::PublicKey::try_from_bytes(record.header().signing_public) else {

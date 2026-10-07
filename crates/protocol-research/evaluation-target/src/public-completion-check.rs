@@ -7,6 +7,7 @@ use evaluation_target::{
     terminal::{ReleaseCollector, verify_no_result},
 };
 use registration_credentials::{
+    SIGNATURE_BYTES,
     release_signing::{RELEASE_BODY_HEADER_BYTES, RELEASE_ENVELOPE_BYTES},
     target_signing::MAXIMUM_TARGET_BODY_BYTES,
 };
@@ -127,7 +128,7 @@ pub fn verify(
     for position in 0..count {
         let packet = match bounded(
             directory.join(format!("release-envelope-{position}.bin")),
-            RELEASE_ENVELOPE_BYTES + 3309,
+            RELEASE_ENVELOPE_BYTES + SIGNATURE_BYTES,
             work,
         ) {
             Ok(packet) => packet,

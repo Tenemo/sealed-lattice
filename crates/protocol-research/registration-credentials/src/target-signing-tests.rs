@@ -102,7 +102,7 @@ fn vote_framing_refuses_missing_extra_and_out_of_range_data() {
     let value = TargetVote {
         position: 19,
         target: [6; 64],
-        signature: [7; 3309],
+        signature: [7; SIGNATURE_BYTES],
     };
     let bytes = value.encode();
     assert_eq!(TargetVote::parse(&bytes).unwrap().encode(), bytes);

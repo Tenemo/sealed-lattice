@@ -7,6 +7,7 @@ use ballot_proof::{
 use evaluation_target::target::{ClassifiedClosedInventory, Error, PublicInputs, WorkingStore};
 use opened_contribution::ContributionOfferVerifier;
 use registration_credentials::{
+    SIGNATURE_BYTES,
     ballot_authentication::ENVELOPE_BYTES,
     ballot_body,
     close_signing::{
@@ -98,7 +99,7 @@ fn packet(bytes: &[u8], maximum: usize) -> io::Result<(&[u8], &[u8])> {
             .try_into()
             .map_err(refusal)?,
     ) as usize;
-    if length > maximum || bytes.len() != 4 + length + 3309 {
+    if length > maximum || bytes.len() != 4 + length + SIGNATURE_BYTES {
         return Err(refusal("packet length"));
     }
     Ok((&bytes[4..4 + length], &bytes[4 + length..]))
@@ -111,7 +112,7 @@ fn close_packet(
     work: &mut Work,
 ) -> io::Result<Vec<u8>> {
     let maximum = maximum_close_message_bytes(purpose, participants);
-    bounded(directory.join(name), 4 + maximum + 3309, work)
+    bounded(directory.join(name), 4 + maximum + SIGNATURE_BYTES, work)
 }
 /// A public body path inside the ceremony directory.
 fn contained(ceremony: &Path, relative: &str) -> io::Result<PathBuf> {
@@ -280,7 +281,7 @@ fn main() -> io::Result<()> {
     control.extend(definition);
     control.extend(bounded(
         ceremony.join("poll-signature.bin"),
-        3309,
+        SIGNATURE_BYTES,
         &mut work,
     )?);
     let mut roster = RosterInputVerifier::new(&control).map_err(refusal)?;
@@ -322,7 +323,11 @@ fn main() -> io::Result<()> {
         control.extend(&identities[4 + 64 * position..4 + 64 * (position + 1)]);
         control.extend((header.len() as u32).to_le_bytes());
         control.extend(header);
-        control.extend(bounded(directory.join("signature.bin"), 3309, &mut work)?);
+        control.extend(bounded(
+            directory.join("signature.bin"),
+            SIGNATURE_BYTES,
+            &mut work,
+        )?);
         roster.begin_record(&control).map_err(refusal)?;
         let mut file = File::open(directory.join("polynomial-01.bin"))?;
         loop {
@@ -346,7 +351,11 @@ fn main() -> io::Result<()> {
     let proposal = Arc::new(
         verify_roster_proposal(
             proposal,
-            &bounded(ceremony.join("proposal-signature.bin"), 3309, &mut work)?,
+            &bounded(
+                ceremony.join("proposal-signature.bin"),
+                SIGNATURE_BYTES,
+                &mut work,
+            )?,
         )
         .map_err(refusal)?,
     );
@@ -368,7 +377,11 @@ fn main() -> io::Result<()> {
             .join(format!("contribution-{position}"))
             .join(identity);
         let envelope = bounded(directory.join("offer.bin"), MAXIMUM_OFFER_BYTES, &mut work)?;
-        let signature = bounded(directory.join("offer-signature.bin"), 3309, &mut work)?;
+        let signature = bounded(
+            directory.join("offer-signature.bin"),
+            SIGNATURE_BYTES,
+            &mut work,
+        )?;
         let authenticated =
             Arc::new(authenticate_offer(roster.clone(), &envelope, &signature).map_err(refusal)?);
         if authenticated.envelope().position() != *position {
@@ -548,8 +561,12 @@ fn main() -> io::Result<()> {
         if name != format!("submission-{ordinal}.bin") {
             return Err(refusal("submission index order"));
         }
-        let bytes = bounded(records.join(name), ENVELOPE_BYTES + 3309, &mut work)?;
-        if bytes.len() != ENVELOPE_BYTES + 3309 {
+        let bytes = bounded(
+            records.join(name),
+            ENVELOPE_BYTES + SIGNATURE_BYTES,
+            &mut work,
+        )?;
+        if bytes.len() != ENVELOPE_BYTES + SIGNATURE_BYTES {
             return Err(refusal("stored submission length"));
         }
         let authentication =

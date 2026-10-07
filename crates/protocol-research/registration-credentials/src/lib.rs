@@ -47,6 +47,8 @@ use zeroize::Zeroizing;
 pub const SIGNATURE_CONTEXT: &[u8] = b"sealed-lattice/registration/v1";
 /// Every participant signature is one ML-DSA-65 signature.
 pub const SIGNATURE_BYTES: usize = ml_dsa_65::SIG_LEN;
+/// Every participant signing key is one ML-DSA-65 public key.
+pub const SIGNING_PUBLIC_KEY_BYTES: usize = ml_dsa_65::PK_LEN;
 /// A tag that keys retained bytes to a credential is this long.
 pub const RETAINED_TAG_BYTES: usize = 64;
 
@@ -63,7 +65,7 @@ pub enum Error {
 
 pub struct Credential {
     signing_seed: Zeroizing<[u8; 32]>,
-    signing_public: [u8; 1952],
+    signing_public: [u8; SIGNING_PUBLIC_KEY_BYTES],
     signed: bool,
     completed_body: Option<[u8; 64]>,
     sealed: bool,
@@ -119,10 +121,10 @@ impl Credential {
             locked_purposes: 0,
         }
     }
-    pub fn signing_public(&self) -> &[u8; 1952] {
+    pub fn signing_public(&self) -> &[u8; SIGNING_PUBLIC_KEY_BYTES] {
         &self.signing_public
     }
-    pub fn sign_registration(&mut self, body: BodyDigest) -> Result<[u8; 3309], Error> {
+    pub fn sign_registration(&mut self, body: BodyDigest) -> Result<[u8; SIGNATURE_BYTES], Error> {
         if self.signed {
             return Err(Error::Consumed);
         }
@@ -131,12 +133,22 @@ impl Credential {
         }
         self.signed = true;
         self.poll_creation_consumed = true;
-        let (_, private) = ml_dsa_65::KG::keygen_from_seed(&self.signing_seed);
-        let signature = private
-            .try_sign_with_seed(&[0; 32], &body.digest, SIGNATURE_CONTEXT)
-            .map_err(|_| Error::Crypto)?;
+        let signature = self.sign_deterministically(&body.digest, SIGNATURE_CONTEXT)?;
         self.completed_body = Some(body.digest);
         Ok(signature)
+    }
+
+    /// Signs the message under the context with the credential's key and
+    /// no signing randomness. Callers first consume the message's purpose.
+    pub(crate) fn sign_deterministically(
+        &self,
+        message: &[u8],
+        context: &[u8],
+    ) -> Result<[u8; SIGNATURE_BYTES], Error> {
+        let (_, private) = ml_dsa_65::KG::keygen_from_seed(&self.signing_seed);
+        private
+            .try_sign_with_seed(&[0; 32], message, context)
+            .map_err(|_| Error::Crypto)
     }
 
     pub fn check_retained(&self) -> bool {
@@ -190,7 +202,7 @@ impl Credential {
 
 pub struct BodyDigest {
     digest: [u8; 64],
-    signing_public: [u8; 1952],
+    signing_public: [u8; SIGNING_PUBLIC_KEY_BYTES],
 }
 impl BodyDigest {
     pub fn bytes(&self) -> [u8; 64] {

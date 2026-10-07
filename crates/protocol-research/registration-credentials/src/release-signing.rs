@@ -1,11 +1,11 @@
 use crate::{
-    Credential, Error, SigningPurpose, ballot_authentication::RetainedBallotOwner,
+    Credential, Error, SIGNATURE_BYTES, SigningPurpose, ballot_authentication::RetainedBallotOwner,
     identity::BodyHasher, roster_authentication::OrganizerSignedRoster,
     target_signing::TargetMessage,
 };
 use fips204::{
     ml_dsa_65,
-    traits::{KeyGen, SerDes, Signer, Verifier},
+    traits::{SerDes, Verifier},
 };
 use linked_release_proof::statement::{header_position, release_coefficient_bytes};
 use std::ops::RangeInclusive;
@@ -172,7 +172,7 @@ impl Credential {
         owner: &RetainedBallotOwner,
         roster: &OrganizerSignedRoster,
         envelope: &ReleaseEnvelope,
-    ) -> Result<[u8; 3309], Error> {
+    ) -> Result<[u8; SIGNATURE_BYTES], Error> {
         self.check_ballot_owner(owner)?;
         self.check_target_predecessors(owner, roster)?;
         let record = roster
@@ -193,9 +193,7 @@ impl Credential {
             return Err(Error::Context);
         }
         self.release_signed = true;
-        let (_, key) = ml_dsa_65::KG::keygen_from_seed(&self.signing_seed);
-        key.try_sign_with_seed(&[0; 32], envelope.bytes(), RELEASE_SIGNATURE_CONTEXT)
-            .map_err(|_| Error::Crypto)
+        self.sign_deterministically(envelope.bytes(), RELEASE_SIGNATURE_CONTEXT)
     }
     pub fn restore_release(
         &mut self,

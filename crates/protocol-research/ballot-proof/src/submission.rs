@@ -1,4 +1,5 @@
 use crate::body::VerifiedBallotBody;
+use registration_credentials::SIGNATURE_BYTES;
 use registration_credentials::ballot_authentication::{BallotEnvelope, verify_ballot_signature};
 use setup_aggregate::verified::VerifiedSetupAggregate;
 use supported_profile::Profile;
@@ -20,7 +21,7 @@ impl VerifiedBallotSubmission {
     pub fn envelope(&self) -> &BallotEnvelope {
         &self.authentication.envelope
     }
-    pub fn signature(&self) -> &[u8; 3309] {
+    pub fn signature(&self) -> &[u8; SIGNATURE_BYTES] {
         &self.authentication.signature
     }
 }
@@ -30,7 +31,7 @@ impl VerifiedBallotSubmission {
 pub struct AuthenticatedBallotEnvelope {
     profile: Profile,
     envelope: BallotEnvelope,
-    signature: [u8; 3309],
+    signature: [u8; SIGNATURE_BYTES],
 }
 
 /// Exact bytes of an authenticated envelope's body. This is not proof validity.
@@ -78,7 +79,7 @@ impl AuthenticatedBallotEnvelope {
     pub fn envelope(&self) -> &BallotEnvelope {
         &self.envelope
     }
-    pub fn signature(&self) -> &[u8; 3309] {
+    pub fn signature(&self) -> &[u8; SIGNATURE_BYTES] {
         &self.signature
     }
 }
@@ -90,7 +91,7 @@ pub fn authenticate_envelope(
 ) -> Result<AuthenticatedBallotEnvelope, Error> {
     let profile = setup.profile();
     let envelope = BallotEnvelope::decode(profile, bytes).map_err(|_| Error::Context)?;
-    let signature: [u8; 3309] = signature.try_into().map_err(|_| Error::Signature)?;
+    let signature: [u8; SIGNATURE_BYTES] = signature.try_into().map_err(|_| Error::Signature)?;
     if !verify_ballot_signature(setup.roster(), &setup.identity(), &envelope, &signature) {
         return Err(Error::Signature);
     }

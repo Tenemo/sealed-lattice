@@ -1,5 +1,5 @@
 use crate::{
-    Credential, Error, SigningPurpose,
+    Credential, Error, SIGNATURE_BYTES, SIGNING_PUBLIC_KEY_BYTES, SigningPurpose,
     ballot_authentication::RetainedBallotOwner,
     foundation::{
         CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple,
@@ -9,7 +9,7 @@ use crate::{
 };
 use fips204::{
     ml_dsa_65,
-    traits::{KeyGen, SerDes, Signer, Verifier},
+    traits::{SerDes, Verifier},
 };
 use supported_profile::Profile;
 
@@ -89,12 +89,12 @@ pub fn close_message_identity(purpose: ClosePurpose, body: &[u8]) -> Result<[u8;
 /// Checks one signature by the supplied roster key. The caller selects that
 /// key from a positively verified roster position.
 pub fn verify_close_signature(
-    public: &[u8; 1952],
+    public: &[u8; SIGNING_PUBLIC_KEY_BYTES],
     purpose: ClosePurpose,
     identity: &[u8; 64],
     signature: &[u8],
 ) -> bool {
-    let Ok(signature) = <[u8; 3309]>::try_from(signature) else {
+    let Ok(signature) = <[u8; SIGNATURE_BYTES]>::try_from(signature) else {
         return false;
     };
     let Ok(public) = ml_dsa_65::PublicKey::try_from_bytes(*public) else {
@@ -463,10 +463,12 @@ impl Credential {
         }
         Ok(())
     }
-    fn sign_close(&self, purpose: ClosePurpose, identity: &[u8; 64]) -> Result<[u8; 3309], Error> {
-        let (_, key) = ml_dsa_65::KG::keygen_from_seed(&self.signing_seed);
-        key.try_sign_with_seed(&[0; 32], identity, purpose.context().as_bytes())
-            .map_err(|_| Error::Crypto)
+    fn sign_close(
+        &self,
+        purpose: ClosePurpose,
+        identity: &[u8; 64],
+    ) -> Result<[u8; SIGNATURE_BYTES], Error> {
+        self.sign_deterministically(identity, purpose.context().as_bytes())
     }
     fn check_own_signature(
         &self,
@@ -496,7 +498,7 @@ impl Credential {
         owner: &RetainedBallotOwner,
         roster: &OrganizerSignedRoster,
         message: &CloseIntentMessage,
-    ) -> Result<[u8; 3309], Error> {
+    ) -> Result<[u8; SIGNATURE_BYTES], Error> {
         self.check_close_owner(owner, roster, message.poll(), message.inventory())?;
         Self::check_organizer(owner, roster)?;
         self.check_unlocked(SigningPurpose::CloseIntent)?;
@@ -540,7 +542,7 @@ impl Credential {
         owner: &RetainedBallotOwner,
         roster: &OrganizerSignedRoster,
         message: &CloseResponseMessage,
-    ) -> Result<[u8; 3309], Error> {
+    ) -> Result<[u8; SIGNATURE_BYTES], Error> {
         self.check_close_owner(owner, roster, message.poll(), message.inventory())?;
         self.check_unlocked(SigningPurpose::CloseResponse)?;
         if self.close_response.is_some() {
@@ -566,7 +568,7 @@ impl Credential {
         owner: &RetainedBallotOwner,
         roster: &OrganizerSignedRoster,
         message: &CloseProposalMessage,
-    ) -> Result<[u8; 3309], Error> {
+    ) -> Result<[u8; SIGNATURE_BYTES], Error> {
         self.check_close_owner(owner, roster, message.poll(), message.inventory())?;
         Self::check_organizer(owner, roster)?;
         self.check_unlocked(SigningPurpose::CloseProposal)?;
