@@ -6,6 +6,7 @@ import {
     compileClassicalReaderOracleBudget,
     compileFullCircuitOracleBudget,
     compileSourceDomainOracleBudget,
+    shakePermutationGateCharge,
 } from '#tests/oracle-budget-model.js';
 import {
     firstOracleResumeHashWork,
@@ -414,15 +415,25 @@ export const reductionGates = (
     ).shadowQueryGatesUpperBound;
 };
 
+// The experiment that decides each requirement. The reduction work depends on
+// an experiment's cost only through its whole permutation slots, so within
+// one slot interval the ratio Tred(T)/T is largest at the interval's first
+// gate count. The query circuits' routing grows with the square of the slots,
+// so across intervals the ratio grows with the slots; the source cache and
+// the extractions' fixed work matter only at experiments whose routing has
+// fallen by far more, as the margin test checks at the population limits,
+// where the slack is smallest. The largest whole-slot experiment within 2^80
+// gates therefore decides every requirement.
+export const decisiveExperimentGates =
+    ((1n << securityTargetBits) / shakePermutationGateCharge) *
+    shakePermutationGateCharge;
+
 // Smallest lambda with comparisons*Tred(T)/2^lambda <= T/2^(80+split) for
-// every T <= 2^80, where Tred(T) = T + reduction work(T). The ratio Tred(T)/T
-// does not decrease with T apart from the source cache and the extractions'
-// fixed work, which do not grow with T. Charging those at T = 1 changes no
-// requirement, as the margin test checks, so T = 2^80 decides it.
+// every T <= 2^80, where Tred(T) = T + reduction work(T).
 export const requiredFheAssumptionBits = (
     comparisons: bigint,
     reductionWorkGates: bigint,
-    experimentGates = 1n << securityTargetBits,
+    experimentGates = decisiveExperimentGates,
 ) =>
     securityTargetBits +
     budgetSplitBits +
@@ -443,7 +454,7 @@ export const unpricedWorkAllowance = (
     comparisons: bigint,
     pricedGates: bigint,
     levelBits: bigint,
-    experimentGates = 1n << securityTargetBits,
+    experimentGates = decisiveExperimentGates,
 ) =>
     (experimentGates << (levelBits - securityTargetBits - budgetSplitBits)) /
         comparisons -
@@ -460,19 +471,25 @@ const fheRingLweComparisons = (
     ledger.fheSelectedKeyComparisons +
     ledger.fheBallotComparisons * ledger.messagesPerFheBallotComparison;
 
-const largestModulusProfiles = () => {
-    const byParticipants = new Map<number, SupportedProfile>();
+// Every supported profile of each participant count, the largest modulus
+// first and, among equal moduli, the most options first.
+const profilesByParticipantCount = () => {
+    const groups = new Map<number, SupportedProfile[]>();
     for (const profile of listSupportedProfiles()) {
-        const current = byParticipants.get(profile.participantCount);
-        if (
-            current === undefined ||
-            profile.ciphertext.bits > current.ciphertext.bits
-        )
-            byParticipants.set(profile.participantCount, profile);
+        const group = groups.get(profile.participantCount) ?? [];
+        group.push(profile);
+        groups.set(profile.participantCount, group);
     }
-    return [...byParticipants.values()].sort(
-        (left, right) => left.participantCount - right.participantCount,
-    );
+    return [...groups.entries()]
+        .sort(([left], [right]) => left - right)
+        .map(([participantCount, profiles]) => ({
+            participantCount,
+            profiles: profiles.sort(
+                (left, right) =>
+                    right.ciphertext.bits - left.ciphertext.bits ||
+                    right.optionCount - left.optionCount,
+            ),
+        }));
 };
 
 // The ledger, comparisons and reduction operands at a profile and original
@@ -493,72 +510,83 @@ const fheComparisonInputs = (
     };
 };
 
-// One original honest registration per participant: the smallest population
-// with every member honest. A larger population H adds about log2(H/n) bits
-// for the comparisons and as many again for the source-domain reduction,
-// whose shadows grow with H.
-export const compileSecurityMarginScreen = () => {
-    const experimentGates = 1n << securityTargetBits;
-    return largestModulusProfiles().map((profile) => {
-        const honestRegistrations = BigInt(profile.participantCount);
-        const modulusBits = BigInt(profile.ciphertext.bits);
-        const { criterion, stressTest } = fheKnownAttackFloor(modulusBits);
-        const { ledger, comparisons, operands } = fheComparisonInputs(
-            profile,
-            honestRegistrations,
-        );
-        const requirements = reductionVariants.map((variant) => {
-            const gates = reductionGates(variant, experimentGates, operands);
-            const requiredBits = requiredFheAssumptionBits(
-                comparisons,
-                gates,
-                experimentGates,
-            );
-            return {
-                variant,
-                reductionGates: gates,
-                requiredBits,
-                marginToCriterion: criterion.log2Cost - Number(requiredBits),
-                marginToStressTest: stressTest.log2Cost - Number(requiredBits),
-            };
-        });
-        const sourceDomain = requirements.find(
-            (value) => value.variant === 'source-domain reduction',
-        );
-        assert.ok(sourceDomain !== undefined);
-        return {
-            participantCount: profile.participantCount,
-            optionCount: profile.optionCount,
-            modulusBits,
-            honestRegistrations,
-            selectedPositionSets: ledger.selectedPositionSets,
-            sharedFheModulusGuesses: ledger.sharedFheModulusGuesses,
-            operands,
+// One profile's screen at one original honest registration per participant:
+// the smallest population with every member honest. A larger population H
+// adds about log2(H/n) bits for the comparisons and as many again for the
+// source-domain reduction, whose shadows grow with H.
+const screenProfile = (profile: SupportedProfile) => {
+    const experimentGates = decisiveExperimentGates;
+    const honestRegistrations = BigInt(profile.participantCount);
+    const modulusBits = BigInt(profile.ciphertext.bits);
+    const { criterion, stressTest } = fheKnownAttackFloor(modulusBits);
+    const { ledger, comparisons, operands } = fheComparisonInputs(
+        profile,
+        honestRegistrations,
+    );
+    const requirements = reductionVariants.map((variant) => {
+        const gates = reductionGates(variant, experimentGates, operands);
+        const requiredBits = requiredFheAssumptionBits(
             comparisons,
-            criterion,
-            stressTest,
-            requirements,
-            // The record creation of the simulated proofs is the reduction
-            // work this variant leaves unpriced.
-            criterionAllowance: unpricedWorkAllowance(
-                comparisons,
-                sourceDomain.reductionGates,
-                supportedLevelBits(criterion),
-                experimentGates,
-            ),
+            gates,
+            experimentGates,
+        );
+        return {
+            variant,
+            reductionGates: gates,
+            requiredBits,
+            marginToCriterion: criterion.log2Cost - Number(requiredBits),
+            marginToStressTest: stressTest.log2Cost - Number(requiredBits),
         };
     });
+    const sourceDomain = requirements.find(
+        (value) => value.variant === 'source-domain reduction',
+    );
+    assert.ok(sourceDomain !== undefined);
+    return {
+        participantCount: profile.participantCount,
+        optionCount: profile.optionCount,
+        modulusBits,
+        honestRegistrations,
+        selectedPositionSets: ledger.selectedPositionSets,
+        sharedFheModulusGuesses: ledger.sharedFheModulusGuesses,
+        operands,
+        comparisons,
+        criterion,
+        stressTest,
+        requirements,
+        // The record creation of the simulated proofs is the reduction
+        // work this variant leaves unpriced.
+        criterionAllowance: unpricedWorkAllowance(
+            comparisons,
+            sourceDomain.reductionGates,
+            supportedLevelBits(criterion),
+            experimentGates,
+        ),
+    };
 };
 
-// The largest original honest registration population of one poll whose
-// source-domain requirement stays within the level a floor supports. The
-// requirement never falls as the population grows, so doubling and then
-// bisection find it. Zero when one registration already exceeds the level.
+// Each participant count's binding profile: the option count whose
+// source-domain requirement leaves the least further work within its own
+// criterion level, the largest modulus among equals.
+export const compileSecurityMarginScreen = () =>
+    profilesByParticipantCount().map(({ profiles }) =>
+        profiles
+            .map(screenProfile)
+            .reduce((binding, row) =>
+                row.criterionAllowance < binding.criterionAllowance
+                    ? row
+                    : binding,
+            ),
+    );
+
+// The source-domain requirement of a profile at an original honest
+// registration population of one poll, charged at an experiment of the given
+// cost; the decisive experiment decides it.
 export const sourceDomainRequirementAt = (
     profile: SupportedProfile,
     honestRegistrations: bigint,
+    experimentGates = decisiveExperimentGates,
 ) => {
-    const experimentGates = 1n << securityTargetBits;
     const { comparisons, operands } = fheComparisonInputs(
         profile,
         honestRegistrations,
@@ -570,6 +598,7 @@ export const sourceDomainRequirementAt = (
     );
     return {
         comparisons,
+        operands,
         reductionGates: gates,
         requiredBits: requiredFheAssumptionBits(
             comparisons,
@@ -579,20 +608,27 @@ export const sourceDomainRequirementAt = (
     };
 };
 
+// The largest original honest registration population of one poll whose
+// source-domain requirement stays within a level. The requirement never
+// falls as the population grows, so doubling, or a population already known
+// to exceed the level, and then bisection find it. Zero when one
+// registration already exceeds the level.
 const largestPopulationWithin = (
     profile: SupportedProfile,
     levelBits: bigint,
+    exceeding?: bigint,
 ) => {
     const within = (population: bigint) =>
         sourceDomainRequirementAt(profile, population).requiredBits <=
         levelBits;
     let low = 0n;
-    let high = 1n;
-    while (within(high)) {
-        low = high;
-        high *= 2n;
-        assert.ok(high < 1n << 64n, 'No population limit below 2^64.');
-    }
+    let high = exceeding ?? 1n;
+    if (exceeding === undefined)
+        while (within(high)) {
+            low = high;
+            high *= 2n;
+            assert.ok(high < 1n << 64n, 'No population limit below 2^64.');
+        }
     while (high - low > 1n) {
         const middle = (low + high) / 2n;
         if (within(middle)) low = middle;
@@ -601,38 +637,75 @@ const largestPopulationWithin = (
     return low;
 };
 
-// The FHE comparisons' own limit on a poll's original honest registrations,
-// at each participant count's largest modulus: the largest population whose
-// priced source-domain requirement stays within the criterion floor, and
-// within the quantum stress test. At each limit, the further reduction work
-// the level still absorbs bounds the unpriced record creation.
+// The FHE comparisons' own limit on the original honest registrations of a
+// poll of each participant count, whatever its option count: the smallest
+// over those option counts of the largest population whose priced
+// source-domain requirement stays within the profile's own criterion level,
+// and likewise within its quantum stress-test level. A profile that stays
+// within its level at the smallest limit so far cannot lower it, so only the
+// others are searched. At each limit, the further reduction work that every
+// option count's level still absorbs bounds the unpriced record creation.
 export const compileFhePopulationLimits = () =>
-    largestModulusProfiles().map((profile) => {
-        const { criterion, stressTest } = fheKnownAttackFloor(
-            BigInt(profile.ciphertext.bits),
-        );
-        const limit = (floor: FheAttackScreen) => {
-            const levelBits = supportedLevelBits(floor);
-            const honestRegistrations = largestPopulationWithin(
-                profile,
-                levelBits,
-            );
+    profilesByParticipantCount().map(({ participantCount, profiles }) => {
+        const limit = (floor: 'criterion' | 'stressTest') => {
+            const levelOf = (profile: SupportedProfile) =>
+                supportedLevelBits(
+                    fheKnownAttackFloor(BigInt(profile.ciphertext.bits))[floor],
+                );
+            let binding:
+                | Readonly<{
+                      profile: SupportedProfile;
+                      levelBits: bigint;
+                      honestRegistrations: bigint;
+                  }>
+                | undefined;
+            for (const profile of profiles) {
+                const levelBits = levelOf(profile);
+                if (
+                    binding !== undefined &&
+                    sourceDomainRequirementAt(
+                        profile,
+                        binding.honestRegistrations,
+                    ).requiredBits <= levelBits
+                )
+                    continue;
+                binding = {
+                    profile,
+                    levelBits,
+                    honestRegistrations: largestPopulationWithin(
+                        profile,
+                        levelBits,
+                        binding?.honestRegistrations,
+                    ),
+                };
+            }
             assert.ok(
-                honestRegistrations > 0n,
+                binding !== undefined && binding.honestRegistrations > 0n,
                 'One registration already exceeds the supported level.',
             );
-            const { comparisons, reductionGates: gates } =
-                sourceDomainRequirementAt(profile, honestRegistrations);
+            const { honestRegistrations } = binding;
+            const allowance = profiles
+                .map((profile) => {
+                    const { comparisons, reductionGates: gates } =
+                        sourceDomainRequirementAt(profile, honestRegistrations);
+                    return unpricedWorkAllowance(
+                        comparisons,
+                        gates,
+                        levelOf(profile),
+                    );
+                })
+                .reduce((least, value) => (value < least ? value : least));
             return {
-                levelBits,
+                optionCount: binding.profile.optionCount,
+                modulusBits: BigInt(binding.profile.ciphertext.bits),
+                levelBits: binding.levelBits,
                 honestRegistrations,
-                allowance: unpricedWorkAllowance(comparisons, gates, levelBits),
+                allowance,
             };
         };
         return {
-            participantCount: profile.participantCount,
-            modulusBits: BigInt(profile.ciphertext.bits),
-            criterion: limit(criterion),
-            stressTest: limit(stressTest),
+            participantCount,
+            criterion: limit('criterion'),
+            stressTest: limit('stressTest'),
         };
     });

@@ -179,6 +179,11 @@ const table = (
         ...rows.map((row) => `| ${row.join(' | ')} |`),
     ].join('\n');
 
+// The whole base-two logarithm of further work, or none when the priced work
+// alone already exceeds the level.
+const formatWorkAllowance = (allowance: bigint): string =>
+    allowance > 0n ? formatCount(allowance.toString(2).length - 1) : 'none';
+
 export const renderDocumentationCensus = (): string => {
     const resourceArtifact = readParticipantArtifactResources();
     const workflowResources = [
@@ -4710,7 +4715,7 @@ export const renderDocumentationCensus = (): string => {
         '',
         '### FHE security margin screen',
         '',
-        'The [margin model](../tests/security-margin-screen-model.ts) tests whether the current FHE comparisons can reach the target with the current parameters. It charges every single-key FHE Ring-LWE comparison of the [clear-preparation ledger](security-argument.md#clear-candidate-joint-ledger) at one original honest registration per participant, expanding each multi-message ballot comparison over its messages. The withdrawn ledger’s seven assumption groups share the 2^-80 budget equally. Each requirement charges the reduction’s work at a complete experiment of 2^80 gates, where the reduction ratio is largest; the source cache and the extractions’ fixed work do not grow with the experiment, and charging them at their largest ratio changes no requirement. The lattice assumptions hold relative to the ideal SHAKE oracle, so the forwarded column, which adds no work, is the floor for a reduction that never reads or programs the attacker’s queries. The FHE embedding fixes each pivot’s honest coordinate after its registration commitment from extracted corrupt registration coordinates, so it reads and programs the registration-source commitment domain with one commitment shadow per potential sender scope. The source-domain column implements only that domain, forwards every other query and prices the complete reduction except the simulated proofs’ record creation: its query circuits, the replacement wrapper for every programmed honest proof, the classical-reader and resumed-hash conversions of the forwarded honest calls and the forwarded calls themselves, every corrupt registration-source extraction with its coordinate decoding, and the source cache. A call reaches that domain only if its input capacity holds the shortest registration-source input, so it costs at least that input’s permutations, and every source input lies in one dyadic input class; the database terms are the full-domain bound restricted to those calls and that class. The converted honest calls read private streams and proof hashes outside that domain, so the conversions enlarge only the forwarded calls. The background column prices only the query circuits of a reduction that implements the whole function itself, as one without the oracle-relative assumption must, and the shadow column adds its commitment shadows. The reader column applies the classical fixed-input reader conversion that participant code uses. The resumed column applies the larger conversion for setup first-oracle leaf hashes resumed from an authenticated checkpoint, conditional on the original input staying available to the adapter. Those four columns omit every other reduction cost, so they are lower bounds. Each row uses the largest FHE modulus at that participant count. The floors are the cheapest core-SVP screens that the [security argument](security-argument.md#ledger) cites; a screen at one modulus bounds the same attack at every smaller supported modulus. Attack costs follow the accepted convention, without quantum random-access memory, so the classical floor over every algorithm of the estimator’s full estimate is the criterion. The quantum model’s sieving speedup assumes that memory, so its floor is a stress test. Neither model counts gates as the convention does. The last column is the further reduction work, in whole log2 gates, that keeps the source-domain requirement within the whole bits of the criterion floor; the simulated proofs’ record creation must fit within it.',
+        'The [margin model](../tests/security-margin-screen-model.ts) tests whether the current FHE comparisons can reach the target with the current parameters. It charges every single-key FHE Ring-LWE comparison of the [clear-preparation ledger](security-argument.md#clear-candidate-joint-ledger) at one original honest registration per participant, expanding each multi-message ballot comparison over its messages. The withdrawn ledger’s seven assumption groups share the 2^-80 budget equally. Each requirement charges the reduction’s work at the largest complete experiment within 2^80 gates that fills whole permutation slots. The reduction’s work depends on an experiment only through those slots and its query routing grows with their square, so that experiment has the largest reduction ratio; the source cache and the extractions’ fixed work, which do not grow with the experiment, leave every smaller experiment’s ratio below it, as the margin test checks at the population limits. The lattice assumptions hold relative to the ideal SHAKE oracle, so the forwarded column, which adds no work, is the floor for a reduction that never reads or programs the attacker’s queries. The FHE embedding fixes each pivot’s honest coordinate after its registration commitment from extracted corrupt registration coordinates, so it reads and programs the registration-source commitment domain with one commitment shadow per potential sender scope. The source-domain column implements only that domain, forwards every other query and prices the complete reduction except the simulated proofs’ record creation: its query circuits, the replacement wrapper for every programmed honest proof, the classical-reader and resumed-hash conversions of the forwarded honest calls and the forwarded calls themselves, every corrupt registration-source extraction with its coordinate decoding, and the source cache. A call reaches that domain only if its input capacity holds the shortest registration-source input, so it costs at least that input’s permutations, and every source input lies in one dyadic input class; the database terms are the full-domain bound restricted to those calls and that class. The converted honest calls read private streams and proof hashes outside that domain, so the conversions enlarge only the forwarded calls. The background column prices only the query circuits of a reduction that implements the whole function itself, as one without the oracle-relative assumption must, and the shadow column adds its commitment shadows. The reader column applies the classical fixed-input reader conversion that participant code uses. The resumed column applies the larger conversion for setup first-oracle leaf hashes resumed from an authenticated checkpoint, conditional on the original input staying available to the adapter. Those four columns omit every other reduction cost, so they are lower bounds. Each row shows the option count whose source-domain requirement leaves the least further work within its own criterion floor, the largest modulus among equals. The floors are the cheapest core-SVP screens that the [security argument](security-argument.md#ledger) cites; a screen at one modulus bounds the same attack at every smaller supported modulus. Attack costs follow the accepted convention, without quantum random-access memory, so the classical floor over every algorithm of the estimator’s full estimate is the criterion. The quantum model’s sieving speedup assumes that memory, so its floor is a stress test. Neither model counts gates as the convention does. The last column is the further reduction work, in whole log2 gates, that keeps the source-domain requirement within the whole bits of the criterion floor, or none where the priced work alone exceeds them; the simulated proofs’ record creation must fit within it.',
         '',
         table(
             [
@@ -4752,35 +4757,38 @@ export const renderDocumentationCensus = (): string => {
                     required('commitment shadows and resumed hashes'),
                     `\`${row.criterion.log2Cost.toFixed(2)}\`, ${row.criterion.attack} at ${formatCount(row.criterion.modulusBits)} bits`,
                     `\`${row.stressTest.log2Cost.toFixed(2)}\`, ${row.stressTest.attack} at ${formatCount(row.stressTest.modulusBits)} bits`,
-                    formatCount(row.criterionAllowance.toString(2).length - 1),
+                    formatWorkAllowance(row.criterionAllowance),
                 ];
             }),
         ),
         '',
         'This screen is a necessary condition, not a security level. Where a requirement exceeds the criterion floor, the priced reduction cannot establish the target at those parameters, whatever its remaining costs.',
         '',
-        'A larger original honest registration population raises the source-domain requirement by about two bits per doubling: one for the comparisons and one for the commitment shadows. The following limits are the largest original honest registration populations of one poll whose source-domain requirement stays within the whole bits each floor supports. They are the FHE comparisons’ own limit; the other assumption groups, the statistical terms, the semantic-use charges and the simulated proofs’ record creation bound the population separately. Each unpriced column gives the further reduction work, in whole log2 gates, that its limit still absorbs.',
+        'A larger original honest registration population raises the source-domain requirement by about two bits per doubling: one for the comparisons and one for the commitment shadows. The following limits are the largest original honest registration populations of one poll of each participant count, whatever its option count, whose source-domain requirement stays within the whole bits each floor supports at that option count’s modulus. Each limit names the option count and modulus that bind it. They are the FHE comparisons’ own limit; the other assumption groups, the statistical terms, the semantic-use charges and the simulated proofs’ record creation bound the population separately. Each unpriced column gives the further reduction work, in whole log2 gates, that every option count still absorbs at that limit.',
         '',
         table(
             [
                 'Participants',
-                'Modulus bits',
+                'Criterion options',
+                'Criterion modulus bits',
                 'Criterion level bits',
                 'Original honest registrations within the criterion',
                 'Unpriced work at that limit, log2 gates',
+                'Stress-test options',
+                'Stress-test modulus bits',
                 'Stress-test level bits',
                 'Original honest registrations within the stress test',
                 'Unpriced work at that limit, log2 gates',
             ],
             compileFhePopulationLimits().map((row) => [
                 formatCount(row.participantCount),
-                formatCount(row.modulusBits),
-                formatCount(row.criterion.levelBits),
-                formatCount(row.criterion.honestRegistrations),
-                formatCount(row.criterion.allowance.toString(2).length - 1),
-                formatCount(row.stressTest.levelBits),
-                formatCount(row.stressTest.honestRegistrations),
-                formatCount(row.stressTest.allowance.toString(2).length - 1),
+                ...[row.criterion, row.stressTest].flatMap((limit) => [
+                    formatCount(limit.optionCount),
+                    formatCount(limit.modulusBits),
+                    formatCount(limit.levelBits),
+                    formatCount(limit.honestRegistrations),
+                    formatWorkAllowance(limit.allowance),
+                ]),
             ]),
         ),
         '',

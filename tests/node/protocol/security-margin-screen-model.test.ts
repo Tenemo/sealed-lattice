@@ -7,6 +7,7 @@ import {
     ceilingLog2,
     compileSecurityMarginScreen,
     criterionAttacks,
+    decisiveExperimentGates,
     fheAttackScreens,
     fheKnownAttackFloor,
     compileFhePopulationLimits,
@@ -19,7 +20,11 @@ import {
     supportedLevelBits,
     unpricedWorkAllowance,
 } from '#tests/security-margin-screen-model.js';
-import { listSupportedProfiles } from '#tests/supported-profile-model.js';
+import {
+    deriveSupportedProfile,
+    listSupportedProfiles,
+    type SupportedProfile,
+} from '#tests/supported-profile-model.js';
 
 // Pascal's triangle, independent of the models' multiplicative binomials.
 const pascal = (rows: number) => {
@@ -37,8 +42,58 @@ const pascal = (rows: number) => {
     return triangle;
 };
 
+const permutationCharge = 24n * 1600n;
+
+// Experiments at which a reduction ratio could peak: the smallest, powers of
+// two, slot intervals' first gate counts, the first slot of each of the
+// widest length widths and of every eighth narrower one, the decisive
+// experiment and the target. A length width grows when
+// 4*1344*factor*slots + 2*512 + 3 reaches the next power of two.
+const sampledExperiments = (factors: readonly bigint[]) => {
+    const target = 1n << securityTargetBits;
+    const experiments = new Set([1n, decisiveExperimentGates, target]);
+    for (let exponent = 8n; exponent <= securityTargetBits; exponent += 8n)
+        experiments.add(1n << exponent);
+    for (
+        let exponent = 0n;
+        permutationCharge << exponent <= target;
+        exponent += 4n
+    )
+        experiments.add(permutationCharge << exponent);
+    for (const factor of factors) {
+        const perSlot = 4n * 1344n * factor;
+        const widest = BigInt(
+            (perSlot * (target / permutationCharge) + 1027n).toString(2).length,
+        );
+        for (let width = 12n; width <= widest; width++) {
+            if (width < widest - 7n && width % 8n !== 0n) continue;
+            const slots =
+                ((1n << (width - 1n)) - 1027n + perSlot - 1n) / perSlot;
+            if (slots > 0n && slots * permutationCharge <= target)
+                experiments.add(slots * permutationCharge);
+        }
+    }
+    return [...experiments];
+};
+
+// Whether an experiment's reduction ratio (T + W) / T stays within the
+// decisive experiment's, compared exactly.
+const withinDecisiveRatio = (
+    experiment: bigint,
+    work: bigint,
+    decisiveWork: bigint,
+) =>
+    (experiment + work) * decisiveExperimentGates <=
+    (decisiveExperimentGates + decisiveWork) * experiment;
+
+const profilesOf = (participantCount: number): readonly SupportedProfile[] =>
+    listSupportedProfiles().filter(
+        (profile) => profile.participantCount === participantCount,
+    );
+
 describe('FHE security margin screen', () => {
     const screen = compileSecurityMarginScreen();
+    const limits = compileFhePopulationLimits();
 
     it('rounds base-two logarithms up exactly at and around powers of two', () => {
         expect(ceilingLog2(1n)).toBe(0n);
@@ -77,41 +132,123 @@ describe('FHE security margin screen', () => {
                     BigInt(moduli.size) *
                     (2n + BigInt(participants)),
             );
-            const largest = Math.max(
-                ...listSupportedProfiles()
-                    .filter(
-                        (profile) => profile.participantCount === participants,
-                    )
-                    .map((profile) => profile.ciphertext.bits),
-            );
-            expect(row.modulusBits).toBe(BigInt(largest));
+            // The row is the option count that leaves the least further work
+            // within its own criterion level, the largest modulus among
+            // equals.
+            const profiles = profilesOf(participants);
+            expect(
+                profiles.some(
+                    (profile) =>
+                        profile.optionCount === row.optionCount &&
+                        BigInt(profile.ciphertext.bits) === row.modulusBits,
+                ),
+            ).toBe(true);
+            for (const profile of profiles) {
+                const modulusBits = BigInt(profile.ciphertext.bits);
+                const at = sourceDomainRequirementAt(
+                    profile,
+                    row.honestRegistrations,
+                );
+                const allowance = unpricedWorkAllowance(
+                    at.comparisons,
+                    at.reductionGates,
+                    supportedLevelBits(
+                        fheKnownAttackFloor(modulusBits).criterion,
+                    ),
+                );
+                expect(allowance).toBeGreaterThanOrEqual(
+                    row.criterionAllowance,
+                );
+                expect(
+                    allowance > row.criterionAllowance ||
+                        modulusBits <= row.modulusBits,
+                ).toBe(true);
+            }
         }
     });
 
-    it('is decided at the largest covered cost because the reduction ratio does not fall', () => {
-        const row = screen[screen.length - 1];
-        const exponents = Array.from(
-            { length: 11 },
-            (_, index) => securityTargetBits - 4n * BigInt(10 - index),
+    it('is decided at the largest whole-slot experiment within the target', () => {
+        const target = 1n << securityTargetBits;
+        expect(decisiveExperimentGates % permutationCharge).toBe(0n);
+        expect(decisiveExperimentGates).toBeLessThanOrEqual(target);
+        expect(decisiveExperimentGates + permutationCharge).toBeGreaterThan(
+            target,
         );
-        for (const variant of reductionVariants) {
-            const required = exponents.map((exponent) => {
-                const gates = 1n << exponent;
-                return requiredFheAssumptionBits(
-                    row.comparisons,
-                    reductionGates(variant, gates, row.operands),
-                    gates,
+        for (const row of screen)
+            for (const variant of reductionVariants) {
+                const decisiveWork = reductionGates(
+                    variant,
+                    decisiveExperimentGates,
+                    row.operands,
                 );
-            });
-            for (let index = 1; index < required.length; index++)
-                expect(required[index]).toBeGreaterThanOrEqual(
-                    required[index - 1],
+                for (const experiment of sampledExperiments([
+                    2n,
+                    5n,
+                    row.operands.resumeFactor,
+                ]))
+                    expect(
+                        withinDecisiveRatio(
+                            experiment,
+                            reductionGates(variant, experiment, row.operands),
+                            decisiveWork,
+                        ),
+                    ).toBe(true);
+                // The target fills the same slots, so the same work over a
+                // larger experiment gives it the smaller ratio.
+                expect(reductionGates(variant, target, row.operands)).toBe(
+                    decisiveWork,
                 );
-            expect(required[required.length - 1]).toBe(
-                row.requirements.find((value) => value.variant === variant)!
-                    .requiredBits,
-            );
-        }
+            }
+    });
+
+    it('keeps the fixed work below the decisive ratio at every population limit', () => {
+        // At a limit the requirement is closest to the next whole bit, so
+        // the source cache and the extractions' fixed work, whose share grows
+        // as the experiment shrinks, have the least room there.
+        for (const row of limits)
+            for (const limit of [row.criterion, row.stressTest]) {
+                const profile = deriveSupportedProfile(
+                    row.participantCount,
+                    limit.optionCount,
+                );
+                const at = sourceDomainRequirementAt(
+                    profile,
+                    limit.honestRegistrations,
+                );
+                const fixed = reductionGates(
+                    'source-domain reduction',
+                    0n,
+                    at.operands,
+                );
+                expect(fixed > at.operands.sourceCacheGates).toBe(
+                    at.operands.corruptSourceExtractions > 0n,
+                );
+                for (const experiment of sampledExperiments([
+                    at.operands.resumeFactor < 5n
+                        ? 5n
+                        : at.operands.resumeFactor,
+                ])) {
+                    const work = reductionGates(
+                        'source-domain reduction',
+                        experiment,
+                        at.operands,
+                    );
+                    expect(
+                        withinDecisiveRatio(
+                            experiment,
+                            work,
+                            at.reductionGates,
+                        ),
+                    ).toBe(true);
+                    expect(
+                        requiredFheAssumptionBits(
+                            at.comparisons,
+                            work,
+                            experiment,
+                        ),
+                    ).toBeLessThanOrEqual(limit.levelBits);
+                }
+            }
     });
 
     it('agrees with a floating-point evaluation of the same requirement', () => {
@@ -248,7 +385,6 @@ describe('FHE security margin screen', () => {
     it('prices the complete source-domain reduction around its query circuits', () => {
         const lengths = registrationSourceInputBits();
         const gates = 1n << securityTargetBits;
-        const permutationCharge = 24n * 1600n;
         const slots = gates / permutationCharge;
         for (const row of screen) {
             const { operands } = row;
@@ -325,23 +461,6 @@ describe('FHE security margin screen', () => {
                     source.reductionGates - complete.shadowQueryGatesUpperBound,
                 ) / Number(complete.shadowQueryGatesUpperBound),
             ).toBeLessThan(2 ** -40);
-            // The work that does not grow with the experiment, charged at
-            // a one-gate experiment, changes no requirement.
-            const fixed = reductionGates(
-                'source-domain reduction',
-                0n,
-                operands,
-            );
-            // Without a corrupt participant nothing is extracted or cached.
-            expect(fixed > operands.sourceCacheGates).toBe(
-                operands.corruptSourceExtractions > 0n,
-            );
-            expect(
-                requiredFheAssumptionBits(
-                    row.comparisons,
-                    source.reductionGates + fixed * gates,
-                ),
-            ).toBe(source.requiredBits);
             // The unpriced record creation may take far more than the
             // experiment's own work before the criterion falls.
             expect(row.criterionAllowance).toBe(
@@ -367,46 +486,82 @@ describe('FHE security margin screen', () => {
         }
     });
 
-    it('solves for the largest original honest registration population within each level', () => {
-        const limits = compileFhePopulationLimits();
+    it('never lowers the requirement as the population grows', () => {
+        // The limit search relies on this, so compare the exact quantity the
+        // requirement rounds, comparisons times the decisive experiment's
+        // reduced cost, at the smallest and largest option counts.
+        for (const [participants, options] of [
+            [4, 2],
+            [4, 20],
+            [20, 2],
+            [20, 20],
+        ]) {
+            const profile = deriveSupportedProfile(participants, options);
+            let previous = 0n;
+            for (
+                let population = BigInt(participants);
+                population < 1n << 34n;
+                population = (3n * population) / 2n + 1n
+            ) {
+                const at = sourceDomainRequirementAt(profile, population);
+                const scaled =
+                    at.comparisons *
+                    (decisiveExperimentGates + at.reductionGates);
+                expect(scaled).toBeGreaterThanOrEqual(previous);
+                previous = scaled;
+            }
+        }
+    });
+
+    it('solves for the smallest population limit over every option count', () => {
         expect(limits.map((row) => row.participantCount)).toEqual(
             screen.map((row) => row.participantCount),
         );
         for (const row of limits) {
-            const screened = screen.find(
-                (value) => value.participantCount === row.participantCount,
-            )!;
-            const profile = listSupportedProfiles().find(
-                (value) =>
-                    value.participantCount === row.participantCount &&
-                    BigInt(value.ciphertext.bits) === screened.modulusBits &&
-                    value.optionCount === screened.optionCount,
-            )!;
             for (const [limit, floor] of [
-                [row.criterion, screened.criterion],
-                [row.stressTest, screened.stressTest],
+                [row.criterion, 'criterion'],
+                [row.stressTest, 'stressTest'],
             ] as const) {
-                expect(limit.levelBits).toBe(
-                    BigInt(Math.floor(floor.log2Cost)),
+                const levelOf = (profile: SupportedProfile) =>
+                    supportedLevelBits(
+                        fheKnownAttackFloor(BigInt(profile.ciphertext.bits))[
+                            floor
+                        ],
+                    );
+                const binding = deriveSupportedProfile(
+                    row.participantCount,
+                    limit.optionCount,
                 );
-                // One more registration crosses the level.
-                const at = sourceDomainRequirementAt(
-                    profile,
-                    limit.honestRegistrations,
-                );
-                const beyond = sourceDomainRequirementAt(
-                    profile,
-                    limit.honestRegistrations + 1n,
-                );
-                expect(at.requiredBits).toBeLessThanOrEqual(limit.levelBits);
-                expect(beyond.requiredBits).toBeGreaterThan(limit.levelBits);
-                expect(limit.allowance).toBe(
-                    unpricedWorkAllowance(
+                expect(BigInt(binding.ciphertext.bits)).toBe(limit.modulusBits);
+                expect(limit.levelBits).toBe(levelOf(binding));
+                // Every option count stays within its own level at the
+                // limit, and the least further work any of them absorbs is
+                // the reported allowance.
+                let least: bigint | undefined;
+                for (const profile of profilesOf(row.participantCount)) {
+                    const at = sourceDomainRequirementAt(
+                        profile,
+                        limit.honestRegistrations,
+                    );
+                    expect(at.requiredBits).toBeLessThanOrEqual(
+                        levelOf(profile),
+                    );
+                    const allowance = unpricedWorkAllowance(
                         at.comparisons,
                         at.reductionGates,
-                        limit.levelBits,
-                    ),
+                        levelOf(profile),
+                    );
+                    if (least === undefined || allowance < least)
+                        least = allowance;
+                }
+                expect(limit.allowance).toBe(least);
+                // One more registration crosses the binding option count's
+                // level.
+                const beyond = sourceDomainRequirementAt(
+                    binding,
+                    limit.honestRegistrations + 1n,
                 );
+                expect(beyond.requiredBits).toBeGreaterThan(limit.levelBits);
                 expect(
                     unpricedWorkAllowance(
                         beyond.comparisons,
@@ -414,15 +569,18 @@ describe('FHE security margin screen', () => {
                         limit.levelBits,
                     ),
                 ).toBeLessThan(0n);
-                // Even at its limit, each level absorbs unpriced record
-                // creation far beyond the experiment's own work.
+                // At its limit the binding option count keeps only the room
+                // below one more registration, which varies, yet every level
+                // still absorbs unpriced record creation far beyond the
+                // experiment's own work.
                 expect(limit.allowance).toBeGreaterThan(
-                    1n << (securityTargetBits + 60n),
+                    1n << (securityTargetBits + 50n),
                 );
             }
             // The comparisons and the commitment shadows both grow with the
             // population, so the requirement rises two bits per doubling and
-            // the two limits differ by the square root of their level gap.
+            // the two limits differ by about the square root of their level
+            // gap, whichever option counts bind them.
             const expected =
                 2 **
                 (Number(row.criterion.levelBits - row.stressTest.levelBits) /
