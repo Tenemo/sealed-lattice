@@ -11,7 +11,6 @@ import {
 } from 'node:fs/promises';
 import { freemem } from 'node:os';
 import path from 'node:path';
-import { setTimeout } from 'node:timers/promises';
 
 import { compileBallotBodyCensus } from '#tests/ballot-body-model.js';
 import { compileClearPreparationResources } from '#tests/clear-preparation-resource-model.js';
@@ -26,10 +25,7 @@ import { compileSetupAggregateResources } from '#tests/setup-aggregate-resource-
 import { deriveSupportedProfile } from '#tests/supported-profile-model.js';
 import { snapshotResearchSources } from '#tools/ci/fixture-sources.js';
 import { runWithLocalRunLog } from '#tools/ci/local-run-log.js';
-import {
-    guardProcessTreeMemory,
-    readProtocolProcessTree,
-} from '#tools/ci/protocol-process-memory.js';
+import { guardProcessTreeMemory } from '#tools/ci/protocol-process-memory.js';
 import { acquireProtocolResearchLock } from '#tools/ci/protocol-research-lock.js';
 import { selectProtocolResearchCase } from '#tools/ci/protocol-research-registry.js';
 import { deriveResearchScenario } from '#tools/ci/protocol-research-scenario.js';
@@ -582,8 +578,7 @@ await runWithLocalRunLog(
                 prefixCase ? 'requested-output' : 'ceremony',
             );
             const controller = new AbortController();
-            let active = false,
-                monitor: Promise<void> | undefined,
+            let guard: { stop: () => Promise<void> } | undefined,
                 peakMemory = 0,
                 samples = 0;
             const started = performance.now();
@@ -633,44 +628,36 @@ await runWithLocalRunLog(
                         observer: {
                             onCommandStart({ processIdentifier }) {
                                 assert.ok(processIdentifier);
-                                active = true;
-                                monitor = (async () => {
-                                    while (active) {
-                                        const bytes =
-                                            await readProtocolProcessTree(
-                                                processIdentifier,
-                                            );
-                                        if (bytes !== undefined) {
-                                            samples++;
-                                            peakMemory = Math.max(
-                                                peakMemory,
-                                                bytes,
-                                            );
-                                            log.writeEvent({
-                                                eventType:
-                                                    'protocol-process-memory',
-                                                details: { bytes, memoryLimit },
-                                            });
-                                            if (bytes > memoryLimit)
-                                                throw new Error(
-                                                    'Protocol process-tree memory guard exceeded.',
-                                                );
-                                        }
-                                        if (active) await setTimeout(1000);
-                                    }
-                                })().catch((error: unknown) => {
-                                    controller.abort(error);
+                                guard = guardProcessTreeMemory({
+                                    processIdentifier,
+                                    memoryLimit,
+                                    exceededMessage:
+                                        'Protocol process-tree memory guard exceeded.',
+                                    onSample: (bytes) => {
+                                        samples++;
+                                        peakMemory = Math.max(
+                                            peakMemory,
+                                            bytes,
+                                        );
+                                        log.writeEvent({
+                                            eventType:
+                                                'protocol-process-memory',
+                                            details: { bytes, memoryLimit },
+                                        });
+                                    },
+                                    abort: (reason) => {
+                                        controller.abort(reason);
+                                    },
                                 });
                             },
                             onCommandExit() {
-                                active = false;
+                                void guard?.stop();
                             },
                         },
                     },
                 );
             } finally {
-                active = false;
-                await monitor;
+                await guard?.stop();
                 // The ceremony's working values and key records in its
                 // scratch directory outlive no run, whether it passed or not.
                 if (scratch !== undefined)

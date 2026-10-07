@@ -15,7 +15,7 @@ import {
     runArtifactDirectoryPath,
     runWithLocalRunLog,
 } from '#tools/ci/local-run-log.js';
-import { readProtocolProcessTree } from '#tools/ci/protocol-process-memory.js';
+import { guardProcessTreeMemory } from '#tools/ci/protocol-process-memory.js';
 import { acquireProtocolResearchLock } from '#tools/ci/protocol-research-lock.js';
 import { selectPublicCompletionCase } from '#tools/ci/protocol-research-registry.js';
 import { deriveResearchScenario } from '#tools/ci/protocol-research-scenario.js';
@@ -297,8 +297,7 @@ await runWithLocalRunLog(
                 // The reader's scratch holds only its working values.
                 try {
                     const controller = new AbortController();
-                    let active = false,
-                        monitor: Promise<void> | undefined,
+                    let guard: { stop: () => Promise<void> } | undefined,
                         peakMemory = 0,
                         samples = 0;
                     const exitCode = await runCommandsInSeries(
@@ -331,49 +330,38 @@ await runWithLocalRunLog(
                             observer: {
                                 onCommandStart({ processIdentifier }) {
                                     assert.ok(processIdentifier);
-                                    active = true;
-                                    monitor = (async () => {
-                                        while (active) {
-                                            const bytes =
-                                                await readProtocolProcessTree(
-                                                    processIdentifier,
-                                                );
-                                            if (bytes !== undefined) {
-                                                samples++;
-                                                peakMemory = Math.max(
-                                                    peakMemory,
+                                    guard = guardProcessTreeMemory({
+                                        processIdentifier,
+                                        memoryLimit: 1073741824,
+                                        exceededMessage:
+                                            'Reader process-tree memory guard exceeded.',
+                                        onSample: (bytes) => {
+                                            samples++;
+                                            peakMemory = Math.max(
+                                                peakMemory,
+                                                bytes,
+                                            );
+                                            log.writeEvent({
+                                                eventType:
+                                                    'threshold-reader-memory',
+                                                details: {
                                                     bytes,
-                                                );
-                                                log.writeEvent({
-                                                    eventType:
-                                                        'threshold-reader-memory',
-                                                    details: {
-                                                        bytes,
-                                                        limit: 1073741824,
-                                                    },
-                                                });
-                                                assert.ok(
-                                                    bytes <= 1073741824,
-                                                    'Reader process-tree memory guard exceeded.',
-                                                );
-                                            }
-                                            if (active)
-                                                await new Promise((resolve) =>
-                                                    setTimeout(resolve, 1000),
-                                                );
-                                        }
-                                    })().catch((error) =>
-                                        controller.abort(error),
-                                    );
+                                                    limit: 1073741824,
+                                                },
+                                            });
+                                        },
+                                        abort: (reason) => {
+                                            controller.abort(reason);
+                                        },
+                                    });
                                 },
                                 onCommandExit() {
-                                    active = false;
+                                    void guard?.stop();
                                 },
                             },
                         },
                     ).finally(async () => {
-                        active = false;
-                        await monitor;
+                        await guard?.stop();
                     });
                     assert.equal(
                         controller.signal.aborted,

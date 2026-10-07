@@ -2,11 +2,13 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { freemem } from 'node:os';
 import path from 'node:path';
-import { setTimeout } from 'node:timers/promises';
 
 import type { ActiveLocalRunLog } from '#tools/ci/local-run-log.js';
 import { createNativeOperationGuard } from '#tools/ci/native-operation-guard.js';
-import { readProtocolProcessTree } from '#tools/ci/protocol-process-memory.js';
+import {
+    guardProcessTreeMemory,
+    readProtocolProcessTree,
+} from '#tools/ci/protocol-process-memory.js';
 import { runCommandsInSeries } from '#tools/ci/run-command.js';
 
 export const runGuardedFixture = async ({
@@ -44,11 +46,11 @@ export const runGuardedFixture = async ({
                   finishFile: path.join(gateDirectory, 'finish'),
               };
     const controller = new AbortController();
-    let active = false,
-        peakMemory = 0,
+    let peakMemory = 0,
         samples = 0,
         output = '';
     let monitor: Promise<void> | undefined;
+    let memoryGuard: { stop: () => Promise<void> } | undefined;
     let nativeGuard: ReturnType<typeof createNativeOperationGuard> | undefined;
     let guardResult:
         | Awaited<
@@ -120,7 +122,6 @@ export const runGuardedFixture = async ({
                 },
                 onCommandStart({ processIdentifier }) {
                     assert.ok(processIdentifier);
-                    active = true;
                     if (gateFiles !== undefined) {
                         nativeGuard = createNativeOperationGuard({
                             allowedProgressLines: nativeProgressLines,
@@ -138,31 +139,27 @@ export const runGuardedFixture = async ({
                             .catch((error: unknown) => controller.abort(error));
                         return;
                     }
-                    monitor = (async () => {
-                        while (active) {
-                            const bytes =
-                                await readProtocolProcessTree(
-                                    processIdentifier,
-                                );
-                            if (bytes !== undefined) {
-                                recordSample('periodic', bytes);
-                                assert.ok(
-                                    bytes <= processMemoryLimit,
-                                    'Fixture process-tree memory guard exceeded.',
-                                );
-                            }
-                            if (active) await setTimeout(1000);
-                        }
-                    })().catch((error: unknown) => controller.abort(error));
+                    memoryGuard = guardProcessTreeMemory({
+                        processIdentifier,
+                        memoryLimit: processMemoryLimit,
+                        exceededMessage:
+                            'Fixture process-tree memory guard exceeded.',
+                        onSample: (bytes) => {
+                            recordSample('periodic', bytes);
+                        },
+                        abort: (reason) => {
+                            controller.abort(reason);
+                        },
+                    });
                 },
                 onCommandExit() {
-                    active = false;
+                    void memoryGuard?.stop();
                     nativeGuard?.stop();
                 },
             },
         },
     ).finally(async () => {
-        active = false;
+        await memoryGuard?.stop();
         await monitor;
         if (gateDirectory !== undefined) {
             const resolved = path.resolve(gateDirectory);

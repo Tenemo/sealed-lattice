@@ -114,7 +114,7 @@ export const guardProcessTreeMemory = (input: {
     readonly processIdentifier: number;
     readonly memoryLimit: number;
     readonly exceededMessage: string;
-    readonly onSample: (bytes: number) => void;
+    readonly onSample: (bytes: number) => void | Promise<void>;
     readonly abort: (reason: unknown) => void;
 }): { readonly stop: () => Promise<void> } => {
     let active = true;
@@ -124,7 +124,7 @@ export const guardProcessTreeMemory = (input: {
                 input.processIdentifier,
             );
             if (bytes !== undefined) {
-                input.onSample(bytes);
+                await input.onSample(bytes);
                 if (bytes > input.memoryLimit)
                     throw new Error(input.exceededMessage);
             }

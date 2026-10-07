@@ -3,7 +3,6 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { freemem } from 'node:os';
 import path from 'node:path';
-import { setTimeout } from 'node:timers/promises';
 
 import { createBrowserOutputSink } from '#tools/ci/bounded-output-browser-sink.js';
 import { browserChunkBytes } from '#tools/ci/bounded-output-browser-transport.mjs';
@@ -11,7 +10,7 @@ import { fileDigest } from '#tools/ci/fixture-sources.js';
 import type { ActiveLocalRunLog } from '#tools/ci/local-run-log.js';
 import { launchChromeParticipant } from '#tools/ci/participant-runtime-chrome.js';
 import type { ChromeParticipant } from '#tools/ci/participant-runtime-chrome.js';
-import { readProtocolProcessTree } from '#tools/ci/protocol-process-memory.js';
+import { guardProcessTreeMemory } from '#tools/ci/protocol-process-memory.js';
 
 export const boundedBrowserSources = [
     'tools/ci/bounded-output-browser.ts',
@@ -247,8 +246,7 @@ export const runFheKeySourceInChrome = async ({
         Awaited<ReturnType<typeof serveBoundedBrowserInputs>> | undefined;
     const controller = new AbortController();
     let chrome: ChromeParticipant | undefined;
-    let active = false;
-    let monitor: Promise<void> | undefined;
+    let guard: { stop: () => Promise<void> } | undefined;
     let peakMemory = 0;
     let samples = 0;
     let timer: ReturnType<typeof globalThis.setTimeout> | undefined;
@@ -295,37 +293,30 @@ export const runFheKeySourceInChrome = async ({
                 fail(new Error('Chrome ' + phase + ' exceeded its deadline.')),
             timeoutMilliseconds,
         );
-        active = true;
-        monitor = (async () => {
-            while (active) {
-                const bytes = await readProtocolProcessTree(
-                    browser.processIdentifier,
-                );
-                if (bytes !== undefined) {
-                    samples++;
-                    peakMemory = Math.max(peakMemory, bytes);
-                    log.writeEvent({
-                        eventType: screenKind + '-browser-memory',
-                        details: {
-                            phase,
-                            relation: screenKind,
-                            caseIndex,
-                            bytes,
-                            limit: processMemoryLimit,
-                            heaps: browser.heaps(),
-                            progress: await browser.evaluate(
-                                'window.boundedExperimentProgress',
-                            ),
-                        },
-                    });
-                    assert.ok(
-                        bytes <= processMemoryLimit,
-                        'Chrome process-tree memory guard exceeded.',
-                    );
-                }
-                if (active) await setTimeout(1000);
-            }
-        })().catch(fail);
+        guard = guardProcessTreeMemory({
+            processIdentifier: browser.processIdentifier,
+            memoryLimit: processMemoryLimit,
+            exceededMessage: 'Chrome process-tree memory guard exceeded.',
+            onSample: async (bytes) => {
+                samples++;
+                peakMemory = Math.max(peakMemory, bytes);
+                log.writeEvent({
+                    eventType: screenKind + '-browser-memory',
+                    details: {
+                        phase,
+                        relation: screenKind,
+                        caseIndex,
+                        bytes,
+                        limit: processMemoryLimit,
+                        heaps: browser.heaps(),
+                        progress: await browser.evaluate(
+                            'window.boundedExperimentProgress',
+                        ),
+                    },
+                });
+            },
+            abort: fail,
+        });
         const configuration = {
             caseIndex,
             timeoutMilliseconds,
@@ -385,9 +376,8 @@ export const runFheKeySourceInChrome = async ({
             },
         };
     } finally {
-        active = false;
         globalThis.clearTimeout(timer);
-        await monitor;
+        await guard?.stop();
         try {
             await chrome?.crash();
         } finally {
