@@ -2,7 +2,7 @@
 
 `sealed-lattice` is a TypeScript and Rust/WebAssembly research library for browser-first, fixed-roster, private-score polling. It targets end-to-end post-quantum security without a trusted tally service, but that security is not yet established.
 
-Use synthetic data only. The project implements its candidate voting construction end to end, but the construction has no independent cryptographic review, supported-phone qualification, or production approval, and its end-to-end security is not established. Do not use it with real ballots, credentials, keys, or secret material. Read the [security policy](SECURITY.md) before experimenting.
+Use synthetic data only. The project implements its candidate voting construction end to end, but the construction has no supported-phone qualification or production approval, and its end-to-end security is not established. Do not use it with real ballots, credentials, keys, or secret material. Read the [security policy](SECURITY.md) before experimenting.
 
 ## Intended protocol
 
