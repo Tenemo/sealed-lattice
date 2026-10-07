@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -41,9 +41,18 @@ const runPackageCommand = (argumentsList: readonly string[]): void => {
     }
 };
 
+// The participant module build's own target directory. The repeated build
+// starts without it, so cargo recompiles the module instead of reusing the
+// cached one.
+const participantModuleTargetPath = path.resolve(
+    repositoryRoot,
+    'target/participant-module',
+);
+
 export const verifyBuildReproducibility = async (): Promise<void> => {
     const before = await collectGeneratedArtifactHashes();
 
+    await rm(participantModuleTargetPath, { recursive: true, force: true });
     runPackageCommand(['--filter', 'sealed-lattice', 'run', 'build']);
 
     const after = await collectGeneratedArtifactHashes();
@@ -56,7 +65,9 @@ export const verifyBuildReproducibility = async (): Promise<void> => {
         );
     }
 
-    console.log('A repeated SDK build reproduced every package byte.');
+    console.log(
+        'A repeated SDK build with a recompiled participant module reproduced every package byte.',
+    );
 };
 
 if (import.meta.main) {
