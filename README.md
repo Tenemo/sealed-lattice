@@ -76,9 +76,29 @@ if (created.status === "completed") {
 
 The participant module checks the question and option labels and refuses an invalid poll as `invalid request` before it generates any key. Import the public API from the package root; workspace internals are not public API.
 
-### Participant
+### Participant API
 
-`openParticipant({ namespace, relay })` opens the participant whose local state the namespace names on the page's origin; a namespace has 1 to 64 lower-case letters, digits and inner hyphens, and one namespace holds one participant of one poll. `run({ operation, parameters })` performs one operation in a fresh worker and returns `completed` with the participant's retained progress; `refused` when nothing changed, with a `reason`: `unsupported browser`, `invalid request` for malformed parameters or an unknown operation, `no participant`, `participant exists`, `insufficient storage`, `another poll`, `another runtime`, or `unavailable` at the participant's stage or role; `pending` with a `cause` and a described `reason` when it waits for `public input`, `storage` or a device `resource` such as memory, or when the participant `module` or its `worker` failed during the operation; or `stopped` when missing or inconsistent local state ended the participant for good. A later visit continues a pending participant from its last committed state. Enrollment interrupted after its intent is retained but before its required secrets are retained stops that participant because the intent cannot resume private generation. Before each operation the page asks the browser to keep the origin's storage with `navigator.storage.persist()`, and a completed operation reports whether it does as `persistentStorage`; a browser may evict storage it does not keep under storage pressure, which stops the participant, so the application warns the participant before its state becomes necessary. An operation on an empty namespace other than `create` is refused as `no participant` and leaves it empty. A participant that another build of the SDK created is refused with `reason: 'another runtime'` and that build's `runtime` identity; nothing changes, so the application can continue it with that build.
+`openParticipant({ namespace, relay })` opens the participant whose local state the namespace names on the page's origin. A namespace has 1 to 64 lower-case letters, digits and inner hyphens, and one namespace holds one participant of one poll. `run({ operation, parameters })` performs one operation in a fresh worker and returns one of four statuses:
+
+| Status | Fields | Meaning |
+| --- | --- | --- |
+| `completed` | `details` | The operation finished; `details` reports the participant's retained progress. |
+| `refused` | `reason`, and `runtime` for `another runtime` | Nothing changed. |
+| `pending` | `cause`, `reason` | The operation could not finish yet; `reason` describes why. A later operation continues from the participant's last committed state. |
+| `stopped` | `reason`, `stopPersistence` | Missing or inconsistent local state ended the participant for good. `stopPersistence` is `confirmed` when the browser durably recorded the stop and `unconfirmed` otherwise. |
+
+A refusal's `reason` is one of:
+
+- `unsupported browser`;
+- `invalid request`, for malformed parameters or an unknown operation;
+- `no participant`, for an operation other than `create` on an empty namespace, which stays empty;
+- `participant exists`, `insufficient storage` or `another poll`;
+- `another runtime`, for a participant that another build of the SDK created, with that build's `runtime` identity, so the application can continue it with that build;
+- `unavailable`, for an operation that the participant's stage or role does not allow.
+
+A pending `cause` is `public input`, `storage` or a device `resource` such as memory when the operation waits for them, or `module` or `worker` when the participant module or its worker failed during the operation.
+
+Enrollment interrupted after its intent is retained but before its required secrets are retained stops that participant, because the intent cannot resume private generation. Before each operation the page asks the browser to keep the origin's storage with `navigator.storage.persist()`, and a completed operation reports whether it does as `persistentStorage`. A browser may evict storage it does not keep under storage pressure, which stops the participant, so the application warns the participant before its state becomes necessary.
 
 The preparation operations follow this order:
 
@@ -92,9 +112,29 @@ After preparation, `ballot` casts or delivers the participant's single ballot. `
 
 Completed operations report the verified poll's `question`, ordered `options` with their identifiers and labels, and `topCount`. Byte parameters are lower-case hexadecimal. Each operation resumes only the original saved state of its runtime; completed signatures are retransmitted unchanged.
 
+### Outcome verification
+
 `verifyOutcome({ poll, relay })` verifies a poll's outcome from the relay without participant state, so a participant whose state stopped, or any page that holds the poll's identity and the relay's URL, can check the result. A fresh worker that holds no credential or randomness reads the published records and runs every owning verifier from the signed poll definition and roster through the setup, the close records and the certified target to its release shares; its public working storage, the IndexedDB databases `sealed-lattice-setup/verification.<poll>` and `sealed-lattice-public-evaluation/verification.<poll>`, is deleted when it ends. It returns `completed` with whether the certified target carries an `encrypted` result and the result's ordered option `identifiers`, none for a certified no-result target; `refused` for an `unsupported browser` or an `invalid request`; or `pending` with a `cause` and a described `reason` when the published records do not verify yet or the device, the module or the worker failed.
 
-The relay is an untrusted HTTP service at the given base URL. It serves a stored record at `public/<name>` and accepts a publication at `publish/<name>?offset=<offset>` of at most one mebibyte, appending it at the record's end or accepting an identical retransmission of stored bytes, and refusing any other chunk. Record names are lower-case path segments of letters, digits, dots and hyphens. Setup discovery uses a separate append-only list for each original author: `POST offers/<position>` announces one 64-byte body identity idempotently, and `GET offers/<position>?offset=<entry-index>` returns a little-endian unsigned 64-bit total entry count, a little-endian unsigned 32-bit page count, and at most 64 body identities in insertion order. Announcements from any caller can add candidates but cannot overwrite earlier ones; every candidate still requires its author signature and complete body proof. The organizer scans one finite snapshot per author fairly, and a later pending operation retries unavailable bodies and newly announced candidates. Every participant verifies what it reads, so the relay cannot create a vote, a ballot or a result, but completion needs it to keep records retrievable after their authors leave.
+### Relay
+
+The relay is an untrusted HTTP service at the given base URL, which ends with a slash. It stores opaque bytes and append-only discovery lists and interprets none of them:
+
+| Route | Request body | Response |
+| --- | --- | --- |
+| `POST chunks` | At most one mebibyte | The stored chunk's 16-byte locator |
+| `GET chunk/<locator>` | | The chunk's bytes |
+| `POST candidates/<key>` | A manifest of at most one mebibyte | The stored candidate's 16-byte locator, then its entry index in the key's list as a little-endian unsigned 64-bit integer |
+| `GET candidate/<locator>` | | The candidate's manifest |
+| `GET candidates/<key>?offset=<index>` | | The list's total entry count as a little-endian unsigned 64-bit integer, the page's entry count as a little-endian unsigned 32-bit integer, and at most 64 candidate locators in insertion order from the index |
+| `POST offers/<position>` | One 64-byte body identity | Success; an identical announcement is idempotent |
+| `GET offers/<position>?offset=<index>` | | The same page form, whose entries are at most 64 body identities |
+
+A locator appears in a path as 32 lower-case hexadecimal digits. A key has at most 256 characters in slash-separated segments of lower-case letters and digits with inner dots and hyphens. A relay on another origin must allow the page's cross-origin requests. Any failed or malformed response leaves the operation pending. A publishing participant reads back every chunk, manifest and discovery entry it publishes and treats a different readback as a failure.
+
+Setup discovery uses one `offers` list for each original author's roster position. Announcements from any caller can add candidates but cannot overwrite earlier ones; every candidate still requires its author signature and complete body proof. The organizer scans one finite snapshot per author fairly, and a later pending operation retries unavailable bodies and newly announced candidates. Every participant verifies what it reads, so the relay cannot create a vote, a ballot or a result, but completion needs it to keep chunks and manifests immutable, keep discovery lists append-only, and keep every record retrievable after its author leaves.
+
+### Worker and browser requirements
 
 The worker runs from a `blob:` URL, compiles the packaged `participant.wasm` after checking its digest, and keeps its state in the IndexedDB databases `sealed-lattice-participant/<namespace>`, `sealed-lattice-setup/<namespace>`, `sealed-lattice-evaluated-target/<namespace>` and `sealed-lattice-public-evaluation/<namespace>` under a Web Lock. It needs a secure context, Web Locks, WebCrypto and IndexedDB; a content security policy must allow `worker-src blob:`, WebAssembly compilation and fetching the module and the relay. On a cross-origin isolated page, served with `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp`, each operation also starts one helper worker per spare core, up to eight, from the same worker source; the helpers run the module's deterministic parallel work through shared memory and hold no participant state. Without isolation, or when a helper has not started within ten seconds, the worker does that work itself, with the same results; a helper that fails leaves the operation pending.
 
