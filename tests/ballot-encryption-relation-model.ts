@@ -215,7 +215,7 @@ const inverseTransform = (values: number[], root: number) => {
 
 // Every option has one comparison window for every rank, whatever result
 // length the poll requests.
-const packingMatrix = (degree: number, optionCount: number) => {
+export const ballotPackingMatrix = (degree: number, optionCount: number) => {
     const window = 2 ** Math.ceil(Math.log2(optionCount));
     const activeSlots = optionCount * optionCount * window;
     assert.ok(activeSlots + optionCount < degree / 4);
@@ -299,7 +299,7 @@ export const createBallotEncryptionRelationModel = (
     assert.equal(auxiliaryScores.length, scores.length);
     const degree = 64,
         auxiliaryDegree = 8;
-    const packing = packingMatrix(degree, scores.length);
+    const packing = ballotPackingMatrix(degree, scores.length);
     const scoreWords = scores.map((score) => score - 1n);
     const integerPlaintext = Array.from(
         { length: degree },
@@ -528,7 +528,9 @@ export const createBallotEncryptionRelationModel = (
         scoreWords,
         plaintextWords,
         plaintextHighBits,
+        packingQuotient,
         fhe,
+        carries,
         auxiliaryCiphertext,
         rows,
         rangeValid,
