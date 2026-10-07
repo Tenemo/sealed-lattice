@@ -26,7 +26,6 @@ const diagnosticEnvironmentVariableNames = [
     'RUST_BACKTRACE',
     'RUST_TEST_THREADS',
     'SEALED_LATTICE_RUN_DIRECTORY',
-    'SEALED_LATTICE_TEST_PROJECT_LABEL',
     'VITEST_MAX_THREADS',
     'VITEST_MIN_THREADS',
 ] as const;
