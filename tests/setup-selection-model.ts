@@ -273,8 +273,7 @@ export const closeOnlySelectionCounterexample = (participantCount: number) => {
     };
 };
 
-type Preparation =
-    'clear-close-only' | 'clear-certified' | 'recoverable-sealed';
+type Preparation = 'clear-certified' | 'recoverable-sealed';
 type Stage = Readonly<{ name: string; prerequisite?: string }>;
 
 // These are candidate protocol-stage paths, including registration and the
@@ -292,8 +291,7 @@ export const preparationStagePath = (
             'ready',
             'delivery-and-opening-shares',
         );
-    else if (preparation === 'clear-certified')
-        prefix.push('selection-and-endorsement');
+    else prefix.push('selection-and-endorsement');
     prefix.push('setup-and-optional-ballot');
     const names = [
         ...prefix,

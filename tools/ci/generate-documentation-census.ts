@@ -54,7 +54,6 @@ import {
     compileFullWordProofLayout,
     compileLinkedReleaseWordProofLayout,
 } from '#tests/full-word-proof-layout-model.js';
-import { compileHashRowCheckpointCensus } from '#tests/hash-row-checkpoint-model.js';
 import { compileLinkedReleaseRelationCensus } from '#tests/linked-release-relation-model.js';
 import {
     compileOperationProofDraws,
@@ -308,7 +307,6 @@ export const renderDocumentationCensus = (): string => {
     );
     const registrationKey = compileRecipientKeyCensus();
     const registrationEnrollment = compileRegistrationEnrollmentCensus();
-    const hashRowCheckpoint = compileHashRowCheckpointCensus();
     const firstOracleCheckpoint =
         compileFirstOracleCheckpointCensus(completion);
     const selectedOpeningTransform = compileSelectedOpeningTransformCensus();
@@ -2915,53 +2913,6 @@ export const renderDocumentationCensus = (): string => {
             ],
         ),
         '',
-        '## Hash-row checkpoint census',
-        '',
-        'The bounded experiment serializes one live proof-row hash array and seals it in ordered chunks. These counts cover one array and one data key; they exclude the remaining prover state, authenticated root, database overhead, key wrapping, repeated checkpoints, retries, and session unions. The primitive-input and authentication-degree operands are not an end-to-end security bound.',
-        '',
-        table(
-            ['Property', 'Value'],
-            [
-                ['Proof-domain rows', formatCount(hashRowCheckpoint.rowCount)],
-                [
-                    'Serialized hash-state bytes per row',
-                    formatCount(hashRowCheckpoint.serializedStateBytes),
-                ],
-                ['Rows per chunk', formatCount(hashRowCheckpoint.rowsPerChunk)],
-                ['Encrypted chunks', formatCount(hashRowCheckpoint.chunkCount)],
-                [
-                    'Maximum chunk plaintext bytes',
-                    formatCount(hashRowCheckpoint.maximumPlaintextChunkBytes),
-                ],
-                [
-                    'Maximum sealed chunk bytes',
-                    formatCount(hashRowCheckpoint.maximumSealedChunkBytes),
-                ],
-                [
-                    'Complete plaintext bytes',
-                    formatCount(hashRowCheckpoint.plaintextBytes),
-                ],
-                [
-                    'Complete sealed bytes',
-                    formatCount(hashRowCheckpoint.sealedBytes),
-                ],
-                [
-                    'Associated-data bytes per chunk',
-                    formatCount(hashRowCheckpoint.associatedBytes),
-                ],
-                [
-                    'Distinct AES block inputs per array key',
-                    formatCount(hashRowCheckpoint.distinctAesBlockInputs),
-                ],
-                [
-                    'Maximum authentication polynomial degree',
-                    formatCount(
-                        hashRowCheckpoint.maximumAuthenticationPolynomialDegree,
-                    ),
-                ],
-            ],
-        ),
-        '',
         '## First-oracle checkpoint census',
         '',
         'The complete first-oracle checkpoint retains the actual witness, masks, leaf-salt seed, and partial row hashes. Lookup multiplicities, empty tree nodes, and the initial transcript are reconstructed. Each private record uses a separate data key. The browser root also retains encrypted generated public inputs; fixed common polynomials and verified recipient keys are reconstructed from predecessors. The proof-randomness minima split at this checkpoint: generation supplies the first-oracle masks and tree seed, while continuation supplies every response salt, starting with the salt preceding the lookup challenge. These minima exclude witness sampling and extra reads caused by rejected field candidates. Storage counts exclude database overhead and later proof phases, repeated checkpoints, and their security and resource unions.',
@@ -3233,21 +3184,17 @@ export const renderDocumentationCensus = (): string => {
         '',
         table(
             ['Candidate path', 'Participant stages', 'Organizer stages'],
-            (
-                [
-                    'clear-close-only',
-                    'clear-certified',
-                    'recoverable-sealed',
-                ] as const
-            ).map((candidate) => [
-                candidate,
-                formatCount(
-                    countStagePath(preparationStagePath(candidate, false)),
-                ),
-                formatCount(
-                    countStagePath(preparationStagePath(candidate, true)),
-                ),
-            ]),
+            (['clear-certified', 'recoverable-sealed'] as const).map(
+                (candidate) => [
+                    candidate,
+                    formatCount(
+                        countStagePath(preparationStagePath(candidate, false)),
+                    ),
+                    formatCount(
+                        countStagePath(preparationStagePath(candidate, true)),
+                    ),
+                ],
+            ),
         ),
         '',
         'The [registration binding screen](../tests/registration-setup-binding-model.ts) commits separately to each possible FHE encryption-key coordinate. It derives distinct FHE families from both modulus and common-matrix sample width for every roster the poll permits. Only the final roster entry opens; seeds are independent across families. Generated bytes count all candidate coordinates hashed during registration, not their simultaneous residency or upload. Digest and private seed/salt figures are payload subtotals excluding canonical framing, signatures, custody, work and restart amplification. The auxiliary pair is fixed public input with no real participant secret; its separate good-key phase bound is used only in the [candidate proof games](security-argument.md#registration-bound-clear-preparation-argument). This does not change the existing parameter table or prove the changed simulator.',
@@ -6201,40 +6148,36 @@ export const findFirstCensusMismatch = (
 };
 
 const usage =
-    'Usage: generate-documentation-census.ts (--output <file> | --check <file> | --print)';
+    'Usage: generate-documentation-census.ts (--output <file> | --check <file>)';
 
 const main = async (): Promise<void> => {
     const rawArguments = process.argv.slice(2);
     const argumentsList =
         rawArguments[0] === '--' ? rawArguments.slice(1) : rawArguments;
-    const rendered = renderDocumentationCensus();
-    if (argumentsList.length === 1 && argumentsList[0] === '--print') {
-        process.stdout.write(rendered);
-        return;
-    }
-    if (argumentsList.length !== 2 || argumentsList[1] === undefined) {
+    const [mode, target] = argumentsList;
+    if (
+        argumentsList.length !== 2 ||
+        (mode !== '--output' && mode !== '--check') ||
+        target === undefined
+    )
         throw new Error(usage);
-    }
-    const targetPath = path.resolve(argumentsList[1]);
-    if (argumentsList[0] === '--output') {
+    const targetPath = path.resolve(target);
+    const rendered = renderDocumentationCensus();
+    if (mode === '--output') {
         await writeFile(targetPath, rendered, 'utf8');
         process.stdout.write(
             `Wrote ${String(Buffer.byteLength(rendered))} bytes to ${targetPath}\n`,
         );
         return;
     }
-    if (argumentsList[0] === '--check') {
-        const stored = await readFile(targetPath, 'utf8');
-        const mismatch = findFirstCensusMismatch(stored, rendered);
-        if (mismatch !== undefined) {
-            throw new Error(
-                `The stored census is stale at line ${String(mismatch)}; regenerate it with --output.`,
-            );
-        }
-        process.stdout.write('The stored census matches the models.\n');
-        return;
+    const stored = await readFile(targetPath, 'utf8');
+    const mismatch = findFirstCensusMismatch(stored, rendered);
+    if (mismatch !== undefined) {
+        throw new Error(
+            `The stored census is stale at line ${String(mismatch)}; regenerate it with --output.`,
+        );
     }
-    throw new Error(usage);
+    process.stdout.write('The stored census matches the models.\n');
 };
 
 if (import.meta.main) await main();

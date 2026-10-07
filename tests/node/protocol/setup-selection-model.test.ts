@@ -161,11 +161,6 @@ describe('clear contribution selection candidate', () => {
         for (const organizer of [false, true]) {
             expect(
                 countStagePath(
-                    preparationStagePath('clear-close-only', organizer),
-                ),
-            ).toBe(7);
-            expect(
-                countStagePath(
                     preparationStagePath('clear-certified', organizer),
                 ),
             ).toBe(8);
