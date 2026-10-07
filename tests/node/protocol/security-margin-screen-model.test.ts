@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { compileSourceDomainOracleBudget } from '#tests/oracle-budget-model.js';
+import { compileRegistrationSourceExtractionWork } from '#tests/registration-source-randomness-model.js';
 import {
     budgetSplitBits,
     ceilingLog2,
@@ -8,11 +9,15 @@ import {
     criterionAttacks,
     fheAttackScreens,
     fheKnownAttackFloor,
-    oracleSimulationGates,
-    oracleSimulationVariants,
+    compileFhePopulationLimits,
+    reductionGates,
+    reductionVariants,
     registrationSourceInputBits,
     requiredFheAssumptionBits,
     securityTargetBits,
+    sourceDomainRequirementAt,
+    supportedLevelBits,
+    unpricedWorkAllowance,
 } from '#tests/security-margin-screen-model.js';
 import { listSupportedProfiles } from '#tests/supported-profile-model.js';
 
@@ -89,17 +94,12 @@ describe('FHE security margin screen', () => {
             { length: 11 },
             (_, index) => securityTargetBits - 4n * BigInt(10 - index),
         );
-        for (const variant of oracleSimulationVariants) {
+        for (const variant of reductionVariants) {
             const required = exponents.map((exponent) => {
                 const gates = 1n << exponent;
                 return requiredFheAssumptionBits(
                     row.comparisons,
-                    oracleSimulationGates(
-                        variant,
-                        gates,
-                        row.sourceMaskScopes,
-                        row.resumeFactor,
-                    ),
+                    reductionGates(variant, gates, row.operands),
                     gates,
                 );
             });
@@ -117,7 +117,7 @@ describe('FHE security margin screen', () => {
     it('agrees with a floating-point evaluation of the same requirement', () => {
         for (const row of screen)
             for (const requirement of row.requirements) {
-                const ratio = 1 + Number(requirement.simulationGates) / 2 ** 80;
+                const ratio = 1 + Number(requirement.reductionGates) / 2 ** 80;
                 const exact =
                     80 +
                     3 +
@@ -133,14 +133,14 @@ describe('FHE security margin screen', () => {
 
     it('orders the nested oracle interfaces by their required level', () => {
         for (const row of screen) {
-            expect(row.resumeFactor).toBeGreaterThan(5n);
+            expect(row.operands.resumeFactor).toBeGreaterThan(5n);
             for (let index = 1; index < row.requirements.length; index++) {
                 const [smaller, larger] = row.requirements.slice(
                     index - 1,
                     index + 1,
                 );
-                expect(smaller.simulationGates).toBeLessThan(
-                    larger.simulationGates,
+                expect(smaller.reductionGates).toBeLessThan(
+                    larger.reductionGates,
                 );
                 expect(smaller.requiredBits).toBeLessThanOrEqual(
                     larger.requiredBits,
@@ -153,9 +153,8 @@ describe('FHE security margin screen', () => {
             const readers = named('commitment shadows and readers');
             const resumed = named('commitment shadows and resumed hashes');
             const growth =
-                Number(resumed.simulationGates) /
-                Number(readers.simulationGates);
-            const factorSquared = (Number(row.resumeFactor) / 5) ** 2;
+                Number(resumed.reductionGates) / Number(readers.reductionGates);
+            const factorSquared = (Number(row.operands.resumeFactor) / 5) ** 2;
             expect(growth).toBeGreaterThan(factorSquared * 0.9);
             expect(growth).toBeLessThan(factorSquared * 1.1);
         }
@@ -166,7 +165,7 @@ describe('FHE security margin screen', () => {
             const forwarded = row.requirements.find(
                 (value) => value.variant === 'forwarded oracle',
             )!;
-            expect(forwarded.simulationGates).toBe(0n);
+            expect(forwarded.reductionGates).toBe(0n);
             // The bit length of comparisons - 1 is the smallest k with
             // comparisons <= 2^k.
             expect(forwarded.requiredBits).toBe(
@@ -219,7 +218,7 @@ describe('FHE security margin screen', () => {
         expect(budget.sourceCallsUpperBound).toBe(calls);
         expect(budget.sourceInputClassBits).toBe(1n << 26n);
         for (const row of screen) {
-            const shadows = row.sourceMaskScopes;
+            const shadows = row.operands.sourceMaskScopes;
             // Programmed and shadow databases each hold one source class; the
             // entry term dominates the per-call and controller terms.
             const leading =
@@ -228,19 +227,214 @@ describe('FHE security margin screen', () => {
                 calls ** 2n *
                 lengthBits *
                 ((1n << 26n) + 2n);
-            const priced = oracleSimulationGates(
-                'source-domain commitment shadows',
+            const priced = compileSourceDomainOracleBudget(
                 gates,
+                512n,
+                lengths,
+                0n,
                 shadows,
-            );
+            ).shadowQueryGatesUpperBound;
             expect(priced).toBeGreaterThan(leading);
             expect(Number(priced) / Number(leading)).toBeLessThan(1.1);
             // The full-domain database keeps an entry per permutation of the
             // whole experiment, which the shortest source call alone exceeds.
             expect(
-                oracleSimulationGates('commitment shadows', gates, shadows) /
+                reductionGates('commitment shadows', gates, row.operands) /
                     priced,
             ).toBeGreaterThan(minimumCall);
+        }
+    });
+
+    it('prices the complete source-domain reduction around its query circuits', () => {
+        const lengths = registrationSourceInputBits();
+        const gates = 1n << securityTargetBits;
+        const permutationCharge = 24n * 1600n;
+        const slots = gates / permutationCharge;
+        for (const row of screen) {
+            const { operands } = row;
+            const factor = operands.resumeFactor;
+            const records = operands.honestProofScopes;
+            const shadows = operands.sourceMaskScopes;
+            const circuits = compileSourceDomainOracleBudget(
+                gates,
+                512n,
+                lengths,
+                0n,
+                shadows,
+            );
+            const complete = compileSourceDomainOracleBudget(
+                gates,
+                512n,
+                lengths,
+                records,
+                shadows,
+                factor,
+            );
+            // The conversions enlarge only the forwarded calls: the source
+            // calls and their database capacity stay the coherent calls'.
+            expect(complete.sourceCallsUpperBound).toBe(
+                circuits.sourceCallsUpperBound,
+            );
+            expect(complete.sourceComponentCapacityUpperBound).toBe(
+                4n * circuits.sourceCallsUpperBound,
+            );
+            // Every forwarded call is made twice around the replacement copy.
+            expect(complete.forwardedCallGatesUpperBound).toBe(
+                2n * factor * slots * permutationCharge,
+            );
+            // Each programmed record compares and substitutes in the
+            // replacement copy of every converted permutation.
+            const withoutRecords = compileSourceDomainOracleBudget(
+                gates,
+                512n,
+                lengths,
+                0n,
+                shadows,
+                factor,
+            );
+            expect(
+                complete.shadowQueryGatesUpperBound -
+                    withoutRecords.shadowQueryGatesUpperBound,
+            ).toBe(
+                factor *
+                    slots *
+                    records *
+                    (10n + 10n * complete.lengthBitsUpperBound + 20n * 1344n),
+            );
+            // Each corrupt registration-source extraction scans the source
+            // component's capacity and decodes the coordinate it finds.
+            const extraction = compileRegistrationSourceExtractionWork(
+                row.participantCount,
+                row.optionCount,
+                complete.sourceComponentCapacityUpperBound,
+                operands.corruptSourceExtractions,
+            ).maximumPreparedSelectionAndDecodingGates;
+            const source = row.requirements.find(
+                (value) => value.variant === 'source-domain reduction',
+            )!;
+            expect(source.reductionGates).toBe(
+                complete.shadowQueryGatesUpperBound +
+                    complete.forwardedCallGatesUpperBound +
+                    extraction +
+                    operands.sourceCacheGates,
+            );
+            // The forwarded calls, extractions and cache are negligible next
+            // to the query circuits.
+            expect(
+                Number(
+                    source.reductionGates - complete.shadowQueryGatesUpperBound,
+                ) / Number(complete.shadowQueryGatesUpperBound),
+            ).toBeLessThan(2 ** -40);
+            // The work that does not grow with the experiment, charged at
+            // a one-gate experiment, changes no requirement.
+            const fixed = reductionGates(
+                'source-domain reduction',
+                0n,
+                operands,
+            );
+            // Without a corrupt participant nothing is extracted or cached.
+            expect(fixed > operands.sourceCacheGates).toBe(
+                operands.corruptSourceExtractions > 0n,
+            );
+            expect(
+                requiredFheAssumptionBits(
+                    row.comparisons,
+                    source.reductionGates + fixed * gates,
+                ),
+            ).toBe(source.requiredBits);
+            // The unpriced record creation may take far more than the
+            // experiment's own work before the criterion falls.
+            expect(row.criterionAllowance).toBe(
+                unpricedWorkAllowance(
+                    row.comparisons,
+                    source.reductionGates,
+                    supportedLevelBits(row.criterion),
+                ),
+            );
+            expect(row.criterionAllowance).toBeGreaterThan(gates << 100n);
+            expect(
+                requiredFheAssumptionBits(
+                    row.comparisons,
+                    source.reductionGates + row.criterionAllowance,
+                ),
+            ).toBe(supportedLevelBits(row.criterion));
+            expect(
+                requiredFheAssumptionBits(
+                    row.comparisons,
+                    source.reductionGates + row.criterionAllowance + 1n,
+                ),
+            ).toBeGreaterThan(supportedLevelBits(row.criterion));
+        }
+    });
+
+    it('solves for the largest original honest registration population within each level', () => {
+        const limits = compileFhePopulationLimits();
+        expect(limits.map((row) => row.participantCount)).toEqual(
+            screen.map((row) => row.participantCount),
+        );
+        for (const row of limits) {
+            const screened = screen.find(
+                (value) => value.participantCount === row.participantCount,
+            )!;
+            const profile = listSupportedProfiles().find(
+                (value) =>
+                    value.participantCount === row.participantCount &&
+                    BigInt(value.ciphertext.bits) === screened.modulusBits &&
+                    value.optionCount === screened.optionCount,
+            )!;
+            for (const [limit, floor] of [
+                [row.criterion, screened.criterion],
+                [row.stressTest, screened.stressTest],
+            ] as const) {
+                expect(limit.levelBits).toBe(
+                    BigInt(Math.floor(floor.log2Cost)),
+                );
+                // One more registration crosses the level.
+                const at = sourceDomainRequirementAt(
+                    profile,
+                    limit.honestRegistrations,
+                );
+                const beyond = sourceDomainRequirementAt(
+                    profile,
+                    limit.honestRegistrations + 1n,
+                );
+                expect(at.requiredBits).toBeLessThanOrEqual(limit.levelBits);
+                expect(beyond.requiredBits).toBeGreaterThan(limit.levelBits);
+                expect(limit.allowance).toBe(
+                    unpricedWorkAllowance(
+                        at.comparisons,
+                        at.reductionGates,
+                        limit.levelBits,
+                    ),
+                );
+                expect(
+                    unpricedWorkAllowance(
+                        beyond.comparisons,
+                        beyond.reductionGates,
+                        limit.levelBits,
+                    ),
+                ).toBeLessThan(0n);
+                // Even at its limit, each level absorbs unpriced record
+                // creation far beyond the experiment's own work.
+                expect(limit.allowance).toBeGreaterThan(
+                    1n << (securityTargetBits + 60n),
+                );
+            }
+            // The comparisons and the commitment shadows both grow with the
+            // population, so the requirement rises two bits per doubling and
+            // the two limits differ by the square root of their level gap.
+            const expected =
+                2 **
+                (Number(row.criterion.levelBits - row.stressTest.levelBits) /
+                    2);
+            const ratio =
+                Number(row.criterion.honestRegistrations) /
+                Number(row.stressTest.honestRegistrations);
+            expect(ratio / expected).toBeGreaterThan(0.99);
+            expect(ratio / expected).toBeLessThan(1.01);
+            expect(row.stressTest.honestRegistrations).toBeGreaterThan(
+                BigInt(row.participantCount),
+            );
         }
     });
 
@@ -327,7 +521,7 @@ describe('FHE security margin screen', () => {
                 expect(value.marginToCriterion).toBeGreaterThan(0);
             // Restricting simulation to the registration-source domain keeps
             // a positive margin even under the quantum stress test.
-            const source = named('source-domain commitment shadows');
+            const source = named('source-domain reduction');
             expect(source.marginToStressTest).toBeGreaterThan(0);
             expect(source.marginToCriterion).toBeGreaterThan(30);
             // Implementing the whole function exceeds the stress test, and

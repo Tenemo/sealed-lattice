@@ -13,6 +13,7 @@ import {
 } from '#tests/proof-hash-work-model.js';
 import { compileRegistrationSetupBindingScreen } from '#tests/registration-setup-binding-model.js';
 import { registrationSourceMask } from '#tests/registration-source-domain-model.js';
+import { compileRegistrationSourceExtractionWork } from '#tests/registration-source-randomness-model.js';
 import {
     listSupportedProfiles,
     supportedProfileRanges,
@@ -214,31 +215,35 @@ export const fheKnownAttackFloor = (modulusBits: bigint) => ({
     ),
 });
 
-// The oracle-simulation operand of an FHE comparison at an experiment of
-// `experimentGates`. The lattice assumptions hold relative to the ideal SHAKE
-// oracle, so a reduction that never reads or programs the attacker's queries
-// forwards them and simulates nothing; programming a point adds a wrapper
-// that this floor omits. The FHE embedding fixes the pivot's coordinate from
-// extracted corrupt registration coordinates, so it reads and programs the
-// registration-source commitment domain: under that assumption it implements
-// only that domain, with one honest-commitment shadow per potential sender
-// scope, and forwards every other query. A reduction that implements the
-// whole function itself, as one without that assumption must, pays the three
-// nested interfaces after it. Each variant prices only the maintained query
-// circuits, so each requirement below is a lower bound on what that reduction
-// needs; extraction, proof simulation, record creation and every other part
-// of the reduction only add work.
-export type OracleSimulationVariant =
+// The reduction-work operand of an FHE comparison at an experiment of
+// `experimentGates`: the work the reduction adds to that experiment. The
+// lattice assumptions hold relative to the ideal SHAKE oracle, so a
+// reduction that never reads or programs the attacker's queries forwards
+// them and adds nothing; that floor omits even the programming wrapper. The
+// FHE embedding fixes the pivot's coordinate from extracted corrupt
+// registration coordinates, so it reads and programs the registration-source
+// commitment domain: under that assumption it implements only that domain,
+// with one honest-commitment shadow per potential sender scope, and forwards
+// every other query. Its variant prices the complete reduction except the
+// simulated proofs' record creation: the source-domain query circuits, the
+// programmed honest proofs' replacement wrapper, the classical-reader and
+// resumed-hash conversions and the forwarded calls, the corrupt
+// registration-source extractions with coordinate decoding, and the source
+// cache. A reduction that implements the whole function itself, as one
+// without that assumption must, pays the four nested interfaces after it;
+// those variants price only the maintained query circuits, so their
+// requirements are lower bounds on what such a reduction needs.
+export type ReductionVariant =
     | 'forwarded oracle'
-    | 'source-domain commitment shadows'
+    | 'source-domain reduction'
     | 'background oracle'
     | 'commitment shadows'
     | 'commitment shadows and readers'
     | 'commitment shadows and resumed hashes';
 
-export const oracleSimulationVariants: readonly OracleSimulationVariant[] = [
+export const reductionVariants: readonly ReductionVariant[] = [
     'forwarded oracle',
-    'source-domain commitment shadows',
+    'source-domain reduction',
     'background oracle',
     'commitment shadows',
     'commitment shadows and readers',
@@ -283,35 +288,100 @@ export const registrationSourceInputBits = (): readonly bigint[] => {
 };
 
 // The complete-input conversion of a setup proof's first-oracle leaf hash
-// resumed from its authenticated checkpoint prefix.
+// resumed from its authenticated checkpoint prefix. It depends on the profile
+// alone, so a population search compiles it once.
+const resumeFactors = new Map<SupportedProfile, bigint>();
 const firstOracleResumeFactor = (profile: SupportedProfile) => {
+    const cached = resumeFactors.get(profile);
+    if (cached !== undefined) return cached;
     const setup = proofHashProfiles(profile).find(
         (value) => value.role === 'setup',
     );
     assert.ok(setup !== undefined);
-    return firstOracleResumeHashWork(
+    const factor = firstOracleResumeHashWork(
         setup.firstWidth,
         setup.roleBytes,
         (setup.firstWidth - 48n) / 16n,
     ).completeInputFactor;
+    resumeFactors.set(profile, factor);
+    return factor;
 };
 
-export const oracleSimulationGates = (
-    variant: OracleSimulationVariant,
+// The ledger populations one reduction acts on at a profile and original
+// honest registration population.
+export type ReductionOperands = Readonly<{
+    participantCount: number;
+    optionCount: number;
+    sourceMaskScopes: bigint;
+    honestProofScopes: bigint;
+    corruptSourceExtractions: bigint;
+    sourceCacheGates: bigint;
+    resumeFactor: bigint;
+}>;
+
+const reductionOperands = (
+    profile: SupportedProfile,
+    ledger: ReturnType<typeof compileClearPreparationLedger>,
+    resumeFactor: bigint,
+): ReductionOperands => ({
+    participantCount: profile.participantCount,
+    optionCount: profile.optionCount,
+    sourceMaskScopes: ledger.sourceMaskScopes,
+    // Each simulated honest proof programs one wide verifier message.
+    honestProofScopes: ledger.maximumHonestProofScopes,
+    corruptSourceExtractions: ledger.maximumCorruptSourceExtractions,
+    sourceCacheGates: ledger.sourceCache.totalGates,
+    resumeFactor,
+});
+
+// The prepared selection and decoding of one extraction request is linear in
+// the requests, so one request per profile and capacity is compiled once.
+const extractionGatesPerRequest = new Map<string, bigint>();
+const extractionGates = (operands: ReductionOperands, capacity: bigint) => {
+    const key = `${String(operands.participantCount)}:${String(operands.optionCount)}:${String(capacity)}`;
+    let perRequest = extractionGatesPerRequest.get(key);
+    if (perRequest === undefined) {
+        perRequest = compileRegistrationSourceExtractionWork(
+            operands.participantCount,
+            operands.optionCount,
+            capacity,
+            1n,
+        ).maximumPreparedSelectionAndDecodingGates;
+        extractionGatesPerRequest.set(key, perRequest);
+    }
+    return operands.corruptSourceExtractions * perRequest;
+};
+
+export const reductionGates = (
+    variant: ReductionVariant,
     experimentGates: bigint,
-    sourceMaskScopes: bigint,
-    resumeFactor = 5n,
+    operands: ReductionOperands,
 ) => {
     if (variant === 'forwarded oracle') return 0n;
     // The commitment digest width is the first output chunk.
     const firstChunkBits = 512n;
-    if (variant === 'source-domain commitment shadows')
-        return compileSourceDomainOracleBudget(
+    if (variant === 'source-domain reduction') {
+        // The conversions cover classical readers at five and resumed hashes
+        // at their own factor.
+        const budget = compileSourceDomainOracleBudget(
             experimentGates,
             firstChunkBits,
             registrationSourceInputBits(),
-            sourceMaskScopes,
-        ).shadowQueryGatesUpperBound;
+            operands.honestProofScopes,
+            operands.sourceMaskScopes,
+            operands.resumeFactor < 5n ? 5n : operands.resumeFactor,
+        );
+        // Extraction scans the source component's whole capacity.
+        return (
+            budget.shadowQueryGatesUpperBound +
+            budget.forwardedCallGatesUpperBound +
+            extractionGates(
+                operands,
+                budget.sourceComponentCapacityUpperBound,
+            ) +
+            operands.sourceCacheGates
+        );
+    }
     if (variant === 'background oracle')
         // The full-domain components alone: no simulated honest commitment,
         // no programmed record and no extraction.
@@ -325,7 +395,7 @@ export const oracleSimulationGates = (
             experimentGates,
             firstChunkBits,
             0n,
-            sourceMaskScopes,
+            operands.sourceMaskScopes,
         ).shadowQueryGatesUpperBound;
     // The participant code reads its private streams through classical
     // fixed-input readers, whose conversion replaces the complete-input one.
@@ -336,27 +406,49 @@ export const oracleSimulationGates = (
         experimentGates,
         firstChunkBits,
         0n,
-        sourceMaskScopes,
-        variant === 'commitment shadows and readers' || resumeFactor < 5n
+        operands.sourceMaskScopes,
+        variant === 'commitment shadows and readers' ||
+            operands.resumeFactor < 5n
             ? 5n
-            : resumeFactor,
+            : operands.resumeFactor,
     ).shadowQueryGatesUpperBound;
 };
 
 // Smallest lambda with comparisons*Tred(T)/2^lambda <= T/2^(80+split) for
-// every T <= 2^80, where Tred(T) = T + simulation(T). The ratio Tred(T)/T
-// does not decrease with T, so T = 2^80 decides it.
+// every T <= 2^80, where Tred(T) = T + reduction work(T). The ratio Tred(T)/T
+// does not decrease with T apart from the source cache and the extractions'
+// fixed work, which do not grow with T. Charging those at T = 1 changes no
+// requirement, as the margin test checks, so T = 2^80 decides it.
 export const requiredFheAssumptionBits = (
     comparisons: bigint,
-    simulationGates: bigint,
+    reductionWorkGates: bigint,
     experimentGates = 1n << securityTargetBits,
 ) =>
     securityTargetBits +
     budgetSplitBits +
     ceilingLog2(
-        comparisons * (experimentGates + simulationGates),
+        comparisons * (experimentGates + reductionWorkGates),
         experimentGates,
     );
+
+// A requirement of lambda bits holds at an attack floor of c bits when
+// lambda <= c, so the integer level a floor supports is its whole part.
+export const supportedLevelBits = (floor: FheAttackScreen) =>
+    BigInt(Math.floor(floor.log2Cost));
+
+// The further reduction work that keeps the requirement within a supported
+// level: comparisons*(T + priced + W) <= T*2^(level-80-split). Negative when
+// the priced work alone exceeds that level.
+export const unpricedWorkAllowance = (
+    comparisons: bigint,
+    pricedGates: bigint,
+    levelBits: bigint,
+    experimentGates = 1n << securityTargetBits,
+) =>
+    (experimentGates << (levelBits - securityTargetBits - budgetSplitBits)) /
+        comparisons -
+    experimentGates -
+    pricedGates;
 
 // The single-key Ring-LWE comparisons of the FHE instance in the clear
 // preparation ledger. A good-key multi-message comparison over n messages
@@ -383,40 +475,57 @@ const largestModulusProfiles = () => {
     );
 };
 
+// The ledger, comparisons and reduction operands at a profile and original
+// honest registration population of one poll.
+const fheComparisonInputs = (
+    profile: SupportedProfile,
+    honestRegistrations: bigint,
+) => {
+    const ledger = compileClearPreparationLedger(profile, honestRegistrations);
+    return {
+        ledger,
+        comparisons: fheRingLweComparisons(ledger),
+        operands: reductionOperands(
+            profile,
+            ledger,
+            firstOracleResumeFactor(profile),
+        ),
+    };
+};
+
 // One original honest registration per participant: the smallest population
-// with every member honest. A larger population H adds log2(H/n) bits.
+// with every member honest. A larger population H adds about log2(H/n) bits
+// for the comparisons and as many again for the source-domain reduction,
+// whose shadows grow with H.
 export const compileSecurityMarginScreen = () => {
     const experimentGates = 1n << securityTargetBits;
     return largestModulusProfiles().map((profile) => {
         const honestRegistrations = BigInt(profile.participantCount);
-        const ledger = compileClearPreparationLedger(
+        const modulusBits = BigInt(profile.ciphertext.bits);
+        const { criterion, stressTest } = fheKnownAttackFloor(modulusBits);
+        const { ledger, comparisons, operands } = fheComparisonInputs(
             profile,
             honestRegistrations,
         );
-        const comparisons = fheRingLweComparisons(ledger);
-        const modulusBits = BigInt(profile.ciphertext.bits);
-        const { criterion, stressTest } = fheKnownAttackFloor(modulusBits);
-        const resumeFactor = firstOracleResumeFactor(profile);
-        const requirements = oracleSimulationVariants.map((variant) => {
-            const simulationGates = oracleSimulationGates(
-                variant,
-                experimentGates,
-                ledger.sourceMaskScopes,
-                resumeFactor,
-            );
+        const requirements = reductionVariants.map((variant) => {
+            const gates = reductionGates(variant, experimentGates, operands);
             const requiredBits = requiredFheAssumptionBits(
                 comparisons,
-                simulationGates,
+                gates,
                 experimentGates,
             );
             return {
                 variant,
-                simulationGates,
+                reductionGates: gates,
                 requiredBits,
                 marginToCriterion: criterion.log2Cost - Number(requiredBits),
                 marginToStressTest: stressTest.log2Cost - Number(requiredBits),
             };
         });
+        const sourceDomain = requirements.find(
+            (value) => value.variant === 'source-domain reduction',
+        );
+        assert.ok(sourceDomain !== undefined);
         return {
             participantCount: profile.participantCount,
             optionCount: profile.optionCount,
@@ -424,12 +533,106 @@ export const compileSecurityMarginScreen = () => {
             honestRegistrations,
             selectedPositionSets: ledger.selectedPositionSets,
             sharedFheModulusGuesses: ledger.sharedFheModulusGuesses,
-            sourceMaskScopes: ledger.sourceMaskScopes,
-            resumeFactor,
+            operands,
             comparisons,
             criterion,
             stressTest,
             requirements,
+            // The record creation of the simulated proofs is the reduction
+            // work this variant leaves unpriced.
+            criterionAllowance: unpricedWorkAllowance(
+                comparisons,
+                sourceDomain.reductionGates,
+                supportedLevelBits(criterion),
+                experimentGates,
+            ),
         };
     });
 };
+
+// The largest original honest registration population of one poll whose
+// source-domain requirement stays within the level a floor supports. The
+// requirement never falls as the population grows, so doubling and then
+// bisection find it. Zero when one registration already exceeds the level.
+export const sourceDomainRequirementAt = (
+    profile: SupportedProfile,
+    honestRegistrations: bigint,
+) => {
+    const experimentGates = 1n << securityTargetBits;
+    const { comparisons, operands } = fheComparisonInputs(
+        profile,
+        honestRegistrations,
+    );
+    const gates = reductionGates(
+        'source-domain reduction',
+        experimentGates,
+        operands,
+    );
+    return {
+        comparisons,
+        reductionGates: gates,
+        requiredBits: requiredFheAssumptionBits(
+            comparisons,
+            gates,
+            experimentGates,
+        ),
+    };
+};
+
+const largestPopulationWithin = (
+    profile: SupportedProfile,
+    levelBits: bigint,
+) => {
+    const within = (population: bigint) =>
+        sourceDomainRequirementAt(profile, population).requiredBits <=
+        levelBits;
+    let low = 0n;
+    let high = 1n;
+    while (within(high)) {
+        low = high;
+        high *= 2n;
+        assert.ok(high < 1n << 64n, 'No population limit below 2^64.');
+    }
+    while (high - low > 1n) {
+        const middle = (low + high) / 2n;
+        if (within(middle)) low = middle;
+        else high = middle;
+    }
+    return low;
+};
+
+// The FHE comparisons' own limit on a poll's original honest registrations,
+// at each participant count's largest modulus: the largest population whose
+// priced source-domain requirement stays within the criterion floor, and
+// within the quantum stress test. At each limit, the further reduction work
+// the level still absorbs bounds the unpriced record creation.
+export const compileFhePopulationLimits = () =>
+    largestModulusProfiles().map((profile) => {
+        const { criterion, stressTest } = fheKnownAttackFloor(
+            BigInt(profile.ciphertext.bits),
+        );
+        const limit = (floor: FheAttackScreen) => {
+            const levelBits = supportedLevelBits(floor);
+            const honestRegistrations = largestPopulationWithin(
+                profile,
+                levelBits,
+            );
+            assert.ok(
+                honestRegistrations > 0n,
+                'One registration already exceeds the supported level.',
+            );
+            const { comparisons, reductionGates: gates } =
+                sourceDomainRequirementAt(profile, honestRegistrations);
+            return {
+                levelBits,
+                honestRegistrations,
+                allowance: unpricedWorkAllowance(comparisons, gates, levelBits),
+            };
+        };
+        return {
+            participantCount: profile.participantCount,
+            modulusBits: BigInt(profile.ciphertext.bits),
+            criterion: limit(criterion),
+            stressTest: limit(stressTest),
+        };
+    });

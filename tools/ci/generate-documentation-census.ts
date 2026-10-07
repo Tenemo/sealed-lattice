@@ -116,8 +116,9 @@ import { compileReleaseVerificationWorkload } from '#tests/release-verification-
 import { compileRnsArithmeticResourceCensus } from '#tests/rns-arithmetic-resource-model.js';
 import { compileRosterProposalCensus } from '#tests/roster-proposal-model.js';
 import {
+    compileFhePopulationLimits,
     compileSecurityMarginScreen,
-    type OracleSimulationVariant,
+    type ReductionVariant,
 } from '#tests/security-margin-screen-model.js';
 import { compileSelectedOpeningTransformCensus } from '#tests/selected-opening-transform-model.js';
 import { compileSetupAggregateResources } from '#tests/setup-aggregate-resource-model.js';
@@ -4705,11 +4706,11 @@ export const renderDocumentationCensus = (): string => {
             }),
         ),
         '',
-        'Oracle simulation is priced from declared query schedules in the compressed-oracle circuit census. That accounting includes persistent components, clean prefix wrappers and all supplied shadow streams. Deriving admissible capacities from the accepted experiment-cost convention, pricing the complete protocol wrappers and closing the semantic-use inventory remain required before solving for a security population.',
+        'Oracle simulation is priced from declared query schedules in the compressed-oracle circuit census. That accounting includes persistent components, clean prefix wrappers and all supplied shadow streams. The margin screen below derives the FHE reduction’s capacities from the accepted experiment-cost convention, prices its protocol wrappers and solves for the FHE comparisons’ own population limit; the other assumption groups and the semantic-use inventory remain required before solving for the complete security population.',
         '',
         '### FHE security margin screen',
         '',
-        'The [margin model](../tests/security-margin-screen-model.ts) tests whether the current FHE comparisons can reach the target with the current parameters. It charges every single-key FHE Ring-LWE comparison of the [clear-preparation ledger](security-argument.md#clear-candidate-joint-ledger) at one original honest registration per participant, expanding each multi-message ballot comparison over its messages. The withdrawn ledger’s seven assumption groups share the 2^-80 budget equally. Each requirement prices only the maintained query circuits at a complete experiment of 2^80 gates, where the reduction ratio is largest. The lattice assumptions hold relative to the ideal SHAKE oracle, so the forwarded column, which simulates nothing, is the floor for a reduction that never reads or programs the attacker’s queries; programming a point adds a wrapper that column omits. The FHE embedding fixes each pivot’s honest coordinate after its registration commitment from extracted corrupt registration coordinates, so it reads and programs the registration-source commitment domain with one commitment shadow per potential sender scope. The source-domain column implements only that domain and forwards every other query. A call reaches that domain only if its input capacity holds the shortest registration-source input, so it costs at least that input’s permutations, and every source input lies in one dyadic input class; the database terms are the full-domain bound restricted to those calls and that class. The background column prices a reduction that implements the whole function itself, as one without the oracle-relative assumption must, and the shadow column adds its commitment shadows. The reader column applies the classical fixed-input reader conversion that participant code uses. The last requirement column applies the larger conversion for setup first-oracle leaf hashes resumed from an authenticated checkpoint, conditional on the original input staying available to the adapter. Extraction, proof simulation, record creation and every other reduction cost only add work, and H registrations instead of n add log2(H/n) bits. Each row uses the largest FHE modulus at that participant count. The floors are the cheapest core-SVP screens that the [security argument](security-argument.md#ledger) cites; a screen at one modulus bounds the same attack at every smaller supported modulus. Attack costs follow the accepted convention, without quantum random-access memory, so the classical floor over every algorithm of the estimator’s full estimate is the criterion. The quantum model’s sieving speedup assumes that memory, so its floor is a stress test. Neither model counts gates as the convention does.',
+        'The [margin model](../tests/security-margin-screen-model.ts) tests whether the current FHE comparisons can reach the target with the current parameters. It charges every single-key FHE Ring-LWE comparison of the [clear-preparation ledger](security-argument.md#clear-candidate-joint-ledger) at one original honest registration per participant, expanding each multi-message ballot comparison over its messages. The withdrawn ledger’s seven assumption groups share the 2^-80 budget equally. Each requirement charges the reduction’s work at a complete experiment of 2^80 gates, where the reduction ratio is largest; the source cache and the extractions’ fixed work do not grow with the experiment, and charging them at their largest ratio changes no requirement. The lattice assumptions hold relative to the ideal SHAKE oracle, so the forwarded column, which adds no work, is the floor for a reduction that never reads or programs the attacker’s queries. The FHE embedding fixes each pivot’s honest coordinate after its registration commitment from extracted corrupt registration coordinates, so it reads and programs the registration-source commitment domain with one commitment shadow per potential sender scope. The source-domain column implements only that domain, forwards every other query and prices the complete reduction except the simulated proofs’ record creation: its query circuits, the replacement wrapper for every programmed honest proof, the classical-reader and resumed-hash conversions of the forwarded honest calls and the forwarded calls themselves, every corrupt registration-source extraction with its coordinate decoding, and the source cache. A call reaches that domain only if its input capacity holds the shortest registration-source input, so it costs at least that input’s permutations, and every source input lies in one dyadic input class; the database terms are the full-domain bound restricted to those calls and that class. The converted honest calls read private streams and proof hashes outside that domain, so the conversions enlarge only the forwarded calls. The background column prices only the query circuits of a reduction that implements the whole function itself, as one without the oracle-relative assumption must, and the shadow column adds its commitment shadows. The reader column applies the classical fixed-input reader conversion that participant code uses. The resumed column applies the larger conversion for setup first-oracle leaf hashes resumed from an authenticated checkpoint, conditional on the original input staying available to the adapter. Those four columns omit every other reduction cost, so they are lower bounds. Each row uses the largest FHE modulus at that participant count. The floors are the cheapest core-SVP screens that the [security argument](security-argument.md#ledger) cites; a screen at one modulus bounds the same attack at every smaller supported modulus. Attack costs follow the accepted convention, without quantum random-access memory, so the classical floor over every algorithm of the estimator’s full estimate is the criterion. The quantum model’s sieving speedup assumes that memory, so its floor is a stress test. Neither model counts gates as the convention does. The last column is the further reduction work, in whole log2 gates, that keeps the source-domain requirement within the whole bits of the criterion floor; the simulated proofs’ record creation must fit within it.',
         '',
         table(
             [
@@ -4719,7 +4720,7 @@ export const renderDocumentationCensus = (): string => {
                 'Selected position sets',
                 'FHE Ring-LWE comparisons',
                 'Required bits, forwarded oracle',
-                'Required bits, source-domain shadows',
+                'Required bits, source-domain reduction',
                 'Required bits, background oracle',
                 'Required bits, commitment shadows',
                 'Required bits, shadows and readers',
@@ -4727,9 +4728,10 @@ export const renderDocumentationCensus = (): string => {
                 'Required bits, shadows and resumed hashes',
                 'Classical screened-attack floor',
                 'Quantum screened-attack floor',
+                'Unpriced work within the criterion, log2 gates',
             ],
             compileSecurityMarginScreen().map((row) => {
-                const required = (variant: OracleSimulationVariant) =>
+                const required = (variant: ReductionVariant) =>
                     formatCount(
                         row.requirements.find(
                             (value) => value.variant === variant,
@@ -4742,19 +4744,45 @@ export const renderDocumentationCensus = (): string => {
                     formatCount(row.selectedPositionSets),
                     formatCount(row.comparisons),
                     required('forwarded oracle'),
-                    required('source-domain commitment shadows'),
+                    required('source-domain reduction'),
                     required('background oracle'),
                     required('commitment shadows'),
                     required('commitment shadows and readers'),
-                    formatCount(row.resumeFactor),
+                    formatCount(row.operands.resumeFactor),
                     required('commitment shadows and resumed hashes'),
                     `\`${row.criterion.log2Cost.toFixed(2)}\`, ${row.criterion.attack} at ${formatCount(row.criterion.modulusBits)} bits`,
                     `\`${row.stressTest.log2Cost.toFixed(2)}\`, ${row.stressTest.attack} at ${formatCount(row.stressTest.modulusBits)} bits`,
+                    formatCount(row.criterionAllowance.toString(2).length - 1),
                 ];
             }),
         ),
         '',
-        'This screen is a necessary condition, not a security level. Where a requirement exceeds the criterion floor, the priced reduction cannot establish the target at those parameters, whatever its remaining costs. Where it stays below, the margin must still absorb every omitted reduction cost and the actual credential population.',
+        'This screen is a necessary condition, not a security level. Where a requirement exceeds the criterion floor, the priced reduction cannot establish the target at those parameters, whatever its remaining costs.',
+        '',
+        'A larger original honest registration population raises the source-domain requirement by about two bits per doubling: one for the comparisons and one for the commitment shadows. The following limits are the largest original honest registration populations of one poll whose source-domain requirement stays within the whole bits each floor supports. They are the FHE comparisons’ own limit; the other assumption groups, the statistical terms, the semantic-use charges and the simulated proofs’ record creation bound the population separately. Each unpriced column gives the further reduction work, in whole log2 gates, that its limit still absorbs.',
+        '',
+        table(
+            [
+                'Participants',
+                'Modulus bits',
+                'Criterion level bits',
+                'Original honest registrations within the criterion',
+                'Unpriced work at that limit, log2 gates',
+                'Stress-test level bits',
+                'Original honest registrations within the stress test',
+                'Unpriced work at that limit, log2 gates',
+            ],
+            compileFhePopulationLimits().map((row) => [
+                formatCount(row.participantCount),
+                formatCount(row.modulusBits),
+                formatCount(row.criterion.levelBits),
+                formatCount(row.criterion.honestRegistrations),
+                formatCount(row.criterion.allowance.toString(2).length - 1),
+                formatCount(row.stressTest.levelBits),
+                formatCount(row.stressTest.honestRegistrations),
+                formatCount(row.stressTest.allowance.toString(2).length - 1),
+            ]),
+        ),
         '',
         '## Proof-field coefficient-fold bounds',
         '',

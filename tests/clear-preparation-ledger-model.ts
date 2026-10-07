@@ -45,6 +45,25 @@ const fixedSourceCatalogue = () => {
     return sourceCatalogue;
 };
 
+// A registration's source coordinates depend only on the poll maximum and
+// option count, so population sweeps compile each binding screen once.
+const coordinateCounts = new Map<string, bigint>();
+const registrationCoordinateCount = (
+    pollMaximumParticipants: number,
+    optionCount: number,
+) => {
+    const key = `${String(pollMaximumParticipants)}:${String(optionCount)}`;
+    let count = coordinateCounts.get(key);
+    if (count === undefined) {
+        count = compileRegistrationSetupBindingScreen(
+            pollMaximumParticipants,
+            optionCount,
+        ).coordinateCount;
+        coordinateCounts.set(key, count);
+    }
+    return count;
+};
+
 const choose = (population: bigint, selected: bigint) => {
     let result = 1n;
     for (let index = 0n; index < selected; index++)
@@ -79,7 +98,7 @@ export const compileClearPreparationPollPopulations = (
     originalHonestRegistrations: bigint,
 ) => {
     assert.ok(originalHonestRegistrations >= 0n);
-    const source = compileRegistrationSetupBindingScreen(
+    const coordinateCount = registrationCoordinateCount(
         pollMaximumParticipants,
         optionCount,
     );
@@ -113,8 +132,7 @@ export const compileClearPreparationPollPopulations = (
             BigInt(pollMaximumParticipants) * originalHonestRegistrations,
         maximumSourceCacheLookups,
         maximumCorruptSourceExtractions: maximumSourceCacheLookups,
-        generatedSourceEntries:
-            originalHonestRegistrations * source.coordinateCount,
+        generatedSourceEntries: originalHonestRegistrations * coordinateCount,
         sourceMaskScopes:
             originalHonestRegistrations * fixedSourceCatalogue().families,
         sourceCache: compileSourceCache(maximumSourceCacheLookups),
@@ -134,7 +152,7 @@ export const compileClearPreparationLedger = (
     );
     const corrupt = BigInt(thresholds.maximumCorruptParticipantCount);
     const selection = compileSetupSelectionCensus(profile.participantCount);
-    const source = compileRegistrationSetupBindingScreen(
+    const coordinateCount = registrationCoordinateCount(
         pollMaximumParticipants,
         profile.optionCount,
     );
@@ -182,8 +200,7 @@ export const compileClearPreparationLedger = (
             maximumHonestContributionScopes +
             maximumHonestBallots +
             maximumHonestReleases,
-        generatedSourceEntries:
-            originalHonestRegistrations * source.coordinateCount,
+        generatedSourceEntries: originalHonestRegistrations * coordinateCount,
         sourceMaskScopes: originalHonestRegistrations * catalogue.families,
         maximumCorruptSourceExtractions:
             maximumStartedPreparationRosters * corrupt,

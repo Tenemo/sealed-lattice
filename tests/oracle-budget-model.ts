@@ -161,16 +161,27 @@ export const compileFullCircuitOracleBudget = (
 // permutations. Every source input lies in one dyadic input class, so such a
 // call visits one input class and at most lengthBits output chunks, whose
 // widths sum to at most 2*(n+K). The database terms are the full-domain bound
-// restricted to those calls and that class. Forwarding conversions,
-// programming records, extraction and the rest of the reduction stay separate.
+// restricted to those calls and that class.
+//
+// Classical readers and resumed hashes convert honest calls to complete
+// inputs, at most completeInputFactor times their reference permutations,
+// with the rectangle envelope's factor two as the least. Those inputs are
+// private streams and proof hashes outside the source domain, so the
+// conversions enlarge only the forwarded calls. Every forwarded call passes
+// the programmed-record replacement copy and the shadow routing, and is made
+// twice around that copy; one length width covers every converted call.
+// Extraction, record creation and the rest of the reduction stay separate.
 export const compileSourceDomainOracleBudget = (
     experimentGates: bigint,
     firstChunkBits: bigint,
     sourceInputBits: readonly bigint[],
+    programmedRecords = 0n,
     shadowStreams = 0n,
+    completeInputFactor = 2n,
 ) => {
     assert.ok(experimentGates >= 0n && firstChunkBits >= 1n);
-    assert.ok(shadowStreams >= 0n && sourceInputBits.length > 0);
+    assert.ok(programmedRecords >= 0n && shadowStreams >= 0n);
+    assert.ok(completeInputFactor >= 2n && sourceInputBits.length > 0);
     const inputClass = (bits: bigint) => {
         let upper = 1n;
         while (upper < bits) upper *= 2n;
@@ -186,12 +197,14 @@ export const compileSourceDomainOracleBudget = (
         bits < minimum ? bits : minimum,
     );
     const rateBits = 1344n;
-    const permutations = 2n * (experimentGates / shakePermutationGateCharge);
+    const permutationSlots = experimentGates / shakePermutationGateCharge;
+    const permutations = 2n * permutationSlots;
+    const forwardedPermutations = completeInputFactor * permutationSlots;
     const minimumSourceCallPermutations =
         (minimumSourceInputBits + 6n + rateBits - 1n) / rateBits;
     const sourceCalls = permutations / minimumSourceCallPermutations;
     const lengthBits = bitWidth(
-        4n * rateBits * permutations + 2n * firstChunkBits + 3n,
+        4n * rateBits * forwardedPermutations + 2n * firstChunkBits + 3n,
     );
     const componentVisits = sourceCalls * lengthBits;
     const componentBitVisits =
@@ -212,12 +225,16 @@ export const compileSourceDomainOracleBudget = (
         return routing + local + controllersAndCopies;
     };
     // The outer replacement copy and the shadow slice routing keep their
-    // full-domain charge per permutation of every call.
+    // full-domain charge per permutation of every converted call.
     const replacementCopies =
-        permutations *
-        (6n + 28n * lengthBits + 2n * rateBits * (14n * lengthBits + 5n));
+        forwardedPermutations *
+        (6n +
+            28n * lengthBits +
+            programmedRecords * (10n + 10n * lengthBits) +
+            2n * rateBits * (14n * lengthBits + 5n) +
+            20n * rateBits * programmedRecords);
     const shadowRoutingGates =
-        permutations *
+        forwardedPermutations *
         (24n +
             62n * lengthBits +
             shadowStreams * (44n + 34n * lengthBits + 40n * rateBits));
@@ -226,6 +243,8 @@ export const compileSourceDomainOracleBudget = (
     return {
         minimumSourceCallPermutations,
         sourceCallsUpperBound: sourceCalls,
+        // The programmed circuit's four full-value accesses per source call.
+        sourceComponentCapacityUpperBound: 4n * sourceCalls,
         sourceInputClassBits,
         lengthBitsUpperBound: lengthBits,
         baseQueryGatesUpperBound: baseQueryGates,
@@ -234,6 +253,8 @@ export const compileSourceDomainOracleBudget = (
             programmedQueryGates +
             shadowStreams * baseQueryGates +
             shadowRoutingGates,
+        forwardedCallGatesUpperBound:
+            2n * forwardedPermutations * shakePermutationGateCharge,
     };
 };
 
