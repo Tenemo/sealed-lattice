@@ -6,7 +6,7 @@ use ballot_proof::{
 use registration_credentials::{
     Credential, RETAINED_TAG_BYTES,
     ballot_authentication::BallotEnvelope,
-    ballot_body::{BallotBodyHasher, HEADER_BYTES},
+    ballot_body::{self, HEADER_BYTES},
     foundation::{
         CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple,
         hash_foundation_tuple_512,
@@ -360,7 +360,7 @@ fn read_ballot(
     envelope: &BallotEnvelope,
     engine: &Engine,
 ) -> Result<Ciphertext, Error> {
-    let mut hash = BallotBodyHasher::for_body_length(engine.profile(), envelope.body_length())
+    let mut hash = ballot_body::body_hasher(engine.profile(), envelope.body_length())
         .map_err(|_| Error::PublicInput)?;
     // The body carries the FHE ciphertext's two components first.
     let split = DEGREE * engine.coefficient_bytes();

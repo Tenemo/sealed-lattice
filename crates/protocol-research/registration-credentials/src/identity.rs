@@ -63,6 +63,27 @@ impl IdentityHasher {
     }
 }
 
+/// Hashes a body of a committed length, pushed in nonempty parts of at most
+/// one mebibyte, into its exact framed byte identity. A refused part
+/// consumes the hasher. The identity supplies no proof or signing authority.
+pub struct BodyHasher(Option<IdentityHasher>);
+impl BodyHasher {
+    pub(crate) fn new(domain: &str, length: usize) -> Result<Self, Error> {
+        IdentityHasher::local(domain, &[], length).map(|hash| Self(Some(hash)))
+    }
+    pub fn push(&mut self, bytes: &[u8]) -> Result<(), Error> {
+        let hash = self.0.as_mut().ok_or(Error::Consumed)?;
+        if bytes.is_empty() || bytes.len() > 1 << 20 || hash.absorb(bytes).is_err() {
+            self.0 = None;
+            return Err(Error::Shape);
+        }
+        Ok(())
+    }
+    pub fn finish(self) -> Result<[u8; 64], Error> {
+        self.0.ok_or(Error::Consumed)?.finish()
+    }
+}
+
 /// The canonical tuple framing that precedes a payload of the length: the
 /// tuple of the domain, the prefix items and an empty raw-byte item, whose
 /// two trailing length words become the payload's.

@@ -60,8 +60,7 @@ fn envelope(
     bytes: &[u8],
 ) -> Result<BallotEnvelope, Error> {
     let profile = context.profile();
-    let mut hash = ballot_body::BallotBodyHasher::for_body_length(profile, bytes.len())
-        .map_err(|_| Error::Encoding)?;
+    let mut hash = ballot_body::body_hasher(profile, bytes.len()).map_err(|_| Error::Encoding)?;
     for bytes in bytes.chunks(crate::CHUNK_LIMIT) {
         hash.push(bytes).map_err(|_| Error::Encoding)?;
     }

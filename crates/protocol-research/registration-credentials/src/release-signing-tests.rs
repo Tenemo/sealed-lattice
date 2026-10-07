@@ -45,7 +45,7 @@ fn release_framing_bounds_context_and_exact_body_length() {
                 ReleaseEnvelope::new(profile, [1; 64], [2; 64], [3; 64], 0, length, [4; 64])
                     .is_err()
             );
-            assert!(ReleaseBodyHasher::new(profile, length).is_err());
+            assert!(body_hasher(profile, length).is_err());
         }
         let proofs = proof_lengths(profile);
         for length in [*proofs.start(), *proofs.end()] {
@@ -88,7 +88,7 @@ fn release_digest_matches_canonical_hash_across_chunk_boundaries() {
     .unwrap()
     .into_bytes();
     for chunk_size in [4093, 1 << 20] {
-        let mut hasher = ReleaseBodyHasher::new(profile, body.len()).unwrap();
+        let mut hasher = body_hasher(profile, body.len()).unwrap();
         for chunk in body.chunks(chunk_size) {
             hasher.push(chunk).unwrap();
         }
@@ -96,26 +96,21 @@ fn release_digest_matches_canonical_hash_across_chunk_boundaries() {
     }
     let mut changed = body.clone();
     changed[RELEASE_BODY_HEADER_BYTES + partial - 1] ^= 1;
-    let mut hasher = ReleaseBodyHasher::new(profile, changed.len()).unwrap();
+    let mut hasher = body_hasher(profile, changed.len()).unwrap();
     for chunk in changed.chunks(1 << 20) {
         hasher.push(chunk).unwrap();
     }
     assert_ne!(hasher.finish().unwrap(), expected);
-    let mut hasher = ReleaseBodyHasher::new(profile, body.len()).unwrap();
+    let mut hasher = body_hasher(profile, body.len()).unwrap();
     for chunk in body.chunks(1 << 20) {
         hasher.push(chunk).unwrap();
     }
     assert!(hasher.push(&[0]).is_err());
     assert!(hasher.finish().is_err());
     for invalid in [Vec::new(), vec![0; (1 << 20) + 1]] {
-        let mut hasher = ReleaseBodyHasher::new(profile, body.len()).unwrap();
+        let mut hasher = body_hasher(profile, body.len()).unwrap();
         assert!(hasher.push(&invalid).is_err());
         assert!(hasher.finish().is_err());
     }
-    assert!(
-        ReleaseBodyHasher::new(profile, body.len())
-            .unwrap()
-            .finish()
-            .is_err()
-    );
+    assert!(body_hasher(profile, body.len()).unwrap().finish().is_err());
 }

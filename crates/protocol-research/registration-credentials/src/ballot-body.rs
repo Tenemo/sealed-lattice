@@ -1,4 +1,4 @@
-use crate::{Error, foundation::hash::StreamingFoundationTupleHash512};
+use crate::{Error, identity::BodyHasher};
 use std::ops::RangeInclusive;
 use supported_profile::{
     AUXILIARY_DEGREE, DEGREE, Profile, auxiliary_modulus,
@@ -70,55 +70,22 @@ pub fn proof_length(profile: Profile, bytes: &[u8]) -> Result<usize, Error> {
     }
     Ok(length)
 }
-/// Computes the exact framed body identity; it supplies no proof or signing authority.
-pub struct BallotBodyHasher {
-    hash: Option<StreamingFoundationTupleHash512>,
-    remaining: usize,
+/// The hasher of a ballot body of the length. It hashes the committed bytes
+/// even if their inner header or proof is malformed: completion supplies a
+/// byte identity, not semantic validity.
+pub fn body_hasher(profile: Profile, length: usize) -> Result<BodyHasher, Error> {
+    if !body_lengths(profile).contains(&length) {
+        return Err(Error::Shape);
+    }
+    BodyHasher::new(BODY_DOMAIN, length)
 }
-impl BallotBodyHasher {
-    pub fn new(profile: Profile, header: &[u8]) -> Result<Self, Error> {
-        let remaining = ciphertext_bytes(profile) + proof_length(profile, header)?;
-        let mut hash = Self::for_body_length(profile, HEADER_BYTES + remaining)?;
-        hash.push(header)?;
-        Ok(hash)
-    }
-    /// Hashes the committed bytes even if their inner header or proof is malformed.
-    /// Completion supplies a byte identity, not semantic validity.
-    pub fn for_body_length(profile: Profile, length: usize) -> Result<Self, Error> {
-        if !body_lengths(profile).contains(&length) {
-            return Err(Error::Shape);
-        }
-        let hash = StreamingFoundationTupleHash512::new_variable_bytes(BODY_DOMAIN, &[], length)
-            .map_err(|_| Error::Shape)?;
-        Ok(Self {
-            hash: Some(hash),
-            remaining: length,
-        })
-    }
-    pub fn push(&mut self, bytes: &[u8]) -> Result<(), Error> {
-        if bytes.is_empty() || bytes.len() > 1 << 20 || bytes.len() > self.remaining {
-            self.hash = None;
-            return Err(Error::Shape);
-        }
-        self.hash
-            .as_mut()
-            .ok_or(Error::Consumed)?
-            .absorb(bytes)
-            .map_err(|_| Error::Shape)?;
-        self.remaining -= bytes.len();
-        Ok(())
-    }
-    pub fn finish(mut self) -> Result<[u8; 64], Error> {
-        if self.remaining != 0 {
-            return Err(Error::Shape);
-        }
-        self.hash
-            .take()
-            .ok_or(Error::Consumed)?
-            .finalize()
-            .map(|hash| hash.into_bytes())
-            .map_err(|_| Error::Shape)
-    }
+/// The hasher of the ballot body that the canonical header begins, after
+/// the header.
+pub fn header_body_hasher(profile: Profile, header: &[u8]) -> Result<BodyHasher, Error> {
+    let length = HEADER_BYTES + ciphertext_bytes(profile) + proof_length(profile, header)?;
+    let mut hash = body_hasher(profile, length)?;
+    hash.push(header)?;
+    Ok(hash)
 }
 
 #[cfg(test)]

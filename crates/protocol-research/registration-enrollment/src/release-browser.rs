@@ -2,8 +2,9 @@ use super::{SESSION, Session};
 use evaluation_target::release_body::{ReleaseBodyVerifier, VerifiedReleaseBody};
 use registration_credentials::{
     Error,
+    identity::BodyHasher,
     release_signing::{
-        RELEASE_BODY_HEADER_BYTES, RELEASE_ENVELOPE_BYTES, ReleaseBodyHasher, ReleaseEnvelope,
+        RELEASE_BODY_HEADER_BYTES, RELEASE_ENVELOPE_BYTES, ReleaseEnvelope, body_hasher,
         body_header,
     },
     target_signing::{MAXIMUM_TARGET_BODY_BYTES, TargetMessage},
@@ -17,7 +18,7 @@ pub(super) struct ReleaseState {
     envelope: ReleaseEnvelope,
     verified: Option<VerifiedReleaseBody>,
     completed: Option<(Vec<u8>, Vec<u8>)>,
-    hasher: Option<ReleaseBodyHasher>,
+    hasher: Option<BodyHasher>,
     import_closed: bool,
 }
 
@@ -230,7 +231,7 @@ fn command(session: &mut Session, operation: u32, input: &[u8]) -> Result<Vec<u8
             {
                 return Err(Error::Context);
             }
-            let hasher = ReleaseBodyHasher::new(profile, envelope.body_length())?;
+            let hasher = body_hasher(profile, envelope.body_length())?;
             session.release = Some(ReleaseState {
                 body: Vec::with_capacity(envelope.body_length()),
                 envelope,

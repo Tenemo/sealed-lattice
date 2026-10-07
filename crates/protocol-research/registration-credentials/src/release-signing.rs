@@ -1,7 +1,7 @@
 use crate::{
     Credential, Error, SigningPurpose, ballot_authentication::RetainedBallotOwner,
-    foundation::hash::StreamingFoundationTupleHash512,
-    roster_authentication::OrganizerSignedRoster, target_signing::TargetMessage,
+    identity::BodyHasher, roster_authentication::OrganizerSignedRoster,
+    target_signing::TargetMessage,
 };
 use fips204::{
     ml_dsa_65,
@@ -137,50 +137,12 @@ pub fn proof_length(profile: Profile, header: &[u8]) -> Result<usize, Error> {
     }
     Ok(proof)
 }
-pub struct ReleaseBodyHasher {
-    hash: Option<StreamingFoundationTupleHash512>,
-    remaining: usize,
-}
-impl ReleaseBodyHasher {
-    pub fn new(profile: Profile, length: usize) -> Result<Self, Error> {
-        if !body_lengths(profile).contains(&length) {
-            return Err(Error::Shape);
-        }
-        Ok(Self {
-            hash: Some(
-                StreamingFoundationTupleHash512::new_variable_bytes(
-                    "sealed-lattice/release-body/v1",
-                    &[],
-                    length,
-                )
-                .map_err(|_| Error::Shape)?,
-            ),
-            remaining: length,
-        })
+/// The hasher of a release body of the length.
+pub fn body_hasher(profile: Profile, length: usize) -> Result<BodyHasher, Error> {
+    if !body_lengths(profile).contains(&length) {
+        return Err(Error::Shape);
     }
-    pub fn push(&mut self, bytes: &[u8]) -> Result<(), Error> {
-        if bytes.is_empty() || bytes.len() > 1 << 20 || bytes.len() > self.remaining {
-            self.hash = None;
-            return Err(Error::Shape);
-        }
-        self.hash
-            .as_mut()
-            .ok_or(Error::Shape)?
-            .absorb(bytes)
-            .map_err(|_| Error::Shape)?;
-        self.remaining -= bytes.len();
-        Ok(())
-    }
-    pub fn finish(self) -> Result<[u8; 64], Error> {
-        if self.remaining != 0 {
-            return Err(Error::Shape);
-        }
-        self.hash
-            .ok_or(Error::Shape)?
-            .finalize()
-            .map(|value| value.into_bytes())
-            .map_err(|_| Error::Shape)
-    }
+    BodyHasher::new("sealed-lattice/release-body/v1", length)
 }
 
 impl Credential {

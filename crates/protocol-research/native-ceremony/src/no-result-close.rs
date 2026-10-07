@@ -9,9 +9,7 @@ use ballot_proof::{
     submission::{AuthenticatedBallotBody, authenticate_envelope},
 };
 use registration_credentials::{
-    ballot_authentication::BallotEnvelope,
-    ballot_body::{self, BallotBodyHasher},
-    poll::VerifiedPoll,
+    ballot_authentication::BallotEnvelope, ballot_body, poll::VerifiedPoll,
 };
 use registration_enrollment::Enrollment;
 use setup_aggregate::verified::VerifiedSetupAggregate;
@@ -40,7 +38,7 @@ fn invalid_source(
     .unwrap();
     let proof_bytes = *ballot_body::proof_lengths(profile).start();
     let header = ballot_body::header(profile, &relation, proof_bytes).unwrap();
-    let mut hash = BallotBodyHasher::new(profile, &header).unwrap();
+    let mut hash = ballot_body::header_body_hasher(profile, &header).unwrap();
     let mut file = crate::public_output::PublicOutput::create(&path).unwrap();
     file.write_all(&header).unwrap();
     let zeros = vec![0; 1 << 20];

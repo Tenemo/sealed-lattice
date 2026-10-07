@@ -1070,11 +1070,9 @@ fn main() {
         let position = 12 + 4 + 64 + 64;
         modified_header[position..position + 2].copy_from_slice(&(author as u16).to_le_bytes());
         let mut destination = public_output::PublicOutput::create(&invalid_proof_path).unwrap();
-        let mut hash = registration_credentials::ballot_body::BallotBodyHasher::for_body_length(
-            profile,
-            envelope.body_length(),
-        )
-        .unwrap();
+        let mut hash =
+            registration_credentials::ballot_body::body_hasher(profile, envelope.body_length())
+                .unwrap();
         destination.write_all(&modified_header).unwrap();
         hash.push(&modified_header).unwrap();
         let mut buffer = vec![0; 1 << 20];

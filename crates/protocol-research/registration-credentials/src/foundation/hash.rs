@@ -2,7 +2,7 @@ use core::fmt;
 
 use super::{
     CANONICAL_TUPLE_SCHEMA_IDENTIFIER, CANONICAL_TUPLE_VERSION, CanonicalCodecError, CanonicalItem,
-    CanonicalItemType, CanonicalTuple,
+    CanonicalTuple,
 };
 use sha3::{
     Shake256,
@@ -89,98 +89,6 @@ fn canonical_foundation_tuple_hash_preimage(
         framed_items,
     )
     .encode()
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum StreamingFoundationHashError {
-    InvalidDomain,
-    ItemCountOverflow,
-    ItemLengthOverflow,
-    PayloadOverrun,
-    PayloadIncomplete,
-}
-
-/// Incremental form of `H_512(domain, prefixItems..., bytes(payload))`.
-///
-/// The tuple and raw-byte item lengths are committed before payload absorption.
-/// This matches [`hash_foundation_tuple_512`] without another payload allocation.
-pub(crate) struct StreamingFoundationTupleHash512 {
-    hasher: Shake256,
-    remaining_payload_byte_length: usize,
-}
-
-impl StreamingFoundationTupleHash512 {
-    pub(crate) fn new_variable_bytes(
-        domain: &str,
-        prefix_items: &[CanonicalItem],
-        payload_byte_length: usize,
-    ) -> Result<Self, StreamingFoundationHashError> {
-        let domain_item = CanonicalItem::nonempty_ascii(domain)
-            .map_err(|_| StreamingFoundationHashError::InvalidDomain)?;
-        let item_count = prefix_items
-            .len()
-            .checked_add(2)
-            .ok_or(StreamingFoundationHashError::ItemCountOverflow)?;
-        let item_count = u32::try_from(item_count)
-            .map_err(|_| StreamingFoundationHashError::ItemCountOverflow)?;
-        let payload_byte_length_u32 = u32::try_from(payload_byte_length)
-            .map_err(|_| StreamingFoundationHashError::ItemLengthOverflow)?;
-        let streamed_item_byte_length = payload_byte_length
-            .checked_add(4)
-            .ok_or(StreamingFoundationHashError::ItemLengthOverflow)?;
-        let streamed_item_byte_length_u32 = u32::try_from(streamed_item_byte_length)
-            .map_err(|_| StreamingFoundationHashError::ItemLengthOverflow)?;
-
-        let mut hasher = Shake256::default();
-        hasher.update(&CANONICAL_TUPLE_SCHEMA_IDENTIFIER.to_le_bytes());
-        hasher.update(&CANONICAL_TUPLE_VERSION.to_le_bytes());
-        hasher.update(&item_count.to_le_bytes());
-        update_canonical_hash_item(&mut hasher, &domain_item)?;
-        for item in prefix_items {
-            update_canonical_hash_item(&mut hasher, item)?;
-        }
-        hasher.update(&CanonicalItemType::RawBytes.canonical_code().to_le_bytes());
-        hasher.update(&streamed_item_byte_length_u32.to_le_bytes());
-        hasher.update(&payload_byte_length_u32.to_le_bytes());
-        Ok(Self {
-            hasher,
-            remaining_payload_byte_length: payload_byte_length,
-        })
-    }
-
-    pub(crate) fn absorb(
-        &mut self,
-        payload_fragment: &[u8],
-    ) -> Result<(), StreamingFoundationHashError> {
-        if payload_fragment.len() > self.remaining_payload_byte_length {
-            return Err(StreamingFoundationHashError::PayloadOverrun);
-        }
-        self.hasher.update(payload_fragment);
-        self.remaining_payload_byte_length -= payload_fragment.len();
-        Ok(())
-    }
-
-    pub(crate) fn finalize(self) -> Result<Hash512, StreamingFoundationHashError> {
-        if self.remaining_payload_byte_length != 0 {
-            return Err(StreamingFoundationHashError::PayloadIncomplete);
-        }
-        let mut reader = self.hasher.finalize_xof();
-        let mut output = [0_u8; Hash512::BYTE_LENGTH];
-        reader.read(&mut output);
-        Ok(Hash512(output))
-    }
-}
-
-fn update_canonical_hash_item(
-    hasher: &mut Shake256,
-    item: &CanonicalItem,
-) -> Result<(), StreamingFoundationHashError> {
-    let byte_length = u32::try_from(item.canonical_bytes().len())
-        .map_err(|_| StreamingFoundationHashError::ItemLengthOverflow)?;
-    hasher.update(&item.item_type().canonical_code().to_le_bytes());
-    hasher.update(&byte_length.to_le_bytes());
-    hasher.update(item.canonical_bytes());
-    Ok(())
 }
 
 #[cfg(test)]

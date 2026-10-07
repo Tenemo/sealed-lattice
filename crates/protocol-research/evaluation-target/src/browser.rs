@@ -3,8 +3,8 @@ use crate::target::{
 };
 use ballot_proof::body::BallotBodyClassification;
 use registration_credentials::{
-    ballot_body::{BallotBodyHasher, HEADER_BYTES},
-    identity::{IdentityHasher, PUBLIC_POLYNOMIAL_DOMAIN},
+    ballot_body::{self, HEADER_BYTES},
+    identity::{BodyHasher, IdentityHasher, PUBLIC_POLYNOMIAL_DOMAIN},
     poll::VerifiedPoll,
 };
 use rns_arithmetic_probe::ranking::{
@@ -28,7 +28,7 @@ enum Payload {
     },
     Ballot {
         author: usize,
-        hash: BallotBodyHasher,
+        hash: BodyHasher,
         expected: [u8; 64],
         components: [PolynomialDecoder; 2],
     },
@@ -355,7 +355,7 @@ impl State {
                     // first.
                     let payload = Payload::Ballot {
                         author: argument,
-                        hash: BallotBodyHasher::for_body_length(engine.profile(), bytes)
+                        hash: ballot_body::body_hasher(engine.profile(), bytes)
                             .map_err(|_| Error::PublicInput)?,
                         expected: *envelope.body_identity(),
                         components: [engine.polynomial_decoder(), engine.polynomial_decoder()],

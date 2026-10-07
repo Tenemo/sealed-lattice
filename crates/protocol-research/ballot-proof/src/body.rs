@@ -3,10 +3,7 @@ use crate::{
     admission::{BallotRelationVerifier, VerifiedBallotRelation},
     statement::setup_input,
 };
-use registration_credentials::{
-    ballot_body::{self, BallotBodyHasher},
-    poll::VerifiedPoll,
-};
+use registration_credentials::{ballot_body, identity::BodyHasher, poll::VerifiedPoll};
 use setup_aggregate::{AggregatePolynomialReader, verified::VerifiedSetupAggregate};
 use setup_witness::contribution::common_records;
 
@@ -292,7 +289,7 @@ impl BallotBodyRelationVerifier {
 
 pub struct BallotBodyVerifier {
     relation: BallotBodyRelationVerifier,
-    hash: BallotBodyHasher,
+    hash: BodyHasher,
     length: usize,
 }
 impl BallotBodyVerifier {
@@ -307,7 +304,7 @@ impl BallotBodyVerifier {
         let length = ballot_body::HEADER_BYTES
             + ballot_body::ciphertext_bytes(profile)
             + relation.proof_length;
-        let hash = BallotBodyHasher::new(profile, header).map_err(|_| Error::Shape)?;
+        let hash = ballot_body::header_body_hasher(profile, header).map_err(|_| Error::Shape)?;
         Ok(Self {
             relation,
             hash,
@@ -357,7 +354,7 @@ pub struct SignedBallotVerifier {
     authentication: crate::submission::AuthenticatedBallotEnvelope,
     setup: Arc<VerifiedSetupAggregate>,
     relation: Option<BallotBodyRelationVerifier>,
-    hash: BallotBodyHasher,
+    hash: BodyHasher,
     failed: bool,
 }
 impl SignedBallotVerifier {
@@ -377,7 +374,7 @@ impl SignedBallotVerifier {
         {
             return Err(Error::Context);
         }
-        let mut hash = BallotBodyHasher::for_body_length(setup.profile(), envelope.body_length())
+        let mut hash = ballot_body::body_hasher(setup.profile(), envelope.body_length())
             .map_err(|_| Error::Shape)?;
         hash.push(header).map_err(|_| Error::Shape)?;
         let relation = BallotBodyRelationVerifier::new(

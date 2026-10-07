@@ -46,11 +46,11 @@ impl AuthenticatedBallotBody {
 
 pub struct BallotBodyAuthentication {
     authentication: AuthenticatedBallotEnvelope,
-    hash: registration_credentials::ballot_body::BallotBodyHasher,
+    hash: registration_credentials::identity::BodyHasher,
 }
 impl BallotBodyAuthentication {
     pub fn new(authentication: AuthenticatedBallotEnvelope) -> Result<Self, Error> {
-        let hash = registration_credentials::ballot_body::BallotBodyHasher::for_body_length(
+        let hash = registration_credentials::ballot_body::body_hasher(
             authentication.profile,
             authentication.envelope().body_length(),
         )

@@ -5,9 +5,12 @@ use fips204::{
 };
 use linked_release_proof::{CHUNK_LIMIT, HEADER_LENGTH, Verifier, verifier};
 use num_bigint::BigInt;
-use registration_credentials::release_signing::{
-    RELEASE_BODY_HEADER_BYTES, RELEASE_ENVELOPE_BYTES, RELEASE_SIGNATURE_CONTEXT,
-    ReleaseBodyHasher, ReleaseEnvelope, partial_bytes, proof_length,
+use registration_credentials::{
+    identity::BodyHasher,
+    release_signing::{
+        RELEASE_BODY_HEADER_BYTES, RELEASE_ENVELOPE_BYTES, RELEASE_SIGNATURE_CONTEXT,
+        ReleaseEnvelope, body_hasher, partial_bytes, proof_length,
+    },
 };
 use std::sync::Arc;
 
@@ -55,7 +58,7 @@ impl ReleaseContext {
 
 pub struct ReleaseBodyVerifier {
     context: Arc<ReleaseContext>,
-    hash: ReleaseBodyHasher,
+    hash: BodyHasher,
     length: usize,
     remaining: usize,
     partial_bytes: usize,
@@ -73,7 +76,7 @@ impl ReleaseBodyVerifier {
         }
         let partial_bytes = partial_bytes(profile);
         let length = RELEASE_BODY_HEADER_BYTES + partial_bytes + proof_bytes;
-        let mut hash = ReleaseBodyHasher::new(profile, length).map_err(|_| Error::Encoding)?;
+        let mut hash = body_hasher(profile, length).map_err(|_| Error::Encoding)?;
         hash.push(header).map_err(|_| Error::Encoding)?;
         Ok(Self {
             context,
