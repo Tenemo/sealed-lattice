@@ -1,13 +1,16 @@
 import { describe, expect, it } from 'vitest';
 
+import { compileSourceDomainOracleBudget } from '#tests/oracle-budget-model.js';
 import {
     budgetSplitBits,
     ceilingLog2,
     compileSecurityMarginScreen,
+    criterionAttacks,
     fheAttackScreens,
     fheKnownAttackFloor,
     oracleSimulationGates,
     oracleSimulationVariants,
+    registrationSourceInputBits,
     requiredFheAssumptionBits,
     securityTargetBits,
 } from '#tests/security-margin-screen-model.js';
@@ -170,64 +173,172 @@ describe('FHE security margin screen', () => {
                 80n + 3n + BigInt((row.comparisons - 1n).toString(2).length),
             );
             // Even the quantum stress test leaves it a positive margin.
-            expect(forwarded.marginToFloor).toBeGreaterThan(0);
+            expect(forwarded.marginToStressTest).toBeGreaterThan(0);
         }
     });
 
-    it('covers a modulus only with screens of the same model at the same or a larger modulus', () => {
-        const at960 = fheKnownAttackFloor(960n);
-        expect(at960.primal.modulusBits).toBe(960n);
-        expect(at960.primal.costModel).toBe('quantum');
-        expect(at960.classicalPrimal.modulusBits).toBe(960n);
-        expect(at960.classicalPrimal.costModel).toBe('classical');
-        expect(at960.floor.attack).toBe('dual hybrid');
-        expect(at960.floor.modulusBits).toBe(992n);
-        const at800 = fheKnownAttackFloor(800n);
-        expect(at800.primal.modulusBits).toBe(896n);
-        expect(at800.classicalPrimal.modulusBits).toBe(928n);
-        // The floor is the cheapest quantum screen covering each attack.
-        const quantumAt992 = fheAttackScreens.filter(
-            (value) =>
-                value.costModel === 'quantum' &&
-                value.modulusBits === 992n &&
-                value.attack !== 'primal hybrid',
-        );
-        expect(at800.floor.log2Cost).toBe(
-            Math.min(
-                ...quantumAt992.map((value) => value.log2Cost),
-                at800.primal.log2Cost,
+    it('puts every registration-source input in one dyadic class', () => {
+        const lengths = registrationSourceInputBits();
+        const coefficientBits = 8n * 65_536n;
+        const modulusBytes = [
+            ...new Set(
+                listSupportedProfiles().map((profile) =>
+                    BigInt(Math.ceil(profile.ciphertext.bits / 8)),
+                ),
+            ),
+        ].sort((left, right) => (left < right ? -1 : 1));
+        // The framing carries the modulus once, and each coefficient has one
+        // sign byte and the modulus bytes.
+        const perModulusByte = 8n + coefficientBits;
+        const framing =
+            lengths[0] - coefficientBits - perModulusByte * modulusBytes[0];
+        expect(lengths).toEqual(
+            modulusBytes.map(
+                (bytes) => framing + coefficientBits + perModulusByte * bytes,
             ),
         );
-        // Classical sieving costs more than the quantum model's.
-        for (const modulusBits of [928n, 960n, 992n]) {
-            const { primal, classicalPrimal } =
-                fheKnownAttackFloor(modulusBits);
-            expect(classicalPrimal.modulusBits).toBe(primal.modulusBits);
-            expect(classicalPrimal.log2Cost).toBeGreaterThan(primal.log2Cost);
+        expect(framing).toBeGreaterThan(8n * 1952n);
+        expect(framing).toBeLessThan(8n * 4096n);
+        for (const bits of lengths) {
+            expect(bits).toBeGreaterThan(1n << 25n);
+            expect(bits).toBeLessThanOrEqual(1n << 26n);
         }
+    });
+
+    it('restricts the quadratic database term to calls that can reach a registration source', () => {
+        const lengths = registrationSourceInputBits();
+        const gates = 1n << securityTargetBits;
+        const permutations = (2n * gates) / (24n * 1600n);
+        const minimumCall = (lengths[0] + 6n + 1343n) / 1344n;
+        const calls = permutations / minimumCall;
+        const lengthBits = BigInt(
+            (4n * 1344n * permutations + 2n * 512n + 3n).toString(2).length,
+        );
+        const budget = compileSourceDomainOracleBudget(gates, 512n, lengths);
+        expect(budget.minimumSourceCallPermutations).toBe(minimumCall);
+        expect(budget.sourceCallsUpperBound).toBe(calls);
+        expect(budget.sourceInputClassBits).toBe(1n << 26n);
+        for (const row of screen) {
+            const shadows = row.sourceMaskScopes;
+            // Programmed and shadow databases each hold one source class; the
+            // entry term dominates the per-call and controller terms.
+            const leading =
+                (16n + 4n * shadows) *
+                59n *
+                calls ** 2n *
+                lengthBits *
+                ((1n << 26n) + 2n);
+            const priced = oracleSimulationGates(
+                'source-domain commitment shadows',
+                gates,
+                shadows,
+            );
+            expect(priced).toBeGreaterThan(leading);
+            expect(Number(priced) / Number(leading)).toBeLessThan(1.1);
+            // The full-domain database keeps an entry per permutation of the
+            // whole experiment, which the shortest source call alone exceeds.
+            expect(
+                oracleSimulationGates('commitment shadows', gates, shadows) /
+                    priced,
+            ).toBeGreaterThan(minimumCall);
+        }
+    });
+
+    it('decides the criterion with classical screens of every estimator attack', () => {
+        const largest = BigInt(
+            Math.max(
+                ...listSupportedProfiles().map(
+                    (profile) => profile.ciphertext.bits,
+                ),
+            ),
+        );
+        const classical = fheAttackScreens.filter(
+            (value) => value.costModel === 'classical',
+        );
+        for (const attack of criterionAttacks)
+            expect(
+                classical.some(
+                    (value) =>
+                        value.attack === attack && value.modulusBits >= largest,
+                ),
+            ).toBe(true);
+        // Each floor is the cheapest screen of its model that covers the
+        // modulus from the same or a larger one, for each attack.
+        const cheapest = (
+            costModel: 'classical' | 'quantum',
+            modulusBits: bigint,
+        ) => {
+            const covering = fheAttackScreens.filter(
+                (value) =>
+                    value.costModel === costModel &&
+                    value.modulusBits >= modulusBits,
+            );
+            return Math.min(
+                ...[...new Set(covering.map((value) => value.attack))].map(
+                    (attack) =>
+                        covering
+                            .filter((value) => value.attack === attack)
+                            .sort((left, right) =>
+                                left.modulusBits < right.modulusBits ? -1 : 1,
+                            )[0].log2Cost,
+                ),
+            );
+        };
+        for (const modulusBits of [800n, 928n, 960n]) {
+            const { criterion, stressTest } = fheKnownAttackFloor(modulusBits);
+            expect(criterion.costModel).toBe('classical');
+            expect(criterion.log2Cost).toBe(cheapest('classical', modulusBits));
+            expect(stressTest.costModel).toBe('quantum');
+            expect(stressTest.log2Cost).toBe(cheapest('quantum', modulusBits));
+            expect(criterion.log2Cost).toBeGreaterThan(stressTest.log2Cost);
+        }
+        const at960 = fheKnownAttackFloor(960n);
+        expect(at960.criterion.attack).toBe('primal hybrid');
+        expect(at960.criterion.modulusBits).toBe(960n);
+        expect(at960.stressTest.attack).toBe('dual hybrid');
+        expect(at960.stressTest.modulusBits).toBe(992n);
+        // Classical sieving costs more than the quantum model's.
+        const paired = fheAttackScreens
+            .filter((value) => value.costModel === 'quantum')
+            .flatMap((quantum) =>
+                classical
+                    .filter(
+                        (value) =>
+                            value.attack === quantum.attack &&
+                            value.modulusBits === quantum.modulusBits,
+                    )
+                    .map((matching) => [quantum, matching] as const),
+            );
+        expect(paired.length).toBeGreaterThanOrEqual(3);
+        for (const [quantum, matching] of paired)
+            expect(matching.log2Cost).toBeGreaterThan(quantum.log2Cost);
         expect(() => fheKnownAttackFloor(993n)).toThrow();
     });
 
-    it('records that the current FHE comparisons exceed the quantum 960-bit primal estimate at the largest rosters', () => {
+    it('records the margins of the priced reductions at the largest rosters', () => {
         for (const participants of [19, 20]) {
             const row = screen.find(
                 (value) => value.participantCount === participants,
             )!;
             expect(row.modulusBits).toBe(960n);
-            const shadows = row.requirements.find(
-                (value) => value.variant === 'commitment shadows',
-            )!;
-            expect(Number(shadows.requiredBits)).toBeGreaterThan(
-                row.primal.log2Cost,
-            );
-            expect(shadows.marginToPrimal).toBeLessThan(0);
-            // The classical estimate still leaves a positive screen margin,
-            // which the resumed-hash conversion mostly consumes.
+            const named = (variant: string) =>
+                row.requirements.find((value) => value.variant === variant)!;
             for (const value of row.requirements)
-                expect(value.marginToClassicalPrimal).toBeGreaterThan(0);
+                expect(value.marginToCriterion).toBeGreaterThan(0);
+            // Restricting simulation to the registration-source domain keeps
+            // a positive margin even under the quantum stress test.
+            const source = named('source-domain commitment shadows');
+            expect(source.marginToStressTest).toBeGreaterThan(0);
+            expect(source.marginToCriterion).toBeGreaterThan(30);
+            // Implementing the whole function exceeds the stress test, and
+            // the resumed-hash conversion consumes most of the criterion
+            // margin.
+            expect(named('commitment shadows').marginToStressTest).toBeLessThan(
+                0,
+            );
             expect(
-                row.requirements[row.requirements.length - 1]
-                    .marginToClassicalPrimal,
+                named('commitment shadows and resumed hashes')
+                    .marginToCriterion,
             ).toBeLessThan(10);
         }
     });

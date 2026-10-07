@@ -154,6 +154,89 @@ export const compileFullCircuitOracleBudget = (
     };
 };
 
+// The oracle-relative reduction implements only the registration-source
+// commitment domain and forwards every other call to the shared oracle. Only
+// a call whose input capacity holds the shortest source input can reach that
+// domain, and the widest rate still charges it at least that many
+// permutations. Every source input lies in one dyadic input class, so such a
+// call visits one input class and at most lengthBits output chunks, whose
+// widths sum to at most 2*(n+K). The database terms are the full-domain bound
+// restricted to those calls and that class. Forwarding conversions,
+// programming records, extraction and the rest of the reduction stay separate.
+export const compileSourceDomainOracleBudget = (
+    experimentGates: bigint,
+    firstChunkBits: bigint,
+    sourceInputBits: readonly bigint[],
+    shadowStreams = 0n,
+) => {
+    assert.ok(experimentGates >= 0n && firstChunkBits >= 1n);
+    assert.ok(shadowStreams >= 0n && sourceInputBits.length > 0);
+    const inputClass = (bits: bigint) => {
+        let upper = 1n;
+        while (upper < bits) upper *= 2n;
+        return upper;
+    };
+    const sourceInputClassBits = inputClass(sourceInputBits[0]);
+    assert.ok(
+        sourceInputBits.every(
+            (bits) => bits > 0n && inputClass(bits) === sourceInputClassBits,
+        ),
+    );
+    const minimumSourceInputBits = sourceInputBits.reduce((minimum, bits) =>
+        bits < minimum ? bits : minimum,
+    );
+    const rateBits = 1344n;
+    const permutations = 2n * (experimentGates / shakePermutationGateCharge);
+    const minimumSourceCallPermutations =
+        (minimumSourceInputBits + 6n + rateBits - 1n) / rateBits;
+    const sourceCalls = permutations / minimumSourceCallPermutations;
+    const lengthBits = bitWidth(
+        4n * rateBits * permutations + 2n * firstChunkBits + 3n,
+    );
+    const componentVisits = sourceCalls * lengthBits;
+    const componentBitVisits =
+        componentVisits * (sourceInputClassBits + 2n) +
+        2n * rateBits * permutations +
+        2n * sourceCalls * firstChunkBits;
+    const queryCircuit = (baseAccesses: bigint) => {
+        const fullValueAccesses = 2n * baseAccesses;
+        // A source component holds at most fullValueAccesses entries per
+        // source call, not per permutation of the whole experiment.
+        const routing =
+            fullValueAccesses ** 2n *
+            sourceCalls *
+            (59n * componentBitVisits + 34n * componentVisits);
+        const local = 80n * fullValueAccesses * componentBitVisits;
+        const controllersAndCopies =
+            baseAccesses * (105n + 320n * lengthBits) * componentBitVisits;
+        return routing + local + controllersAndCopies;
+    };
+    // The outer replacement copy and the shadow slice routing keep their
+    // full-domain charge per permutation of every call.
+    const replacementCopies =
+        permutations *
+        (6n + 28n * lengthBits + 2n * rateBits * (14n * lengthBits + 5n));
+    const shadowRoutingGates =
+        permutations *
+        (24n +
+            62n * lengthBits +
+            shadowStreams * (44n + 34n * lengthBits + 40n * rateBits));
+    const baseQueryGates = queryCircuit(1n);
+    const programmedQueryGates = queryCircuit(2n) + replacementCopies;
+    return {
+        minimumSourceCallPermutations,
+        sourceCallsUpperBound: sourceCalls,
+        sourceInputClassBits,
+        lengthBitsUpperBound: lengthBits,
+        baseQueryGatesUpperBound: baseQueryGates,
+        programmedQueryGatesUpperBound: programmedQueryGates,
+        shadowQueryGatesUpperBound:
+            programmedQueryGates +
+            shadowStreams * baseQueryGates +
+            shadowRoutingGates,
+    };
+};
+
 // One classical fixed-input XOF reader and its cursor clones, sharing one
 // prefix cache. Input absorption is charged once at this root; sharing an
 // unfinished input hash between DIFFERENT inputs is outside this model.

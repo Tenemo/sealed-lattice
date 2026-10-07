@@ -1,16 +1,21 @@
 import assert from 'node:assert/strict';
 
 import { compileClearPreparationLedger } from '#tests/clear-preparation-ledger-model.js';
+import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import {
     compileClassicalReaderOracleBudget,
     compileFullCircuitOracleBudget,
+    compileSourceDomainOracleBudget,
 } from '#tests/oracle-budget-model.js';
 import {
     firstOracleResumeHashWork,
     proofHashProfiles,
 } from '#tests/proof-hash-work-model.js';
+import { compileRegistrationSetupBindingScreen } from '#tests/registration-setup-binding-model.js';
+import { registrationSourceMask } from '#tests/registration-source-domain-model.js';
 import {
     listSupportedProfiles,
+    supportedProfileRanges,
     type SupportedProfile,
 } from '#tests/supported-profile-model.js';
 
@@ -40,11 +45,11 @@ export const budgetSplitBits = ceilingLog2(budgetGroupCount);
 // entries of each sign and error width 3.2. Every supported FHE modulus shares
 // the dimension and both distributions, so an estimate at a modulus bounds
 // the same attack at every smaller supported modulus from below. Attack costs
-// follow the accepted convention, without quantum random-access memory. The
-// quantum model's sieving speedup assumes that memory, so its estimates are a
-// stress test, and the classical estimates stand in for the criterion until
-// screens without it cover every attack. Neither model counts gates the way
-// the convention does, so both remain screens.
+// follow the accepted convention, without quantum random-access memory, so
+// the classical model's screens of every algorithm of the estimator's full
+// estimate decide the criterion. The quantum model's sieving speedup assumes
+// that memory, so its estimates are a stress test. Neither model counts gates
+// the way the convention does, so both remain screens.
 export const fheAttackScreens = [
     {
         attack: 'primal hybrid',
@@ -100,9 +105,60 @@ export const fheAttackScreens = [
         modulusBits: 928n,
         log2Cost: 219.28562463733982,
     },
+    {
+        attack: 'unique SVP',
+        costModel: 'classical',
+        modulusBits: 960n,
+        log2Cost: 217.54,
+    },
+    {
+        attack: 'bounded distance',
+        costModel: 'classical',
+        modulusBits: 960n,
+        log2Cost: 217.54000418240523,
+    },
+    {
+        attack: 'primal hybrid without meet-in-the-middle',
+        costModel: 'classical',
+        modulusBits: 960n,
+        log2Cost: 215.83538369914376,
+    },
+    {
+        attack: 'primal hybrid with Babai lifting',
+        costModel: 'classical',
+        modulusBits: 960n,
+        log2Cost: 214.48815634813218,
+    },
+    {
+        attack: 'dual',
+        costModel: 'classical',
+        modulusBits: 960n,
+        log2Cost: 217.54,
+    },
+    {
+        attack: 'dual hybrid',
+        costModel: 'classical',
+        modulusBits: 960n,
+        log2Cost: 216.956,
+    },
 ] as const;
 
 export type FheAttackScreen = (typeof fheAttackScreens)[number];
+
+// The lattice-reduction algorithms of the pinned estimator's full estimate,
+// plus the meet-in-the-middle primal hybrid without Babai lifting that its
+// authors call overly optimistic for the attacker. Its other algorithms yield
+// no screen at this dimension: coded-BKW reports no finite cost and Arora-Ge
+// does not finish.
+export const criterionAttacks: readonly FheAttackScreen['attack'][] = [
+    'unique SVP',
+    'bounded distance',
+    'primal hybrid',
+    'primal hybrid without meet-in-the-middle',
+    'primal hybrid with Babai lifting',
+    'dual',
+    'dual hybrid',
+];
 
 // The screen of one attack and cost model at the smallest screened modulus
 // at least as large as the profile's.
@@ -122,41 +178,59 @@ const coveringScreen = (
             left.modulusBits < right.modulusBits ? -1 : 1,
         )[0];
 
-// The quantum floor is the cheapest covering quantum screen over every
-// screened attack: no recorded quantum screen costs less at this modulus.
-export const fheKnownAttackFloor = (modulusBits: bigint) => {
-    const quantum = [
-        ...new Set(fheAttackScreens.map((screen) => screen.attack)),
-    ].map((attack) => coveringScreen(attack, 'quantum', modulusBits));
+// The cheapest covering screen of one cost model over the given attacks: no
+// recorded screen of that model costs less at this modulus.
+const screenedFloor = (
+    costModel: FheAttackScreen['costModel'],
+    attacks: readonly FheAttackScreen['attack'][],
+    modulusBits: bigint,
+) => {
+    const covering = attacks.map((attack) =>
+        coveringScreen(attack, costModel, modulusBits),
+    );
     assert.ok(
-        quantum.every((screen) => screen !== undefined),
+        covering.every((screen) => screen !== undefined),
         'No screen covers this modulus.',
     );
-    const floor = quantum.reduce((lowest, screen) =>
+    return covering.reduce((lowest, screen) =>
         screen.log2Cost < lowest.log2Cost ? screen : lowest,
     );
-    const primal = coveringScreen('primal hybrid', 'quantum', modulusBits)!;
-    const classicalPrimal = coveringScreen(
-        'primal hybrid',
-        'classical',
-        modulusBits,
-    );
-    assert.ok(classicalPrimal !== undefined);
-    return { floor, primal, classicalPrimal };
 };
+
+// The criterion floor covers every criterion attack in the classical model;
+// the stress-test floor covers every attack the quantum model screened.
+export const fheKnownAttackFloor = (modulusBits: bigint) => ({
+    criterion: screenedFloor('classical', criterionAttacks, modulusBits),
+    stressTest: screenedFloor(
+        'quantum',
+        [
+            ...new Set(
+                fheAttackScreens
+                    .filter((screen) => screen.costModel === 'quantum')
+                    .map((screen) => screen.attack),
+            ),
+        ],
+        modulusBits,
+    ),
+});
 
 // The oracle-simulation operand of an FHE comparison at an experiment of
 // `experimentGates`. The lattice assumptions hold relative to the ideal SHAKE
 // oracle, so a reduction that never reads or programs the attacker's queries
 // forwards them and simulates nothing; programming a point adds a wrapper
-// that this floor omits. A reduction that implements the whole function
-// itself, as one without that assumption or one that extracts must, pays the
-// three nested interfaces after it. Each variant prices only the maintained
-// query circuits, so each requirement below is a lower bound on what that
-// reduction needs; extraction, proof simulation, record creation and every
-// other part of the reduction only add work.
+// that this floor omits. The FHE embedding fixes the pivot's coordinate from
+// extracted corrupt registration coordinates, so it reads and programs the
+// registration-source commitment domain: under that assumption it implements
+// only that domain, with one honest-commitment shadow per potential sender
+// scope, and forwards every other query. A reduction that implements the
+// whole function itself, as one without that assumption must, pays the three
+// nested interfaces after it. Each variant prices only the maintained query
+// circuits, so each requirement below is a lower bound on what that reduction
+// needs; extraction, proof simulation, record creation and every other part
+// of the reduction only add work.
 export type OracleSimulationVariant =
     | 'forwarded oracle'
+    | 'source-domain commitment shadows'
     | 'background oracle'
     | 'commitment shadows'
     | 'commitment shadows and readers'
@@ -164,11 +238,49 @@ export type OracleSimulationVariant =
 
 export const oracleSimulationVariants: readonly OracleSimulationVariant[] = [
     'forwarded oracle',
+    'source-domain commitment shadows',
     'background oracle',
     'commitment shadows',
     'commitment shadows and readers',
     'commitment shadows and resumed hashes',
 ];
+
+// The exact registration-source commitment input lengths over the immutable
+// family catalogue, which every poll of the largest roster size and each
+// option count spans.
+let catalogueSourceInputBits: readonly bigint[] | undefined;
+export const registrationSourceInputBits = (): readonly bigint[] => {
+    if (catalogueSourceInputBits !== undefined) return catalogueSourceInputBits;
+    const { participants, options } = supportedProfileRanges();
+    const lengths = new Set<bigint>();
+    for (
+        let optionCount = options.minimum;
+        optionCount <= options.maximum;
+        optionCount++
+    )
+        for (const family of compileRegistrationSetupBindingScreen(
+            participants.maximum,
+            optionCount,
+        ).fhe) {
+            let modulus = family.modulus;
+            const bytes: number[] = [];
+            while (modulus > 0n) {
+                bytes.push(Number(modulus & 255n));
+                modulus >>= 8n;
+            }
+            const source = registrationSourceMask(
+                new Uint8Array(1952),
+                Uint8Array.from(bytes),
+                BigInt(family.sampleBits),
+                Number(fixedModulusBfvInputs.polynomialDegree),
+            );
+            lengths.add(8n * BigInt(source.inputBytes));
+        }
+    catalogueSourceInputBits = [...lengths].sort((left, right) =>
+        left < right ? -1 : 1,
+    );
+    return catalogueSourceInputBits;
+};
 
 // The complete-input conversion of a setup proof's first-oracle leaf hash
 // resumed from its authenticated checkpoint prefix.
@@ -193,6 +305,13 @@ export const oracleSimulationGates = (
     if (variant === 'forwarded oracle') return 0n;
     // The commitment digest width is the first output chunk.
     const firstChunkBits = 512n;
+    if (variant === 'source-domain commitment shadows')
+        return compileSourceDomainOracleBudget(
+            experimentGates,
+            firstChunkBits,
+            registrationSourceInputBits(),
+            sourceMaskScopes,
+        ).shadowQueryGatesUpperBound;
     if (variant === 'background oracle')
         // The full-domain components alone: no simulated honest commitment,
         // no programmed record and no extraction.
@@ -276,8 +395,7 @@ export const compileSecurityMarginScreen = () => {
         );
         const comparisons = fheRingLweComparisons(ledger);
         const modulusBits = BigInt(profile.ciphertext.bits);
-        const { floor, primal, classicalPrimal } =
-            fheKnownAttackFloor(modulusBits);
+        const { criterion, stressTest } = fheKnownAttackFloor(modulusBits);
         const resumeFactor = firstOracleResumeFactor(profile);
         const requirements = oracleSimulationVariants.map((variant) => {
             const simulationGates = oracleSimulationGates(
@@ -295,10 +413,8 @@ export const compileSecurityMarginScreen = () => {
                 variant,
                 simulationGates,
                 requiredBits,
-                marginToFloor: floor.log2Cost - Number(requiredBits),
-                marginToPrimal: primal.log2Cost - Number(requiredBits),
-                marginToClassicalPrimal:
-                    classicalPrimal.log2Cost - Number(requiredBits),
+                marginToCriterion: criterion.log2Cost - Number(requiredBits),
+                marginToStressTest: stressTest.log2Cost - Number(requiredBits),
             };
         });
         return {
@@ -311,9 +427,8 @@ export const compileSecurityMarginScreen = () => {
             sourceMaskScopes: ledger.sourceMaskScopes,
             resumeFactor,
             comparisons,
-            floor,
-            primal,
-            classicalPrimal,
+            criterion,
+            stressTest,
             requirements,
         };
     });
