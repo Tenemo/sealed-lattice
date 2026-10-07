@@ -32,6 +32,8 @@ jobs:
               run: pnpm run build
             - name: Verify reproducible build output
               run: pnpm run build:verify-reproducible
+            - name: Smoke-test the packed npm package
+              run: pnpm exec tsx ./tools/ci/verify-packed-package.ts
             - name: Lint workspace
               run: pnpm run lint
             - name: Type-check workspace
@@ -46,6 +48,13 @@ jobs:
             - name: Run Chromium tests against the built workspace
               timeout-minutes: 55
               run: pnpm run test:browser:built
+            - name: Upload routine diagnostics
+              if: ${{ failure() }}
+              uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+              with:
+                  if-no-files-found: warn
+                  name: routine-logs-${{ github.run_id }}-${{ github.run_attempt }}
+                  path: logs
 
     rust-fast:
         name: rust fast
@@ -61,7 +70,7 @@ jobs:
               with:
                   workspaces: crates/protocol-research
             - run: cargo +1.95.0 fmt --manifest-path crates/protocol-research/Cargo.toml --all -- --check
-            - run: cargo +1.95.0 clippy --manifest-path crates/protocol-research/Cargo.toml --offline --locked -p registration-credentials --all-targets -- -D warnings
+            - run: cargo +1.95.0 clippy --manifest-path crates/protocol-research/Cargo.toml --offline --locked --no-default-features --workspace --all-targets -- -D warnings
             - name: Run Rust kernel tests
               timeout-minutes: 110
               run: pnpm run test:rust:kernel
