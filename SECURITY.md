@@ -35,15 +35,11 @@ These are requirements, not claims about the current package.
 
 ## Current implementation boundary
 
-The package ships the participant runtime, a WebAssembly module and worker that carry one participant through registration, roster agreement, the distributed setup, the ballot and its proof, closing, the target vote, the release share, and the local result, and that verify a poll's outcome from its published records without participant state. The participant API returns only the participant's verified progress and its authorized result; it exposes no raw decryption, participant-secret export, or path around certified release. An implemented step is not an established one: the runtime has run only in development environments, and its security argument is incomplete.
-
-The changed preparation binds contribution sources during registration and requires a quorum-certified selection of complete public offers before voting. Recorded desktop runs cover named departure and recovery scenarios on their respective builds, but its complete security bound and phone resource qualification remain open. An earlier reduction-time estimate was withdrawn after a circuit-accounting counterexample; current population and query-schedule models do not establish an end-to-end security level or a numerical registration limit.
-
-Removed construction formats are not accepted as compatibility inputs or fallback modes.
+The [README](README.md#current-implementation-boundary) describes what the package implements and which development evidence exists.
 
 ## Open security blockers
 
-The emitted protocol implements candidates for the first five items. The changed preparation still requires its complete matching composition argument and numerical security ledger. The current research direction cannot advance beyond research status until all of these are closed for one exact emitted protocol:
+The emitted protocol implements constructions for the first five items. The construction remains a research direction until every item is closed for one exact emitted protocol:
 
 - a malicious, dealerless, fixed-roster BFV/BGV setup that creates threshold secret shares and every evaluation key despite the permitted departures from roster fixing, without participant removal, retry or an indispensable contributor;
 - an asynchronous close rule that completes from the close responses of any `n-f` participants including the organizer and limits a malicious relay or organizer to the bounded omission above;
