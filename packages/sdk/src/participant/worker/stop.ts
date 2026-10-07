@@ -1,10 +1,8 @@
 // This reports local persistence only. It grants no protocol authority, and an
 // unconfirmed write never permits continuation of the failed invocation.
-export async function stopParticipant(database: IDBDatabase): Promise<{
-    refused: true;
-    stopped: boolean;
-    stopPersistence: 'confirmed' | 'unconfirmed';
-}> {
+export async function stopParticipant(
+    database: IDBDatabase,
+): Promise<'confirmed' | 'unconfirmed'> {
     let stopped = false;
     try {
         await new Promise<void>((resolve, reject) => {
@@ -36,9 +34,5 @@ export async function stopParticipant(database: IDBDatabase): Promise<{
     } catch {
         // A committed marker can still exist when readback fails.
     }
-    return {
-        refused: true,
-        stopped,
-        stopPersistence: stopped ? 'confirmed' : 'unconfirmed',
-    };
+    return stopped ? 'confirmed' : 'unconfirmed';
 }

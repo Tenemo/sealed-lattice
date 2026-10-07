@@ -114,7 +114,6 @@ export type ParticipantProfile = Readonly<{
         selectionReferenceBytes: number;
         certificateBytes: number;
         endorsementPacketBytes: number;
-        signedSelectionPacketBytes: number;
     }>;
     ballot: Readonly<{
         minimumScore: number;
@@ -589,8 +588,6 @@ const profileBounds = (
         selectionBodyBytes: profile.selectionBodyBytes,
         selectionReferenceBytes: profile.selectionReferenceBytes,
         certificateBytes: profile.certificateBytes,
-        signedSelectionPacketBytes:
-            4 + profile.selectionBodyBytes + module.registration.signatureBytes,
     };
     // PRE2 frames three independent slots. Each signing slot retains the locked body,
     // followed by the signature on completion. At activation all slots empty.

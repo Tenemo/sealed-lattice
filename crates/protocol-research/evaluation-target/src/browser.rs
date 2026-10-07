@@ -179,7 +179,7 @@ impl State {
             return Err(Error::Encoding);
         }
         self.output.clear();
-        if self.target.is_some() && ![20, 24].contains(&operation) {
+        if self.target.is_some() {
             return Err(Error::Context);
         }
         if ![12, 13].contains(&operation) && self.incoming.is_some() {
@@ -514,30 +514,6 @@ impl State {
                     self.word(prime);
                     self.output.extend_from_slice(&record);
                 }
-                Ok(())
-            }
-            20 => {
-                if argument != 0 || length != 8 {
-                    return Err(Error::Encoding);
-                }
-                let offset = u32::from_le_bytes(self.input[..4].try_into().unwrap()) as usize;
-                let count = u32::from_le_bytes(self.input[4..8].try_into().unwrap()) as usize;
-                let ciphertext = self
-                    .target
-                    .as_ref()
-                    .and_then(|target| target.ciphertext())
-                    .ok_or(Error::Incomplete)?;
-                if count == 0
-                    || count > CHUNK_BYTES
-                    || offset > ciphertext.len().saturating_sub(count)
-                {
-                    return Err(Error::Encoding);
-                }
-                self.output.extend_from_slice(
-                    ciphertext
-                        .get(offset..offset + count)
-                        .ok_or(Error::Encoding)?,
-                );
                 Ok(())
             }
             _ => Err(Error::Encoding),

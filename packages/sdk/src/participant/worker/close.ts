@@ -987,11 +987,6 @@ const takeResponses = async (session: CloseSession, relay: PublicRelay) => {
             )
                 continue;
             const length = readUnsigned32(response, 0);
-            if (
-                length < close.minimumResponseBodyBytes ||
-                response.length !== 4 + length + registration.signatureBytes
-            )
-                continue;
             const supplied: Uint8Array[] = [];
             for (
                 let offset = 4 + close.minimumResponseBodyBytes, index = 0;

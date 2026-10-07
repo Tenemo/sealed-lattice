@@ -970,14 +970,12 @@ fn main() {
             .sign_retained_ballot_envelope(&restored_owner, &changed_envelope)
             .is_err()
     );
+    // The author's credential signs its ballot envelope only once.
     assert!(
-        ballot_proof::submission::sign_body(
-            &mut enrollments[0].credential,
-            &body,
-            &setup,
-            ballot_time,
-        )
-        .is_err()
+        enrollments[0]
+            .credential
+            .sign_ballot_envelope(setup.roster(), &envelope)
+            .is_err()
     );
     let authenticated =
         ballot_proof::submission::authenticate_envelope(&setup, envelope.bytes(), &signature)
@@ -1006,14 +1004,12 @@ fn main() {
         &body_path,
         &final_keys,
     );
+    // Another participant's credential cannot sign the author's envelope.
     assert!(
-        ballot_proof::submission::sign_body(
-            &mut enrollments[1].credential,
-            &body,
-            &setup,
-            ballot_time,
-        )
-        .is_err()
+        enrollments[1]
+            .credential
+            .sign_ballot_envelope(setup.roster(), &envelope)
+            .is_err()
     );
     let mut submissions: Vec<Option<close::Submission>> = vec![None; enrollments.len()];
     submissions[0] = Some(close::Submission {

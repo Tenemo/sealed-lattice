@@ -126,9 +126,6 @@ export const compileParticipantRuntimeProfile = (
             endorsementPacketBytes: number(
                 authentication.endorsementPacketBytes,
             ),
-            signedSelectionPacketBytes: number(
-                authentication.signedSelectionPacketBytes,
-            ),
         },
         ballot: {
             minimumScore: ballotScoreRange.minimum,

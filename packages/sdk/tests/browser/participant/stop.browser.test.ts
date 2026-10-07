@@ -24,16 +24,8 @@ const readMarker = (database: IDBDatabase) =>
     requestResult<unknown>(
         database.transaction('stopped').objectStore('stopped').get(0),
     );
-const confirmed = {
-    refused: true,
-    stopped: true,
-    stopPersistence: 'confirmed',
-};
-const unconfirmed = {
-    refused: true,
-    stopped: false,
-    stopPersistence: 'unconfirmed',
-};
+const confirmed = 'confirmed';
+const unconfirmed = 'unconfirmed';
 
 afterEach(async () => {
     vi.restoreAllMocks();

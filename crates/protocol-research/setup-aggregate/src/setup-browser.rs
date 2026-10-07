@@ -237,14 +237,8 @@ pub fn roster_context() -> Option<(Arc<VerifiedPoll>, Arc<OrganizerSignedRoster>
         Some((state.poll.clone()?, state.proposal.clone()?))
     })
 }
-pub fn verified_offers() -> Vec<Arc<VerifiedContributionOffer>> {
-    SESSION.with(|state| state.borrow().offers.clone())
-}
 pub fn unsigned_selection() -> Option<SelectionProposal> {
     SESSION.with(|state| state.borrow().unsigned.clone())
-}
-pub fn authenticated_selection() -> Option<Arc<AuthenticatedSelectionProposal>> {
-    SESSION.with(|state| state.borrow().selected.clone())
 }
 pub fn selection_inputs() -> Option<Arc<VerifiedSelectionInputs>> {
     SESSION.with(|state| state.borrow().inputs.clone())

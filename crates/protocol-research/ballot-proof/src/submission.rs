@@ -1,8 +1,5 @@
 use crate::body::VerifiedBallotBody;
-use registration_credentials::{
-    Credential,
-    ballot_authentication::{BallotEnvelope, verify_ballot_signature},
-};
+use registration_credentials::ballot_authentication::{BallotEnvelope, verify_ballot_signature};
 use setup_aggregate::verified::VerifiedSetupAggregate;
 use supported_profile::Profile;
 
@@ -113,29 +110,6 @@ fn check_setup(body: &VerifiedBallotBody, setup: &VerifiedSetupAggregate) -> Res
         return Err(Error::Context);
     }
     Ok(relation.position())
-}
-/// The ballot time is the author's clock reading when its attempt was locked.
-pub fn sign_body(
-    credential: &mut Credential,
-    body: &VerifiedBallotBody,
-    setup: &VerifiedSetupAggregate,
-    ballot_time: u64,
-) -> Result<(BallotEnvelope, [u8; 3309]), Error> {
-    let position = check_setup(body, setup)?;
-    let envelope = BallotEnvelope::new(
-        setup.profile(),
-        *body.relation().poll(),
-        setup.identity(),
-        position,
-        ballot_time,
-        body.length(),
-        *body.identity(),
-    )
-    .map_err(|_| Error::Context)?;
-    let signature = credential
-        .sign_ballot_envelope(setup.roster(), &envelope)
-        .map_err(|_| Error::Signature)?;
-    Ok((envelope, signature))
 }
 pub fn verify_submission(
     body: VerifiedBallotBody,

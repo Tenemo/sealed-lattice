@@ -842,14 +842,14 @@ const run = async (
                         error instanceof ModuleFailure
                     )
                         throw error;
-                    const stop = await stopParticipant(opened);
+                    const stopPersistence = await stopParticipant(opened);
                     return {
                         status: 'stopped',
                         reason:
                             error instanceof Error
                                 ? error.message
                                 : String(error),
-                        stopPersistence: stop.stopPersistence,
+                        stopPersistence,
                     };
                 }
             },
