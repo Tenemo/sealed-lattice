@@ -294,7 +294,11 @@ it('allows later original bytes after junk and empty publications without first-
                     },
                 );
                 expect(refused).toBe(3);
-                expect(received).toEqual(expected);
+                // Generic deep equality visits each of the 1 MiB elements
+                // separately and takes over a second per comparison.
+                expect(
+                    Buffer.from(received).equals(Buffer.from(expected)),
+                ).toBe(true);
 
                 const before = await readdir(path.join(_directory, 'chunks'));
                 const retainedCopies: Uint8Array[] = [];
@@ -340,7 +344,9 @@ it('allows later original bytes after junk and empty publications without first-
                             expected.length,
                         ),
                 );
-                expect(forwarded).toEqual(expected);
+                expect(
+                    Buffer.from(forwarded).equals(Buffer.from(expected)),
+                ).toBe(true);
             }
             const retained = Uint8Array.of(3, 17, 127, 255);
             const beforeCopy = await readdir(path.join(_directory, 'chunks'));
