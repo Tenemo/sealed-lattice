@@ -116,8 +116,28 @@ import { compileReleaseVerificationWorkload } from '#tests/release-verification-
 import { compileRnsArithmeticResourceCensus } from '#tests/rns-arithmetic-resource-model.js';
 import { compileRosterProposalCensus } from '#tests/roster-proposal-model.js';
 import {
+    atMost,
+    compileAuthenticationGroup,
+    compileIdentityCollisionGroup,
+    compileRecordCreationPricing,
+    compileSecurityLedger,
+    compileSemanticUseCharges,
+    compileSoundnessCharge,
+    compileStatisticalTerms,
+    ledgerGroups,
+    maximumChargedQueries,
+    rational,
+    rationalCeilingLog2,
+    soundnessChargeAt,
+    statisticalRatioAt,
+    type Rational,
+    type StatisticalTerm,
+} from '#tests/security-ledger-model.js';
+import {
     compileFhePopulationLimits,
     compileSecurityMarginScreen,
+    instanceAttackScreens,
+    populationSearchCap,
     type ReductionVariant,
 } from '#tests/security-margin-screen-model.js';
 import { compileSelectedOpeningTransformCensus } from '#tests/selected-opening-transform-model.js';
@@ -183,6 +203,44 @@ const table = (
 // alone already exceeds the level.
 const formatWorkAllowance = (allowance: bigint): string =>
     allowance > 0n ? formatCount(allowance.toString(2).length - 1) : 'none';
+
+const formatLog2Cost = (value: number): string =>
+    Number.isFinite(value) ? `\`${value.toFixed(2)}\`` : 'no finite cost';
+
+const formatPopulationLimit = (limit: bigint | undefined): string =>
+    limit === undefined ? 'none' : formatCount(limit);
+
+// The largest ratio of each statistical term to the experiment's cost over
+// every supported profile at the search cap, and the largest subtotals.
+const compileStatisticalTermMaxima = () => {
+    const terms = new Map<
+        string,
+        { scope: StatisticalTerm['scope']; ratio: Rational }
+    >();
+    const subtotals = new Map<string, Rational>();
+    for (const profile of listSupportedProfiles()) {
+        for (const term of compileStatisticalTerms(profile)) {
+            const ratio = term.ratioAt(populationSearchCap);
+            const current = terms.get(term.name);
+            if (current === undefined || !atMost(ratio, current.ratio))
+                terms.set(term.name, { scope: term.scope, ratio });
+        }
+        for (const [label, scope] of [
+            ['Outside the proofs', 'outside the proofs'],
+            ['Proofs', 'proofs'],
+            ['Every term', undefined],
+        ] as const) {
+            const ratio = statisticalRatioAt(
+                profile,
+                populationSearchCap,
+                scope,
+            );
+            const current = subtotals.get(label) ?? rational(0n);
+            if (!atMost(ratio, current)) subtotals.set(label, ratio);
+        }
+    }
+    return { terms, subtotals };
+};
 
 export const renderDocumentationCensus = (): string => {
     const resourceArtifact = readParticipantArtifactResources();
@@ -4579,7 +4637,7 @@ export const renderDocumentationCensus = (): string => {
         '',
         '## Composed security ledger',
         '',
-        'The [clear-preparation argument](security-argument.md#clear-candidate-joint-ledger) owns the conditional hybrid interfaces. The first tables evaluate fixed-roster-size structural upper bounds at the displayed example original-honest-registration population H, including abandoned and unselected registrations; H is not an admitted population limit. Whole-poll bounds permitting different roster sizes follow separately. Started private preparation and certified rosters have different bounds. Original contribution scopes include failed or unfinished generation before publication; a replay of the same retained intent adds work but no new scope. Primitive comparison counts include the source-family or selected-position guesses where required, but exclude unresolved semantic-use error charges and reduction-time operands. No numerical end-to-end security level or required primitive level is emitted.',
+        'The [clear-preparation argument](security-argument.md#clear-candidate-joint-ledger) owns the conditional hybrid interfaces. The first tables evaluate fixed-roster-size structural upper bounds at the displayed example original-honest-registration population H, including abandoned and unselected registrations; H is not an admitted population limit. Whole-poll bounds permitting different roster sizes follow separately. Started private preparation and certified rosters have different bounds. Original contribution scopes include failed or unfinished generation before publication; a replay of the same retained intent adds work but no new scope. Primitive comparison counts include the source-family or selected-position guesses where required, but exclude semantic-use error charges and reduction-time operands. The assumption group limits at the end of this section are conditional on the proof-compiler gate; no end-to-end security level is emitted.',
         '',
         table(
             [
@@ -4711,7 +4769,7 @@ export const renderDocumentationCensus = (): string => {
             }),
         ),
         '',
-        'Oracle simulation is priced from declared query schedules in the compressed-oracle circuit census. That accounting includes persistent components, clean prefix wrappers and all supplied shadow streams. The margin screen below derives the FHE reduction’s capacities from the accepted experiment-cost convention, prices its protocol wrappers and solves for the FHE comparisons’ own population limit; the other assumption groups and the semantic-use inventory remain required before solving for the complete security population.',
+        'Oracle simulation is priced from declared query schedules in the compressed-oracle circuit census. That accounting includes persistent components, clean prefix wrappers and all supplied shadow streams. The margin screen below derives the FHE reduction’s capacities from the accepted experiment-cost convention, prices its protocol wrappers and solves for the FHE comparisons’ own population limit, and the assumption group limits below solve for every group’s.',
         '',
         '### FHE security margin screen',
         '',
@@ -4764,7 +4822,7 @@ export const renderDocumentationCensus = (): string => {
         '',
         'This screen is a necessary condition, not a security level. Where a requirement exceeds the criterion floor, the priced reduction cannot establish the target at those parameters, whatever its remaining costs.',
         '',
-        'A larger original honest registration population raises the source-domain requirement by about two bits per doubling: one for the comparisons and one for the commitment shadows. The following limits are the largest original honest registration populations of one poll of each participant count, whatever its option count, whose source-domain requirement stays within the whole bits each floor supports at that option count’s modulus. Each limit names the option count and modulus that bind it. They are the FHE comparisons’ own limit; the other assumption groups, the statistical terms, the semantic-use charges and the simulated proofs’ record creation bound the population separately. Each unpriced column gives the further reduction work, in whole log2 gates, that every option count still absorbs at that limit.',
+        'A larger original honest registration population raises the source-domain requirement by about two bits per doubling: one for the comparisons and one for the commitment shadows. The following limits are the largest original honest registration populations of one poll of each participant count, whatever its option count, whose source-domain requirement stays within the whole bits each floor supports at that option count’s modulus. Each limit names the option count and modulus that bind it. They are the FHE comparisons’ own limit; the assumption group limits below add the other groups, and the simulated proofs’ record creation must fit within the unpriced work. Each unpriced column gives the further reduction work, in whole log2 gates, that every option count still absorbs at that limit.',
         '',
         table(
             [
@@ -4789,6 +4847,209 @@ export const renderDocumentationCensus = (): string => {
                     formatCount(limit.honestRegistrations),
                     formatWorkAllowance(limit.allowance),
                 ]),
+            ]),
+        ),
+        '',
+        '### Assumption group limits',
+        '',
+        'The [security ledger model](../tests/security-ledger-model.ts) derives each assumption group’s own limit on a poll’s original honest registrations and takes the poll’s limit as the smallest, conditional on the proof-compiler gate. The seven groups share the budget as above, so each bounds the ratio of its contribution to the experiment’s cost by 2^-83 at every experiment within 2^80 gates. The lattice groups price their comparisons with the source-domain reduction of the screen above. Circular security of the honest evaluation-key tuples is judged against the FHE instance’s floor at each option count’s modulus, as the owner decided on 2026-10-07. The fixed share-encryption and auxiliary instances use the following core-SVP screens of the pinned estimator with unlimited samples; an attack whose estimate has no finite cost at any block size has no floor, and an instance without a finite screen in a cost model imposes no limit in it. A group that stays within its level at 2^64 registrations has no limit below that search cap, shown as none.',
+        '',
+        table(
+            [
+                'Instance',
+                'Attack',
+                'Cost model',
+                'Modulus bits',
+                'Core-SVP log2 cost',
+            ],
+            (['share encryption', 'auxiliary'] as const).flatMap((instance) =>
+                instanceAttackScreens[instance].map((screen) => [
+                    instance === 'share encryption'
+                        ? 'Share encryption'
+                        : 'Auxiliary',
+                    screen.attack,
+                    screen.costModel,
+                    formatCount(screen.modulusBits),
+                    formatLog2Cost(screen.log2Cost),
+                ]),
+            ),
+        ),
+        '',
+        'The accepted reading of the ML-DSA-65 claim bounds the forgery of one key by T^2/2^192 at cost T. A union over the original honest credentials charges each key’s reduction, which runs the real experiment with that key’s signing oracle and tests every honest verification under it against the frames its intents fixed. The test adds at most the displayed gates per verification, while every verification computes at least the displayed permutations, so the reduction costs at most (1+rho)T, and the limit is the largest population with H((1+rho)T)^2/2^192 <= T/2^83 at T = 2^80. Every identity, retained tag and signed-frame digest is a 512-bit SHAKE256 prefix, so one compressed-oracle collision bound covers them all at every experiment, whatever the population.',
+        '',
+        (() => {
+            const authentication = compileAuthenticationGroup();
+            const identity = compileIdentityCollisionGroup();
+            return table(
+                ['Property', 'Value'],
+                [
+                    [
+                        'Signed frames per original credential',
+                        formatCount(authentication.signedFramesPerKey),
+                    ],
+                    [
+                        'Forgery-test gates per verification',
+                        formatCount(authentication.comparisonGates),
+                    ],
+                    [
+                        'Shortest frame-digest input bytes',
+                        formatCount(authentication.shortestFrameInputBytes),
+                    ],
+                    [
+                        'Least permutations per verification',
+                        formatCount(authentication.verificationPermutations),
+                    ],
+                    [
+                        'Least verification gates',
+                        formatCount(authentication.verificationGates),
+                    ],
+                    [
+                        'Original honest registrations within the authentication budget',
+                        formatCount(authentication.honestRegistrations),
+                    ],
+                    [
+                        'Identity-collision ratio to experiment cost, log2 upper bound',
+                        formatCount(rationalCeilingLog2(identity.ratio)),
+                    ],
+                ],
+            );
+        })(),
+        '',
+        'Each statistical term is bounded relative to the experiment’s cost. A once-global term, or a term charged per operation of one kind, is bounded by its value over one permutation charge, since every operation costs at least one. Query-dependent terms use at most four charged queries per permutation charge of the experiment, and population-dependent terms are evaluated at the population. The following shows each term’s largest bound over every supported profile at 2^64 original honest registrations; the subtotals round each term up to a multiple of 2^-1024. Terms outside the proofs do not depend on the proof-compiler gate.',
+        '',
+        ...(() => {
+            const maxima = compileStatisticalTermMaxima();
+            return [
+                table(
+                    [
+                        'Term',
+                        'Scope',
+                        'Largest ratio at 2^64 registrations, log2 upper bound',
+                    ],
+                    [...maxima.terms].map(([name, { scope, ratio }]) => [
+                        name,
+                        scope,
+                        formatCount(rationalCeilingLog2(ratio)),
+                    ]),
+                ),
+                '',
+                table(
+                    [
+                        'Subtotal',
+                        'Largest ratio at 2^64 registrations, log2 upper bound',
+                    ],
+                    [...maxima.subtotals].map(([label, ratio]) => [
+                        label,
+                        formatCount(rationalCeilingLog2(ratio)),
+                    ]),
+                ),
+            ];
+        })(),
+        '',
+        'The proof-soundness term charges the finite-family tagged soundness bound at both endpoints of every comparison whose endpoint games use true accepted corrupt statements: every lattice comparison, and four steps outside them, namely original-history recovery with prescribed release, both corrupt-ballot recovery switches and the terminal identity. Its operands are the whole suite’s.',
+        '',
+        (() => {
+            const soundness = compileSoundnessCharge();
+            const queries = maximumChargedQueries();
+            return table(
+                ['Property', 'Value'],
+                [
+                    [
+                        'Largest round error, log2 upper bound',
+                        formatCount(rationalCeilingLog2(soundness.roundError)),
+                    ],
+                    ['Raw input bits', formatCount(soundness.inputBits)],
+                    ['Hash-label sentinels', formatCount(soundness.sentinels)],
+                    [
+                        'Accepted expansion queries',
+                        formatCount(soundness.expansionQueries),
+                    ],
+                    ['Message bits', formatCount(soundness.messageBits)],
+                    ['Tag bits', formatCount(soundness.tagBits)],
+                    ['Largest charged queries', formatCount(queries)],
+                    [
+                        'One charge at those queries, log2 upper bound',
+                        formatCount(
+                            rationalCeilingLog2(soundnessChargeAt(queries)),
+                        ),
+                    ],
+                ],
+            );
+        })(),
+        '',
+        table(
+            [
+                'Participants',
+                'Charges independent of the population',
+                'Charges per original registration, largest option count',
+            ],
+            supportedProfiles.profiles.map((row) => {
+                const charges = row.map(compileSemanticUseCharges);
+                const largest = (field: 'constant' | 'slope') =>
+                    charges.reduce(
+                        (maximum, value) =>
+                            value[field] > maximum ? value[field] : maximum,
+                        0n,
+                    );
+                return [
+                    formatCount(row[0].participantCount),
+                    formatCount(largest('constant')),
+                    formatCount(largest('slope')),
+                ];
+            }),
+        ),
+        '',
+        'The criterion table uses each lattice group’s classical floor, and the stress-test table replaces those floors by the quantum ones; the other groups are the same in both. The poll limit is the smallest group limit.',
+        '',
+        ...(() => {
+            const ledger = compileSecurityLedger();
+            return (['criterion', 'stressTest'] as const).flatMap(
+                (floor, index) => [
+                    ...(index === 0 ? [] : ['']),
+                    table(
+                        [
+                            'Participants',
+                            ...ledgerGroups,
+                            floor === 'criterion'
+                                ? 'Poll limit within the criterion'
+                                : 'Poll limit within the stress test',
+                            'Binding group',
+                        ],
+                        ledger.map((row) => [
+                            formatCount(row.participantCount),
+                            ...ledgerGroups.map((group) =>
+                                formatPopulationLimit(
+                                    row[floor].limits.get(group),
+                                ),
+                            ),
+                            formatCount(row[floor].binding.limit),
+                            row[floor].binding.group,
+                        ]),
+                    ),
+                ],
+            );
+        })(),
+        '',
+        'Each simulated proof replaces one honest proof, and the direct simulator runs the unchanged proof writer on public dummy columns, adding only the dummy entries’ sampling, their public affine pairing, one constant-coefficient adjustment and the programmed message. Every honest proof costs at least its prover’s hash permutations, so an experiment holds at most one simulated proof per that many permutation charges. Because the decisive experiment has the largest reduction ratio, record creation fits within every lattice level at every experiment when its added work per simulated proof is at most those permutation charges times the unpriced work at the poll’s limit over the decisive experiment. The last column divides that by the dummy entries of the largest proof role, every systematic coordinate of its original oracles, giving the work each entry may cost.',
+        '',
+        table(
+            [
+                'Participants',
+                'Poll limit within the criterion',
+                'Unpriced work at that limit, log2 gates',
+                'Least prover permutations per honest proof',
+                'Dummy entries per simulated proof',
+                'Added work per simulated proof within every level, log2 gates',
+                'Added work per dummy entry within every level, log2 gates',
+            ],
+            compileRecordCreationPricing().map((row) => [
+                formatCount(row.participantCount),
+                formatCount(row.honestRegistrations),
+                formatWorkAllowance(row.allowance),
+                formatCount(row.leastProverPermutations),
+                formatCount(row.largestDummyEntries),
+                formatWorkAllowance(row.workPerProof),
+                formatWorkAllowance(row.workPerEntry),
             ]),
         ),
         '',

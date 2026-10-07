@@ -102,7 +102,7 @@ export const proofCompilerCaps = {
     programmedMessageBudget: honestProofBudget,
 } as const;
 
-const compileProofCompilerCapCensus = () => {
+export const compileProofCompilerCapCensus = () => {
     const {
         chargedQueries,
         relativeBalanceBits,

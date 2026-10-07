@@ -25,10 +25,10 @@ import {
 // advantage at most T/2^80. Above 2^80 gates the bound is trivial.
 export const securityTargetBits = 80n;
 
-// The assumption groups that share the 2^-80 budget, as in the withdrawn
-// composed ledger: statistical terms, signatures, identity collisions,
-// share-encryption, auxiliary and FHE Ring-LWE, and evaluation-key circular
-// security. Each group receives 2^-(80+3).
+// The assumption groups of the security ledger that share the 2^-80 budget:
+// the FHE, share-encryption and auxiliary Ring-LWE comparisons, evaluation-key
+// circular security, ML-DSA authentication, identity collisions and the
+// statistical terms. Each group receives 2^-(80+3).
 const budgetGroupCount = 7n;
 
 // Smallest integer k with numerator/denominator <= 2^k.
@@ -215,6 +215,224 @@ export const fheKnownAttackFloor = (modulusBits: bigint) => ({
         modulusBits,
     ),
 });
+
+export type AttackScreen = Readonly<{
+    attack: string;
+    costModel: 'classical' | 'quantum';
+    modulusBits: bigint;
+    log2Cost: number;
+}>;
+
+// Core-SVP screens from the pinned estimator for the suite's two fixed
+// instances, which every profile shares: degree 65,536 with the 158-bit
+// sharing modulus, and degree 4,096 with the 35-bit auxiliary modulus. Both
+// use balanced sparse ternary secrets with 128 entries of each sign, the
+// width-3.2 error of every emitted sampler and, for the attacker, unbounded
+// samples. An attack whose estimate has no finite cost at any block size has
+// an infinite screen. The classical screens of every algorithm of the full
+// estimate decide the criterion; the quantum screens are a stress test.
+export const instanceAttackScreens: Readonly<
+    Record<'share encryption' | 'auxiliary', readonly AttackScreen[]>
+> = {
+    'share encryption': [
+        {
+            attack: 'unique SVP',
+            costModel: 'classical',
+            modulusBits: 158n,
+            log2Cost: Number.POSITIVE_INFINITY,
+        },
+        {
+            attack: 'bounded distance',
+            costModel: 'classical',
+            modulusBits: 158n,
+            log2Cost: Number.POSITIVE_INFINITY,
+        },
+        {
+            attack: 'primal hybrid',
+            costModel: 'classical',
+            modulusBits: 158n,
+            log2Cost: 610.1471552614535,
+        },
+        {
+            attack: 'primal hybrid without meet-in-the-middle',
+            costModel: 'classical',
+            modulusBits: 158n,
+            log2Cost: 738.7002118029999,
+        },
+        {
+            attack: 'primal hybrid with Babai lifting',
+            costModel: 'classical',
+            modulusBits: 158n,
+            log2Cost: 628.1599186312503,
+        },
+        {
+            attack: 'dual',
+            costModel: 'classical',
+            modulusBits: 158n,
+            log2Cost: Number.POSITIVE_INFINITY,
+        },
+        {
+            attack: 'dual hybrid',
+            costModel: 'classical',
+            modulusBits: 158n,
+            log2Cost: Number.POSITIVE_INFINITY,
+        },
+        {
+            attack: 'coded BKW',
+            costModel: 'classical',
+            modulusBits: 158n,
+            log2Cost: Number.POSITIVE_INFINITY,
+        },
+        {
+            attack: 'unique SVP',
+            costModel: 'quantum',
+            modulusBits: 158n,
+            log2Cost: Number.POSITIVE_INFINITY,
+        },
+        {
+            attack: 'bounded distance',
+            costModel: 'quantum',
+            modulusBits: 158n,
+            log2Cost: Number.POSITIVE_INFINITY,
+        },
+        {
+            attack: 'dual hybrid',
+            costModel: 'quantum',
+            modulusBits: 158n,
+            log2Cost: Number.POSITIVE_INFINITY,
+        },
+        {
+            attack: 'primal hybrid',
+            costModel: 'quantum',
+            modulusBits: 158n,
+            log2Cost: 593.460876850818,
+        },
+        {
+            attack: 'primal hybrid without meet-in-the-middle',
+            costModel: 'quantum',
+            modulusBits: 158n,
+            log2Cost: 713.7818160198522,
+        },
+        {
+            attack: 'primal hybrid with Babai lifting',
+            costModel: 'quantum',
+            modulusBits: 158n,
+            log2Cost: 609.9031610086014,
+        },
+    ],
+    auxiliary: [
+        {
+            attack: 'unique SVP',
+            costModel: 'classical',
+            modulusBits: 35n,
+            log2Cost: 405.00399999999996,
+        },
+        {
+            attack: 'bounded distance',
+            costModel: 'classical',
+            modulusBits: 35n,
+            log2Cost: 405.5351072984547,
+        },
+        {
+            attack: 'primal hybrid',
+            costModel: 'classical',
+            modulusBits: 35n,
+            log2Cost: 282.58789841170767,
+        },
+        {
+            attack: 'primal hybrid without meet-in-the-middle',
+            costModel: 'classical',
+            modulusBits: 35n,
+            log2Cost: 344.50991114725474,
+        },
+        {
+            attack: 'primal hybrid with Babai lifting',
+            costModel: 'classical',
+            modulusBits: 35n,
+            log2Cost: 327.02025390058486,
+        },
+        {
+            attack: 'dual',
+            costModel: 'classical',
+            modulusBits: 35n,
+            log2Cost: 409.96799999999996,
+        },
+        {
+            attack: 'dual hybrid',
+            costModel: 'classical',
+            modulusBits: 35n,
+            log2Cost: 376.9798371302914,
+        },
+        {
+            attack: 'coded BKW',
+            costModel: 'classical',
+            modulusBits: 35n,
+            log2Cost: 521.6940086703631,
+        },
+        {
+            attack: 'primal hybrid',
+            costModel: 'quantum',
+            modulusBits: 35n,
+            log2Cost: 268.5681008420732,
+        },
+        {
+            attack: 'bounded distance',
+            costModel: 'quantum',
+            modulusBits: 35n,
+            log2Cost: 368.1202384652496,
+        },
+        {
+            attack: 'dual hybrid',
+            costModel: 'quantum',
+            modulusBits: 35n,
+            log2Cost: 344.79779792804027,
+        },
+    ],
+};
+
+// The fixed instances' criterion also covers coded BKW, which reports a
+// finite cost at the auxiliary instance's small dimension but none at the
+// share-encryption instance's.
+const instanceCriterionAttacks: readonly string[] = [
+    ...criterionAttacks,
+    'coded BKW',
+];
+
+// The cheapest finite screen of each cost model. Every criterion attack must
+// have a classical screen, finite or not; a model without any finite screen
+// has no floor.
+export const instanceKnownAttackFloor = (
+    instance: keyof typeof instanceAttackScreens,
+) => {
+    const screens = instanceAttackScreens[instance];
+    for (const attack of instanceCriterionAttacks)
+        assert.ok(
+            screens.some(
+                (screen) =>
+                    screen.attack === attack &&
+                    screen.costModel === 'classical',
+            ),
+            `No classical ${attack} screen covers the ${instance} instance.`,
+        );
+    const cheapest = (costModel: AttackScreen['costModel']) =>
+        screens
+            .filter(
+                (screen) =>
+                    screen.costModel === costModel &&
+                    Number.isFinite(screen.log2Cost),
+            )
+            .reduce<AttackScreen | undefined>(
+                (lowest, screen) =>
+                    lowest === undefined || screen.log2Cost < lowest.log2Cost
+                        ? screen
+                        : lowest,
+                undefined,
+            );
+    return {
+        criterion: cheapest('classical'),
+        stressTest: cheapest('quantum'),
+    };
+};
 
 // The reduction-work operand of an FHE comparison at an experiment of
 // `experimentGates`: the work the reduction adds to that experiment. The
@@ -444,7 +662,7 @@ export const requiredFheAssumptionBits = (
 
 // A requirement of lambda bits holds at an attack floor of c bits when
 // lambda <= c, so the integer level a floor supports is its whole part.
-export const supportedLevelBits = (floor: FheAttackScreen) =>
+export const supportedLevelBits = (floor: AttackScreen) =>
     BigInt(Math.floor(floor.log2Cost));
 
 // The further reduction work that keeps the requirement within a supported
@@ -471,6 +689,70 @@ const fheRingLweComparisons = (
     ledger.fheSelectedKeyComparisons +
     ledger.fheBallotComparisons * ledger.messagesPerFheBallotComparison;
 
+// The lattice assumption groups of the clear-preparation ledger. Each charges
+// its own single-message comparisons; circular security of the honest
+// evaluation-key tuple is judged against the FHE instance's floor, as the
+// owner decided on 2026-10-07.
+export type LatticeAssumptionGroup =
+    | 'FHE Ring-LWE'
+    | 'Evaluation-key circular security'
+    | 'Share-encryption Ring-LWE'
+    | 'Auxiliary Ring-LWE';
+
+export const latticeAssumptionGroups: readonly LatticeAssumptionGroup[] = [
+    'FHE Ring-LWE',
+    'Evaluation-key circular security',
+    'Share-encryption Ring-LWE',
+    'Auxiliary Ring-LWE',
+];
+
+export const latticeGroupComparisons = (
+    group: LatticeAssumptionGroup,
+    ledger: ReturnType<typeof compileClearPreparationLedger>,
+) => {
+    switch (group) {
+        case 'FHE Ring-LWE':
+            return fheRingLweComparisons(ledger);
+        case 'Evaluation-key circular security':
+            return ledger.fheTupleComparisons;
+        case 'Share-encryption Ring-LWE':
+            // Every recipient key's good/uniform/good sweep and both
+            // replacements of every honest sharing row to an honest
+            // recipient, one ciphertext each.
+            return (
+                ledger.recipientKeyComparisons +
+                ledger.recipientCiphertextComparisons
+            );
+        case 'Auxiliary Ring-LWE':
+            return (
+                ledger.auxiliaryKeyComparisons +
+                ledger.auxiliaryBallotComparisons *
+                    ledger.messagesPerAuxiliaryBallotComparison
+            );
+    }
+};
+
+// A group's criterion and stress-test floors at a profile's FHE modulus. The
+// share-encryption and auxiliary instances are fixed for the suite. A floor
+// is undefined when no screened attack of that model has a finite cost.
+export const latticeGroupFloors = (
+    group: LatticeAssumptionGroup,
+    modulusBits: bigint,
+): Readonly<{
+    criterion: AttackScreen | undefined;
+    stressTest: AttackScreen | undefined;
+}> => {
+    switch (group) {
+        case 'FHE Ring-LWE':
+        case 'Evaluation-key circular security':
+            return fheKnownAttackFloor(modulusBits);
+        case 'Share-encryption Ring-LWE':
+            return instanceKnownAttackFloor('share encryption');
+        case 'Auxiliary Ring-LWE':
+            return instanceKnownAttackFloor('auxiliary');
+    }
+};
+
 // Every supported profile of each participant count, the largest modulus
 // first and, among equal moduli, the most options first.
 const profilesByParticipantCount = () => {
@@ -492,16 +774,17 @@ const profilesByParticipantCount = () => {
         }));
 };
 
-// The ledger, comparisons and reduction operands at a profile and original
-// honest registration population of one poll.
-const fheComparisonInputs = (
+// The ledger, comparisons and reduction operands of a group at a profile and
+// original honest registration population of one poll.
+const groupComparisonInputs = (
+    group: LatticeAssumptionGroup,
     profile: SupportedProfile,
     honestRegistrations: bigint,
 ) => {
     const ledger = compileClearPreparationLedger(profile, honestRegistrations);
     return {
         ledger,
-        comparisons: fheRingLweComparisons(ledger),
+        comparisons: latticeGroupComparisons(group, ledger),
         operands: reductionOperands(
             profile,
             ledger,
@@ -509,6 +792,11 @@ const fheComparisonInputs = (
         ),
     };
 };
+
+const fheComparisonInputs = (
+    profile: SupportedProfile,
+    honestRegistrations: bigint,
+) => groupComparisonInputs('FHE Ring-LWE', profile, honestRegistrations);
 
 // One profile's screen at one original honest registration per participant:
 // the smallest population with every member honest. A larger population H
@@ -579,15 +867,20 @@ export const compileSecurityMarginScreen = () =>
             ),
     );
 
-// The source-domain requirement of a profile at an original honest
-// registration population of one poll, charged at an experiment of the given
-// cost; the decisive experiment decides it.
-export const sourceDomainRequirementAt = (
+// The source-domain requirement of a group's comparisons at a profile and an
+// original honest registration population of one poll, charged at an
+// experiment of the given cost; the decisive experiment decides it. Every
+// lattice comparison of the clear-preparation hybrids runs inside the
+// extracting simulator that the registration-source step installs, so each
+// group's reduction pays the same source-domain work.
+export const latticeRequirementAt = (
+    group: LatticeAssumptionGroup,
     profile: SupportedProfile,
     honestRegistrations: bigint,
     experimentGates = decisiveExperimentGates,
 ) => {
-    const { comparisons, operands } = fheComparisonInputs(
+    const { comparisons, operands } = groupComparisonInputs(
+        group,
         profile,
         honestRegistrations,
     );
@@ -608,27 +901,40 @@ export const sourceDomainRequirementAt = (
     };
 };
 
-// The largest original honest registration population of one poll whose
-// source-domain requirement stays within a level. The requirement never
-// falls as the population grows, so doubling, or a population already known
-// to exceed the level, and then bisection find it. Zero when one
-// registration already exceeds the level.
-const largestPopulationWithin = (
+export const sourceDomainRequirementAt = (
     profile: SupportedProfile,
-    levelBits: bigint,
+    honestRegistrations: bigint,
+    experimentGates = decisiveExperimentGates,
+) =>
+    latticeRequirementAt(
+        'FHE Ring-LWE',
+        profile,
+        honestRegistrations,
+        experimentGates,
+    );
+
+// Population searches stop here; a group still within its level at this
+// population has no limit below it.
+export const populationSearchCap = 1n << 64n;
+
+// The largest population at most the search cap for which a requirement that
+// never falls as the population grows stays within its level. Doubling, or a
+// population already known to exceed the level, and then bisection find it.
+// Zero when one registration already exceeds the level; undefined when the
+// cap itself stays within it.
+export const largestPopulationWithin = (
+    within: (population: bigint) => boolean,
     exceeding?: bigint,
-) => {
-    const within = (population: bigint) =>
-        sourceDomainRequirementAt(profile, population).requiredBits <=
-        levelBits;
+): bigint | undefined => {
     let low = 0n;
     let high = exceeding ?? 1n;
-    if (exceeding === undefined)
+    if (exceeding === undefined) {
+        if (within(populationSearchCap)) return undefined;
         while (within(high)) {
             low = high;
             high *= 2n;
-            assert.ok(high < 1n << 64n, 'No population limit below 2^64.');
         }
+    }
     while (high - low > 1n) {
         const middle = (low + high) / 2n;
         if (within(middle)) low = middle;
@@ -637,21 +943,28 @@ const largestPopulationWithin = (
     return low;
 };
 
-// The FHE comparisons' own limit on the original honest registrations of a
+// A lattice group's own limit on the original honest registrations of a
 // poll of each participant count, whatever its option count: the smallest
 // over those option counts of the largest population whose priced
 // source-domain requirement stays within the profile's own criterion level,
 // and likewise within its quantum stress-test level. A profile that stays
 // within its level at the smallest limit so far cannot lower it, so only the
 // others are searched. At each limit, the further reduction work that every
-// option count's level still absorbs bounds the unpriced record creation.
-export const compileFhePopulationLimits = () =>
+// option count's level still absorbs bounds the unpriced record creation. A
+// limit is undefined when no profile has one below the search cap, and a
+// floor without a finite screen imposes none.
+const solveLatticePopulationLimits = (group: LatticeAssumptionGroup) =>
     profilesByParticipantCount().map(({ participantCount, profiles }) => {
         const limit = (floor: 'criterion' | 'stressTest') => {
-            const levelOf = (profile: SupportedProfile) =>
-                supportedLevelBits(
-                    fheKnownAttackFloor(BigInt(profile.ciphertext.bits))[floor],
-                );
+            const levelOf = (profile: SupportedProfile) => {
+                const screen = latticeGroupFloors(
+                    group,
+                    BigInt(profile.ciphertext.bits),
+                )[floor];
+                return screen === undefined
+                    ? undefined
+                    : supportedLevelBits(screen);
+            };
             let binding:
                 | Readonly<{
                       profile: SupportedProfile;
@@ -661,39 +974,41 @@ export const compileFhePopulationLimits = () =>
                 | undefined;
             for (const profile of profiles) {
                 const levelBits = levelOf(profile);
+                if (levelBits === undefined) continue;
+                const within = (population: bigint) =>
+                    latticeRequirementAt(group, profile, population)
+                        .requiredBits <= levelBits;
                 if (
                     binding !== undefined &&
-                    sourceDomainRequirementAt(
-                        profile,
-                        binding.honestRegistrations,
-                    ).requiredBits <= levelBits
+                    within(binding.honestRegistrations)
                 )
                     continue;
-                binding = {
-                    profile,
-                    levelBits,
-                    honestRegistrations: largestPopulationWithin(
-                        profile,
-                        levelBits,
-                        binding?.honestRegistrations,
-                    ),
-                };
+                const honestRegistrations = largestPopulationWithin(
+                    within,
+                    binding?.honestRegistrations,
+                );
+                if (honestRegistrations === undefined) continue;
+                binding = { profile, levelBits, honestRegistrations };
             }
+            if (binding === undefined) return undefined;
             assert.ok(
-                binding !== undefined && binding.honestRegistrations > 0n,
+                binding.honestRegistrations > 0n,
                 'One registration already exceeds the supported level.',
             );
             const { honestRegistrations } = binding;
             const allowance = profiles
                 .map((profile) => {
+                    const levelBits = levelOf(profile);
+                    if (levelBits === undefined) return undefined;
                     const { comparisons, reductionGates: gates } =
-                        sourceDomainRequirementAt(profile, honestRegistrations);
-                    return unpricedWorkAllowance(
-                        comparisons,
-                        gates,
-                        levelOf(profile),
-                    );
+                        latticeRequirementAt(
+                            group,
+                            profile,
+                            honestRegistrations,
+                        );
+                    return unpricedWorkAllowance(comparisons, gates, levelBits);
                 })
+                .filter((value) => value !== undefined)
                 .reduce((least, value) => (value < least ? value : least));
             return {
                 optionCount: binding.profile.optionCount,
@@ -707,5 +1022,33 @@ export const compileFhePopulationLimits = () =>
             participantCount,
             criterion: limit('criterion'),
             stressTest: limit('stressTest'),
+        };
+    });
+
+// Each group's limits are solved once.
+const latticePopulationLimits = new Map<
+    LatticeAssumptionGroup,
+    ReturnType<typeof solveLatticePopulationLimits>
+>();
+
+export const compileLatticePopulationLimits = (
+    group: LatticeAssumptionGroup,
+) => {
+    let limits = latticePopulationLimits.get(group);
+    if (limits === undefined) {
+        limits = solveLatticePopulationLimits(group);
+        latticePopulationLimits.set(group, limits);
+    }
+    return limits;
+};
+
+// The FHE comparisons' own limits, which every participant count has.
+export const compileFhePopulationLimits = () =>
+    compileLatticePopulationLimits('FHE Ring-LWE').map((row) => {
+        assert.ok(row.criterion !== undefined && row.stressTest !== undefined);
+        return {
+            participantCount: row.participantCount,
+            criterion: row.criterion,
+            stressTest: row.stressTest,
         };
     });
