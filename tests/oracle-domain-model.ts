@@ -41,7 +41,7 @@ type QueryRun = {
     readonly outputCapacity: bigint;
 };
 
-export const prefixReplacementBaseQueriesPerAccess = 2n;
+const prefixReplacementBaseQueriesPerAccess = 2n;
 
 type ShadowQueryRun = QueryRun & {
     readonly activeShadows: readonly number[];

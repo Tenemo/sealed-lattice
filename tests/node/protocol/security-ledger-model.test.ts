@@ -189,6 +189,15 @@ describe('Security ledger', () => {
         expect(Number(limit) / 2 ** 29).toBeLessThan(0.94);
     });
 
+    it('dominates both DFMS21 extraction coefficients with exact integers', () => {
+        // Summing e through 1/3! and bounding the tail geometrically by
+        // (1/4!)/(1-1/5) gives e <= 261/96 = 87/32.
+        expect(96 + 96 + 48 + 16 + 5).toBe(3 * 87);
+        // Hence 40*e^2 < 296, and sqrt(2) < 3/2 gives 8*sqrt(2) < 12.
+        expect(40n * 87n ** 2n).toBeLessThan(296n * 32n ** 2n);
+        expect(12n ** 2n).toBeGreaterThan(8n ** 2n * 2n);
+    });
+
     it('keeps identity collisions within their budget at every experiment', () => {
         const identity = compileIdentityCollisionGroup();
         expect(identity.withinBudget).toBe(true);

@@ -34,9 +34,7 @@ import { compileCloseWireCensus } from '#tests/close-wire-model.js';
 import {
     compareCommitmentEquivocationHybrids,
     compareDuplicateCommitmentInputs,
-    compileCommitmentEquivocationBound,
 } from '#tests/commitment-equivocation-model.js';
-import { compileCommitmentExtractionBound } from '#tests/commitment-extraction-bound-model.js';
 import { compileCommonAgreementDegreeCensus } from '#tests/common-agreement-degree-model.js';
 import {
     compileCommonMatrixSamplingCensus,
@@ -46,7 +44,6 @@ import {
     sparseRoutingWork,
     labelledHashExtractionWork,
     prefixOracleWork,
-    prefixOracleQueriesPerAccess,
     oracleMaskRoutingWork,
 } from '#tests/compressed-oracle-model.js';
 import { compileContributionBodyCensus } from '#tests/contribution-body-model.js';
@@ -74,7 +71,6 @@ import {
 import {
     oracleDomainWork,
     programmedOracleDomainWork,
-    prefixReplacementBaseQueriesPerAccess,
     shadowOracleDomainWork,
 } from '#tests/oracle-domain-model.js';
 import { compileOrdinaryWorkflowResources } from '#tests/ordinary-workflow-resource-model.js';
@@ -5155,80 +5151,6 @@ export const renderDocumentationCensus = (): string => {
             ]),
         ),
         '',
-        '## Early commitment extraction census',
-        '',
-        'DFMS21 Corollary 4.8 for full-body contribution commitments, including losing frozen inventory views. Fixed-suite public matrices remove the former seed-commitment stage. The sum charges both simulator disturbance and valid-opening mismatch. Theorem 4.3 additionally gives O(Q*E*Time[f] + Q^2): the displayed coefficients do not instantiate its constants, reversible gate costs, or the rest of the reduction. This is an ideal-QROM arithmetic bound, not a setup or fixed-hash security claim.',
-        '',
-        table(
-            [
-                'Participants',
-                'Relevant commitments',
-                'Hash output bits',
-                'Quantum query bound',
-                'Relation-evaluation coefficient Q*E',
-                'Quadratic-query coefficient Q^2',
-                'Combined failure exponent',
-            ],
-            [10, 20].map((participantCount) => {
-                const bound =
-                    compileCommitmentExtractionBound(participantCount);
-                return [
-                    formatCount(participantCount),
-                    formatCount(bound.extractedCommitmentCount),
-                    formatCount(bound.hashOutputBitLength),
-                    formatCount(bound.quantumQueryCount),
-                    formatCount(bound.simulatorRelationEvaluationCoefficient),
-                    formatCount(bound.simulatorQuadraticQueryCoefficient),
-                    bound.combinedFailureExponent === undefined
-                        ? 'No extraction event'
-                        : formatCount(bound.combinedFailureExponent),
-                ];
-            }),
-        ),
-        '',
-        'The fixed-output rows above are the baseline. A coherent SHAKE prefix wrapper computes a complete finite stream value, copies only the requested prefix and uncomputes the complete value. The following stream rows charge its full-value oracle calls and retain the same normalized prefix-match ratios from DFMS21 Remark 4.2. The finite stream width remains a separate resource operand; a fixed body/hash width does not bound every adversarial input or output.',
-        '',
-        table(
-            [
-                'Participants',
-                'Stream wrapper',
-                'Logical stream accesses',
-                'Simulated full-value queries',
-                'Quadratic-query coefficient',
-                'Combined failure exponent',
-            ],
-            [10, 20].flatMap((participants) =>
-                [1n, prefixReplacementBaseQueriesPerAccess].map(
-                    (baseQueriesPerAccess) => {
-                        const logical =
-                                compileCommitmentExtractionBound(
-                                    participants,
-                                ).quantumQueryCount,
-                            bound = compileCommitmentExtractionBound(
-                                participants,
-                                baseQueriesPerAccess *
-                                    prefixOracleQueriesPerAccess *
-                                    logical,
-                            );
-                        return [
-                            formatCount(participants),
-                            baseQueriesPerAccess === 1n
-                                ? 'Base stream'
-                                : 'Programmed stream',
-                            formatCount(logical),
-                            formatCount(bound.quantumQueryCount),
-                            formatCount(
-                                bound.simulatorQuadraticQueryCoefficient,
-                            ),
-                            bound.combinedFailureExponent === undefined
-                                ? 'No extraction event'
-                                : formatCount(bound.combinedFailureExponent),
-                        ];
-                    },
-                ),
-            ),
-        ),
-        '',
         '## Compressed-oracle circuit work',
         '',
         "The declared gate basis is X, CNOT, Toffoli and controlled-H, each acting on at most three qubits. The sorted database uses one spare tuple while routing the queried value to a separate register. Clean computation includes inverse evaluation and register swaps. These bounded examples verify the circuit family; they are not the protocol's full input domain or query population.",
@@ -5679,42 +5601,7 @@ export const renderDocumentationCensus = (): string => {
             ],
         ),
         '',
-        '## Full-body commitment equivocation census',
-        '',
-        'The original whole-message extension uses a separate hidden salt slice for each potential honest credential, with one commitment per sender scope. The fixed credential tape also charges unused credentials, preserving adaptive activation inside the wrapper. These supplied scope caps are conditional operands, not derived lifetime limits. Its bound sums the single-sender one-way-to-hiding hybrids and does not multiply by the body bit length. The ideal-XOF credential-collision term accounts separately for equal original seeds and equal public matrix-seed prefixes. Controlled oracle calls exclude credential generation, routing, input/output processing and actual oracle-simulator cost; complete reduction time and fixed-function correspondence remain open.',
-        '',
-        table(
-            [
-                'Participants',
-                'Potential credential scope cap',
-                'Salt bits',
-                'Quantum query bound',
-                'Failure exponent',
-                'Controlled oracle call bound',
-                'Ideal credential-collision numerator',
-                'Ideal credential-collision denominator',
-            ],
-            [
-                [10, 10n],
-                [10, 30n],
-                [20, 20n],
-            ].map(([participantCount, scopes]) => {
-                const bound = compileCommitmentEquivocationBound(
-                    Number(participantCount),
-                    BigInt(scopes),
-                );
-                return [
-                    formatCount(participantCount),
-                    formatCount(bound.credentialScopeCount),
-                    formatCount(bound.saltBitLength),
-                    formatCount(bound.quantumQueryCount),
-                    formatCount(bound.failureExponent),
-                    formatCount(bound.maximumControlledOracleCalls),
-                    formatCount(bound.credentialCollisionNumerator),
-                    formatCount(bound.credentialCollisionDenominator),
-                ];
-            }),
-        ),
+        '## Commitment equivocation finite model',
         '',
         'The finite model compares exact joint density matrices conditioned on the complete post-opening oracle and public transcript. Its alternate constructions test incomplete masking, retained shadow values, and unwanted changes to the uncommitted output suffix. This enumerates selected receivers rather than proving quantum security.',
         '',

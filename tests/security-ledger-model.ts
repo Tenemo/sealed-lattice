@@ -613,8 +613,9 @@ export const compileStatisticalTerms = (
         {
             // DFMS21 Corollary 4.8 with both normalized ratios at most
             // 2^-512 and l <= f*h extractions: 24*l*Q + 12*l*(l+1) over
-            // 2^256 and 296*(Q+l+1)^3 + 2 over 2^512, with
-            // (a+b)^3 <= 4(a^3+b^3), Q <= 4T/c and T >= c*max(1,h).
+            // 2^256 and 296*(Q+l+1)^3 + 2 over 2^512, since 8*sqrt(2) < 12
+            // and 40*e^2 < 296, with (a+b)^3 <= 4(a^3+b^3), Q <= 4T/c and
+            // T >= c*max(1,h).
             name: 'Registration-source extraction',
             scope: 'outside the proofs',
             ratioAt: (honestRegistrations) => {
