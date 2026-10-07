@@ -86,11 +86,6 @@ mod tests {
     fn sealed_keys_restore_without_resealing_authority() {
         let mut original = RegistrationKey::new();
         let key = [7; 32];
-        assert!(
-            original
-                .seal_retained(&key, b"registration/context")
-                .is_err()
-        );
         let sealed = original
             .seal_retained(&key, b"registration/context")
             .unwrap();

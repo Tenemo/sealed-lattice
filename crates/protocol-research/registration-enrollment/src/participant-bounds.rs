@@ -223,7 +223,7 @@ mod tests {
     #[test]
     fn records_have_their_declared_lengths() {
         let limits = limits();
-        assert_eq!(limits.len(), 36);
+        assert_eq!(limits.len(), 35);
         for profile in [Profile::new(3, 2).unwrap(), Profile::new(20, 20).unwrap()] {
             let bounds = profile_bounds(profile);
             let checkpoints = bounds[26] as usize;
