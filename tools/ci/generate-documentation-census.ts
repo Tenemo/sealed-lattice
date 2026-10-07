@@ -94,6 +94,7 @@ import {
     compileFirstOracleReadVariation,
     compileProofRandomnessBudgets,
 } from '#tests/proof-randomness-budget-model.js';
+import { proofRelationCatalogue } from '#tests/proof-relation-catalogue-model.js';
 import { compileProofVerifierQueryCensus } from '#tests/proof-verifier-query-model.js';
 import { compileRecipientKeyCensus } from '#tests/recipient-key-model.js';
 import { compileRecipientKeyUniquenessBound } from '#tests/recipient-key-uniqueness-model.js';
@@ -177,6 +178,7 @@ import { compileSupportedThresholdCompletionProfiles } from '#tests/threshold-co
 import { verifyThresholdKeyAggregationModel } from '#tests/threshold-key-aggregation-model.js';
 import { compileThresholdReleaseNoiseCensus } from '#tests/threshold-release-noise-model.js';
 import {
+    compileFamilyRoundErrorCensus,
     compileProofRoundErrorCensus,
     compileWideChallengeCompilerCensus,
 } from '#tests/wide-challenge-compiler-model.js';
@@ -280,6 +282,15 @@ export const renderDocumentationCensus = (): string => {
     const wideChallengeCompiler =
         compileWideChallengeCompilerCensus(completion);
     const sampledRoundErrors = compileProofRoundErrorCensus(completion);
+    const familyRoundErrors = compileFamilyRoundErrorCensus();
+    const effectiveRelations = new Map<string, Set<string>>();
+    for (const entry of proofRelationCatalogue())
+        effectiveRelations.set(
+            entry.role,
+            (effectiveRelations.get(entry.role) ?? new Set()).add(
+                entry.arithmeticKey,
+            ),
+        );
     const proofHashDomain = compileProofHashDomainCensus();
     const fullWordProof = compileFullWordProofLayout(completion);
     const ballotWordProof = compileBallotWordProofLayout(completion);
@@ -2291,6 +2302,53 @@ export const renderDocumentationCensus = (): string => {
                 ].map(formatCount),
                 role.queryDominates ? 'Yes' : 'No',
             ]),
+        ),
+        '',
+        'Every effective relation of the fixed family is some supported profile\x27s relation, so the maxima over every profile cover every relation. The [ordinary round-by-round soundness theorem](security-argument.md#ordinary-round-by-round-soundness) bounds each relation\x27s round error by the larger of the query term and its sampled algebraic bound; the margin is the least whole number of bits by which the query term exceeds that bound for one relation of the purpose.',
+        '',
+        table(
+            [
+                'Purpose',
+                'Effective relations',
+                'Largest original and virtual oracles',
+                'Largest lookup root degree',
+                'Largest affine rows',
+                'Largest consumed base-field samples',
+                'Least query margin in whole bits',
+                'Query term is every relation\x27s round error',
+            ],
+            familyRoundErrors.purposes.map((purpose) => [
+                purpose.name,
+                formatCount(effectiveRelations.get(purpose.name)?.size ?? 0),
+                ...[
+                    purpose.oracles,
+                    purpose.lookupRootDegree,
+                    purpose.affineRows,
+                    purpose.baseFieldSamples,
+                    purpose.queryMarginBits,
+                ].map(formatCount),
+                purpose.queryDominates ? 'Yes' : 'No',
+            ]),
+        ),
+        '',
+        table(
+            ['Family round error', 'Value'],
+            [
+                ['Query draws', formatCount(commonAgreement.queries)],
+                [
+                    'Query term bits below one, rounded down',
+                    formatCount(familyRoundErrors.queryErrorBits),
+                ],
+                [
+                    'Largest round error equals the query term',
+                    familyRoundErrors.maximumRoundError.numerator *
+                        familyRoundErrors.queryError.denominator ===
+                    familyRoundErrors.queryError.numerator *
+                        familyRoundErrors.maximumRoundError.denominator
+                        ? 'Yes'
+                        : 'No',
+                ],
+            ],
         ),
         '',
         'The [fixed proof-domain catalogue](../tests/proof-relation-catalogue-model.ts) independently derives the immutable four-purpose descriptors, original participant-identity role framing and complete context grammar. The [raw-domain and mixed-width graph model](../tests/proof-hash-domain-model.ts) keeps raw namespace membership separate from canonical context resolution, allows compatible profile aliases, and compares whole relation-sized prefixes of the maximum output word. Generic mutable relation descriptors remain excluded. These source-conformance and finite structural checks do not establish proof soundness, an honest-credential scope or an end-to-end security level.',

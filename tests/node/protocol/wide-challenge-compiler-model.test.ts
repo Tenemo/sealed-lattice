@@ -1,15 +1,22 @@
 import { describe, expect, it } from 'vitest';
 
+import { proofRelationCatalogueEntry } from '#tests/proof-relation-catalogue-model.js';
 import {
     completionProfile,
     listSupportedProfiles,
 } from '#tests/supported-profile-model.js';
 import {
+    compileFamilyRoundErrorCensus,
     compileWideChallengeCompilerCensus,
     compileProofRoundErrorCensus,
     jointModuloDensityBound,
     wideChallengeLayout,
 } from '#tests/wide-challenge-compiler-model.js';
+import {
+    catalogueWordRelation,
+    productionWordProofDomain,
+    wordRelationShape,
+} from '#tests/word-verifier-reference-model.js';
 
 describe('wide verifier messages and short authentication tags', () => {
     it('derives the current three source families separately before taking a round-error maximum', () => {
@@ -44,8 +51,36 @@ describe('wide verifier messages and short authentication tags', () => {
         }
     });
     it('independently checks every profile and family against the unchanged query term', () => {
+        const production = productionWordProofDomain();
         for (const profile of listSupportedProfiles()) {
             const value = compileProofRoundErrorCensus(profile);
+            // The operands are the catalogue relation's, whose parameter
+            // bytes declare one degree per batched oracle, and the reference
+            // verifier draws two weights per oracle and the first fold.
+            const catalogue = proofRelationCatalogueEntry(profile);
+            for (const role of value.roles) {
+                const entry = catalogue.find(
+                    (candidate) => candidate.role === role.name,
+                );
+                expect(entry).toBeDefined();
+                const shape = wordRelationShape(
+                    catalogueWordRelation(entry!),
+                    production,
+                );
+                expect([
+                    role.originalOracles,
+                    role.originalOracles + role.virtualOracles,
+                    role.lookupEntries,
+                    BigInt(role.messageBytes),
+                    role.baseFieldSamples,
+                ]).toEqual([
+                    shape.original,
+                    shape.oracles,
+                    shape.lookups,
+                    entry!.messageBytes,
+                    3 * (2 * shape.oracles + 1),
+                ]);
+            }
             expect(value.prime).toBeGreaterThan(1n << 127n);
             expect(value.weightedFri.ceiling).toBeLessThan(1n << 56n);
             expect(value.queryError.numerator << 302n).toBeGreaterThan(
@@ -77,6 +112,37 @@ describe('wide verifier messages and short authentication tags', () => {
                     .map((role) => role.messageBytes),
             ).toEqual([262144, 262144]);
             expect(value.maximumRoundError).toEqual(value.queryError);
+        }
+    });
+    it('bounds every effective relation of each purpose by the query term', () => {
+        const family = compileFamilyRoundErrorCensus();
+        expect(family.maximumRoundError).toEqual(family.queryError);
+        // (193/256)^704 lies between 2^-287 and 2^-286.
+        expect(family.queryError).toEqual({
+            numerator: 193n ** 704n,
+            denominator: 256n ** 704n,
+        });
+        expect((193n ** 704n) << 286n).toBeLessThanOrEqual(256n ** 704n);
+        expect((193n ** 704n) << 287n).toBeGreaterThan(256n ** 704n);
+        expect(family.queryErrorBits).toBe(286);
+        expect(family.purposes.map((purpose) => purpose.name)).toEqual([
+            'setup',
+            'ballot',
+            'release',
+        ]);
+        for (const purpose of family.purposes) {
+            expect(purpose.queryDominates).toBe(true);
+            const { numerator, denominator } = purpose.sampledAlgebraic;
+            const query = family.queryError;
+            expect(
+                (numerator * query.denominator) <<
+                    BigInt(purpose.queryMarginBits),
+            ).toBeLessThanOrEqual(query.numerator * denominator);
+            expect(
+                (numerator * query.denominator) <<
+                    BigInt(purpose.queryMarginBits + 1),
+            ).toBeGreaterThan(query.numerator * denominator);
+            expect(purpose.queryMarginBits).toBeGreaterThan(0);
         }
     });
     it('fits every independent field challenge and all query indices in one message', () => {

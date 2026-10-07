@@ -3,7 +3,10 @@ import { compileCommonAgreementDegreeCensus } from '#tests/common-agreement-degr
 import { compileLinkedReleaseRelationCensus } from '#tests/linked-release-relation-model.js';
 import { deriveSetupContributionShape } from '#tests/setup-contribution-relation-model.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
-import type { SupportedProfile } from '#tests/supported-profile-model.js';
+import {
+    listSupportedProfiles,
+    type SupportedProfile,
+} from '#tests/supported-profile-model.js';
 import { compileWeightedFriBound } from '#tests/weighted-fri-bound-model.js';
 
 type ProofPurpose = 'setup' | 'ballot' | 'release';
@@ -288,6 +291,64 @@ export const compileProofRoundErrorCensus = (profile: SupportedProfile) => {
         roles,
         maximumRoundError: largestFraction(
             roles.map((role) => role.roundError),
+        ),
+    };
+};
+
+// The largest k with 2^k * denominator <= numerator.
+const wholeBits = (numerator: bigint, denominator: bigint) => {
+    let bits = numerator.toString(2).length - denominator.toString(2).length;
+    if (denominator << BigInt(bits) > numerator) bits--;
+    return bits;
+};
+
+// Every effective relation of the fixed family is some supported profile's
+// relation, so the largest operands of each purpose over every profile, and
+// the least whole-bit margin of the query term over a relation's sampled
+// algebraic bound, cover every relation.
+export const compileFamilyRoundErrorCensus = () => {
+    const censuses = listSupportedProfiles().map(compileProofRoundErrorCensus);
+    const { queryError } = censuses[0];
+    const largest = (values: readonly bigint[]) =>
+        values.reduce((maximum, value) => (value > maximum ? value : maximum));
+    const purposes = (['setup', 'ballot', 'release'] as const).map((name) => {
+        const roles = censuses.map((census) => {
+            const role = census.roles.find((value) => value.name === name);
+            if (role === undefined)
+                throw new Error('A profile lacks a proof purpose.');
+            return role;
+        });
+        const sampledAlgebraic = largestFraction(
+            roles.map((role) => role.sampledAlgebraic),
+        );
+        return {
+            name,
+            oracles: largest(
+                roles.map((role) =>
+                    BigInt(role.originalOracles + role.virtualOracles),
+                ),
+            ),
+            lookupRootDegree: largest(
+                roles.map((role) => role.lookupRootDegree),
+            ),
+            affineRows: largest(roles.map((role) => role.affineRows)),
+            baseFieldSamples: largest(
+                roles.map((role) => BigInt(role.baseFieldSamples)),
+            ),
+            sampledAlgebraic,
+            queryDominates: roles.every((role) => role.queryDominates),
+            queryMarginBits: wholeBits(
+                queryError.numerator * sampledAlgebraic.denominator,
+                queryError.denominator * sampledAlgebraic.numerator,
+            ),
+        };
+    });
+    return {
+        queryError,
+        queryErrorBits: wholeBits(queryError.denominator, queryError.numerator),
+        purposes,
+        maximumRoundError: largestFraction(
+            censuses.map((census) => census.maximumRoundError),
         ),
     };
 };
