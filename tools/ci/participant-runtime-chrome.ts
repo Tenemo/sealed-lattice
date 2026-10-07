@@ -41,6 +41,23 @@ type OriginStorage = Readonly<{
     failure?: string;
 }>;
 
+// Chrome's own histograms of the IndexedDB backing stores this browser
+// process opened: for each, the count of each recorded value; whether it has
+// reported, and why the last request failed, if it did.
+type BackingStoreOpenings = Readonly<{
+    histograms: Readonly<Record<string, Readonly<Record<string, number>>>>;
+    reported: boolean;
+    failure?: string;
+}>;
+
+// Chromium records each backing store opening's status, the result of its
+// first attempt and whether it created a missing store.
+const backingStoreOpeningHistograms = [
+    'IndexedDB.BackingStore.OpenStatus',
+    'IndexedDB.BackingStore.OpenFirstTryResult',
+    'IndexedDB.BackingStore.CreateIfMissing.OnDisk',
+];
+
 export type ChromeParticipant = Readonly<{
     processIdentifier: number;
     version: string;
@@ -57,6 +74,9 @@ export type ChromeParticipant = Readonly<{
     // The storage the page's origin last reported; the browser is asked
     // again when no request is outstanding.
     storage(): OriginStorage;
+    // How Chrome last reported opening this process's IndexedDB backing
+    // stores; it is asked again when no request is outstanding.
+    backingStoreOpenings(): BackingStoreOpenings;
     // Runs the action while the browser records the V8 CPU samples of its
     // page and worker threads, and returns the recorded trace events.
     trace<Result>(
@@ -130,6 +150,12 @@ export const launchChromeParticipant = async (
     let storageUsage: Record<string, unknown> | undefined;
     let storageRequested = false;
     let storageFailure: string | undefined;
+    // The backing store histograms last reported, whether a request for them
+    // is outstanding, and why the last request failed.
+    let openingHistograms:
+        Record<string, Readonly<Record<string, number>>> | undefined;
+    let openingsRequested = false;
+    let openingsFailure: string | undefined;
     // A crashed page answers none of its requests, so each fails at once.
     let pageCrashed = false;
     // The trace being recorded: its events so far, what ends it, and what
@@ -418,6 +444,63 @@ export const launchChromeParticipant = async (
                     ...(storageFailure === undefined
                         ? {}
                         : { failure: storageFailure }),
+                };
+            },
+            backingStoreOpenings: () => {
+                if (!openingsRequested) {
+                    openingsRequested = true;
+                    // Histograms belong to the browser, not to the page.
+                    void send('Browser.getHistograms', {
+                        query: 'IndexedDB.BackingStore',
+                    })
+                        .then(
+                            (result) => {
+                                const histograms: Record<
+                                    string,
+                                    Readonly<Record<string, number>>
+                                > = {};
+                                for (const histogram of result.histograms as readonly {
+                                    name: string;
+                                    buckets: readonly {
+                                        low: number;
+                                        count: number;
+                                    }[];
+                                }[])
+                                    if (
+                                        backingStoreOpeningHistograms.some(
+                                            (name) =>
+                                                histogram.name.endsWith(name),
+                                        )
+                                    )
+                                        histograms[histogram.name] =
+                                            Object.fromEntries(
+                                                histogram.buckets.map(
+                                                    (bucket) => [
+                                                        String(bucket.low),
+                                                        bucket.count,
+                                                    ],
+                                                ),
+                                            );
+                                openingHistograms = histograms;
+                                openingsFailure = undefined;
+                            },
+                            (error: unknown) => {
+                                openingsFailure =
+                                    error instanceof Error
+                                        ? error.message
+                                        : String(error);
+                            },
+                        )
+                        .finally(() => {
+                            openingsRequested = false;
+                        });
+                }
+                return {
+                    histograms: openingHistograms ?? {},
+                    reported: openingHistograms !== undefined,
+                    ...(openingsFailure === undefined
+                        ? {}
+                        : { failure: openingsFailure }),
                 };
             },
             trace: async (action) => {

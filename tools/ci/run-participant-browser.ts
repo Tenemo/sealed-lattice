@@ -926,6 +926,8 @@ await runWithLocalRunLog(
             0,
         ]);
         const browserSessions = new WeakMap<ChromeParticipant, number>();
+        // The backing store histograms each browser last logged.
+        const loggedOpenings = new WeakMap<ChromeParticipant, string>();
         let nextBrowserSession = 0;
         let nextMeasuredOperation = 0;
         const transfers = Array.from(
@@ -1311,6 +1313,25 @@ await runWithLocalRunLog(
                                 storage,
                             },
                         });
+                        // Chrome's own account of opening this launch's
+                        // IndexedDB stores, logged whenever it changes, so a
+                        // lost store shows whether Chrome discarded it.
+                        const openings = browser.backingStoreOpenings();
+                        const histograms = JSON.stringify(openings.histograms);
+                        if (
+                            openings.reported &&
+                            loggedOpenings.get(browser) !== histograms
+                        ) {
+                            loggedOpenings.set(browser, histograms);
+                            log.writeEvent({
+                                eventType: 'participant-backing-store-openings',
+                                details: {
+                                    ...details,
+                                    session: browserSessions.get(browser),
+                                    histograms: openings.histograms,
+                                },
+                            });
+                        }
                         if (bytes > participantMemoryLimit) {
                             guardFailure ??= new Error(
                                 'Participant process-tree memory guard exceeded.',
