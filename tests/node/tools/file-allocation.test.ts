@@ -6,6 +6,9 @@ import { expect, it } from 'vitest';
 import { sampleFileAllocation } from '#tools/ci/file-allocation.js';
 
 it('measures file lengths and allocated storage including database files and reports missing paths and hard links', async () => {
+    // The scratch directory sits on the repository's file system, where the
+    // runners keep the profiles they measure; a fresh clone has no temp/ yet.
+    await mkdir(path.resolve('temp'), { recursive: true });
     const directory = await mkdtemp(path.resolve('temp/file-allocation-'));
     try {
         const database = path.join(directory, 'Default', 'IndexedDB');

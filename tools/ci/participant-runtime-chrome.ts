@@ -135,7 +135,10 @@ export const launchChromeParticipant = async (
             : ['--js-flags=' + javaScriptFlags]),
         'about:blank',
     ];
+    // On POSIX, Chrome leads its own process group, so the process-tree kill
+    // can signal every Chrome process instead of only the browser process.
     const child = spawn(executable, launchArguments, {
+        detached: process.platform !== 'win32',
         windowsHide: true,
         stdio: ['ignore', 'ignore', 'pipe'],
     });

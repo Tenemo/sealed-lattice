@@ -106,6 +106,18 @@ const testResolve = {
     tsconfigPaths: true,
 } as const;
 
+// A run log keeps each project's attachments, including failure screenshots,
+// inside its run directory instead of the default repository-root directory.
+const projectAttachments = (projectName: string) =>
+    testAttachmentDirectoryPath === undefined
+        ? {}
+        : {
+              attachmentsDir: path.join(
+                  testAttachmentDirectoryPath,
+                  projectName,
+              ),
+          };
+
 const desktopBrowserInstances: BrowserInstanceOption[] = [
     {
         browser: 'chromium',
@@ -135,6 +147,7 @@ const makeNodeProject = ({
         name: projectName,
         include: [...include],
         ...(exclude === undefined ? {} : { exclude: [...exclude] }),
+        ...projectAttachments(projectName),
         environment: 'node',
         ...(nodeDiagnosticReportArguments.length === 0
             ? {}
@@ -169,6 +182,7 @@ const makeBrowserProject = ({
         test: {
             name: projectName,
             include: [...include],
+            ...projectAttachments(projectName),
             // Each real-WASM browser file can instantiate a large kernel and
             // create workers. Keep the canonical Chromium lane serialized so
             // concurrent files cannot inflate the measured working set.
