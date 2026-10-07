@@ -105,6 +105,7 @@ import {
     sumProtocolProcessTree,
 } from '#tools/ci/protocol-process-memory.js';
 import { acquireProtocolResearchLock } from '#tools/ci/protocol-research-lock.js';
+import { redactDiagnosticText } from '#tools/ci/run-log-diagnostics.js';
 
 // Runs a browser cohort of the selected profile through the maintained
 // participant runtime: each participant is its own origin with its own
@@ -1452,6 +1453,21 @@ await runWithLocalRunLog(
                                 copy === undefined && pressured.has(position)
                                     ? `--wasm-max-mem-pages=${String(pressurePages)}`
                                     : undefined,
+                                // Chrome's own account of a store it could
+                                // not open, or found corrupt and deleted,
+                                // is recorded as it happens, so a crash
+                                // cannot lose it.
+                                (line) => {
+                                    log.writeEvent({
+                                        eventType:
+                                            'participant-browser-storage-log',
+                                        details: {
+                                            ...details,
+                                            session,
+                                            line: redactDiagnosticText(line),
+                                        },
+                                    });
+                                },
                             );
                             assert.equal(
                                 await chrome.evaluate('crossOriginIsolated'),

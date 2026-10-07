@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { access, mkdir, realpath } from 'node:fs/promises';
 import path from 'node:path';
+import { StringDecoder } from 'node:string_decoder';
 
 import { killProcessTree } from '#tools/ci/run-command.js';
 
@@ -58,6 +59,13 @@ const backingStoreOpeningHistograms = [
     'IndexedDB.BackingStore.CreateIfMissing.OnDisk',
 ];
 
+// Chrome logs to standard error, each line prefixed with its process,
+// thread, time, level and source location. The browser process runs
+// IndexedDB, so a store it could not open, or found corrupt and deleted,
+// appears in lines from its IndexedDB and LevelDB code as it happens.
+const storageLogLine =
+    /^\[\d+:\d+:[^:\]]*:[A-Z_]+:[^\]]*(?:indexed_db|leveldatabase|leveldb)[^\]]*\]/u;
+
 export type ChromeParticipant = Readonly<{
     processIdentifier: number;
     version: string;
@@ -98,11 +106,14 @@ const chromeExecutable = () =>
           ? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
           : '/usr/bin/google-chrome';
 
-// Launches Chrome for a participant's page, passing V8 the flags when given.
+// Launches Chrome for a participant's page, passing V8 the flags when given,
+// and hands each line of Chrome's IndexedDB and LevelDB log to the listener
+// as it arrives, before the browser counts as ended.
 export const launchChromeParticipant = async (
     profileDirectory: string,
     origin: string,
     javaScriptFlags?: string,
+    onStorageLog?: (line: string) => void,
 ): Promise<ChromeParticipant> => {
     const executable = chromeExecutable();
     await access(executable);
@@ -116,6 +127,7 @@ export const launchChromeParticipant = async (
         '--no-first-run',
         '--no-default-browser-check',
         '--disable-extensions',
+        '--enable-logging=stderr',
         '--remote-debugging-port=0',
         '--user-data-dir=' + profile,
         ...(javaScriptFlags === undefined
@@ -127,6 +139,40 @@ export const launchChromeParticipant = async (
         windowsHide: true,
         stdio: ['ignore', 'ignore', 'pipe'],
     });
+    // Standard error carries the DevTools address and then Chrome's log; each
+    // whole line reaches the startup reader and, from storage code, the
+    // listener.
+    const decoder = new StringDecoder('utf8');
+    let partialLine = '';
+    let onStartupLine: ((line: string) => void) | undefined;
+    const readLine = (line: string) => {
+        onStartupLine?.(line);
+        if (storageLogLine.test(line)) onStorageLog?.(line);
+    };
+    child.stderr.on('data', (bytes: Buffer) => {
+        const lines = (partialLine + decoder.write(bytes)).split('\n');
+        partialLine = lines.pop() ?? '';
+        for (const line of lines) readLine(line.replace(/\r$/u, ''));
+    });
+    // A line that a process ending mid-write left unfinished still counts.
+    child.stderr.once('end', () => {
+        const line = partialLine + decoder.end();
+        if (line !== '') readLine(line.replace(/\r$/u, ''));
+    });
+    // Standard error closes once Chrome and every process holding it end, so
+    // the browser counts as ended only after its last storage lines, unless a
+    // process it started holds standard error open beyond this bound.
+    const errorClosed = new Promise<void>((resolve) => {
+        child.stderr.once('close', () => resolve());
+    });
+    const storageLogDelivered = () =>
+        new Promise<void>((resolve) => {
+            const timer = setTimeout(resolve, 2000);
+            void errorClosed.then(() => {
+                clearTimeout(timer);
+                resolve();
+            });
+        });
     let socket: WebSocket | undefined;
     const pending = new Map<
         number,
@@ -211,28 +257,30 @@ export const launchChromeParticipant = async (
             new Promise((resolve) => setTimeout(resolve, 2000)),
         ]);
         socket?.close();
-        if (exited()) return;
-        await exit(
-            () => child.kill(),
-            'Chrome did not close within its deadline.',
-        );
+        if (!exited())
+            await exit(
+                () => child.kill(),
+                'Chrome did not close within its deadline.',
+            );
+        await storageLogDelivered();
     };
     // Taskkill also reports a failure when a process of the tree ends by
     // itself while it runs, so the browser process's exit decides whether
     // the crash happened.
     const crash = async () => {
         socket?.close();
-        if (exited()) return;
-        const termination = killProcessTree(child, { signal: 'SIGKILL' });
-        await exit(
-            () => undefined,
-            'Chrome did not exit after its termination: ' +
-                JSON.stringify(termination),
-        );
+        if (!exited()) {
+            const termination = killProcessTree(child, { signal: 'SIGKILL' });
+            await exit(
+                () => undefined,
+                'Chrome did not exit after its termination: ' +
+                    JSON.stringify(termination),
+            );
+        }
+        await storageLogDelivered();
     };
     try {
         const endpoint = await new Promise<string>((resolve, reject) => {
-            let output = '';
             const timer = setTimeout(
                 () => reject(new Error('Chrome startup deadline.')),
                 30_000,
@@ -241,16 +289,14 @@ export const launchChromeParticipant = async (
                 clearTimeout(timer);
                 reject(error);
             });
-            child.stderr.on('data', (bytes: Buffer) => {
-                output += bytes.toString();
-                const match = /DevTools listening on (ws:\/\/\S+)/u.exec(
-                    output,
-                );
+            onStartupLine = (line) => {
+                const match = /DevTools listening on (ws:\/\/\S+)/u.exec(line);
                 if (match) {
                     clearTimeout(timer);
+                    onStartupLine = undefined;
                     resolve(match[1]);
                 }
-            });
+            };
         });
         const connected = new WebSocket(endpoint);
         socket = connected;
