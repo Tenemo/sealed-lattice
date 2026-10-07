@@ -627,16 +627,19 @@ describe('close response model', () => {
     });
 
     it('attains but never exceeds the eight-visit stage bound for every roster', () => {
-        // Three preparation visits, then ballot, close response, target
-        // signature, release and verification; a nonvoter has no ballot.
+        // Registration, roster confirmation with the contribution offer and
+        // setup selection with endorsement, then setup verification with the
+        // ballot, close response, target signature, release and
+        // verification; a nonvoter verifies setup without a ballot.
         for (const participantCount of supportedParticipantCounts) {
             const census = compileCloseVisitCensus(participantCount);
+            expect(census.preparationVisits).toBe(3);
             expect(census.voterStageBound).toBe(8);
             expect(census.organizerStageBound).toBe(8);
-            expect(census.nonvoterStageBound).toBe(7);
+            expect(census.nonvoterStageBound).toBe(8);
             expect(census.voterVisits).toBe(8);
             expect(census.organizerVisits).toBe(8);
-            expect(census.nonvoterVisits).toBe(7);
+            expect(census.nonvoterVisits).toBe(8);
             expect(census.maximumVisits).toBeLessThanOrEqual(
                 mandatoryVisitCeiling,
             );

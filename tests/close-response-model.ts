@@ -1,6 +1,7 @@
+import { preparationStagePath } from '#tests/setup-selection-model.js';
 import { compileThresholdCompletionProfile } from '#tests/threshold-completion-model.js';
 
-// Close responses under the owner's bounded-omission contract. The organizer
+// Close responses under the bounded-omission contract. The organizer
 // is roster position zero. Messages are ideal authenticated objects: a model
 // signature cannot be forged, and envelope, intent, response, proposal, and
 // target identities cannot collide. This model creates no protocol capability.
@@ -2383,18 +2384,25 @@ export const compileCloseObligationCounterexamples = () => {
 };
 
 // Productive visits observed in the message-level executions, added to the
-// fixed-suite preparation visits. Each honest participant performs all work
-// its newest delivery enables. Deliveries and sessions do not define visits:
-// one protocol stage includes its restarts and the organizer's collection
-// across sessions. Each counted visit performs a one-shot stage: a ballot,
-// the close response, the target signature, the release
-// share and verification, and for the organizer the close intent and the
-// proposal with its own response and target signature instead of the
-// response and signature.
+// preparation visits of the certified clear setup. Each honest participant
+// performs all work its newest delivery enables. Deliveries and sessions do
+// not define visits: one protocol stage includes its restarts and the
+// organizer's collection across sessions. Each counted visit performs a
+// one-shot stage: setup verification with the ballot, the close response,
+// the target signature, the release share and verification, and for the
+// organizer the close intent and the proposal with its own response and
+// target signature instead of the response and signature. A nonvoter may
+// verify setup before a later close intent, in a visit of its own.
 const closeStages = {
-    voter: ['ballot', 'response', 'target-signature', 'release', 'verify'],
-    nonvoter: ['response', 'target-signature', 'release', 'verify'],
-    organizer: ['ballot', 'close', 'proposal', 'release', 'verify'],
+    voter: [
+        'setup-and-ballot',
+        'response',
+        'target-signature',
+        'release',
+        'verify',
+    ],
+    nonvoter: ['setup', 'response', 'target-signature', 'release', 'verify'],
+    organizer: ['setup-and-ballot', 'close', 'proposal', 'release', 'verify'],
 } as const;
 
 export type CloseVisitCensus = Readonly<{
@@ -2410,22 +2418,26 @@ export type CloseVisitCensus = Readonly<{
     maximumVisits: number;
 }>;
 
+// The certified clear setup's stages before setup verification, which the
+// close stages above begin with.
+const preparationStages = (() => {
+    const names = preparationStagePath('clear-certified', false).map(
+        ({ name }) => name,
+    );
+    const setup = names.indexOf('setup-and-optional-ballot');
+    if (setup < 0) throw new Error('The stage path has no setup stage.');
+    return names.slice(0, setup);
+})();
+
 // The participants of each productive visit of a permitted sequential
 // preparation schedule, not a maximum over asynchronous deliveries. Each
 // stage consumes every participant's preceding publication, the first
 // participant returns before the others complete each stage, and every
 // visit performs all work the shared transcript enables.
-const commonMatrixPreparationStages = [
-    'registration-and-recipient-key',
-    'roster-confirmation-and-setup-commitment',
-    'setup-opening',
-] as const;
-const traceCommonMatrixPreparationVisits = (
+const tracePreparationVisits = (
     participantCount: number,
 ): readonly number[] => {
-    const published = commonMatrixPreparationStages.map(
-        () => new Set<number>(),
-    );
+    const published = preparationStages.map(() => new Set<number>());
     const visits: number[] = [];
     const visit = (participant: number): void => {
         let productive = false;
@@ -2455,7 +2467,7 @@ export const compileCloseVisitCensus = (
     participantCount: number,
 ): CloseVisitCensus => {
     const profile = deriveCloseProfile(participantCount);
-    const preparation = traceCommonMatrixPreparationVisits(participantCount);
+    const preparation = tracePreparationVisits(participantCount);
     const preparationVisits = Math.max(
         ...Array.from(
             { length: participantCount },
@@ -2515,7 +2527,9 @@ export const compileCloseVisitCensus = (
         executions,
         organizerVisits: preparationVisits + organizerVisits,
         voterVisits: preparationVisits + voterVisits,
-        nonvoterVisits: preparationVisits + nonvoterVisits,
+        // The executions start after setup, so a nonvoter's own setup
+        // verification visit is added here.
+        nonvoterVisits: preparationVisits + 1 + nonvoterVisits,
         organizerStageBound: preparationVisits + closeStages.organizer.length,
         voterStageBound: preparationVisits + closeStages.voter.length,
         nonvoterStageBound: preparationVisits + closeStages.nonvoter.length,

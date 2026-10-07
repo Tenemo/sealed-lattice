@@ -423,7 +423,7 @@ export const renderDocumentationCensus = (): string => {
         '',
         'The lifecycle census allows independently bounded disappearance and corrupt-refusal sets. The scope of this stronger candidate availability model is owned by [non-forking state](non-forking-state.md#release-threshold-under-the-candidate-availability-model); its responder floor is not an additional mandatory fault budget.',
         '',
-        'For each supported roster, the model uses `f = floor((n - 1) / 3)`, all `n` setup receipts, inventory-certificate threshold `q = n - f`, result-release threshold `d = max(f + 1, 2)`, which is also the number of setup contributors, the first `d` roster positions, and minimum turnout `m = f + 2` accepted ballots. At least one setup contributor is honest because `d > f`, and no single one knows the key because `d >= 2`. All-roster receipts leave at least `n - 2f >= d` honest verified share holders after any `f` disappear, and `d < n`. At most `f` accepted ballots are corrupt, so a released result combines at least two honest ballots. When every honest participant votes, omitting `f` honest ballots while every corrupt participant abstains leaves `n - 2f` accepted ballots; the no-result column marks rosters where that is below `m`. A `q` close certificate has at least `n - 2f` honest locked signers, and two such certificates share at least `2q - n > f` positions, so a conflicting certificate needs an honest signer to sign twice. Every named set is counted; isomorphic joint cases are checked with exact multiplicity, and profiles through twelve participants are also brute-force cross-checked over the underlying bit masks.',
+        'For each supported roster, the model uses `f = floor((n - 1) / 3)`, inventory-certificate threshold `q = n - f`, result-release threshold `d = max(f + 1, 2)`, which is also the number of selected setup contributors, and minimum turnout `m = f + 2` accepted ballots. At least one selected contributor is honest because `d > f`, and no single one knows the key because `d >= 2`. Every roster member derives its release share from the certified setup, so any `f` disappearances and `f` corruptions leave at least `n - 2f >= d` honest share holders, and `d < n`. At most `f` accepted ballots are corrupt, so a released result combines at least two honest ballots. When every honest participant votes, omitting `f` honest ballots while every corrupt participant abstains leaves `n - 2f` accepted ballots; the no-result column marks rosters where that is below `m`. A `q` close certificate has at least `n - 2f` honest locked signers, and two such certificates share at least `2q - n > f` positions, so a conflicting certificate needs an honest signer to sign twice. Every named set is counted; isomorphic joint cases are checked with exact multiplicity, and profiles through twelve participants are also brute-force cross-checked over the underlying bit masks.',
         '',
         table(
             [
@@ -433,7 +433,6 @@ export const renderDocumentationCensus = (): string => {
                 'Result release',
                 'Minimum turnout',
                 'No result forceable at full honest turnout',
-                'Setup receipts',
                 'Guaranteed honest responders / honest certificate signers',
                 'Minimum certificate intersection',
                 'Mandatory release positions',
@@ -448,7 +447,6 @@ export const renderDocumentationCensus = (): string => {
                 String(profile.resultReleaseThreshold),
                 String(profile.minimumTurnout),
                 profile.noResultForceableAtFullHonestTurnout ? 'yes' : 'no',
-                String(profile.setupReceiptThreshold),
                 String(profile.guaranteedHonestResponderCount),
                 String(profile.minimumCertificateIntersection),
                 String(profile.mandatoryReleaseParticipantCount),
@@ -2765,7 +2763,7 @@ export const renderDocumentationCensus = (): string => {
         '',
         '## Registration enrollment census',
         '',
-        'The combined enrollment record binds a canonical public username, actual credentials, and the complete recipient-key proof. Separate data keys seal the original recipient key and signing seed; the encrypted local root retains those keys and references every record. From the roster transition on, the root also references the retained roster and the retained registration, each keyed to the credential. Payload counts exclude database metadata and browser-managed root-key storage.',
+        'The combined enrollment record binds a canonical public username, the actual signing credential, the hash of the recipient public key and the FHE source commitments to the poll and runtime. Separate data keys seal the original recipient key and signing seed; the encrypted local root retains those keys and references every record. From the roster transition on, the root also references the retained roster and the retained registration, each keyed to the credential. Payload counts exclude database metadata and browser-managed root-key storage.',
         '',
         table(
             ['Property', 'Value'],
@@ -5736,7 +5734,7 @@ export const renderDocumentationCensus = (): string => {
         '',
         '## Close-response census',
         '',
-        "Each roster uses the close quorum `q = n - f`, guarantees inclusion of an on-time envelope that `f + 1` honest participants received before responding, and omits at most `f` honest ballots. A response lists at most two envelopes per slot. With every honest participant voting, omitting `f` honest ballots while every corrupt participant abstains leaves `n - 2f` accepted ballots. The stage bound adds three preparation visits to the ballot, close response, target signature, release share and verification; the organizer's close intent and proposal replace its response and signature. Prioritized message-level executions attain every stage bound.",
+        "Each roster uses the close quorum `q = n - f`, guarantees inclusion of an on-time envelope that `f + 1` honest participants received before responding, and omits at most `f` honest ballots. A response lists at most two envelopes per slot. With every honest participant voting, omitting `f` honest ballots while every corrupt participant abstains leaves `n - 2f` accepted ballots. The stage bound adds three preparation visits, for registration, roster confirmation with the contribution offer and setup selection with endorsement, to setup verification with the ballot, the close response, target signature, release share and verification; the organizer's close intent and proposal replace its response and signature, and a nonvoter verifies setup in a visit of its own. Prioritized message-level executions attain every stage bound.",
         '',
         table(
             [

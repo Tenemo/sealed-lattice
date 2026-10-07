@@ -5,7 +5,6 @@ import {
     compileThresholdCompletionProfile,
     deriveLifecycleAvailability,
     lifecycleAvailabilityStages,
-    simulateFixedContributorMessageAvailability,
 } from '#tests/threshold-completion-model.js';
 
 // Product goals, maintained independently of the model: a poll has 3 to 20
@@ -65,9 +64,7 @@ describe('threshold completion model', () => {
             setupContributorCount: 4,
             minimumTurnout: 5,
             noResultForceableAtFullHonestTurnout: true,
-            setupReceiptThreshold: 10,
             guaranteedHonestResponderCount: 4,
-            minimumHonestVerifiedShareCountAfterDisappearance: 4,
             minimumHonestCertificateSignerCount: 4,
             minimumCertificateIntersection: 4,
             mandatoryReleaseParticipantCount: 0,
@@ -149,10 +146,11 @@ describe('threshold completion model', () => {
         }
     });
 
-    it('leaves an honest member in the fixed contributor set', () => {
+    it('keeps an honest member in every selected contributor set', () => {
+        // The setup selection takes setupContributorCount offers. Removing at
+        // most f corrupt participants from any such set leaves an honest
+        // contributor, and no single contributor holds the key.
         for (const profile of compileSupportedThresholdCompletionProfiles()) {
-            // Only the first setupContributorCount positions contribute, and
-            // the corrupt participants cannot fill them all.
             expect(profile.setupContributorCount).toBeGreaterThan(
                 profile.maximumCorruptParticipantCount,
             );
@@ -160,24 +158,6 @@ describe('threshold completion model', () => {
             expect(profile.setupContributorCount).toBeLessThanOrEqual(
                 profile.participantCount,
             );
-        }
-        // Every corrupt set of at most f participants leaves an honest
-        // contributor.
-        for (
-            let participantCount = 3;
-            participantCount <= 12;
-            participantCount += 1
-        ) {
-            const { maximumCorruptParticipantCount, setupContributorCount } =
-                compileThresholdCompletionProfile(participantCount);
-            const contributors = 2 ** setupContributorCount - 1;
-            for (const corruptSet of participantSets(
-                participantCount,
-                (size) => size <= maximumCorruptParticipantCount,
-            ))
-                expect(
-                    memberCount(contributors & ~corruptSet),
-                ).toBeGreaterThanOrEqual(1);
         }
     });
 
@@ -218,9 +198,9 @@ describe('threshold completion model', () => {
                 orderedCertificatePairCount: BigInt(certificates.length) ** 2n,
             });
 
-            // This stronger responder-count stress case starts after all
-            // setup receipts exist. It cannot prove progress from roster
-            // fixing, for which the unavailable union is bounded by f.
+            // This stronger responder-count stress case starts after setup is
+            // certified. It cannot prove progress from roster fixing, for
+            // which the unavailable union is bounded by f.
             const faultSets = participantSets(
                 participantCount,
                 (size) => size <= maximumCorruptParticipantCount,
@@ -244,10 +224,7 @@ describe('threshold completion model', () => {
                 resultReleaseThreshold,
             );
             expect(profile).toMatchObject({
-                setupReceiptThreshold: participantCount,
                 guaranteedHonestResponderCount: minimumHonestResponderCount,
-                minimumHonestVerifiedShareCountAfterDisappearance:
-                    minimumHonestResponderCount,
                 corruptionDisappearanceRefusalCaseCount: BigInt(
                     corruptionDisappearanceRefusalCaseCount,
                 ),
@@ -370,131 +347,5 @@ describe('availability from roster fixing', () => {
                 { participant: 1, before: 'release' },
             ]),
         ).toThrow('total unavailable set');
-    });
-});
-
-describe('fixed-contributor preparation dependency experiment', () => {
-    it('exposes the minimal missing-confirmation and committed-but-unopened counterexamples', () => {
-        const missingConfirmation = simulateFixedContributorMessageAvailability(
-            4,
-            0,
-            [{ participant: 2, before: 'roster-confirmation' }],
-        );
-        expect(missingConfirmation.confirmationParticipants).toEqual([0, 1, 3]);
-        expect(missingConfirmation.missingConfirmationParticipants).toEqual([
-            2,
-        ]);
-        expect(missingConfirmation.openingParticipants).toEqual([]);
-        expect(missingConfirmation.closeParticipants).toEqual([]);
-        expect(missingConfirmation.releaseParticipants).toEqual([]);
-
-        const missingOpening = simulateFixedContributorMessageAvailability(
-            4,
-            0,
-            [{ participant: 1, before: 'setup-opening' }],
-        );
-        expect(missingOpening.confirmationParticipants).toEqual([0, 1, 2, 3]);
-        expect(missingOpening.missingConfirmationParticipants).toEqual([]);
-        expect(missingOpening.openingParticipants).toEqual([0]);
-        expect(missingOpening.missingOpeningParticipants).toEqual([1]);
-        expect(missingOpening.closeParticipants).toEqual([]);
-        expect(missingOpening.releaseParticipants).toEqual([]);
-    });
-
-    it('finds the missing producer for every early single failure at every fault-tolerant size', () => {
-        for (const participantCount of supportedParticipantCounts.filter(
-            (count) => count >= 4,
-        )) {
-            const faultBound = Math.floor((participantCount - 1) / 3);
-            const contributors = Array.from(
-                { length: Math.max(faultBound + 1, 2) },
-                (_unused, participant) => participant,
-            );
-            for (
-                let participant = 1;
-                participant < participantCount;
-                participant++
-            ) {
-                for (const before of lifecycleAvailabilityStages.slice(0, 4)) {
-                    const trace = simulateFixedContributorMessageAvailability(
-                        participantCount,
-                        0,
-                        [{ participant, before }],
-                    );
-                    const contributor = contributors.includes(participant);
-                    const confirmationMissing =
-                        before === 'roster-fixed' ||
-                        before === 'roster-confirmation' ||
-                        (before === 'setup-commitment' && contributor);
-                    expect(trace.missingConfirmationParticipants).toEqual(
-                        confirmationMissing ? [participant] : [],
-                    );
-                    expect(trace.missingOpeningParticipants).toEqual(
-                        confirmationMissing
-                            ? contributors
-                            : contributor
-                              ? [participant]
-                              : [],
-                    );
-                    expect(trace.releaseParticipants.length).toBe(
-                        confirmationMissing || contributor
-                            ? 0
-                            : participantCount - 1,
-                    );
-                }
-            }
-        }
-    });
-
-    it('retains published setup messages and permits later quorum work without their departed senders', () => {
-        for (const participantCount of supportedParticipantCounts) {
-            const faultBound = Math.floor((participantCount - 1) / 3);
-            const roster = Array.from(
-                { length: participantCount },
-                (_unused, participant) => participant,
-            );
-            const uninterrupted = simulateFixedContributorMessageAvailability(
-                participantCount,
-                0,
-                [],
-            );
-            expect(uninterrupted.confirmationParticipants).toEqual(roster);
-            expect(uninterrupted.openingParticipants).toEqual(
-                roster.slice(0, Math.max(faultBound + 1, 2)),
-            );
-            expect(uninterrupted.releaseParticipants).toEqual(roster);
-            if (faultBound === 0) continue;
-            // Some participants leave before closing; the organizer leaves
-            // after certification permanently closes the inventory. The total
-            // is exactly f, not a renewed per-stage f.
-            const failures = [
-                ...roster.slice(1, faultBound).map((participant) => ({
-                    participant,
-                    before: 'closing' as const,
-                })),
-                { participant: 0, before: 'release' as const },
-            ];
-            const trace = simulateFixedContributorMessageAvailability(
-                participantCount,
-                0,
-                failures,
-            );
-            expect(trace.confirmationParticipants).toEqual(roster);
-            expect(trace.openingParticipants).toEqual(
-                uninterrupted.openingParticipants,
-            );
-            expect(trace.closeParticipants).toEqual([
-                0,
-                ...roster.slice(faultBound),
-            ]);
-            expect(trace.certificateParticipants).toEqual([
-                0,
-                ...roster.slice(faultBound),
-            ]);
-            expect(trace.releaseParticipants).toEqual(roster.slice(faultBound));
-            expect(trace.releaseParticipants.length).toBeGreaterThanOrEqual(
-                Math.max(faultBound + 1, 2),
-            );
-        }
     });
 });

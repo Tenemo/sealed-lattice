@@ -13,19 +13,16 @@ const requireParticipantCount = (participantCount: number): void => {
     }
 };
 
-// Cuts before work in one permitted asynchronous schedule. Roster-only
-// confirmations arrive before the contributors' commitments in this schedule;
-// that ordering is not a protocol dependency. The closing stage collects
-// the proposal and responses; target certification permanently closes the
-// inventory, so the required organizer exception lasts through that cut.
-// A completed opening includes
-// its full body and proof. Published records remain retrievable after their
-// sender leaves.
+// Cuts before work in one permitted asynchronous schedule of the certified
+// clear setup. The closing stage collects the proposal and responses; target
+// certification permanently closes the inventory, so the required organizer
+// exception lasts through that cut. Published records remain retrievable
+// after their sender leaves.
 export const lifecycleAvailabilityStages = [
     'roster-fixed',
-    'roster-confirmation',
-    'setup-commitment',
-    'setup-opening',
+    'roster-confirmation-and-contribution',
+    'setup-selection-and-endorsement',
+    'setup-verification',
     'closing',
     'target-certification',
     'release',
@@ -95,70 +92,6 @@ export const deriveLifecycleAvailability = (
     };
 };
 
-// A dependency kill experiment for the current fixed-contributor setup:
-// CommitmentInventory::new needs all n confirmations, SetupAggregator needs
-// the first d openings, and verified setup precedes CloseWork::new. See
-// registration-credentials/src/contribution-authentication.rs and
-// setup-aggregate/src/verified.rs in the protocol-research workspace.
-// This computes message producers, not cryptographic validity or admission.
-export const simulateFixedContributorMessageAvailability = (
-    participantCount: number,
-    organizer: number,
-    failures: readonly ParticipantFailure[],
-) => {
-    const availability = deriveLifecycleAvailability(
-        participantCount,
-        organizer,
-        failures,
-    );
-    const availableAt = (stage: LifecycleAvailabilityStage) =>
-        availability.stages[lifecycleAvailabilityStages.indexOf(stage)]
-            .availableParticipants;
-    const releaseThreshold = Math.max(availability.faultBound + 1, 2);
-    const contributors = availability.roster.slice(0, releaseThreshold);
-    const rosterConfirmations = availableAt('roster-confirmation').filter(
-        (participant) => !contributors.includes(participant),
-    );
-    const setupCommitments = availableAt('setup-commitment').filter(
-        (participant) => contributors.includes(participant),
-    );
-    const confirmationParticipants = [
-        ...rosterConfirmations,
-        ...setupCommitments,
-    ].sort((left, right) => left - right);
-    const missingConfirmationParticipants = availability.roster.filter(
-        (participant) => !confirmationParticipants.includes(participant),
-    );
-    const openingParticipants =
-        missingConfirmationParticipants.length === 0
-            ? availableAt('setup-opening').filter((participant) =>
-                  contributors.includes(participant),
-              )
-            : [];
-    const missingOpeningParticipants = contributors.filter(
-        (participant) => !openingParticipants.includes(participant),
-    );
-    const closeParticipants =
-        missingOpeningParticipants.length === 0 ? availableAt('closing') : [];
-    const certificateParticipants =
-        closeParticipants.length >= availability.requiredContinuerCount
-            ? availableAt('target-certification')
-            : [];
-    const releaseParticipants =
-        certificateParticipants.length >= availability.requiredContinuerCount
-            ? availableAt('release')
-            : [];
-    return {
-        confirmationParticipants,
-        missingConfirmationParticipants,
-        openingParticipants,
-        missingOpeningParticipants,
-        closeParticipants,
-        certificateParticipants,
-        releaseParticipants,
-    };
-};
-
 const binomial = (n: number, k: number): bigint => {
     if (!Number.isSafeInteger(n) || !Number.isSafeInteger(k)) {
         throw new TypeError('Binomial inputs must be safe integers.');
@@ -212,7 +145,7 @@ type SetClassCensus = Readonly<{
 }>;
 
 // This separate post-setup stress census allows independent disappearance
-// and corrupt-refusal sets, after every setup receipt already exists. It is
+// and corrupt-refusal sets, after setup is certified. It is
 // stronger in responder count but does not establish the required lifecycle
 // availability from roster fixing; deriveLifecycleAvailability owns that
 // envelope, whose unavailable union is bounded by f.
@@ -373,9 +306,7 @@ export type ThresholdCompletionProfile = Readonly<{
     setupContributorCount: number;
     minimumTurnout: number;
     noResultForceableAtFullHonestTurnout: boolean;
-    setupReceiptThreshold: number;
     guaranteedHonestResponderCount: number;
-    minimumHonestVerifiedShareCountAfterDisappearance: number;
     minimumHonestCertificateSignerCount: number;
     minimumCertificateIntersection: number;
     mandatoryReleaseParticipantCount: number;
@@ -402,14 +333,10 @@ export const compileThresholdCompletionProfile = (
         maximumCorruptParticipantCount + 1,
         2,
     );
-    // The first d roster positions contribute the setup's key material, so at
-    // least one contributor is honest under the static corruption bound.
+    // The setup selection takes exactly d contribution offers, so at least one
+    // selected contributor is honest under the static corruption bound.
     const setupContributorCount = resultReleaseThreshold;
     const minimumTurnout = maximumCorruptParticipantCount + 2;
-    // Current candidate prerequisite, not a product requirement. The message
-    // availability experiment above demonstrates why it fails when a roster
-    // member leaves before confirming or a fixed contributor never opens.
-    const setupReceiptThreshold = participantCount;
     const mandatoryReleaseParticipantCount =
         binomial(participantCount - 1, resultReleaseThreshold) === 0n
             ? participantCount
@@ -419,8 +346,6 @@ export const compileThresholdCompletionProfile = (
     }
     const guaranteedHonestResponderCount =
         participantCount - 2 * maximumCorruptParticipantCount;
-    const minimumHonestVerifiedShareCountAfterDisappearance =
-        setupReceiptThreshold - 2 * maximumCorruptParticipantCount;
     const minimumHonestCertificateSignerCount =
         inventoryCertificateThreshold - maximumCorruptParticipantCount;
     const minimumCertificateIntersection =
@@ -440,8 +365,6 @@ export const compileThresholdCompletionProfile = (
         participantCount - maximumCorruptParticipantCount < minimumTurnout ||
         maximumCorruptParticipantCount >= resultReleaseThreshold ||
         guaranteedHonestResponderCount < resultReleaseThreshold ||
-        minimumHonestVerifiedShareCountAfterDisappearance <
-            resultReleaseThreshold ||
         minimumHonestCertificateSignerCount !==
             guaranteedHonestResponderCount ||
         minimumCertificateIntersection <= maximumCorruptParticipantCount
@@ -527,9 +450,7 @@ export const compileThresholdCompletionProfile = (
         setupContributorCount,
         minimumTurnout,
         noResultForceableAtFullHonestTurnout,
-        setupReceiptThreshold,
         guaranteedHonestResponderCount,
-        minimumHonestVerifiedShareCountAfterDisappearance,
         minimumHonestCertificateSignerCount,
         minimumCertificateIntersection,
         mandatoryReleaseParticipantCount,
