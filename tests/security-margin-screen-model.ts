@@ -691,8 +691,7 @@ const fheRingLweComparisons = (
 
 // The lattice assumption groups of the clear-preparation ledger. Each charges
 // its own single-message comparisons; circular security of the honest
-// evaluation-key tuple is judged against the FHE instance's floor, as the
-// owner decided on 2026-10-07.
+// evaluation-key tuple is judged against the FHE instance's floor.
 export type LatticeAssumptionGroup =
     | 'FHE Ring-LWE'
     | 'Evaluation-key circular security'

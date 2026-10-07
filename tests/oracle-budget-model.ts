@@ -128,7 +128,7 @@ export const compileOraclePermutationBudget = (
     };
 };
 
-// Applies the owner-selected full-circuit convention to the query circuits.
+// Applies the full-circuit convention to the query circuits.
 // This operand must include every caller's charged oracle work. Extra calls
 // introduced by a reduction must be included before using this conversion.
 // Other simulation work, extraction and record construction remain separate.

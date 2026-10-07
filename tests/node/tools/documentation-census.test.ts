@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
     findFirstCensusMismatch,
+    linkPrivateOwners,
     renderDocumentationCensus,
 } from '#tools/ci/generate-documentation-census.js';
 
@@ -44,6 +45,26 @@ describe('documentation census generator', () => {
         );
         expect(rendered).not.toMatch(/\d{4}-\d{2}-\d{2}T/u);
         expect(rendered.endsWith('\n')).toBe(true);
+    });
+
+    it('resolves private citations only through the link table', () => {
+        expect(rendered).not.toContain('](private:');
+        const text =
+            'See [the ledger](private:security-ledger) and [the paths](private:stage-paths).';
+        expect(linkPrivateOwners(text, undefined)).toBe(
+            'See the ledger and the paths.',
+        );
+        expect(
+            linkPrivateOwners(text, {
+                'security-ledger': 'ledger.md#ledger',
+                'stage-paths': 'paths.md#paths',
+            }),
+        ).toBe(
+            'See [the ledger](ledger.md#ledger) and [the paths](paths.md#paths).',
+        );
+        expect(() =>
+            linkPrivateOwners(text, { 'security-ledger': 'ledger.md#ledger' }),
+        ).toThrow('The census link table has no stage-paths.');
     });
 
     it('locates the first stale line of a stored census', () => {

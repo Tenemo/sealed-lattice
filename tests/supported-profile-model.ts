@@ -520,7 +520,7 @@ export const deriveSupportedProfile = (
     return profile;
 };
 
-// The system specification's completion and qualification profile.
+// The completion and qualification profile.
 export const completionProfileCounts = {
     participantCount: 10,
     optionCount: 10,

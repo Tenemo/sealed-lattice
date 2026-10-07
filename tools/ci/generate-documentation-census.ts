@@ -240,7 +240,26 @@ const compileStatisticalTermMaxima = () => {
     return { terms, subtotals };
 };
 
-export const renderDocumentationCensus = (): string => {
+// The census lives among private planning documents. Its sentences cite
+// them as [label](private:key), and a table beside the census maps each key
+// to its target, so this tracked source names none of them. Without the
+// table each citation keeps its label as plain text.
+export const linkPrivateOwners = (
+    text: string,
+    targets: Readonly<Record<string, string>> | undefined,
+): string =>
+    text.replace(
+        /\[([^\]]+)\]\(private:([a-z-]+)\)/gu,
+        (_citation, label: string, key: string) => {
+            if (targets === undefined) return label;
+            const target = targets[key];
+            if (target === undefined)
+                throw new Error(`The census link table has no ${key}.`);
+            return `[${label}](${target})`;
+        },
+    );
+
+const renderCensusText = (): string => {
     const resourceArtifact = readParticipantArtifactResources();
     const workflowResources = [
         deriveSupportedProfile(10, 10),
@@ -419,7 +438,7 @@ export const renderDocumentationCensus = (): string => {
         '',
         '## Threshold completion census',
         '',
-        'The lifecycle census allows independently bounded disappearance and corrupt-refusal sets. The scope of this stronger candidate availability model is owned by [non-forking state](non-forking-state.md#release-threshold-under-the-candidate-availability-model); its responder floor is not an additional mandatory fault budget.',
+        'The lifecycle census allows independently bounded disappearance and corrupt-refusal sets. The scope of this stronger candidate availability model is owned by [non-forking state](private:candidate-availability-threshold); its responder floor is not an additional mandatory fault budget.',
         '',
         'For each supported roster, the model uses `f = floor((n - 1) / 3)`, inventory-certificate threshold `q = n - f`, result-release threshold `d = max(f + 1, 2)`, which is also the number of selected setup contributors, and minimum turnout `m = f + 2` accepted ballots. At least one selected contributor is honest because `d > f`, and no single one knows the key because `d >= 2`. Every roster member derives its release share from the certified setup, so any `f` disappearances and `f` corruptions leave at least `n - 2f >= d` honest share holders, and `d < n`. At most `f` accepted ballots are corrupt, so a released result combines at least two honest ballots. When every honest participant votes, omitting `f` honest ballots while every corrupt participant abstains leaves `n - 2f` accepted ballots; the no-result column marks rosters where that is below `m`. A `q` close certificate has at least `n - 2f` honest locked signers, and two such certificates share at least `2q - n > f` positions, so a conflicting certificate needs an honest signer to sign twice. Every named set is counted; isomorphic joint cases are checked with exact multiplicity, and profiles through twelve participants are also brute-force cross-checked over the underlying bit masks.',
         '',
@@ -2300,7 +2319,7 @@ export const renderDocumentationCensus = (): string => {
             ]),
         ),
         '',
-        'Every effective relation of the fixed family is some supported profile\x27s relation, so the maxima over every profile cover every relation. The [ordinary round-by-round soundness theorem](security-argument.md#ordinary-round-by-round-soundness) bounds each relation\x27s round error by the larger of the query term and its sampled algebraic bound; the margin is the least whole number of bits by which the query term exceeds that bound for one relation of the purpose.',
+        'Every effective relation of the fixed family is some supported profile\x27s relation, so the maxima over every profile cover every relation. The [ordinary round-by-round soundness theorem](private:round-by-round-soundness) bounds each relation\x27s round error by the larger of the query term and its sampled algebraic bound; the margin is the least whole number of bits by which the query term exceeds that bound for one relation of the purpose.',
         '',
         table(
             [
@@ -3154,7 +3173,7 @@ export const renderDocumentationCensus = (): string => {
         '',
         '## Preparation selection and registration binding screen',
         '',
-        'The [selection model](../tests/setup-selection-model.ts) checks the fixed eligible pool, selected subset and quorum intersection. Its close-only counterexample keeps a valid ballot under one setup, enough honest pre-close holders and a closing quorum for another setup: the ciphertext cannot be retargeted. The [candidate analysis](collective-preparation-analysis.md#registration-bound-clear-preparation) owns that failure and the pre-ballot certification repair. These counts do not establish a construction or its security loss.',
+        'The [selection model](../tests/setup-selection-model.ts) checks the fixed eligible pool, selected subset and quorum intersection. Its close-only counterexample keeps a valid ballot under one setup, enough honest pre-close holders and a closing quorum for another setup: the ciphertext cannot be retargeted. The [candidate analysis](private:clear-preparation-analysis) owns that failure and the pre-ballot certification repair. These counts do not establish a construction or its security loss.',
         '',
         table(
             [
@@ -3180,7 +3199,7 @@ export const renderDocumentationCensus = (): string => {
             }),
         ),
         '',
-        'Candidate productive-stage upper bounds include registration, setup, an optional ballot and the existing close/target/release/outcome suffix. Same-stage restarts, status checks and organizer collection sessions add no nodes. The paths require the local coalescences in the [visit owner](non-forking-state.md#preparation-candidate-stage-paths), complete retained payload availability and no additional participant-dependent output. They are conditional stage graphs, not emitted workflow measurements or a security verdict. Nonvoters may still perform setup before a later close request and therefore share this conservative bound.',
+        'Candidate productive-stage upper bounds include registration, setup, an optional ballot and the existing close/target/release/outcome suffix. Same-stage restarts, status checks and organizer collection sessions add no nodes. The paths require the local coalescences in the [visit owner](private:preparation-stage-paths), complete retained payload availability and no additional participant-dependent output. They are conditional stage graphs, not emitted workflow measurements or a security verdict. Nonvoters may still perform setup before a later close request and therefore share this conservative bound.',
         '',
         table(
             ['Candidate path', 'Participant stages', 'Organizer stages'],
@@ -3197,7 +3216,7 @@ export const renderDocumentationCensus = (): string => {
             ),
         ),
         '',
-        'The [registration binding screen](../tests/registration-setup-binding-model.ts) commits separately to each possible FHE encryption-key coordinate. It derives distinct FHE families from both modulus and common-matrix sample width for every roster the poll permits. Only the final roster entry opens; seeds are independent across families. Generated bytes count all candidate coordinates hashed during registration, not their simultaneous residency or upload. Digest and private seed/salt figures are payload subtotals excluding canonical framing, signatures, custody, work and restart amplification. The auxiliary pair is fixed public input with no real participant secret; its separate good-key phase bound is used only in the [candidate proof games](security-argument.md#registration-bound-clear-preparation-argument). This does not change the existing parameter table or prove the changed simulator.',
+        'The [registration binding screen](../tests/registration-setup-binding-model.ts) commits separately to each possible FHE encryption-key coordinate. It derives distinct FHE families from both modulus and common-matrix sample width for every roster the poll permits. Only the final roster entry opens; seeds are independent across families. Generated bytes count all candidate coordinates hashed during registration, not their simultaneous residency or upload. Digest and private seed/salt figures are payload subtotals excluding canonical framing, signatures, custody, work and restart amplification. The auxiliary pair is fixed public input with no real participant secret; its separate good-key phase bound is used only in the [candidate proof games](private:clear-preparation-argument). This does not change the existing parameter table or prove the changed simulator.',
         '',
         table(
             [
@@ -4669,7 +4688,7 @@ export const renderDocumentationCensus = (): string => {
         '',
         '## Composed security ledger',
         '',
-        'The [clear-preparation argument](security-argument.md#clear-candidate-joint-ledger) owns the conditional hybrid interfaces. The first tables evaluate fixed-roster-size structural upper bounds at the displayed example original-honest-registration population H, including abandoned and unselected registrations; H is not an admitted population limit. Whole-poll bounds permitting different roster sizes follow separately. Started private preparation and certified rosters have different bounds. Original contribution scopes include failed or unfinished generation before publication; a replay of the same retained intent adds work but no new scope. Primitive comparison counts include the source-family or selected-position guesses where required, but exclude semantic-use error charges and reduction-time operands. The assumption group limits at the end of this section take their proof terms from the proof-compiler gate\x27s theorems; no end-to-end security level is emitted.',
+        'The [clear-preparation argument](private:clear-preparation-ledger) owns the conditional hybrid interfaces. The first tables evaluate fixed-roster-size structural upper bounds at the displayed example original-honest-registration population H, including abandoned and unselected registrations; H is not an admitted population limit. Whole-poll bounds permitting different roster sizes follow separately. Started private preparation and certified rosters have different bounds. Original contribution scopes include failed or unfinished generation before publication; a replay of the same retained intent adds work but no new scope. Primitive comparison counts include the source-family or selected-position guesses where required, but exclude semantic-use error charges and reduction-time operands. The assumption group limits at the end of this section take their proof terms from the proof-compiler gate\x27s theorems; no end-to-end security level is emitted.',
         '',
         table(
             [
@@ -4805,7 +4824,7 @@ export const renderDocumentationCensus = (): string => {
         '',
         '### FHE security margin screen',
         '',
-        'The [margin model](../tests/security-margin-screen-model.ts) tests whether the current FHE comparisons can reach the target with the current parameters. It charges every single-key FHE Ring-LWE comparison of the [clear-preparation ledger](security-argument.md#clear-candidate-joint-ledger) at one original honest registration per participant, expanding each multi-message ballot comparison over its messages. The withdrawn ledger’s seven assumption groups share the 2^-80 budget equally. Each requirement charges the reduction’s work at the largest complete experiment within 2^80 gates that fills whole permutation slots. The reduction’s work depends on an experiment only through those slots and its query routing grows with their square, so that experiment has the largest reduction ratio; the source cache and the extractions’ fixed work, which do not grow with the experiment, leave every smaller experiment’s ratio below it, as the margin test checks at the population limits. The lattice assumptions hold relative to the ideal SHAKE oracle, so the forwarded column, which adds no work, is the floor for a reduction that never reads or programs the attacker’s queries. The FHE embedding fixes each pivot’s honest coordinate after its registration commitment from extracted corrupt registration coordinates, so it reads and programs the registration-source commitment domain with one commitment shadow per potential sender scope. The source-domain column implements only that domain, forwards every other query and prices the complete reduction except the simulated proofs’ record creation: its query circuits, the replacement wrapper for every programmed honest proof, the classical-reader and resumed-hash conversions of the forwarded honest calls and the forwarded calls themselves, every corrupt registration-source extraction with its coordinate decoding, and the source cache. A call reaches that domain only if its input capacity holds the shortest registration-source input, so it costs at least that input’s permutations, and every source input lies in one dyadic input class; the database terms are the full-domain bound restricted to those calls and that class. The converted honest calls read private streams and proof hashes outside that domain, so the conversions enlarge only the forwarded calls. The background column prices only the query circuits of a reduction that implements the whole function itself, as one without the oracle-relative assumption must, and the shadow column adds its commitment shadows. The reader column applies the classical fixed-input reader conversion that participant code uses. The resumed column applies the larger conversion for setup first-oracle leaf hashes resumed from an authenticated checkpoint, conditional on the original input staying available to the adapter. Those four columns omit every other reduction cost, so they are lower bounds. Each row shows the option count whose source-domain requirement leaves the least further work within its own criterion floor, the largest modulus among equals. The floors are the cheapest core-SVP screens that the [security argument](security-argument.md#ledger) cites; a screen at one modulus bounds the same attack at every smaller supported modulus. Attack costs follow the accepted convention, without quantum random-access memory, so the classical floor over every algorithm of the estimator’s full estimate is the criterion. The quantum model’s sieving speedup assumes that memory, so its floor is a stress test. Neither model counts gates as the convention does. The last column is the further reduction work, in whole log2 gates, that keeps the source-domain requirement within the whole bits of the criterion floor, or none where the priced work alone exceeds them; the simulated proofs’ record creation must fit within it.',
+        'The [margin model](../tests/security-margin-screen-model.ts) tests whether the current FHE comparisons can reach the target with the current parameters. It charges every single-key FHE Ring-LWE comparison of the [clear-preparation ledger](private:clear-preparation-ledger) at one original honest registration per participant, expanding each multi-message ballot comparison over its messages. The withdrawn ledger’s seven assumption groups share the 2^-80 budget equally. Each requirement charges the reduction’s work at the largest complete experiment within 2^80 gates that fills whole permutation slots. The reduction’s work depends on an experiment only through those slots and its query routing grows with their square, so that experiment has the largest reduction ratio; the source cache and the extractions’ fixed work, which do not grow with the experiment, leave every smaller experiment’s ratio below it, as the margin test checks at the population limits. The lattice assumptions hold relative to the ideal SHAKE oracle, so the forwarded column, which adds no work, is the floor for a reduction that never reads or programs the attacker’s queries. The FHE embedding fixes each pivot’s honest coordinate after its registration commitment from extracted corrupt registration coordinates, so it reads and programs the registration-source commitment domain with one commitment shadow per potential sender scope. The source-domain column implements only that domain, forwards every other query and prices the complete reduction except the simulated proofs’ record creation: its query circuits, the replacement wrapper for every programmed honest proof, the classical-reader and resumed-hash conversions of the forwarded honest calls and the forwarded calls themselves, every corrupt registration-source extraction with its coordinate decoding, and the source cache. A call reaches that domain only if its input capacity holds the shortest registration-source input, so it costs at least that input’s permutations, and every source input lies in one dyadic input class; the database terms are the full-domain bound restricted to those calls and that class. The converted honest calls read private streams and proof hashes outside that domain, so the conversions enlarge only the forwarded calls. The background column prices only the query circuits of a reduction that implements the whole function itself, as one without the oracle-relative assumption must, and the shadow column adds its commitment shadows. The reader column applies the classical fixed-input reader conversion that participant code uses. The resumed column applies the larger conversion for setup first-oracle leaf hashes resumed from an authenticated checkpoint, conditional on the original input staying available to the adapter. Those four columns omit every other reduction cost, so they are lower bounds. Each row shows the option count whose source-domain requirement leaves the least further work within its own criterion floor, the largest modulus among equals. The floors are the cheapest core-SVP screens that the [security argument](private:security-ledger) cites; a screen at one modulus bounds the same attack at every smaller supported modulus. Attack costs follow the accepted convention, without quantum random-access memory, so the classical floor over every algorithm of the estimator’s full estimate is the criterion. The quantum model’s sieving speedup assumes that memory, so its floor is a stress test. Neither model counts gates as the convention does. The last column is the further reduction work, in whole log2 gates, that keeps the source-domain requirement within the whole bits of the criterion floor, or none where the priced work alone exceeds them; the simulated proofs’ record creation must fit within it.',
         '',
         table(
             [
@@ -4884,7 +4903,7 @@ export const renderDocumentationCensus = (): string => {
         '',
         '### Assumption group limits',
         '',
-        'The [security ledger model](../tests/security-ledger-model.ts) derives each assumption group’s own limit on a poll’s original honest registrations and takes the poll’s limit as the smallest, with the proof terms resting on the proof-compiler gate’s theorems. The seven groups share the budget as above, so each bounds the ratio of its contribution to the experiment’s cost by 2^-83 at every experiment within 2^80 gates. The lattice groups price their comparisons with the source-domain reduction of the screen above. Circular security of the honest evaluation-key tuples is judged against the FHE instance’s floor at each option count’s modulus, as the owner decided on 2026-10-07. The fixed share-encryption and auxiliary instances use the following core-SVP screens of the pinned estimator with unlimited samples; an attack whose estimate has no finite cost at any block size has no floor, and an instance without a finite screen in a cost model imposes no limit in it. A group that stays within its level at 2^64 registrations has no limit below that search cap, shown as none.',
+        'The [security ledger model](../tests/security-ledger-model.ts) derives each assumption group’s own limit on a poll’s original honest registrations and takes the poll’s limit as the smallest, with the proof terms resting on the proof-compiler gate’s theorems. The seven groups share the budget as above, so each bounds the ratio of its contribution to the experiment’s cost by 2^-83 at every experiment within 2^80 gates. The lattice groups price their comparisons with the source-domain reduction of the screen above. Circular security of the honest evaluation-key tuples is judged against the FHE instance’s floor at each option count’s modulus. The fixed share-encryption and auxiliary instances use the following core-SVP screens of the pinned estimator with unlimited samples; an attack whose estimate has no finite cost at any block size has no floor, and an instance without a finite screen in a cost model imposes no limit in it. A group that stays within its level at 2^64 registrations has no limit below that search cap, shown as none.',
         '',
         table(
             [
@@ -5445,7 +5464,7 @@ export const renderDocumentationCensus = (): string => {
         '',
         '### Full-circuit query and source extraction budgets',
         '',
-        'The owner-selected full-circuit convention charges controlled permutation slots regardless of branch probability. Separate input and output maxima are bounded by a rectangle costing at most twice that slot budget. These examples price the complete programmed/background query circuit, every declared shadow and its selection circuit. All caller queries must enter the supplied budget; extra reduction calls, non-oracle computation and constructor work cannot be silently charged to the original experiment. The record and shadow counts below are declared examples, not a numerical registration limit.',
+        'The full-circuit convention charges controlled permutation slots regardless of branch probability. Separate input and output maxima are bounded by a rectangle costing at most twice that slot budget. These examples price the complete programmed/background query circuit, every declared shadow and its selection circuit. All caller queries must enter the supplied budget; extra reduction calls, non-oracle computation and constructor work cannot be silently charged to the original experiment. The record and shadow counts below are declared examples, not a numerical registration limit.',
         '',
         table(
             [
@@ -6123,6 +6142,10 @@ export const renderDocumentationCensus = (): string => {
     ].join('\n')}\n`;
 };
 
+export const renderDocumentationCensus = (
+    privateLinkTargets?: Readonly<Record<string, string>>,
+): string => linkPrivateOwners(renderCensusText(), privateLinkTargets);
+
 const normalizeCensusLine = (line: string): string =>
     line.startsWith('|')
         ? line
@@ -6147,6 +6170,24 @@ export const findFirstCensusMismatch = (
     return undefined;
 };
 
+// The private link table, when present, lies beside the census.
+const readPrivateLinkTargets = async (
+    censusPath: string,
+): Promise<Readonly<Record<string, string>> | undefined> => {
+    try {
+        return JSON.parse(
+            await readFile(
+                path.join(path.dirname(censusPath), 'census-links.json'),
+                'utf8',
+            ),
+        ) as Record<string, string>;
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT')
+            return undefined;
+        throw error;
+    }
+};
+
 const usage =
     'Usage: generate-documentation-census.ts (--output <file> | --check <file>)';
 
@@ -6162,7 +6203,9 @@ const main = async (): Promise<void> => {
     )
         throw new Error(usage);
     const targetPath = path.resolve(target);
-    const rendered = renderDocumentationCensus();
+    const rendered = renderDocumentationCensus(
+        await readPrivateLinkTargets(targetPath),
+    );
     if (mode === '--output') {
         await writeFile(targetPath, rendered, 'utf8');
         process.stdout.write(
