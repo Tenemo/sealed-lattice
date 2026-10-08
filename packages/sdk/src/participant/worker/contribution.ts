@@ -11,7 +11,7 @@ import {
     unsigned32,
     unsigned64,
 } from './bytes.js';
-import { PublicInputFailure, sessionInput } from './context.js';
+import { sessionInput } from './context.js';
 import type { ProfileContext } from './context.js';
 import {
     createProofWriter,
@@ -20,6 +20,7 @@ import {
     readProof,
 } from './contribution-proof.js';
 import { openDelivery } from './delivery.js';
+import { PublicInputFailure, StoragePending } from './failures.js';
 import { custodyIdentity, custodyPurpose } from './identity.js';
 import {
     operationSeedBytes,
@@ -62,7 +63,6 @@ import {
     discardStagedRecords,
     readParticipantValue,
     snapshotParticipant,
-    StoragePending,
 } from './storage.js';
 
 // Own offer work advances independently of the preparation journal. Its

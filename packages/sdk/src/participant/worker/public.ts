@@ -18,8 +18,9 @@ import {
     type CandidateFile,
     type CandidateManifest,
 } from './candidate-codec.js';
-import { describe, PublicInputFailure } from './context.js';
+import { describe } from './context.js';
 import type { Delivery } from './delivery.js';
+import { PublicInputFailure } from './failures.js';
 
 // Public records come from an untrusted relay. Every read has an exact upper
 // bound checked before the bytes are kept, and every failure leaves the

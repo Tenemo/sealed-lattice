@@ -8,14 +8,15 @@ import {
 import type { ParticipantContext } from '#packages/sdk/src/participant/worker/context.js';
 import { createEnrollment } from '#packages/sdk/src/participant/worker/enrollment.js';
 import {
+    ModuleFailure,
+    ResourceFailure,
+    StoragePending,
+} from '#packages/sdk/src/participant/worker/failures.js';
+import {
     custodyIdentity,
     custodyPurpose,
 } from '#packages/sdk/src/participant/worker/identity.js';
-import {
-    instantiateParticipantKernel,
-    ModuleFailure,
-    ResourceFailure,
-} from '#packages/sdk/src/participant/worker/kernel.js';
+import { instantiateParticipantKernel } from '#packages/sdk/src/participant/worker/kernel.js';
 import { noParallelHelpers } from '#packages/sdk/src/participant/worker/parallel.js';
 import {
     openRoot,
@@ -26,7 +27,6 @@ import {
     isRootKey,
     openParticipantDatabase,
     snapshotParticipant,
-    StoragePending,
 } from '#packages/sdk/src/participant/worker/storage.js';
 
 const databases: IDBDatabase[] = [];

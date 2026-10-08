@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 
-import { PublicInputFailure } from '#packages/sdk/src/participant/worker/context.js';
+import { PublicInputFailure } from '#packages/sdk/src/participant/worker/failures.js';
 import { discoverContributionOffers } from '#packages/sdk/src/participant/worker/offer-discovery.js';
 
 const identity = (marker: number) => new Uint8Array(64).fill(marker);

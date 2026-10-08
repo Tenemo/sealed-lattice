@@ -9,8 +9,8 @@ import {
     decodeCandidateManifest,
     encodeCandidateManifest,
 } from '#packages/sdk/src/participant/worker/candidate-codec.js';
-import { PublicInputFailure } from '#packages/sdk/src/participant/worker/context.js';
 import { guardDelivery } from '#packages/sdk/src/participant/worker/delivery.js';
+import { PublicInputFailure } from '#packages/sdk/src/participant/worker/failures.js';
 import {
     createCandidatePublication,
     findCandidate,

@@ -1,3 +1,4 @@
+import { ModuleFailure, ResourceFailure } from './failures.js';
 import type { ParallelHelpers } from './parallel.js';
 
 // The participant scalar module's exports that the worker calls. Every
@@ -205,18 +206,6 @@ export type KernelHandlers = {
 
 // Randomness requests are bounded before any view of module memory exists.
 const maximumRandomRequest = 65_536;
-
-// A helper that failed, and an exhausted memory bound of the module instance
-// or of the shared arena, end the operation as pending. The instance is not
-// used again; a later visit starts a fresh one.
-export class ResourceFailure extends Error {}
-
-// A module call that ended without returning for any other reason, a trap or
-// a host function's failure, also ends the operation as pending. The module
-// reads the participant's local inputs only after their authentication, so
-// such a call consumed public input or met a defect of its own, and the
-// participant stays where its last commit left it.
-export class ModuleFailure extends Error {}
 
 export type LoadedKernel = Readonly<{
     kernel: ParticipantKernel;

@@ -2,11 +2,13 @@ import binaryen from 'binaryen';
 import { describe, expect, it } from 'vitest';
 
 import {
+    ModuleFailure,
+    ResourceFailure,
+} from '#packages/sdk/src/participant/worker/failures.js';
+import {
     instantiateParticipantKernel,
     kernelFunctions,
-    ModuleFailure,
     operationSeedBytes,
-    ResourceFailure,
     seededRandomness,
 } from '#packages/sdk/src/participant/worker/kernel.js';
 import type { ParallelHelpers } from '#packages/sdk/src/participant/worker/parallel.js';

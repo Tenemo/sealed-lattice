@@ -17,17 +17,17 @@ import {
     unsigned64,
 } from './bytes.js';
 import { closeRecordInventory, decodeCloseState } from './close-state.js';
-import { describe, PublicInputFailure, sessionInput } from './context.js';
+import { describe, sessionInput } from './context.js';
 import type { ProfileContext } from './context.js';
 import { contributionRecords } from './contribution.js';
 import type { ParticipantSession } from './contribution.js';
 import { openDelivery } from './delivery.js';
 import {
-    operationSeedBytes,
-    readKernel,
+    PublicInputFailure,
     ResourceFailure,
-    seededRandomness,
-} from './kernel.js';
+    StoragePending,
+} from './failures.js';
+import { operationSeedBytes, readKernel, seededRandomness } from './kernel.js';
 import type { ParticipantStoredRecord } from './predecessor.js';
 import { createCandidatePublication } from './public.js';
 import type { PublicRelay } from './public.js';
@@ -45,7 +45,7 @@ import {
     ensureFinalAggregate,
     readFinalAggregate,
 } from './setup.js';
-import { snapshotParticipant, StoragePending } from './storage.js';
+import { snapshotParticipant } from './storage.js';
 
 // Creates, retains, signs and delivers a participant's ballot through the
 // phases the ballot state records.

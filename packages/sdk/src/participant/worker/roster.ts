@@ -10,7 +10,7 @@ import {
     unsigned16,
     unsigned32,
 } from './bytes.js';
-import { InvalidRequest, PublicInputFailure, sessionInput } from './context.js';
+import { sessionInput } from './context.js';
 import type {
     ParticipantContext,
     ProfileContext,
@@ -18,6 +18,7 @@ import type {
 } from './context.js';
 import { retainRegistration } from './enrollment.js';
 import type { RestoredEnrollment } from './enrollment.js';
+import { InvalidRequest, PublicInputFailure } from './failures.js';
 import { readKernel } from './kernel.js';
 import type { ParticipantKernel } from './kernel.js';
 import {

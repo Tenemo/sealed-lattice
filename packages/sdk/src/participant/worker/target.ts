@@ -24,7 +24,7 @@ import {
     restoreCompletedClose,
 } from './close.js';
 import type { CloseSession } from './close.js';
-import { PublicInputFailure, sessionInput } from './context.js';
+import { sessionInput } from './context.js';
 import type {
     ProfileContext,
     PublicContext,
@@ -34,10 +34,10 @@ import { contributionRecords } from './contribution.js';
 import { openDelivery } from './delivery.js';
 import {
     ModuleFailure,
-    readKernel,
+    PublicInputFailure,
     ResourceFailure,
-    writeBufferInput,
-} from './kernel.js';
+} from './failures.js';
+import { readKernel, writeBufferInput } from './kernel.js';
 import type { ParticipantKernel } from './kernel.js';
 import {
     createCandidatePublication,

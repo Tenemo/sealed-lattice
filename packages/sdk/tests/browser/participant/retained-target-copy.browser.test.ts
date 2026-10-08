@@ -4,7 +4,7 @@ import type { ProfileContext } from '#packages/sdk/src/participant/worker/contex
 import {
     ModuleFailure,
     ResourceFailure,
-} from '#packages/sdk/src/participant/worker/kernel.js';
+} from '#packages/sdk/src/participant/worker/failures.js';
 import { chunkBytes } from '#packages/sdk/src/participant/worker/root.js';
 import {
     evaluatedTargetName,

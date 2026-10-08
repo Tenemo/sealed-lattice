@@ -19,7 +19,7 @@
 // run every job itself; a failed job and an exhausted arena end the operation
 // as pending.
 
-import { ResourceFailure } from './kernel.js';
+import { ResourceFailure } from './failures.js';
 
 // The module's job bounds, which the host enforces again.
 const maximumJobBytes = 8 << 20;

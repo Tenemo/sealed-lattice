@@ -6,9 +6,9 @@ import {
     readParticipantLimits,
     readParticipantProfile,
 } from '#packages/sdk/src/participant/worker/bounds.js';
+import { ModuleFailure } from '#packages/sdk/src/participant/worker/failures.js';
 import {
     instantiateParticipantKernel,
-    ModuleFailure,
     requireInputCapacities,
 } from '#packages/sdk/src/participant/worker/kernel.js';
 import { noParallelHelpers } from '#packages/sdk/src/participant/worker/parallel.js';

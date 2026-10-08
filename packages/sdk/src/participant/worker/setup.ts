@@ -7,7 +7,7 @@ import {
     unsigned32,
 } from './bytes.js';
 import { collectingCloseState, encodeCloseState } from './close-state.js';
-import { PublicInputFailure, sessionInput } from './context.js';
+import { sessionInput } from './context.js';
 import type { PublicContext, PublicProfileContext } from './context.js';
 import {
     contributionCandidateKey,
@@ -18,10 +18,10 @@ import type { ParticipantSession, SignedPacket } from './contribution.js';
 import { openDelivery } from './delivery.js';
 import {
     ModuleFailure,
-    readKernel,
+    PublicInputFailure,
     ResourceFailure,
-    writeSetupInput,
-} from './kernel.js';
+} from './failures.js';
+import { readKernel, writeSetupInput } from './kernel.js';
 import { encodePreparationState } from './preparation-state.js';
 import {
     createCandidatePublication,

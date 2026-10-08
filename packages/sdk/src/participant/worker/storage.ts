@@ -1,3 +1,5 @@
+import { StoragePending } from './failures.js';
+
 // The participant's origin-local database. The key, root and head stores hold
 // the single authenticated root; every other store holds records that root
 // references by hash or by record key.
@@ -125,12 +127,6 @@ export const readParticipantValue = async (
     await done;
     return value;
 };
-
-// A failed write that leaves the participant's retained authority as it
-// was, a transition whose exact predecessor still authenticates or staged
-// records the origin had no room for, leaves the participant pending; any
-// other failure is local state loss.
-export class StoragePending extends Error {}
 
 // Adds records that no root references yet in one strict transaction. Only
 // generated output is staged this way; the next root lists it and its

@@ -5,6 +5,7 @@ import {
     readParticipantProfile,
 } from '#packages/sdk/src/participant/worker/bounds.js';
 import type { ProfileContext } from '#packages/sdk/src/participant/worker/context.js';
+import { StoragePending } from '#packages/sdk/src/participant/worker/failures.js';
 import {
     custodyIdentity,
     custodyPurpose,
@@ -30,7 +31,6 @@ import {
     openParticipantDatabase,
     readParticipantValue,
     snapshotParticipant,
-    StoragePending,
 } from '#packages/sdk/src/participant/worker/storage.js';
 import type { ParticipantStore } from '#packages/sdk/src/participant/worker/storage.js';
 

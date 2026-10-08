@@ -23,11 +23,7 @@ import {
     publishClose,
     resumeClose,
 } from './close.js';
-import {
-    InvalidRequest,
-    isEligibleContributor,
-    PublicInputFailure,
-} from './context.js';
+import { isEligibleContributor } from './context.js';
 import type { ParticipantContext, ProfileContext } from './context.js';
 import {
     beginContribution,
@@ -42,15 +38,18 @@ import {
 } from './contribution.js';
 import { createEnrollment, restoreEnrollment } from './enrollment.js';
 import type { EnrollmentRequest, RestoredEnrollment } from './enrollment.js';
+import {
+    classifyFailure,
+    InvalidRequest,
+    pendingCause,
+    PublicInputFailure,
+} from './failures.js';
 import { participantRuntimeLabel } from './identity.js';
 import {
     instantiateParticipantKernel,
-    ModuleFailure,
     requireInputCapacities,
-    ResourceFailure,
 } from './kernel.js';
 import type { ParticipantKernel } from './kernel.js';
-import { pendingCause } from './outcome.js';
 import type {
     ParticipantPendingCause,
     ParticipantRefusalReason,
@@ -95,7 +94,6 @@ import {
     namespacedName,
     openParticipantDatabase,
     participantNamespacePattern,
-    StoragePending,
     storedRuntime,
 } from './storage.js';
 import { decodeTargetState } from './target-state.js';
@@ -856,24 +854,18 @@ const run = async (
                             ),
                         };
                     // A malformed request is refused before the operation
-                    // changes anything.
-                    if (error instanceof InvalidRequest)
+                    // changes anything. A local failure after authority
+                    // started stops the participant before any other
+                    // operation takes the lock. A failed helper, an exhausted
+                    // memory bound and a module call that ended without
+                    // returning touch no retained state and leave the
+                    // participant pending. Enrollment converts failures after
+                    // its intent but before retaining its secrets into local
+                    // state loss instead.
+                    const outcome = classifyFailure(error, authorityStarted);
+                    if (outcome.status === 'refused')
                         return refused('invalid request');
-                    // A local failure after authority started stops the
-                    // participant before any other operation takes the lock.
-                    // A failed helper, an exhausted memory bound and a module
-                    // call that ended without returning touch no retained
-                    // state and leave the participant pending. Enrollment
-                    // converts failures after its intent but before retaining
-                    // its secrets into local state loss instead.
-                    if (
-                        !authorityStarted ||
-                        error instanceof PublicInputFailure ||
-                        error instanceof StoragePending ||
-                        error instanceof ResourceFailure ||
-                        error instanceof ModuleFailure
-                    )
-                        throw error;
+                    if (outcome.status === 'pending') throw error;
                     const stopPersistence = await stopParticipant(opened);
                     return {
                         status: 'stopped',

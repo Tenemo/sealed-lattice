@@ -7,10 +7,11 @@ import {
     unsigned16,
     unsigned32,
 } from './bytes.js';
-import { PublicInputFailure, sessionInput } from './context.js';
+import { sessionInput } from './context.js';
 import { commitPreparation } from './contribution.js';
 import type { ParticipantSession, SignedPacket } from './contribution.js';
 import { openDelivery } from './delivery.js';
+import { PublicInputFailure } from './failures.js';
 import { readKernel, writeSetupInput } from './kernel.js';
 import { discoverContributionOffers } from './offer-discovery.js';
 import type { PreparationEndorsement } from './preparation-state.js';

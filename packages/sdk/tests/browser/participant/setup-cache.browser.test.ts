@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { PublicInputFailure } from '#packages/sdk/src/participant/worker/context.js';
 import type { PublicProfileContext } from '#packages/sdk/src/participant/worker/context.js';
+import { PublicInputFailure } from '#packages/sdk/src/participant/worker/failures.js';
 import {
     deliverFinalAggregate,
     readFinalAggregate,

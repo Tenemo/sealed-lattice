@@ -47,13 +47,5 @@ export const ownRegistrationInput = (
     bytes: Uint8Array,
 ) => writeOwnRegistrationInput(context.kernel, bytes);
 
-// A public input that is unavailable or refused leaves the participant
-// pending; it never stops the participant or replaces retained state.
-export class PublicInputFailure extends Error {}
-
-// A request whose parameters are malformed is refused before the operation
-// changes anything.
-export class InvalidRequest extends Error {}
-
 export const describe = (error: unknown) =>
     error instanceof Error ? error.message : String(error);

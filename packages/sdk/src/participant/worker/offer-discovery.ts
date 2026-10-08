@@ -1,4 +1,4 @@
-import { PublicInputFailure } from './context.js';
+import { PublicInputFailure } from './failures.js';
 
 type OfferCandidate = Readonly<{
     position: number;

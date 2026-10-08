@@ -13,6 +13,7 @@ import {
     unsigned16,
     unsigned32,
 } from '#packages/sdk/src/participant/worker/bytes.js';
+import { ResourceFailure } from '#packages/sdk/src/participant/worker/failures.js';
 import {
     custodyIdentity,
     custodyPurpose,
@@ -20,7 +21,6 @@ import {
 import {
     instantiateParticipantKernel,
     readKernel,
-    ResourceFailure,
     writeInput,
 } from '#packages/sdk/src/participant/worker/kernel.js';
 import {
@@ -1268,7 +1268,8 @@ describe('participant module memory', () => {
                 '--input-type=module',
                 '--eval',
                 [
-                    `const { instantiateParticipantKernel, ResourceFailure } = await import(${source('kernel.ts')});`,
+                    `const { instantiateParticipantKernel } = await import(${source('kernel.ts')});`,
+                    `const { ResourceFailure } = await import(${source('failures.ts')});`,
                     `const { noParallelHelpers } = await import(${source('parallel.ts')});`,
                     `const bytes = await (await import('node:fs/promises')).readFile(${JSON.stringify(fileURLToPath(new URL('participant.wasm', distribution)))});`,
                     'const { kernel } = await instantiateParticipantKernel(await WebAssembly.compile(bytes), noParallelHelpers);',

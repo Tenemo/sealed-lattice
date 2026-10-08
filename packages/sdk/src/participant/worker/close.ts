@@ -29,11 +29,12 @@ import {
     encodeCloseState,
 } from './close-state.js';
 import type { CloseEvent, CloseState } from './close-state.js';
-import { PublicInputFailure, sessionInput } from './context.js';
+import { sessionInput } from './context.js';
 import type { ProfileContext, PublicProfileContext } from './context.js';
 import { contributionRecords } from './contribution.js';
 import type { ParticipantSession } from './contribution.js';
 import { openDelivery } from './delivery.js';
+import { PublicInputFailure } from './failures.js';
 import { custodyIdentity, custodyPurpose } from './identity.js';
 import { readKernel } from './kernel.js';
 import {

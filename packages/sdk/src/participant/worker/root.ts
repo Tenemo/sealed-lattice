@@ -10,6 +10,7 @@ import {
 } from './bytes.js';
 import { describe } from './context.js';
 import type { ParticipantContext } from './context.js';
+import { StoragePending } from './failures.js';
 import {
     custodyIdentities,
     custodyIdentity,
@@ -30,7 +31,6 @@ import {
     participantStores,
     readParticipantValue,
     snapshotParticipant,
-    StoragePending,
 } from './storage.js';
 import type { ParticipantHead } from './storage.js';
 

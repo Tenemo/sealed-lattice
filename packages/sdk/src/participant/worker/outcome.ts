@@ -1,7 +1,3 @@
-import { PublicInputFailure } from './context.js';
-import { ModuleFailure, ResourceFailure } from './kernel.js';
-import { StoragePending } from './storage.js';
-
 /**
  * Why a refused request changed nothing: the browser lacks a required
  * capability; the request is malformed or asks for something its parameters
@@ -28,14 +24,3 @@ export type ParticipantRefusalReason =
  */
 export type ParticipantPendingCause =
     'public input' | 'storage' | 'resource' | 'module' | 'worker';
-
-export const pendingCause = (error: unknown): ParticipantPendingCause =>
-    error instanceof PublicInputFailure
-        ? 'public input'
-        : error instanceof StoragePending
-          ? 'storage'
-          : error instanceof ResourceFailure
-            ? 'resource'
-            : error instanceof ModuleFailure
-              ? 'module'
-              : 'worker';
