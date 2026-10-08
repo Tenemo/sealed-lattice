@@ -11,14 +11,13 @@ import {
 
 const fixture = Buffer.from(`
 globalThis.run = async (command) => {
-    const delivered = await fetchModule(command.module, command.identity.module);
-    await runtimeIdentity(command.identity, delivered.digest);
+    const delivered = await deliverModule(command);
     const module = await WebAssembly.compile(delivered.bytes);
     const evaluation = evaluatingOperations.has(command.operation);
     return { module, evaluation };
 };
 globalThis.verify = async () => {
-    const delivered = await fetchModule('honest', 'digest');
+    const delivered = await deliverModule({ module: 'honest' });
     return await WebAssembly.compile(delivered.bytes);
 };`);
 
@@ -49,12 +48,9 @@ describe('corrupt participant module selection', () => {
         const context = {
             location: { origin: 'https://participant.test' },
             evaluatingOperations: new Set(['sign-target']),
-            fetchModule: () => {
-                events.push('honest delivery');
-                return { bytes: honest, digest: 'digest' };
-            },
-            runtimeIdentity: () => {
-                events.push('runtime identity');
+            deliverModule: () => {
+                events.push('honest delivery and runtime identity');
+                return { bytes: honest, runtime: 'runtime' };
             },
             fetch: (url: string) => {
                 expect(url).toBe(
@@ -84,14 +80,16 @@ describe('corrupt participant module selection', () => {
             }),
         ).toEqual({ module: [4, 5, 6], evaluation: false });
         expect(events).toEqual([
-            'honest delivery',
-            'runtime identity',
+            'honest delivery and runtime identity',
             'corrupt delivery',
             'compile 4,5,6',
         ]);
         events.length = 0;
         expect(await context.verify!()).toEqual([1, 2, 3]);
-        expect(events).toEqual(['honest delivery', 'compile 1,2,3']);
+        expect(events).toEqual([
+            'honest delivery and runtime identity',
+            'compile 1,2,3',
+        ]);
     });
 
     it('refuses an absent or ambiguous participant compilation', () => {

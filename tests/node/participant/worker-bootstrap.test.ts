@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { participantRuntimeLabel } from '#packages/sdk/src/participant/worker/module/custody-identity.js';
-import type { WorkerResult } from '#packages/sdk/src/participant/worker/worker.js';
+import type { WorkerResult } from '#packages/sdk/src/participant/worker/runtime/worker-messages.js';
 
 const downstream = vi.hoisted(() => ({
     helpers: vi.fn(),

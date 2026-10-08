@@ -4,12 +4,16 @@ import {
     helperRole,
 } from './worker/module/parallel-helpers.js';
 import type {
+    VerificationCommand,
+    WorkerCommand,
+    WorkerResult,
+} from './worker/runtime/worker-messages.js';
+import type {
     IncompleteOperation,
     ParticipantPendingCause,
     ParticipantRefusalReason,
 } from './worker/shared/operation-status.js';
 import { participantNamespacePattern } from './worker/storage/database.js';
-import type { WorkerResult } from './worker/worker.js';
 
 export type {
     ParticipantPendingCause,
@@ -254,7 +258,7 @@ const openHelpers = async (url: string) => {
 // ends them all once the worker answers.
 const runWorkerOnce = async (
     url: string,
-    command: Readonly<Record<string, unknown>>,
+    command: WorkerCommand | VerificationCommand,
 ) => {
     const helpers = await openHelpers(url);
     return new Promise<WorkerResult>((resolve) => {
@@ -298,7 +302,7 @@ const runWorkerOnce = async (
 // the evaluating worker's memory.
 const runWorker = async (
     source: string,
-    command: Readonly<Record<string, unknown>>,
+    command: Omit<WorkerCommand, 'separateEvaluation'>,
 ) => {
     const url = URL.createObjectURL(
         new Blob([source], { type: 'text/javascript' }),

@@ -27,6 +27,7 @@ import {
     decodeCandidateReceipt,
     encodeCandidateManifest,
 } from '#packages/sdk/src/participant/worker/relay/candidate-codec.js';
+import type { WorkerResult } from '#packages/sdk/src/participant/worker/runtime/worker-messages.js';
 import { tupleFields } from '#packages/sdk/src/participant/worker/shared/bytes.js';
 import { completedClosePhase } from '#packages/sdk/src/participant/worker/stages/close/close-state.js';
 import {
@@ -40,7 +41,6 @@ import {
     setupCacheName,
 } from '#packages/sdk/src/participant/worker/storage/database.js';
 import { targetPhase } from '#packages/sdk/src/participant/worker/storage/root-generation.js';
-import type { WorkerResult } from '#packages/sdk/src/participant/worker/worker.js';
 import { compileOperationProofDraws } from '#tests/operation-seed-model.js';
 import { compileParticipantRuntimeProfile } from '#tests/participant-runtime-bounds-model.js';
 import {

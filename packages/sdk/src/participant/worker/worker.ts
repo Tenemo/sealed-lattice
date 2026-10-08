@@ -1,720 +1,41 @@
-import { errorMessage, isEligibleContributor } from './module/context.js';
-import type {
-    ParticipantContext,
-    ParticipantProfileContext,
-} from './module/context.js';
-import { participantRuntimeLabel } from './module/custody-identity.js';
+import { errorMessage } from './module/context.js';
 import {
     helperRole,
     listenAsHelper,
     startParallelHelpers,
 } from './module/parallel-helpers.js';
 import type { ParallelHelpers } from './module/parallel-helpers.js';
-import {
-    instantiateParticipantModule,
-    requireInputCapacities,
-} from './module/participant-module.js';
 import type { ParticipantModule } from './module/participant-module.js';
 import { readParticipantLimits } from './module/runtime-bounds.js';
 import type { PublicRelay } from './relay/relay.js';
-import { readBounded } from './relay/relay.js';
-import { isOperationAvailable } from './runtime/operation-availability.js';
 import {
-    concatenate,
-    encodeText,
-    equalBytes,
-    fromHexadecimal,
-    hexadecimal,
-} from './shared/bytes.js';
+    deliverModule,
+    instantiateForOperation,
+    isSupportedBrowser,
+    operationMemory,
+} from './runtime/module-delivery.js';
+import { executeOperation } from './runtime/operations.js';
 import {
-    classifyFailure,
-    InvalidRequest,
-    pendingCause,
-    PublicInputFailure,
-} from './shared/failures.js';
+    isVerification,
+    isWellFormed,
+    isWellFormedVerification,
+    refused,
+} from './runtime/worker-messages.js';
 import type {
-    IncompleteOperation,
-    ParticipantRefusalReason,
-} from './shared/operation-status.js';
-import {
-    beginBallot,
-    completeBallot,
-    parseBallotScores,
-    publishBallot,
-    resumeBallot,
-} from './stages/ballot/ballot.js';
-import {
-    advanceClose,
-    closeEvents,
-    isCloseComplete,
-    lockPublishedIntent,
-    parseCloseParameters,
-    publishClose,
-    resumeClose,
-} from './stages/close/close.js';
-import {
-    beginContribution,
-    confirmRoster,
-    continueContribution,
-    generateContribution,
-    isContributionSession,
-    publishOffer,
-    restoreCheckpoint,
-    resumeParticipant,
-    signContribution,
-} from './stages/contribution/contribution.js';
-import type {
-    EnrollmentRequest,
-    RestoredEnrollment,
-} from './stages/enrollment/enrollment.js';
-import {
-    createEnrollment,
-    restoreEnrollment,
-} from './stages/enrollment/enrollment.js';
+    VerificationCommand,
+    WorkerCommand,
+    WorkerResult,
+} from './runtime/worker-messages.js';
+import { fromHexadecimal } from './shared/bytes.js';
+import { classifyFailure, pendingCause } from './shared/failures.js';
 import { verifyPublishedOutcome } from './stages/outcome-verifier.js';
-import { decodeReleaseState } from './stages/release/release-state.js';
-import {
-    advanceRelease,
-    computeResult,
-    publishRelease,
-    resumeRelease,
-} from './stages/release/release.js';
-import { publishRegistrationRecords } from './stages/roster/registration-publication.js';
-import {
-    acceptRoster,
-    parseRegistrationBodyDigests,
-    proposeRoster,
-    retainedProfile,
-    reverifyRoster,
-    signRoster,
-} from './stages/roster/roster.js';
-import { endorseSetup, selectSetup } from './stages/setup/setup-selection.js';
-import {
-    restoreSetup,
-    retainSetup,
-    verifySetup,
-} from './stages/setup/setup.js';
-import { decodeTargetState } from './stages/target-vote/target-state.js';
-import {
-    certifiedBallotInclusion,
-    EvaluationRetained,
-    largestBufferInputBytes,
-    publishTarget,
-    signTarget,
-} from './stages/target-vote/target.js';
+import { EvaluationRetained } from './stages/target-vote/target.js';
 import {
     deleteWorkingStorage,
     namespacedName,
     openParticipantDatabase,
-    participantNamespacePattern,
-    storedRuntime,
 } from './storage/database.js';
-import {
-    ballotPhase,
-    releasePhase,
-    rootGeneration,
-    targetPhase,
-} from './storage/root-generation.js';
-import type { AuthenticatedRoot } from './storage/root.js';
-import { authenticateRoot } from './storage/root.js';
 import { stopParticipant } from './storage/stop.js';
-
-// The application's SDK supplies the namespace of the participant's local
-// state, the relay's base URL, the module's URL and the identities its build
-// recorded; the worker fetches the module itself and recomputes the runtime
-// identity that every retained root binds. Protocol bounds come from the
-// verified module and retained state, never from the page. When the page separates evaluation, a worker
-// that retains the target it evaluated before the operation's other work
-// ends there, and the page runs the operation again in a fresh worker.
-type WorkerCommand = Readonly<{
-    operation: string;
-    namespace: string;
-    relay: string;
-    module: string;
-    identity: Readonly<{
-        source: string;
-        module: string;
-        worker: string;
-    }>;
-    parameters: Readonly<Record<string, unknown>>;
-    separateEvaluation?: boolean;
-}>;
-
-// An evaluated result reports the memory of a worker that retained the
-// target it evaluated, and is never an operation's result. A refused result
-// says why, and a participant that another runtime created is refused with
-// that runtime's identity, which its head names. A pending result names what
-// the participant waits for.
-export type WorkerResult =
-    | Readonly<{
-          status: 'completed';
-          details: Readonly<Record<string, unknown>>;
-      }>
-    | IncompleteOperation
-    | Readonly<{ status: 'evaluated'; memory: OperationMemory }>;
-
-const maximumModuleBytes = 8_388_608;
-
-// A refused request changed nothing.
-const refused = (
-    reason: Exclude<ParticipantRefusalReason, 'another runtime'>,
-) => ({ status: 'refused', reason }) as const;
-
-// The pinned module digest gates execution. The runtime identity combines it
-// with the pinned source and worker digests and binds protocol contexts and
-// retained state; it is distinct from module-owned protocol object identities.
-const deliveryDigest = async (bytes: Uint8Array<ArrayBuffer>) =>
-    new Uint8Array(await crypto.subtle.digest('SHA-512', bytes));
-
-const fetchModule = async (url: string, expected: string) => {
-    const bytes = await readBounded(url, maximumModuleBytes);
-    const digest = await deliveryDigest(bytes);
-    if (hexadecimal(digest) !== expected)
-        throw new PublicInputFailure('The participant module changed.');
-    return { bytes, digest };
-};
-
-// An absolute HTTP or HTTPS URL in its canonical form.
-const httpUrl = (value: unknown) => {
-    if (typeof value !== 'string' || !URL.canParse(value)) return undefined;
-    const url = new URL(value);
-    return (url.protocol === 'https:' || url.protocol === 'http:') &&
-        url.href === value
-        ? url
-        : undefined;
-};
-
-// A base URL ends with a slash and has no query or fragment, so every
-// record name extends its path.
-const isBaseUrl = (value: unknown) => {
-    const url = httpUrl(value);
-    return (
-        url !== undefined &&
-        url.pathname.endsWith('/') &&
-        url.search === '' &&
-        url.hash === ''
-    );
-};
-
-const isWellFormed = (command: WorkerCommand) =>
-    typeof command.namespace === 'string' &&
-    participantNamespacePattern.test(command.namespace) &&
-    isBaseUrl(command.relay) &&
-    httpUrl(command.module) !== undefined &&
-    (command.separateEvaluation === undefined ||
-        typeof command.separateEvaluation === 'boolean');
-
-const runtimeIdentity = async (
-    identity: WorkerCommand['identity'],
-    moduleDigest: Uint8Array<ArrayBuffer>,
-) =>
-    deliveryDigest(
-        concatenate(
-            encodeText(participantRuntimeLabel),
-            fromHexadecimal(identity.source),
-            moduleDigest,
-            fromHexadecimal(identity.worker),
-        ),
-    );
-
-const text = (value: unknown) => {
-    if (typeof value !== 'string')
-        throw new InvalidRequest('Malformed text parameter.');
-    return value;
-};
-
-// Byte parameters cross the page boundary as lower-case hexadecimal; any
-// other text is a malformed request, not a local fault.
-const bytes = (value: unknown) => {
-    const encoded = text(value);
-    if (!/^(?:[0-9a-f]{2})*$/u.test(encoded))
-        throw new InvalidRequest('Malformed byte parameter.');
-    return fromHexadecimal(encoded);
-};
-
-// What this participant's ballot is: open once the verified setup is
-// retained, in progress from the attempt lock, signed, or impossible once the
-// participant learned that ballot submission closed without a ballot of its
-// own.
-const ballotState = (root: AuthenticatedRoot) => {
-    const { generation } = root.head;
-    if (generation < rootGeneration.setupRetained) return undefined;
-    if (generation === rootGeneration.setupRetained) return 'open';
-    if (generation < ballotPhase.signed) return 'in progress';
-    return (root.manifest.suffixes.ballot?.length ?? 0) > 0
-        ? 'signed'
-        : 'could not vote';
-};
-
-// The own ballot's status in the certified target, which the target
-// signing state retains from the evaluation on, and the release state of a
-// participant that signed no target from its lock on. A participant that
-// signed no target and locked no release retains none.
-const ballotInclusion = (
-    root: AuthenticatedRoot,
-    isOrganizer: boolean,
-    profiled: ParticipantProfileContext | undefined,
-) => {
-    const { generation } = root.head;
-    const { target, release } = root.manifest.suffixes;
-    if (profiled === undefined) return undefined;
-    if (
-        generation >= targetPhase.intent &&
-        target !== undefined &&
-        target.length !== 0
-    )
-        return decodeTargetState(
-            profiled.profile,
-            generation,
-            isOrganizer,
-            target,
-        ).ballotInclusion;
-    return generation < releasePhase.locked || release === undefined
-        ? undefined
-        : decodeReleaseState(profiled.profile, generation, isOrganizer, release)
-              .ballotInclusion;
-};
-
-// Whether the participant contributes setup key material is known once its
-// roster is retained.
-const summary = (
-    root: AuthenticatedRoot,
-    enrollment: RestoredEnrollment,
-    profiled: ParticipantProfileContext | undefined,
-) => ({
-    generation: root.head.generation,
-    poll: hexadecimal(root.manifest.poll),
-    registrationBodyDigest: hexadecimal(enrollment.registrationBodyDigest),
-    username: enrollment.username,
-    isOrganizer: enrollment.isOrganizer,
-    question: enrollment.poll.question,
-    options: enrollment.poll.options,
-    topCount: enrollment.poll.topCount,
-    isEligibleContributor:
-        profiled === undefined ? undefined : isEligibleContributor(profiled),
-    ballotState: ballotState(root),
-    ballotInclusion: ballotInclusion(root, enrollment.isOrganizer, profiled),
-});
-
-const execute = async (
-    context: ParticipantContext,
-    relay: PublicRelay,
-    command: WorkerCommand,
-    started: () => void,
-): Promise<WorkerResult> => {
-    const parameters = command.parameters;
-    if (command.operation === 'create') {
-        const role = text(parameters.role);
-        let request: EnrollmentRequest;
-        if (role === 'organizer') {
-            const { options } = parameters;
-            if (!Array.isArray(options))
-                throw new InvalidRequest('Malformed option labels.');
-            request = {
-                role,
-                question: text(parameters.question),
-                options: (options as unknown[]).map((label) => text(label)),
-                topCount: Number(parameters.topCount),
-                maximumParticipants: Number(parameters.maximumParticipants),
-                username: text(parameters.username),
-            };
-        } else if (role === 'joiner')
-            request = {
-                role,
-                poll: bytes(parameters.poll),
-                definition: bytes(parameters.definition),
-                definitionSignature: bytes(parameters.definitionSignature),
-                username: text(parameters.username),
-            };
-        else return refused('invalid request');
-        const root = await createEnrollment(context, request, started);
-        if (typeof root === 'string') return refused(root);
-        const enrollment = await restoreEnrollment(context, root, true);
-        return {
-            status: 'completed',
-            details: summary(root, enrollment, undefined),
-        };
-    }
-    // An empty namespace holds no participant, and a participant that another
-    // runtime created is that runtime's to continue: this worker cannot open
-    // its root, so no authority starts, nothing is written and nothing can
-    // stop.
-    const stored = await storedRuntime(context.database);
-    if (stored.status === 'empty') return refused('no participant');
-    if (
-        stored.status === 'named' &&
-        stored.runtime !== hexadecimal(context.runtime)
-    )
-        return {
-            status: 'refused',
-            reason: 'another runtime',
-            runtime: stored.runtime,
-        };
-    started();
-    let root = await authenticateRoot(context);
-    const enrollment = await restoreEnrollment(context, root, false);
-    if (
-        parameters.poll !== undefined &&
-        parameters.poll !== hexadecimal(root.manifest.poll)
-    )
-        return refused('another poll');
-    // The retained roster names the profile from generation two on; every
-    // operation past the roster runs only at such a generation.
-    const profiled =
-        root.head.generation >= rootGeneration.rosterLocked
-            ? await retainedProfile(context, root, enrollment)
-            : undefined;
-    // What an operation reports beside the participant's summary.
-    let reported: Readonly<Record<string, unknown>> = {};
-    const profileContext = (): ParticipantProfileContext => {
-        if (profiled === undefined)
-            throw new Error('The participant profile is not known.');
-        return profiled;
-    };
-    const available = isOperationAvailable(command.operation, {
-        generation: root.head.generation,
-        isOrganizer: enrollment.isOrganizer,
-        hasProfile: profiled !== undefined,
-        isEligibleContributor:
-            profiled !== undefined && isEligibleContributor(profiled),
-        spentTargetVote:
-            root.head.generation >= releasePhase.locked &&
-            root.manifest.suffixes.target?.length === 0,
-    });
-    if (available === undefined) return refused('invalid request');
-    if (!available) return refused('unavailable operation');
-    switch (command.operation) {
-        case 'status':
-            break;
-        case 'publish':
-            if (root.head.generation === rootGeneration.preparation)
-                await resumeParticipant(profileContext(), root);
-            await publishRegistrationRecords(context, relay, root, enrollment);
-            break;
-        case 'propose-roster': {
-            const registrationBodyDigests = parseRegistrationBodyDigests(
-                parameters.registrationBodyDigests,
-            );
-            if (root.head.generation === rootGeneration.rosterLocked) {
-                const proposal = await reverifyRoster(
-                    context,
-                    relay,
-                    root,
-                    enrollment,
-                );
-                if (
-                    proposal.registrationBodyDigests.join(',') !==
-                    registrationBodyDigests.join(',')
-                )
-                    return refused('invalid request');
-                root = await signRoster(context, root, proposal);
-                reported = { rosterUsernames: proposal.usernames };
-            } else {
-                const proposed = await proposeRoster(
-                    context,
-                    relay,
-                    root,
-                    enrollment,
-                    registrationBodyDigests,
-                );
-                if (proposed === undefined)
-                    return refused('unavailable operation');
-                root = proposed.root;
-                reported = { rosterUsernames: proposed.usernames };
-            }
-            break;
-        }
-        case 'accept-roster': {
-            const accepted = await acceptRoster(
-                context,
-                relay,
-                root,
-                enrollment,
-                parseRegistrationBodyDigests(
-                    parameters.registrationBodyDigests,
-                ),
-            );
-            if (accepted === undefined) return refused('unavailable operation');
-            root = accepted.root;
-            reported = { rosterUsernames: accepted.usernames };
-            break;
-        }
-        case 'confirm': {
-            const session = await resumeParticipant(profileContext(), root);
-            await confirmRoster(session);
-            root = session.root;
-            break;
-        }
-        case 'contribute': {
-            let session = await resumeParticipant(profileContext(), root);
-            if (session.state === undefined || session.state.phase === 4) {
-                const proposal = await reverifyRoster(
-                    context,
-                    relay,
-                    root,
-                    enrollment,
-                );
-                if (
-                    !equalBytes(proposal.identity, session.records.proposal) ||
-                    proposal.position !== session.records.position ||
-                    context.module.confirm_roster() !== 0
-                )
-                    throw new Error('The verified original roster changed.');
-                if (!isContributionSession(session))
-                    session = await beginContribution(session);
-                if (!isContributionSession(session))
-                    throw new Error('No offer intent is retained.');
-                await generateContribution(session);
-            } else if (session.state.phase === 5 || session.state.phase === 6) {
-                if (!isContributionSession(session))
-                    throw new Error('No own proof checkpoint is retained.');
-                await restoreCheckpoint(session, relay);
-            }
-            if (!isContributionSession(session))
-                throw new Error('No own offer is retained.');
-            if (session.state.phase === 5 || session.state.phase === 6)
-                await continueContribution(session);
-            const offer = await signContribution(session);
-            root = session.root;
-            await publishOffer(session, relay, offer);
-            break;
-        }
-        case 'select-setup': {
-            const session = await resumeParticipant(profileContext(), root);
-            await selectSetup(session, relay);
-            root = session.root;
-            break;
-        }
-        case 'endorse-setup': {
-            const session = await resumeParticipant(profileContext(), root);
-            await endorseSetup(session, relay);
-            root = session.root;
-            break;
-        }
-        case 'verify-setup': {
-            const session = await resumeParticipant(profileContext(), root);
-            root = await retainSetup(
-                session,
-                await verifySetup(session, relay),
-            );
-            // A participant that finds the organizer's close intent once its
-            // setup is retained learned that ballot submission closed before
-            // it could vote: it locks the intent and starts no ballot.
-            session.root = root;
-            await lockPublishedIntent(
-                await resumeClose(session, enrollment.isOrganizer),
-                relay,
-            );
-            root = session.root;
-            break;
-        }
-        case 'cast-ballot': {
-            // Generation twelve starts an attempt with the requested scores.
-            // A retained attempt continues only with its locked scores, and a
-            // signed ballot is only delivered again, also after an intent.
-            const generation = root.head.generation;
-            const scores =
-                parameters.scores === undefined
-                    ? undefined
-                    : parseBallotScores(
-                          profileContext().profile,
-                          parameters.scores,
-                      );
-            if (
-                (parameters.scores !== undefined && scores === undefined) ||
-                (generation === rootGeneration.setupRetained &&
-                    scores === undefined)
-            )
-                return refused('invalid request');
-            if (generation >= ballotPhase.signed && scores !== undefined)
-                return refused('unavailable operation');
-            const participant = await resumeParticipant(profileContext(), root);
-            let session;
-            if (
-                scores !== undefined &&
-                generation === rootGeneration.setupRetained
-            )
-                session = await beginBallot(participant, scores);
-            else {
-                session = await resumeBallot(participant);
-                if (session === undefined)
-                    return refused('unavailable operation');
-                if (
-                    scores !== undefined &&
-                    !equalBytes(scores, session.state.scores)
-                )
-                    return refused('invalid request');
-            }
-            await completeBallot(session, relay);
-            root = participant.root;
-            await publishBallot(session, relay);
-            // A ballot created in this operation reports the proof randomness
-            // the module drew.
-            if (session.proofRandomBytes !== undefined)
-                reported = { proofRandomBytes: session.proofRandomBytes };
-            break;
-        }
-        case 'close': {
-            // Only the organizer opens the close, and only before an intent
-            // and with no ballot attempt pending.
-            const generation = root.head.generation;
-            const request = parseCloseParameters(parameters);
-            if (
-                request === undefined ||
-                (request.closeTime !== undefined && !enrollment.isOrganizer)
-            )
-                return refused('invalid request');
-            if (
-                request.closeTime !== undefined &&
-                generation !== rootGeneration.setupRetained &&
-                generation !== ballotPhase.signed
-            )
-                return refused('unavailable operation');
-            const participant = await resumeParticipant(profileContext(), root);
-            const session = await resumeClose(
-                participant,
-                enrollment.isOrganizer,
-            );
-            if (!isCloseComplete(session)) {
-                await restoreSetup(participant, relay);
-                await advanceClose(session, relay, request);
-            }
-            root = participant.root;
-            await publishClose(session, relay);
-            return {
-                status: 'completed',
-                details: {
-                    ...summary(root, enrollment, profiled),
-                    closeEvents: closeEvents(session),
-                },
-            };
-        }
-        case 'sign-target': {
-            // A signed vote is only delivered again.
-            const generation = root.head.generation;
-            const participant = await resumeParticipant(profileContext(), root);
-            const session = await resumeClose(
-                participant,
-                enrollment.isOrganizer,
-            );
-            let signed = {};
-            if (generation < targetPhase.signed) {
-                await restoreSetup(participant, relay);
-                signed = await signTarget(session, relay);
-            }
-            root = participant.root;
-            await publishTarget(session, relay);
-            return {
-                status: 'completed',
-                details: { ...summary(root, enrollment, profiled), ...signed },
-            };
-        }
-        case 'release': {
-            // A release without a target of its own needs an existing
-            // certificate. A signed release is only delivered again.
-            const generation = root.head.generation;
-            const participant = await resumeParticipant(profileContext(), root);
-            const session = await resumeRelease(
-                await resumeClose(participant, enrollment.isOrganizer),
-            );
-            let released = {};
-            if (generation < releasePhase.signed) {
-                // A release continued from an earlier operation reports the
-                // generation it resumed from.
-                const resumed =
-                    session.state === undefined
-                        ? {}
-                        : { resumedFrom: { generation } };
-                await restoreSetup(participant, relay);
-                const advanced = await advanceRelease(session, relay);
-                // A release generated in this operation reports the proof
-                // randomness the module drew.
-                const { proofRandomBytes } = session;
-                released = {
-                    ...resumed,
-                    predecessor: session.state?.predecessor,
-                    ...advanced,
-                    ...(proofRandomBytes === undefined
-                        ? {}
-                        : { proofRandomBytes }),
-                };
-            }
-            root = participant.root;
-            await publishRelease(session, relay);
-            return {
-                status: 'completed',
-                details: {
-                    ...summary(root, enrollment, profiled),
-                    ...released,
-                },
-            };
-        }
-        case 'compute-result': {
-            // Any participant past its close combines the published release
-            // shares in its own module; the result is not published.
-            const participant = await resumeParticipant(profileContext(), root);
-            const session = await resumeClose(
-                participant,
-                enrollment.isOrganizer,
-            );
-            await restoreSetup(participant, relay);
-            const result = await computeResult(session, relay);
-            const summarized = summary(root, enrollment, profiled);
-            return {
-                status: 'completed',
-                details: {
-                    ...summarized,
-                    // A participant that retains no status reads it from
-                    // the target this operation certified.
-                    ...(summarized.ballotInclusion === undefined
-                        ? {
-                              ballotInclusion: certifiedBallotInclusion(
-                                  participant.context,
-                              ),
-                          }
-                        : {}),
-                    ...result,
-                },
-            };
-        }
-        default:
-            return refused('invalid request');
-    }
-    // A roster retained by this operation names the profile only now.
-    return {
-        status: 'completed',
-        details: {
-            ...summary(
-                root,
-                enrollment,
-                profiled ??
-                    (root.head.generation >= rootGeneration.rosterLocked
-                        ? await retainedProfile(context, root, enrollment)
-                        : undefined),
-            ),
-            ...reported,
-        },
-    };
-};
-
-// The WebAssembly memory a completed operation held: the worker instance's
-// linear memory and how far its allocations reached, and its helpers' and
-// the shared arena's, beside the bounds of the operation's memory plan.
-const operationMemory = (
-    module: ParticipantModule,
-    helpers: ParallelHelpers,
-    evaluation: boolean,
-) => ({
-    workerBytes: module.memory.buffer.byteLength,
-    workerUsedBytes: module.linear_memory_high_water() >>> 0,
-    workerBoundBytes:
-        module.worker_memory_bound(helpers.count, evaluation ? 1 : 0) >>> 0,
-    helpers: helpers.count,
-    helperBoundBytes:
-        module.helper_memory_bound(helpers.count, evaluation ? 1 : 0) >>> 0,
-    ...helpers.memory(),
-});
-type OperationMemory = ReturnType<typeof operationMemory>;
 
 // The operations that evaluate the ranking program, whose helpers keep the
 // evaluation's tables and the polynomials its multiplications keep.
@@ -728,27 +49,14 @@ const run = async (
     command: WorkerCommand,
     helperPorts: readonly MessagePort[],
 ): Promise<WorkerResult> => {
-    if (
-        !isSecureContext ||
-        typeof navigator.locks !== 'object' ||
-        typeof crypto.subtle !== 'object' ||
-        typeof indexedDB !== 'object'
-    )
-        return refused('unsupported browser');
+    if (!isSupportedBrowser()) return refused('unsupported browser');
     if (!isWellFormed(command)) return refused('invalid request');
     const relay: PublicRelay = { base: command.relay };
     let database: IDBDatabase | undefined;
     let helpers: ParallelHelpers | undefined;
     let authorityStarted = false;
     try {
-        const delivered = await fetchModule(
-            command.module,
-            command.identity.module,
-        );
-        const runtime = await runtimeIdentity(
-            command.identity,
-            delivered.digest,
-        );
+        const delivered = await deliverModule(command);
         const compiledModule = await WebAssembly.compile(delivered.bytes);
         const evaluation = evaluatingOperations.has(command.operation);
         const started = startParallelHelpers(
@@ -765,35 +73,20 @@ const run = async (
             async (): Promise<WorkerResult> => {
                 let module: ParticipantModule | undefined;
                 try {
-                    const instance = await instantiateParticipantModule(
+                    const instance = await instantiateForOperation(
                         compiledModule,
                         parallel,
+                        evaluation,
                     );
                     module = instance.module;
-                    // The worker's share of the operation's memory plan,
-                    // whose other shares the started helpers hold, bounds
-                    // its instance before the first allocation.
-                    if (
-                        module.worker_reserve(
-                            parallel.count,
-                            evaluation ? 1 : 0,
-                        ) !== 0
-                    )
-                        throw new Error(
-                            'The participant module refused its memory plan.',
-                        );
-                    requireInputCapacities(
-                        module,
-                        largestBufferInputBytes(module),
-                    );
-                    const result = await execute(
+                    const result = await executeOperation(
                         {
                             namespace: command.namespace,
                             database: opened,
                             module,
                             handlers: instance.handlers,
                             parallel,
-                            runtime,
+                            runtime: delivered.runtime,
                             limits: readParticipantLimits(module),
                             separateEvaluation:
                                 command.separateEvaluation === true,
@@ -849,10 +142,7 @@ const run = async (
                     const stopPersistence = await stopParticipant(opened);
                     return {
                         status: 'stopped',
-                        detail:
-                            error instanceof Error
-                                ? error.message
-                                : String(error),
+                        detail: errorMessage(error),
                         stopPersistence,
                     };
                 }
@@ -876,27 +166,6 @@ const run = async (
     }
 };
 
-// A verification of a poll's outcome from the relay's public records alone,
-// in a fresh worker that holds no participant state. The page names the
-// poll's identity, and the module refuses a poll of another runtime.
-type VerificationCommand = Readonly<{
-    operation: 'verify-outcome';
-    poll: string;
-    relay: string;
-    module: string;
-    identity: WorkerCommand['identity'];
-}>;
-
-const isVerification = (
-    command: WorkerCommand | VerificationCommand,
-): command is VerificationCommand => command.operation === 'verify-outcome';
-
-const isWellFormedVerification = (command: VerificationCommand) =>
-    typeof command.poll === 'string' &&
-    /^[0-9a-f]{128}$/u.test(command.poll) &&
-    isBaseUrl(command.relay) &&
-    httpUrl(command.module) !== undefined;
-
 // A verification's public working storage, named apart from every
 // participant's, since no participant namespace has a full stop.
 const verificationNamespace = (poll: string) => 'verification.' + poll;
@@ -905,24 +174,11 @@ const runVerification = async (
     command: VerificationCommand,
     helperPorts: readonly MessagePort[],
 ): Promise<WorkerResult> => {
-    if (
-        !isSecureContext ||
-        typeof navigator.locks !== 'object' ||
-        typeof crypto.subtle !== 'object' ||
-        typeof indexedDB !== 'object'
-    )
-        return refused('unsupported browser');
+    if (!isSupportedBrowser()) return refused('unsupported browser');
     if (!isWellFormedVerification(command)) return refused('invalid request');
     let helpers: ParallelHelpers | undefined;
     try {
-        const delivered = await fetchModule(
-            command.module,
-            command.identity.module,
-        );
-        const runtime = await runtimeIdentity(
-            command.identity,
-            delivered.digest,
-        );
+        const delivered = await deliverModule(command);
         const compiledModule = await WebAssembly.compile(delivered.bytes);
         helpers = await startParallelHelpers(compiledModule, helperPorts, true);
         const parallel = helpers;
@@ -930,15 +186,11 @@ const runVerification = async (
         return await navigator.locks.request(
             namespacedName('sealed-lattice-verification', namespace),
             async (): Promise<WorkerResult> => {
-                const { module, handlers } = await instantiateParticipantModule(
+                const { module, handlers } = await instantiateForOperation(
                     compiledModule,
                     parallel,
+                    true,
                 );
-                if (module.worker_reserve(parallel.count, 1) !== 0)
-                    throw new Error(
-                        'The participant module refused its memory plan.',
-                    );
-                requireInputCapacities(module, largestBufferInputBytes(module));
                 try {
                     const outcome = await verifyPublishedOutcome(
                         {
@@ -946,7 +198,7 @@ const runVerification = async (
                             module,
                             handlers,
                             parallel,
-                            runtime,
+                            runtime: delivered.runtime,
                             limits: readParticipantLimits(module),
                         },
                         { base: command.relay },
