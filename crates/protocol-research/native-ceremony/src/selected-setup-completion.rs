@@ -1,5 +1,5 @@
 use crate::{BallotInputs, OriginalEnrollments, Scenario, aggregate, close, completion};
-use ballot_proof::close::{CloseContext, ClosedSlot};
+use evaluation_target::close::{CloseContext, ClosedSlot};
 use registration_credentials::poll::{SignedPoll, VerifiedPoll};
 use registration_enrollment::finality_work::OwnBallotStatus;
 use setup_aggregate::verified::VerifiedSetupAggregate;

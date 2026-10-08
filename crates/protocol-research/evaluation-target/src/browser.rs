@@ -217,8 +217,7 @@ impl State {
                 // Every classification is taken, so the ballots' shared
                 // inputs are not held through the evaluation.
                 ballot_proof::release_browser_ballot_inputs();
-                let barrier =
-                    ballot_proof::take_browser_close_barrier().ok_or(Error::Incomplete)?;
+                let barrier = crate::close_browser::take_barrier().ok_or(Error::Incomplete)?;
                 // The barrier must come from this instance's own setup verifier.
                 if barrier.poll().identity() != poll.identity()
                     || barrier.setup().identity() != setup.identity()

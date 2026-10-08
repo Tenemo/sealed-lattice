@@ -5,9 +5,9 @@ use crate::close::{
 use crate::scenario::Scenario;
 use ballot_proof::{
     body::SignedBallotVerifier,
-    close::{CloseContext, ClosedSlot, VerifiedCloseBarrier},
     submission::{AuthenticatedBallotBody, authenticate_envelope},
 };
+use evaluation_target::close::{CloseContext, ClosedSlot, VerifiedCloseBarrier};
 use registration_credentials::{
     ballot_authentication::BallotEnvelope, ballot_body, poll::VerifiedPoll,
 };

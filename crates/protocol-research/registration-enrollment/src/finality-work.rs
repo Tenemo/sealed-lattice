@@ -1,4 +1,4 @@
-use ballot_proof::close::ClosedSlot;
+use evaluation_target::close::ClosedSlot;
 use evaluation_target::target::VerifiedEvaluationTarget;
 use registration_credentials::{
     Credential, Error,
@@ -92,7 +92,7 @@ impl FinalityWork {
     }
     // The close barrier the target was evaluated from, which the constructor
     // requires.
-    fn barrier(&self) -> &ballot_proof::close::VerifiedCloseBarrier {
+    fn barrier(&self) -> &evaluation_target::close::VerifiedCloseBarrier {
         self.target
             .classified()
             .expect("A finality target keeps its classified inventory.")

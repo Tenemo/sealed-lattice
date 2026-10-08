@@ -1,11 +1,9 @@
-use crate::{
-    close::{
-        AuthenticatedCloseIntent, AuthenticatedCloseResponse, CloseContext, VerifiedCloseBarrier,
-    },
-    submission::{
-        AuthenticatedBallotBody, AuthenticatedBallotEnvelope, BallotBodyAuthentication,
-        authenticate_envelope,
-    },
+use crate::close::{
+    AuthenticatedCloseIntent, AuthenticatedCloseResponse, CloseContext, VerifiedCloseBarrier,
+};
+use ballot_proof::submission::{
+    AuthenticatedBallotBody, AuthenticatedBallotEnvelope, BallotBodyAuthentication,
+    authenticate_envelope,
 };
 use registration_credentials::{
     SIGNATURE_BYTES,

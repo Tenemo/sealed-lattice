@@ -1,4 +1,4 @@
-use crate::submission::{AuthenticatedBallotBody, AuthenticatedBallotEnvelope};
+use ballot_proof::submission::{AuthenticatedBallotBody, AuthenticatedBallotEnvelope};
 use registration_credentials::{
     SIGNATURE_BYTES, SIGNING_PUBLIC_KEY_BYTES,
     close_signing::{

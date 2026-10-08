@@ -1,6 +1,6 @@
-use ballot_proof::close::{ClosedSlot, VerifiedCloseBarrier};
 use evaluation_target::{
     certification::CertificateCollector,
+    close::{ClosedSlot, VerifiedCloseBarrier},
     release::ReleaseContext,
     release_body::ReleaseBodyVerifier,
     target::{ClassifiedClosedInventory, Error, PublicInputs, WorkingStore},

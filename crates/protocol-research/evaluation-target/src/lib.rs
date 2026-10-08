@@ -22,6 +22,10 @@ pub fn verified_browser_certificate()
     completion_browser::verified_certificate()
 }
 pub mod certification;
+pub mod close;
+#[cfg(target_arch = "wasm32")]
+#[path = "close-browser.rs"]
+mod close_browser;
 #[cfg(target_arch = "wasm32")]
 #[path = "completion-browser.rs"]
 mod completion_browser;

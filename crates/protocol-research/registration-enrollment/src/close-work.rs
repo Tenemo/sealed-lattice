@@ -1,9 +1,9 @@
-use ballot_proof::{
-    close::{AuthenticatedCloseIntent, AuthenticatedCloseResponse, CloseContext, usable_entries},
-    submission::{
-        AuthenticatedBallotBody, AuthenticatedBallotEnvelope, BallotBodyAuthentication,
-        authenticate_envelope,
-    },
+use ballot_proof::submission::{
+    AuthenticatedBallotBody, AuthenticatedBallotEnvelope, BallotBodyAuthentication,
+    authenticate_envelope,
+};
+use evaluation_target::close::{
+    AuthenticatedCloseIntent, AuthenticatedCloseResponse, CloseContext, usable_entries,
 };
 use registration_credentials::{
     Credential, Error, SIGNATURE_BYTES,

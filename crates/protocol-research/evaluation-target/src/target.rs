@@ -1,8 +1,6 @@
+use crate::close::{ClosedSlot, VerifiedCloseBarrier};
 use crate::program::RankingProgram;
-use ballot_proof::{
-    body::BallotBodyClassification,
-    close::{ClosedSlot, VerifiedCloseBarrier},
-};
+use ballot_proof::body::BallotBodyClassification;
 use registration_credentials::{
     Credential, RETAINED_TAG_BYTES,
     ballot_authentication::BallotEnvelope,

@@ -4,10 +4,6 @@ pub mod body;
 #[cfg(target_arch = "wasm32")]
 #[path = "body-browser.rs"]
 mod body_browser;
-pub mod close;
-#[cfg(target_arch = "wasm32")]
-#[path = "close-browser.rs"]
-mod close_browser;
 pub mod columns;
 pub mod context;
 pub mod parameters;
@@ -56,9 +52,4 @@ pub fn take_browser_classification() -> Option<body::BallotBodyClassification> {
 #[cfg(target_arch = "wasm32")]
 pub fn release_browser_ballot_inputs() {
     body_browser::release_inputs()
-}
-
-#[cfg(target_arch = "wasm32")]
-pub fn take_browser_close_barrier() -> Option<close::VerifiedCloseBarrier> {
-    close_browser::take_barrier()
 }

@@ -1,10 +1,12 @@
 use ballot_proof::{
     body::SignedBallotVerifier,
-    close::{CloseContext, ClosedSlot},
     statement::setup_input,
     submission::{BallotBodyAuthentication, authenticate_envelope},
 };
-use evaluation_target::target::{ClassifiedClosedInventory, Error, PublicInputs, WorkingStore};
+use evaluation_target::{
+    close::{CloseContext, ClosedSlot},
+    target::{ClassifiedClosedInventory, Error, PublicInputs, WorkingStore},
+};
 use registration_credentials::{
     SIGNATURE_BYTES,
     ballot_authentication::ENVELOPE_BYTES,
