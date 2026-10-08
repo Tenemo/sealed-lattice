@@ -6,7 +6,7 @@ import {
     signingLoopSourceEstimates,
 } from '#tests/signing-loop-estimate-model.js';
 
-describe('Published signing-loop estimates', () => {
+describe('published signing-loop estimates', () => {
     it('reproduces both source limits without treating the older mean as current', () => {
         const [original, updated] = compileSigningLoopSourceComparison();
         for (const model of [original, updated]) {

@@ -13,7 +13,7 @@ import {
     shadowOracleDomainWork,
 } from '#tests/oracle-domain-model.js';
 
-describe('Hidden-slice oracle routing', () => {
+describe('hidden-slice oracle routing', () => {
     it('binds an honest private source before revealing its receiver slice', () => {
         const bits = (value: number, width: number) =>
             Uint8Array.from({ length: width }, (_, bit) => (value >> bit) & 1);

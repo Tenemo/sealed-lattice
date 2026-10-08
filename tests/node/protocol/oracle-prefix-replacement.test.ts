@@ -17,7 +17,7 @@ const bits = (value: number, width: number) =>
         (_, bit) => Math.floor(value / 2 ** bit) % 2,
     );
 
-describe('Programmed oracle prefixes', () => {
+describe('programmed oracle prefixes', () => {
     it('validates retained records even when the query schedule is empty', () => {
         expect(() =>
             programmedOracleDomainWork([], 1n, [

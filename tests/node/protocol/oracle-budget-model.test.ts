@@ -13,7 +13,7 @@ import {
     shadowOracleDomainWork,
 } from '#tests/oracle-domain-model.js';
 
-describe('Declared maximum-length oracle work', () => {
+describe('declared maximum-length oracle work', () => {
     it('covers correlated lengths without assuming the input and output maxima share a branch', () => {
         for (const rate of [1088n, 1344n] as const)
             for (const slots of [1n, 2n, 5n, 31n]) {

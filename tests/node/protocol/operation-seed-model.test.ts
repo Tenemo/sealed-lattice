@@ -60,7 +60,7 @@ const enumerate = (
     return { seeds, initialized, read };
 };
 
-describe('Original private-randomness scope populations', () => {
+describe('original private-randomness scope populations', () => {
     it('separates seed draws, read domains and unused continuation domains', () => {
         for (const values of [
             [0, 0, 0, 0],

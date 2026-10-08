@@ -105,7 +105,7 @@ const queriesAt = (gates: bigint) =>
 const populationsUpTo = (limit: bigint) =>
     [0n, 1n, 2n, 1_000n, 1n << 30n, limit].filter((value) => value <= limit);
 
-describe('Security ledger', () => {
+describe('security ledger', () => {
     const ledger = compileSecurityLedger();
     const fheLimits = compileFhePopulationLimits();
     const profiles = listSupportedProfiles();

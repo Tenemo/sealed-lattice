@@ -8,7 +8,7 @@ import {
     type OracleInputMask,
 } from '#tests/compressed-oracle-model.js';
 
-describe('Exact raw-input oracle slice masks', () => {
+describe('exact raw-input oracle slice masks', () => {
     it('routes non-adjacent fields with exact lengths and clean reversible work', () => {
         const masks: OracleInputMask[] = [
             { inputLength: 4, positions: [0, 3], values: Uint8Array.of(0, 1) },

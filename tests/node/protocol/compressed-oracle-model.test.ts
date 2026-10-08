@@ -18,7 +18,7 @@ import {
     verifyLabelledHashExtraction,
 } from '#tests/compressed-oracle-model.js';
 
-describe('Compressed oracle implementation', () => {
+describe('compressed oracle implementation', () => {
     it('preserves coherent prefix reads and clears all unrequested output', () => {
         for (const bits of [1, 2]) {
             const result = verifyPrefixOracleWrapper(bits);

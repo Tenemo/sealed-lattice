@@ -17,7 +17,7 @@ import {
     verifyOracleDomainAdapter,
 } from '#tests/oracle-domain-model.js';
 
-describe('Full-domain oracle adapter', () => {
+describe('full-domain oracle adapter', () => {
     it('preserves exact message lengths, coherent cleanup and every bounded stream assignment', () => {
         const result = verifyOracleDomainAdapter();
         expect(result.controllerCases).toBeGreaterThan(1000);

@@ -20,7 +20,7 @@ function* subsets(
             yield [first, ...rest];
 }
 
-describe('Clear-preparation comparison populations', () => {
+describe('clear-preparation comparison populations', () => {
     it('bounds smaller certified forks independently of the maximum roster denominator', () => {
         const honest = Array.from({ length: 10 }, (_, index) => index + 1);
         const confirmations = new Map<number, number>();
