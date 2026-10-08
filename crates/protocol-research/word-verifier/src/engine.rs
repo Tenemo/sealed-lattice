@@ -15,6 +15,9 @@ use supported_profile::relation::{
     WITNESS_DEGREE,
 };
 
+#[path = "lookup-table.rs"]
+mod lookup_table;
+
 type Element = [u128; 3];
 const ZERO: Element = [0, 0, 0];
 const ONE: Element = [1, 0, 0];
@@ -653,7 +656,7 @@ impl<S: Statement> Verifier<S> {
                 .finish()
                 .ok_or(Refusal::Encoding)?,
         );
-        let table = proof_lookup_table::on_proof_domain();
+        let table = lookup_table::on_proof_domain();
         self.points = self
             .indices
             .iter()

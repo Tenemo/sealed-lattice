@@ -14,7 +14,6 @@ members = [
     "evaluation-target",
     "linked-release-proof",
     "rns-arithmetic-probe",
-    "proof-lookup-table",
     "contribution-prover",
     "supported-profile",
     "parallel-work",

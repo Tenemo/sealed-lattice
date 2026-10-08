@@ -11,7 +11,6 @@ crate-type = ["rlib"]
 
 [dependencies]
 parallel-work = { path = "../parallel-work" }
-proof-lookup-table = { path = "../proof-lookup-table" }
 sha3 = "=0.10.9"
 setup-stream-kernel = { path = "../setup-stream-kernel" }
 supported-profile = { path = "../supported-profile" }

@@ -363,14 +363,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "proof-lookup-table"
-version = "0.0.0"
-dependencies = [
- "supported-profile",
- "word-proof",
-]
-
-[[package]]
 name = "quote"
 version = "1.0.47"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -701,7 +693,6 @@ name = "word-verifier"
 version = "0.0.0"
 dependencies = [
  "parallel-work",
- "proof-lookup-table",
  "setup-stream-kernel",
  "sha3",
  "supported-profile",
