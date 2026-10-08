@@ -192,30 +192,30 @@ pub extern "C" fn setup_roster_finish(length: usize) -> u32 {
     SESSION.with(|value| {
         let mut value = value.borrow_mut();
         if value.proposal.is_some() {
-            return 0;
+            return 1;
         }
         let Session { input, roster, .. } = &mut *value;
         let Some((body, signature)) = input
             .get(..length)
             .and_then(|bytes| packet(bytes, MAXIMUM_PROPOSAL_BYTES))
         else {
-            return 0;
+            return 1;
         };
         let Some(roster) = roster.as_mut() else {
-            return 0;
+            return 1;
         };
         let Ok(proposal) = roster.finish() else {
-            return 0;
+            return 1;
         };
         if proposal.body() != body {
-            return 0;
+            return 1;
         }
         let Ok(proposal) = verify_roster_proposal(proposal, signature) else {
-            return 0;
+            return 1;
         };
         value.proposal = Some(Arc::new(proposal));
         value.poll = Some(Arc::new(value.roster.take().unwrap().into_poll()));
-        1
+        0
     })
 }
 /// The option count of the poll whose roster this verification verified, or
@@ -334,13 +334,13 @@ pub extern "C" fn setup_offer_finish() -> u32 {
     SESSION.with(|state| {
         let mut state = state.borrow_mut();
         let Some(offer) = state.offer.take() else {
-            return 0;
+            return 1;
         };
         let Ok(offer) = offer.finish() else {
-            return 0;
+            return 1;
         };
         keep_offer(&mut state.offers, Arc::new(offer));
-        1
+        0
     })
 }
 #[unsafe(no_mangle)]
@@ -499,7 +499,7 @@ pub extern "C" fn setup_selection_aggregate() -> u32 {
     SESSION.with(|state| {
         let mut state = state.borrow_mut();
         if state.aggregator.is_some() {
-            return 0;
+            return 1;
         }
         let result = (|| {
             let selected = state.selected.clone().ok_or(())?;
@@ -523,9 +523,9 @@ pub extern "C" fn setup_selection_aggregate() -> u32 {
         match result {
             Ok(aggregate) => {
                 state.aggregator = Some(aggregate);
-                1
+                0
             }
-            Err(()) => 0,
+            Err(()) => 1,
         }
     })
 }
@@ -617,10 +617,10 @@ pub extern "C" fn setup_finish_selected_offer() -> u32 {
             .as_mut()
             .map(SetupAggregator::finish_contribution)
         else {
-            return 0;
+            return 1;
         };
         keep_offer(&mut state.offers, offer);
-        1
+        0
     })
 }
 #[unsafe(no_mangle)]
@@ -642,20 +642,20 @@ pub extern "C" fn setup_selection_finish() -> u32 {
             .as_ref()
             .is_none_or(|aggregate| !aggregate.complete())
         {
-            return 0;
+            return 1;
         }
         let Ok(inputs) = state.aggregator.take().unwrap().finish() else {
-            return 0;
+            return 1;
         };
         if state.inputs.as_ref().is_some_and(|known| {
             known.identity() != inputs.identity() || known.polynomials() != inputs.polynomials()
         }) || state.verified.as_ref().is_some_and(|known| {
             known.identity() != inputs.identity() || known.polynomials() != inputs.polynomials()
         }) {
-            return 0;
+            return 1;
         }
         state.inputs = Some(Arc::new(inputs));
-        1
+        0
     })
 }
 
@@ -738,12 +738,12 @@ pub extern "C" fn setup_finish_certificate() -> u32 {
         let mut state = state.borrow_mut();
         let (Some(inputs), Some(certificate)) = (state.inputs.as_ref(), state.certificate.as_ref())
         else {
-            return 0;
+            return 1;
         };
         let Ok(verified) = inputs.certify(certificate) else {
-            return 0;
+            return 1;
         };
         state.verified = Some(Arc::new(verified));
-        1
+        0
     })
 }

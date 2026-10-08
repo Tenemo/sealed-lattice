@@ -193,8 +193,7 @@ const recordBegin = concatenate(
 );
 
 // The module's input buffers and the commands that read public input from
-// them. A command that reports acceptance with a nonzero value refuses with
-// zero; every other command refuses with a nonzero value.
+// them. Every command refuses with one; a query answers zero when it refuses.
 type InputBuffer = Readonly<{
     pointer: (kernel: ParticipantKernel) => number;
     capacity: (kernel: ParticipantKernel) => number;
@@ -234,7 +233,7 @@ type PublicInputCommand = Readonly<{
     name: KernelCommand;
     buffer: keyof typeof inputBuffers;
     parameters: readonly Parameter[];
-    acceptsWithNonzero?: true;
+    query?: true;
 }>;
 const publicInputCommands: readonly PublicInputCommand[] = [
     { name: 'validate_join', buffer: 'session', parameters: ['length'] },
@@ -248,13 +247,11 @@ const publicInputCommands: readonly PublicInputCommand[] = [
         name: 'roster_finish',
         buffer: 'session',
         parameters: [],
-        acceptsWithNonzero: true,
     },
     {
         name: 'verify_roster_signature',
         buffer: 'session',
         parameters: ['length'],
-        acceptsWithNonzero: true,
     },
     {
         name: 'participant_close_command',
@@ -286,7 +283,6 @@ const publicInputCommands: readonly PublicInputCommand[] = [
         name: 'setup_roster_finish',
         buffer: 'setup',
         parameters: ['length'],
-        acceptsWithNonzero: true,
     },
     { name: 'setup_offer_begin', buffer: 'setup', parameters: ['length'] },
     {
@@ -303,13 +299,12 @@ const publicInputCommands: readonly PublicInputCommand[] = [
         name: 'setup_offer_finish',
         buffer: 'setup',
         parameters: [],
-        acceptsWithNonzero: true,
     },
     {
         name: 'setup_offer_available',
         buffer: 'setup',
         parameters: ['index', 'length'],
-        acceptsWithNonzero: true,
+        query: true,
     },
     { name: 'setup_selection_build', buffer: 'setup', parameters: ['length'] },
     { name: 'setup_selection_begin', buffer: 'setup', parameters: ['length'] },
@@ -317,7 +312,6 @@ const publicInputCommands: readonly PublicInputCommand[] = [
         name: 'setup_selection_aggregate',
         buffer: 'setup',
         parameters: [],
-        acceptsWithNonzero: true,
     },
     {
         name: 'setup_begin_selected_offer',
@@ -343,13 +337,11 @@ const publicInputCommands: readonly PublicInputCommand[] = [
         name: 'setup_finish_selected_offer',
         buffer: 'setup',
         parameters: [],
-        acceptsWithNonzero: true,
     },
     {
         name: 'setup_selection_finish',
         buffer: 'setup',
         parameters: [],
-        acceptsWithNonzero: true,
     },
     { name: 'setup_endorsement', buffer: 'setup', parameters: ['length'] },
     { name: 'setup_certificate_build', buffer: 'setup', parameters: [] },
@@ -358,7 +350,6 @@ const publicInputCommands: readonly PublicInputCommand[] = [
         name: 'setup_finish_certificate',
         buffer: 'setup',
         parameters: [],
-        acceptsWithNonzero: true,
     },
     {
         name: 'close_command',
@@ -394,7 +385,7 @@ const publicInputCommands: readonly PublicInputCommand[] = [
         name: 'ballot_classification_finish',
         buffer: 'ballotBody',
         parameters: [],
-        acceptsWithNonzero: true,
+        query: true,
     },
     {
         name: 'evaluation_target_command',
@@ -496,9 +487,9 @@ describe('participant module public input', () => {
         for (const { name, bytes } of carriers) {
             writeSetupInput(kernel, bytes);
             expect(call(kernel, name, [bytes.length], name)).not.toBe(0);
-            expect(kernel.setup_offer_finish()).toBe(0);
-            expect(kernel.setup_selection_finish()).toBe(0);
-            expect(kernel.setup_finish_certificate()).toBe(0);
+            expect(kernel.setup_offer_finish()).toBe(1);
+            expect(kernel.setup_selection_finish()).toBe(1);
+            expect(kernel.setup_finish_certificate()).toBe(1);
             expect(kernel.setup_selection_count()).toBe(0);
             expect(kernel.setup_selection_position(0) >>> 0).toBe(0xffff_ffff);
             expect(kernel.setup_selection_body_identity_pointer(0)).toBe(0);
@@ -513,7 +504,7 @@ describe('participant module public input', () => {
                     `unscoped-proof/${String(length)}`,
                 ),
             ).not.toBe(0);
-            expect(kernel.setup_offer_finish()).toBe(0);
+            expect(kernel.setup_offer_finish()).toBe(1);
         }
         const begin = rosterBegin(minimumParticipants);
         writeSetupInput(kernel, begin);
@@ -564,9 +555,9 @@ describe('participant module public input', () => {
             expect(
                 cancellation
                     ? result === 0
-                    : command.acceptsWithNonzero === true
+                    : command.query === true
                       ? result === 0
-                      : result !== 0,
+                      : result === 1,
                 `${label}: ${command.name}(${values.join(', ')}) returned ${String(result)}`,
             ).toBe(true);
         };
@@ -802,7 +793,7 @@ describe('participant module public input', () => {
                     label,
                 );
             }
-            expect(kernel.roster_finish()).toBe(0);
+            expect(kernel.roster_finish()).toBe(1);
         }
         expect(genuineRecord()).toEqual(accepted);
     });

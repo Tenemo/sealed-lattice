@@ -605,13 +605,13 @@ pub extern "C" fn roster_finish() -> u32 {
     SESSION.with(|state| {
         let mut state = state.borrow_mut();
         let Some(roster) = state.roster.as_mut() else {
-            return 0;
+            return 1;
         };
         let Ok(proposal) = roster.finish() else {
-            return 0;
+            return 1;
         };
         state.proposal = Some(proposal);
-        1
+        0
     })
 }
 #[unsafe(no_mangle)]
@@ -731,20 +731,20 @@ pub extern "C" fn verify_roster_signature(length: usize) -> u32 {
     SESSION.with(|state| {
         let mut state = state.borrow_mut();
         if length != SIGNATURE_BYTES {
-            return 0;
+            return 1;
         }
         let Some(roster) = state.roster.as_mut() else {
-            return 0;
+            return 1;
         };
         let Ok(proposal) = roster.finish() else {
-            return 0;
+            return 1;
         };
         let Ok(verified) = verify_roster_proposal(proposal, &state.input[..length]) else {
-            return 0;
+            return 1;
         };
         state.proposal_signature = Some(*verified.signature());
         state.signed_proposal = Some(Arc::new(verified));
-        1
+        0
     })
 }
 

@@ -1,8 +1,9 @@
 import type { ParallelHelpers } from './parallel.js';
 
-// The participant scalar module's exports that the worker calls. A command
-// returns zero on success unless its comment says otherwise; the owning Rust
-// state machine decides acceptance.
+// The participant scalar module's exports that the worker calls. Every
+// command returns zero when it accepts and one when it refuses, and a query's
+// comment states its answer; the owning Rust state machine decides
+// acceptance.
 export const kernelFunctions = [
     // The shared bounds and one profile's, each written as 64-bit words; a
     // command returns the word count, zero for an unsupported profile.
@@ -49,7 +50,6 @@ export const kernelFunctions = [
     // The registration records the worker may stream at once.
     'roster_open_records',
     'roster_record',
-    // One when the proposal is complete.
     'roster_finish',
     'roster_body_pointer',
     'roster_body_length',
@@ -60,7 +60,6 @@ export const kernelFunctions = [
     'validate_roster_signer',
     'sign_roster_proposal',
     'roster_signature_pointer',
-    // One when the signature verifies.
     'verify_roster_signature',
     // Emits the credential-keyed retained roster of a roster verified in
     // full.
@@ -145,7 +144,6 @@ export const kernelFunctions = [
     'setup_roster_begin',
     'setup_roster_begin_retained',
     'setup_roster_record',
-    // One when the organizer's proposal verifies.
     'setup_roster_finish',
     // The verified roster's poll option count, or zero before it verifies.
     'setup_option_count',
@@ -155,6 +153,7 @@ export const kernelFunctions = [
     'setup_offer_polynomial',
     'setup_offer_proof',
     'setup_offer_finish',
+    // One when a verified offer has the position and body identity.
     'setup_offer_available',
     'setup_selection_build',
     'setup_selection_begin',

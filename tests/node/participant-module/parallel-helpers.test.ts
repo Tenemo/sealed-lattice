@@ -442,7 +442,7 @@ const verifyRoster = async (
     } finally {
         served.mockRestore();
     }
-    return kernel.roster_finish() === 1
+    return kernel.roster_finish() === 0
         ? {
               body: readKernel(
                   kernel,

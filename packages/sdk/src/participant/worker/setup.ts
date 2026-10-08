@@ -521,7 +521,7 @@ export const verifyOffer = async (
             candidate,
             kernel.setup_offer_proof,
         );
-        if (kernel.setup_offer_finish() !== 1)
+        if (kernel.setup_offer_finish() !== 0)
             throw new PublicInputFailure('A contribution offer was refused.');
         if (!offerAvailable(context, offer))
             throw new PublicInputFailure(
@@ -641,7 +641,7 @@ const aggregateOffer = async (
             kernel.setup_selected_offer_proof,
         );
     if (
-        kernel.setup_finish_selected_offer() !== 1 ||
+        kernel.setup_finish_selected_offer() !== 0 ||
         kernel.setup_accepted() !== accepted + 1
     )
         throw new PublicInputFailure(
@@ -670,7 +670,7 @@ const aggregateSelection = async (
         cache = await openSetupCache(context.namespace);
         for (;;) {
             let retry = false;
-            if (kernel.setup_selection_aggregate() !== 1)
+            if (kernel.setup_selection_aggregate() !== 0)
                 throw new PublicInputFailure(
                     'The selected aggregation was refused.',
                 );
@@ -701,7 +701,7 @@ const aggregateSelection = async (
                         throw error;
                     }
                 }
-                if (kernel.setup_selection_finish() !== 1)
+                if (kernel.setup_selection_finish() !== 0)
                     throw new PublicInputFailure(
                         'The selected aggregate was refused.',
                     );
@@ -815,7 +815,7 @@ export const verifySetupRoster = async (
     // The retained roster, proposal and signature are authenticated, so a
     // refusal means the relay served other headers or keys under their
     // names.
-    if (kernel.setup_roster_finish(proposalPacket.length) !== 1)
+    if (kernel.setup_roster_finish(proposalPacket.length) !== 0)
         throw new PublicInputFailure(
             'The published registrations are not the retained roster.',
         );
@@ -962,7 +962,7 @@ const verifyCertificateInputs = async (
 ) => {
     const selection = authenticateCertificate(context, certificate, retained);
     await aggregateSelection(context, relay, selection);
-    if (context.kernel.setup_finish_certificate() !== 1)
+    if (context.kernel.setup_finish_certificate() !== 0)
         throw new PublicInputFailure(
             'The complete certified setup was refused.',
         );
@@ -1014,7 +1014,7 @@ const certifyRetainedSelection = (
     // Rust. Equality preserves the credential-keyed original verified inputs.
     authenticateCertificate(session.context, certificate);
     if (!equalBytes(original.identity, selection.identity)) return undefined;
-    if (session.context.kernel.setup_finish_certificate() !== 1)
+    if (session.context.kernel.setup_finish_certificate() !== 0)
         throw new PublicInputFailure(
             'The certificate does not match the verified selection.',
         );
@@ -1183,7 +1183,7 @@ export const verifyPublicSetup = async (
                 proposalSignature,
             );
             writeSetupInput(kernel, proposalPacket);
-            if (kernel.setup_roster_finish(proposalPacket.length) !== 1)
+            if (kernel.setup_roster_finish(proposalPacket.length) !== 0)
                 throw new PublicInputFailure(
                     'The roster proposal was refused.',
                 );

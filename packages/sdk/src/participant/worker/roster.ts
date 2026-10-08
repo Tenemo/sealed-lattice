@@ -282,7 +282,7 @@ const finishProposal = async (
         },
         restoring,
     );
-    if (kernel.roster_finish() !== 1)
+    if (kernel.roster_finish() !== 0)
         throw new PublicInputFailure(
             restoring
                 ? 'The published registrations are not the retained roster.'
@@ -358,7 +358,7 @@ const verifySignature = (
     signature: Uint8Array,
 ) => {
     sessionInput(context, signature);
-    return context.kernel.verify_roster_signature(signature.length) === 1;
+    return context.kernel.verify_roster_signature(signature.length) === 0;
 };
 
 // A roster this participant verified and retained, with its verified
