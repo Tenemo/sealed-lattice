@@ -1,8 +1,11 @@
+// Whether a readback confirmed the stop marker's strict write.
+export type StopPersistence = 'confirmed' | 'unconfirmed';
+
 // This reports local persistence only. It grants no protocol authority, and an
 // unconfirmed write never permits continuation of the failed invocation.
 export async function stopParticipant(
     database: IDBDatabase,
-): Promise<'confirmed' | 'unconfirmed'> {
+): Promise<StopPersistence> {
     let stopped = false;
     try {
         await new Promise<void>((resolve, reject) => {

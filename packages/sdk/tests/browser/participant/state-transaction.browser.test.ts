@@ -248,13 +248,18 @@ describe('authenticated participant state transactions', () => {
         expect(await head()).toBe(18);
     });
 
-    it('clears the validation deadline before queuing writes', async () => {
+    it('bounds only validation: a deadline reached once writes are queued aborts nothing', async () => {
         const { commit, validate, head } = await fixture();
-        const clear = vi.spyOn(globalThis, 'clearTimeout');
-        await commit(validate, (transaction) => {
-            expect(clear).toHaveBeenCalled();
-            transaction.objectStore('head').put(19, 0);
-        });
+        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+        try {
+            await commit(validate, (transaction) => {
+                // Any deadline still armed would abort the transaction here.
+                vi.runAllTimers();
+                transaction.objectStore('head').put(19, 0);
+            });
+        } finally {
+            vi.useRealTimers();
+        }
         expect(await head()).toBe(19);
     });
 

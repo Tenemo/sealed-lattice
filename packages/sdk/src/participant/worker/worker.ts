@@ -89,6 +89,7 @@ import {
 } from './roster.js';
 import { restoreSetup, retainSetup, verifySetup } from './setup.js';
 import { stopParticipant } from './stop.js';
+import type { StopPersistence } from './stop.js';
 import {
     deleteWorkingStorage,
     namespacedName,
@@ -143,7 +144,7 @@ export type WorkerResult = Readonly<
     | {
           status: 'stopped';
           detail: string;
-          stopPersistence: 'confirmed' | 'unconfirmed';
+          stopPersistence: StopPersistence;
       }
     | { status: 'evaluated'; memory: OperationMemory }
 >;

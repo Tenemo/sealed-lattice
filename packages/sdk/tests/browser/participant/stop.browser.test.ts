@@ -24,8 +24,6 @@ const readMarker = (database: IDBDatabase) =>
     requestResult<unknown>(
         database.transaction('stopped').objectStore('stopped').get(0),
     );
-const confirmed = 'confirmed';
-const unconfirmed = 'unconfirmed';
 
 afterEach(async () => {
     vi.restoreAllMocks();
@@ -37,11 +35,11 @@ afterEach(async () => {
 describe('participant stop persistence in IndexedDB', () => {
     it('confirms a strict commit and readback, including an existing stop marker', async () => {
         const database = await openDatabase();
-        await expect(stopParticipant(database)).resolves.toEqual(confirmed);
+        await expect(stopParticipant(database)).resolves.toBe('confirmed');
         database.close();
         const reopened = await openDatabase(database.name);
         await expect(readMarker(reopened)).resolves.toBe(true);
-        await expect(stopParticipant(reopened)).resolves.toEqual(confirmed);
+        await expect(stopParticipant(reopened)).resolves.toBe('confirmed');
     });
 
     it('refuses without claiming persistence after a successful put is aborted', async () => {
@@ -64,7 +62,7 @@ describe('participant stop persistence in IndexedDB', () => {
                 return transaction;
             },
         );
-        await expect(stopParticipant(database)).resolves.toEqual(unconfirmed);
+        await expect(stopParticipant(database)).resolves.toBe('unconfirmed');
         database.close();
         const reopened = await openDatabase(database.name);
         await expect(readMarker(reopened)).resolves.toBeUndefined();
@@ -83,7 +81,7 @@ describe('participant stop persistence in IndexedDB', () => {
                 return transaction;
             },
         );
-        await expect(stopParticipant(database)).resolves.toEqual(unconfirmed);
+        await expect(stopParticipant(database)).resolves.toBe('unconfirmed');
         const reopened = await openDatabase(database.name);
         await expect(readMarker(reopened)).resolves.toBe(true);
     });
@@ -108,8 +106,8 @@ describe('participant stop persistence in IndexedDB', () => {
                     return transaction;
                 },
             );
-            await expect(stopParticipant(database)).resolves.toEqual(
-                unconfirmed,
+            await expect(stopParticipant(database)).resolves.toBe(
+                'unconfirmed',
             );
             database.close();
             const reopened = await openDatabase(database.name);
@@ -122,6 +120,6 @@ describe('participant stop persistence in IndexedDB', () => {
     it('refuses when the database is unavailable', async () => {
         const database = await openDatabase();
         database.close();
-        await expect(stopParticipant(database)).resolves.toEqual(unconfirmed);
+        await expect(stopParticipant(database)).resolves.toBe('unconfirmed');
     });
 });

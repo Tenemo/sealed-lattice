@@ -7,6 +7,7 @@ import {
     helperRole,
     helperStartMilliseconds,
 } from './worker/parallel.js';
+import type { StopPersistence } from './worker/stop.js';
 import { participantNamespacePattern } from './worker/storage.js';
 import type { WorkerResult } from './worker/worker.js';
 
@@ -170,7 +171,7 @@ export type ParticipantResult = Readonly<
     | {
           status: 'stopped';
           detail: string;
-          stopPersistence: 'confirmed' | 'unconfirmed';
+          stopPersistence: StopPersistence;
       }
 >;
 
