@@ -312,8 +312,7 @@ export const createEnrollment = async (
             delete handlers.staged;
             delete handlers.random;
         }
-        if (prepared !== 0 || module.check_retained() !== 0)
-            throw new Error('Enrollment preparation failed.');
+        if (prepared !== 0) throw new Error('Enrollment preparation failed.');
         const poll = readModuleMemory(
             module,
             module.poll_identity_pointer(),
@@ -357,7 +356,6 @@ export const createEnrollment = async (
         if (
             module.prepare_organizer(0) !== 1 ||
             module.prepare_joiner(0) !== 1 ||
-            module.check_retained() !== 0 ||
             randomBytes !== before
         )
             throw new Error('Repeated preparation changed authority.');

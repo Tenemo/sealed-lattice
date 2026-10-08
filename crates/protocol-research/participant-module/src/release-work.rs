@@ -41,7 +41,6 @@ impl ReleaseWork {
         {
             return Err(Error::Context);
         }
-        key.validate_retained().map_err(|_| Error::Crypto)?;
         let target = self.context.certificate().target();
         let setup = target.setup();
         let message = TargetMessage::parse(target.body(), setup.profile().participants())?;

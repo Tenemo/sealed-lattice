@@ -15,7 +15,7 @@ import {
 // calls. One export traps, one reports an exhausted memory bound through the
 // allocator's import and one draws randomness through the witness import.
 const trapping = 'restore';
-const exhausting = 'check_retained';
+const exhausting = 'retain_registration';
 const drawing = 'prepare_organizer';
 const standInModule = () => {
     const text = [
@@ -80,7 +80,7 @@ describe('participant module failures', () => {
         );
         let failure: unknown;
         try {
-            module.check_retained();
+            module.retain_registration();
         } catch (error) {
             failure = error;
         }

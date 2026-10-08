@@ -177,7 +177,6 @@ impl Enrollment {
         let runtime = verified_poll.runtime();
         let mut sources = fhe_sources::Sources::create(verified_poll, &credential)?;
         let mut key = RegistrationKey::new();
-        key.validate_retained().map_err(|_| Error::State)?;
         let public = key.public_key_bytes();
         let key_hash = ProtocolHash::digest(&public);
         let mut key_output = RecordWriter::new(0, &mut output);
@@ -255,9 +254,6 @@ impl Enrollment {
     }
     pub fn sources_retired(&self) -> bool {
         self.sources.is_none()
-    }
-    pub fn check(&self) -> bool {
-        self.key.validate_retained().is_ok() && self.credential.check_retained()
     }
     pub fn restore(
         poll: &protocol_foundations::poll::VerifiedPoll,

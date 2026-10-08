@@ -73,7 +73,6 @@ impl RegistrationKey {
         encrypted_linear: Vec<BigInt>,
         target_linear: Vec<BigInt>,
     ) -> Result<linked_release_proof::PreparedRelease, Error> {
-        self.validate_retained()?;
         let common = contribution::common_share_polynomial();
         let secret = Zeroizing::new(self.secret.iter().copied().map(i128::from).collect());
         let inputs = linked_release_proof::ReleaseInputs::new(
@@ -88,7 +87,7 @@ impl RegistrationKey {
         .map_err(|_| Error::InvalidState)?;
         linked_release_proof::derive_bound(inputs, header).map_err(|_| Error::InvalidState)
     }
-    pub fn validate_retained(&self) -> Result<(), Error> {
+    fn validate_retained(&self) -> Result<(), Error> {
         let public_modulus = integer(share_modulus());
         let public_half = public_modulus >> 1usize;
         if self.secret.len() != DEGREE

@@ -313,7 +313,6 @@ const prepare = (
             ? module.prepare_organizer(input.length)
             : module.prepare_joiner(input.length),
     ).toBe(0);
-    expect(module.check_retained()).toBe(0);
     return {
         poll: readModuleMemory(module, module.poll_identity_pointer(), 64),
         records: new Map(

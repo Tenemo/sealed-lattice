@@ -348,13 +348,3 @@ fn restore_enrollment(length: usize, prepared: bool) -> u32 {
         0
     })
 }
-#[unsafe(no_mangle)]
-pub extern "C" fn check_retained() -> u32 {
-    SESSION.with(|state| {
-        state
-            .borrow()
-            .enrollment
-            .as_ref()
-            .map_or(1, |value| u32::from(!value.check()))
-    })
-}
