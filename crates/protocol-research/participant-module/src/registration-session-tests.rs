@@ -1,65 +1,19 @@
 //! Registration sessions against the registration verifier on a real
 //! registration: the same verified record however the bytes are divided or
 //! interleaved, and the verifier's own refusal of changed bytes.
-use crate::Enrollment;
+use crate::registration_fixture::{Record, registration};
 use protocol_foundations::{
     Credential, Error,
     foundation::{
-        CanonicalItem, CanonicalTuple, StabilizedDisplayText,
-        manifest::{Manifest, OptionDefinition},
-        participant_identity::derive_participant_identity,
+        CanonicalItem, CanonicalTuple, participant_identity::derive_participant_identity,
     },
-    poll::{PollDraft, VerifiedPoll, verify_poll},
+    poll::VerifiedPoll,
     registration::{RegistrationVerifier, VerifiedRegistration, session::RegistrationSession},
     roster::RetainedContributionContext,
 };
 use supported_profile::Profile;
 
 const CHUNK: usize = 1 << 20;
-
-#[derive(Clone)]
-struct Record {
-    header: Vec<u8>,
-    signature: Vec<u8>,
-    key: Vec<u8>,
-}
-
-// A poll and its organizer's registration.
-fn registration() -> (VerifiedPoll, Record, Enrollment) {
-    let text = |value: &str| StabilizedDisplayText::from_ingress_utf8(value.as_bytes()).unwrap();
-    let options = (0..2)
-        .map(|index| {
-            OptionDefinition::new(
-                index,
-                format!("option-{index}"),
-                text(&format!("Option {index}")),
-            )
-            .unwrap()
-        })
-        .collect();
-    let draft = PollDraft::new(Manifest::new(text("Question"), options).unwrap(), 2, 10).unwrap();
-    let runtime = [7; 64];
-    let mut parts: [Vec<u8>; 3] = Default::default();
-    let (packet, enrollment, _) =
-        Enrollment::create_organizer(draft, runtime, b"Organizer", |kind, offset, bytes| {
-            if let Some(part) = parts.get_mut(kind as usize) {
-                assert_eq!(offset, part.len());
-                part.extend_from_slice(bytes);
-            }
-        })
-        .unwrap();
-    let poll = verify_poll(packet.identity, runtime, &packet.body, &packet.signature).unwrap();
-    let [key, header, signature] = parts;
-    (
-        poll,
-        Record {
-            header,
-            signature,
-            key,
-        },
-        enrollment,
-    )
-}
 
 fn direct(poll: &VerifiedPoll, record: &Record) -> Result<VerifiedRegistration, Error> {
     let mut verifier = RegistrationVerifier::new(poll, &record.header, &record.signature)?;
@@ -92,7 +46,7 @@ fn same(left: &VerifiedRegistration, right: &VerifiedRegistration) -> bool {
 
 #[test]
 fn sessions_verify_and_refuse_a_registration_as_its_verifier_does() {
-    let (poll, record, enrollment) = registration();
+    let (_, poll, record, enrollment) = registration();
     let expected = direct(&poll, &record).unwrap();
     checkpoint_import_preserves_the_verified_original_owner(
         &poll,

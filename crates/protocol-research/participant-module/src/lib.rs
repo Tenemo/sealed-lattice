@@ -27,8 +27,14 @@ pub mod offer_signing;
 #[cfg(any(target_arch = "wasm32", test))]
 #[path = "operation-random.rs"]
 mod operation_random;
+#[cfg(any(target_arch = "wasm32", test))]
+#[path = "own-verification.rs"]
+mod own_verification;
 #[path = "participant-bounds.rs"]
 pub mod participant_bounds;
+#[cfg(test)]
+#[path = "registration-fixture.rs"]
+mod registration_fixture;
 #[cfg(test)]
 #[path = "registration-session-tests.rs"]
 mod registration_session_tests;
@@ -36,13 +42,7 @@ mod registration_session_tests;
 pub mod release_work;
 
 #[cfg(target_arch = "wasm32")]
-mod browser;
-#[cfg(target_arch = "wasm32")]
-#[path = "own-verification.rs"]
-mod own_verification;
-#[cfg(target_arch = "wasm32")]
-#[path = "parallel-browser.rs"]
-mod parallel_browser;
+mod abi;
 
 /// Every job a helper instance runs. Every proof crate proves with the one
 /// shared engine, so its jobs serve every proof kind.

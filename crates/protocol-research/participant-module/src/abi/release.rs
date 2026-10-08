@@ -51,7 +51,7 @@ fn command(session: &mut Session, operation: u32, input: &[u8]) -> Result<Vec<u8
             if input != context.certificate().target().body() {
                 return Err(Error::Context);
             }
-            if !crate::operation_random::ready(crate::operation_random::Purpose::Release) {
+            if !super::operation_random::ready(crate::operation_random::Purpose::Release) {
                 return Err(Error::Context);
             }
             let work = crate::release_work::ReleaseWork::new(owner, context)?;
