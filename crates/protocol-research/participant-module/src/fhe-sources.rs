@@ -33,7 +33,6 @@ struct Entry {
 
 pub(crate) struct Sources {
     poll: [u8; 64],
-    runtime: [u8; 64],
     owner: [u8; SIGNING_PUBLIC_KEY_BYTES],
     families: Vec<Profile>,
     entries: Vec<Entry>,
@@ -66,7 +65,6 @@ fn associated(body: [u8; 64]) -> Vec<u8> {
 // Absorb a canonical tuple without allocating a copy of the private seed.
 fn stream(
     poll: [u8; 64],
-    runtime: [u8; 64],
     owner: &[u8; SIGNING_PUBLIC_KEY_BYTES],
     profile: Profile,
     seed: &[u8; SEED_BYTES],
@@ -78,14 +76,13 @@ fn stream(
             CanonicalItem::nonempty_ascii("sealed-lattice/fhe-source-randomness/v1").unwrap(),
             CanonicalItem::fixed_bytes(owner).unwrap(),
             CanonicalItem::hash512(poll),
-            CanonicalItem::hash512(runtime),
             CanonicalItem::variable_bytes(profile.ciphertext_modulus().to_bytes()).unwrap(),
             CanonicalItem::unsigned64(profile.fhe_common_sample_bits() as u64),
         ],
     )
     .encode()
     .unwrap();
-    prefix[4..8].copy_from_slice(&7u32.to_le_bytes());
+    prefix[4..8].copy_from_slice(&6u32.to_le_bytes());
     let mut hash = Shake256::default();
     hash.update(&prefix);
     hash.update(&CanonicalItemType::RawBytes.canonical_code().to_le_bytes());
@@ -133,7 +130,6 @@ impl Sources {
             };
             let mut reader = stream(
                 poll.identity(),
-                poll.runtime(),
                 credential.signing_public(),
                 *profile,
                 &entry.seed,
@@ -157,7 +153,6 @@ impl Sources {
         }
         Ok(Self {
             poll: poll.identity(),
-            runtime: poll.runtime(),
             owner: *credential.signing_public(),
             families,
             entries,
@@ -182,7 +177,7 @@ impl Sources {
 
     pub(crate) fn source(&self, profile: Profile) -> Result<FheKeySource, Error> {
         let entry = &self.entries[self.index(profile)?];
-        let mut random = stream(self.poll, self.runtime, &self.owner, profile, &entry.seed);
+        let mut random = stream(self.poll, &self.owner, profile, &entry.seed);
         Ok(FheKeySource::from_reader(profile, &mut random))
     }
 
@@ -242,7 +237,6 @@ impl Sources {
             .collect();
         Ok(Self {
             poll: poll.identity(),
-            runtime: poll.runtime(),
             owner: *credential.signing_public(),
             families,
             entries,

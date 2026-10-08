@@ -191,7 +191,6 @@ describe('participant release state', () => {
     it('lists every record under its own coordinates, length and binding', () => {
         const context = {
             poll: filled(64, 1),
-            runtime: filled(64, 2),
             setupIdentity: filled(64, 3),
             position: 2,
         };

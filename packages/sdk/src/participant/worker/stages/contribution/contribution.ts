@@ -109,10 +109,10 @@ export type ContributionState = Readonly<{
 }>;
 
 // What a contribution record is bound to besides its location: the poll,
-// the runtime, the roster proposal and the participant.
+// whose identity names the runtime, the roster proposal and the
+// participant.
 type ProposalRecordContext = Readonly<{
     poll: Uint8Array;
-    runtime: Uint8Array;
     proposal: Uint8Array;
     position: number;
 }>;
@@ -384,7 +384,6 @@ const recordAssociatedData = (
     concatenate(
         encodeText('participant-contribution-record/1'),
         context.poll,
-        context.runtime,
         context.proposal,
         unsigned16(context.position),
         unsigned16(record.object),
@@ -908,7 +907,6 @@ export const restoreCheckpoint = async (
             state.position,
             concatenate(
                 session.records.poll,
-                session.records.runtime,
                 session.records.proposal,
                 state.header,
             ),
@@ -1256,7 +1254,6 @@ const retainProposal = async (
     );
     const control = concatenate(
         root.manifest.poll,
-        context.runtime,
         unsigned16(context.position),
         unsigned32(proposal.length),
         proposal,
@@ -1326,7 +1323,6 @@ export const resumeParticipant = async (
         preparation,
         records: {
             poll: root.manifest.poll,
-            runtime: context.runtime,
             proposal,
             position: context.position,
         },

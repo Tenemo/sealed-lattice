@@ -22,7 +22,6 @@ const RETAINED_SETUP_TAG_LABEL: &[u8] = b"sealed-lattice/retained-setup-referenc
 /// This creates no public roster, setup, ballot, or unspent-attempt capability.
 pub struct RetainedBallotOwner {
     poll: [u8; 64],
-    runtime: [u8; 64],
     setup_identity: [u8; 64],
     position: usize,
     owner_body: [u8; 64],
@@ -37,9 +36,6 @@ impl RetainedBallotOwner {
     }
     pub fn poll(&self) -> &[u8; 64] {
         &self.poll
-    }
-    pub fn runtime(&self) -> &[u8; 64] {
-        &self.runtime
     }
     pub fn setup_identity(&self) -> &[u8; 64] {
         &self.setup_identity
@@ -176,7 +172,6 @@ impl Credential {
     ) -> Result<(), Error> {
         self.check_confirmed_context(context)?;
         if context.poll != poll.identity()
-            || context.runtime != poll.runtime()
             || context.profile().options() != poll.manifest().option_count()
             || self.completed_body != Some(context.owner_body)
         {
@@ -201,7 +196,6 @@ impl Credential {
         }
         Ok(RetainedBallotOwner {
             poll: poll.identity(),
-            runtime: poll.runtime(),
             setup_identity,
             position: context.position,
             owner_body: context.owner_body,

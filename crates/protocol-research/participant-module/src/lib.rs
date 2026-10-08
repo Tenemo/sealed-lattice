@@ -174,7 +174,6 @@ impl Enrollment {
     ) -> Result<(Self, DataKeys), Error> {
         let username = normalize_username(username).map_err(|_| Error::Shape)?;
         let poll = verified_poll.identity();
-        let runtime = verified_poll.runtime();
         let mut sources = fhe_sources::Sources::create(verified_poll, &credential)?;
         let mut key = RegistrationKey::new();
         let public = key.public_key_bytes();
@@ -186,14 +185,13 @@ impl Enrollment {
         let header = RegistrationHeader {
             username,
             poll,
-            runtime,
             signing_public: *credential.signing_public(),
             recipient_key_hash: key_hash,
             fhe_key_commitments: sources.commitments().to_vec(),
         }
         .encode()
         .map_err(|_| Error::Shape)?;
-        let body = BodyDigest::from_header(&header, poll, runtime).map_err(|_| Error::State)?;
+        let body = BodyDigest::from_header(&header, poll).map_err(|_| Error::State)?;
         let body_digest = body.bytes();
         let sealed_sources = sources.seal(body_digest)?;
         let signature = credential
@@ -323,7 +321,6 @@ impl Enrollment {
     ) -> Result<Self, Error> {
         use num_bigint::{BigInt, Sign};
         if poll.identity() != header.poll
-            || poll.runtime() != header.runtime
             || public_bytes.len() != 65536 * 21
             || ProtocolHash::digest(public_bytes) != header.recipient_key_hash
         {

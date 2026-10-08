@@ -44,26 +44,26 @@ export const compileRegistrationSourceRandomness = (
         // length. Only the ASCII domain and modulus have inner lengths.
         const sourceInputBytes =
             8n +
-            7n * 6n +
+            6n * 6n +
             4n +
             bytes('sealed-lattice/fhe-source-randomness/v1') +
             registrationSigningPublicKeyBytes +
-            2n * 64n +
+            64n +
             4n +
             modulusBytes +
             8n +
             operationSeedBytes;
-        // Domain, owner, salt, poll, runtime, modulus, sampler width and the
-        // complete variable-byte public coordinate. This is ordinary SHAKE,
+        // Domain, owner, salt, poll, modulus, sampler width and the complete
+        // variable-byte public coordinate. This is ordinary SHAKE,
         // without ProtocolHash's separate fixed 64-byte prefix.
         const commitmentInputBytes =
             8n +
-            8n * 6n +
+            7n * 6n +
             4n +
             bytes('sealed-lattice/registered-fhe-key/v1') +
             registrationSigningPublicKeyBytes +
             64n +
-            2n * 64n +
+            64n +
             4n +
             modulusBytes +
             8n +

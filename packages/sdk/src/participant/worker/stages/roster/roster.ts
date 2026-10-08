@@ -54,13 +54,13 @@ export const registrationFile = {
 export const registrationCandidateKey = (registrationBodyDigest: string) =>
     'registration/' + registrationBodyDigest;
 
-// The ordered registration body digests a proposal lists: the fourth tuple
+// The ordered registration body digests a proposal lists: the third tuple
 // value holds its own length, the count and one digest per participant.
 export const proposalRegistrationBodyDigests = (body: Uint8Array): string[] => {
     const fields = tupleFields(body);
-    const bodies = fields[3];
+    const bodies = fields[2];
     if (
-        fields.length !== 4 ||
+        fields.length !== 3 ||
         bodies.length < 8 ||
         readUnsigned32(bodies, 0) !== bodies.length - 4
     )

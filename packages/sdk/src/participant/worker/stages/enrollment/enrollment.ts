@@ -559,7 +559,7 @@ export const restoreEnrollment = async (
         ? await read(dataKind.sourceCapsule)
         : await read(dataKind.setupReference);
     const control = concatenate(
-        pollContext,
+        manifest.poll,
         unsigned32(header.length),
         header,
         registrationBodyDigest,
@@ -617,7 +617,7 @@ export const restoreEnrollment = async (
     if (module.validate_joiner(pollInput.length) !== 0)
         throw new Error('The retained poll definition was refused.');
     const isOrganizer = equalBytes(
-        tupleFields(header)[3],
+        tupleFields(header)[2],
         tupleFields(definition)[3],
     );
     return {

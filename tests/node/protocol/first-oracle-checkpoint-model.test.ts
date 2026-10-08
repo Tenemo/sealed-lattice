@@ -103,8 +103,8 @@ describe('complete first-oracle proof checkpoint', () => {
             Buffer.from('FPC4'),
             Buffer.from([10, 10]),
             Buffer.alloc(4),
-            Buffer.from([154, 1]),
-            Buffer.alloc(410),
+            Buffer.from([84, 1]),
+            Buffer.alloc(340),
             Buffer.alloc(64),
             Buffer.alloc(64),
             Buffer.concat([
@@ -118,9 +118,9 @@ describe('complete first-oracle proof checkpoint', () => {
         ]);
         expect(model.headerBytes).toBe(BigInt(actualHeader.length));
         expect(model.importBytes).toBe(
-            BigInt(Buffer.concat([Buffer.alloc(3 * 64), actualHeader]).length),
+            BigInt(Buffer.concat([Buffer.alloc(2 * 64), actualHeader]).length),
         );
-        expect(model.maximumHeaderBytes - model.headerBytes).toBe(1024n - 410n);
+        expect(model.maximumHeaderBytes - model.headerBytes).toBe(1024n - 340n);
         const input = Buffer.concat([Buffer.alloc(64), actualHeader]);
         expect(model.headerDigestInputBytes).toBe(BigInt(input.length));
         const padded = [...input, 0x1f];

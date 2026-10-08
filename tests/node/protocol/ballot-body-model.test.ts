@@ -31,7 +31,7 @@ describe('ballot body framing', () => {
         ).toBe(layout.reconstructedInputBytes);
         expect(layout.contextBytes).toBe(136n);
         expect(layout.proofRoleBytes).toBe(
-            8n + 36n + 4n + 30n + 4n + 128n + 192n + 2n,
+            8n + 30n + 4n + 30n + 4n + 128n + 128n + 2n,
         );
         expect(layout.headerBytes).toBe(148n);
         expect(layout.envelopeBytes).toBe(214n);

@@ -257,15 +257,15 @@ pub extern "C" fn contribution_checkpoint_key(position: usize, length: usize) ->
 pub extern "C" fn retain_proposal(length: usize) -> u32 {
     SESSION.with(|state| {
         let mut state = state.borrow_mut();
-        // The proposal names the poll and runtime of this instance's verified
-        // registration, whose poll fixes the option count.
+        // The proposal names the poll of this instance's verified
+        // registration, which fixes the option count.
         let Some(verified) = super::own_verification::verified() else {
             return 1;
         };
         let Some(enrollment) = state.enrollment.as_ref() else {
             return 1;
         };
-        if !(134..=state.input.len()).contains(&length)
+        if !(70..=state.input.len()).contains(&length)
             || state.retained_context.is_some()
             || state.offer.body_started()
             || CONTRIBUTION.with(|session| session.borrow().phase()) != 0
@@ -273,11 +273,10 @@ pub extern "C" fn retain_proposal(length: usize) -> u32 {
             return 1;
         }
         let input = &state.input[..length];
-        let body_length = u32::from_le_bytes(input[130..134].try_into().unwrap()) as usize;
+        let body_length = u32::from_le_bytes(input[66..70].try_into().unwrap()) as usize;
         if body_length > protocol_foundations::roster::MAXIMUM_PROPOSAL_BYTES
-            || length != 134 + body_length
+            || length != 70 + body_length
             || input[..64] != verified.header().poll
-            || input[64..128] != verified.header().runtime
         {
             return 1;
         }
@@ -286,8 +285,8 @@ pub extern "C" fn retain_proposal(length: usize) -> u32 {
                 &enrollment.credential,
                 &verified,
                 poll,
-                u16::from_le_bytes(input[128..130].try_into().unwrap()) as usize,
-                &input[134..],
+                u16::from_le_bytes(input[64..66].try_into().unwrap()) as usize,
+                &input[70..],
             )
         }) else {
             return 1;

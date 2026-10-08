@@ -93,7 +93,7 @@ describe('first-oracle hash resume work', () => {
         const setup = proofHashProfiles(deriveSupportedProfile(20, 20)).find(
             (value) => value.role === 'setup',
         )!;
-        for (const role of [1n, 135n, 136n, 137n, 410n, 1024n]) {
+        for (const role of [1n, 135n, 136n, 137n, 340n, 1024n]) {
             const latest = checkEveryCut(setup.firstWidth, role);
             expect(latest.completeInputFactor).toBeGreaterThan(5n);
             for (const resumes of [1n, 2n, 17n]) {
@@ -116,12 +116,12 @@ describe('first-oracle hash resume work', () => {
 
     it('rejects checkpoint cuts and widths the original first oracle cannot have', () => {
         for (const [width, role, column] of [
-            [48n, 410n, 0n],
-            [65n, 410n, 0n],
+            [48n, 340n, 0n],
+            [65n, 340n, 0n],
             [64n, 0n, 0n],
             [64n, 1025n, 0n],
-            [64n, 410n, -1n],
-            [64n, 410n, 2n],
+            [64n, 340n, -1n],
+            [64n, 340n, 2n],
         ])
             expect(() =>
                 firstOracleResumeHashWork(width, role, column),

@@ -41,7 +41,6 @@ const keys = (count: number, first: number) =>
 
 const context: RecordContext = {
     poll: filled(64, 1),
-    runtime: filled(64, 2),
     setupIdentity: filled(64, 3),
     position: 2,
 };

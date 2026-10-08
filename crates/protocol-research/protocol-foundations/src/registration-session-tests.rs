@@ -28,7 +28,7 @@ fn open_sessions() -> usize {
         .sum()
 }
 
-/// A signed poll and the header of a registration of it with the runtime,
+/// A signed poll of the runtime and the header of a registration of it,
 /// whose key nothing produced.
 pub(crate) fn keyless_record(runtime: [u8; 64]) -> (SignedPoll, Vec<u8>) {
     let text = |value: &str| StabilizedDisplayText::from_ingress_utf8(value.as_bytes()).unwrap();
@@ -44,11 +44,10 @@ pub(crate) fn keyless_record(runtime: [u8; 64]) -> (SignedPoll, Vec<u8>) {
         .collect();
     let draft = PollDraft::new(Manifest::new(text("Question"), options).unwrap(), 2, 3).unwrap();
     let mut organizer = Credential::from_seed([1; 32]);
-    let packet = organizer.create_poll(draft, [4; 64], [5; 32]).unwrap();
+    let packet = organizer.create_poll(draft, runtime, [5; 32]).unwrap();
     let header = RegistrationHeader {
         username: normalize_username(b"Participant").unwrap(),
         poll: packet.identity,
-        runtime,
         signing_public: *organizer.signing_public(),
         recipient_key_hash: [0; 64],
 
@@ -59,8 +58,8 @@ pub(crate) fn keyless_record(runtime: [u8; 64]) -> (SignedPoll, Vec<u8>) {
     (packet, header)
 }
 
-// A header of another runtime or with extra bytes is refused before any
-// session opens. A dropped session and a finished one leave no state,
+// A header of another runtime's poll or with extra bytes is refused before
+// any session opens. A dropped session and a finished one leave no state,
 // and a key that does not match its header's hash refuses the session
 // when it finishes, with the verifier's refusal.
 #[test]

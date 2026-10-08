@@ -12,10 +12,10 @@ describe('signed registration and original-key custody', () => {
         const value = compileRegistrationEnrollmentCensus();
         expect(value.maximumHeaderBytes).toBe(
             8n +
-                7n * 6n +
+                6n * 6n +
                 4n +
                 37n +
-                3n * 64n +
+                2n * 64n +
                 1952n +
                 4n +
                 128n +

@@ -19,16 +19,12 @@ pub fn proof_role(
         .records()
         .get(position)
         .ok_or(Error)?;
-    if position >= setup.profile().participants()
-        || original.header().poll != poll.identity()
-        || original.header().runtime != poll.runtime()
-    {
+    if position >= setup.profile().participants() || original.header().poll != poll.identity() {
         return Err(Error);
     }
     encode_role(
         derive_participant_identity(&original.header().signing_public).map_err(|_| Error)?,
         poll.identity(),
-        poll.runtime(),
         setup.identity(),
         position,
     )
@@ -39,7 +35,6 @@ pub fn private_proof_role(
     encode_role(
         context.participant_identity(),
         context.poll().identity(),
-        context.poll().runtime(),
         *context.setup_identity(),
         context.position(),
     )
@@ -47,7 +42,6 @@ pub fn private_proof_role(
 fn encode_role(
     participant_identity: ParticipantIdentity,
     poll: [u8; 64],
-    runtime: [u8; 64],
     setup_identity: [u8; 64],
     position: usize,
 ) -> Result<Vec<u8>, Error> {
@@ -60,7 +54,6 @@ fn encode_role(
             CanonicalItem::nonempty_ascii(&participant_identity.to_lowercase_hex())
                 .map_err(|_| Error)?,
             CanonicalItem::hash512(poll),
-            CanonicalItem::hash512(runtime),
             CanonicalItem::hash512(setup_identity),
             CanonicalItem::unsigned16(position),
         ],

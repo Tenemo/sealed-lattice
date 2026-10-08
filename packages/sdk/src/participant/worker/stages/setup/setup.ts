@@ -272,7 +272,6 @@ export const retainedRecordContext = async (
     session: ParticipantSession,
 ): Promise<RecordContext> => ({
     poll: session.root.manifest.poll,
-    runtime: session.context.runtime,
     setupIdentity: referenceSetupIdentity(
         await readDataKind(
             session.context,

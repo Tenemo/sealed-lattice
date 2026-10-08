@@ -322,7 +322,6 @@ export const closeRecordAssociatedData = (
     concatenate(
         encodeText('sealed-lattice/participant-close-record/v1'),
         context.poll,
-        context.runtime,
         context.setupIdentity,
         unsigned16(context.position),
         Uint8Array.of(event.kind),

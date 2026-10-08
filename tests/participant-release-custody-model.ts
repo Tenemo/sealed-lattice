@@ -10,12 +10,12 @@ import { compileTargetSigningStateCensus } from '#tests/target-signing-state-mod
 
 export const participantReleaseProofRoleBytes =
     8n +
-    7n * 6n +
+    6n * 6n +
     4n +
     BigInt(Buffer.byteLength('sealed-lattice/certified-release/v2')) +
     4n +
     participantIdentityAsciiBytes +
-    4n * 64n +
+    3n * 64n +
     2n;
 
 const releaseContextBytes = 4n + 3n * 64n + 2n;

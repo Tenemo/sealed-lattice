@@ -16,7 +16,6 @@ use supported_profile::{
 fn encode_release_proof_role(
     participant_identity: ParticipantIdentity,
     poll: [u8; 64],
-    runtime: [u8; 64],
     setup_identity: [u8; 64],
     target: [u8; 64],
     position: usize,
@@ -31,7 +30,6 @@ fn encode_release_proof_role(
             CanonicalItem::nonempty_ascii(&participant_identity.to_lowercase_hex())
                 .map_err(|_| Error::Encoding)?,
             CanonicalItem::hash512(poll),
-            CanonicalItem::hash512(runtime),
             CanonicalItem::hash512(setup_identity),
             CanonicalItem::hash512(target),
             CanonicalItem::unsigned16(position),
@@ -106,7 +104,6 @@ impl ReleaseContext {
         if position >= profile.participants()
             || records.len() != profile.participants()
             || records[position].header().poll != target.poll().identity()
-            || records[position].header().runtime != target.poll().runtime()
             || constant.setup_identity() != &setup.identity()
             || linear.setup_identity() != &setup.identity()
             || constant.index() != profile.share_constant_polynomial(position)
@@ -167,7 +164,6 @@ impl ReleaseContext {
             derive_participant_identity(&original.header().signing_public)
                 .map_err(|_| Error::Context)?,
             target.poll().identity(),
-            target.poll().runtime(),
             target.setup().identity(),
             *target.identity(),
             self.position,

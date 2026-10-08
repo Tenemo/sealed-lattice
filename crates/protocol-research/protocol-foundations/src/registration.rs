@@ -67,19 +67,14 @@ pub struct RegistrationVerifier {
 impl RegistrationVerifier {
     pub fn new(poll: &VerifiedPoll, header_bytes: &[u8], signature: &[u8]) -> Result<Self, Error> {
         crate::checked_header(header_bytes, poll)?;
-        Self::open(poll.identity(), poll.runtime(), header_bytes, signature)
+        Self::open(poll.identity(), header_bytes, signature)
     }
-    fn open(
-        poll: [u8; 64],
-        runtime: [u8; 64],
-        header_bytes: &[u8],
-        signature: &[u8],
-    ) -> Result<Self, Error> {
+    fn open(poll: [u8; 64], header_bytes: &[u8], signature: &[u8]) -> Result<Self, Error> {
         let (header, consumed) = RegistrationHeader::decode_prefix(header_bytes)?;
         if consumed != header_bytes.len() {
             return Err(Error::Shape);
         }
-        let body = BodyDigest::from_header(header_bytes, poll, runtime)?;
+        let body = BodyDigest::from_header(header_bytes, poll)?;
         Ok(Self {
             header,
             body,

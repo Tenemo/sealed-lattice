@@ -32,10 +32,10 @@ const role = (purpose: string, release = false) =>
     Buffer.concat([
         integer(1, 2),
         integer(1, 2),
-        integer(release ? 7 : 6),
+        integer(release ? 6 : 5),
         ascii(purpose),
         ascii(owner),
-        ...Array.from({ length: release ? 4 : 3 }, () =>
+        ...Array.from({ length: release ? 3 : 2 }, () =>
             item(6, Buffer.alloc(64)),
         ),
         item(3, integer(1, 2)),
@@ -66,7 +66,7 @@ const frame = (
 describe('fixed three-purpose raw-domain catalogue', () => {
     it('uses the independently pinned original-PID role widths and complete state widths', () => {
         expect(Object.values(roles).map((value) => value.length)).toEqual([
-            410, 404, 479,
+            340, 334, 409,
         ]);
         const shapes = [
             [3, 2, 131072],

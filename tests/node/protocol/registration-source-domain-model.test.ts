@@ -31,12 +31,11 @@ const frame = (
     coordinate: Buffer,
 ) =>
     Buffer.concat([
-        Buffer.from('0100010008000000', 'hex'),
+        Buffer.from('0100010007000000', 'hex'),
         field(2, variable(Buffer.from('sealed-lattice/registered-fhe-key/v1'))),
         field(1, owner),
         field(1, Buffer.alloc(64, 3)),
         field(6, Buffer.alloc(64, 5)),
-        field(6, Buffer.alloc(64, 7)),
         field(1, variable(modulus)),
         field(4, uint(8, sampleBits)),
         field(1, variable(coordinate)),
@@ -140,12 +139,12 @@ const decode = (bytes: Buffer, degree: number) => {
         bytes.length < 8 ||
         bytes.readUInt16LE() !== 1 ||
         bytes.readUInt16LE(2) !== 1 ||
-        bytes.readUInt32LE(4) !== 8
+        bytes.readUInt32LE(4) !== 7
     )
         return undefined;
     let offset = 8;
     const fields: { type: number; bytes: Buffer }[] = [];
-    for (let index = 0; index < 8; index++) {
+    for (let index = 0; index < 7; index++) {
         if (offset + 6 > bytes.length) return undefined;
         const type = bytes.readUInt16LE(offset),
             length = bytes.readUInt32LE(offset + 2);
@@ -157,7 +156,7 @@ const decode = (bytes: Buffer, degree: number) => {
     if (
         offset !== bytes.length ||
         fields.some(
-            (value, index) => value.type !== [2, 1, 1, 6, 6, 1, 4, 1][index],
+            (value, index) => value.type !== [2, 1, 1, 6, 1, 4, 1][index],
         )
     )
         return undefined;
@@ -166,15 +165,14 @@ const decode = (bytes: Buffer, degree: number) => {
             ? value.subarray(4)
             : undefined;
     const domain = unwrap(fields[0].bytes),
-        modulus = unwrap(fields[5].bytes),
-        coordinate = unwrap(fields[7].bytes);
+        modulus = unwrap(fields[4].bytes),
+        coordinate = unwrap(fields[6].bytes);
     if (
         domain?.toString() !== 'sealed-lattice/registered-fhe-key/v1' ||
         fields[1].bytes.length !== 1952 ||
         fields[2].bytes.length !== 64 ||
         fields[3].bytes.length !== 64 ||
-        fields[4].bytes.length !== 64 ||
-        fields[6].bytes.length !== 8 ||
+        fields[5].bytes.length !== 8 ||
         modulus === undefined ||
         coordinate?.length !== degree * (modulus.length + 1)
     )
@@ -182,7 +180,7 @@ const decode = (bytes: Buffer, degree: number) => {
     return {
         owner: fields[1].bytes,
         modulus,
-        sampleBits: fields[6].bytes.readBigUInt64LE(),
+        sampleBits: fields[5].bytes.readBigUInt64LE(),
     };
 };
 
@@ -228,7 +226,7 @@ it('matches an independent raw decoder including every framing and owner bit, ma
         expect(expected(value)).toBe(false);
     }
     expect(mask.comparedRawBits).toBe(
-        BigInt(bytes.length - 64 - 128 - degree * (modulus.length + 1)) * 8n,
+        BigInt(bytes.length - 64 - 64 - degree * (modulus.length + 1)) * 8n,
     );
     expect(mask.comparedCellBits).toBe(
         mask.comparedRawBits +
@@ -269,7 +267,7 @@ it('derives source-mask operands from the independently modeled complete registr
             expect(mask.comparedRawBits).toBe(
                 8n *
                     (work.families[index].commitmentInputBytes -
-                        192n -
+                        128n -
                         family.publicCoordinateBytes),
             );
             expect(mask.inputClassUpper).toBeGreaterThanOrEqual(

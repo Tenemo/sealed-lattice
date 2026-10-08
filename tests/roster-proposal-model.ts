@@ -17,19 +17,19 @@ export const compileRosterProposalCensus = (participantCount: number) => {
     const bytes = (value: string) => BigInt(Buffer.byteLength(value));
     const roleBytes =
         8n +
-        6n * 6n +
+        5n * 6n +
         4n +
         bytes('sealed-lattice/setup-contribution/v2') +
         4n +
         participantIdentityAsciiBytes +
-        3n * 64n +
+        2n * 64n +
         2n;
     const proposalBytes =
         8n +
-        4n * 6n +
+        3n * 6n +
         4n +
         bytes('sealed-lattice/roster-proposal/v1') +
-        2n * 64n +
+        64n +
         4n +
         4n +
         count * 64n;

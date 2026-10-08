@@ -41,7 +41,6 @@ fn signed_registration(
     let header = RegistrationHeader {
         username: normalize_username(format!("Participant {body}").as_bytes()).unwrap(),
         poll: poll.identity(),
-        runtime: poll.runtime(),
         signing_public: *credential.signing_public(),
         recipient_key_hash: ProtocolHash::digest(&key),
 
@@ -49,7 +48,7 @@ fn signed_registration(
     }
     .encode()
     .unwrap();
-    let digest = BodyDigest::from_header(&header, poll.identity(), poll.runtime()).unwrap();
+    let digest = BodyDigest::from_header(&header, poll.identity()).unwrap();
     let signature = credential.sign_registration(digest).unwrap();
     let mut verifier = RegistrationVerifier::new(poll, &header, &signature).unwrap();
     for chunk in key.chunks(CHUNK_LIMIT) {
@@ -423,12 +422,7 @@ fn retained_context(fixture: &CustodyFixture, position: usize) -> RetainedContri
 }
 
 fn checkpoint_prefix(fixture: &CustodyFixture) -> Vec<u8> {
-    [
-        fixture.poll.identity(),
-        fixture.poll.runtime(),
-        fixture.proposal.identity(),
-    ]
-    .concat()
+    [fixture.poll.identity(), fixture.proposal.identity()].concat()
 }
 
 // A later visit's roster, which the roster verifier verifies again from the
@@ -478,7 +472,7 @@ fn contribution_roles_retain_the_original_owner_across_roster_verification_and_c
                 .to_lowercase_hex();
         assert_eq!(tuple.schema_identifier, 1);
         assert_eq!(tuple.schema_version, 1);
-        assert_eq!(tuple.items.len(), 6);
+        assert_eq!(tuple.items.len(), 5);
         assert_eq!(tuple.items[0].item_type(), CanonicalItemType::Ascii);
         assert_eq!(
             tuple.items[0].variable_value_bytes().unwrap(),
@@ -489,17 +483,16 @@ fn contribution_roles_retain_the_original_owner_across_roster_verification_and_c
             tuple.items[1].variable_value_bytes().unwrap(),
             participant.as_bytes()
         );
-        for (item, expected) in tuple.items[2..5].iter().zip([
-            fixture.poll.identity(),
-            fixture.poll.runtime(),
-            fixture.proposal.identity(),
-        ]) {
+        for (item, expected) in tuple.items[2..4]
+            .iter()
+            .zip([fixture.poll.identity(), fixture.proposal.identity()])
+        {
             assert_eq!(item.item_type(), CanonicalItemType::Hash512);
             assert_eq!(item.canonical_bytes(), expected);
         }
-        assert_eq!(tuple.items[5].item_type(), CanonicalItemType::Unsigned16);
+        assert_eq!(tuple.items[4].item_type(), CanonicalItemType::Unsigned16);
         assert_eq!(
-            tuple.items[5].canonical_bytes(),
+            tuple.items[4].canonical_bytes(),
             (position as u16).to_le_bytes()
         );
         assert_eq!(verified.contribution_role(position).unwrap(), role);
@@ -600,26 +593,25 @@ fn retained_context_refuses_other_original_owners_and_positions_before_signing()
 }
 
 #[test]
-fn retained_context_requires_the_original_poll_and_runtime() {
+fn retained_context_requires_the_original_poll() {
     let fixture = custody_fixture([4; 64], 5);
-    // Keep the original owner, body entry, and other routing fields intact,
-    // so each routing comparison must reject independently.
-    for field in [1, 2] {
-        let mut proposal =
-            CanonicalTuple::decode(fixture.proposal.body(), &CanonicalDecodeLimits::default())
-                .unwrap();
-        proposal.items[field] = CanonicalItem::hash512([99; 64]);
-        assert!(matches!(
-            RetainedContributionContext::parse(
-                &fixture.credentials[1],
-                &fixture.proposal.records()[1],
-                &fixture.poll,
-                1,
-                &proposal.encode().unwrap(),
-            ),
-            Err(Error::Context)
-        ));
-    }
+    // Keep the original owner and body entries intact, so the poll
+    // comparison must reject on its own.
+    let mut proposal =
+        CanonicalTuple::decode(fixture.proposal.body(), &CanonicalDecodeLimits::default()).unwrap();
+    proposal.items[1] = CanonicalItem::hash512([99; 64]);
+    assert!(matches!(
+        RetainedContributionContext::parse(
+            &fixture.credentials[1],
+            &fixture.proposal.records()[1],
+            &fixture.poll,
+            1,
+            &proposal.encode().unwrap(),
+        ),
+        Err(Error::Context)
+    ));
+    // Another poll, of another nonce or of another runtime, refuses both
+    // ways.
     for (runtime, nonce) in [([4; 64], 6), ([9; 64], 5)] {
         let foreign = custody_fixture(runtime, nonce);
         assert_ne!(fixture.poll.identity(), foreign.poll.identity());
@@ -689,7 +681,7 @@ fn checkpoint_roles_refuse_changed_routing_position_and_profile() {
     for profile in [Profile::new(4, 2).unwrap(), Profile::new(3, 3).unwrap()] {
         assert!(context.checkpoint_role(&prefix, 1, profile).is_err());
     }
-    for offset in [0, 63, 64, 127, 128, 191] {
+    for offset in [0, 63, 64, 127] {
         let mut changed = prefix.clone();
         changed[offset] ^= 1;
         assert!(
@@ -698,7 +690,7 @@ fn checkpoint_roles_refuse_changed_routing_position_and_profile() {
                 .is_err()
         );
     }
-    for changed in [&prefix[..191], &[prefix.as_slice(), &[0]].concat()] {
+    for changed in [&prefix[..127], &[prefix.as_slice(), &[0]].concat()] {
         assert!(
             context
                 .checkpoint_role(changed, 1, context.profile())

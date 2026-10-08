@@ -68,7 +68,6 @@ impl FinalityWork {
         let count = target.setup().profile().participants();
         if target.classified().is_none()
             || owner.poll() != &target.poll().identity()
-            || owner.runtime() != &target.poll().runtime()
             || owner.setup_identity() != &target.setup().identity()
             || owner.position() >= count
         {

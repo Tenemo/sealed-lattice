@@ -218,7 +218,6 @@ export const ballotRecordAssociatedData = (
     concatenate(
         encodeText('sealed-lattice/participant-ballot-record/v2'),
         context.poll,
-        context.runtime,
         context.setupIdentity,
         unsigned16(context.position),
         unsigned16(index),

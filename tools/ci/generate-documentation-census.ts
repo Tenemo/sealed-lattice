@@ -2780,7 +2780,7 @@ const renderCensusText = (): string => {
         '',
         '## Registration enrollment census',
         '',
-        'The combined enrollment record binds a canonical public username, the actual signing credential, the hash of the recipient public key and the FHE source commitments to the poll and runtime. Separate data keys seal the original recipient key and signing seed; the encrypted local root retains those keys and references every record. From the roster transition on, the root also references the roster proposal and, once signed, its signature. Payload counts exclude database metadata and browser-managed root-key storage.',
+        'The combined enrollment record binds a canonical public username, the actual signing credential, the hash of the recipient public key and the FHE source commitments to the poll, whose identity names the runtime. Separate data keys seal the original recipient key and signing seed; the encrypted local root retains those keys and references every record. From the roster transition on, the root also references the roster proposal and, once signed, its signature. Payload counts exclude database metadata and browser-managed root-key storage.',
         '',
         table(
             ['Property', 'Value'],
@@ -5527,7 +5527,7 @@ const renderCensusText = (): string => {
             ),
         ),
         '',
-        'The raw registration-source slice fixes the source grammar, original owner, immutable family and salt at their actual bit positions. Its exact length is checked; poll/runtime and the coordinate payload stay unconstrained. Current protocol credential hash calls are shorter than this source language even at its syntactic minimum. This separates raw oracle inputs, not their potentially dependent message values. Retained tags have the distinct fixed ProtocolHash prefix.',
+        'The raw registration-source slice fixes the source grammar, original owner, immutable family and salt at their actual bit positions. Its exact length is checked; the poll and the coordinate payload stay unconstrained. Current protocol credential hash calls are shorter than this source language even at its syntactic minimum. This separates raw oracle inputs, not their potentially dependent message values. Retained tags have the distinct fixed ProtocolHash prefix.',
         '',
         table(
             ['Source/credential boundary', 'Bytes'],
@@ -5545,7 +5545,7 @@ const renderCensusText = (): string => {
             ],
         ),
         '',
-        'The following query-controller and prepared-extraction counts use the completion poll family inventory, an output prefix equal to the commitment width and a declared extraction database capacity. The separate returned-coordinate circuit checks the extracted poll/runtime, canonical centered coefficients and absence of negative zero, then copies the salt and coordinate or a zero dummy with a distinct validity bit. It includes clean compute/copy/uncompute even on missing or malformed extraction. The independent query circuit, cache indexing, circuit construction and later polynomial arithmetic remain separate costs.',
+        'The following query-controller and prepared-extraction counts use the completion poll family inventory, an output prefix equal to the commitment width and a declared extraction database capacity. The separate returned-coordinate circuit checks the extracted poll, canonical centered coefficients and absence of negative zero, then copies the salt and coordinate or a zero dummy with a distinct validity bit. It includes clean compute/copy/uncompute even on missing or malformed extraction. The independent query circuit, cache indexing, circuit construction and later polynomial arithmetic remain separate costs.',
         '',
         table(
             [

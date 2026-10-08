@@ -111,9 +111,10 @@ impl CloseContext {
     pub fn new(poll: Arc<VerifiedPoll>, setup: Arc<VerifiedSetupAggregate>) -> Result<Self, Error> {
         let proposal = setup.roster().proposal();
         if !supported_profile::Profile::participant_range().contains(&proposal.records().len())
-            || proposal.records().iter().any(|record| {
-                record.header().poll != poll.identity() || record.header().runtime != poll.runtime()
-            })
+            || proposal
+                .records()
+                .iter()
+                .any(|record| record.header().poll != poll.identity())
             || proposal.records()[proposal.organizer_position()]
                 .header()
                 .signing_public

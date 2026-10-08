@@ -141,7 +141,6 @@ fn ceremony() -> Ceremony {
         let header = RegistrationHeader {
             username: normalize_username(format!("Participant {position}").as_bytes()).unwrap(),
             poll: poll.identity(),
-            runtime,
             signing_public: *credential.signing_public(),
             recipient_key_hash: ProtocolHash::digest(&keys[position]),
             fhe_key_commitments: vec![
@@ -151,7 +150,7 @@ fn ceremony() -> Ceremony {
         }
         .encode()
         .unwrap();
-        let body = BodyDigest::from_header(&header, poll.identity(), poll.runtime()).unwrap();
+        let body = BodyDigest::from_header(&header, poll.identity()).unwrap();
         let signature = credential.sign_registration(body).unwrap();
         let mut verifier = RegistrationVerifier::new(&poll, &header, &signature).unwrap();
         for part in keys[position].chunks(CHUNK_LIMIT) {

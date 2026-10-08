@@ -43,13 +43,12 @@ fn verify_key(
     let header = RegistrationHeader {
         username: normalize_username(format!("Participant {seed}").as_bytes()).unwrap(),
         poll: poll.identity(),
-        runtime: poll.runtime(),
         signing_public: *credential.signing_public(),
         recipient_key_hash: ProtocolHash::digest(key),
         fhe_key_commitments: vec![[7; 64]; crate::source_binding::fhe_key_families(poll).len()],
     }
     .encode()?;
-    let body = BodyDigest::from_header(&header, poll.identity(), poll.runtime())?;
+    let body = BodyDigest::from_header(&header, poll.identity())?;
     let signature = credential.sign_registration(body)?;
     let mut verifier = RegistrationVerifier::new(poll, &header, &signature)?;
     for part in key.chunks(chunk) {
@@ -156,7 +155,6 @@ fn every_supported_roster_size_up_to_the_poll_maximum_can_be_proposed() {
                     RegistrationHeader {
                         username: normalize_username(b"Participant").unwrap(),
                         poll: poll.identity(),
-                        runtime: poll.runtime(),
                         signing_public: *credential.signing_public(),
                         recipient_key_hash: [0; 64],
 

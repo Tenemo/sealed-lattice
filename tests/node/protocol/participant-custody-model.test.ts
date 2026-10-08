@@ -457,11 +457,10 @@ describe('shared participant custody', () => {
     it('includes target-bound release records without turning corpus maxima into lifetime limits', () => {
         const classes = compileParticipantVaultKeyClasses(completionProfile());
         const release = compileParticipantReleaseCustody(completionProfile());
-        // The poll, runtime and setup inventory, the position, the certified
-        // target digest, and the record's index and length.
+        // The poll and setup inventory, the position, the certified target
+        // digest, and the record's index and length.
         const associatedBytes = Buffer.concat([
             Buffer.from('sealed-lattice/participant-release-record/v2'),
-            Buffer.alloc(64),
             Buffer.alloc(64),
             Buffer.alloc(64),
             Buffer.alloc(2),

@@ -40,10 +40,10 @@ const originalRole = (purpose: keyof typeof domains, owner = 'ab'.repeat(64)) =>
     Buffer.concat([
         integer(1, 2),
         integer(1, 2),
-        integer(purpose === 'release' ? 7 : 6, 4),
+        integer(purpose === 'release' ? 6 : 5, 4),
         ascii(domains[purpose]),
         ascii(owner),
-        ...Array.from({ length: purpose === 'release' ? 4 : 3 }, (_, index) =>
+        ...Array.from({ length: purpose === 'release' ? 3 : 2 }, (_, index) =>
             item(6, Buffer.alloc(64, index + 1)),
         ),
         item(3, integer(0, 2)),

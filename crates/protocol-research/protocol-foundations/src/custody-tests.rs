@@ -11,7 +11,6 @@ fn restored_signing_keys_cannot_recreate_authority_the_root_does_not_unlock() {
         BodyDigest::new(RegistrationHeader {
             username: normalize_username(b"Participant").unwrap(),
             poll: [1; 64],
-            runtime: [2; 64],
             signing_public: *original.signing_public(),
             recipient_key_hash: [3; 64],
 

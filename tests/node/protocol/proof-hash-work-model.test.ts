@@ -201,9 +201,9 @@ describe('proof hash work', () => {
             ['release', 1040n, 3360n, 1540n, 8782022n],
         ]);
         expect(profiles.map((value) => value.roleBytes)).toEqual([
-            410n,
-            404n,
-            479n,
+            340n,
+            334n,
+            409n,
         ]);
         for (const profile of profiles) {
             const costs = compileProofHashWork(completionProfile(), profile);
@@ -255,7 +255,7 @@ describe('proof hash work', () => {
         const profile = proofHashProfiles(completionProfile()).find(
             (value) => value.role === 'ballot',
         )!;
-        for (const roleBytes of [64, 72, 136, 282, 404, 410, 479, 1024]) {
+        for (const roleBytes of [64, 72, 136, 282, 334, 340, 409, 1024]) {
             const prefix = (domain: string, level: boolean) =>
                 Buffer.concat([
                     Buffer.alloc(64),
@@ -326,7 +326,10 @@ describe('proof hash work', () => {
         );
         // First, second and linear trees, followed by the emitted FRI trees.
         // Prefixes are local to row and subtree jobs, including an upper
-        // node prefix for each level above the subtrees.
+        // node prefix for each level above the subtrees. Every role's leaf
+        // and node prefix, with the fixed 64-byte digest domain, the framed
+        // family name and role and its framed fields, covers three complete
+        // 136-byte blocks.
         const exponents = [
             18,
             18,
@@ -347,7 +350,7 @@ describe('proof hash work', () => {
                     value.proverCore.permutations,
             ),
         ).toEqual(
-            [3n, 3n, 4n].map((prefixBlocks) => reusedPrefixes * prefixBlocks),
+            [3n, 3n, 3n].map((prefixBlocks) => reusedPrefixes * prefixBlocks),
         );
         for (const value of values) {
             expect(value.proverCore.queries).toBe(
@@ -480,8 +483,8 @@ describe('proof hash work', () => {
             compileProofHashWork(completionProfile(), profile),
         );
         // Every leaf and node hash of a group but the first of each reuses
-        // the prefix blocks, including the fixed 64-byte digest domain: two blocks for
-        // three for setup/ballot, and four for release.
+        // the prefix blocks, including the fixed 64-byte digest domain: three
+        // complete blocks for every role.
         const reusedPrefixes = compileProofVerifierQueryCensus().groups.reduce(
             (sum, group) =>
                 sum +
@@ -496,7 +499,7 @@ describe('proof hash work', () => {
                     value.verifierCore.permutations,
             ),
         ).toEqual(
-            [3n, 3n, 4n].map((prefixBlocks) => reusedPrefixes * prefixBlocks),
+            [3n, 3n, 3n].map((prefixBlocks) => reusedPrefixes * prefixBlocks),
         );
         for (const value of values) {
             expect(value.verifierCore.queries).toBe(
@@ -513,7 +516,7 @@ describe('proof hash work', () => {
         const role = proofHashProfiles(profile).find(
             (value) => value.role === 'setup',
         )!;
-        const previousRoleBytes = 8n + 5n * 6n + 4n + 36n + 3n * 64n + 2n;
+        const previousRoleBytes = 8n + 4n * 6n + 4n + 36n + 2n * 64n + 2n;
         const ownerItemBytes = 6n + 4n + 2n * 64n;
         expect(role.roleBytes).toBe(previousRoleBytes + ownerItemBytes);
         const current = compileProofHashWork(profile, role);

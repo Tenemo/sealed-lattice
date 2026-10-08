@@ -360,21 +360,23 @@ export const compileParticipantVaultKeyClasses = (
         authentication.signatureBytes,
     ].reduce((maximum, bytes) => (bytes > maximum ? bytes : maximum), 0n);
     const chunkBytes = 1n << 20n;
+    // The poll and proposal identities, the position and the record's
+    // object, offset and length.
     const contributionAssociatedBytes =
         BigInt(Buffer.byteLength('participant-contribution-record/1')) +
-        128n +
+        64n +
         64n +
         2n +
         2n +
         4n +
         4n;
-    // The poll, runtime and setup inventory, the position, a release's
-    // certified target digest, and the record's index and length.
+    // The poll and setup inventory, the position, a release's certified
+    // target digest, and the record's index and length.
     const ballotAssociatedBytes =
         BigInt(
             Buffer.byteLength('sealed-lattice/participant-ballot-record/v2'),
         ) +
-        3n * 64n +
+        2n * 64n +
         2n +
         2n +
         4n;
@@ -382,7 +384,7 @@ export const compileParticipantVaultKeyClasses = (
         BigInt(
             Buffer.byteLength('sealed-lattice/participant-release-record/v2'),
         ) +
-        3n * 64n +
+        2n * 64n +
         2n +
         64n +
         2n +

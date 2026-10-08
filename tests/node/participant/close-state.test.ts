@@ -288,7 +288,6 @@ describe('participant close state', () => {
         ).toBe(true);
         const context = {
             poll: filled(64, 1),
-            runtime: filled(64, 2),
             setupIdentity: filled(64, 3),
             position: 1,
         };

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import type { OracleInputMask } from '#tests/compressed-oracle-model.js';
 
 // The source-target predicate reads syntax, owner and the immutable family.
-// It deliberately leaves the salt, poll, runtime and coordinate unconstrained.
+// It deliberately leaves the salt, poll and coordinate unconstrained.
 // Coefficient validity belongs to the real contribution verifier, not extraction.
 export const registrationSourceMask = (
     owner: Uint8Array,
@@ -40,7 +40,7 @@ export const registrationSourceMask = (
     };
     integer(2, 1n);
     integer(2, 1n);
-    integer(4, 8n);
+    integer(4, 7n);
     const domain = new TextEncoder().encode(
         'sealed-lattice/registered-fhe-key/v1',
     );
@@ -52,10 +52,8 @@ export const registrationSourceMask = (
     header(1, 64);
     const saltOffset = offset;
     offset += 64;
-    for (let hash = 0; hash < 2; hash++) {
-        header(6, 64);
-        offset += 64;
-    }
+    header(6, 64);
+    offset += 64;
     header(1, 4 + modulus.length);
     integer(4, BigInt(modulus.length));
     literal(modulus);

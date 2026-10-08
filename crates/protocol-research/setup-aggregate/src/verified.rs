@@ -67,9 +67,7 @@ impl VerifiedSetupAggregate {
 }
 
 fn check_poll(roster: &AuthenticatedRosterProposal, poll: &VerifiedPoll) -> Result<(), Refusal> {
-    if roster.proposal().records()[0].header().poll != poll.identity()
-        || roster.proposal().records()[0].header().runtime != poll.runtime()
-    {
+    if roster.proposal().records()[0].header().poll != poll.identity() {
         return Err(Refusal::Context);
     }
     Ok(())

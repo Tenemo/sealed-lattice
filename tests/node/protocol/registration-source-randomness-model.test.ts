@@ -54,12 +54,12 @@ describe('original registration source randomness and hash work', () => {
         let largestDecoded = 0n;
         for (const [index, family] of inventory.families.entries()) {
             // Recover the raw mask from its independent byte framing: only
-            // salt, poll/runtime and the coordinate payload are unconstrained.
+            // salt, poll and the coordinate payload are unconstrained.
             const rawLength = 8n * family.commitmentInputBytes;
             const rawMask =
                 8n *
                 (family.commitmentInputBytes -
-                    192n -
+                    128n -
                     family.publicCoordinateBytes);
             let classWidth = 1n;
             while (classWidth < rawLength) classWidth *= 2n;
@@ -77,11 +77,12 @@ describe('original registration source randomness and hash work', () => {
             expect(result.families[index].comparedInputBits).toBe(label);
             // The native source binder uses one sign byte followed by a
             // fixed-width little-endian magnitude, bounded by floor(q/2).
+            // The extracted context is the 512-bit poll identity.
             const magnitudeBits = 8n * family.modulusBytes;
             const payloadBits = 512n + 65536n * (8n + magnitudeBits);
             const decoding =
                 11n +
-                10n * 1024n +
+                10n * 512n +
                 65536n * (24n * magnitudeBits + 94n) +
                 3n * payloadBits;
             expect(result.families[index].coordinateDecodingGates).toBe(
@@ -134,7 +135,6 @@ describe('original registration source randomness and hash work', () => {
                     ),
                     item(1, Buffer.alloc(1952)),
                     item(6, Buffer.alloc(64)),
-                    item(6, Buffer.alloc(64)),
                     item(
                         1,
                         variable(Buffer.alloc(Number(family.modulusBytes))),
@@ -166,7 +166,6 @@ describe('original registration source randomness and hash work', () => {
                     ),
                     item(1, Buffer.alloc(1952)),
                     item(1, Buffer.alloc(64)),
-                    item(6, Buffer.alloc(64)),
                     item(6, Buffer.alloc(64)),
                     item(
                         1,

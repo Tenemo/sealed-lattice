@@ -230,14 +230,14 @@ function applyClean(
 
 // After source-labelled extraction, framing, owner and family have already
 // matched the extraction predicate. This separate total circuit checks the
-// expected poll/runtime and canonical sign-magnitude coefficients. It copies
+// expected poll and canonical sign-magnitude coefficients. It copies
 // the salt and coordinate only on success, with a distinct validity bit.
 // It neither checks a key witness nor creates participant authority.
 export function compileSourceCoordinateDecoding(
     coefficients: number,
     magnitudeBits: number,
     halfModulus: bigint,
-    contextBits = 1024,
+    contextBits = 512,
     saltBits = 512,
 ) {
     assert.ok(
@@ -290,7 +290,7 @@ export function compileSourceCoordinateDecoding(
 export function sourceCoordinateDecodingWork(
     coefficients: bigint,
     magnitudeBits: bigint,
-    contextBits = 1024n,
+    contextBits = 512n,
     saltBits = 512n,
 ) {
     assert.ok(

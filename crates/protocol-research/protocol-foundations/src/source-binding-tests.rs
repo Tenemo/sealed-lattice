@@ -43,7 +43,6 @@ fn header(poll: &VerifiedPoll, credential: &Credential) -> RegistrationHeader {
     RegistrationHeader {
         username: normalize_username(b"Participant").unwrap(),
         poll: poll.identity(),
-        runtime: poll.runtime(),
         signing_public: *credential.signing_public(),
         recipient_key_hash: [5; 64],
 
@@ -120,7 +119,7 @@ fn registration_signature_binds_ordered_coordinate_commitments() {
         digest[0] = index as u8;
     }
     let digest = |header: &RegistrationHeader| {
-        BodyDigest::from_header(&header.encode().unwrap(), poll.identity(), poll.runtime()).unwrap()
+        BodyDigest::from_header(&header.encode().unwrap(), poll.identity()).unwrap()
     };
     let signature = credential.sign_registration(digest(&header)).unwrap();
     assert!(verify_registration_signature(digest(&header), &signature));
@@ -131,7 +130,7 @@ fn registration_signature_binds_ordered_coordinate_commitments() {
     assert!(!verify_registration_signature(digest(&header), &signature));
     let bytes = header.encode().unwrap();
     let mut changed = CanonicalTuple::decode(&bytes, &CanonicalDecodeLimits::default()).unwrap();
-    changed.items[6] = CanonicalItem::variable_bytes([0; 64]).unwrap();
+    changed.items[5] = CanonicalItem::variable_bytes([0; 64]).unwrap();
     assert!(RegistrationHeader::decode_prefix(&changed.encode().unwrap()).is_err());
 }
 
@@ -161,7 +160,6 @@ fn coordinate_commitment_matches_independent_framing_and_transport_partitions() 
             CanonicalItem::fixed_bytes(credential.signing_public()).unwrap(),
             CanonicalItem::fixed_bytes(salt).unwrap(),
             CanonicalItem::hash512(poll.identity()),
-            CanonicalItem::hash512(poll.runtime()),
             CanonicalItem::variable_bytes(&modulus).unwrap(),
             CanonicalItem::unsigned64(profile.fhe_common_sample_bits() as u64),
             CanonicalItem::variable_bytes([]).unwrap(),
@@ -190,32 +188,19 @@ fn coordinate_commitment_matches_independent_framing_and_transport_partitions() 
             expected
         );
     }
-    for (other_owner, other_poll, other_runtime, other_salt) in [
+    for (other_owner, other_poll, other_salt) in [
         (
             *Credential::from_seed([9; 32]).signing_public(),
             poll.identity(),
-            poll.runtime(),
             salt,
         ),
-        (*credential.signing_public(), [9; 64], poll.runtime(), salt),
-        (*credential.signing_public(), poll.identity(), [9; 64], salt),
-        (
-            *credential.signing_public(),
-            poll.identity(),
-            poll.runtime(),
-            [9; 64],
-        ),
+        (*credential.signing_public(), [9; 64], salt),
+        (*credential.signing_public(), poll.identity(), [9; 64]),
     ] {
         assert_ne!(
             zero_coordinate(
-                FheKeyCommitmentHasher::new(
-                    other_poll,
-                    other_runtime,
-                    &other_owner,
-                    profile,
-                    &other_salt
-                )
-                .unwrap(),
+                FheKeyCommitmentHasher::new(other_poll, &other_owner, profile, &other_salt)
+                    .unwrap(),
                 1 << 20
             ),
             expected

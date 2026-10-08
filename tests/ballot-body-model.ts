@@ -41,12 +41,12 @@ export const compileBallotBodyCensus = (profile: SupportedProfile) => {
     const contextBytes = 4n + 64n + 64n + 2n + 1n + 1n;
     const proofRoleBytes =
         8n +
-        6n * 6n +
+        5n * 6n +
         4n +
         BigInt(Buffer.byteLength('sealed-lattice/ballot-proof/v2')) +
         4n +
         participantIdentityAsciiBytes +
-        3n * 64n +
+        2n * 64n +
         2n;
     const headerBytes = 4n + 8n + contextBytes;
     const ciphertextBytes = 2n * fheBytes + 2n * auxiliaryBytes;

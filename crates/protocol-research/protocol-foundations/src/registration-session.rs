@@ -93,15 +93,13 @@ fn run(input: &[u8]) -> Vec<u8> {
     })
 }
 
-// The poll and runtime identities, the header's length, the header and the
-// signature.
+// The poll identity, the header's length, the header and the signature.
 fn open(bytes: &[u8]) -> Result<RegistrationVerifier, Error> {
-    let length = u32::from_le_bytes(bytes[128..132].try_into().unwrap()) as usize;
+    let length = u32::from_le_bytes(bytes[64..68].try_into().unwrap()) as usize;
     RegistrationVerifier::open(
         bytes[..64].try_into().unwrap(),
-        bytes[64..128].try_into().unwrap(),
-        &bytes[132..132 + length],
-        &bytes[132 + length..],
+        &bytes[68..68 + length],
+        &bytes[68 + length..],
     )
 }
 
@@ -152,9 +150,8 @@ impl RegistrationSession {
         if signature.len() != SIGNATURE_BYTES {
             return Err(Error::Shape);
         }
-        let mut input = Vec::with_capacity(132 + header_bytes.len() + signature.len());
+        let mut input = Vec::with_capacity(68 + header_bytes.len() + signature.len());
         input.extend(poll.identity());
-        input.extend(poll.runtime());
         input.extend((header_bytes.len() as u32).to_le_bytes());
         input.extend(header_bytes);
         input.extend(signature);

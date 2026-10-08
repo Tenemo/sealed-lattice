@@ -224,7 +224,6 @@ pub extern "C" fn retire_contribution_sources() -> u32 {
         if !same_context
             || poll.identity() != state.poll_identity
             || poll.identity() != original.header().poll
-            || poll.runtime() != original.header().runtime
         {
             return 1;
         }

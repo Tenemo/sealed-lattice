@@ -7,11 +7,10 @@ import type { ParticipantStore } from './database.js';
 // own fresh AES-256-GCM key with the zero nonce.
 
 // What a private record after setup verification is bound to besides its
-// coordinates: the poll, the runtime, the setup identity and the
-// participant.
+// coordinates: the poll, whose identity names the runtime, the setup
+// identity and the participant.
 export type RecordContext = Readonly<{
     poll: Uint8Array;
-    runtime: Uint8Array;
     setupIdentity: Uint8Array;
     position: number;
 }>;

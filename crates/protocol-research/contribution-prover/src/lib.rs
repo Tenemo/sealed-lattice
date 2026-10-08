@@ -15,8 +15,8 @@ pub fn import_checkpoint(
     position: usize,
     bytes: &[u8],
 ) -> Result<first_checkpoint::Import, Error> {
-    let prefix = bytes.get(..192).ok_or(Error::Operation)?;
-    let import = first_checkpoint::Import::begin(&bytes[192..])?;
+    let prefix = bytes.get(..128).ok_or(Error::Operation)?;
+    let import = first_checkpoint::Import::begin(&bytes[128..])?;
     let expected = context
         .checkpoint_role(prefix, position, import.profile())
         .map_err(|_| Error::Operation)?;

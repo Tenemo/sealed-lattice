@@ -7,7 +7,7 @@ describe('participant release custody layout', () => {
     it('retains the seed only between the target lock and the body', () => {
         const value = compileParticipantReleaseCustody(completionProfile());
         expect(value.proofRoleBytes).toBe(
-            8n + 7n * 6n + 4n + 35n + 4n + 128n + 4n * 64n + 2n,
+            8n + 6n * 6n + 4n + 35n + 4n + 128n + 3n * 64n + 2n,
         );
         // The marker, predecessor, ballot status, target length, body
         // length and key count;

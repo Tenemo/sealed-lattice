@@ -21,7 +21,6 @@ pub const MAXIMUM_PROPOSAL_BYTES: usize = 2048;
 #[derive(Clone)]
 pub struct RetainedContributionContext {
     pub(crate) poll: [u8; 64],
-    pub(crate) runtime: [u8; 64],
     pub(crate) proposal: [u8; 64],
     pub(crate) position: usize,
     pub(crate) owner_body: [u8; 64],
@@ -45,23 +44,22 @@ impl RetainedContributionContext {
         if credential.signing_public() != &header.signing_public
             || credential.completed_body != Some(original.body_digest())
             || header.poll != verified_poll.identity()
-            || header.runtime != verified_poll.runtime()
             || header.fhe_key_commitments.len()
                 != crate::source_binding::fhe_key_families(verified_poll).len()
         {
             return Err(Error::Context);
         }
-        let (poll, runtime) = (header.poll, header.runtime);
+        let poll = header.poll;
         let limits = CanonicalDecodeLimits {
             maximum_tuple_byte_length: MAXIMUM_PROPOSAL_BYTES,
-            maximum_item_count: 4,
+            maximum_item_count: 3,
             maximum_item_byte_length: MAXIMUM_PROPOSAL_BYTES,
             maximum_nesting_depth: 1,
             maximum_cumulative_work_byte_length: 8192,
             maximum_cumulative_allocation_byte_length: 8192,
         };
         let tuple = CanonicalTuple::decode(bytes, &limits).map_err(|_| Error::Shape)?;
-        if tuple.schema_identifier != 1 || tuple.schema_version != 1 || tuple.items.len() != 4 {
+        if tuple.schema_identifier != 1 || tuple.schema_version != 1 || tuple.items.len() != 3 {
             return Err(Error::Shape);
         }
         let items = &tuple.items;
@@ -70,13 +68,11 @@ impl RetainedContributionContext {
                 != b"sealed-lattice/roster-proposal/v1"
             || items[1].item_type() != CanonicalItemType::Hash512
             || items[1].canonical_bytes() != poll
-            || items[2].item_type() != CanonicalItemType::Hash512
-            || items[2].canonical_bytes() != runtime
-            || items[3].item_type() != CanonicalItemType::RawBytes
+            || items[2].item_type() != CanonicalItemType::RawBytes
         {
             return Err(Error::Context);
         }
-        let bodies = items[3].variable_value_bytes().map_err(|_| Error::Shape)?;
+        let bodies = items[2].variable_value_bytes().map_err(|_| Error::Shape)?;
         let count = bodies
             .get(..4)
             .map(|count| u32::from_le_bytes(count.try_into().unwrap()) as usize)
@@ -104,7 +100,6 @@ impl RetainedContributionContext {
         let role = contribution_role(original, proposal, position)?;
         Ok(Self {
             poll,
-            runtime,
             proposal,
             position,
             owner_body,
@@ -125,19 +120,19 @@ impl RetainedContributionContext {
     pub fn fhe_key_commitment(&self) -> &[u8; 64] {
         &self.fhe_key_commitment
     }
-    /// The checkpoint's routing and profile must match this original owner
-    /// before its sealed records are read. Noncontributors retain a context
-    /// for ballots, but never import a contribution checkpoint.
+    /// The checkpoint's routing, the poll and proposal identities, and its
+    /// profile must match this original owner before its sealed records are
+    /// read. Noncontributors retain a context for ballots, but never import
+    /// a contribution checkpoint.
     pub fn checkpoint_role(
         &self,
         prefix: &[u8],
         position: usize,
         profile: Profile,
     ) -> Result<&[u8], Error> {
-        if prefix.len() != 192
+        if prefix.len() != 128
             || prefix[..64] != self.poll
-            || prefix[64..128] != self.runtime
-            || prefix[128..] != self.proposal
+            || prefix[64..] != self.proposal
             || position != self.position
             || position >= self.profile.setup_eligible_contributors()
             || profile != self.profile
@@ -148,9 +143,9 @@ impl RetainedContributionContext {
     }
 }
 
-/// A proposal names its poll and runtime and lists the registration count
-/// and each registration's body digest.
-fn encode_proposal(poll: [u8; 64], runtime: [u8; 64], bodies: Vec<u8>) -> Result<Vec<u8>, Error> {
+/// A proposal names its poll and lists the registration count and each
+/// registration's body digest.
+fn encode_proposal(poll: [u8; 64], bodies: Vec<u8>) -> Result<Vec<u8>, Error> {
     CanonicalTuple::new(
         1,
         1,
@@ -158,7 +153,6 @@ fn encode_proposal(poll: [u8; 64], runtime: [u8; 64], bodies: Vec<u8>) -> Result
             CanonicalItem::nonempty_ascii("sealed-lattice/roster-proposal/v1")
                 .map_err(|_| Error::Shape)?,
             CanonicalItem::hash512(poll),
-            CanonicalItem::hash512(runtime),
             CanonicalItem::variable_bytes(bodies).map_err(|_| Error::Shape)?,
         ],
     )
@@ -169,7 +163,7 @@ fn encode_proposal(poll: [u8; 64], runtime: [u8; 64], bodies: Vec<u8>) -> Result
 pub fn proposal_bytes(participants: usize) -> usize {
     let mut bodies = Vec::from((participants as u32).to_le_bytes());
     bodies.resize(4 + 64 * participants, 0);
-    encode_proposal([0; 64], [0; 64], bodies)
+    encode_proposal([0; 64], bodies)
         .expect("A proposal of a supported size encodes.")
         .len()
 }
@@ -203,10 +197,7 @@ impl RosterProposal {
         let mut organizer_position = None;
         for (position, record) in records.iter().enumerate() {
             let header = record.header();
-            if header.poll != poll.identity()
-                || header.runtime != poll.runtime()
-                || header.fhe_key_commitments.len() != family_count
-            {
+            if header.poll != poll.identity() || header.fhe_key_commitments.len() != family_count {
                 return Err(Error::Context);
             }
             entries.push(
@@ -223,7 +214,7 @@ impl RosterProposal {
         let organizer_position = organizer_position.ok_or(Error::Context)?;
         // The roster refuses a repeated signing key or identity.
         Roster::new(entries).map_err(|_| Error::Shape)?;
-        let body = encode_proposal(poll.identity(), poll.runtime(), bodies)?;
+        let body = encode_proposal(poll.identity(), bodies)?;
         let identity = hash_foundation_tuple_512(
             "sealed-lattice/roster-proposal-id/v1",
             &[CanonicalItem::variable_bytes(&body).map_err(|_| Error::Shape)?],
@@ -290,7 +281,6 @@ fn contribution_role(
     let header = original.header();
     encode_contribution_role(
         header.poll,
-        header.runtime,
         proposal,
         position,
         derive_participant_identity(&header.signing_public).map_err(|_| Error::Shape)?,
@@ -300,7 +290,6 @@ fn contribution_role(
 // Byte encoding alone supplies no original-owner or contribution authority.
 pub(crate) fn encode_contribution_role(
     poll: [u8; 64],
-    runtime: [u8; 64],
     proposal: [u8; 64],
     position: usize,
     participant_identity: ParticipantIdentity,
@@ -317,7 +306,6 @@ pub(crate) fn encode_contribution_role(
             CanonicalItem::nonempty_ascii(&participant_identity.to_lowercase_hex())
                 .map_err(|_| Error::Shape)?,
             CanonicalItem::hash512(poll),
-            CanonicalItem::hash512(runtime),
             CanonicalItem::hash512(proposal),
             CanonicalItem::unsigned16(position as u16),
         ],

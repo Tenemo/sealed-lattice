@@ -22,7 +22,6 @@ impl BallotComputationContext {
     ) -> Result<Self, Error> {
         let profile = inputs.profile();
         if owner.poll() != &poll.identity()
-            || owner.runtime() != &poll.runtime()
             || owner.setup_identity() != inputs.setup_identity()
             || owner.position() >= profile.participants()
             || profile.options() != poll.manifest().option_count()

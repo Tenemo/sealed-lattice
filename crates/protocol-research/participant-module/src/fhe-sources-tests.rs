@@ -84,7 +84,6 @@ fn source_stream_matches_canonical_tuple_and_binds_each_original_context() {
             CanonicalItem::nonempty_ascii("sealed-lattice/fhe-source-randomness/v1").unwrap(),
             CanonicalItem::fixed_bytes(owner).unwrap(),
             CanonicalItem::hash512([3; 64]),
-            CanonicalItem::hash512([5; 64]),
             CanonicalItem::variable_bytes(profile.ciphertext_modulus().to_bytes()).unwrap(),
             CanonicalItem::unsigned64(profile.fhe_common_sample_bits() as u64),
             CanonicalItem::fixed_bytes(seed).unwrap(),
@@ -96,33 +95,22 @@ fn source_stream_matches_canonical_tuple_and_binds_each_original_context() {
     hash.update(&canonical);
     let mut expected = [0; 160];
     hash.finalize_xof().read(&mut expected);
-    let output =
-        |poll, runtime, owner: &[u8; SIGNING_PUBLIC_KEY_BYTES], profile, seed: &[u8; 64]| {
-            let mut bytes = [0; 160];
-            stream(poll, runtime, owner, profile, seed).read(&mut bytes);
-            bytes
-        };
-    assert_eq!(output([3; 64], [5; 64], &owner, profile, &seed), expected);
-    assert_ne!(output([4; 64], [5; 64], &owner, profile, &seed), expected);
-    assert_ne!(output([3; 64], [6; 64], &owner, profile, &seed), expected);
+    let output = |poll, owner: &[u8; SIGNING_PUBLIC_KEY_BYTES], profile, seed: &[u8; 64]| {
+        let mut bytes = [0; 160];
+        stream(poll, owner, profile, seed).read(&mut bytes);
+        bytes
+    };
+    assert_eq!(output([3; 64], &owner, profile, &seed), expected);
+    assert_ne!(output([4; 64], &owner, profile, &seed), expected);
     assert_ne!(
-        output(
-            [3; 64],
-            [5; 64],
-            &[24; SIGNING_PUBLIC_KEY_BYTES],
-            profile,
-            &seed
-        ),
+        output([3; 64], &[24; SIGNING_PUBLIC_KEY_BYTES], profile, &seed),
         expected
     );
-    assert_ne!(
-        output([3; 64], [5; 64], &owner, profile, &[30; 64]),
-        expected
-    );
+    assert_ne!(output([3; 64], &owner, profile, &[30; 64]), expected);
     let other = Profile::all()
         .find(|candidate| candidate.ciphertext_modulus() != profile.ciphertext_modulus())
         .unwrap();
-    assert_ne!(output([3; 64], [5; 64], &owner, other, &seed), expected);
+    assert_ne!(output([3; 64], &owner, other, &seed), expected);
 }
 
 #[test]
@@ -133,7 +121,6 @@ fn source_capsule_restores_original_entries_and_refuses_damage_or_resealing() {
     let commitments = vec![[31; 64]; families.len()];
     let mut sources = Sources {
         poll: poll.identity(),
-        runtime: poll.runtime(),
         owner: *credential.signing_public(),
         entries: families
             .iter()

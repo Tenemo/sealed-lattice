@@ -108,7 +108,6 @@ impl CloseWork {
     ) -> Result<Self, Error> {
         let proposal = setup.roster().proposal();
         if owner.poll() != &poll.identity()
-            || owner.runtime() != &poll.runtime()
             || owner.setup_identity() != &setup.identity()
             || owner.position() >= proposal.records().len()
         {

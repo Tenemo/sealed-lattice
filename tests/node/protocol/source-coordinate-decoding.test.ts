@@ -151,12 +151,12 @@ describe('extracted source coordinate decoding circuit', () => {
                 for (const magnitude of [0n, limit - 1n, limit, limit + 1n]) {
                     const source = input(
                         1,
-                        1n << 1023n,
-                        1n << 1023n,
+                        1n << 511n,
+                        1n << 511n,
                         1n << 511n,
                         [[sign, magnitude]],
                         magnitudeBits,
-                        1024,
+                        512,
                         512,
                     );
                     const result = runCleanCircuit(one, source);
@@ -165,7 +165,7 @@ describe('extracted source coordinate decoding circuit', () => {
                     expect(result[result.length - 1]).toBe(Number(valid));
                     expect(result.subarray(0, -1)).toEqual(
                         valid
-                            ? source.subarray(2049)
+                            ? source.subarray(1025)
                             : new Uint8Array(result.length - 1),
                     );
                 }

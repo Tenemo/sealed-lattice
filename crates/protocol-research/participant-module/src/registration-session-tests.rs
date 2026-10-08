@@ -122,7 +122,6 @@ fn checkpoint_import_preserves_the_verified_original_owner(
         vec![
             CanonicalItem::nonempty_ascii("sealed-lattice/roster-proposal/v1").unwrap(),
             CanonicalItem::hash512(poll.identity()),
-            CanonicalItem::hash512(poll.runtime()),
             CanonicalItem::variable_bytes(bodies).unwrap(),
         ],
     )
@@ -130,7 +129,7 @@ fn checkpoint_import_preserves_the_verified_original_owner(
     .unwrap();
     let context =
         RetainedContributionContext::parse(credential, original, poll, 0, &proposal).unwrap();
-    let prefix = [poll.identity(), poll.runtime(), *context.identity()].concat();
+    let prefix = [poll.identity(), *context.identity()].concat();
     let role = |credential: &Credential, position: u16, purpose: &str| {
         CanonicalTuple::new(
             1,
@@ -144,7 +143,6 @@ fn checkpoint_import_preserves_the_verified_original_owner(
                 )
                 .unwrap(),
                 CanonicalItem::hash512(poll.identity()),
-                CanonicalItem::hash512(poll.runtime()),
                 CanonicalItem::hash512(*context.identity()),
                 CanonicalItem::unsigned16(position),
             ],
@@ -181,16 +179,16 @@ fn checkpoint_import_preserves_the_verified_original_owner(
         let bytes = request(&wrong_role, profile.participants());
         // The checkpoint decoder accepts this partial header, isolating the
         // owning import helper's role check as the reason for refusal.
-        assert!(word_proof::bridge::first_checkpoint::Import::begin(&bytes[192..]).is_ok());
+        assert!(word_proof::bridge::first_checkpoint::Import::begin(&bytes[128..]).is_ok());
         assert!(contribution_prover::import_checkpoint(&context, 0, &bytes).is_err());
     }
     for position in [1, 2, usize::MAX] {
         assert!(contribution_prover::import_checkpoint(&context, position, &valid).is_err());
     }
     let missing_keys = request(&expected_role, 0);
-    assert!(word_proof::bridge::first_checkpoint::Import::begin(&missing_keys[192..]).is_ok());
+    assert!(word_proof::bridge::first_checkpoint::Import::begin(&missing_keys[128..]).is_ok());
     assert!(contribution_prover::import_checkpoint(&context, 0, &missing_keys).is_err());
-    for offset in [0, 64, 128] {
+    for offset in [0, 64] {
         let mut changed = valid.clone();
         changed[offset] ^= 1;
         assert!(contribution_prover::import_checkpoint(&context, 0, &changed).is_err());

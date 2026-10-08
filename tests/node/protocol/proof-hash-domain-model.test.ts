@@ -31,14 +31,13 @@ const ascii = (value: string) =>
 const roleHeader = Buffer.alloc(8);
 roleHeader.writeUInt16LE(1);
 roleHeader.writeUInt16LE(1, 2);
-roleHeader.writeUInt32LE(6, 4);
+roleHeader.writeUInt32LE(5, 4);
 const role = Buffer.concat([
     roleHeader,
     ascii('sealed-lattice/ballot-proof/v2'),
     ascii('ab'.repeat(64)),
     item(6, Buffer.alloc(64, 1)),
     item(6, Buffer.alloc(64, 2)),
-    item(6, Buffer.alloc(64, 3)),
     item(3, Buffer.alloc(2)),
 ]);
 const fixedPrefix = Buffer.alloc(64);

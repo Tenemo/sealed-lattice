@@ -45,7 +45,7 @@ const parseRole = (
     )
         return undefined;
     const count = role.readUInt32LE(4);
-    if (count !== 6 && count !== 7) return undefined;
+    if (count !== 5 && count !== 6) return undefined;
     let offset = 8;
     const items: { type: number; bytes: Buffer }[] = [];
     for (let index = 0; index < count; index++) {
@@ -74,7 +74,7 @@ const parseRole = (
     );
     if (
         !purpose ||
-        count !== (purpose === 'release' ? 7 : 6) ||
+        count !== (purpose === 'release' ? 6 : 5) ||
         items
             .slice(2, -1)
             .some((item) => item.type !== 6 || item.bytes.length !== 64) ||

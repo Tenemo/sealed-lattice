@@ -187,10 +187,10 @@ impl Credential {
 
     /// Keys a result that its owning verifier or evaluator produced to this
     /// credential's secret seed, under the label of what the bytes are and
-    /// the poll and runtime they belong to. Only the transition that
-    /// consumes the owner's result requests a tag, so a later operation of
-    /// the same participant refuses bytes it did not retain. The tag is
-    /// local custody evidence, not a public capability.
+    /// the poll they belong to, whose identity names its runtime. Only the
+    /// transition that consumes the owner's result requests a tag, so a later
+    /// operation of the same participant refuses bytes it did not retain. The
+    /// tag is local custody evidence, not a public capability.
     pub fn retained_tag(
         &self,
         label: &[u8],
@@ -202,7 +202,6 @@ impl Credential {
         hash.update(label);
         hash.update(self.signing_seed.as_slice());
         hash.update(poll.identity());
-        hash.update(poll.runtime());
         hash.update((bytes.len() as u64).to_le_bytes());
         hash.update(bytes);
         hash.finalize()
@@ -250,16 +249,12 @@ impl BodyDigest {
             signing_public: header.signing_public,
         })
     }
-    pub fn from_header(
-        bytes: &[u8],
-        expected_poll: [u8; 64],
-        expected_runtime: [u8; 64],
-    ) -> Result<Self, Error> {
+    pub fn from_header(bytes: &[u8], expected_poll: [u8; 64]) -> Result<Self, Error> {
         let (header, consumed) = RegistrationHeader::decode_prefix(bytes)?;
         if consumed != bytes.len() {
             return Err(Error::Shape);
         }
-        if header.poll != expected_poll || header.runtime != expected_runtime {
+        if header.poll != expected_poll {
             return Err(Error::Context);
         }
         Self::new(header)
@@ -271,8 +266,8 @@ fn check_header(header: &RegistrationHeader) -> Result<(), Error> {
     Ok(())
 }
 
-/// A complete registration header of the poll and runtime, checked as the
-/// registration verifier checks it.
+/// A complete registration header of the poll, checked as the registration
+/// verifier checks it.
 pub(crate) fn checked_header(
     bytes: &[u8],
     poll: &VerifiedPoll,
@@ -282,7 +277,6 @@ pub(crate) fn checked_header(
         return Err(Error::Shape);
     }
     if header.poll != poll.identity()
-        || header.runtime != poll.runtime()
         || header.fhe_key_commitments.len() != source_binding::fhe_key_families(poll).len()
     {
         return Err(Error::Context);

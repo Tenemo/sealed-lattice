@@ -79,13 +79,7 @@ impl FheKeyCommitmentHasher {
         salt: &[u8; SOURCE_SALT_BYTES],
     ) -> Result<Self, Error> {
         fhe_key_family_index(poll, profile)?;
-        Self::new(
-            poll.identity(),
-            poll.runtime(),
-            credential.signing_public(),
-            profile,
-            salt,
-        )
+        Self::new(poll.identity(), credential.signing_public(), profile, salt)
     }
 
     pub fn for_contribution(
@@ -101,7 +95,6 @@ impl FheKeyCommitmentHasher {
             .header();
         Self::new(
             header.poll,
-            header.runtime,
             &header.signing_public,
             proposal.profile(),
             salt,
@@ -118,7 +111,6 @@ impl FheKeyCommitmentHasher {
         }
         Self::new(
             context.poll,
-            context.runtime,
             credential.signing_public(),
             context.profile(),
             salt,
@@ -127,7 +119,6 @@ impl FheKeyCommitmentHasher {
 
     fn new(
         poll: [u8; 64],
-        runtime: [u8; 64],
         signing_public: &[u8; SIGNING_PUBLIC_KEY_BYTES],
         profile: Profile,
         salt: &[u8; SOURCE_SALT_BYTES],
@@ -138,7 +129,6 @@ impl FheKeyCommitmentHasher {
             CanonicalItem::fixed_bytes(signing_public).map_err(|_| Error::Shape)?,
             CanonicalItem::fixed_bytes(salt).map_err(|_| Error::Shape)?,
             CanonicalItem::hash512(poll),
-            CanonicalItem::hash512(runtime),
             CanonicalItem::variable_bytes(&modulus).map_err(|_| Error::Shape)?,
             CanonicalItem::unsigned64(profile.fhe_common_sample_bits() as u64),
         ];

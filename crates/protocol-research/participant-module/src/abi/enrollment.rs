@@ -214,7 +214,7 @@ fn restore_enrollment(length: usize, prepared: bool) -> u32 {
         let mut state = state.borrow_mut();
         if state.restored
             || (state.started && state.enrollment.is_none())
-            || !(132..=state.input.len()).contains(&length)
+            || !(68..=state.input.len()).contains(&length)
         {
             return 1;
         }
@@ -222,7 +222,7 @@ fn restore_enrollment(length: usize, prepared: bool) -> u32 {
         state.started = true;
         let input = Zeroizing::new(state.input[..length].to_vec());
         state.input[..length].zeroize();
-        let header_length = u32::from_le_bytes(input[128..132].try_into().unwrap()) as usize;
+        let header_length = u32::from_le_bytes(input[64..68].try_into().unwrap()) as usize;
         if header_length > RegistrationHeader::maximum_bytes() {
             return 1;
         }
@@ -230,7 +230,7 @@ fn restore_enrollment(length: usize, prepared: bool) -> u32 {
         let key_polynomial_bytes = protocol_foundations::registration::KEY_BYTES;
         let recipient_bytes = setup_witness::registration::SEALED_KEY_BYTES;
         let signing_bytes = protocol_foundations::SEALED_SIGNING_SEED_BYTES;
-        let base_length = 132
+        let base_length = 68
             + header_length
             + 64
             + key_bytes
@@ -241,17 +241,14 @@ fn restore_enrollment(length: usize, prepared: bool) -> u32 {
             return 1;
         }
         let Ok((header, consumed)) =
-            RegistrationHeader::decode_prefix(&input[132..132 + header_length])
+            RegistrationHeader::decode_prefix(&input[68..68 + header_length])
         else {
             return 1;
         };
-        if consumed != header_length
-            || header.poll.as_slice() != &input[..64]
-            || header.runtime.as_slice() != &input[64..128]
-        {
+        if consumed != header_length || header.poll.as_slice() != &input[..64] {
             return 1;
         }
-        let start = 132 + header_length;
+        let start = 68 + header_length;
         let body_digest = input[start..start + 64].try_into().unwrap();
         let data_keys = &input[start + 64..start + 64 + key_bytes];
         let public_start = start + 64 + key_bytes;
@@ -311,7 +308,7 @@ fn restore_enrollment(length: usize, prepared: bool) -> u32 {
         let Some(verified) = super::own_verification::verified() else {
             return 1;
         };
-        if verified.header().encode().ok().as_deref() != Some(&input[132..132 + header_length])
+        if verified.header().encode().ok().as_deref() != Some(&input[68..68 + header_length])
             || verified.body_digest() != body_digest
             || verified.public_key() != &input[public_start..capsule_start]
         {

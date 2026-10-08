@@ -100,7 +100,7 @@ export const compileFirstOracleCheckpointCensus = (
         maximumPlaintextRecordBytes: recordBytes,
         maximumCiphertextRecordBytes: recordBytes + 16n,
         headerBytes,
-        importBytes: 3n * 64n + headerBytes,
+        importBytes: 2n * 64n + headerBytes,
         headerDigestInputBytes,
         headerDigestPermutations,
         headerDigestPermutationsPerPass: recordCount * headerDigestPermutations,

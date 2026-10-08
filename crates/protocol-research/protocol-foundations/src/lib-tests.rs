@@ -3,7 +3,6 @@ fn body(credential: &Credential, poll: [u8; 64]) -> BodyDigest {
     BodyDigest::new(RegistrationHeader {
         username: foundation::normalize_username(b"Participant").unwrap(),
         poll,
-        runtime: [2; 64],
         signing_public: *credential.signing_public(),
         recipient_key_hash: [3; 64],
         fhe_key_commitments: vec![[7; 64]],
@@ -76,7 +75,6 @@ fn canonical_headers_bind_context_and_refuse_trailing_bytes() {
     let header = RegistrationHeader {
         username: foundation::normalize_username(b"Participant").unwrap(),
         poll: [1; 64],
-        runtime: [2; 64],
         signing_public: *credential.signing_public(),
         recipient_key_hash: [3; 64],
 
@@ -86,14 +84,14 @@ fn canonical_headers_bind_context_and_refuse_trailing_bytes() {
     .unwrap();
     let mut combined = header.clone();
     combined.extend([4; 128]);
-    assert!(BodyDigest::from_header(&combined, [1; 64], [2; 64]).is_err());
-    let decoded = BodyDigest::from_header(&header, [1; 64], [2; 64]).unwrap();
+    assert!(BodyDigest::from_header(&combined, [1; 64]).is_err());
+    let decoded = BodyDigest::from_header(&header, [1; 64]).unwrap();
     assert_eq!(decoded.bytes(), body(&credential, [1; 64]).bytes());
-    assert!(BodyDigest::from_header(&header, [9; 64], [2; 64]).is_err());
+    assert!(BodyDigest::from_header(&header, [9; 64]).is_err());
     let mut altered = header.clone();
     altered[2] = 2;
-    assert!(BodyDigest::from_header(&altered, [1; 64], [2; 64]).is_err());
-    assert!(BodyDigest::from_header(&header[..header.len() - 1], [1; 64], [2; 64]).is_err());
+    assert!(BodyDigest::from_header(&altered, [1; 64]).is_err());
+    assert!(BodyDigest::from_header(&header[..header.len() - 1], [1; 64]).is_err());
 }
 
 #[test]
@@ -102,7 +100,6 @@ fn signed_usernames_are_canonical_bounded_and_not_replaceable() {
     let make = |name: &[u8]| RegistrationHeader {
         username: foundation::normalize_username(name).unwrap(),
         poll: [1; 64],
-        runtime: [2; 64],
         signing_public: *credential.signing_public(),
         recipient_key_hash: [3; 64],
 
@@ -118,7 +115,7 @@ fn signed_usernames_are_canonical_bounded_and_not_replaceable() {
     assert!(foundation::normalize_username(&[b'n'; 129]).is_err());
     assert!(foundation::normalize_username(b"").is_err());
     assert!(foundation::normalize_username(&[0xff]).is_err());
-    let hash = |header: &[u8]| BodyDigest::from_header(header, [1; 64], [2; 64]).unwrap();
+    let hash = |header: &[u8]| BodyDigest::from_header(header, [1; 64]).unwrap();
     let signature = credential.sign_registration(hash(&encoded)).unwrap();
     assert!(verify_registration_signature(hash(&encoded), &signature));
     assert!(!verify_registration_signature(hash(&other), &signature));
@@ -129,5 +126,5 @@ fn signed_usernames_are_canonical_bounded_and_not_replaceable() {
     noncanonical.extend(6u32.to_le_bytes());
     noncanonical.extend(b"Jose\xcc\x81");
     noncanonical.extend(&encoded[name_end..]);
-    assert!(BodyDigest::from_header(&noncanonical, [1; 64], [2; 64]).is_err());
+    assert!(BodyDigest::from_header(&noncanonical, [1; 64]).is_err());
 }
