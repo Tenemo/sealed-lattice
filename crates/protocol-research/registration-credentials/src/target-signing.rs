@@ -177,7 +177,8 @@ impl TargetVote {
             return Err(Error::Shape);
         }
         let position = u16::from_le_bytes(bytes[..2].try_into().unwrap()) as usize;
-        if position >= 20 {
+        // A position lies within the largest supported roster.
+        if position >= *Profile::participant_range().end() {
             return Err(Error::Shape);
         }
         Ok(Self {
@@ -266,7 +267,8 @@ impl Credential {
         })
     }
     /// Restores consumed target authority from the exact authenticated root
-    /// record, without evaluating another signature or reopening that purpose.
+    /// record. It verifies the retained vote's signature under the credential,
+    /// signs nothing and never reopens that purpose.
     pub fn restore_target(
         &mut self,
         owner: &RetainedBallotOwner,
