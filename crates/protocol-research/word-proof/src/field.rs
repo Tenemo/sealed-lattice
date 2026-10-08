@@ -1,5 +1,5 @@
 pub use base::MODULUS;
-pub use setup_stream_kernel::arithmetic as base;
+pub use statement_stream::arithmetic as base;
 pub type Element = [u128; 3];
 pub const ZERO: Element = [0, 0, 0];
 pub const ONE: Element = [1, 0, 0];

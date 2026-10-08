@@ -1,7 +1,7 @@
 use crate::{BallotInputs, OriginalEnrollments, Scenario, aggregate, close, completion};
 use evaluation_target::close::{CloseContext, ClosedSlot};
-use registration_credentials::poll::{SignedPoll, VerifiedPoll};
-use registration_enrollment::finality_work::OwnBallotInclusion;
+use participant_module::finality_work::OwnBallotInclusion;
+use protocol_foundations::poll::{SignedPoll, VerifiedPoll};
 use setup_aggregate::verified::VerifiedSetupAggregate;
 use std::{fs, path::Path, sync::Arc};
 

@@ -1,5 +1,5 @@
 use super::*;
-use registration_credentials::SIGNING_PUBLIC_KEY_BYTES;
+use protocol_foundations::SIGNING_PUBLIC_KEY_BYTES;
 #[test]
 fn proof_roles_separate_every_variable_context_input() {
     let owner = derive_participant_identity(&[7; SIGNING_PUBLIC_KEY_BYTES]).unwrap();
@@ -24,7 +24,7 @@ fn proof_roles_separate_every_variable_context_input() {
     );
     assert_eq!(
         tuple.items[1].item_type(),
-        registration_credentials::foundation::CanonicalItemType::Ascii
+        protocol_foundations::foundation::CanonicalItemType::Ascii
     );
     assert_eq!(
         tuple.items[1].variable_value_bytes().unwrap(),

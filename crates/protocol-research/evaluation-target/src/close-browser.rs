@@ -5,7 +5,7 @@ use ballot_proof::submission::{
     AuthenticatedBallotBody, AuthenticatedBallotEnvelope, BallotBodyAuthentication,
     authenticate_envelope,
 };
-use registration_credentials::{
+use protocol_foundations::{
     SIGNATURE_BYTES,
     ballot_authentication::ENVELOPE_BYTES,
     close_signing::{

@@ -21,8 +21,7 @@ fn source(profile: Profile, index: usize) -> (AggregatePolynomial, Vec<u8>, Vec<
     let expected = AggregatePolynomial {
         index,
         bytes: bytes.len(),
-        digest: registration_credentials::identity::identity(PUBLIC_POLYNOMIAL_DOMAIN, &bytes)
-            .unwrap(),
+        digest: protocol_foundations::identity::identity(PUBLIC_POLYNOMIAL_DOMAIN, &bytes).unwrap(),
     };
     (expected, bytes, values)
 }

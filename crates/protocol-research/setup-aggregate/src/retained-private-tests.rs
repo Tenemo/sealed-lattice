@@ -10,7 +10,7 @@ fn record() -> (Vec<u8>, Vec<u8>) {
     record.extend([9; 64]);
     for index in profile.contribution_body_polynomials() {
         record.extend(if index == key {
-            registration_credentials::identity::identity(PUBLIC_POLYNOMIAL_DOMAIN, &values).unwrap()
+            protocol_foundations::identity::identity(PUBLIC_POLYNOMIAL_DOMAIN, &values).unwrap()
         } else {
             [0; 64]
         });
@@ -80,7 +80,7 @@ fn provisional_and_final_reference_grammars_do_not_alias() {
         .into_polynomials();
     let provisional = encode_reference(b"SPI1", profile(), [9; 64], &polynomials).unwrap();
     assert_eq!(
-        provisional.len() + registration_credentials::RETAINED_TAG_BYTES,
+        provisional.len() + protocol_foundations::RETAINED_TAG_BYTES,
         crate::selection_reference_bytes(profile())
     );
     assert!(RetainedSetupInputs::parse(profile(), &provisional, [9; 64]).is_err());

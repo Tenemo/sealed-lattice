@@ -4,7 +4,7 @@ use crate::{
     oracles::{FirstOracle, SecondOracle, Witness},
 };
 use parallel_work::share;
-use setup_stream_kernel::{ProverOperatorPlan, prover_operator_plan};
+use statement_stream::{ProverOperatorPlan, prover_operator_plan};
 use std::collections::BTreeMap;
 use supported_profile::Profile;
 use zeroize::Zeroizing;

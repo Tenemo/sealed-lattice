@@ -6,7 +6,7 @@ use crate::{
     reduction,
 };
 use num_bigint::{BigInt, Sign};
-use registration_credentials::poll::VerifiedPoll;
+use protocol_foundations::poll::VerifiedPoll;
 use setup_aggregate::RetainedAggregatePolynomial;
 use supported_profile::{
     AUXILIARY_DEGREE, AUXILIARY_PLAINTEXT_MODULUS, AUXILIARY_SECRET_SUPPORT, FHE_SECRET_SUPPORT,

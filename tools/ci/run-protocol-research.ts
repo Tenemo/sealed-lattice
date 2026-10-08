@@ -408,7 +408,7 @@ await runWithLocalRunLog(
                     '--locked',
                     '--no-default-features',
                     '-p',
-                    'rns-arithmetic-probe',
+                    'encrypted-ranking',
                     '--features',
                     'numerical-probes',
                     '--all-targets',
@@ -430,7 +430,7 @@ await runWithLocalRunLog(
                     '--target',
                     'wasm32-unknown-unknown',
                     '-p',
-                    'registration-enrollment',
+                    'participant-module',
                     '--features',
                     'invalid-ballot',
                     '--lib',
@@ -453,7 +453,7 @@ await runWithLocalRunLog(
                     '--target',
                     'wasm32-unknown-unknown',
                     '-p',
-                    'registration-enrollment',
+                    'participant-module',
                     '--lib',
                 ],
                 'browser-target',
@@ -517,14 +517,11 @@ await runWithLocalRunLog(
                     '--locked',
                     '--release',
                     '--no-default-features',
-                    ...['native-ceremony', 'rns-arithmetic-probe'].flatMap(
+                    ...['native-ceremony', 'encrypted-ranking'].flatMap(
                         (name) => ['-p', name],
                     ),
                     ...(requestedOutputCase
-                        ? [
-                              '--features',
-                              'rns-arithmetic-probe/numerical-probes',
-                          ]
+                        ? ['--features', 'encrypted-ranking/numerical-probes']
                         : []),
                     '--bins',
                 ],

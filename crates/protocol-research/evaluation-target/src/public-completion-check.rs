@@ -6,7 +6,7 @@ use evaluation_target::{
     target::VerifiedEvaluationTarget,
     terminal::{ReleaseCollector, verify_no_result},
 };
-use registration_credentials::{
+use protocol_foundations::{
     SIGNATURE_BYTES,
     release_signing::{RELEASE_BODY_HEADER_BYTES, RELEASE_ENVELOPE_BYTES},
     target_signing::MAXIMUM_TARGET_BODY_BYTES,

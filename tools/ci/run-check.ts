@@ -230,7 +230,7 @@ const buildLanes = (): {
                                 '--offline',
                                 '--locked',
                                 '-p',
-                                'registration-enrollment',
+                                'participant-module',
                                 '--lib',
                                 '--target',
                                 'wasm32-unknown-unknown',

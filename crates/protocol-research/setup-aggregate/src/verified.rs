@@ -1,7 +1,7 @@
 use crate::offer_verifier::{ContributionOfferVerifier, VerifiedContributionOffer};
 use crate::{CHUNK_BYTES, PolynomialAdder, RetainedSetupInputs};
 use parallel_work::PendingDigest;
-use registration_credentials::{
+use protocol_foundations::{
     Credential, RETAINED_TAG_BYTES,
     contribution_offer::AuthenticatedContributionOffer,
     identity::{IdentityHasher, PUBLIC_POLYNOMIAL_DOMAIN},

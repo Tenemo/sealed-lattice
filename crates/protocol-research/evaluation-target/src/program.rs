@@ -1,4 +1,4 @@
-use rns_arithmetic_probe::ranking::program_identity;
+use encrypted_ranking::ranking::program_identity;
 use supported_profile::{DEGREE, Profile};
 
 /// The comparison polynomial is evaluated in blocks of this many powers.

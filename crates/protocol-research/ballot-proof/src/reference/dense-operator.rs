@@ -23,7 +23,7 @@ struct Builder {
 }
 impl Builder {
     fn new(profile: Profile, alpha: Element, header: &[u8]) -> Result<Self, Error> {
-        registration_credentials::ballot_body::check_context(profile, header)
+        protocol_foundations::ballot_body::check_context(profile, header)
             .map_err(|_| Error::Shape)?;
         Ok(Self {
             profile,

@@ -19,7 +19,7 @@ pub const CHUNK_BYTES: usize = 524_288;
 pub fn selection_reference_bytes(profile: Profile) -> usize {
     4 + 64
         + 64 * profile.contribution_body_polynomials().len()
-        + registration_credentials::RETAINED_TAG_BYTES
+        + protocol_foundations::RETAINED_TAG_BYTES
 }
 
 /// The family of a setup polynomial that contribution bodies carry, and so

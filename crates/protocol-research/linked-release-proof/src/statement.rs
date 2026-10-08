@@ -1,7 +1,7 @@
 use num_bigint::{BigInt, Sign};
 use parallel_work::ProtocolHash;
-pub use setup_stream_kernel::SetupStatementOutput as StatementOutput;
-use setup_stream_kernel::{CHUNK_LIMIT, PolynomialStream};
+pub use statement_stream::StatementOutput;
+use statement_stream::{CHUNK_LIMIT, PolynomialStream};
 use supported_profile::{
     Profile, RECIPIENT_SECRET_SUPPORT, RELEASE_DECODING_LIMB_BITS, RELEASE_LIMB_BITS, SHARE_SCALE,
     relation::*,
@@ -39,9 +39,9 @@ pub enum Error {
     Binding,
     Arithmetic,
 }
-impl From<setup_stream_kernel::Error> for Error {
-    fn from(error: setup_stream_kernel::Error) -> Self {
-        use setup_stream_kernel::Error as Stream;
+impl From<statement_stream::Error> for Error {
+    fn from(error: statement_stream::Error) -> Self {
+        use statement_stream::Error as Stream;
         match error {
             Stream::Parameters | Stream::Length | Stream::Incomplete => Self::Shape,
             Stream::Encoding => Self::Encoding,

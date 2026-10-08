@@ -1,6 +1,6 @@
 use num_bigint::BigInt;
 use num_traits::Signed;
-use setup_stream_kernel::arithmetic::{MODULUS, add, multiply, power, subtract};
+use statement_stream::arithmetic::{MODULUS, add, multiply, power, subtract};
 use zeroize::Zeroizing;
 
 // FHE, registration and auxiliary equations use 96-bit limbs; share

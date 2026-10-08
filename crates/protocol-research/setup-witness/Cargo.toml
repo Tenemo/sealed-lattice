@@ -15,7 +15,7 @@ sha3.workspace = true
 zeroize.workspace = true
 linked-release-proof = { path = "../linked-release-proof" }
 parallel-work = { path = "../parallel-work" }
-setup-stream-kernel = { path = "../setup-stream-kernel" }
+statement-stream = { path = "../statement-stream" }
 supported-profile = { path = "../supported-profile" }
 
 [features]

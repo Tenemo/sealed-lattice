@@ -1,6 +1,6 @@
 use super::*;
 use ballot_encryption::packing::PackingWitness;
-use registration_credentials::identity::{PUBLIC_POLYNOMIAL_DOMAIN, identity};
+use protocol_foundations::identity::{PUBLIC_POLYNOMIAL_DOMAIN, identity};
 use setup_aggregate::{RetainedAggregatePolynomial, RetainedSetupInputs};
 use supported_profile::DEGREE;
 

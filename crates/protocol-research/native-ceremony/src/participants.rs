@@ -1,4 +1,4 @@
-use registration_enrollment::Enrollment;
+use participant_module::Enrollment;
 use std::{
     collections::BTreeMap,
     ops::{Index, IndexMut},

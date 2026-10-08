@@ -1,0 +1,31 @@
+[package]
+name = "participant-module"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["rlib", "cdylib"]
+
+[features]
+# A corrupt participant's runtime, which signs authentic invalid ballots.
+invalid-ballot = ["ballot-proof/invalid-ballot"]
+
+[dependencies]
+protocol-foundations = { path = "../protocol-foundations" }
+contribution-prover = { path = "../contribution-prover" }
+setup-witness = { path = "../setup-witness" }
+supported-profile = { path = "../supported-profile" }
+num-bigint.workspace = true
+# The contribution randomness streams hold secret sponge states.
+sha3 = { workspace = true, features = ["zeroize"] }
+zeroize.workspace = true
+ballot-proof = { path = "../ballot-proof" }
+ballot-encryption = { path = "../ballot-encryption" }
+setup-aggregate = { path = "../setup-aggregate" }
+evaluation-target = { path = "../evaluation-target" }
+linked-release-proof = { path = "../linked-release-proof" }
+parallel-work = { path = "../parallel-work" }
+word-proof = { path = "../word-proof" }
+encrypted-ranking = { path = "../encrypted-ranking" }
+statement-stream = { path = "../statement-stream" }

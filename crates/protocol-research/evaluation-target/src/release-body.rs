@@ -5,7 +5,7 @@ use fips204::{
 };
 use linked_release_proof::{CHUNK_LIMIT, HEADER_LENGTH, Verifier, verifier};
 use num_bigint::BigInt;
-use registration_credentials::{
+use protocol_foundations::{
     SIGNATURE_BYTES,
     identity::BodyHasher,
     release_signing::{

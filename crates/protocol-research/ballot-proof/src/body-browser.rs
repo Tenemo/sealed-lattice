@@ -3,9 +3,9 @@ use crate::{
     body::{BallotBodyClassification, BallotInputs, SignedBallotVerifier},
     submission::authenticate_envelope,
 };
-use registration_credentials::SIGNATURE_BYTES;
-use registration_credentials::ballot_authentication::ENVELOPE_BYTES;
-use registration_credentials::ballot_body::HEADER_BYTES;
+use protocol_foundations::SIGNATURE_BYTES;
+use protocol_foundations::ballot_authentication::ENVELOPE_BYTES;
+use protocol_foundations::ballot_body::HEADER_BYTES;
 use std::{cell::RefCell, sync::Arc};
 
 struct Session {

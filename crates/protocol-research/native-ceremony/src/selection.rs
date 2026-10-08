@@ -1,5 +1,5 @@
 use crate::{OriginalEnrollments, aggregate, contribution};
-use registration_credentials::{
+use protocol_foundations::{
     contribution_offer::authenticate_offer,
     poll::VerifiedPoll,
     roster::RetainedContributionContext,
@@ -25,7 +25,7 @@ pub fn run(
     roster: Arc<AuthenticatedRosterProposal>,
     enrollments: &mut OriginalEnrollments,
     selected_authors: &[usize],
-    mut alternate_endorser: Option<(usize, registration_credentials::Credential)>,
+    mut alternate_endorser: Option<(usize, protocol_foundations::Credential)>,
     selection_fork: bool,
 ) -> Prepared {
     let profile = roster.proposal().profile();
@@ -279,7 +279,7 @@ pub fn run(
     let setup = Arc::new(inputs.certify(&certificate).unwrap());
     if let Some(losing) = losing_inputs {
         assert!(losing.certify(&certificate).is_err());
-        let winner = registration_enrollment::ballot::retained_setup_reference(
+        let winner = participant_module::ballot::retained_setup_reference(
             &enrollments[1].credential,
             poll,
             &setup,

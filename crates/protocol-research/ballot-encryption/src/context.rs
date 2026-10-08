@@ -1,5 +1,5 @@
-use registration_credentials::foundation::participant_identity::ParticipantIdentity;
-use registration_credentials::{ballot_authentication::RetainedBallotOwner, poll::VerifiedPoll};
+use protocol_foundations::foundation::participant_identity::ParticipantIdentity;
+use protocol_foundations::{ballot_authentication::RetainedBallotOwner, poll::VerifiedPoll};
 use setup_aggregate::RetainedSetupInputs;
 use std::sync::Arc;
 use supported_profile::Profile;

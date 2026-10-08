@@ -1,5 +1,5 @@
 use ballot_proof::statement::setup_input;
-use registration_credentials::{
+use protocol_foundations::{
     contribution_offer::AuthenticatedContributionOffer, poll::VerifiedPoll,
     setup_selection::AuthenticatedSelectionProposal,
 };
@@ -515,7 +515,7 @@ pub fn classify_ballot(
         ballot_proof::submission::authenticate_envelope(&setup, envelope, signature)
             .map_err(|_| Error::Context)?;
     let mut file = File::open(path).unwrap();
-    let mut header = [0; registration_credentials::ballot_body::HEADER_BYTES];
+    let mut header = [0; protocol_foundations::ballot_body::HEADER_BYTES];
     file.read_exact(&mut header).unwrap();
     if mode == "header" {
         header[0] ^= 1;
@@ -545,7 +545,7 @@ pub fn classify_ballot(
     let mut offset = header.len();
     let mut buffer = vec![0; 65521];
     let changed = header.len()
-        + registration_credentials::ballot_body::ciphertext_bytes(profile)
+        + protocol_foundations::ballot_body::ciphertext_bytes(profile)
         + PROOF_HEADER_BYTES;
     while offset < total {
         let count = buffer.len().min(total - offset);

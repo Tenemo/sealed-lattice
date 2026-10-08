@@ -442,9 +442,7 @@ describe('source coefficient allocation comparison', () => {
             read('tools/ci/rust-toolchain.ts'),
             read('crates/protocol-research/setup-witness/src/reduction.rs'),
             read('crates/protocol-research/setup-witness/src/gaussian.rs'),
-            read(
-                'crates/protocol-research/setup-stream-kernel/src/arithmetic.rs',
-            ),
+            read('crates/protocol-research/statement-stream/src/arithmetic.rs'),
         ]);
         expect(source).toContain(
             'Vec::with_capacity((digits.len() * radix_bits).div_ceil(32) + 1)',

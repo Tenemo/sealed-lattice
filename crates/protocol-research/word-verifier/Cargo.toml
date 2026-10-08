@@ -10,7 +10,7 @@ crate-type = ["rlib"]
 [dependencies]
 parallel-work = { path = "../parallel-work" }
 sha3.workspace = true
-setup-stream-kernel = { path = "../setup-stream-kernel" }
+statement-stream = { path = "../statement-stream" }
 supported-profile = { path = "../supported-profile" }
 
 [dev-dependencies]

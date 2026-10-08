@@ -3,7 +3,7 @@ use crate::{
     relation::{BallotRelationVerifier, VerifiedBallotRelation},
     statement::setup_input,
 };
-use registration_credentials::{ballot_body, identity::BodyHasher, poll::VerifiedPoll};
+use protocol_foundations::{ballot_body, identity::BodyHasher, poll::VerifiedPoll};
 use setup_aggregate::{AggregatePolynomialReader, verified::VerifiedSetupAggregate};
 use setup_witness::contribution::common_records;
 
@@ -339,7 +339,7 @@ pub struct InvalidBallotBody {
     authentication: crate::submission::AuthenticatedBallotEnvelope,
 }
 impl InvalidBallotBody {
-    pub fn envelope(&self) -> &registration_credentials::ballot_authentication::BallotEnvelope {
+    pub fn envelope(&self) -> &protocol_foundations::ballot_authentication::BallotEnvelope {
         self.authentication.envelope()
     }
 }

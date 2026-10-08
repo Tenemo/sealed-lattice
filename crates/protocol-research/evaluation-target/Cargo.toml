@@ -12,10 +12,10 @@ crate-type = ["rlib"]
 fips204 = { workspace = true, features = ["ml-dsa-65"] }
 num-bigint.workspace = true
 ballot-proof = { path = "../ballot-proof" }
-registration-credentials = { path = "../registration-credentials" }
+protocol-foundations = { path = "../protocol-foundations" }
 setup-aggregate = { path = "../setup-aggregate" }
 setup-witness = { path = "../setup-witness" }
-rns-arithmetic-probe = { path = "../rns-arithmetic-probe" }
+encrypted-ranking = { path = "../encrypted-ranking" }
 parallel-work = { path = "../parallel-work" }
 linked-release-proof = { path = "../linked-release-proof" }
 supported-profile = { path = "../supported-profile" }

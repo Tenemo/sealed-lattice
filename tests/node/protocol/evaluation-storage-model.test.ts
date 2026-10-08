@@ -63,7 +63,7 @@ describe('scalar evaluation storage schedule', () => {
             ]).toEqual(primes);
             expect(result.jobBytes).toBe(job);
             const source = readFileSync(
-                'crates/protocol-research/rns-arithmetic-probe/src/ranking.rs',
+                'crates/protocol-research/encrypted-ranking/src/ranking.rs',
                 'utf8',
             );
             for (const operand of [

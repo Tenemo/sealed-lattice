@@ -1,3 +1,4 @@
+use encrypted_ranking::ranking::{Ciphertext, stored_bytes, stored_value_bytes};
 use evaluation_target::{
     certification::CertificateCollector,
     close::{ClosedSlot, VerifiedCloseBarrier},
@@ -6,14 +7,13 @@ use evaluation_target::{
     target::{ClassifiedClosedInventory, Error, PublicInputs, WorkingStore},
     terminal::{ReleaseCollector, verify_no_result},
 };
-use registration_credentials::{
-    Credential, release_signing::body_header, target_signing::TargetMessage,
-};
-use registration_enrollment::{
+use participant_module::{
     finality_work::{FinalityWork, OwnBallotInclusion, classified_ballot_inclusion},
     release_work::ReleaseWork,
 };
-use rns_arithmetic_probe::ranking::{Ciphertext, stored_bytes, stored_value_bytes};
+use protocol_foundations::{
+    Credential, release_signing::body_header, target_signing::TargetMessage,
+};
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs::{self, File},
@@ -493,7 +493,7 @@ pub fn run(
     let corrupt: Vec<_> = (0..profile.participants())
         .filter(|position| scenario.corrupt(*position))
         .collect();
-    let selection = registration_credentials::setup_selection::SelectionProposal::decode(
+    let selection = protocol_foundations::setup_selection::SelectionProposal::decode(
         setup.roster().proposal(),
         &fs::read(output.join("selection.bin")).unwrap(),
     )

@@ -1,10 +1,10 @@
 use crate::certification::VerifiedInventoryCertificate;
 use linked_release_proof::statement::{self, PublicStatement};
 use num_bigint::{BigInt, Sign};
-use registration_credentials::foundation::participant_identity::{
+use protocol_foundations::foundation::participant_identity::{
     ParticipantIdentity, derive_participant_identity,
 };
-use registration_credentials::foundation::{CanonicalItem, CanonicalTuple};
+use protocol_foundations::foundation::{CanonicalItem, CanonicalTuple};
 use setup_aggregate::VerifiedAggregatePolynomial;
 use std::sync::Arc;
 use supported_profile::{

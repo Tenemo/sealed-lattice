@@ -59,6 +59,6 @@ pub static JOBS: [&parallel_work::Job; 1] = [&PLAN];
 /// Each coefficient of a stored working value of the evaluation takes this
 /// many bytes: its whole little-endian words.
 pub fn stored_coefficient_bytes(profile: supported_profile::Profile) -> usize {
-    rns_arithmetic_probe::ranking::stored_value_bytes(profile)
-        / (2 * rns_arithmetic_probe::ranking::DEGREE)
+    encrypted_ranking::ranking::stored_value_bytes(profile)
+        / (2 * encrypted_ranking::ranking::DEGREE)
 }

@@ -3,11 +3,12 @@ use ballot_proof::{
     statement::setup_input,
     submission::{BallotBodyAuthentication, authenticate_envelope},
 };
+use encrypted_ranking::ranking::{Ciphertext, KEY_RECORD_BYTES, stored_bytes, stored_value_bytes};
 use evaluation_target::{
     close::{CloseContext, ClosedSlot},
     target::{ClassifiedClosedInventory, Error, PublicInputs, WorkingStore},
 };
-use registration_credentials::{
+use protocol_foundations::{
     SIGNATURE_BYTES,
     ballot_authentication::ENVELOPE_BYTES,
     ballot_body,
@@ -21,9 +22,6 @@ use registration_credentials::{
     roster_authentication::authenticate_roster_proposal,
     roster_input::RosterInputVerifier,
     setup_selection::{MAXIMUM_SELECTION_BYTES, authenticate_certificate, certificate_bytes},
-};
-use rns_arithmetic_probe::ranking::{
-    Ciphertext, KEY_RECORD_BYTES, stored_bytes, stored_value_bytes,
 };
 use setup_aggregate::offer_verifier::ContributionOfferVerifier;
 use setup_aggregate::{CHUNK_BYTES, contribution_family, verified::SetupAggregator};

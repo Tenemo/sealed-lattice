@@ -11,7 +11,7 @@ crate-type = ["rlib"]
 num-bigint.workspace = true
 
 parallel-work = { path = "../parallel-work" }
-registration-credentials = { path = "../registration-credentials" }
+protocol-foundations = { path = "../protocol-foundations" }
 setup-witness = { path = "../setup-witness" }
 supported-profile = { path = "../supported-profile" }
 word-verifier = { path = "../word-verifier" }

@@ -1,5 +1,5 @@
 use super::*;
-use registration_credentials::identity::identity;
+use protocol_foundations::identity::identity;
 
 fn payload(index: usize) -> Vec<u8> {
     (0..100 + index)

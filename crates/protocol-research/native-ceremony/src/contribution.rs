@@ -1,9 +1,9 @@
 use num_bigint::{BigInt, Sign};
 use num_traits::Signed;
 use parallel_work::ProtocolHash;
-use registration_credentials::roster::RetainedContributionContext;
-use registration_credentials::roster_authentication::AuthenticatedRosterProposal;
-use registration_enrollment::{Enrollment, offer_signing::OfferSigning};
+use participant_module::{Enrollment, offer_signing::OfferSigning};
+use protocol_foundations::roster::RetainedContributionContext;
+use protocol_foundations::roster_authentication::AuthenticatedRosterProposal;
 use setup_aggregate::contribution_family;
 use setup_witness::{
     PolynomialOutput,
@@ -113,7 +113,7 @@ fn polynomial_bytes(
     )
 }
 pub fn generate(
-    poll: &registration_credentials::poll::VerifiedPoll,
+    poll: &protocol_foundations::poll::VerifiedPoll,
     roster: &Arc<AuthenticatedRosterProposal>,
     enrollment: &mut Enrollment,
     position: usize,

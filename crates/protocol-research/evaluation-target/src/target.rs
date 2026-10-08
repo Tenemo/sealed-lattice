@@ -1,7 +1,8 @@
 use crate::close::{ClosedSlot, VerifiedCloseBarrier};
 use crate::program::RankingProgram;
 use ballot_proof::body::BallotBodyClassification;
-use registration_credentials::{
+use encrypted_ranking::ranking::{Ciphertext, DEGREE, Engine, Progress, Refusal};
+use protocol_foundations::{
     Credential, RETAINED_TAG_BYTES,
     ballot_authentication::BallotEnvelope,
     ballot_body::{self, HEADER_BYTES},
@@ -15,7 +16,6 @@ use registration_credentials::{
         MAXIMUM_TARGET_BODY_BYTES, TARGET_IDENTITY_DOMAIN, TargetMessage, minimum_turnout,
     },
 };
-use rns_arithmetic_probe::ranking::{Ciphertext, DEGREE, Engine, Progress, Refusal};
 use setup_aggregate::verified::VerifiedSetupAggregate;
 use std::{io::Read, sync::Arc};
 

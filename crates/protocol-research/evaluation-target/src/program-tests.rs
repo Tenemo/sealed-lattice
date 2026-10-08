@@ -1,6 +1,6 @@
 use super::*;
+use encrypted_ranking::ranking::{Engine, MAXIMUM_INSTRUCTIONS};
 use num_bigint::BigUint;
-use rns_arithmetic_probe::ranking::{Engine, MAXIMUM_INSTRUCTIONS};
 
 fn completion() -> Profile {
     Profile::new(10, 10).unwrap()
@@ -186,7 +186,7 @@ fn a_polynomial_arriving_in_pieces_decodes_as_it_does_whole() {
         .decode_into(&mut decoder, &bytes[..bytes.len() - 1])
         .unwrap();
     assert!(engine.finish_polynomial(decoder).is_err());
-    let value_bytes = rns_arithmetic_probe::ranking::stored_value_bytes(profile);
+    let value_bytes = encrypted_ranking::ranking::stored_value_bytes(profile);
     let mut read = engine.begin_reload(0).unwrap();
     assert!(engine.push_read(&mut read, &[0; 7]).is_err());
     assert!(

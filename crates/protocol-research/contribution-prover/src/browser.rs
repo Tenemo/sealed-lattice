@@ -2,7 +2,7 @@ use num_bigint::{BigInt, Sign};
 use num_traits::Zero;
 use parallel_work::ProtocolHash;
 use parallel_work::{HashStream, Sponge, sealing};
-use registration_credentials::{
+use protocol_foundations::{
     registration::{KEY_BYTES, VerifiedRegistration},
     roster::{RetainedContributionContext, RosterProposal},
 };
@@ -318,8 +318,8 @@ pub fn begin_verified(
     proposal: &RosterProposal,
     position: usize,
     source: setup_witness::fhe_key_source::FheKeySource,
-) -> Result<(), registration_credentials::Error> {
-    use registration_credentials::Error;
+) -> Result<(), protocol_foundations::Error> {
+    use protocol_foundations::Error;
     SESSION.with(|state| {
         let mut state = state.borrow_mut();
         if state.stopped

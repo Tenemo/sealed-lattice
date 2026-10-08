@@ -3,7 +3,7 @@ use crate::{
     verified::{AggregatePolynomial, Refusal, VerifiedSetupAggregate},
 };
 use num_bigint::BigInt;
-use registration_credentials::identity::{IdentityHasher, PUBLIC_POLYNOMIAL_DOMAIN};
+use protocol_foundations::identity::{IdentityHasher, PUBLIC_POLYNOMIAL_DOMAIN};
 use supported_profile::Profile;
 
 /// Immutable coefficients read from exactly one owning aggregate reference.

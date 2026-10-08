@@ -3,8 +3,8 @@ use fips204::{
     ml_dsa_65,
     traits::{SerDes, Verifier},
 };
-use registration_credentials::SIGNING_PUBLIC_KEY_BYTES;
-use registration_credentials::target_signing::{CERTIFICATION_CONTEXT, TargetVote};
+use protocol_foundations::SIGNING_PUBLIC_KEY_BYTES;
+use protocol_foundations::target_signing::{CERTIFICATION_CONTEXT, TargetVote};
 use std::sync::Arc;
 
 #[derive(Debug, PartialEq, Eq)]

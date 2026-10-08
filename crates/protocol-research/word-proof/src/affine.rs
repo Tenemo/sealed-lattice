@@ -60,7 +60,7 @@ impl Operator {
         self,
         columns: usize,
         queries: &[u32],
-    ) -> Result<Vec<Element>, setup_stream_kernel::Error> {
+    ) -> Result<Vec<Element>, statement_stream::Error> {
         let count = queries.len();
         let mut output = vec![ZERO; columns * count];
         let mut evaluated = Vec::new();
@@ -85,7 +85,7 @@ impl Operator {
             evaluated.push(values);
             weights.push(term.weights);
         }
-        let values = setup_stream_kernel::evaluate_public_columns(evaluated, queries)?;
+        let values = statement_stream::evaluate_public_columns(evaluated, queries)?;
         for (weights, values) in weights.iter().zip(values.chunks(count)) {
             for (column, weight) in weights {
                 for (target, value) in output[column * count..(column + 1) * count]

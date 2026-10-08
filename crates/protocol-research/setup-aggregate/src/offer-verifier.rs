@@ -1,5 +1,5 @@
 use parallel_work::Ticket;
-use registration_credentials::{
+use protocol_foundations::{
     contribution_body::{ContributionBodyHasher, ContributionBodyHeader, body_length},
     contribution_offer::{AuthenticatedContributionOffer, OfferEnvelope},
     identity::{IdentityHasher, PUBLIC_POLYNOMIAL_DOMAIN},

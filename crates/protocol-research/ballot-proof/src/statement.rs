@@ -5,8 +5,8 @@ use ballot_encryption::{
 use num_bigint::{BigInt, Sign};
 use parallel_work::ProtocolHash;
 use parallel_work::{HashStream, Sponge};
-use setup_stream_kernel::PolynomialStream;
-pub use setup_stream_kernel::SetupStatementOutput as StatementOutput;
+use statement_stream::PolynomialStream;
+pub use statement_stream::StatementOutput;
 use supported_profile::{
     AUXILIARY_DEGREE, AUXILIARY_PLAINTEXT_MODULUS, FHE_LIMB_BITS, Family, PLAINTEXT_MODULUS,
     Profile, SETUP_ERROR_BITS, WORD_BITS, auxiliary_modulus, relation::*,
@@ -229,7 +229,7 @@ struct Builder {
 }
 impl Builder {
     fn new(profile: Profile, alpha: Element, header: &[u8]) -> Result<Self, Error> {
-        registration_credentials::ballot_body::check_context(profile, header)
+        protocol_foundations::ballot_body::check_context(profile, header)
             .map_err(|_| Error::Shape)?;
         Ok(Self {
             profile,

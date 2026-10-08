@@ -5,7 +5,7 @@ use crate::{
     statement::{PublicStatement, coefficient_bytes, encode_polynomial, setup_input},
 };
 use ballot_encryption::{context::BallotComputationContext, encryption::LinkedBallotWitness};
-use registration_credentials::{ballot_authentication::BallotEnvelope, ballot_body};
+use protocol_foundations::{ballot_authentication::BallotEnvelope, ballot_body};
 use setup_aggregate::RetainedAggregatePolynomial;
 use supported_profile::{
     Family,

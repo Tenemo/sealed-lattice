@@ -2,14 +2,14 @@ use crate::target::{
     ClassifiedClosedInventory, Error, EvaluationSession, VerifiedEvaluationTarget,
 };
 use ballot_proof::body::BallotBodyClassification;
-use registration_credentials::{
+use encrypted_ranking::ranking::{
+    DEGREE, Engine, KEY_RECORD_BYTES, PolynomialDecoder, Progress, RecordRequest, Refusal,
+    StoredValueRead, stored_value_bytes,
+};
+use protocol_foundations::{
     ballot_body::{self, HEADER_BYTES},
     identity::{BodyHasher, IdentityHasher, PUBLIC_POLYNOMIAL_DOMAIN},
     poll::VerifiedPoll,
-};
-use rns_arithmetic_probe::ranking::{
-    DEGREE, Engine, KEY_RECORD_BYTES, PolynomialDecoder, Progress, RecordRequest, Refusal,
-    StoredValueRead, stored_value_bytes,
 };
 use setup_aggregate::verified::VerifiedSetupAggregate;
 use std::{cell::RefCell, sync::Arc};

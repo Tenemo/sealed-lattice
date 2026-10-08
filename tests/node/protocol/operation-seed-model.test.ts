@@ -139,11 +139,11 @@ describe('original private-randomness scope populations', () => {
 
     it('binds the domain and seed-width operands to the current source owners', async () => {
         const operation = await readFile(
-            'crates/protocol-research/registration-enrollment/src/operation-random.rs',
+            'crates/protocol-research/participant-module/src/operation-random.rs',
             'utf8',
         );
         const source = await readFile(
-            'crates/protocol-research/registration-enrollment/src/fhe-sources.rs',
+            'crates/protocol-research/participant-module/src/fhe-sources.rs',
             'utf8',
         );
         const tree = await readFile(

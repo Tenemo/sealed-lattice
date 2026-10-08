@@ -3,7 +3,7 @@ use crate::{
     CHUNK_BYTES,
     verified::{SetupAggregator, VerifiedSelectionInputs, VerifiedSetupAggregate, build_selection},
 };
-use registration_credentials::{
+use protocol_foundations::{
     Credential, SIGNATURE_BYTES,
     contribution_body::BODY_HEADER_BYTES,
     contribution_offer::{AuthenticatedContributionOffer, MAXIMUM_OFFER_BYTES, authenticate_offer},

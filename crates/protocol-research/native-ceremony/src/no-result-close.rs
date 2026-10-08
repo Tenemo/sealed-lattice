@@ -8,10 +8,10 @@ use ballot_proof::{
     submission::{AuthenticatedBallotBody, authenticate_envelope},
 };
 use evaluation_target::close::{CloseContext, ClosedSlot, VerifiedCloseBarrier};
-use registration_credentials::{
+use participant_module::Enrollment;
+use protocol_foundations::{
     ballot_authentication::BallotEnvelope, ballot_body, poll::VerifiedPoll,
 };
-use registration_enrollment::Enrollment;
 use setup_aggregate::verified::VerifiedSetupAggregate;
 use std::{io::Write, path::Path, sync::Arc};
 

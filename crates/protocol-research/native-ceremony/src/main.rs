@@ -12,8 +12,9 @@ mod scenario;
 mod selected_setup_completion;
 mod selection;
 use aggregate::{ballot_key, final_keys, polynomial_bytes};
+use participant_module::{Enrollment, finality_work::OwnBallotInclusion};
 use participants::OriginalEnrollments;
-use registration_credentials::{
+use protocol_foundations::{
     RETAINED_TAG_BYTES, SIGNATURE_BYTES,
     ballot_authentication::BallotEnvelope,
     foundation::{
@@ -25,7 +26,6 @@ use registration_credentials::{
     roster::{RetainedContributionContext, RosterProposal},
     roster_authentication::authenticate_roster_proposal,
 };
-use registration_enrollment::{Enrollment, finality_work::OwnBallotInclusion};
 use scenario::Scenario;
 use setup_aggregate::verified::VerifiedSetupAggregate;
 use std::{
@@ -99,7 +99,7 @@ impl BallotInputs<'_> {
             self.setup.roster().proposal().body(),
         )
         .unwrap();
-        let retained_reference = registration_enrollment::ballot::retained_setup_reference(
+        let retained_reference = participant_module::ballot::retained_setup_reference(
             &enrollment.credential,
             self.poll,
             self.setup,
@@ -117,8 +117,7 @@ impl BallotInputs<'_> {
         .concat();
         let credential = &mut enrollment.credential;
         let mut work =
-            registration_enrollment::ballot::BallotWork::new(credential, &proposal, &control)
-                .unwrap();
+            participant_module::ballot::BallotWork::new(credential, &proposal, &control).unwrap();
         let index = ballot_key(profile);
         work.command(credential, 1, index, &[]).unwrap();
         stream_key(self.final_keys, profile, index, |offset, bytes| {
@@ -415,9 +414,7 @@ fn main() {
         // The original completed enrollment has not acted on any roster yet.
         restored
             .credential
-            .unlock_unused_purposes(
-                2 * registration_credentials::SigningPurpose::Release.mask() - 1,
-            )
+            .unlock_unused_purposes(2 * protocol_foundations::SigningPurpose::Release.mask() - 1)
             .unwrap();
         enrollments[position] = restored;
         records.push(record);
@@ -459,7 +456,7 @@ fn main() {
         } else {
             &*corrupt_signing_capsule
         };
-        let mut credential = registration_credentials::Credential::open_complete(
+        let mut credential = protocol_foundations::Credential::open_complete(
             record.header().signing_public,
             record.body_digest(),
             key,
@@ -477,8 +474,8 @@ fn main() {
         credential.confirm_roster(&retained).unwrap();
         credential
             .unlock_unused_purposes(
-                registration_credentials::SigningPurpose::SelectionEndorsement.mask()
-                    | registration_credentials::SigningPurpose::SelectionProposal.mask(),
+                protocol_foundations::SigningPurpose::SelectionEndorsement.mask()
+                    | protocol_foundations::SigningPurpose::SelectionProposal.mask(),
             )
             .unwrap();
         Some((position, credential))
@@ -566,14 +563,14 @@ fn main() {
     )
     .unwrap();
     let owner = close::owner_of(&enrollments[0].credential, &poll, &setup, 0);
-    let retained_reference = registration_enrollment::ballot::retained_setup_reference(
+    let retained_reference = participant_module::ballot::retained_setup_reference(
         &enrollments[0].credential,
         &poll,
         &setup,
     )
     .unwrap();
     let retained_record = &retained_reference[..retained_reference.len() - RETAINED_TAG_BYTES];
-    let restore = |credential: &registration_credentials::Credential, retained: &[u8]| {
+    let restore = |credential: &protocol_foundations::Credential, retained: &[u8]| {
         VerifiedSetupAggregate::restore(credential, &poll, &certificate, retained)
     };
     let restored = restore(&enrollments[0].credential, &retained_reference).unwrap();
@@ -610,7 +607,7 @@ fn main() {
         ]
         .concat()
     };
-    let foreign_reference = registration_enrollment::ballot::retained_setup_reference(
+    let foreign_reference = participant_module::ballot::retained_setup_reference(
         &enrollments[1].credential,
         &poll,
         &setup,
@@ -620,7 +617,7 @@ fn main() {
     changed_digest[4 + 64] ^= 1;
     for reference in [&foreign_reference[..], &changed_digest, retained_record] {
         assert!(
-            registration_enrollment::ballot::BallotWork::new(
+            participant_module::ballot::BallotWork::new(
                 &enrollments[0].credential,
                 &retained_proposal,
                 &control_with_reference(reference)
@@ -641,7 +638,7 @@ fn main() {
         setup.roster().proposal().body(),
     )
     .unwrap();
-    let outsider_reference = registration_enrollment::ballot::retained_setup_reference(
+    let outsider_reference = participant_module::ballot::retained_setup_reference(
         &enrollments[outsider].credential,
         &poll,
         &setup,
@@ -652,7 +649,7 @@ fn main() {
     assert_eq!(outsider_owner.position(), outsider);
     assert_eq!(outsider_owner.setup_identity(), &setup.identity());
     assert_eq!(
-        registration_enrollment::ballot::BallotWork::new(
+        participant_module::ballot::BallotWork::new(
             &enrollments[outsider].credential,
             &outsider_proposal,
             &control_with_reference(&outsider_reference)
@@ -663,7 +660,7 @@ fn main() {
         outsider
     );
     let ballot_control = control_with_reference(&retained_reference);
-    let mut work = registration_enrollment::ballot::BallotWork::new(
+    let mut work = participant_module::ballot::BallotWork::new(
         &enrollments[0].credential,
         &retained_proposal,
         &ballot_control,
@@ -675,7 +672,7 @@ fn main() {
     );
     // Only the FHE aggregate is a delivered ballot key.
     assert!(
-        registration_enrollment::ballot::BallotWork::new(
+        participant_module::ballot::BallotWork::new(
             &enrollments[0].credential,
             &retained_proposal,
             &ballot_control,
@@ -710,7 +707,7 @@ fn main() {
     // A repeated key poisons its private session, so isolate that hostile
     // delivery from the original session's later score checks.
     {
-        let mut repeated = registration_enrollment::ballot::BallotWork::new(
+        let mut repeated = participant_module::ballot::BallotWork::new(
             &enrollments[0].credential,
             &retained_proposal,
             &ballot_control,
@@ -739,7 +736,7 @@ fn main() {
         .concat();
         assert!(matches!(
             repeated.command(&mut enrollments[0].credential, 4, 0, &timed_scores),
-            Err(registration_credentials::Error::Consumed)
+            Err(protocol_foundations::Error::Consumed)
         ));
     }
     // Refused inputs consume neither the ballot attempt nor the keys already
@@ -764,7 +761,7 @@ fn main() {
     for input in inputs {
         assert!(matches!(
             work.command(&mut enrollments[0].credential, 4, 0, &input),
-            Err(registration_credentials::Error::Shape)
+            Err(protocol_foundations::Error::Shape)
         ));
     }
     work.command(&mut enrollments[0].credential, 4, 0, &timed(&valid))
@@ -794,11 +791,11 @@ fn main() {
     }
     body_file.finish().unwrap();
     let mut body_input = File::open(&body_path).unwrap();
-    let mut header = vec![0; registration_credentials::ballot_body::HEADER_BYTES];
+    let mut header = vec![0; protocol_foundations::ballot_body::HEADER_BYTES];
     body_input.read_exact(&mut header).unwrap();
     std::io::copy(
         &mut std::io::Read::by_ref(&mut body_input)
-            .take(registration_credentials::ballot_body::ciphertext_bytes(profile) as u64),
+            .take(protocol_foundations::ballot_body::ciphertext_bytes(profile) as u64),
         &mut std::io::sink(),
     )
     .unwrap();
@@ -850,7 +847,7 @@ fn main() {
     );
     let original = setup.roster().proposal().records()[0].as_ref();
     let restore_credential = || {
-        let mut credential = registration_credentials::Credential::open_complete(
+        let mut credential = protocol_foundations::Credential::open_complete(
             original.header().signing_public,
             original.body_digest(),
             &organizer_signing_key,
@@ -864,7 +861,7 @@ fn main() {
     let mut restored = restore_credential();
     for changed_body in [false, true] {
         let mut restored_credential = restore_credential();
-        let mut restored_work = registration_enrollment::ballot::BallotWork::new(
+        let mut restored_work = participant_module::ballot::BallotWork::new(
             &restored_credential,
             &retained_proposal,
             &ballot_control,
@@ -936,11 +933,11 @@ fn main() {
     // unlocks a purpose that the root's records show unused.
     assert!(matches!(
         restored.sign_retained_ballot_envelope(&restored_owner, &changed_envelope),
-        Err(registration_credentials::Error::Consumed)
+        Err(protocol_foundations::Error::Consumed)
     ));
     // Restoring the completed ballot consumes the purpose even after an unlock.
     restored
-        .unlock_unused_purposes(registration_credentials::SigningPurpose::Ballot.mask())
+        .unlock_unused_purposes(protocol_foundations::SigningPurpose::Ballot.mask())
         .unwrap();
     assert!(
         restored
@@ -1053,7 +1050,7 @@ fn main() {
     if let Some(author) = scenario.invalid_proof {
         let invalid_proof_path = ballot_body_path(&ballot_directory, &scenario, author);
         let mut source = File::open(&body_path).unwrap();
-        let mut modified_header = [0; registration_credentials::ballot_body::HEADER_BYTES];
+        let mut modified_header = [0; protocol_foundations::ballot_body::HEADER_BYTES];
         source.read_exact(&mut modified_header).unwrap();
         // The statement position follows the body header's magic, proof
         // length, statement magic, poll and setup identity.
@@ -1061,7 +1058,7 @@ fn main() {
         modified_header[position..position + 2].copy_from_slice(&(author as u16).to_le_bytes());
         let mut destination = public_output::PublicOutput::create(&invalid_proof_path).unwrap();
         let mut hash =
-            registration_credentials::ballot_body::body_hasher(profile, envelope.body_length())
+            protocol_foundations::ballot_body::body_hasher(profile, envelope.body_length())
                 .unwrap();
         destination.write_all(&modified_header).unwrap();
         hash.push(&modified_header).unwrap();
@@ -1174,7 +1171,7 @@ fn main() {
     let equivocator = scenario.equivocator.map(|position| {
         let record = &setup.roster().proposal().records()[position];
         let restore = || {
-            let mut credential = registration_credentials::Credential::open_complete(
+            let mut credential = protocol_foundations::Credential::open_complete(
                 record.header().signing_public,
                 record.body_digest(),
                 &corrupt_wrapping_key,
@@ -1198,10 +1195,8 @@ fn main() {
         close::Equivocator {
             forks: std::array::from_fn(|_| {
                 let mut fork = restore();
-                fork.unlock_unused_purposes(
-                    registration_credentials::SigningPurpose::Ballot.mask(),
-                )
-                .unwrap();
+                fork.unlock_unused_purposes(protocol_foundations::SigningPurpose::Ballot.mask())
+                    .unwrap();
                 fork
             }),
             restored: restore(),

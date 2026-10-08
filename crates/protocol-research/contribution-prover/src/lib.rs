@@ -2,7 +2,7 @@
 #[cfg(target_arch = "wasm32")]
 pub mod browser;
 
-use registration_credentials::roster::RetainedContributionContext;
+use protocol_foundations::roster::RetainedContributionContext;
 use supported_profile::{Profile, relation::setup_relation};
 use word_proof::bridge::Error;
 use word_proof::bridge::first_checkpoint;

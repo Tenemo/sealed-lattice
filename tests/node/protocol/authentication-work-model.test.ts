@@ -450,7 +450,7 @@ describe('complete participant authentication accounting', () => {
         ] as const) {
             const source = await readFile(
                 new URL(
-                    '../../../crates/protocol-research/registration-credentials/src/' +
+                    '../../../crates/protocol-research/protocol-foundations/src/' +
                         file,
                     import.meta.url,
                 ),

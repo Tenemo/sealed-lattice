@@ -77,7 +77,7 @@ export const runRegistrationSession = async () => {
                     '--manifest-path',
                     path.join(root, 'crates/protocol-research/Cargo.toml'),
                     '-p',
-                    'registration-enrollment',
+                    'participant-module',
                     '--lib',
                     registrationSessionTest,
                     '--',

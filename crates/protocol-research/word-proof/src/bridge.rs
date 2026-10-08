@@ -9,7 +9,7 @@ use crate::{
     tree::Multiproof,
 };
 use parallel_work::ProtocolHash;
-use setup_stream_kernel::{PolynomialStream, setup_polynomial_stream};
+use statement_stream::{PolynomialStream, setup_polynomial_stream};
 use supported_profile::{Profile, relation::*};
 
 use std::collections::VecDeque;

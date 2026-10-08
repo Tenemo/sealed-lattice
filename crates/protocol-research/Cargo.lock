@@ -52,7 +52,7 @@ dependencies = [
  "num-bigint",
  "num-traits",
  "parallel-work",
- "registration-credentials",
+ "protocol-foundations",
  "setup-aggregate",
  "setup-witness",
  "supported-profile",
@@ -66,10 +66,10 @@ dependencies = [
  "ballot-encryption",
  "num-bigint",
  "parallel-work",
- "registration-credentials",
+ "protocol-foundations",
  "setup-aggregate",
- "setup-stream-kernel",
  "setup-witness",
+ "statement-stream",
  "supported-profile",
  "word-proof",
  "word-verifier",
@@ -108,7 +108,7 @@ dependencies = [
  "num-bigint",
  "num-traits",
  "parallel-work",
- "registration-credentials",
+ "protocol-foundations",
  "setup-witness",
  "supported-profile",
  "word-proof",
@@ -165,17 +165,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "encrypted-ranking"
+version = "0.0.0"
+dependencies = [
+ "num-bigint",
+ "num-traits",
+ "parallel-work",
+ "protocol-foundations",
+ "supported-profile",
+ "zeroize",
+]
+
+[[package]]
 name = "evaluation-target"
 version = "0.0.0"
 dependencies = [
  "ballot-encryption",
  "ballot-proof",
+ "encrypted-ranking",
  "fips204",
  "linked-release-proof",
  "num-bigint",
  "parallel-work",
- "registration-credentials",
- "rns-arithmetic-probe",
+ "protocol-foundations",
  "setup-aggregate",
  "setup-witness",
  "supported-profile",
@@ -256,8 +268,8 @@ dependencies = [
  "num-bigint",
  "num-traits",
  "parallel-work",
- "setup-stream-kernel",
  "sha3",
+ "statement-stream",
  "supported-profile",
  "word-proof",
  "word-verifier",
@@ -270,14 +282,14 @@ version = "0.0.0"
 dependencies = [
  "ballot-encryption",
  "ballot-proof",
+ "encrypted-ranking",
  "evaluation-target",
  "getrandom",
  "num-bigint",
  "num-traits",
  "parallel-work",
- "registration-credentials",
- "registration-enrollment",
- "rns-arithmetic-probe",
+ "participant-module",
+ "protocol-foundations",
  "setup-aggregate",
  "setup-witness",
  "supported-profile",
@@ -333,6 +345,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "participant-module"
+version = "0.0.0"
+dependencies = [
+ "ballot-encryption",
+ "ballot-proof",
+ "contribution-prover",
+ "encrypted-ranking",
+ "evaluation-target",
+ "linked-release-proof",
+ "num-bigint",
+ "parallel-work",
+ "protocol-foundations",
+ "setup-aggregate",
+ "setup-witness",
+ "sha3",
+ "statement-stream",
+ "supported-profile",
+ "word-proof",
+ "zeroize",
+]
+
+[[package]]
 name = "polyval"
 version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -351,6 +385,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "985e7ec9bb745e6ce6535b544d84d6cd6f7ad8bd711c398938ae983b91a766d9"
 dependencies = [
  "unicode-ident",
+]
+
+[[package]]
+name = "protocol-foundations"
+version = "0.0.0"
+dependencies = [
+ "fips204",
+ "parallel-work",
+ "sha3",
+ "supported-profile",
+ "unicode-normalization",
+ "zeroize",
 ]
 
 [[package]]
@@ -375,71 +421,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec0be4795e2f6a28069bec0b5ff3e2ac9bafc99e6a9a7dc3547996c5c816922c"
 
 [[package]]
-name = "registration-credentials"
-version = "0.0.0"
-dependencies = [
- "fips204",
- "parallel-work",
- "sha3",
- "supported-profile",
- "unicode-normalization",
- "zeroize",
-]
-
-[[package]]
-name = "registration-enrollment"
-version = "0.0.0"
-dependencies = [
- "ballot-encryption",
- "ballot-proof",
- "contribution-prover",
- "evaluation-target",
- "linked-release-proof",
- "num-bigint",
- "parallel-work",
- "registration-credentials",
- "rns-arithmetic-probe",
- "setup-aggregate",
- "setup-stream-kernel",
- "setup-witness",
- "sha3",
- "supported-profile",
- "word-proof",
- "zeroize",
-]
-
-[[package]]
-name = "rns-arithmetic-probe"
-version = "0.0.0"
-dependencies = [
- "num-bigint",
- "num-traits",
- "parallel-work",
- "registration-credentials",
- "supported-profile",
- "zeroize",
-]
-
-[[package]]
 name = "setup-aggregate"
 version = "0.0.0"
 dependencies = [
  "num-bigint",
  "parallel-work",
- "registration-credentials",
+ "protocol-foundations",
  "setup-witness",
  "supported-profile",
  "word-verifier",
-]
-
-[[package]]
-name = "setup-stream-kernel"
-version = "0.0.0"
-dependencies = [
- "num-bigint",
- "num-traits",
- "parallel-work",
- "supported-profile",
 ]
 
 [[package]]
@@ -450,8 +440,8 @@ dependencies = [
  "num-bigint",
  "num-traits",
  "parallel-work",
- "setup-stream-kernel",
  "sha3",
+ "statement-stream",
  "supported-profile",
  "zeroize",
 ]
@@ -476,6 +466,16 @@ dependencies = [
  "digest",
  "keccak",
  "zeroize",
+]
+
+[[package]]
+name = "statement-stream"
+version = "0.0.0"
+dependencies = [
+ "num-bigint",
+ "num-traits",
+ "parallel-work",
+ "supported-profile",
 ]
 
 [[package]]
@@ -663,8 +663,8 @@ name = "word-proof"
 version = "0.0.0"
 dependencies = [
  "parallel-work",
- "setup-stream-kernel",
  "sha3",
+ "statement-stream",
  "supported-profile",
  "zeroize",
 ]
@@ -674,8 +674,8 @@ name = "word-verifier"
 version = "0.0.0"
 dependencies = [
  "parallel-work",
- "setup-stream-kernel",
  "sha3",
+ "statement-stream",
  "supported-profile",
  "word-proof",
 ]

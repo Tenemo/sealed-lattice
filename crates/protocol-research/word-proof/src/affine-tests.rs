@@ -56,7 +56,7 @@ fn terms_give_every_column_the_values_of_its_rows() {
     ];
     let columns = operator.columns(7);
     assert!(columns[6].iter().all(|value| *value == ZERO));
-    let expected = setup_stream_kernel::evaluate_public_columns(columns, &queries).unwrap();
+    let expected = statement_stream::evaluate_public_columns(columns, &queries).unwrap();
     assert_eq!(operator.at_queries(7, &queries).unwrap(), expected);
 }
 

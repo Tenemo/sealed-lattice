@@ -7,7 +7,8 @@ use evaluation_target::close::{
     AuthenticatedCloseIntent, AuthenticatedCloseResponse, CloseContext, ClosedSlot,
     Error as CloseError, VerifiedCloseBarrier,
 };
-use registration_credentials::{
+use participant_module::{Enrollment, close_work::CloseWork};
+use protocol_foundations::{
     Credential, Error, RETAINED_TAG_BYTES, SIGNATURE_BYTES,
     ballot_authentication::{BallotEnvelope, RetainedBallotOwner},
     close_signing::{
@@ -18,7 +19,6 @@ use registration_credentials::{
     poll::VerifiedPoll,
     roster::RetainedContributionContext,
 };
-use registration_enrollment::{Enrollment, close_work::CloseWork};
 use setup_aggregate::verified::VerifiedSetupAggregate;
 use std::{
     fs::File,
@@ -93,7 +93,7 @@ pub fn owner_of(
     )
     .unwrap();
     let reference =
-        registration_enrollment::ballot::retained_setup_reference(credential, poll, setup).unwrap();
+        participant_module::ballot::retained_setup_reference(credential, poll, setup).unwrap();
     let (reference, tag) = reference.split_at(reference.len() - RETAINED_TAG_BYTES);
     credential
         .retain_setup_ballot_owner(poll, &retained, setup.identity(), reference, tag)
@@ -688,7 +688,7 @@ pub fn run(
         let position = equivocation.position;
         let late_fork = &mut equivocation.late_fork;
         late_fork
-            .unlock_unused_purposes(registration_credentials::SigningPurpose::CloseResponse.mask())
+            .unlock_unused_purposes(protocol_foundations::SigningPurpose::CloseResponse.mask())
             .unwrap();
         late_fork
             .lock_close_intent(
@@ -1076,12 +1076,9 @@ pub fn run(
     let (proposal_body, proposal_signature) = split(&proposal);
     // Only the usable slots' bodies are fetched and hashed; the conflicting
     // envelopes need none.
-    let named = registration_credentials::close_signing::CloseProposalMessage::parse(
-        proposal_body,
-        count,
-        0,
-    )
-    .unwrap();
+    let named =
+        protocol_foundations::close_signing::CloseProposalMessage::parse(proposal_body, count, 0)
+            .unwrap();
     let required = context
         .required_bodies(&intent, &named, &authenticated)
         .unwrap();

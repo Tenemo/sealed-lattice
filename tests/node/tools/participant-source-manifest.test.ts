@@ -29,8 +29,8 @@ describe('participant source identity', () => {
         const manifest = JSON.parse(
             await participantSourceManifest(
                 fixtureBuild([
-                    'crates/protocol-research/registration-enrollment/src/lib.rs',
-                    'crates/protocol-research/registration-credentials/src/foundation/hash.rs',
+                    'crates/protocol-research/participant-module/src/lib.rs',
+                    'crates/protocol-research/protocol-foundations/src/foundation/hash.rs',
                 ]),
                 [
                     'packages/sdk/src/index.ts',
@@ -44,10 +44,10 @@ describe('participant source identity', () => {
         for (const file of [
             'packages/sdk/src/index.ts',
             'packages/sdk/src/participant/participant.ts',
-            'crates/protocol-research/registration-enrollment/src/lib.rs',
-            'crates/protocol-research/registration-enrollment/Cargo.toml',
-            'crates/protocol-research/registration-credentials/src/foundation/hash.rs',
-            'crates/protocol-research/registration-credentials/Cargo.toml',
+            'crates/protocol-research/participant-module/src/lib.rs',
+            'crates/protocol-research/participant-module/Cargo.toml',
+            'crates/protocol-research/protocol-foundations/src/foundation/hash.rs',
+            'crates/protocol-research/protocol-foundations/Cargo.toml',
             'crates/protocol-research/Cargo.toml',
             'crates/protocol-research/Cargo.lock',
             'tools/ci/sdk-package-tsdown.config.ts',

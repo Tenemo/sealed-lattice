@@ -14,8 +14,8 @@ invalid-ballot = []
 [dependencies]
 ballot-encryption = { path = "../ballot-encryption" }
 setup-aggregate = { path = "../setup-aggregate" }
-registration-credentials = { path = "../registration-credentials" }
-setup-stream-kernel = { path = "../setup-stream-kernel" }
+protocol-foundations = { path = "../protocol-foundations" }
+statement-stream = { path = "../statement-stream" }
 num-bigint.workspace = true
 setup-witness = { path = "../setup-witness" }
 zeroize.workspace = true

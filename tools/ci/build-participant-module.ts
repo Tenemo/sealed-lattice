@@ -182,7 +182,7 @@ export const buildParticipantModule = async (
             '--locked',
             '--release',
             '-p',
-            'registration-enrollment',
+            'participant-module',
             ...(feature === undefined ? [] : ['--features', feature]),
             '--lib',
             '--target',
@@ -206,7 +206,7 @@ export const buildParticipantModule = async (
         'release',
     );
     const module = await readFile(
-        path.join(releaseDirectory, 'registration_enrollment.wasm'),
+        path.join(releaseDirectory, 'participant_module.wasm'),
     );
     await checkParticipantModule(module);
     return {
@@ -214,7 +214,7 @@ export const buildParticipantModule = async (
         compiler,
         flags: flag('<repository>', '<cargo-home>'),
         sources: await compiledRustSources(
-            path.join(releaseDirectory, 'registration_enrollment.d'),
+            path.join(releaseDirectory, 'participant_module.d'),
         ),
     };
 };

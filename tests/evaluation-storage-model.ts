@@ -117,7 +117,7 @@ export const compileRankingProgramModel = (
 };
 
 // Source operands: ranking::{capacity,scratch_bytes}, arithmetic-jobs::job_bytes
-// and registration-enrollment::memory_plan. This exact lane has zero helpers.
+// and participant-module::memory_plan. This exact lane has zero helpers.
 export const compileScalarEvaluationCapacity = (profile: SupportedProfile) => {
     const rns = compileRnsArithmeticResourceCensus(profile);
     const residue = rns.degree * 8n;

@@ -1,6 +1,6 @@
 use crate::body::VerifiedBallotBody;
-use registration_credentials::SIGNATURE_BYTES;
-use registration_credentials::ballot_authentication::{BallotEnvelope, verify_ballot_signature};
+use protocol_foundations::SIGNATURE_BYTES;
+use protocol_foundations::ballot_authentication::{BallotEnvelope, verify_ballot_signature};
 use setup_aggregate::verified::VerifiedSetupAggregate;
 use supported_profile::Profile;
 
@@ -47,11 +47,11 @@ impl AuthenticatedBallotBody {
 
 pub struct BallotBodyAuthentication {
     authentication: AuthenticatedBallotEnvelope,
-    hash: registration_credentials::identity::BodyHasher,
+    hash: protocol_foundations::identity::BodyHasher,
 }
 impl BallotBodyAuthentication {
     pub fn new(authentication: AuthenticatedBallotEnvelope) -> Result<Self, Error> {
-        let hash = registration_credentials::ballot_body::body_hasher(
+        let hash = protocol_foundations::ballot_body::body_hasher(
             authentication.profile,
             authentication.envelope().body_length(),
         )

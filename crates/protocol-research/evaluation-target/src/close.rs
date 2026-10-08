@@ -1,5 +1,5 @@
 use ballot_proof::submission::{AuthenticatedBallotBody, AuthenticatedBallotEnvelope};
-use registration_credentials::{
+use protocol_foundations::{
     SIGNATURE_BYTES, SIGNING_PUBLIC_KEY_BYTES,
     close_signing::{
         CloseIntentMessage, CloseProposalMessage, ClosePurpose, CloseResponseMessage,

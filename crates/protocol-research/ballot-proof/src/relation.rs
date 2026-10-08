@@ -3,7 +3,7 @@ use crate::{
     statement::{self, polynomial_bytes, setup_input},
     verifier,
 };
-use registration_credentials::{
+use protocol_foundations::{
     identity::{IdentityHasher, PUBLIC_POLYNOMIAL_DOMAIN, identity},
     poll::VerifiedPoll,
 };

@@ -1,4 +1,4 @@
-use registration_credentials::{
+use protocol_foundations::{
     foundation::participant_identity::{ParticipantIdentity, derive_participant_identity},
     foundation::{CanonicalItem, CanonicalTuple},
     poll::VerifiedPoll,

@@ -8,7 +8,7 @@ publish.workspace = true
 sha3 = { workspace = true, features = ["zeroize"] }
 zeroize.workspace = true
 parallel-work = { path = "../parallel-work" }
-setup-stream-kernel = { path = "../setup-stream-kernel" }
+statement-stream = { path = "../statement-stream" }
 supported-profile = { path = "../supported-profile" }
 
 [features]

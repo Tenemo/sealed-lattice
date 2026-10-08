@@ -1,13 +1,13 @@
 use parallel_work::ProtocolHash;
 use parallel_work::{HashStream, Sponge};
-use setup_stream_kernel::SetupStatementOutput as StatementOutput;
-use setup_stream_kernel::arithmetic::{
-    MODULUS, add as add_base, multiply as multiply_base, power as power_base,
-    subtract as subtract_base,
-};
 use sha3::{
     Shake256,
     digest::{ExtendableOutput, Update, XofReader},
+};
+use statement_stream::StatementOutput;
+use statement_stream::arithmetic::{
+    MODULUS, add as add_base, multiply as multiply_base, power as power_base,
+    subtract as subtract_base,
 };
 use std::{collections::BTreeMap, sync::OnceLock};
 use supported_profile::relation::{
@@ -84,7 +84,7 @@ fn scale(value: Element, factor: u128) -> Element {
     value.map(|entry| multiply_base(entry, factor))
 }
 fn multiply(left: Element, right: Element) -> Element {
-    setup_stream_kernel::arithmetic::multiply_extension(left, right)
+    statement_stream::arithmetic::multiply_extension(left, right)
 }
 fn encode(value: Element) -> [u8; 48] {
     let mut bytes = [0; 48];
