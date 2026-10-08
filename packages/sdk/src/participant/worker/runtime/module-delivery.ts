@@ -5,7 +5,8 @@ import {
     requireInputCapacities,
 } from '../module/participant-module.js';
 import type { ParticipantModule } from '../module/participant-module.js';
-import { readBounded } from '../relay/relay.js';
+import { chunkBytes } from '../module/runtime-bounds.js';
+import { readBounded, transferChunkBytes } from '../relay/relay.js';
 import {
     concatenate,
     encodeText,
@@ -13,7 +14,7 @@ import {
     hexadecimal,
 } from '../shared/bytes.js';
 import { PublicInputFailure } from '../shared/failures.js';
-import { largestBufferInputBytes } from '../stages/target-vote/target.js';
+import { evaluationStoreChunkBytes } from '../stages/target-vote/evaluation.js';
 
 import type { WorkerCommand } from './worker-messages.js';
 
@@ -52,6 +53,19 @@ export const deliverModule = async (
     );
     return { bytes, runtime };
 };
+
+// The largest input the worker writes at once into the module's close,
+// classifier, evaluation and certificate buffers: a relay transfer chunk, a
+// retained record chunk, a cached aggregate chunk or an evaluation store
+// chunk. Every whole record and concatenation it writes there is smaller at
+// every supported profile.
+export const largestBufferInputBytes = (module: ParticipantModule) =>
+    Math.max(
+        transferChunkBytes,
+        chunkBytes,
+        module.setup_chunk_capacity(),
+        evaluationStoreChunkBytes,
+    );
 
 // Instantiates the module for one operation. The worker's share of the
 // operation's memory plan, whose other shares the started helpers hold,

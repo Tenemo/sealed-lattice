@@ -12,8 +12,8 @@ import {
     readParticipantLimits,
     readParticipantProfile,
 } from '#packages/sdk/src/participant/worker/module/runtime-bounds.js';
+import { largestBufferInputBytes } from '#packages/sdk/src/participant/worker/runtime/module-delivery.js';
 import { ModuleFailure } from '#packages/sdk/src/participant/worker/shared/failures.js';
-import { largestBufferInputBytes } from '#packages/sdk/src/participant/worker/stages/target-vote/target.js';
 import {
     compileParticipantRuntimeLimits,
     compileParticipantRuntimeProfile,

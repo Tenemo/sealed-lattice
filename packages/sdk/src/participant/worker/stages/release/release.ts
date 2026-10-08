@@ -45,13 +45,13 @@ import {
     restoreCompletedClose,
 } from '../close/close.js';
 import { deliverFinalAggregate, readFinalAggregate } from '../setup/setup.js';
+import { discardEvaluation } from '../target-vote/evaluation.js';
 import type {
     BallotInclusion,
     TargetState,
 } from '../target-vote/target-state.js';
 import {
     certifiedBallotInclusion,
-    discardEvaluation,
     finalityOperation,
     restoreOrEvaluateTarget,
     resumeTarget,

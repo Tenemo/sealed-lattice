@@ -9,7 +9,7 @@ import {
 import {
     restoreEvaluation,
     retainEvaluation,
-} from '#packages/sdk/src/participant/worker/stages/target-vote/target.js';
+} from '#packages/sdk/src/participant/worker/stages/target-vote/evaluation.js';
 import {
     evaluatedTargetName,
     namespacedName,

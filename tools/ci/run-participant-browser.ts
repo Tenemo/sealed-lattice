@@ -29,11 +29,11 @@ import {
 } from '#packages/sdk/src/participant/worker/relay/candidate-codec.js';
 import type { WorkerResult } from '#packages/sdk/src/participant/worker/runtime/worker-messages.js';
 import { tupleFields } from '#packages/sdk/src/participant/worker/shared/bytes.js';
-import { completedClosePhase } from '#packages/sdk/src/participant/worker/stages/close/close-state.js';
 import {
     closureBodyFile,
     closureSubmissionFile,
-} from '#packages/sdk/src/participant/worker/stages/close/close.js';
+} from '#packages/sdk/src/participant/worker/stages/close/close-records.js';
+import { completedClosePhase } from '#packages/sdk/src/participant/worker/stages/close/close-state.js';
 import {
     evaluatedTargetName,
     namespacedName,

@@ -3,10 +3,8 @@ import type { PublicRelay } from '../relay/relay.js';
 
 import { certifyTarget, combineReleaseShares } from './release/release.js';
 import { verifyPublicSetup } from './setup/setup.js';
-import {
-    evaluateClosedTarget,
-    publicCloseRecords,
-} from './target-vote/target.js';
+import { publicCloseRecords } from './target-vote/close-barrier.js';
+import { evaluateClosedTarget } from './target-vote/evaluation.js';
 
 // The outcome verifier runs the owning verifiers over a poll's published
 // records from the poll's identity alone, in a worker that holds no
