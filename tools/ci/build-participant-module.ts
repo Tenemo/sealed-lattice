@@ -19,7 +19,7 @@ import { participantRuntimeLabel } from '#packages/sdk/src/participant/worker/id
 const repositoryRoot = fileURLToPath(new URL('../../', import.meta.url));
 const workspace = path.join(repositoryRoot, 'crates', 'protocol-research');
 // The participant module's linear memory never exceeds the absolute bound.
-const maximumMemoryBytes = 671_088_640;
+export const participantLinearMemoryBytes = 671_088_640;
 const rustflagSeparator = '\x1f';
 const compilerCommit = '59807616e1fa2540724bfbac14d7976d7e4a3860';
 
@@ -112,7 +112,7 @@ export const checkParticipantModule = async (
         if (
             memory.shared ||
             memory.is64 ||
-            memory.max !== maximumMemoryBytes / 65_536
+            memory.max !== participantLinearMemoryBytes / 65_536
         )
             throw new Error(
                 'The participant module memory is not the bounded scalar memory.',
@@ -164,7 +164,7 @@ export const buildParticipantModule = async (
         '-C',
         'target-feature=-simd128',
         '-C',
-        `link-arg=--max-memory=${String(maximumMemoryBytes)}`,
+        `link-arg=--max-memory=${String(participantLinearMemoryBytes)}`,
     ];
     const targetDirectory = path.join(
         repositoryRoot,

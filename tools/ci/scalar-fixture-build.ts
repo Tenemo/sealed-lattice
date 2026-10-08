@@ -6,6 +6,7 @@ import path from 'node:path';
 
 import binaryen from 'binaryen';
 
+import { participantLinearMemoryBytes } from '#tools/ci/build-participant-module.js';
 import { runCommandAndCaptureOutput } from '#tools/ci/command-runner.js';
 import type { ActiveLocalRunLog } from '#tools/ci/local-run-log.js';
 
@@ -60,9 +61,8 @@ export const scalarFixtureBuildFlags = (repository: string, cargo: string) => [
     '-C',
     'target-feature=-simd128',
     '-C',
-    'link-arg=--max-memory=' + String(scalarLinearMemoryLimit),
+    'link-arg=--max-memory=' + String(participantLinearMemoryBytes),
 ];
-export const scalarLinearMemoryLimit = 671_088_640;
 export const fixtureProcessMemoryLimit = 1_073_741_824;
 const compilerCommit = '59807616e1fa2540724bfbac14d7976d7e4a3860';
 const allowedImports = new Set([
@@ -91,7 +91,7 @@ export const inspectScalarFixtureModule = async (bytes: Uint8Array) => {
         assert.ok(
             !memory.shared &&
                 !memory.is64 &&
-                memory.max === scalarLinearMemoryLimit / 65_536,
+                memory.max === participantLinearMemoryBytes / 65_536,
             'The scalar module memory is not bounded unshared scalar memory.',
         );
     } finally {

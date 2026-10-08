@@ -8,6 +8,7 @@ import {
     boundedBrowserSources,
     runFheKeySourceInChrome,
 } from '#tools/ci/bounded-output-browser.js';
+import { participantLinearMemoryBytes } from '#tools/ci/build-participant-module.js';
 import {
     assertFheKeySourceStable,
     assertScalarNativeInputs,
@@ -33,7 +34,6 @@ import {
     fixtureProcessMemoryLimit,
     readFixtureCompiler,
     scalarFixtureBuildFlags,
-    scalarLinearMemoryLimit,
 } from '#tools/ci/scalar-fixture-build.js';
 
 const screenKind = 'fhe-key-source';
@@ -101,7 +101,8 @@ export const runFheKeySourceScreen = async (
                         model.planningBytes < BigInt(fixtureProcessMemoryLimit),
                     );
                     assert.ok(
-                        model.planningBytes < BigInt(scalarLinearMemoryLimit),
+                        model.planningBytes <
+                            BigInt(participantLinearMemoryBytes),
                     );
                     assert.ok(
                         model.reportBytes <= model.outputCapacity &&
@@ -115,7 +116,7 @@ export const runFheKeySourceScreen = async (
                             models,
                             phaseLabels: fheKeySourcePhases,
                             processMemoryLimit: fixtureProcessMemoryLimit,
-                            linearMemoryLimit: scalarLinearMemoryLimit,
+                            linearMemoryLimit: participantLinearMemoryBytes,
                             scope: 'Original FHE source creation, public-coordinate emission, restoration into a contribution, first-gadget generation and independent coordinate checks. Planning and sampled process/linear limits remain distinct; no proof or participant capability is created.',
                         },
                         (_key, value: unknown) =>
@@ -349,7 +350,7 @@ export const runFheKeySourceScreen = async (
                                 expectedBytes: expected.bytes,
                                 expectedSha512: expected.sha512,
                                 processMemoryLimit: fixtureProcessMemoryLimit,
-                                linearMemoryLimit: scalarLinearMemoryLimit,
+                                linearMemoryLimit: participantLinearMemoryBytes,
                             });
                         else {
                             const configuration = path.join(
@@ -402,7 +403,7 @@ export const runFheKeySourceScreen = async (
                             typeof result.result.maximumLinearMemoryBytes ===
                                 'number' &&
                                 result.result.maximumLinearMemoryBytes <=
-                                    scalarLinearMemoryLimit,
+                                    participantLinearMemoryBytes,
                         );
                         await compareNativeReferenceArtifacts(
                             [expected],
