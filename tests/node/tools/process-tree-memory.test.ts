@@ -57,9 +57,11 @@ describe('process-tree memory', () => {
         const samples: number[] = [];
         const aborted: unknown[] = [];
         let handled = 0;
-        let sampled: () => void = () => undefined;
-        const first = new Promise<void>((resolve) => {
-            sampled = resolve;
+        // The first sample or a failed read ends the wait, so a read that
+        // fails reports its error instead of outlasting the test.
+        let settle: () => void = () => undefined;
+        const settled = new Promise<void>((resolve) => {
+            settle = resolve;
         });
         const guard = guardProcessTreeMemory({
             processIdentifier,
@@ -69,16 +71,19 @@ describe('process-tree memory', () => {
                 samples.push(bytes);
                 await Promise.resolve();
                 handled++;
-                sampled();
+                settle();
             },
-            abort: (reason) => aborted.push(reason),
+            abort: (reason) => {
+                aborted.push(reason);
+                settle();
+            },
         });
-        await first;
+        await settled;
         await guard.stop();
+        expect(aborted).toEqual([]);
         expect(samples.length).toBeGreaterThan(0);
         expect(handled).toBe(samples.length);
         expect(samples.every((bytes) => bytes > 0)).toBe(true);
-        expect(aborted).toEqual([]);
     });
 
     it('aborts with its message once a sample exceeds the limit and samples no more', async () => {
