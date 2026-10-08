@@ -42,9 +42,11 @@ import { readParticipantOutput } from './participant-module.js';
 import { openRecord, recordContext, sealRecord } from './private-records.js';
 import type { RecordContext } from './private-records.js';
 import {
+    candidateLists,
     createCandidatePublication,
     readCandidateFile,
     readCandidates,
+    scanCandidatesFairly,
     streamCandidateFile,
 } from './relay.js';
 import type { CandidateView, PublicRelay } from './relay.js';
@@ -1053,34 +1055,22 @@ const takeResponses = async (session: CloseSession, relay: PublicRelay) => {
     await deliverWantedBodies(session, relay);
     const recovered = tryCloseCommand(context, closeOperation.prepareResponse);
     if (recovered !== undefined) return recovered;
-    const remaining = new Map(
-        Array.from(
-            { length: profile.participantCount },
-            (_, position) =>
-                [
-                    position,
-                    readCandidates(relay, closeResponseCandidateKey(position))[
-                        Symbol.asyncIterator
-                    ](),
-                ] as const,
-        ).filter(
-            ([position]) =>
+    let prepared: ReturnType<typeof tryCloseCommand>;
+    return scanCandidatesFairly(
+        candidateLists(
+            relay,
+            profile.participantCount,
+            closeResponseCandidateKey,
+            (position) =>
                 position !== session.records.position && !taken.has(position),
         ),
-    );
-    while (remaining.size > 0) {
-        for (const [responder, candidates] of remaining) {
-            const next = await candidates.next();
-            if (next.done) {
-                remaining.delete(responder);
-                continue;
-            }
+        async (responder, candidate) => {
             let response: Uint8Array;
             let copies: Uint8Array;
             try {
                 response = await readCandidateFile(
                     relay,
-                    next.value,
+                    candidate,
                     'response.bin',
                     4 +
                         close.maximumResponseBodyBytes +
@@ -1088,12 +1078,12 @@ const takeResponses = async (session: CloseSession, relay: PublicRelay) => {
                 );
                 copies = await readCandidateFile(
                     relay,
-                    next.value,
+                    candidate,
                     'submissions.bin',
                     maximumListedEntries(profile) * close.submissionBytes,
                 );
             } catch (error) {
-                if (error instanceof PublicInputFailure) continue;
+                if (error instanceof PublicInputFailure) return false;
                 throw error;
             }
             if (
@@ -1103,7 +1093,7 @@ const takeResponses = async (session: CloseSession, relay: PublicRelay) => {
                     4 + close.minimumResponseBodyBytes - responderFromListing,
                 ) !== responder
             )
-                continue;
+                return false;
             const length = readUnsigned32(response, 0);
             const supplied: Uint8Array[] = [];
             for (
@@ -1140,7 +1130,7 @@ const takeResponses = async (session: CloseSession, relay: PublicRelay) => {
                     record,
                 ) === undefined
             )
-                continue;
+                return false;
             const event = {
                 kind: closeEventKind.response,
                 serial: nextSerial(session.state),
@@ -1152,21 +1142,15 @@ const takeResponses = async (session: CloseSession, relay: PublicRelay) => {
                 added,
             );
             learnResponse(session, event.serial, record);
-            remaining.delete(responder);
-            const prepared = tryCloseCommand(
-                context,
-                closeOperation.prepareResponse,
-            );
-            if (prepared !== undefined) return prepared;
-        }
-        await deliverWantedBodies(session, relay);
-        const prepared = tryCloseCommand(
-            context,
-            closeOperation.prepareResponse,
-        );
-        if (prepared !== undefined) return prepared;
-    }
-    return undefined;
+            prepared = tryCloseCommand(context, closeOperation.prepareResponse);
+            return true;
+        },
+        () => prepared,
+        async () => {
+            await deliverWantedBodies(session, relay);
+            prepared = tryCloseCommand(context, closeOperation.prepareResponse);
+        },
+    );
 };
 
 // Delivers the bodies the taken responses need and the organizer lacks,

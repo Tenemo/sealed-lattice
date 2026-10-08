@@ -264,6 +264,55 @@ export const findCandidate = async <Value>(
     );
 };
 
+// The discovery lists of the roster positions below the count that the
+// filter includes, by position.
+export const candidateLists = (
+    relay: PublicRelay,
+    count: number,
+    key: (position: number) => string,
+    include: (position: number) => boolean = () => true,
+) => {
+    const lists = new Map<number, AsyncIterator<CandidateView>>();
+    for (let position = 0; position < count; position++)
+        if (include(position))
+            lists.set(
+                position,
+                readCandidates(relay, key(position))[Symbol.asyncIterator](),
+            );
+    return lists;
+};
+
+// Takes candidates from per-author discovery lists fairly: each round visits
+// the next candidate of every list that still has one, in position order, so
+// that no author's list, however long, delays or displaces another's. A
+// visit returns whether it retires its position. The scan ends with the first
+// value `result` gives after a visit or a round, or with none once every list
+// is exhausted or retired; `afterRound`, when given, runs after each round
+// that gives no value.
+export const scanCandidatesFairly = async <Candidate, Result>(
+    lists: Map<number, AsyncIterator<Candidate>>,
+    visit: (position: number, candidate: Candidate) => Promise<boolean>,
+    result: () => Result | undefined,
+    afterRound?: () => Promise<void>,
+): Promise<Result | undefined> => {
+    let value = result();
+    while (value === undefined && lists.size > 0) {
+        for (const [position, candidates] of lists) {
+            const next = await candidates.next();
+            if (next.done) {
+                lists.delete(position);
+                continue;
+            }
+            if (await visit(position, next.value)) lists.delete(position);
+            value = result();
+            if (value !== undefined) return value;
+        }
+        await afterRound?.();
+        value = result();
+    }
+    return value;
+};
+
 export const streamCandidateFile = async (
     relay: PublicRelay,
     candidate: CandidateView,

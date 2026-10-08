@@ -28,9 +28,10 @@ import {
 } from './participant-module.js';
 import { openRecord, sealRecord } from './private-records.js';
 import {
+    candidateLists,
     createCandidatePublication,
     readCandidateFile,
-    readCandidates,
+    scanCandidatesFairly,
     streamCandidateFile,
 } from './relay.js';
 import type { PublicRelay } from './relay.js';
@@ -251,36 +252,21 @@ export const certifyTarget = async (
         completionCommand(context, completionOperation.beginVotes),
     );
     let accepted = 0;
-    let refused = false;
-    const pending = new Map(
-        Array.from(
-            { length: count },
-            (_, position) =>
-                [
-                    position,
-                    readCandidates(relay, targetVoteCandidateKey(position))[
-                        Symbol.asyncIterator
-                    ](),
-                ] as const,
-        ),
-    );
-    while (pending.size > 0 && accepted < threshold) {
-        for (const [position, candidates] of pending) {
-            const next = await candidates.next();
-            if (next.done) {
-                pending.delete(position);
-                continue;
-            }
+    // The authors whose vote the completion verifier refused.
+    const refusals = new Set<number>();
+    await scanCandidatesFairly(
+        candidateLists(relay, count, targetVoteCandidateKey),
+        async (position, candidate) => {
             let vote: Uint8Array;
             try {
                 vote = await readCandidateFile(
                     relay,
-                    next.value,
+                    candidate,
                     'vote.bin',
                     context.profile.target.votePacketBytes,
                 );
             } catch (error) {
-                if (error instanceof PublicInputFailure) continue;
+                if (error instanceof PublicInputFailure) return false;
                 throw error;
             }
             // A copied valid vote in another author's discovery list must
@@ -289,27 +275,28 @@ export const certifyTarget = async (
                 vote.length !== context.profile.target.votePacketBytes ||
                 readUnsigned16(vote, 0) !== position
             )
-                continue;
+                return false;
             const inserted = tryCompletionCommand(
                 context,
                 completionOperation.insertVote,
                 0,
                 vote,
             );
-            if (inserted === undefined) refused = true;
-            else {
-                accepted = words(inserted)[1];
-                pending.delete(position);
-                if (accepted >= threshold) break;
+            if (inserted === undefined) {
+                refusals.add(position);
+                return false;
             }
-        }
-    }
+            accepted = words(inserted)[1];
+            return true;
+        },
+        () => (accepted >= threshold ? accepted : undefined),
+    );
     const certified = tryCompletionCommand(
         context,
         completionOperation.certify,
     );
     if (certified === undefined) {
-        if (restored && refused) await discardEvaluation(context);
+        if (restored && refusals.size > 0) await discardEvaluation(context);
         throw new PublicInputFailure('The target votes are incomplete.');
     }
     return words(certified)[0] === 1;
@@ -719,38 +706,22 @@ export const combineReleaseShares = async (
 ) => {
     const { profile } = context;
     const bounds = profile.release;
-    let result = encrypted
+    let combined = encrypted
         ? undefined
         : tryCompletionCommand(context, completionOperation.result);
-    const pending = new Map(
-        Array.from(
-            { length: profile.participantCount },
-            (_, position) =>
-                [
-                    position,
-                    readCandidates(relay, releaseCandidateKey(position))[
-                        Symbol.asyncIterator
-                    ](),
-                ] as const,
-        ),
-    );
-    while (result === undefined && pending.size > 0) {
-        for (const [position, candidates] of pending) {
-            const next = await candidates.next();
-            if (next.done) {
-                pending.delete(position);
-                continue;
-            }
+    const result = await scanCandidatesFairly(
+        candidateLists(relay, profile.participantCount, releaseCandidateKey),
+        async (position, candidate) => {
             let packet: Uint8Array;
             try {
                 packet = await readCandidateFile(
                     relay,
-                    next.value,
+                    candidate,
                     'envelope.bin',
                     bounds.envelopeBytes + profile.registration.signatureBytes,
                 );
             } catch (error) {
-                if (error instanceof PublicInputFailure) continue;
+                if (error instanceof PublicInputFailure) return false;
                 throw error;
             }
             await establishReleaseContext(context, position);
@@ -760,13 +731,13 @@ export const combineReleaseShares = async (
                 0,
                 packet,
             );
-            if (authenticated === undefined) continue;
+            if (authenticated === undefined) return false;
             let header: Uint8Array = new Uint8Array();
             let accepted = true;
             try {
                 await streamCandidateFile(
                     relay,
-                    next.value,
+                    candidate,
                     'body.bin',
                     bounds.maximumBodyBytes,
                     (bytes) => {
@@ -808,12 +779,15 @@ export const combineReleaseShares = async (
                     completionOperation.finishRelease,
                 ) === undefined
             )
-                continue;
-            pending.delete(position);
-            result = tryCompletionCommand(context, completionOperation.result);
-            if (result !== undefined) break;
-        }
-    }
+                return false;
+            combined = tryCompletionCommand(
+                context,
+                completionOperation.result,
+            );
+            return true;
+        },
+        () => combined,
+    );
     if (result === undefined)
         throw new PublicInputFailure('The release shares are incomplete.');
     const identifiers: string[] = [];

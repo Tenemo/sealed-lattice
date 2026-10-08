@@ -27,10 +27,12 @@ import {
 } from './participant-module.js';
 import { encodePreparationState } from './preparation-state.js';
 import {
+    candidateLists,
     createCandidatePublication,
     findCandidate,
     readCandidateFile,
     readCandidates,
+    scanCandidatesFairly,
     streamCandidateFile,
 } from './relay.js';
 import type { CandidateView, PublicRelay } from './relay.js';
@@ -879,34 +881,18 @@ const readSetupCertificate = async (
                     context.profile.registration.signatureBytes,
                 ),
             });
-            const remaining = new Map(
-                Array.from(
-                    { length: context.profile.participantCount },
-                    (_, position) =>
-                        [
-                            position,
-                            readCandidates(
-                                relay,
-                                endorsementCandidateKey(position),
-                            )[Symbol.asyncIterator](),
-                        ] as const,
-                ),
-            );
             let endorsements = 0;
-            while (
-                remaining.size > 0 &&
-                endorsements < context.profile.close.quorum
-            ) {
-                for (const [position, candidates] of remaining) {
-                    const next = await candidates.next();
-                    if (next.done) {
-                        remaining.delete(position);
-                        continue;
-                    }
+            await scanCandidatesFairly(
+                candidateLists(
+                    relay,
+                    context.profile.participantCount,
+                    endorsementCandidateKey,
+                ),
+                async (position, candidate) => {
                     try {
                         const bytes = await readCandidateFile(
                             relay,
-                            next.value,
+                            candidate,
                             'endorsement.bin',
                             context.profile.preparation.endorsementPacketBytes,
                         );
@@ -916,20 +902,24 @@ const readSetupCertificate = async (
                                     .endorsementPacketBytes ||
                             readUnsigned16(bytes, 0) !== position
                         )
-                            continue;
+                            return false;
                         writeSetupInput(context.module, bytes);
                         if (
                             context.module.setup_endorsement(bytes.length) !== 0
                         )
-                            continue;
-                        remaining.delete(position);
+                            return false;
                         endorsements++;
-                        if (endorsements >= context.profile.close.quorum) break;
+                        return true;
                     } catch (error) {
                         if (!(error instanceof PublicInputFailure)) throw error;
+                        return false;
                     }
-                }
-            }
+                },
+                () =>
+                    endorsements >= context.profile.close.quorum
+                        ? endorsements
+                        : undefined,
+            );
             if (context.module.setup_certificate_build() !== 0)
                 throw new PublicInputFailure(
                     'A complete setup endorsement quorum is unavailable.',
