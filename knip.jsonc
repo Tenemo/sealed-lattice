@@ -7,8 +7,11 @@
                 "tools/ci/sdk-package-tsdown.config.ts",
                 // Browser entry bundled by the guarded preparation runner.
                 "tools/ci/participant-preparation-storage.ts",
+                // Workers the bounded output screens start by path.
+                "tools/ci/bounded-output-browser-worker.mjs",
+                "tools/ci/bounded-output-worker.mjs",
             ],
-            "project": ["tests/**/*.ts", "tools/**/*.ts"],
+            "project": ["tests/**/*.ts", "tools/**/*.{ts,mjs}"],
         },
         "packages/sdk": {
             "entry": [

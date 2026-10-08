@@ -147,7 +147,6 @@ const makeNodeProject = ({
         include: [...include],
         ...(exclude === undefined ? {} : { exclude: [...exclude] }),
         ...projectAttachments(projectName),
-        environment: 'node',
         ...(nodeDiagnosticReportArguments.length === 0
             ? {}
             : { execArgv: nodeDiagnosticReportArguments }),
@@ -220,25 +219,16 @@ const makeBrowserProject = ({
 export default defineConfig({
     resolve: testResolve,
     test: {
+        reporters: [
+            'default' as const,
+            ...(process.env.GITHUB_ACTIONS === 'true'
+                ? (['github-actions'] as const)
+                : []),
+            ...(testResultFilePath === undefined ? [] : (['json'] as const)),
+        ],
         ...(testResultFilePath === undefined
-            ? {
-                  reporters: [
-                      'default' as const,
-                      ...(process.env.GITHUB_ACTIONS === 'true'
-                          ? (['github-actions'] as const)
-                          : []),
-                  ],
-              }
-            : {
-                  outputFile: { json: testResultFilePath },
-                  reporters: [
-                      'default' as const,
-                      ...(process.env.GITHUB_ACTIONS === 'true'
-                          ? (['github-actions'] as const)
-                          : []),
-                      'json' as const,
-                  ],
-              }),
+            ? {}
+            : { outputFile: { json: testResultFilePath } }),
         projects: [
             ...nodeTestProjectDefinitions.map((projectDefinition) =>
                 makeNodeProject(projectDefinition),

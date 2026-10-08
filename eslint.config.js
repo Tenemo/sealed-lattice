@@ -14,7 +14,7 @@ import {
 const sourceFiles = ['**/*.{js,mjs,ts}'];
 const javaScriptFiles = ['**/*.{js,mjs}'];
 const testFiles = ['packages/*/tests/**/*.ts', 'tests/**/*.ts'];
-const toolFiles = ['tools/**/*.ts', '*.config.{ts,js}'];
+const toolFiles = ['tools/**/*.{ts,mjs}', '*.config.{ts,js}'];
 
 const projectPaths = ['./tsconfig.tools.json', './packages/*/tsconfig.json'];
 
@@ -89,7 +89,6 @@ export default defineConfig(
         rules: {
             ...eslintJs.configs.recommended.rules,
             'no-redeclare': 'off',
-            'no-restricted-exports': 'off',
             'no-restricted-properties': [
                 'error',
                 {
@@ -99,7 +98,6 @@ export default defineConfig(
                         'Use the project crypto-backed randomness helpers instead.',
                 },
             ],
-            'no-shadow': 'off',
             'no-undef': 'off',
             'no-unused-vars': 'off',
             '@typescript-eslint/no-unused-vars': 'off',
@@ -131,7 +129,6 @@ export default defineConfig(
                 { devDependencies: true },
             ],
             'import-x/no-duplicates': 'error',
-            'import-x/prefer-default-export': 'off',
             'import-x/extensions': [
                 'error',
                 'ignorePackages',
