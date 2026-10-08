@@ -598,7 +598,7 @@ const execute = async (
         case 'release': {
             // Release follows this participant's signed target, or its
             // completed close when it signed no target and a certificate
-            // already exists; a pending target signature cannot be
+            // already exists; a pending target vote cannot be
             // bypassed. A signed release is only delivered again.
             const generation = root.head.generation;
             if (

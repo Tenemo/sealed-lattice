@@ -4,7 +4,7 @@ import { certifyTarget, combineReleaseShares } from './release.js';
 import { verifyPublicSetup } from './setup.js';
 import { evaluateClosedTarget, publicCloseRecords } from './target.js';
 
-// The standalone verifier runs the owning verifiers over a poll's published
+// The outcome verifier runs the owning verifiers over a poll's published
 // records from the poll's identity alone, in a worker that holds no
 // participant state, credential or randomness, only public working storage.
 

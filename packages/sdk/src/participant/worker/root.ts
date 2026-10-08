@@ -71,7 +71,7 @@ export const dataKind = {
     proposal: 7,
     proposalSignature: 8,
     setupReference: 9,
-    // The quorum certificate the setup was verified against.
+    // The setup certificate the setup was verified against.
     setupInventory: 10,
     // This participant's roster verification, keyed to its credential.
     retainedRoster: 11,

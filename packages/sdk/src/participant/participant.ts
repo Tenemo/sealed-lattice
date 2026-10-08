@@ -42,11 +42,9 @@ export type ParticipantOptions = Readonly<{
      */
     namespace: string;
     /**
-     * The relay's absolute HTTP or HTTPS base URL, without credentials, a
-     * query or a fragment. It serves each public record at `public/<name>`
-     * and accepts its publication at `publish/<name>?offset=<offset>`.
-     * The `offers/<position>` endpoint appends untrusted body identities and
-     * returns bounded announcement pages for setup discovery.
+     * The relay's absolute HTTP or HTTPS base URL, ending with a slash,
+     * without credentials, a query or a fragment. The package README's relay
+     * section lists the routes it serves.
      */
     relay: string;
 }>;
@@ -136,8 +134,8 @@ export type ParticipantSummary = Readonly<{
     /**
      * The own ballot's status in the target the participant signs, once it
      * has evaluated that target. A participant that signs no target reads it
-     * from the certified target in its release and result visits, and every
-     * operation reports it again once its release is locked.
+     * from the certified target in its release and result operations, and
+     * every operation reports it again once its release is locked.
      */
     ballotStatus: 'not cast' | 'late' | 'included' | 'omitted' | undefined;
     /**
@@ -151,7 +149,7 @@ export type ParticipantSummary = Readonly<{
  * A refused request changed nothing, and its reason says why; a pending one
  * waits for public input, storage or a device resource such as memory, or
  * follows a module or worker failure, as its cause names and its reason
- * describes, and a later visit continues from the participant's last
+ * describes, and a later operation continues from the participant's last
  * committed state; a stopped participant never acts again. Enrollment that
  * ends after its intent is retained but before its secrets are retained
  * stops, since that intent cannot resume private generation. A participant
@@ -180,14 +178,14 @@ export type Participant = Readonly<{
     run: (request: ParticipantRequest) => Promise<ParticipantResult>;
 }>;
 
-/** What a standalone verification of a poll's outcome reads. */
+/** What the outcome verifier reads. */
 export type OutcomeVerificationOptions = Readonly<{
     /** The poll's identity in lower-case hexadecimal. */
     poll: string;
     /**
-     * The relay's absolute HTTP or HTTPS base URL, without credentials, a
-     * query or a fragment, which serves each public record at
-     * `public/<name>`.
+     * The relay's absolute HTTP or HTTPS base URL, ending with a slash,
+     * without credentials, a query or a fragment. The package README's relay
+     * section lists the routes it serves.
      */
     relay: string;
 }>;
