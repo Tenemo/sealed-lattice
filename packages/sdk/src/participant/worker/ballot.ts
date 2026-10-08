@@ -44,6 +44,7 @@ import {
     deliverFinalAggregate,
     ensureFinalAggregate,
     readFinalAggregate,
+    retainedSetupInventory,
 } from './setup.js';
 import { snapshotParticipant } from './storage.js';
 
@@ -233,7 +234,10 @@ export const beginBallot = async (
         estimate.quota - estimate.usage < profile.ballot.requiredStorageBytes
     )
         throw new StoragePending('The origin lacks room for a ballot.');
-    const records = await recordContext(participant);
+    const records = recordContext(
+        participant,
+        await retainedSetupInventory(participant),
+    );
     const session: BallotSession = {
         participant,
         records,
@@ -271,7 +275,10 @@ export const resumeBallot = async (
     participant: ParticipantSession,
 ): Promise<BallotSession | undefined> => {
     const { context } = participant;
-    const records = await recordContext(participant);
+    const records = recordContext(
+        participant,
+        await retainedSetupInventory(participant),
+    );
     const state = retainedBallotState(participant, records);
     const snapshot = await snapshotParticipant(context.database);
     if (snapshot.counts.ballot !== (state?.bodyKeys.length ?? 0))

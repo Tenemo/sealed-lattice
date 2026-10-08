@@ -14,7 +14,7 @@ import {
     contributionRecords,
     polynomialFile,
 } from './contribution.js';
-import type { ParticipantSession, SignedPacket } from './contribution.js';
+import type { ParticipantSession } from './contribution.js';
 import { openDelivery } from './delivery.js';
 import {
     ModuleFailure,
@@ -46,6 +46,8 @@ import {
     streamRegistrations,
     validRecordIds,
 } from './roster.js';
+import { encodeSignedPacket } from './signed-packet.js';
+import type { SignedPacket } from './signed-packet.js';
 import { namespacedName, setupCacheName } from './storage.js';
 
 // The owning Rust verifiers authenticate the roster, complete selected offers,
@@ -305,11 +307,7 @@ export const authenticateSelection = (
     packet: SignedPacket,
     retained = false,
 ) => {
-    const bytes = concatenate(
-        unsigned32(packet.body.length),
-        packet.body,
-        packet.signature,
-    );
+    const bytes = encodeSignedPacket(packet);
     writeSetupInput(context.kernel, bytes);
     if (context.kernel.setup_selection_begin(bytes.length) !== 0)
         throw retained

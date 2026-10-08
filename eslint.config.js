@@ -151,6 +151,7 @@ export default defineConfig(
     {
         files: ['packages/*/src/**/*.ts'],
         rules: {
+            'import-x/no-cycle': ['error', { ignoreExternal: true }],
             'import-x/no-relative-packages': 'error',
             'no-restricted-imports': [
                 'error',

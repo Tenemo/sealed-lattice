@@ -1,12 +1,13 @@
 import type { ParticipantSession } from './contribution.js';
-import { retainedSetupInventory } from './setup.js';
 import { readParticipantValue } from './storage.js';
 import type { ParticipantStore } from './storage.js';
 
-// Private records beneath the authenticated root after setup verification.
-// Each is sealed once under its own fresh AES-256-GCM key with the zero
-// nonce; its associated data binds the poll, the runtime, the setup
-// inventory, the participant and the record's coordinates.
+// Every private record beneath the authenticated root is sealed once under its
+// own fresh AES-256-GCM key with the zero nonce.
+
+// What a private record after setup verification is bound to besides its
+// coordinates: the poll, the runtime, the setup inventory and the
+// participant.
 export type RecordContext = Readonly<{
     poll: Uint8Array;
     runtime: Uint8Array;
@@ -17,12 +18,13 @@ export type RecordContext = Readonly<{
 export const recordKeyBytes = 32;
 const tagBytes = 16;
 
-export const recordContext = async (
+export const recordContext = (
     session: ParticipantSession,
-): Promise<RecordContext> => ({
+    inventory: Uint8Array,
+): RecordContext => ({
     poll: session.root.manifest.poll,
     runtime: session.context.runtime,
-    inventory: await retainedSetupInventory(session),
+    inventory,
     position: session.records.position,
 });
 
@@ -50,6 +52,26 @@ export const sealRecord = async (
     return { key, ciphertext };
 };
 
+export const sealedLength = (length: number) => length + tagBytes;
+
+// Opens a record's ciphertext under its listed key and associated data.
+export const openSealedRecord = async (
+    key: Uint8Array,
+    additionalData: Uint8Array,
+    ciphertext: Uint8Array<ArrayBuffer>,
+) =>
+    new Uint8Array(
+        await crypto.subtle.decrypt(
+            {
+                name: 'AES-GCM',
+                iv: new Uint8Array(12),
+                additionalData: new Uint8Array(additionalData),
+            },
+            await recordCipher(key, 'decrypt'),
+            ciphertext,
+        ),
+    );
+
 // Reads one record at its store key and opens it under its listed key.
 export const openRecord = async (
     database: IDBDatabase,
@@ -59,19 +81,11 @@ export const openRecord = async (
     length: number,
 ) => {
     const blob = await readParticipantValue(database, store, storeKey);
-    if (!(blob instanceof Blob) || blob.size !== length + tagBytes)
+    if (!(blob instanceof Blob) || blob.size !== sealedLength(length))
         throw new Error('A private participant record is missing.');
-    return new Uint8Array(
-        await crypto.subtle.decrypt(
-            {
-                name: 'AES-GCM',
-                iv: new Uint8Array(12),
-                additionalData: new Uint8Array(record.additionalData),
-            },
-            await recordCipher(record.key, 'decrypt'),
-            new Uint8Array(await blob.arrayBuffer()),
-        ),
+    return openSealedRecord(
+        record.key,
+        record.additionalData,
+        new Uint8Array(await blob.arrayBuffer()),
     );
 };
-
-export const sealedLength = (length: number) => length + tagBytes;

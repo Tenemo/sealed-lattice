@@ -5,11 +5,10 @@ import {
     readUnsigned32,
     tupleFields,
     unsigned16,
-    unsigned32,
 } from './bytes.js';
 import { sessionInput } from './context.js';
 import { commitPreparation } from './contribution.js';
-import type { ParticipantSession, SignedPacket } from './contribution.js';
+import type { ParticipantSession } from './contribution.js';
 import { openDelivery } from './delivery.js';
 import { PublicInputFailure } from './failures.js';
 import { readKernel, writeSetupInput } from './kernel.js';
@@ -31,9 +30,8 @@ import {
     verifySetupRoster,
 } from './setup.js';
 import type { SelectedOffer } from './setup.js';
-
-const packet = (value: SignedPacket) =>
-    concatenate(unsigned32(value.body.length), value.body, value.signature);
+import { decodeSignedPacket, encodeSignedPacket } from './signed-packet.js';
+import type { SignedPacket } from './signed-packet.js';
 
 const selectionCommand = (
     session: ParticipantSession,
@@ -49,23 +47,6 @@ const selectionCommand = (
         context.kernel.contribution_output_pointer(),
         context.kernel.contribution_output_length(),
     );
-};
-
-const splitPacket = (
-    session: ParticipantSession,
-    bytes: Uint8Array,
-): SignedPacket => {
-    const length = readUnsigned32(bytes, 0);
-    if (
-        length !== session.context.profile.preparation.selectionBodyBytes ||
-        bytes.length !==
-            4 + length + session.context.profile.registration.signatureBytes
-    )
-        throw new Error('The signed selection has another shape.');
-    return {
-        body: bytes.slice(4, 4 + length),
-        signature: bytes.slice(4 + length),
-    };
 };
 
 // Only transport destinations are recovered from an authenticated original
@@ -127,7 +108,7 @@ export const selectSetup = async (
     await verifySetupRoster(session, relay);
     let retained = session.preparation.selection;
     if (retained?.stage === 'signed') {
-        selectionCommand(session, 3, packet(retained));
+        selectionCommand(session, 3, encodeSignedPacket(retained));
     } else {
         const offers: SelectedOffer[] = [];
         if (retained !== undefined) {
@@ -158,7 +139,12 @@ export const selectSetup = async (
         }
         if (retained?.stage !== 'intent' || !equalBytes(retained.body, body))
             throw new Error('The original selection intent changed.');
-        const signed = splitPacket(session, selectionCommand(session, 1));
+        const signed = decodeSignedPacket(
+            selectionCommand(session, 1),
+            session.context.profile.registration.signatureBytes,
+        );
+        if (signed === undefined)
+            throw new Error('The signed selection has another shape.');
         if (!equalBytes(signed.body, retained.body))
             throw new Error('The organizer changed its locked selection.');
         await commitPreparation(session, {
@@ -284,7 +270,7 @@ export const endorseSetup = async (
             session,
             4,
             concatenate(
-                packet(retained.selection),
+                encodeSignedPacket(retained.selection),
                 endorsementPacket(session, retained),
             ),
         );

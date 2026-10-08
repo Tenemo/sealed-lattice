@@ -41,6 +41,12 @@ import {
     readCandidateFile,
 } from './public.js';
 import type { PublicRelay } from './public.js';
+import {
+    openSealedRecord,
+    recordKeyBytes,
+    sealRecord,
+    sealedLength,
+} from './records.js';
 import { rootGeneration } from './root-generation.js';
 import {
     authenticateRecords,
@@ -57,6 +63,8 @@ import {
     registrationCandidateKey,
 } from './roster.js';
 import type { VerifiedProposal } from './roster.js';
+import { decodeSignedPacket } from './signed-packet.js';
+import type { SignedPacket } from './signed-packet.js';
 import {
     addParticipantRecords,
     awaitLater,
@@ -118,15 +126,9 @@ export const isContributionSession = (
     session: ParticipantSession,
 ): session is ContributionSession => session.state !== undefined;
 
-export type SignedPacket = Readonly<{
-    body: Uint8Array;
-    signature: Uint8Array;
-}>;
-
 const publicEntryBytes = 2 + 4 + 4 + 32 + 64;
 const privateEntryBytes = 32 + 64;
 const signingEntryBytes = 2 + 4 + 32 + 64;
-const keyBytes = 32;
 
 const identityBytes = 64;
 // The sealed checkpoint bytes one write stores while the next are sealed.
@@ -241,8 +243,11 @@ const decodeSigningRecords = (
             object: readUnsigned16(bytes, start),
             offset: 0,
             length: readUnsigned32(bytes, start + 2),
-            key: bytes.slice(start + 6, start + 6 + keyBytes),
-            hash: bytes.slice(start + 6 + keyBytes, start + signingEntryBytes),
+            key: bytes.slice(start + 6, start + 6 + recordKeyBytes),
+            hash: bytes.slice(
+                start + 6 + recordKeyBytes,
+                start + signingEntryBytes,
+            ),
         };
         if (
             record.object !== signingObject(profile, kind) ||
@@ -312,9 +317,9 @@ export const decodeContributionState = (
             object: readUnsigned16(bytes, offset),
             offset: readUnsigned32(bytes, offset + 2),
             length: readUnsigned32(bytes, offset + 6),
-            key: bytes.slice(offset + 10, offset + 10 + keyBytes),
+            key: bytes.slice(offset + 10, offset + 10 + recordKeyBytes),
             hash: bytes.slice(
-                offset + 10 + keyBytes,
+                offset + 10 + recordKeyBytes,
                 offset + publicEntryBytes,
             ),
         };
@@ -341,8 +346,11 @@ export const decodeContributionState = (
     const privateRecords: CheckpointRecord[] = [];
     for (let index = 0; index < privateCount; index++) {
         privateRecords.push({
-            key: bytes.slice(offset, offset + keyBytes),
-            hash: bytes.slice(offset + keyBytes, offset + privateEntryBytes),
+            key: bytes.slice(offset, offset + recordKeyBytes),
+            hash: bytes.slice(
+                offset + recordKeyBytes,
+                offset + privateEntryBytes,
+            ),
         });
         offset += privateEntryBytes;
     }
@@ -377,36 +385,21 @@ const recordAssociatedData = (context: RecordContext, record: RecordLocation) =>
         unsigned32(record.length),
     );
 
-const recordCipher = (key: Uint8Array, usage: 'encrypt' | 'decrypt') =>
-    crypto.subtle.importKey('raw', new Uint8Array(key), 'AES-GCM', false, [
-        usage,
-    ]);
-
 type SealedOutput = Readonly<{
     record: SealedRecord;
     ciphertext: Uint8Array;
 }>;
 
-const sealRecord = async (
+const sealContributionRecord = async (
     session: ParticipantSession,
     object: number,
     offset: number,
     bytes: Uint8Array,
 ): Promise<SealedOutput> => {
-    const key = crypto.getRandomValues(new Uint8Array(keyBytes));
     const location = { object, offset, length: bytes.length };
-    const ciphertext = new Uint8Array(
-        await crypto.subtle.encrypt(
-            {
-                name: 'AES-GCM',
-                iv: new Uint8Array(12),
-                additionalData: new Uint8Array(
-                    recordAssociatedData(session.records, location),
-                ),
-            },
-            await recordCipher(key, 'encrypt'),
-            new Uint8Array(bytes),
-        ),
+    const { key, ciphertext } = await sealRecord(
+        recordAssociatedData(session.records, location),
+        bytes,
     );
     return {
         record: {
@@ -422,7 +415,7 @@ const sealRecord = async (
     };
 };
 
-const openRecord = async (
+const openContributionRecord = async (
     session: ParticipantSession,
     record: SealedRecord,
 ) => {
@@ -431,7 +424,7 @@ const openRecord = async (
         'contribution',
         [record.object, record.offset],
     );
-    if (!(blob instanceof Blob) || blob.size !== record.length + 16)
+    if (!(blob instanceof Blob) || blob.size !== sealedLength(record.length))
         throw new Error('A contribution record is missing.');
     const ciphertext = new Uint8Array(await blob.arrayBuffer());
     if (
@@ -445,22 +438,11 @@ const openRecord = async (
         )
     )
         throw new Error('A contribution record changed.');
-    const bytes = new Uint8Array(
-        await crypto.subtle.decrypt(
-            {
-                name: 'AES-GCM',
-                iv: new Uint8Array(12),
-                additionalData: new Uint8Array(
-                    recordAssociatedData(session.records, record),
-                ),
-            },
-            await recordCipher(record.key, 'decrypt'),
-            ciphertext,
-        ),
+    return openSealedRecord(
+        record.key,
+        recordAssociatedData(session.records, record),
+        ciphertext,
     );
-    if (bytes.length !== record.length)
-        throw new Error('A contribution record has another length.');
-    return bytes;
 };
 
 const openSigning = (session: ContributionSession, kind: SigningKind) => {
@@ -470,7 +452,7 @@ const openSigning = (session: ContributionSession, kind: SigningKind) => {
     );
     if (record === undefined)
         throw new Error('A contribution signing record is missing.');
-    return openRecord(session, record);
+    return openContributionRecord(session, record);
 };
 
 // The stored records a contribution state lists. Public and signing records
@@ -484,7 +466,7 @@ const contributionInventory = (
     ...[...state.publicRecords, ...state.signingRecords].map((record) => ({
         store: 'contribution',
         key: [record.object, record.offset],
-        byteLength: record.length + 16,
+        byteLength: sealedLength(record.length),
         encryption: {
             key: record.key,
             additionalData: recordAssociatedData(context, record),
@@ -576,7 +558,7 @@ const commitContribution = async (
         contribution: encodeContributionState(session.state),
     };
     for (const output of transition.signing ?? [])
-        (await openRecord(session, output.record)).fill(0);
+        (await openContributionRecord(session, output.record)).fill(0);
 };
 
 const proverOutput = (context: ProfileContext) =>
@@ -614,22 +596,6 @@ const signing = (
         context.kernel.contribution_output_pointer(),
         context.kernel.contribution_output_length(),
     );
-};
-
-const splitPacket = (
-    bytes: Uint8Array,
-    profile: ParticipantProfile,
-): SignedPacket => {
-    const signatureBytes = profile.registration.signatureBytes;
-    if (
-        bytes.length < 4 ||
-        bytes.length !== 4 + readUnsigned32(bytes, 0) + signatureBytes
-    )
-        throw new Error('Malformed signed contribution packet.');
-    return {
-        body: bytes.slice(4, bytes.length - signatureBytes),
-        signature: bytes.slice(bytes.length - signatureBytes),
-    };
 };
 
 // Runs prover commands with the randomness of one generation or
@@ -685,7 +651,7 @@ const proverRun = (session: ContributionSession, statement: boolean) => {
             }
             const sealed = await Promise.allSettled(
                 records.map((record) =>
-                    sealRecord(
+                    sealContributionRecord(
                         session,
                         record.object,
                         record.offset,
@@ -867,9 +833,9 @@ export const generateContribution = async (session: ContributionSession) => {
             if (checkpoint(context, checkpointCommand.seal) !== 0)
                 throw new Error('A checkpoint record was refused.');
             const output = proverOutput(context);
-            const key = output.slice(0, keyBytes);
-            output.fill(0, 0, keyBytes);
-            const sealed = output.subarray(keyBytes);
+            const key = output.slice(0, recordKeyBytes);
+            output.fill(0, 0, recordKeyBytes);
+            const sealed = output.subarray(recordKeyBytes);
             if (sealed.length !== length)
                 throw new Error('A checkpoint record has another length.');
             privateRecords.push({
@@ -1022,7 +988,7 @@ export const continueContribution = async (session: ContributionSession) => {
     const run = proverRun(session, false);
     const proof: SealedRecord[] = [];
     const writer = createProofWriter(bounds, async (slot, bytes) => {
-        const output = await sealRecord(
+        const output = await sealContributionRecord(
             session,
             proofObject(profile),
             slot.offset,
@@ -1048,7 +1014,7 @@ export const continueContribution = async (session: ContributionSession) => {
     let taken = 0;
     let opening =
         order.length > 0
-            ? awaitLater(openRecord(session, order[0]))
+            ? awaitLater(openContributionRecord(session, order[0]))
             : undefined;
     const openNext = async () => {
         if (opening === undefined)
@@ -1057,7 +1023,7 @@ export const continueContribution = async (session: ContributionSession) => {
         taken++;
         opening =
             taken < order.length
-                ? awaitLater(openRecord(session, order[taken]))
+                ? awaitLater(openContributionRecord(session, order[taken]))
                 : undefined;
         return bytes;
     };
@@ -1150,7 +1116,7 @@ const readRetainedProof = (
                 record.length !== slot.length
             )
                 throw new Error('The private proof record plan changed.');
-            return openRecord(session, record);
+            return openContributionRecord(session, record);
         },
         consume,
     );
@@ -1175,7 +1141,7 @@ const bodyOffer = async (session: ContributionSession) => {
         for (const record of state.publicRecords.filter(
             (value) => value.object === polynomial.expandedIndex + 1,
         )) {
-            const bytes = await openRecord(session, record);
+            const bytes = await openContributionRecord(session, record);
             const input = concatenate(unsigned32(record.offset), bytes);
             try {
                 signing(
@@ -1212,7 +1178,7 @@ export const signContribution = async (
     if (session.state.phase === 9) return storedOffer(session);
     const envelope = await bodyOffer(session);
     if (session.state.phase === 7) {
-        const output = await sealRecord(
+        const output = await sealContributionRecord(
             session,
             signingObject(profile, 'offerEnvelope'),
             0,
@@ -1230,13 +1196,15 @@ export const signContribution = async (
     const body = await openSigning(session, 'offerEnvelope');
     if (!equalBytes(envelope, body))
         throw new Error('The locked offer changed.');
-    const signed = splitPacket(
+    const signed = decodeSignedPacket(
         signing(context, signingCommand.signOffer),
-        profile,
+        profile.registration.signatureBytes,
     );
+    if (signed === undefined)
+        throw new Error('Malformed signed contribution packet.');
     if (!equalBytes(signed.body, body))
         throw new Error('The signer changed the offer.');
-    const output = await sealRecord(
+    const output = await sealContributionRecord(
         session,
         signingObject(profile, 'offerSignature'),
         0,
@@ -1438,7 +1406,7 @@ export const publishOffer = async (
                 for (const record of session.state.publicRecords.filter(
                     (value) => value.object === polynomial.expandedIndex + 1,
                 )) {
-                    const bytes = await openRecord(session, record);
+                    const bytes = await openContributionRecord(session, record);
                     try {
                         await accept(bytes);
                     } finally {

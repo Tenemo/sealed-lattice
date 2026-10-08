@@ -15,7 +15,6 @@ import {
     readUnsigned16,
     readUnsigned32,
     readUnsigned64,
-    unsigned32,
     unsigned64,
 } from './bytes.js';
 import {
@@ -48,6 +47,8 @@ import { openRecord, recordContext, sealRecord } from './records.js';
 import type { RecordContext } from './records.js';
 import { ballotPhase, closePhase, rootGeneration } from './root-generation.js';
 import { commitRoot, dataRecordInventory } from './root.js';
+import { retainedSetupInventory } from './setup.js';
+import { encodeSignedPacket } from './signed-packet.js';
 import { snapshotParticipant } from './storage.js';
 
 // A participant's close work. Each visit restores the module's close state
@@ -164,9 +165,6 @@ const closeCommand = (
     return output;
 };
 
-const packet = (body: Uint8Array, signature: Uint8Array) =>
-    concatenate(unsigned32(body.length), body, signature);
-
 const generationOf = (session: CloseSession) =>
     session.participant.root.head.generation;
 
@@ -191,7 +189,10 @@ export const resumeClose = async (
         bytes === undefined
     )
         throw new Error('No close log is retained.');
-    const records = await recordContext(participant);
+    const records = recordContext(
+        participant,
+        await retainedSetupInventory(participant),
+    );
     const state = decodeCloseState(
         context.profile,
         root.head.generation,
@@ -883,7 +884,7 @@ const signIntent = async (session: CloseSession, closeTime?: bigint) => {
         });
     }
     const signature = closeCommand(context, 8, 0, body);
-    return packet(body, signature);
+    return encodeSignedPacket({ body, signature });
 };
 
 // Locks the first authenticated intent. The lock's transaction retires the
@@ -1130,7 +1131,7 @@ const respond = async (session: CloseSession, preparedBody?: Uint8Array) => {
             },
         });
     const signature = closeCommand(context, 8, 0, body);
-    const responsePacket = packet(body, signature);
+    const responsePacket = encodeSignedPacket({ body, signature });
     let state: CloseState = {
         ...session.state,
         responseBody: new Uint8Array(),
@@ -1165,7 +1166,10 @@ const propose = async (session: CloseSession, prepared: boolean) => {
         state: {
             ...session.state,
             proposalBody: new Uint8Array(),
-            proposalPacket: packet(session.state.proposalBody, signature),
+            proposalPacket: encodeSignedPacket({
+                body: session.state.proposalBody,
+                signature,
+            }),
         },
     });
 };
