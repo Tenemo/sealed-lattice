@@ -1,8 +1,7 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 pub mod body;
-#[cfg(target_arch = "wasm32")]
-#[path = "body-browser.rs"]
-mod body_browser;
+#[path = "classification-session.rs"]
+pub mod classification_session;
 pub mod columns;
 pub mod context;
 #[path = "private-ballot.rs"]
@@ -40,15 +39,4 @@ pub fn verifier(
         proof_header,
         |alpha, queries| StatementStream::new(profile, expected_statement, alpha, queries).ok(),
     )
-}
-
-#[cfg(target_arch = "wasm32")]
-pub fn take_browser_classification() -> Option<body::BallotBodyClassification> {
-    body_browser::take_classification()
-}
-
-/// Releases the statement inputs that the classified ballots shared.
-#[cfg(target_arch = "wasm32")]
-pub fn release_browser_ballot_inputs() {
-    body_browser::release_inputs()
 }

@@ -92,10 +92,10 @@ impl EvaluationInputs for InstanceInputs {
         setup_aggregate::setup_browser::context()
     }
     fn take_classification(&mut self) -> Option<BallotBodyClassification> {
-        ballot_proof::take_browser_classification()
+        super::ballot::take_classification()
     }
     fn release_ballot_inputs(&mut self) {
-        ballot_proof::release_browser_ballot_inputs();
+        super::ballot::release_ballot_inputs();
     }
     fn take_barrier(&mut self) -> Option<VerifiedCloseBarrier> {
         super::close::take_barrier()
