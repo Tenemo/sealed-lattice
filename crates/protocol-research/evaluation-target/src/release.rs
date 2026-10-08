@@ -25,7 +25,7 @@ fn encode_release_proof_role(
         1,
         1,
         vec![
-            CanonicalItem::nonempty_ascii("sealed-lattice/certified-release/v2")
+            CanonicalItem::nonempty_ascii("sealed-lattice/certified-release/v3")
                 .map_err(|_| Error::Encoding)?,
             CanonicalItem::nonempty_ascii(&participant_identity.to_lowercase_hex())
                 .map_err(|_| Error::Encoding)?,

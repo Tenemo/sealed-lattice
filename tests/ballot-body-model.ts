@@ -43,7 +43,7 @@ export const compileBallotBodyCensus = (profile: SupportedProfile) => {
         8n +
         5n * 6n +
         4n +
-        BigInt(Buffer.byteLength('sealed-lattice/ballot-proof/v2')) +
+        BigInt(Buffer.byteLength('sealed-lattice/ballot-proof/v3')) +
         4n +
         participantIdentityAsciiBytes +
         2n * 64n +

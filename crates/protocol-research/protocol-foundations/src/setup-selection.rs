@@ -16,13 +16,14 @@ use std::sync::Arc;
 use supported_profile::Profile;
 
 pub const SELECTION_PURPOSE: &str = "sealed-lattice/setup-selection/v1";
-pub const SELECTION_IDENTITY_DOMAIN: &str = "sealed-lattice/setup-selection-id/v1";
+pub const SELECTION_IDENTITY_DOMAIN: &str = "sealed-lattice/setup-selection-identity/v1";
 pub const PROPOSAL_CONTEXT: &[u8] = b"sealed-lattice/setup-selection-proposal/v1";
 pub const ENDORSEMENT_PURPOSE: &str = "sealed-lattice/setup-selection-endorsement/v1";
-pub const ENDORSEMENT_IDENTITY_DOMAIN: &str = "sealed-lattice/setup-selection-endorsement-id/v1";
+pub const ENDORSEMENT_IDENTITY_DOMAIN: &str =
+    "sealed-lattice/setup-selection-endorsement-identity/v1";
 pub const ENDORSEMENT_BYTES: usize = 2 + 64 + SIGNATURE_BYTES;
 pub const MAXIMUM_SELECTION_BYTES: usize = 2048;
-const RETAINED_INPUTS_LABEL: &[u8] = b"sealed-lattice/retained-selection-inputs/v1";
+const RETAINED_INPUTS_LABEL: &[u8] = b"sealed-lattice/retained-selection-inputs/v2";
 pub fn selection_body_bytes(profile: Profile) -> usize {
     CanonicalTuple::new(
         1,

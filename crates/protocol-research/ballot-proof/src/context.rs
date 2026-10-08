@@ -50,7 +50,7 @@ fn encode_role(
         1,
         1,
         vec![
-            CanonicalItem::nonempty_ascii("sealed-lattice/ballot-proof/v2").map_err(|_| Error)?,
+            CanonicalItem::nonempty_ascii("sealed-lattice/ballot-proof/v3").map_err(|_| Error)?,
             CanonicalItem::nonempty_ascii(&participant_identity.to_lowercase_hex())
                 .map_err(|_| Error)?,
             CanonicalItem::hash512(poll),

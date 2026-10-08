@@ -65,7 +65,7 @@ impl RetainedContributionContext {
         let items = &tuple.items;
         if items[0].item_type() != CanonicalItemType::Ascii
             || items[0].variable_value_bytes().map_err(|_| Error::Shape)?
-                != b"sealed-lattice/roster-proposal/v1"
+                != b"sealed-lattice/roster-proposal/v2"
             || items[1].item_type() != CanonicalItemType::Hash512
             || items[1].canonical_bytes() != poll
             || items[2].item_type() != CanonicalItemType::RawBytes
@@ -92,7 +92,7 @@ impl RetainedContributionContext {
             return Err(Error::Context);
         }
         let proposal = hash_foundation_tuple_512(
-            "sealed-lattice/roster-proposal-id/v1",
+            "sealed-lattice/roster-proposal-identity/v1",
             &[CanonicalItem::variable_bytes(bytes).map_err(|_| Error::Shape)?],
         )
         .map_err(|_| Error::Shape)?
@@ -150,7 +150,7 @@ fn encode_proposal(poll: [u8; 64], bodies: Vec<u8>) -> Result<Vec<u8>, Error> {
         1,
         1,
         vec![
-            CanonicalItem::nonempty_ascii("sealed-lattice/roster-proposal/v1")
+            CanonicalItem::nonempty_ascii("sealed-lattice/roster-proposal/v2")
                 .map_err(|_| Error::Shape)?,
             CanonicalItem::hash512(poll),
             CanonicalItem::variable_bytes(bodies).map_err(|_| Error::Shape)?,
@@ -216,7 +216,7 @@ impl RosterProposal {
         Roster::new(entries).map_err(|_| Error::Shape)?;
         let body = encode_proposal(poll.identity(), bodies)?;
         let identity = hash_foundation_tuple_512(
-            "sealed-lattice/roster-proposal-id/v1",
+            "sealed-lattice/roster-proposal-identity/v1",
             &[CanonicalItem::variable_bytes(&body).map_err(|_| Error::Shape)?],
         )
         .map_err(|_| Error::Shape)?
@@ -301,7 +301,7 @@ pub(crate) fn encode_contribution_role(
         1,
         1,
         vec![
-            CanonicalItem::nonempty_ascii("sealed-lattice/setup-contribution/v2")
+            CanonicalItem::nonempty_ascii("sealed-lattice/setup-contribution/v3")
                 .map_err(|_| Error::Shape)?,
             CanonicalItem::nonempty_ascii(&participant_identity.to_lowercase_hex())
                 .map_err(|_| Error::Shape)?,

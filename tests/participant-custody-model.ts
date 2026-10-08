@@ -363,7 +363,11 @@ export const compileParticipantVaultKeyClasses = (
     // The poll and proposal identities, the position and the record's
     // object, offset and length.
     const contributionAssociatedBytes =
-        BigInt(Buffer.byteLength('participant-contribution-record/1')) +
+        BigInt(
+            Buffer.byteLength(
+                'sealed-lattice/participant-contribution-record/v2',
+            ),
+        ) +
         64n +
         64n +
         2n +
@@ -374,7 +378,7 @@ export const compileParticipantVaultKeyClasses = (
     // target digest, and the record's index and length.
     const ballotAssociatedBytes =
         BigInt(
-            Buffer.byteLength('sealed-lattice/participant-ballot-record/v2'),
+            Buffer.byteLength('sealed-lattice/participant-ballot-record/v3'),
         ) +
         2n * 64n +
         2n +
@@ -382,7 +386,7 @@ export const compileParticipantVaultKeyClasses = (
         4n;
     const releaseAssociatedBytes =
         BigInt(
-            Buffer.byteLength('sealed-lattice/participant-release-record/v2'),
+            Buffer.byteLength('sealed-lattice/participant-release-record/v3'),
         ) +
         2n * 64n +
         2n +

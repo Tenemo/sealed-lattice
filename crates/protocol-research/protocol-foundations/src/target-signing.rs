@@ -13,8 +13,8 @@ use fips204::{
 };
 use supported_profile::Profile;
 
-pub const TARGET_PURPOSE: &str = "sealed-lattice/evaluation-target/v1";
-pub const TARGET_IDENTITY_DOMAIN: &str = "sealed-lattice/evaluation-target-id/v1";
+pub const TARGET_PURPOSE: &str = "sealed-lattice/evaluation-target/v2";
+pub const TARGET_IDENTITY_DOMAIN: &str = "sealed-lattice/evaluation-target-identity/v1";
 pub const CERTIFICATION_CONTEXT: &[u8] = b"sealed-lattice/target-certification/v1";
 pub const TARGET_VOTE_BYTES: usize = 2 + 64 + crate::SIGNATURE_BYTES;
 /// Every evaluation target body is at most this long.

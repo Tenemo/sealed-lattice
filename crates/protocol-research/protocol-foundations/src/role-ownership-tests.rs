@@ -476,7 +476,7 @@ fn contribution_roles_retain_the_original_owner_across_roster_verification_and_c
         assert_eq!(tuple.items[0].item_type(), CanonicalItemType::Ascii);
         assert_eq!(
             tuple.items[0].variable_value_bytes().unwrap(),
-            b"sealed-lattice/setup-contribution/v2"
+            b"sealed-lattice/setup-contribution/v3"
         );
         assert_eq!(tuple.items[1].item_type(), CanonicalItemType::Ascii);
         assert_eq!(

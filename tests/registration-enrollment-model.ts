@@ -82,7 +82,7 @@ export const compileRegistrationEnrollmentCensus = () => {
         8n +
         6n * 6n +
         4n +
-        bytes('sealed-lattice/registration-header/v5') +
+        bytes('sealed-lattice/registration-header/v6') +
         2n * 64n +
         inputs.signingPublicKeyBytes +
         4n +

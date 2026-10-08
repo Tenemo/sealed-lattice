@@ -127,7 +127,7 @@ impl ClassifiedClosedInventory {
     }
     fn target_fields(&self) -> Result<Vec<CanonicalItem>, Error> {
         Ok(vec![
-            CanonicalItem::nonempty_ascii("sealed-lattice/evaluation-target/v1")
+            CanonicalItem::nonempty_ascii("sealed-lattice/evaluation-target/v2")
                 .map_err(|_| Error::Encoding)?,
             CanonicalItem::hash512(self.poll.identity()),
             CanonicalItem::hash512(self.setup.identity()),
@@ -396,7 +396,7 @@ fn read_ballot(
     ])
 }
 
-const RETAINED_TARGET_LABEL: &[u8] = b"sealed-lattice/retained-evaluation-target/v1";
+const RETAINED_TARGET_LABEL: &[u8] = b"sealed-lattice/retained-evaluation-target/v2";
 const RETAINED_TARGET_MAGIC: &[u8; 4] = b"RET1";
 
 /// Only completed deterministic evaluation (or an accepted set below the

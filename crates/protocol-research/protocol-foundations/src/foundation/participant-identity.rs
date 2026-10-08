@@ -54,7 +54,7 @@ pub fn derive_participant_identity(
     signing_verification_key: &[u8; SIGNING_PUBLIC_KEY_BYTES],
 ) -> Result<ParticipantIdentity, CanonicalCodecError> {
     let participant_identity_hash = hash512(
-        "sealed-lattice/foundation/participant-id/v1",
+        "sealed-lattice/foundation/participant-identity/v1",
         &[CanonicalItem::fixed_bytes(*signing_verification_key)?],
     )?;
 

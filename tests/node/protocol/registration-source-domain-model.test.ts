@@ -32,7 +32,7 @@ const frame = (
 ) =>
     Buffer.concat([
         Buffer.from('0100010007000000', 'hex'),
-        field(2, variable(Buffer.from('sealed-lattice/registered-fhe-key/v1'))),
+        field(2, variable(Buffer.from('sealed-lattice/registered-fhe-key/v2'))),
         field(1, owner),
         field(1, Buffer.alloc(64, 3)),
         field(6, Buffer.alloc(64, 5)),
@@ -168,7 +168,7 @@ const decode = (bytes: Buffer, degree: number) => {
         modulus = unwrap(fields[4].bytes),
         coordinate = unwrap(fields[6].bytes);
     if (
-        domain?.toString() !== 'sealed-lattice/registered-fhe-key/v1' ||
+        domain?.toString() !== 'sealed-lattice/registered-fhe-key/v2' ||
         fields[1].bytes.length !== 1952 ||
         fields[2].bytes.length !== 64 ||
         fields[3].bytes.length !== 64 ||

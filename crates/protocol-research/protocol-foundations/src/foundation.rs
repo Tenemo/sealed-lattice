@@ -75,7 +75,7 @@ impl RegistrationHeader {
             1,
             1,
             vec![
-                CanonicalItem::nonempty_ascii("sealed-lattice/registration-header/v5").unwrap(),
+                CanonicalItem::nonempty_ascii("sealed-lattice/registration-header/v6").unwrap(),
                 CanonicalItem::hash512(self.poll),
                 CanonicalItem::fixed_bytes(self.signing_public).unwrap(),
                 CanonicalItem::hash512(self.recipient_key_hash),
@@ -112,7 +112,7 @@ impl RegistrationHeader {
             || items[0]
                 .variable_value_bytes()
                 .map_err(|_| crate::Error::Shape)?
-                != b"sealed-lattice/registration-header/v5"
+                != b"sealed-lattice/registration-header/v6"
         {
             return Err(crate::Error::Context);
         }

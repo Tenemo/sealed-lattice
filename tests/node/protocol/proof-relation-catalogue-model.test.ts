@@ -41,9 +41,9 @@ const role = (purpose: string, release = false) =>
         item(3, integer(1, 2)),
     ]);
 const roles = {
-    setup: role('sealed-lattice/setup-contribution/v2'),
-    ballot: role('sealed-lattice/ballot-proof/v2'),
-    release: role('sealed-lattice/certified-release/v2', true),
+    setup: role('sealed-lattice/setup-contribution/v3'),
+    ballot: role('sealed-lattice/ballot-proof/v3'),
+    release: role('sealed-lattice/certified-release/v3', true),
 };
 const frame = (
     purpose: keyof typeof roles,

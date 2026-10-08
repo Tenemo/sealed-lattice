@@ -75,7 +75,7 @@ export const setupSelectionIdentityModel = (
     createHash('shake256', { outputLength: 64 })
         .update(
             tuple([
-                ascii('sealed-lattice/setup-selection-id/v1'),
+                ascii('sealed-lattice/setup-selection-identity/v1'),
                 item(
                     1,
                     variable(

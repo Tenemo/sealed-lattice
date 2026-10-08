@@ -156,7 +156,7 @@ fn coordinate_commitment_matches_independent_framing_and_transport_partitions() 
         1,
         1,
         vec![
-            CanonicalItem::nonempty_ascii("sealed-lattice/registered-fhe-key/v1").unwrap(),
+            CanonicalItem::nonempty_ascii("sealed-lattice/registered-fhe-key/v2").unwrap(),
             CanonicalItem::fixed_bytes(credential.signing_public()).unwrap(),
             CanonicalItem::fixed_bytes(salt).unwrap(),
             CanonicalItem::hash512(poll.identity()),

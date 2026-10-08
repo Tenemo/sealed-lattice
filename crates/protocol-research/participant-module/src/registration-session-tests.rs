@@ -120,7 +120,7 @@ fn checkpoint_import_preserves_the_verified_original_owner(
         1,
         1,
         vec![
-            CanonicalItem::nonempty_ascii("sealed-lattice/roster-proposal/v1").unwrap(),
+            CanonicalItem::nonempty_ascii("sealed-lattice/roster-proposal/v2").unwrap(),
             CanonicalItem::hash512(poll.identity()),
             CanonicalItem::variable_bytes(bodies).unwrap(),
         ],
@@ -150,7 +150,7 @@ fn checkpoint_import_preserves_the_verified_original_owner(
         .encode()
         .unwrap()
     };
-    let expected_role = role(credential, 0, "sealed-lattice/setup-contribution/v2");
+    let expected_role = role(credential, 0, "sealed-lattice/setup-contribution/v3");
     assert_eq!(
         context.checkpoint_role(&prefix, 0, profile).unwrap(),
         expected_role
@@ -173,8 +173,8 @@ fn checkpoint_import_preserves_the_verified_original_owner(
     let valid = request(&expected_role, profile.participants());
     let other_owner = Credential::from_seed([91; 32]);
     for wrong_role in [
-        role(&other_owner, 0, "sealed-lattice/setup-contribution/v2"),
-        role(credential, 1, "sealed-lattice/setup-contribution/v2"),
+        role(&other_owner, 0, "sealed-lattice/setup-contribution/v3"),
+        role(credential, 1, "sealed-lattice/setup-contribution/v3"),
     ] {
         let bytes = request(&wrong_role, profile.participants());
         // The checkpoint decoder accepts this partial header, isolating the

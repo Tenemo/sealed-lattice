@@ -81,7 +81,7 @@ fn source_stream_matches_canonical_tuple_and_binds_each_original_context() {
         1,
         1,
         vec![
-            CanonicalItem::nonempty_ascii("sealed-lattice/fhe-source-randomness/v1").unwrap(),
+            CanonicalItem::nonempty_ascii("sealed-lattice/fhe-source-randomness/v2").unwrap(),
             CanonicalItem::fixed_bytes(owner).unwrap(),
             CanonicalItem::hash512([3; 64]),
             CanonicalItem::variable_bytes(profile.ciphertext_modulus().to_bytes()).unwrap(),

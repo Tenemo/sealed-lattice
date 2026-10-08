@@ -6,7 +6,7 @@ fn signing_key_derivation_returns_the_identity_type() {
     let identity = derive_participant_identity(&signing_verification_key)
         .expect("fixed signing key derives an identity");
     let expected_hash = hash512(
-        "sealed-lattice/foundation/participant-id/v1",
+        "sealed-lattice/foundation/participant-identity/v1",
         &[CanonicalItem::fixed_bytes(signing_verification_key)
             .expect("fixed key has canonical bytes")],
     )

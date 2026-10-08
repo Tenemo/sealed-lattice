@@ -46,7 +46,7 @@ export const compileRegistrationSourceRandomness = (
             8n +
             6n * 6n +
             4n +
-            bytes('sealed-lattice/fhe-source-randomness/v1') +
+            bytes('sealed-lattice/fhe-source-randomness/v2') +
             registrationSigningPublicKeyBytes +
             64n +
             4n +
@@ -60,7 +60,7 @@ export const compileRegistrationSourceRandomness = (
             8n +
             7n * 6n +
             4n +
-            bytes('sealed-lattice/registered-fhe-key/v1') +
+            bytes('sealed-lattice/registered-fhe-key/v2') +
             registrationSigningPublicKeyBytes +
             64n +
             64n +

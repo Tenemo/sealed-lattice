@@ -233,8 +233,14 @@ describe('participant custody identities', () => {
         // The domains of the identities a certified target, a ballot
         // submission and a proposal's named response are addressed by.
         const domains = [
-            [custodyPurpose.target, 'sealed-lattice/evaluation-target-id/v1'],
-            [custodyPurpose.envelope, 'sealed-lattice/ballot-envelope-id/v1'],
+            [
+                custodyPurpose.target,
+                'sealed-lattice/evaluation-target-identity/v1',
+            ],
+            [
+                custodyPurpose.envelope,
+                'sealed-lattice/ballot-envelope-identity/v1',
+            ],
             [custodyPurpose.closeResponse, 'sealed-lattice/close-response/v1'],
         ] as const;
         for (const [purpose, domain] of domains)

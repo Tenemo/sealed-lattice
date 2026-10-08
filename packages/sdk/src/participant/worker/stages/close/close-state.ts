@@ -320,7 +320,7 @@ export const closeRecordAssociatedData = (
     length: number,
 ) =>
     concatenate(
-        encodeText('sealed-lattice/participant-close-record/v1'),
+        encodeText('sealed-lattice/participant-close-record/v2'),
         context.poll,
         context.setupIdentity,
         unsigned16(context.position),

@@ -132,7 +132,7 @@ impl FheKeyCommitmentHasher {
             CanonicalItem::variable_bytes(&modulus).map_err(|_| Error::Shape)?,
             CanonicalItem::unsigned64(profile.fhe_common_sample_bits() as u64),
         ];
-        let hash = IdentityHasher::local("sealed-lattice/registered-fhe-key/v1", &prefix, length)?;
+        let hash = IdentityHasher::local("sealed-lattice/registered-fhe-key/v2", &prefix, length)?;
         let mut half_modulus = modulus;
         let mut carry = 0;
         for byte in half_modulus.iter_mut().rev() {

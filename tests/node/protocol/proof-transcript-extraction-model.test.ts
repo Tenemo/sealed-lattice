@@ -32,9 +32,9 @@ const item = (type: number, value: Buffer) =>
 const ascii = (value: string) =>
     item(2, Buffer.concat([integer(value.length, 4), Buffer.from(value)]));
 const domains = {
-    setup: 'sealed-lattice/setup-contribution/v2',
-    ballot: 'sealed-lattice/ballot-proof/v2',
-    release: 'sealed-lattice/certified-release/v2',
+    setup: 'sealed-lattice/setup-contribution/v3',
+    ballot: 'sealed-lattice/ballot-proof/v3',
+    release: 'sealed-lattice/certified-release/v3',
 };
 const originalRole = (purpose: keyof typeof domains, owner = 'ab'.repeat(64)) =>
     Buffer.concat([

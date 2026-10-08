@@ -129,7 +129,7 @@ describe('original registration source randomness and hash work', () => {
                         2,
                         variable(
                             Buffer.from(
-                                'sealed-lattice/fhe-source-randomness/v1',
+                                'sealed-lattice/fhe-source-randomness/v2',
                             ),
                         ),
                     ),
@@ -161,7 +161,7 @@ describe('original registration source randomness and hash work', () => {
                     item(
                         2,
                         variable(
-                            Buffer.from('sealed-lattice/registered-fhe-key/v1'),
+                            Buffer.from('sealed-lattice/registered-fhe-key/v2'),
                         ),
                     ),
                     item(1, Buffer.alloc(1952)),

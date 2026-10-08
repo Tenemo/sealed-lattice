@@ -21,7 +21,7 @@ fn proof_role_separates_every_verified_context_input() {
     assert_eq!(tuple.items.len(), 6);
     assert_eq!(
         tuple.items[0].variable_value_bytes().unwrap(),
-        b"sealed-lattice/certified-release/v2"
+        b"sealed-lattice/certified-release/v3"
     );
     assert_eq!(
         tuple.items[1].item_type(),

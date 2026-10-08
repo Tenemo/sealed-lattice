@@ -11,7 +11,7 @@ use fips204::{
 };
 use std::sync::Arc;
 pub const OFFER_PURPOSE: &str = "sealed-lattice/contribution-offer/v1";
-pub const OFFER_IDENTITY_DOMAIN: &str = "sealed-lattice/contribution-offer-id/v1";
+pub const OFFER_IDENTITY_DOMAIN: &str = "sealed-lattice/contribution-offer-identity/v1";
 pub const MAXIMUM_OFFER_BYTES: usize = 1024;
 pub fn offer_envelope_bytes() -> usize {
     let profile = supported_profile::Profile::new(

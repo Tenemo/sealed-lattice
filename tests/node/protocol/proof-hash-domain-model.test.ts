@@ -34,7 +34,7 @@ roleHeader.writeUInt16LE(1, 2);
 roleHeader.writeUInt32LE(5, 4);
 const role = Buffer.concat([
     roleHeader,
-    ascii('sealed-lattice/ballot-proof/v2'),
+    ascii('sealed-lattice/ballot-proof/v3'),
     ascii('ab'.repeat(64)),
     item(6, Buffer.alloc(64, 1)),
     item(6, Buffer.alloc(64, 2)),

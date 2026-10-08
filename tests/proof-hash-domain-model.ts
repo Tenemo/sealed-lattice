@@ -25,9 +25,9 @@ const purposeCatalogues = new Map<
     readonly ProofRelationCatalogueEntry[]
 >();
 const purposes: Readonly<Record<Purpose, string>> = {
-    setup: 'sealed-lattice/setup-contribution/v2',
-    ballot: 'sealed-lattice/ballot-proof/v2',
-    release: 'sealed-lattice/certified-release/v2',
+    setup: 'sealed-lattice/setup-contribution/v3',
+    ballot: 'sealed-lattice/ballot-proof/v3',
+    release: 'sealed-lattice/certified-release/v3',
 };
 const originalOwner = (bytes: Buffer) =>
     bytes.length === 128 &&

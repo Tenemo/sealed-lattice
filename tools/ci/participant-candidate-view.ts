@@ -71,7 +71,7 @@ export const participantCandidateView = (store: Store, directory: string) => {
             ballot === undefined
                 ? undefined
                 : identity(
-                      'sealed-lattice/ballot-envelope-id/v1',
+                      'sealed-lattice/ballot-envelope-identity/v1',
                       ballot,
                   ).toString('hex');
         if (envelopeIdentity !== undefined)
@@ -192,7 +192,7 @@ export const participantCandidateView = (store: Store, directory: string) => {
                         try {
                             await handle.writeFile(
                                 identity(
-                                    'sealed-lattice/setup-selection-id/v1',
+                                    'sealed-lattice/setup-selection-identity/v1',
                                     bytes.subarray(8, 8 + length),
                                 ),
                             );

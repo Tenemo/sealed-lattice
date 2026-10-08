@@ -23,7 +23,7 @@ describe('verified registration roster proposal', () => {
                 slot.writeUInt16LE(position);
                 const encoded = Buffer.concat([
                     tuple,
-                    item(2, ascii('sealed-lattice/setup-contribution/v2')),
+                    item(2, ascii('sealed-lattice/setup-contribution/v3')),
                     item(2, ascii(owner)),
                     item(6, Buffer.alloc(64, 1)),
                     item(6, Buffer.alloc(64, 2)),

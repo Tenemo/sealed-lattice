@@ -73,7 +73,7 @@ fn stream(
         1,
         1,
         vec![
-            CanonicalItem::nonempty_ascii("sealed-lattice/fhe-source-randomness/v1").unwrap(),
+            CanonicalItem::nonempty_ascii("sealed-lattice/fhe-source-randomness/v2").unwrap(),
             CanonicalItem::fixed_bytes(owner).unwrap(),
             CanonicalItem::hash512(poll),
             CanonicalItem::variable_bytes(profile.ciphertext_modulus().to_bytes()).unwrap(),

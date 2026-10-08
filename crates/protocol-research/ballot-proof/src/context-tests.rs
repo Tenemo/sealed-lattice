@@ -19,7 +19,7 @@ fn proof_roles_separate_every_variable_context_input() {
     assert_eq!(tuple.items.len(), 5);
     assert_eq!(
         tuple.items[0].variable_value_bytes().unwrap(),
-        b"sealed-lattice/ballot-proof/v2"
+        b"sealed-lattice/ballot-proof/v3"
     );
     assert_eq!(
         tuple.items[1].item_type(),
