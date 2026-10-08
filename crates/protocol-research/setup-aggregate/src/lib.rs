@@ -4,9 +4,8 @@ use supported_profile::{Family, Profile};
 #[path = "offer-verifier.rs"]
 pub mod offer_verifier;
 mod retained;
-#[cfg(target_arch = "wasm32")]
-#[path = "setup-browser.rs"]
-pub mod setup_browser;
+#[path = "setup-session.rs"]
+pub mod setup_session;
 pub mod verified;
 pub use retained::{
     AggregatePolynomialReader, RetainedAggregatePolynomial, RetainedPolynomialReader,

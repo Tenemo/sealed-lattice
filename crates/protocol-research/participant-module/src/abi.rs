@@ -1,5 +1,5 @@
-//! The participant crate's WebAssembly exports, one file per stage, and the
-//! participant session they share.
+//! Every WebAssembly export of the participant module, one file per stage,
+//! and the participant session they share.
 use crate::{Enrollment, offer_signing::OfferSigning};
 use protocol_foundations::foundation::{MAXIMUM_USERNAME_INGRESS_BYTES, RegistrationHeader};
 use protocol_foundations::{
@@ -29,14 +29,12 @@ mod participant_bounds;
 mod release;
 mod roster;
 mod setup;
+#[path = "abi/setup-verification.rs"]
+mod setup_verification;
 
 fn input_bytes() -> usize {
     let retained_setup = supported_profile::Profile::all()
-        .map(|profile| {
-            4 + 64
-                + 64 * profile.contribution_body_polynomials().len()
-                + protocol_foundations::RETAINED_TAG_BYTES
-        })
+        .map(setup_aggregate::selection_reference_bytes)
         .max()
         .unwrap();
     let restore = 128

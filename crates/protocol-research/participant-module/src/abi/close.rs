@@ -30,7 +30,7 @@ pub extern "C" fn participant_close_command(operation: u32, argument: usize, len
             let Some(context) = session.retained_context.as_ref() else {
                 return 1;
             };
-            let Some((poll, setup)) = setup_aggregate::setup_browser::context() else {
+            let Some((poll, setup)) = super::setup_verification::verified_setup() else {
                 return 1;
             };
             let Ok(ballot) =
@@ -87,7 +87,7 @@ pub extern "C" fn close_command(operation: u32, length: usize) -> u32 {
         u32::from(
             close
                 .borrow_mut()
-                .command(setup_aggregate::setup_browser::context, operation, length)
+                .command(super::setup_verification::verified_setup, operation, length)
                 .is_err(),
         )
     })

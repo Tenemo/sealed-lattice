@@ -108,7 +108,7 @@ pub extern "C" fn ballot_classification_begin(length: usize) -> u32 {
         u32::from(
             session
                 .borrow_mut()
-                .begin(setup_aggregate::setup_browser::context, length)
+                .begin(super::setup_verification::verified_setup, length)
                 .is_err(),
         )
     })
@@ -117,7 +117,7 @@ pub extern "C" fn ballot_classification_begin(length: usize) -> u32 {
 /// setup reads as its FHE key; the maximum value when no setup is verified.
 #[unsafe(no_mangle)]
 pub extern "C" fn ballot_classification_key_index() -> usize {
-    setup_aggregate::setup_browser::context()
+    super::setup_verification::verified_setup()
         .map(|(_, setup)| ballot_proof::statement::setup_input(setup.profile()).2)
         .unwrap_or(usize::MAX)
 }

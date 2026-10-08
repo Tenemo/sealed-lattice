@@ -33,7 +33,7 @@ pub extern "C" fn retain_evaluation() -> u32 {
 fn restore_evaluation_step(state: &mut Session, operation: u32, length: usize) -> Option<()> {
     match operation {
         0 => {
-            let (_, setup) = setup_aggregate::setup_browser::context()?;
+            let (_, setup) = super::setup_verification::verified_setup()?;
             let maximum = 8
                 + protocol_foundations::target_signing::MAXIMUM_TARGET_BODY_BYTES
                 + 2 * supported_profile::relation::SYSTEMATIC
@@ -51,7 +51,7 @@ fn restore_evaluation_step(state: &mut Session, operation: u32, length: usize) -
         2 => {
             let (expected, copy) = state.evaluation.take()?;
             (length == 0 && copy.len() == expected).then_some(())?;
-            let (poll, setup) = setup_aggregate::setup_browser::context()?;
+            let (poll, setup) = super::setup_verification::verified_setup()?;
             let target = evaluation_target::target::VerifiedEvaluationTarget::restore(
                 &state.enrollment.as_ref()?.credential,
                 poll,
@@ -89,7 +89,7 @@ thread_local! {static TARGET: RefCell<TargetSession> = RefCell::new(TargetSessio
 struct InstanceInputs;
 impl EvaluationInputs for InstanceInputs {
     fn setup(&mut self) -> Option<(Arc<VerifiedPoll>, Arc<VerifiedSetupAggregate>)> {
-        setup_aggregate::setup_browser::context()
+        super::setup_verification::verified_setup()
     }
     fn take_classification(&mut self) -> Option<BallotBodyClassification> {
         super::ballot::take_classification()

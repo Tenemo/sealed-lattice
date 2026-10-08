@@ -12,7 +12,7 @@ pub extern "C" fn setup_roster_begin_retained(begin: usize, length: usize) -> u3
     let Some(roster) = SESSION.with(|state| retained_roster(&state.borrow(), begin, length)) else {
         return 1;
     };
-    setup_aggregate::setup_browser::begin_roster(roster);
+    super::setup_verification::begin_roster(roster);
     0
 }
 
@@ -28,7 +28,7 @@ fn selection_operation(
     let input = Zeroizing::new(state.input[..length].to_vec());
     state.input[..length].zeroize();
     let context = original_context(state)?;
-    let (_, roster) = setup_aggregate::setup_browser::roster_context().ok_or(Error::Context)?;
+    let (_, roster) = super::setup_verification::roster_context().ok_or(Error::Context)?;
     if roster.proposal().identity_bytes() != context.identity() {
         return Err(Error::Context);
     }
@@ -38,7 +38,7 @@ fn selection_operation(
                 return Err(Error::Shape);
             }
             let selection =
-                setup_aggregate::setup_browser::unsigned_selection().ok_or(Error::Context)?;
+                super::setup_verification::unsigned_selection().ok_or(Error::Context)?;
             if selection.roster_identity() != context.identity() {
                 return Err(Error::Context);
             }
@@ -59,8 +59,7 @@ fn selection_operation(
             state.contribution_output = emitted_packet(selection.body(), &signature);
         }
         2 | 5 => {
-            let inputs =
-                setup_aggregate::setup_browser::selection_inputs().ok_or(Error::Context)?;
+            let inputs = super::setup_verification::selection_inputs().ok_or(Error::Context)?;
             if inputs.roster().proposal().identity_bytes() != context.identity() {
                 return Err(Error::Context);
             }
@@ -135,10 +134,10 @@ pub extern "C" fn retain_selection_inputs() -> u32 {
         let Some(enrollment) = state.enrollment.as_ref() else {
             return 1;
         };
-        let Some((poll, _)) = setup_aggregate::setup_browser::roster_context() else {
+        let Some((poll, _)) = super::setup_verification::roster_context() else {
             return 1;
         };
-        let Some(inputs) = setup_aggregate::setup_browser::selection_inputs() else {
+        let Some(inputs) = super::setup_verification::selection_inputs() else {
             return 1;
         };
         let Ok(retained) = inputs.retain(&enrollment.credential, &poll) else {
@@ -157,7 +156,7 @@ pub extern "C" fn restore_selection_inputs(length: usize) -> u32 {
         else {
             return 1;
         };
-        u32::from(!setup_aggregate::setup_browser::restore_inputs(
+        u32::from(!super::setup_verification::restore_inputs(
             &enrollment.credential,
             bytes,
         ))
@@ -175,7 +174,7 @@ pub extern "C" fn retain_setup() -> u32 {
         let Some(enrollment) = state.enrollment.as_ref() else {
             return 1;
         };
-        let Some((poll, setup)) = setup_aggregate::setup_browser::context() else {
+        let Some((poll, setup)) = super::setup_verification::verified_setup() else {
             return 1;
         };
         let Ok(reference) =
@@ -200,7 +199,7 @@ pub extern "C" fn retire_contribution_sources() -> u32 {
         if enrollment.sources_retired() {
             return 1;
         }
-        let Some((poll, setup)) = setup_aggregate::setup_browser::context() else {
+        let Some((poll, setup)) = super::setup_verification::verified_setup() else {
             return 1;
         };
         let Some(original) = super::own_verification::verified() else {
@@ -248,7 +247,7 @@ pub extern "C" fn restore_setup(length: usize) -> u32 {
         else {
             return 1;
         };
-        u32::from(!setup_aggregate::setup_browser::restore(
+        u32::from(!super::setup_verification::restore_setup(
             &enrollment.credential,
             retained,
         ))
