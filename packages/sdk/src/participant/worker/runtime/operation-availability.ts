@@ -2,7 +2,7 @@ import { completedClosePhase } from '../stages/close/close-state.js';
 import { rootGeneration, targetPhase } from '../storage/root-generation.js';
 
 // What a retained participant's operation availability depends on: its root
-// generation, its role, whether its retained roster names its profile and
+// generation, its role, whether its retained proposal names its profile and
 // makes it an eligible contributor, and whether a release spent its target
 // signing purpose without a vote.
 export type ParticipantStage = Readonly<{

@@ -42,7 +42,6 @@ import {
 } from '../../storage/root.js';
 import type { AuthenticatedRoot } from '../../storage/root.js';
 import type { RestoredEnrollment } from '../enrollment/enrollment.js';
-import { retainRegistration } from '../enrollment/enrollment.js';
 
 // Registration record files as each participant publishes them, named by the
 // registration body digest.
@@ -86,16 +85,14 @@ const recordStep = {
 
 // Streams the proposed registration records into a roster verifier, as many
 // at once as it keeps open, so that their verifications run side by side on
-// the module's helpers. A verifier that restores a retained roster takes
-// each record's header and key alone. The first refused step stops every
-// record and is thrown once every started record has stopped.
+// the module's helpers. The first refused step stops every record and is
+// thrown once every started record has stopped.
 export const streamRegistrations = async (
     relay: PublicRelay,
     registrationBodyDigests: readonly string[],
     registration: ParticipantLimits['registration'],
     openRecords: number,
     step: (operation: number, position: number, bytes: Uint8Array) => boolean,
-    restoring = false,
 ) => {
     let failure: { error: unknown } | undefined;
     const run = (
@@ -121,14 +118,12 @@ export const streamRegistrations = async (
                         registrationFile.header,
                         registration.maximumHeaderBytes,
                     );
-                    const signature = restoring
-                        ? new Uint8Array()
-                        : await readCandidateFile(
-                              relay,
-                              candidate,
-                              registrationFile.signature,
-                              registration.signatureBytes,
-                          );
+                    const signature = await readCandidateFile(
+                        relay,
+                        candidate,
+                        registrationFile.signature,
+                        registration.signatureBytes,
+                    );
                     run(
                         recordStep.begin,
                         position,
@@ -274,7 +269,6 @@ const finishProposal = async (
     relay: PublicRelay,
     enrollment: RestoredEnrollment,
     registrationBodyDigests: readonly string[],
-    restoring: boolean,
 ): Promise<VerifiedProposal> => {
     const { module, limits } = context;
     await streamRegistrations(
@@ -288,14 +282,9 @@ const finishProposal = async (
                 module.roster_record(operation, position, bytes.length) === 0
             );
         },
-        restoring,
     );
     if (module.roster_finish() !== 0)
-        throw new PublicInputFailure(
-            restoring
-                ? 'The published registrations are not the retained roster.'
-                : 'The roster proposal was refused.',
-        );
+        throw new PublicInputFailure('The roster proposal was refused.');
     const body = readModuleMemory(
         module,
         module.roster_body_pointer(),
@@ -357,22 +346,7 @@ const verifyProposalInputs = async (
     writeModuleInput(context, begin);
     if (context.module.roster_begin(begin.length) !== 0)
         throw new PublicInputFailure('The proposed poll was refused.');
-    return finishProposal(
-        context,
-        relay,
-        enrollment,
-        registrationBodyDigests,
-        false,
-    );
-};
-
-// The credential keys the roster the module verified in full, so that later
-// operations restore it from the published headers and keys alone.
-const retainRoster = (context: ParticipantContext) => {
-    const { module } = context;
-    if (module.retain_roster() !== 0)
-        throw new Error('The credential refused the verified roster.');
-    return readParticipantOutput(module);
+    return finishProposal(context, relay, enrollment, registrationBodyDigests);
 };
 
 const verifySignature = (
@@ -383,9 +357,9 @@ const verifySignature = (
     return context.module.verify_roster_signature(signature.length) === 0;
 };
 
-// A roster this participant verified and retained, with its verified
-// usernames in roster order.
-export type RetainedRoster = Readonly<{
+// The root a roster transition committed, with the verified usernames in
+// roster order.
+export type RosterTransition = Readonly<{
     root: AuthenticatedRoot;
     usernames: readonly string[];
 }>;
@@ -399,7 +373,7 @@ export const proposeRoster = async (
     root: AuthenticatedRoot,
     enrollment: RestoredEnrollment,
     registrationBodyDigests: readonly string[],
-): Promise<RetainedRoster | undefined> => {
+): Promise<RosterTransition | undefined> => {
     if (
         !enrollment.isOrganizer ||
         root.head.generation !== rootGeneration.registered
@@ -413,14 +387,7 @@ export const proposeRoster = async (
         registrationBodyDigests,
     );
     if (context.module.validate_roster_signer() !== 0) return undefined;
-    const added = [
-        { kind: dataKind.proposal, bytes: proposal.body },
-        { kind: dataKind.retainedRoster, bytes: retainRoster(context) },
-        {
-            kind: dataKind.retainedRegistration,
-            bytes: retainRegistration(context),
-        },
-    ];
+    const added = [{ kind: dataKind.proposal, bytes: proposal.body }];
     const locked = await commitRoot(context, root, {
         generation: rootGeneration.rosterLocked,
         manifest: {
@@ -487,7 +454,7 @@ export const acceptRoster = async (
     root: AuthenticatedRoot,
     enrollment: RestoredEnrollment,
     registrationBodyDigests: readonly string[],
-): Promise<RetainedRoster | undefined> => {
+): Promise<RosterTransition | undefined> => {
     if (
         enrollment.isOrganizer ||
         root.head.generation !== rootGeneration.registered
@@ -529,11 +496,6 @@ export const acceptRoster = async (
     const added = [
         { kind: dataKind.proposal, bytes: proposal.body },
         { kind: dataKind.proposalSignature, bytes: signature },
-        { kind: dataKind.retainedRoster, bytes: retainRoster(context) },
-        {
-            kind: dataKind.retainedRegistration,
-            bytes: retainRegistration(context),
-        },
     ];
     return {
         root: await commitRoot(context, root, {
@@ -553,9 +515,9 @@ export const acceptRoster = async (
     };
 };
 
-// Restores this participant's roster verification from the retained roster
-// and the published headers and keys, so that the module holds the live
-// signed proposal that contribution generation needs.
+// Verifies this participant's retained proposal again from the published
+// registration records, so that the module holds the live signed proposal
+// that contribution generation needs.
 export const reverifyRoster = async (
     context: ParticipantContext,
     relay: PublicRelay,
@@ -575,19 +537,14 @@ export const reverifyRoster = async (
         enrollment.definitionSignature,
         registrationBodyDigests.length,
     );
-    const input = concatenate(
-        begin,
-        await readDataKind(context, root.manifest, dataKind.retainedRoster),
-    );
-    writeModuleInput(context, input);
-    if (context.module.roster_begin_retained(begin.length, input.length) !== 0)
-        throw new Error('The credential refused the retained roster.');
+    writeModuleInput(context, begin);
+    if (context.module.roster_begin(begin.length) !== 0)
+        throw new Error('The roster verifier refused the retained poll.');
     const proposal = await finishProposal(
         context,
         relay,
         enrollment,
         registrationBodyDigests,
-        true,
     );
     if (!equalBytes(proposal.body, stored))
         throw new Error('The retained proposal differs from its records.');
@@ -603,11 +560,11 @@ export const reverifyRoster = async (
     return proposal;
 };
 
-// The profile the retained roster names: its participant count from the
-// retained proposal and its option count from the poll the module verified.
-// The retained root, proposal, retained roster, setup reference and setup
-// certificate must meet its bounds. The participant's position is its
-// registration's in the retained proposal.
+// The profile the retained proposal names: its participant count from the
+// proposal and its option count from the poll the module verified. The
+// retained root, proposal, setup reference and setup certificate must meet
+// its bounds. The participant's position is its registration's in the
+// retained proposal.
 export const retainedProfile = async (
     context: ParticipantContext,
     root: AuthenticatedRoot,
@@ -633,8 +590,6 @@ export const retainedProfile = async (
     if (
         profile === undefined ||
         proposal.length !== profile.proposalBytes ||
-        retainedLength(dataKind.retainedRoster) !==
-            profile.root.retainedRosterBytes ||
         root.plaintext.length + tagBytes >
             rootBound({ ...context, profile }, root.head.generation) ||
         (setupReference !== 0 &&
@@ -643,13 +598,13 @@ export const retainedProfile = async (
             setupCertificate !== profile.root.setupCertificateBytes)
     )
         throw new Error(
-            'The retained roster does not name a supported profile.',
+            'The retained proposal does not name a supported profile.',
         );
     const position = proposalRegistrationBodyDigests(proposal).indexOf(
         hexadecimal(enrollment.registrationBodyDigest),
     );
     if (position < 0)
-        throw new Error('The retained roster omits this participant.');
+        throw new Error('The retained proposal omits this participant.');
     return { ...context, profile, position };
 };
 

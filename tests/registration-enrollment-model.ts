@@ -60,21 +60,6 @@ const maximumSourceInventory = () => {
     return sourceMaximums;
 };
 
-// A retained roster: its marker, the proposal identity and the record count,
-// each record's body digest and the tag keyed to the original credential.
-export const retainedRosterBytes = (participants: bigint) =>
-    4n + 64n + 2n + participants * 64n + 64n;
-
-// A retained registration: its body digest and original credential tag.
-const retainedRegistrationBytes = 64n + 64n;
-
-// The largest supported roster's, derived once.
-let largestRetainedRosterBytes: bigint | undefined;
-const maximumRetainedRosterBytes = () =>
-    (largestRetainedRosterBytes ??= retainedRosterBytes(
-        BigInt(supportedProfileRanges().participants.maximum),
-    ));
-
 const registrationEnrollmentInputs = {
     signingPublicKeyBytes: registrationSigningPublicKeyBytes,
     signatureBytes: 3309n,
@@ -109,15 +94,14 @@ export const compileRegistrationEnrollmentCensus = () => {
     const signingCapsuleBytes = 4n + 32n + 16n;
     const maximumEnrollmentRecords =
         ceiling(key.publicKeyBytes, 1_048_576n) + 7n;
-    // The proposal, its signature, the retained roster and the retained
-    // registration.
-    const maximumRecords = maximumEnrollmentRecords + 4n;
+    // The proposal and its signature.
+    const maximumRecords = maximumEnrollmentRecords + 2n;
     const manifestPrefixBytes = 4n + 3n * 32n + 64n + 4n;
     const preparedManifestPrefixBytes = manifestPrefixBytes - 32n;
     const maximumEnrollmentManifestBytes =
         manifestPrefixBytes + maximumEnrollmentRecords * 73n;
     const maximumProposalIntentManifestBytes =
-        manifestPrefixBytes + (maximumEnrollmentRecords + 3n) * 73n;
+        manifestPrefixBytes + (maximumEnrollmentRecords + 1n) * 73n;
     const maximumManifestBytes = manifestPrefixBytes + maximumRecords * 73n;
     const maximumRootBytes = maximumManifestBytes + 16n;
     // Seven items: the purpose, runtime, nonce, organizer key, manifest,
@@ -180,8 +164,6 @@ export const compileRegistrationEnrollmentCensus = () => {
         maximumSourceCapsuleBytes: source.capsuleBytes,
         maximumRecords,
         maximumEnrollmentRecords,
-        maximumRetainedRosterBytes: maximumRetainedRosterBytes(),
-        retainedRegistrationBytes,
         maximumEnrollmentManifestBytes,
         maximumProposalIntentManifestBytes,
         manifestPrefixBytes,
@@ -233,9 +215,7 @@ export const compileRegistrationEnrollmentCensus = () => {
             inputs.maximumPollDefinitionBytes +
             inputs.signatureBytes +
             inputs.maximumProposalBytes +
-            inputs.signatureBytes +
-            maximumRetainedRosterBytes() +
-            retainedRegistrationBytes,
+            inputs.signatureBytes,
         initialRootDistinctBlockInputs:
             1n +
             2n +

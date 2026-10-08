@@ -9,7 +9,7 @@ const generations = [
 ];
 
 // The generations at which the operation may start, for a joiner whose
-// retained roster names its profile unless the stage says otherwise.
+// retained proposal names its profile unless the stage says otherwise.
 const availableAt = (
     operation: string,
     stage: Partial<Omit<ParticipantStage, 'generation'>> = {},

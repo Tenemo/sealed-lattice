@@ -66,9 +66,6 @@ describe('participant runtime bounds', () => {
                 expect(profile.root.setupReferenceBytes).toBeLessThanOrEqual(
                     limits.root.maximumSetupReferenceBytes,
                 );
-                expect(profile.root.retainedRosterBytes).toBeLessThanOrEqual(
-                    limits.root.maximumRetainedRosterBytes,
-                );
             }
     });
 

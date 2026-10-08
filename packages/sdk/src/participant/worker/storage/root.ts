@@ -83,13 +83,8 @@ export const dataKind = {
     setupReference: 9,
     // The setup certificate the setup was verified against.
     setupCertificate: 10,
-    // This participant's roster verification, keyed to its credential.
-    retainedRoster: 11,
-    // This participant's verification of its own registration, keyed to its
-    // credential.
-    retainedRegistration: 12,
     // Original private FHE family sources, retired with verified setup.
-    sourceCapsule: 13,
+    sourceCapsule: 11,
 } as const;
 
 export type RecordReference = Readonly<{
@@ -111,7 +106,7 @@ const presentSuffixes = (generation: number) =>
 
 // Roots before the contribution's intent retain only enrollment records,
 // the proposal and its signature. A later root is bounded by the profile its
-// retained roster names; before that profile is known, by the largest root
+// retained proposal names; before that profile is known, by the largest root
 // of any supported profile.
 const enrollmentRoot = (generation: number) =>
     generation < suffixStarts.preparation;
@@ -171,8 +166,8 @@ export const encodeManifest = (
 // Checks the canonical reference inventory: ascending kinds, contiguous
 // chunks of at most one mebibyte, only the last chunk of a kind shorter, and
 // the complete records that the generation requires. The profile's exact
-// proposal, retained roster, setup reference and setup certificate lengths are
-// checked once it is known.
+// proposal, setup reference and setup certificate lengths are checked once it
+// is known.
 const checkReferences = (
     references: readonly RecordReference[],
     generation: number,
@@ -210,8 +205,6 @@ const checkReferences = (
         !exact(dataKind.pollSignature, registration.signatureBytes) ||
         generation >= rootGeneration.rosterLocked !==
             lengths[dataKind.proposal] > 0 ||
-        generation >= rootGeneration.rosterLocked !==
-            lengths[dataKind.retainedRoster] > 0 ||
         !exact(
             dataKind.proposalSignature,
             generation >= rootGeneration.rosterSigned

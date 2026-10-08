@@ -1,20 +1,9 @@
 //! The setup: the participant's selection signatures, the retained selection
 //! inputs and setup, and the retirement of the contribution sources.
-use super::roster::retained_roster;
 use super::{SESSION, Session, emitted_packet, original_context, signed_packet};
 use crate::offer_signing::OfferSigning;
 use protocol_foundations::SIGNATURE_BYTES;
 use zeroize::{Zeroize, Zeroizing};
-/// Starts a setup verification whose roster restores this participant's
-/// earlier roster verification.
-#[unsafe(no_mangle)]
-pub extern "C" fn setup_roster_begin_retained(begin: usize, length: usize) -> u32 {
-    let Some(roster) = SESSION.with(|state| retained_roster(&state.borrow(), begin, length)) else {
-        return 1;
-    };
-    super::setup_verification::begin_roster(roster);
-    0
-}
 
 protocol_foundations::operation_codes! {
     /// The participant's selection signing commands.

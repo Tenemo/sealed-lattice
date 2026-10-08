@@ -2,7 +2,7 @@
 //! the roster and the contribution read.
 use super::SESSION;
 use crate::own_verification::{CONTROL_BYTES, State};
-use protocol_foundations::{Credential, poll::VerifiedPoll, registration::VerifiedRegistration};
+use protocol_foundations::{poll::VerifiedPoll, registration::VerifiedRegistration};
 use std::{cell::RefCell, sync::Arc};
 
 thread_local! {static STATE:RefCell<State>=RefCell::new(State::new());}
@@ -11,50 +11,10 @@ pub(super) fn verified() -> Option<Arc<VerifiedRegistration>> {
     STATE.with(|state| state.borrow().verified.clone())
 }
 
-/// The signed poll was checked before either fresh or retained registration
-/// verification. It fixes enrollment source families even during restoration.
+/// The signed poll, which the registration verification checks first. It
+/// fixes enrollment source families even during restoration.
 pub(super) fn with_poll<T>(operation: impl FnOnce(&VerifiedPoll) -> T) -> Option<T> {
     STATE.with(|state| state.borrow().poll.as_ref().map(operation))
-}
-
-/// Restores the participant's own registration from the retained copy the
-/// host delivered, for the original credential that the
-/// registration's capsules opened.
-pub(super) fn restore(credential: &Credential) -> Option<Arc<VerifiedRegistration>> {
-    STATE.with(|state| {
-        let mut state = state.borrow_mut();
-        let state = &mut *state;
-        if state.verified.is_some() {
-            return None;
-        }
-        let retained = state.retained.take()?;
-        let pending = state.pending.take()?;
-        let verified = Arc::new(
-            pending
-                .restore(credential, state.poll.as_ref()?, &retained)
-                .ok()?,
-        );
-        state.verified = Some(verified.clone());
-        state.restored = true;
-        Some(verified)
-    })
-}
-
-/// Keys this instance's verification of the participant's own registration
-/// to its credential. A registration restored from its retained copy is not
-/// retained again.
-pub(super) fn retain(credential: &Credential) -> Option<Vec<u8>> {
-    STATE.with(|state| {
-        let state = state.borrow();
-        if state.restored {
-            return None;
-        }
-        state
-            .verified
-            .as_ref()?
-            .retain(credential, state.poll.as_ref()?)
-            .ok()
-    })
 }
 
 /// The result length, question and options of the poll this instance
@@ -160,25 +120,6 @@ pub extern "C" fn own_registration_poll() -> u32 {
             return 1;
         };
         state.contribution_output = poll;
-        0
-    })
-}
-/// Emits this instance's verification of the participant's own
-/// registration, keyed to the restored credential, so that a later visit
-/// restores it under the original credential instead of verifying its signature again.
-#[unsafe(no_mangle)]
-pub extern "C" fn retain_registration() -> u32 {
-    SESSION.with(|state| {
-        let mut state = state.borrow_mut();
-        state.contribution_output.clear();
-        let Some(retained) = state
-            .enrollment
-            .as_ref()
-            .and_then(|enrollment| retain(&enrollment.credential))
-        else {
-            return 1;
-        };
-        state.contribution_output = retained;
         0
     })
 }

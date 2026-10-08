@@ -45,9 +45,6 @@ export const moduleFunctions = [
     // contribution output.
     'own_registration_poll',
     'roster_begin',
-    // Restores the retained roster from the begin input and the retained
-    // roster after it.
-    'roster_begin_retained',
     // The registration records the worker may stream at once.
     'roster_open_records',
     'roster_record',
@@ -62,12 +59,6 @@ export const moduleFunctions = [
     'sign_roster_proposal',
     'roster_signature_pointer',
     'verify_roster_signature',
-    // Emits the credential-keyed retained roster of a roster verified in
-    // full.
-    'retain_roster',
-    // The module's verification of the participant's own registration,
-    // keyed to the restored credential.
-    'retain_registration',
     'retain_proposal',
     'retained_proposal_identity_pointer',
     'participant_ballot_command',
@@ -143,7 +134,6 @@ export const moduleFunctions = [
     'setup_input_capacity',
     'setup_chunk_capacity',
     'setup_roster_begin',
-    'setup_roster_begin_retained',
     'setup_roster_record',
     'setup_roster_finish',
     // The verified roster's poll option count, or zero before it verifies.

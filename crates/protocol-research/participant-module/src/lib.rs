@@ -208,7 +208,7 @@ impl Enrollment {
             (2, signature.as_slice()),
             (3, sealed_key.bytes.as_slice()),
             (4, sealed_credential.bytes.as_slice()),
-            (13, sealed_sources.bytes.as_slice()),
+            (11, sealed_sources.bytes.as_slice()),
         ] {
             output(kind, 0, bytes);
         }

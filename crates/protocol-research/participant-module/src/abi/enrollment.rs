@@ -122,7 +122,7 @@ pub extern "C" fn validate_joiner(length: usize) -> u32 {
 
 /// The staged output that carries the enrollment's three capsule keys, which
 /// the worker retains in its root rather than as a record.
-const DATA_KEYS: u32 = 14;
+const DATA_KEYS: u32 = 12;
 fn staged_output(kind: u32, offset: usize, bytes: &[u8]) {
     #[link(wasm_import_module = "enrollment")]
     unsafe extern "C" {
@@ -306,12 +306,9 @@ fn restore_enrollment(length: usize, prepared: bool) -> u32 {
         }) else {
             return 1;
         };
-        // The registration this instance verified, or else the verification
-        // of an earlier visit, which only the credential just opened restores.
-        // The keys stay only if it names the root's exact inputs.
-        let Some(verified) = super::own_verification::verified()
-            .or_else(|| super::own_verification::restore(&enrollment.credential))
-        else {
+        // The registration this instance verified. The keys stay only if it
+        // names the root's exact inputs.
+        let Some(verified) = super::own_verification::verified() else {
             return 1;
         };
         if verified.header().encode().ok().as_deref() != Some(&input[132..132 + header_length])

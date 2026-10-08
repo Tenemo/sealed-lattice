@@ -4,11 +4,8 @@ use crate::{
 };
 use parallel_work::ProtocolHash;
 
-#[path = "retained-registration.rs"]
-mod retained;
 #[path = "registration-session.rs"]
 pub mod session;
-pub use retained::RETAINED_REGISTRATION_BYTES;
 
 pub const CHUNK_LIMIT: usize = 1 << 20;
 pub const KEY_BYTES: usize = supported_profile::DEGREE * 21;
@@ -27,17 +24,6 @@ impl VerifiedRegistration {
     }
     pub fn public_key(&self) -> &[u8] {
         &self.public_key
-    }
-    pub(crate) fn restored(
-        header: RegistrationHeader,
-        body_digest: [u8; 64],
-        public_key: Vec<u8>,
-    ) -> Self {
-        Self {
-            header,
-            body_digest,
-            public_key,
-        }
     }
     #[cfg(test)]
     pub(crate) fn for_roster(header: RegistrationHeader, body_digest: [u8; 64]) -> Self {

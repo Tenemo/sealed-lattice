@@ -61,7 +61,7 @@ import { unusedPreparationPurposes } from '../contribution/preparation-state.js'
 
 // The staged output that carries the three capsule keys, which the root
 // retains rather than as a record.
-const stagedDataKeys = 14;
+const stagedDataKeys = 12;
 
 // Why an enrollment was refused.
 type EnrollmentRefusal = Extract<
@@ -471,16 +471,6 @@ export type RestoredEnrollment = Readonly<{
     definitionSignature: Uint8Array;
 }>;
 
-// The credential keys the module's verification of the participant's own
-// registration, so that later operations restore it instead of reading and
-// verifying its signature again.
-export const retainRegistration = (context: ParticipantContext) => {
-    const { module } = context;
-    if (module.retain_registration() !== 0)
-        throw new Error('The credential refused the verified registration.');
-    return readParticipantOutput(module);
-};
-
 // The result length, question and options the module writes for the poll it
 // verified the participant's own registration against.
 const readVerifiedPoll = (context: ParticipantContext): VerifiedPoll => {
@@ -508,21 +498,19 @@ const readVerifiedPoll = (context: ParticipantContext): VerifiedPoll => {
     return { question, options, topCount };
 };
 
-// The steps of the verification of the participant's own registration; its
-// retained step takes an earlier visit's retained copy.
+// The steps of the verification of the participant's own registration.
 const ownRegistrationStep = {
     begin: 0,
     key: 1,
     keyFinish: 2,
     finish: 4,
-    retained: 5,
 } as const;
 
-// Verifies the retained registration through the module's own registration
-// verifier, or restores that verification from its retained copy in place of
-// the record, restores the original keys and checks the retained poll
-// definition. The purposes the root shows unused stay available; an instance
-// that created the credential in this invocation keeps its live authority.
+// Verifies the participant's own registration records, which the root
+// retains, through the module's own registration verifier on every visit,
+// restores the original keys and checks the retained poll definition. The
+// purposes the root shows unused stay available; an instance that created
+// the credential in this invocation keeps its live authority.
 export const restoreEnrollment = async (
     context: ParticipantContext,
     root: AuthenticatedRoot,
@@ -560,24 +548,12 @@ export const restoreEnrollment = async (
             publicKey.subarray(offset, offset + chunkBytes),
         );
     own(ownRegistrationStep.keyFinish);
-    let registrationBodyDigest: Uint8Array;
-    // From the roster transition on, the root retains the module's
-    // verification of the participant's own registration, keyed to its
-    // credential.
-    if (root.head.generation >= rootGeneration.rosterLocked) {
-        // The module checks the copy's tag once the capsules open the
-        // credential it is keyed to.
-        const retained = await read(dataKind.retainedRegistration);
-        own(ownRegistrationStep.retained, retained);
-        registrationBodyDigest = retained.slice(0, 64);
-    } else {
-        own(ownRegistrationStep.finish);
-        registrationBodyDigest = readModuleMemory(
-            module,
-            module.own_registration_body_digest_pointer(),
-            64,
-        );
-    }
+    own(ownRegistrationStep.finish);
+    const registrationBodyDigest = readModuleMemory(
+        module,
+        module.own_registration_body_digest_pointer(),
+        64,
+    );
     const sourcesRequired = requiresFheKeySources(root.head.generation);
     const sourceState = sourcesRequired
         ? await read(dataKind.sourceCapsule)

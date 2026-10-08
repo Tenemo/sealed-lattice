@@ -126,7 +126,7 @@ impl SetupSession {
     }
     /// Starts a setup verification with the roster verifier that reads its
     /// registrations, discarding any earlier one.
-    pub fn begin_roster(&mut self, roster: RosterInputVerifier) {
+    fn begin_roster(&mut self, roster: RosterInputVerifier) {
         self.roster = Some(roster);
         self.proposal = None;
         self.poll = None;

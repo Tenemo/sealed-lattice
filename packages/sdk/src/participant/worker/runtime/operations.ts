@@ -158,7 +158,7 @@ export const executeOperation = async (
         parameters.poll !== hexadecimal(root.manifest.poll)
     )
         return refused('another poll');
-    // The retained roster names the profile from generation two on; every
+    // The retained proposal names the profile from generation two on; every
     // operation past the roster runs only at such a generation.
     const profiled =
         root.head.generation >= rootGeneration.rosterLocked

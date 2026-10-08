@@ -44,7 +44,7 @@ import {
 } from './setup-verification.js';
 
 // A participant's setup activation. It verifies the setup from its retained
-// roster and preparation state, publishes the complete certificate it
+// proposal and preparation state, publishes the complete certificate it
 // collected, retains the setup reference and certificate in its root while
 // retiring its preparation records, and restores the verified setup in later
 // operations, rebuilding the public aggregate cache from fresh verification
@@ -77,15 +77,11 @@ export const verifySetupRoster = async (
         pollSignature,
         registrationBodyDigests.length,
     );
-    // The verified registrations are restored from the retained roster and
-    // the published headers and keys.
-    const input = concatenate(
-        begin,
-        await readDataKind(context, manifest, dataKind.retainedRoster),
-    );
-    writeModuleInput(context, input);
-    if (module.setup_roster_begin_retained(begin.length, input.length) !== 0)
-        throw new Error('The setup verifier refused the retained roster.');
+    // The setup verifier verifies the registrations that the retained
+    // proposal lists again from the published records.
+    writeSetupInput(module, begin);
+    if (module.setup_roster_begin(begin.length) !== 0)
+        throw new Error('The setup verifier refused the retained poll.');
     await streamRegistrations(
         relay,
         registrationBodyDigests,
@@ -101,7 +97,6 @@ export const verifySetupRoster = async (
                 ) === 0
             );
         },
-        true,
     );
     const proposalSignature = await readDataKind(
         context,
@@ -114,12 +109,11 @@ export const verifySetupRoster = async (
         proposalSignature,
     );
     writeSetupInput(module, proposalPacket);
-    // The retained roster, proposal and signature are authenticated, so a
-    // refusal means the relay served other headers or keys under their
-    // names.
+    // The retained proposal and signature are authenticated, so a refusal
+    // means the published registrations are not the ones the proposal lists.
     if (module.setup_roster_finish(proposalPacket.length) !== 0)
         throw new PublicInputFailure(
-            'The published registrations are not the retained roster.',
+            'The published registrations are not the retained proposal.',
         );
     preparedRosters.add(module);
 };

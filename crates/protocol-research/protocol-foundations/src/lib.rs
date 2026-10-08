@@ -19,8 +19,6 @@ pub mod poll;
 pub mod registration;
 #[path = "release-signing.rs"]
 pub mod release_signing;
-#[path = "retained-roster.rs"]
-pub mod retained_roster;
 #[cfg(test)]
 #[path = "role-ownership-tests.rs"]
 mod role_ownership_tests;

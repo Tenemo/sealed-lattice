@@ -46,23 +46,18 @@ export type ParticipantLimits = Readonly<{
         signingCapsuleBytes: number;
         maximumSourceCapsuleBytes: number;
         maximumProposalBytes: number;
-        // The participant's verification of its own registration, keyed to
-        // its credential.
-        retainedRegistrationBytes: number;
     }>;
     root: Readonly<{
         maximumRecords: number;
         // Roots through the accepted roster retain only enrollment records,
-        // the proposal, its signature, the retained roster and the retained
-        // registration.
+        // the proposal and its signature.
         maximumEnrollmentRootBytes: number;
-        // A later root, its setup reference, its setup certificate and the
-        // retained roster before the roster names the profile: the largest
-        // of any supported profile.
+        // A later root, its setup reference and its setup certificate before
+        // the retained proposal names the profile: the largest of any
+        // supported profile.
         maximumRootBytes: number;
         maximumSetupReferenceBytes: number;
         maximumSetupCertificateBytes: number;
-        maximumRetainedRosterBytes: number;
     }>;
 }>;
 
@@ -80,8 +75,6 @@ export type ParticipantProfile = Readonly<{
         setupReferenceBytes: number;
         // The setup certificate the setup was verified against.
         setupCertificateBytes: number;
-        // The participant's roster verification, keyed to its credential.
-        retainedRosterBytes: number;
     }>;
     contribution: Readonly<{
         // Setup polynomial i is statement object i + 1; object zero is the
@@ -211,7 +204,6 @@ const readModuleLimits = (module: ParticipantModule) => {
             signingCapsuleBytes: take(),
             maximumSourceCapsuleBytes: take(),
             maximumProposalBytes: take(),
-            retainedRegistrationBytes: take(),
         },
         contribution: {
             bodyHeaderBytes: take(),
@@ -262,7 +254,6 @@ const readModuleProfile = (
         participantCount: take(),
         optionCount: take(),
         proposalBytes: take(),
-        retainedRosterBytes: take(),
         expandedPolynomials: take(),
         firstOracleColumns: take(),
         statementBytes: take(),
@@ -303,13 +294,11 @@ const readModuleProfile = (
 type ModuleProfile = NonNullable<ReturnType<typeof readModuleProfile>>;
 
 // The data record kinds' largest lengths, in manifest order, with the
-// proposal at its cap and the given setup reference, setup certificate and retained
-// roster.
+// proposal at its cap and the given setup reference and setup certificate.
 const dataKindMaximums = (
     registration: ParticipantLimits['registration'],
     setupReferenceBytes: number,
     setupCertificateBytes: number,
-    retainedRosterBytes: number,
 ) => [
     registration.publicKeyBytes,
     registration.maximumHeaderBytes,
@@ -322,32 +311,25 @@ const dataKindMaximums = (
     registration.signatureBytes,
     setupReferenceBytes,
     setupCertificateBytes,
-    retainedRosterBytes,
-    registration.retainedRegistrationBytes,
     registration.maximumSourceCapsuleBytes,
 ];
 
 // The largest enrollment root: every record but the setup reference and
 // certificate, which it lacks, and the organizer's proposal intent.
-const enrollmentRootBytes = (
-    registration: ParticipantLimits['registration'],
-    retainedRosterBytes: number,
-) =>
+const enrollmentRootBytes = (registration: ParticipantLimits['registration']) =>
     rootPrefixBytes +
     rootReferenceBytes *
-        dataKindMaximums(registration, 0, 0, retainedRosterBytes).reduce(
+        dataKindMaximums(registration, 0, 0).reduce(
             (total, bytes) => total + chunks(bytes),
             0,
         ) +
     tagBytes;
 
 // Everything the participant retains through its accepted roster: the
-// registration records, the enrollment root, the poll and its signature,
-// the proposal and its signature, the retained roster and the retained
-// registration.
+// registration records, the enrollment root, the poll and its signature, and
+// the proposal and its signature.
 const enrollmentPayloadBytes = (
     registration: ParticipantLimits['registration'],
-    retainedRosterBytes: number,
 ) =>
     registration.publicKeyBytes +
     registration.maximumHeaderBytes +
@@ -355,13 +337,11 @@ const enrollmentPayloadBytes = (
     registration.recipientCapsuleBytes +
     registration.signingCapsuleBytes +
     registration.maximumSourceCapsuleBytes +
-    enrollmentRootBytes(registration, retainedRosterBytes) +
+    enrollmentRootBytes(registration) +
     registration.maximumPollDefinitionBytes +
     registration.signatureBytes +
     registration.maximumProposalBytes +
-    registration.signatureBytes +
-    retainedRosterBytes +
-    registration.retainedRegistrationBytes;
+    registration.signatureBytes;
 
 // The contribution suffix: its marker, own phase, position and counts, the
 // checkpoint header, a reference per public and private record, each
@@ -625,7 +605,6 @@ const profileBounds = (
         limits.registration,
         0,
         0,
-        limits.root.maximumRetainedRosterBytes,
     ).reduce((total, bytes) => total + chunks(bytes), 0);
     // Preparation retains the source capsule and own work; later roots
     // retire them and retain the verified setup reference and certificate.
@@ -665,19 +644,12 @@ const profileBounds = (
             maximumRootBytes,
             setupReferenceBytes: setupReference,
             setupCertificateBytes: setupCertificate,
-            retainedRosterBytes: profile.retainedRosterBytes,
         },
         contribution: {
             ...contribution,
             requiredStorageBytes:
-                enrollmentPayloadBytes(
-                    limits.registration,
-                    limits.root.maximumRetainedRosterBytes,
-                ) -
-                enrollmentRootBytes(
-                    limits.registration,
-                    limits.root.maximumRetainedRosterBytes,
-                ) +
+                enrollmentPayloadBytes(limits.registration) -
+                enrollmentRootBytes(limits.registration) +
                 maximumRootBytes +
                 setupReference +
                 setupCertificate +
@@ -702,7 +674,7 @@ const profileBounds = (
 };
 
 // Reads the module's shared bounds and the largest supported profile's,
-// which bound a root and its setup reference before the retained roster
+// which bound a root and its setup reference before the retained proposal
 // names the profile.
 export const readParticipantLimits = (
     module: ParticipantModule,
@@ -718,7 +690,6 @@ export const readParticipantLimits = (
         throw new Error('The participant module lacks its largest profile.');
     const maximumSetupReferenceBytes = setupReferenceBytes(largest);
     const maximumSetupCertificateBytes = setupCertificateBytes(largest);
-    const maximumRetainedRosterBytes = largest.retainedRosterBytes;
     const enrollment: ParticipantLimits = {
         participants,
         options,
@@ -728,16 +699,11 @@ export const readParticipantLimits = (
                 { ...registration, maximumSourceCapsuleBytes: 0 },
                 maximumSetupReferenceBytes,
                 maximumSetupCertificateBytes,
-                maximumRetainedRosterBytes,
             ).reduce((total, bytes) => total + chunks(bytes), 0),
-            maximumEnrollmentRootBytes: enrollmentRootBytes(
-                registration,
-                maximumRetainedRosterBytes,
-            ),
+            maximumEnrollmentRootBytes: enrollmentRootBytes(registration),
             maximumRootBytes: 0,
             maximumSetupReferenceBytes,
             maximumSetupCertificateBytes,
-            maximumRetainedRosterBytes,
         },
     };
     return {
@@ -768,5 +734,4 @@ export const participantDataKindMaximums = (limits: ParticipantLimits) =>
         limits.registration,
         limits.root.maximumSetupReferenceBytes,
         limits.root.maximumSetupCertificateBytes,
-        limits.root.maximumRetainedRosterBytes,
     );

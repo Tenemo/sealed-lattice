@@ -1,9 +1,9 @@
 //! Original-owner role controls at the authenticated local-custody boundary.
 //! Signed canonical recipient keys pass the real registration verifier before
-//! these controls exercise original credential and retained roster authority.
+//! these controls exercise original credential authority.
 use crate::registration::CHUNK_LIMIT;
 use crate::{
-    BodyDigest, Credential, Error,
+    BodyDigest, Credential, Error, SIGNATURE_BYTES,
     foundation::{
         CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple,
         RegistrationHeader, StabilizedDisplayText, derive_participant_identity,
@@ -23,17 +23,19 @@ struct CustodyFixture {
     packet: SignedPoll,
     poll: VerifiedPoll,
     credentials: Vec<Credential>,
+    signatures: Vec<[u8; SIGNATURE_BYTES]>,
     proposal: RosterProposal,
 }
 
-// Every holder below comes from the production restore operation: the key
-// must match its header and the retained metadata must authenticate under the
-// original credential. No test constructor creates a verified capability.
-fn retained_registration(
+// Every holder below comes from the production registration verifier, with
+// the signature it verified: the key must match its header and the signature
+// must verify under the original credential. No test constructor creates a
+// verified capability.
+fn signed_registration(
     poll: &VerifiedPoll,
     credential: &mut Credential,
     body: u8,
-) -> VerifiedRegistration {
+) -> (VerifiedRegistration, [u8; SIGNATURE_BYTES]) {
     let mut key = vec![0; KEY_BYTES];
     key[1] = body;
     let header = RegistrationHeader {
@@ -54,7 +56,7 @@ fn retained_registration(
         verifier.push_key(chunk).unwrap();
     }
     verifier.finish_key().unwrap();
-    verifier.finish().unwrap()
+    (verifier.finish().unwrap(), signature)
 }
 
 fn custody_fixture(runtime: [u8; 64], nonce: u8) -> CustodyFixture {
@@ -85,18 +87,20 @@ fn custody_fixture_with_size(runtime: [u8; 64], nonce: u8, participants: usize) 
         .create_poll(draft, runtime, [nonce; 32])
         .unwrap();
     let poll = verify_poll(packet.identity, runtime, &packet.body, &packet.signature).unwrap();
-    let records = credentials
+    let (records, signatures): (Vec<_>, Vec<_>) = credentials
         .iter_mut()
         .enumerate()
         .map(|(position, credential)| {
-            Arc::new(retained_registration(&poll, credential, position as u8 + 1))
+            let (record, signature) = signed_registration(&poll, credential, position as u8 + 1);
+            (Arc::new(record), signature)
         })
-        .collect();
+        .unzip();
     let proposal = RosterProposal::new(&poll, records).unwrap();
     CustodyFixture {
         packet,
         poll,
         credentials,
+        signatures,
         proposal,
     }
 }
@@ -427,11 +431,9 @@ fn checkpoint_prefix(fixture: &CustodyFixture) -> Vec<u8> {
     .concat()
 }
 
-fn restore_roster(fixture: &CustodyFixture) -> RosterProposal {
-    let owner = &fixture.credentials[1];
-    let retained = owner
-        .retain_roster(&fixture.poll, &fixture.proposal)
-        .unwrap();
+// A later visit's roster, which the roster verifier verifies again from the
+// published records under the body identities the proposal lists.
+fn verify_roster(fixture: &CustodyFixture) -> RosterProposal {
     let begin = [
         fixture.poll.identity().as_slice(),
         &fixture.poll.runtime(),
@@ -441,7 +443,7 @@ fn restore_roster(fixture: &CustodyFixture) -> RosterProposal {
         &fixture.packet.signature,
     ]
     .concat();
-    let mut verifier = RosterInputVerifier::retained(&begin, owner, &retained).unwrap();
+    let mut verifier = RosterInputVerifier::new(&begin).unwrap();
     for (position, record) in fixture.proposal.records().iter().enumerate() {
         let header = record.header().encode().unwrap();
         let input = [
@@ -449,6 +451,7 @@ fn restore_roster(fixture: &CustodyFixture) -> RosterProposal {
             &record.body_digest(),
             &(header.len() as u32).to_le_bytes(),
             &header,
+            &fixture.signatures[position],
         ]
         .concat();
         verifier.begin_record(&input).unwrap();
@@ -462,9 +465,10 @@ fn restore_roster(fixture: &CustodyFixture) -> RosterProposal {
 }
 
 #[test]
-fn contribution_roles_retain_the_original_owner_across_roster_and_context_restoration() {
+fn contribution_roles_retain_the_original_owner_across_roster_verification_and_context_restoration()
+{
     let fixture = custody_fixture([4; 64], 5);
-    let restored = restore_roster(&fixture);
+    let verified = verify_roster(&fixture);
     for position in 0..fixture.proposal.profile().setup_eligible_contributors() {
         let role = fixture.proposal.contribution_role(position).unwrap();
         let tuple = CanonicalTuple::decode(&role, &CanonicalDecodeLimits::default()).unwrap();
@@ -498,7 +502,7 @@ fn contribution_roles_retain_the_original_owner_across_roster_and_context_restor
             tuple.items[5].canonical_bytes(),
             (position as u16).to_le_bytes()
         );
-        assert_eq!(restored.contribution_role(position).unwrap(), role);
+        assert_eq!(verified.contribution_role(position).unwrap(), role);
         let context = retained_context(&fixture, position);
         assert_eq!(
             context
@@ -556,7 +560,7 @@ fn retained_context_refuses_other_original_owners_and_positions_before_signing()
         ),
         Err(Error::Context)
     ));
-    let other_body = retained_registration(&fixture.poll, &mut same_key, 19);
+    let (other_body, _) = signed_registration(&fixture.poll, &mut same_key, 19);
     assert_ne!(other_body.body_digest(), original.body_digest());
     for record in [original.as_ref(), &other_body] {
         assert!(matches!(

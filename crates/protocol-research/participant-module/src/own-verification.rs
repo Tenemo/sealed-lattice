@@ -1,22 +1,18 @@
 use protocol_foundations::{
     Error, SIGNATURE_BYTES,
     poll::{MAXIMUM_POLL_BYTES, VerifiedPoll, verify_poll},
-    registration::{
-        CHUNK_LIMIT, RETAINED_REGISTRATION_BYTES, RegistrationVerifier, VerifiedRegistration,
-    },
+    registration::{CHUNK_LIMIT, RegistrationVerifier, VerifiedRegistration},
 };
 use std::sync::Arc;
 
 const MAXIMUM_HEADER_BYTES: usize = 4096;
 protocol_foundations::operation_codes! {
-    /// The steps of the verification of the participant's own registration;
-    /// its retained step takes an earlier visit's retained copy.
+    /// The steps of the verification of the participant's own registration.
     enum OwnRegistrationStep {
         Begin = 0,
         Key = 1,
         KeyFinish = 2,
         Finish = 4,
-        Retained = 5,
     }
 }
 pub(crate) const CONTROL_BYTES: usize =
@@ -28,13 +24,7 @@ pub(crate) struct State {
     // its option count; no later input can replace them.
     pub(crate) poll: Option<VerifiedPoll>,
     pub(crate) options: usize,
-    // The retained copy of an earlier visit's verification, which replaces
-    // another signature check once its original credential is open.
-    pub(crate) retained: Option<Vec<u8>>,
     pub(crate) verified: Option<Arc<VerifiedRegistration>>,
-    // Whether the verified registration is that retained copy's rather than
-    // this instance's verification.
-    pub(crate) restored: bool,
 }
 impl State {
     pub(crate) fn new() -> Self {
@@ -43,9 +33,7 @@ impl State {
             pending: None,
             poll: None,
             options: 0,
-            retained: None,
             verified: None,
-            restored: false,
         }
     }
     fn begin(&mut self, bytes: &[u8]) -> Result<(), Error> {
@@ -112,13 +100,6 @@ impl State {
             Some(OwnRegistrationStep::Finish) if length == 0 => {
                 let verified = self.pending.take().ok_or(Error::Consumed)?.finish()?;
                 self.verified = Some(Arc::new(verified));
-                Ok(())
-            }
-            Some(OwnRegistrationStep::Retained) if length == RETAINED_REGISTRATION_BYTES => {
-                if self.pending.is_none() || self.retained.is_some() {
-                    return Err(Error::Consumed);
-                }
-                self.retained = Some(self.input[..length].to_vec());
                 Ok(())
             }
             _ => Err(Error::Shape),

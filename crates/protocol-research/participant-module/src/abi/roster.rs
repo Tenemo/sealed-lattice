@@ -18,63 +18,10 @@ pub extern "C" fn roster_begin(length: usize) -> u32 {
         let Ok(roster) = RosterInputVerifier::new(input) else {
             return 1;
         };
-        begin_roster(&mut state, roster);
-        0
-    })
-}
-fn begin_roster(state: &mut Session, roster: RosterInputVerifier) {
-    state.roster = Some(roster);
-    state.proposal = None;
-    state.proposal_signature = None;
-    state.signed_proposal = None;
-}
-// A roster verifier that restores the retained roster the restored
-// credential keyed: the input is the verifier's begin input and then the
-// retained roster.
-pub(super) fn retained_roster(
-    state: &Session,
-    begin: usize,
-    length: usize,
-) -> Option<RosterInputVerifier> {
-    let enrollment = state.enrollment.as_ref()?;
-    let (begin, retained) = state.input.get(..length)?.split_at_checked(begin)?;
-    RosterInputVerifier::retained(begin, &enrollment.credential, retained).ok()
-}
-/// Restores this participant's earlier roster verification: each record
-/// then takes its header and key, and no proof.
-#[unsafe(no_mangle)]
-pub extern "C" fn roster_begin_retained(begin: usize, length: usize) -> u32 {
-    SESSION.with(|state| {
-        let mut state = state.borrow_mut();
-        let Some(roster) = retained_roster(&state, begin, length) else {
-            return 1;
-        };
-        begin_roster(&mut state, roster);
-        0
-    })
-}
-/// Emits the retained roster from the proposal this instance's roster
-/// verifier built by verifying every record, keyed to the restored
-/// credential. A restored roster is not retained again.
-#[unsafe(no_mangle)]
-pub extern "C" fn retain_roster() -> u32 {
-    SESSION.with(|state| {
-        let mut state = state.borrow_mut();
-        state.contribution_output.clear();
-        let (Some(enrollment), Some(roster), Some(proposal)) = (
-            state.enrollment.as_ref(),
-            state.roster.as_ref(),
-            state.proposal.as_ref(),
-        ) else {
-            return 1;
-        };
-        if roster.is_retained() {
-            return 1;
-        }
-        let Ok(retained) = enrollment.credential.retain_roster(roster.poll(), proposal) else {
-            return 1;
-        };
-        state.contribution_output = retained;
+        state.roster = Some(roster);
+        state.proposal = None;
+        state.proposal_signature = None;
+        state.signed_proposal = None;
         0
     })
 }

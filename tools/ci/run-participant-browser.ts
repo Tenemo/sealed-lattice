@@ -6241,8 +6241,9 @@ await runWithLocalRunLog(
             }
             // A third view swaps the first two registrations under each
             // other's body digests. Each is a valid registration for the
-            // poll, so only the retained roster tells them apart, and every
-            // visit verifies the setup again from them first.
+            // poll, so only the body digests the retained proposal lists tell
+            // them apart, and every visit verifies the setup again from them
+            // first.
             const registrationForgeries = new Map<string, Buffer>();
             for (const [from, to] of [
                 [0, 1],

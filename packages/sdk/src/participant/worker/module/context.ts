@@ -28,7 +28,7 @@ export type PublicProfileContext = PublicContext &
 
 // What one worker invocation shares across the participant's phases: also
 // the participant's database, whether a target it evaluates before other
-// work ends the worker once retained and, once the retained roster names
+// work ends the worker once retained and, once the retained proposal names
 // the poll's profile, that profile's bounds and the participant's position
 // in the roster.
 export type ParticipantContext = PublicContext &

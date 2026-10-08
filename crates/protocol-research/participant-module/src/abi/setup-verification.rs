@@ -1,11 +1,8 @@
 //! The public setup verification, whose verified setup the later stages
 //! read.
 use protocol_foundations::{
-    Credential,
-    poll::VerifiedPoll,
-    roster_authentication::AuthenticatedRosterProposal,
-    roster_input::{RecordStep, RosterInputVerifier},
-    setup_selection::SelectionProposal,
+    Credential, poll::VerifiedPoll, roster_authentication::AuthenticatedRosterProposal,
+    roster_input::RecordStep, setup_selection::SelectionProposal,
 };
 use setup_aggregate::{
     CHUNK_BYTES,
@@ -24,9 +21,6 @@ fn step(run: impl FnOnce(&mut SetupSession) -> Result<(), Refused>) -> u32 {
 /// The verified poll and setup, once this visit's setup verifies.
 pub(super) fn verified_setup() -> Option<(Arc<VerifiedPoll>, Arc<VerifiedSetupAggregate>)> {
     SETUP.with(|setup| setup.borrow().verified_setup())
-}
-pub(super) fn begin_roster(roster: RosterInputVerifier) {
-    SETUP.with(|setup| setup.borrow_mut().begin_roster(roster));
 }
 pub(super) fn restore_setup(credential: &Credential, retained: &[u8]) -> bool {
     SETUP.with(|setup| setup.borrow_mut().restore_setup(credential, retained))
