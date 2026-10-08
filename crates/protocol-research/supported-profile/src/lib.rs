@@ -7,6 +7,7 @@
 
 use std::ops::RangeInclusive;
 
+pub mod plaintext;
 pub mod relation;
 
 const TABLE: &[u8] = include_bytes!("../profiles.bin");

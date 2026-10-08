@@ -10,22 +10,11 @@ use linked_release_proof::{
 };
 use num_bigint::BigInt;
 use std::sync::Arc;
-use supported_profile::{PLAINTEXT_MODULUS as PRIME, Profile};
+use supported_profile::{
+    PLAINTEXT_MODULUS as PRIME, Profile,
+    plaintext::{multiply, odd_power_values, power, slot_positions},
+};
 
-fn multiply(left: u32, right: u32) -> u32 {
-    (u64::from(left) * u64::from(right) % u64::from(PRIME)) as u32
-}
-fn power(mut value: u32, mut exponent: u32) -> u32 {
-    let mut result = 1;
-    while exponent > 0 {
-        if exponent & 1 == 1 {
-            result = multiply(result, value);
-        }
-        value = multiply(value, value);
-        exponent >>= 1;
-    }
-    result
-}
 /// The option at each requested rank. The result plaintext is one at the
 /// slot of each requested rank's option and zero at every other slot.
 fn selected_positions(
@@ -47,47 +36,12 @@ fn selected_positions(
         return Err(Error::Encoding);
     }
     let length = SYSTEMATIC / 2;
-    let mut twist = 1;
-    let mut values: Vec<_> = coefficients
-        .iter()
-        .step_by(2)
-        .map(|value| {
-            let result = multiply(*value, twist);
-            twist = multiply(twist, 3);
-            result
-        })
-        .collect();
-    let logarithm = length.ilog2();
-    for index in 0..length {
-        let reverse = index.reverse_bits() >> (usize::BITS - logarithm);
-        if index < reverse {
-            values.swap(index, reverse);
-        }
-    }
-    let mut width = 2;
-    while width <= length {
-        let step = power(9, (length / width) as u32);
-        for block in values.chunks_exact_mut(width) {
-            let (left, right) = block.split_at_mut(width / 2);
-            let mut twiddle = 1;
-            for (first, second) in left.iter_mut().zip(right) {
-                let a = *first;
-                let b = multiply(*second, twiddle);
-                *first = (a + b) % PRIME;
-                *second = (a + PRIME - b) % PRIME;
-                twiddle = multiply(twiddle, step);
-            }
-        }
-        width *= 2;
-    }
+    let values = odd_power_values(coefficients);
     let mut selected = vec![None; top_count];
     let mut used = vec![false; length];
-    let mut exponent = 1;
-    for slot in 0..SYSTEMATIC / 4 {
-        let index = (exponent - 1) / 2;
+    for (slot, index) in slot_positions(SYSTEMATIC).enumerate() {
         used[index] = true;
         let value = values[index];
-        exponent = 5 * exponent % SYSTEMATIC;
         if slot < options * options * window
             && slot.is_multiple_of(window)
             && slot / window % options < top_count

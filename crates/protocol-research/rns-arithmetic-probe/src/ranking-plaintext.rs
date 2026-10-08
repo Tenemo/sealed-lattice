@@ -1,27 +1,9 @@
 use super::DEGREE;
-use supported_profile::{PLAINTEXT_MODULUS as PRIME, Profile};
+use supported_profile::{
+    PLAINTEXT_MODULUS as PRIME, Profile,
+    plaintext::{centered, encode_slots, multiply, power},
+};
 
-fn multiply(left: u32, right: u32) -> u32 {
-    (u64::from(left) * u64::from(right) % u64::from(PRIME)) as u32
-}
-fn power(mut value: u32, mut exponent: u32) -> u32 {
-    let mut result = 1;
-    while exponent != 0 {
-        if exponent & 1 != 0 {
-            result = multiply(result, value);
-        }
-        value = multiply(value, value);
-        exponent >>= 1;
-    }
-    result
-}
-fn centered(value: u32) -> i32 {
-    if value > PRIME / 2 {
-        value as i32 - PRIME as i32
-    } else {
-        value as i32
-    }
-}
 fn interpolate(points: &[u32], values: &[u32]) -> Vec<u32> {
     let mut differences = values.to_vec();
     for order in 1..points.len() {
@@ -46,46 +28,7 @@ fn interpolate(points: &[u32], values: &[u32]) -> Vec<u32> {
 }
 
 pub(super) fn encode(slots: &[u32]) -> Vec<i32> {
-    assert_eq!(slots.len(), DEGREE / 4);
-    let length = DEGREE / 2;
-    let mut natural = vec![0; length];
-    let mut exponent = 1;
-    for value in slots {
-        natural[(exponent - 1) / 2] = *value;
-        exponent = 5 * exponent % DEGREE;
-    }
-    let logarithm = length.ilog2();
-    for index in 0..length {
-        let reversed = index.reverse_bits() >> (usize::BITS - logarithm);
-        if index < reversed {
-            natural.swap(index, reversed);
-        }
-    }
-    let inverse_root = power(9, PRIME - 2);
-    let mut width = 2;
-    while width <= length {
-        let step = power(inverse_root, (length / width) as u32);
-        for block in natural.chunks_exact_mut(width) {
-            let (left, right) = block.split_at_mut(width / 2);
-            let mut twiddle = 1;
-            for (left, right) in left.iter_mut().zip(right) {
-                let first = *left;
-                let second = multiply(*right, twiddle);
-                *left = (first + second) % PRIME;
-                *right = (first + PRIME - second) % PRIME;
-                twiddle = multiply(twiddle, step);
-            }
-        }
-        width *= 2;
-    }
-    let mut coefficients = vec![0; DEGREE];
-    let mut twist = power(length as u32, PRIME - 2);
-    let inverse_twist = power(3, PRIME - 2);
-    for (index, value) in natural.into_iter().enumerate() {
-        coefficients[2 * index] = centered(multiply(value, twist));
-        twist = multiply(twist, inverse_twist);
-    }
-    coefficients
+    encode_slots(slots, DEGREE)
 }
 
 /// The comparison polynomial's coefficients, each rank-equality power's

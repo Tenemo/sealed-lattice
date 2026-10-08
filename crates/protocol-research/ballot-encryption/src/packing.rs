@@ -1,5 +1,7 @@
 pub use supported_profile::DEGREE;
-use supported_profile::{MAXIMUM_SCORE, MINIMUM_SCORE, PLAINTEXT_MODULUS as MODULUS, Profile};
+use supported_profile::{
+    MAXIMUM_SCORE, MINIMUM_SCORE, PLAINTEXT_MODULUS as MODULUS, Profile, plaintext,
+};
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Refusal {
@@ -85,52 +87,6 @@ impl PackingWitness {
     }
 }
 
-fn multiply(left: u32, right: u32) -> u32 {
-    ((u64::from(left) * u64::from(right)) % u64::from(MODULUS)) as u32
-}
-fn power(mut value: u32, mut exponent: u32) -> u32 {
-    let mut result = 1;
-    while exponent != 0 {
-        if exponent & 1 != 0 {
-            result = multiply(result, value);
-        }
-        value = multiply(value, value);
-        exponent >>= 1;
-    }
-    result
-}
-fn inverse_transform(values: &mut [u32], root: u32) {
-    let length = values.len();
-    let logarithm = length.ilog2();
-    for index in 0..length {
-        let reversed = index.reverse_bits() >> (usize::BITS - logarithm);
-        if index < reversed {
-            values.swap(index, reversed);
-        }
-    }
-    let inverse_root = power(root, MODULUS - 2);
-    let mut width = 2;
-    while width <= length {
-        let step = power(inverse_root, (length / width) as u32);
-        for block in values.chunks_exact_mut(width) {
-            let (left, right) = block.split_at_mut(width / 2);
-            let mut twiddle = 1;
-            for (left, right) in left.iter_mut().zip(right) {
-                let first = *left;
-                let second = multiply(*right, twiddle);
-                *left = (first + second) % MODULUS;
-                *right = (first + MODULUS - second) % MODULUS;
-                twiddle = multiply(twiddle, step);
-            }
-        }
-        width *= 2;
-    }
-    let inverse_length = power(length as u32, MODULUS - 2);
-    for value in values {
-        *value = multiply(*value, inverse_length);
-    }
-}
-
 /// The two comparison-orbit halves are distinct. Only the selected orbit is
 /// populated; the other half and every odd coefficient remain zero.
 ///
@@ -176,27 +132,7 @@ fn encode_with_degree(scores: &[u8], degree: usize) -> Result<Vec<i32>, Refusal>
     for (position, score) in scores.iter().enumerate() {
         slots[active + position] = u32::from(*score);
     }
-    let root = power(3, (MODULUS - 1) / degree as u32);
-    let mut natural = vec![0; degree / 2];
-    let mut exponent = 1;
-    for value in slots {
-        natural[(exponent - 1) / 2] = value;
-        exponent = 5 * exponent % degree;
-    }
-    inverse_transform(&mut natural, multiply(root, root));
-    let inverse_root = power(root, MODULUS - 2);
-    let mut twist = 1;
-    let mut coefficients = vec![0; degree];
-    for (position, value) in natural.into_iter().enumerate() {
-        let value = multiply(value, twist);
-        coefficients[2 * position] = if value > MODULUS / 2 {
-            value as i32 - MODULUS as i32
-        } else {
-            value as i32
-        };
-        twist = multiply(twist, inverse_root);
-    }
-    Ok(coefficients)
+    Ok(plaintext::encode_slots(&slots, degree))
 }
 
 #[cfg(test)]

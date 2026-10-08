@@ -1,4 +1,5 @@
 use super::*;
+use supported_profile::plaintext::power;
 
 // Direct evaluation uses signed integer modular arithmetic, not the FFT.
 fn evaluate(coefficients: &[i32], subring_point: u32) -> i64 {
