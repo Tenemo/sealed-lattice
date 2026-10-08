@@ -52,6 +52,14 @@ export const sealRecord = async (
 
 export const sealedLength = (length: number) => length + tagBytes;
 
+// A record sealed under a fresh key at its index among the records its
+// stage lists, written with the root that lists it.
+export type SealedRecord = Readonly<{
+    index: number;
+    key: Uint8Array;
+    ciphertext: Uint8Array;
+}>;
+
 // Opens a record's ciphertext under its listed key and associated data.
 export const openSealedRecord = async (
     key: Uint8Array,

@@ -33,14 +33,13 @@ import type {
     ParticipantProfileContext,
     PublicProfileContext,
 } from './context.js';
-import { contributionRecords } from './contribution.js';
 import type { ParticipantSession } from './contribution.js';
 import { openDelivery } from './delivery.js';
 import { PublicInputFailure } from './failures.js';
 import { custodyIdentity, custodyPurpose } from './identity.js';
 import { readParticipantOutput } from './participant-module.js';
 import { openRecord, recordContext, sealRecord } from './private-records.js';
-import type { RecordContext } from './private-records.js';
+import type { RecordContext, SealedRecord } from './private-records.js';
 import {
     candidateLists,
     createCandidatePublication,
@@ -126,12 +125,8 @@ export type CloseSession = {
     readonly known: Set<string>;
 };
 
-type AddedRecord = Readonly<{
-    serial: number;
-    index: number;
-    key: Uint8Array;
-    ciphertext: Uint8Array;
-}>;
+// A close record also names the event that lists it.
+type SealedCloseRecord = SealedRecord & Readonly<{ serial: number }>;
 
 // The close work's operations, as the module's close command numbers them.
 const closeOperation = {
@@ -270,7 +265,7 @@ const sealCloseRecord = async (
     event: Readonly<{ kind: number; serial: number }>,
     index: number,
     bytes: Uint8Array,
-): Promise<AddedRecord> => ({
+): Promise<SealedCloseRecord> => ({
     serial: event.serial,
     index,
     ...(await sealRecord(
@@ -282,7 +277,7 @@ const sealCloseRecord = async (
 type CloseTransition = Readonly<{
     generation: number;
     state: CloseState;
-    added?: readonly AddedRecord[];
+    added?: readonly SealedCloseRecord[];
     // Serials whose records leave with the events that listed them.
     retired?: readonly number[];
 }>;
@@ -309,7 +304,6 @@ const commitClose = async (
         },
         predecessorRecords: [
             ...dataRecordInventory(root.manifest),
-            ...contributionRecords(participant),
             ...retainedBallotRecords(participant, session.records),
             ...closeRecordInventory(profile, session.records, session.state),
         ],
@@ -766,7 +760,7 @@ export const completedCloseRecords = (session: CloseSession) =>
 const appendEvent = (
     session: CloseSession,
     event: CloseEvent,
-    added: readonly AddedRecord[] = [],
+    added: readonly SealedCloseRecord[] = [],
 ) =>
     commitClose(session, {
         generation: generationOf(session),
@@ -1245,7 +1239,6 @@ const respond = async (session: CloseSession, preparedBody?: Uint8Array) => {
     let state: CloseState = {
         ...session.state,
         responseBody: new Uint8Array(),
-
         responsePacket,
     };
     if (session.isOrganizer) {

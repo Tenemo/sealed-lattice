@@ -23,7 +23,6 @@ import type {
     PublicContext,
     PublicProfileContext,
 } from './context.js';
-import { contributionRecords } from './contribution.js';
 import type { ParticipantSession } from './contribution.js';
 import { openDelivery } from './delivery.js';
 import { PublicInputFailure, StorageFailure } from './failures.js';
@@ -34,7 +33,7 @@ import {
 } from './participant-module.js';
 import type { ParticipantStoredRecord } from './predecessor.js';
 import { openRecord, recordContext, sealRecord } from './private-records.js';
-import type { RecordContext } from './private-records.js';
+import type { RecordContext, SealedRecord } from './private-records.js';
 import { createCandidatePublication } from './relay.js';
 import type { PublicRelay } from './relay.js';
 import { ballotPhase } from './root-generation.js';
@@ -83,12 +82,6 @@ export const parseBallotScores = (
         ? scores
         : undefined;
 };
-
-type SealedRecord = Readonly<{
-    index: number;
-    key: Uint8Array;
-    ciphertext: Uint8Array;
-}>;
 
 const sealBallotRecord = async (
     context: RecordContext,
@@ -198,7 +191,6 @@ const commitBallot = async (
         },
         predecessorRecords: [
             ...dataRecordInventory(root.manifest),
-            ...contributionRecords(participant),
             ...ballotRecordInventory(
                 context.profile,
                 session.records,
@@ -267,7 +259,6 @@ export const beginBallot = async (
         },
         predecessorRecords: [
             ...dataRecordInventory(root.manifest),
-            ...contributionRecords(participant),
             ...collectedCloseRecords(participant, records),
         ],
     });

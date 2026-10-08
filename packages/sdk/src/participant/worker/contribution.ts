@@ -90,7 +90,7 @@ type RecordLocation = Readonly<{
     length: number;
 }>;
 
-type SealedRecord = RecordLocation &
+type ContributionRecord = RecordLocation &
     Readonly<{ key: Uint8Array; hash: Uint8Array }>;
 
 type CheckpointRecord = Readonly<{ key: Uint8Array; hash: Uint8Array }>;
@@ -100,15 +100,16 @@ export type ContributionState = Readonly<{
     position: number;
     // The first-oracle checkpoint header until completion, then SCB2.
     header: Uint8Array;
-    publicRecords: readonly SealedRecord[];
+    publicRecords: readonly ContributionRecord[];
     privateRecords: readonly CheckpointRecord[];
-    signingRecords: readonly SealedRecord[];
+    signingRecords: readonly ContributionRecord[];
     // The randomness seed of a generation or continuation intent.
     seed: Uint8Array;
 }>;
 
-// What a sealed record is bound to besides its location.
-type RecordContext = Readonly<{
+// What a contribution record is bound to besides its location: the poll,
+// the runtime, the roster proposal and the participant.
+type ProposalRecordContext = Readonly<{
     poll: Uint8Array;
     runtime: Uint8Array;
     proposal: Uint8Array;
@@ -119,7 +120,7 @@ type RecordContext = Readonly<{
 // work is optional and advances independently from quorum selection.
 export type ParticipantSession = {
     readonly context: ParticipantProfileContext;
-    readonly records: RecordContext;
+    readonly records: ProposalRecordContext;
     root: AuthenticatedRoot;
     state?: ContributionState;
     preparation: PreparationState;
@@ -198,7 +199,7 @@ const retainedShape = (phase: number) => ({
 
 const prefixBytes = 4 + 1 + 2 + 4 * 4;
 
-const encodeSigningRecord = (record: SealedRecord) =>
+const encodeSigningRecord = (record: ContributionRecord) =>
     concatenate(
         unsigned16(record.object),
         unsigned32(record.length),
@@ -313,7 +314,7 @@ export const decodeContributionState = (
     )
         throw new Error('The contribution state does not match its phase.');
     let offset = prefix + headerLength;
-    const publicRecords: SealedRecord[] = [];
+    const publicRecords: ContributionRecord[] = [];
     for (let index = 0; index < publicCount; index++) {
         const record = {
             object: readUnsigned16(bytes, offset),
@@ -375,7 +376,10 @@ export const decodeContributionState = (
 };
 
 // Each record has its own key, so the fixed zero nonce is used once per key.
-const recordAssociatedData = (context: RecordContext, record: RecordLocation) =>
+const recordAssociatedData = (
+    context: ProposalRecordContext,
+    record: RecordLocation,
+) =>
     concatenate(
         encodeText('participant-contribution-record/1'),
         context.poll,
@@ -388,7 +392,7 @@ const recordAssociatedData = (context: RecordContext, record: RecordLocation) =>
     );
 
 type SealedOutput = Readonly<{
-    record: SealedRecord;
+    record: ContributionRecord;
     ciphertext: Uint8Array;
 }>;
 
@@ -419,7 +423,7 @@ const sealContributionRecord = async (
 
 const openContributionRecord = async (
     session: ParticipantSession,
-    record: SealedRecord,
+    record: ContributionRecord,
 ) => {
     const blob = await readParticipantValue(
         session.context.database,
@@ -463,7 +467,7 @@ const openSigning = (session: ContributionSession, kind: SigningKind) => {
 const contributionInventory = (
     profile: ParticipantProfile,
     state: ContributionState,
-    context: RecordContext,
+    context: ProposalRecordContext,
 ): ParticipantStoredRecord[] => [
     ...[...state.publicRecords, ...state.signingRecords].map((record) => ({
         store: 'contribution',
@@ -615,7 +619,7 @@ const proverRun = (session: ContributionSession, statement: boolean) => {
     );
     const lengths = new Map<number, number>();
     const pending: { object: number; offset: number; bytes: Uint8Array }[] = [];
-    const stored: SealedRecord[] = [];
+    const stored: ContributionRecord[] = [];
     let current = 0;
     let emitted = 0;
     const randomness = seededRandomness(
@@ -990,7 +994,7 @@ export const continueContribution = async (session: ContributionSession) => {
         });
     const { state } = session;
     const run = proverRun(session, false);
-    const proof: SealedRecord[] = [];
+    const proof: ContributionRecord[] = [];
     const writer = createProofWriter(bounds, async (slot, bytes) => {
         const output = await sealContributionRecord(
             session,

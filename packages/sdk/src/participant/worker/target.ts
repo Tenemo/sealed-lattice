@@ -30,7 +30,6 @@ import type {
     PublicContext,
     PublicProfileContext,
 } from './context.js';
-import { contributionRecords } from './contribution.js';
 import { openDelivery } from './delivery.js';
 import {
     ModuleFailure,
@@ -1260,7 +1259,6 @@ const commitTarget = async (
         },
         predecessorRecords: [
             ...dataRecordInventory(root.manifest),
-            ...contributionRecords(participant),
             ...retainedBallotRecords(participant, close.records),
             ...completedCloseRecords(close),
         ],
@@ -1358,7 +1356,6 @@ export const signTarget = async (close: CloseSession, relay: PublicRelay) => {
             predecessor: completedClosePhase(close.isOrganizer),
             ballotInclusion,
             body,
-
             vote: new Uint8Array(),
         };
         await commitTarget(close, targetPhase.intent, state);
@@ -1375,7 +1372,6 @@ export const signTarget = async (close: CloseSession, relay: PublicRelay) => {
     );
     await commitTarget(close, targetPhase.signed, {
         ...state,
-
         vote,
     });
     return { usableSubmissions, acceptedBallots };

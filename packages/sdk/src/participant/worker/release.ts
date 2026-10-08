@@ -15,7 +15,6 @@ import type {
     ParticipantProfileContext,
     PublicProfileContext,
 } from './context.js';
-import { contributionRecords } from './contribution.js';
 import { openDelivery } from './delivery.js';
 import { PublicInputFailure } from './failures.js';
 import { custodyIdentity, custodyPurpose } from './identity.js';
@@ -27,6 +26,7 @@ import {
     writeBufferInput,
 } from './participant-module.js';
 import { openRecord, sealRecord } from './private-records.js';
+import type { SealedRecord } from './private-records.js';
 import {
     candidateLists,
     createCandidatePublication,
@@ -369,17 +369,11 @@ const openReleaseRecord = (session: ReleaseSession, index: number) => {
     );
 };
 
-type AddedRecord = Readonly<{
-    index: number;
-    key: Uint8Array;
-    ciphertext: Uint8Array;
-}>;
-
 const sealReleaseRecord = async (
     session: ReleaseSession,
     index: number,
     bytes: Uint8Array,
-): Promise<AddedRecord> => ({
+): Promise<SealedRecord> => ({
     index,
     ...(await sealRecord(
         releaseRecordAssociatedData(
@@ -395,7 +389,7 @@ const sealReleaseRecord = async (
 type ReleaseTransition = Readonly<{
     generation: number;
     state: ReleaseState;
-    added?: readonly AddedRecord[];
+    added?: readonly SealedRecord[];
 }>;
 
 const commitRelease = async (
@@ -421,7 +415,6 @@ const commitRelease = async (
         },
         predecessorRecords: [
             ...dataRecordInventory(root.manifest),
-            ...contributionRecords(participant),
             ...retainedBallotRecords(participant, close.records),
             ...completedCloseRecords(close),
             ...(session.state === undefined
@@ -516,7 +509,7 @@ const proveRelease = async (session: ReleaseSession) => {
         bodyLength > bounds.maximumBodyBytes
     )
         throw new Error('The release envelope is malformed.');
-    const added: AddedRecord[] = [];
+    const added: SealedRecord[] = [];
     for (const [index, length] of releaseRecordLengths(
         profile,
         bodyLength,
@@ -577,7 +570,6 @@ const signRelease = async (session: ReleaseSession) => {
         generation: releasePhase.signed,
         state: {
             ...state,
-
             signature: packet.slice(state.envelope.length),
         },
     });

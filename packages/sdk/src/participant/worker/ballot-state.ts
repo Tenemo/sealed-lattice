@@ -202,7 +202,6 @@ export const decodeBallotState = (
         bodyLength,
         bodyKeys,
         envelope,
-
         signature,
     };
 };
