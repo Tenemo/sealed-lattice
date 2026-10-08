@@ -7,6 +7,7 @@ import {
     unsigned16,
 } from './bytes.js';
 import { completedClosePhase } from './close-state.js';
+import { targetPhase } from './root-generation.js';
 
 // The target signing suffix follows the completed close: the participant's
 // signed response, and for the organizer its signed proposal. Generation 23
@@ -15,7 +16,6 @@ import { completedClosePhase } from './close-state.js';
 // body, the status and the completed vote, which later generations keep
 // unchanged.
 
-export const targetPhase = { intent: 23, signed: 24 } as const;
 const marker = encodeText('TST3');
 
 // The own ballot's status in the target, by the finality work's code.

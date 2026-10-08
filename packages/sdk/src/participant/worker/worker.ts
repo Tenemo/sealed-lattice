@@ -1,4 +1,3 @@
-import { ballotPhase } from './ballot-state.js';
 import {
     beginBallot,
     completeBallot,
@@ -65,14 +64,19 @@ import { endorseSetup, selectSetup } from './preparation-selection.js';
 import { readBounded } from './public.js';
 import type { PublicRelay } from './public.js';
 import { publishRegistrationRecords } from './registration-publication.js';
-import { decodeReleaseState, releasePhase } from './release-state.js';
+import { decodeReleaseState } from './release-state.js';
 import {
     advanceRelease,
     computeResult,
     publishRelease,
     resumeRelease,
 } from './release.js';
-import { rootGeneration } from './root-generation.js';
+import {
+    ballotPhase,
+    releasePhase,
+    rootGeneration,
+    targetPhase,
+} from './root-generation.js';
 import { authenticateRoot } from './root.js';
 import type { AuthenticatedRoot } from './root.js';
 import {
@@ -93,7 +97,7 @@ import {
     StoragePending,
     storedRuntime,
 } from './storage.js';
-import { decodeTargetState, targetPhase } from './target-state.js';
+import { decodeTargetState } from './target-state.js';
 import {
     certifiedBallotStatus,
     EvaluationRetained,

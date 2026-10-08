@@ -99,3 +99,22 @@ fn restored_signing_keys_cannot_recreate_authority_the_root_does_not_unlock() {
         Credential::open_complete(*original.signing_public(), [0; 64], &data_key, &sealed).is_err()
     );
 }
+
+// The worker computes the unused-purpose mask from these positions.
+#[test]
+fn signing_purpose_positions_are_fixed() {
+    for (purpose, position) in [
+        (SigningPurpose::Proposal, 0),
+        (SigningPurpose::Offer, 1),
+        (SigningPurpose::SelectionProposal, 2),
+        (SigningPurpose::SelectionEndorsement, 3),
+        (SigningPurpose::Ballot, 4),
+        (SigningPurpose::CloseIntent, 5),
+        (SigningPurpose::CloseResponse, 6),
+        (SigningPurpose::CloseProposal, 7),
+        (SigningPurpose::Target, 8),
+        (SigningPurpose::Release, 9),
+    ] {
+        assert_eq!(purpose.mask(), 1 << position);
+    }
+}

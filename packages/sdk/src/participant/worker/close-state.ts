@@ -11,7 +11,7 @@ import {
 import type { ParticipantStoredRecord } from './predecessor.js';
 import { recordKeyBytes, sealedLength } from './records.js';
 import type { RecordContext } from './records.js';
-import { rootGeneration } from './root-generation.js';
+import { closePhase, rootGeneration } from './root-generation.js';
 
 // The close log beneath the authenticated root. It retains every close input
 // the participant's state machine accepted, in arrival order, so restoration
@@ -24,13 +24,6 @@ import { rootGeneration } from './root-generation.js';
 // organizer's signed proposal. No event is added from generation 20 on, and
 // later generations keep the completed close unchanged.
 
-export const closePhase = {
-    intent: 18,
-    locked: 19,
-    responding: 20,
-    responded: 21,
-    proposed: 22,
-} as const;
 const marker = encodeText('CST2');
 
 const eventHeaderBytes = 1 + 2 + 4 + 4;

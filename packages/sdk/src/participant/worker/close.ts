@@ -1,4 +1,3 @@
-import { ballotPhase } from './ballot-state.js';
 import {
     ballotCandidateKey,
     ballotWorkInput,
@@ -21,7 +20,6 @@ import {
 } from './bytes.js';
 import {
     closeEventKind,
-    closePhase,
     closeRecordAssociatedData,
     closeRecordInventory,
     closeRecordLengths,
@@ -47,7 +45,7 @@ import {
 import type { CandidateView, PublicRelay } from './public.js';
 import { openRecord, recordContext, sealRecord } from './records.js';
 import type { RecordContext } from './records.js';
-import { rootGeneration } from './root-generation.js';
+import { ballotPhase, closePhase, rootGeneration } from './root-generation.js';
 import { commitRoot, dataRecordInventory } from './root.js';
 import { snapshotParticipant } from './storage.js';
 

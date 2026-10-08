@@ -32,16 +32,15 @@ import { openRecord, sealRecord } from './records.js';
 import {
     decodeReleaseState,
     encodeReleaseState,
-    releasePhase,
     releaseRecordAssociatedData,
     releaseRecordInventory,
     releaseRecordLengths,
 } from './release-state.js';
 import type { ReleaseState } from './release-state.js';
+import { releasePhase, targetPhase } from './root-generation.js';
 import { commitRoot, dataRecordInventory } from './root.js';
 import { deliverFinalAggregate, readFinalAggregate } from './setup.js';
 import { snapshotParticipant } from './storage.js';
-import { targetPhase } from './target-state.js';
 import type { BallotStatus, TargetState } from './target-state.js';
 import {
     certifiedBallotStatus,

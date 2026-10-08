@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import { completedClosePhase } from '#packages/sdk/src/participant/worker/close-state.js';
+import { targetPhase } from '#packages/sdk/src/participant/worker/root-generation.js';
 import {
     ballotStatuses,
     decodeTargetState,
     encodeTargetState,
-    targetPhase,
 } from '#packages/sdk/src/participant/worker/target-state.js';
 import type { BallotStatus } from '#packages/sdk/src/participant/worker/target-state.js';
 import { compileParticipantRuntimeProfile } from '#tests/participant-runtime-bounds-model.js';

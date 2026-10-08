@@ -4,15 +4,15 @@ import { completedClosePhase } from '#packages/sdk/src/participant/worker/close-
 import {
     decodeReleaseState,
     encodeReleaseState,
-    releasePhase,
     releaseRecordInventory,
     releaseRecordLengths,
 } from '#packages/sdk/src/participant/worker/release-state.js';
 import type { ReleaseState } from '#packages/sdk/src/participant/worker/release-state.js';
 import {
-    ballotStatuses,
+    releasePhase,
     targetPhase,
-} from '#packages/sdk/src/participant/worker/target-state.js';
+} from '#packages/sdk/src/participant/worker/root-generation.js';
+import { ballotStatuses } from '#packages/sdk/src/participant/worker/target-state.js';
 import type { BallotStatus } from '#packages/sdk/src/participant/worker/target-state.js';
 import { compileParticipantReleaseCustody } from '#tests/participant-release-custody-model.js';
 import { compileParticipantRuntimeProfile } from '#tests/participant-runtime-bounds-model.js';

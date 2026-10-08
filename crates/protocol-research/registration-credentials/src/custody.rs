@@ -10,18 +10,20 @@ pub const SEALED_SIGNING_SEED_BYTES: usize = 4 + 32 + 16;
 
 /// Signing purposes that a restored credential withholds until the
 /// authenticated participant root unlocks those its records show unused.
+/// Each discriminant is the purpose's bit position in the unused-purpose
+/// mask, which the worker names the same way.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SigningPurpose {
-    Proposal,
-    Offer,
-    SelectionProposal,
-    SelectionEndorsement,
-    Ballot,
-    CloseIntent,
-    CloseResponse,
-    CloseProposal,
-    Target,
-    Release,
+    Proposal = 0,
+    Offer = 1,
+    SelectionProposal = 2,
+    SelectionEndorsement = 3,
+    Ballot = 4,
+    CloseIntent = 5,
+    CloseResponse = 6,
+    CloseProposal = 7,
+    Target = 8,
+    Release = 9,
 }
 impl SigningPurpose {
     pub const fn mask(self) -> u16 {

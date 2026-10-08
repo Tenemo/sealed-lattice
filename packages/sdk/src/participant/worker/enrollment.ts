@@ -21,7 +21,13 @@ import { readKernel } from './kernel.js';
 import type { ParticipantRefusalReason } from './outcome.js';
 import { validateParticipantPredecessor } from './predecessor.js';
 import { unusedPreparationPurposes } from './preparation-state.js';
-import { rootGeneration } from './root-generation.js';
+import {
+    ballotPhase,
+    closePhase,
+    releasePhase,
+    rootGeneration,
+    targetPhase,
+} from './root-generation.js';
 import {
     authenticateRoot,
     chunkBytes,
@@ -34,6 +40,7 @@ import {
     sealRoot,
 } from './root.js';
 import type { AuthenticatedRoot, RecordReference } from './root.js';
+import { purposeBit, signingPurpose } from './signing-purpose.js';
 import { commitParticipantState } from './state-transaction.js';
 import {
     isEmptyParticipant,
@@ -83,19 +90,35 @@ const encodeWellFormed = (value: string) => {
     return encodeText(value);
 };
 
-// Only a completed signature consumes its one-shot purpose. Preparation
-// has independent authenticated intents; later stages use global generations.
-const unusedPurposes = (root: AuthenticatedRoot) => {
-    const generation = root.head.generation;
-    const lastUnused = [2, 0, 0, 0, 15, 18, 20, 21, 23, 27];
-    let mask = lastUnused.reduce(
-        (value, last, purpose) =>
-            generation <= last ? value | (1 << purpose) : value,
-        0,
-    );
-    if (generation < 4) mask |= 0b1110;
-    else if (generation === 4) {
-        const preparation = root.manifest.suffixes.preparation;
+// The last generation at which each staged purpose's message is retained
+// without its completed signature, which a restored credential signs again.
+// Only a completed signature consumes a one-shot purpose.
+const lastUnsignedGeneration = [
+    [signingPurpose.rosterProposal, rootGeneration.rosterLocked],
+    [signingPurpose.ballot, ballotPhase.body],
+    [signingPurpose.closeIntent, closePhase.intent],
+    [signingPurpose.closeResponse, closePhase.responding],
+    [signingPurpose.closeProposal, closePhase.responded],
+    [signingPurpose.target, targetPhase.intent],
+    [signingPurpose.release, releasePhase.body],
+] as const;
+
+// The purposes a restored credential may still sign at the root's
+// generation. Preparation has independent authenticated intents, which its
+// journal records; the other stages follow the root's generations.
+export const unusedSigningPurposes = (
+    generation: number,
+    preparation: Uint8Array | undefined,
+) => {
+    let mask = 0;
+    for (const [purpose, last] of lastUnsignedGeneration)
+        if (generation <= last) mask |= purposeBit(purpose);
+    if (generation < rootGeneration.preparation)
+        mask |=
+            purposeBit(signingPurpose.offer) |
+            purposeBit(signingPurpose.selectionProposal) |
+            purposeBit(signingPurpose.selectionEndorsement);
+    else if (generation === rootGeneration.preparation) {
         if (preparation === undefined)
             throw new Error('Missing preparation journal.');
         mask |= unusedPreparationPurposes(preparation);
@@ -545,7 +568,14 @@ export const restoreEnrollment = async (
         ...(sourcesRequired
             ? [sourceState]
             : [unsigned32(sourceState.length), sourceState]),
-        unsigned16(created ? 0 : unusedPurposes(root)),
+        unsigned16(
+            created
+                ? 0
+                : unusedSigningPurposes(
+                      root.head.generation,
+                      root.manifest.suffixes.preparation,
+                  ),
+        ),
     );
     let status: number;
     try {

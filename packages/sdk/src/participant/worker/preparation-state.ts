@@ -6,6 +6,7 @@ import {
     readUnsigned32,
     unsigned32,
 } from './bytes.js';
+import { purposeBit, signingPurpose } from './signing-purpose.js';
 
 export type PreparationSignature = Readonly<
     | { stage: 'intent'; body: Uint8Array }
@@ -153,7 +154,7 @@ export const decodePreparationState = (
 export const unusedPreparationPurposes = (bytes: Uint8Array) => {
     const [contribution, selection, endorsement] = splitPreparation(bytes);
     let mask = 0;
-    if (contribution.length === 0) mask |= 1 << 1;
+    if (contribution.length === 0) mask |= purposeBit(signingPurpose.offer);
     else {
         const phase = contribution[4];
         if (
@@ -163,10 +164,13 @@ export const unusedPreparationPurposes = (bytes: Uint8Array) => {
             phase > 9
         )
             throw new Error('Invalid retained offer phase.');
-        if (phase < 9) mask |= 1 << 1;
+        if (phase < 9) mask |= purposeBit(signingPurpose.offer);
     }
-    for (const [index, field] of [selection, endorsement].entries()) {
-        if (field.length === 0 || field[0] === 1) mask |= 1 << (index + 2);
+    for (const [purpose, field] of [
+        [signingPurpose.selectionProposal, selection],
+        [signingPurpose.selectionEndorsement, endorsement],
+    ] as const) {
+        if (field.length === 0 || field[0] === 1) mask |= purposeBit(purpose);
         else if (field[0] !== 2)
             throw new Error('Invalid retained preparation signature phase.');
     }

@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-    ballotPhase,
     ballotRecordInventory,
     decodeBallotState,
     encodeBallotState,
@@ -14,6 +13,7 @@ import {
     unsigned64,
 } from '#packages/sdk/src/participant/worker/bytes.js';
 import type { RecordContext } from '#packages/sdk/src/participant/worker/records.js';
+import { ballotPhase } from '#packages/sdk/src/participant/worker/root-generation.js';
 import { compileParticipantBallotCustody } from '#tests/participant-ballot-custody-model.js';
 import { compileParticipantRuntimeProfile } from '#tests/participant-runtime-bounds-model.js';
 import { deriveSupportedProfile } from '#tests/supported-profile-model.js';

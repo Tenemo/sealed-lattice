@@ -13,7 +13,12 @@ import { operationSeedBytes } from './kernel.js';
 import type { ParticipantStoredRecord } from './predecessor.js';
 import { recordKeyBytes, sealedLength } from './records.js';
 import type { RecordContext } from './records.js';
-import { ballotStatuses, targetPhase } from './target-state.js';
+import {
+    isRootGeneration,
+    releasePhase,
+    targetPhase,
+} from './root-generation.js';
+import { ballotStatuses } from './target-state.js';
 import type { BallotStatus } from './target-state.js';
 
 // The release suffix follows the signed target, or the completed close when
@@ -24,13 +29,6 @@ import type { BallotStatus } from './target-state.js';
 // retains the generated body's records and its envelope, retiring the seed;
 // that same transaction locks signing, and generation 29 retains the
 // signature.
-
-export const releasePhase = {
-    locked: 25,
-    ready: 26,
-    body: 27,
-    signed: 29,
-} as const;
 
 const marker = encodeText('RST4');
 const prefixBytes = marker.length + 2 + 2 + 4 + 2;
@@ -97,7 +95,7 @@ export const decodeReleaseState = (
     const phase = phaseOf(generation);
     if (
         generation < releasePhase.locked ||
-        generation === 28 ||
+        !isRootGeneration(generation) ||
         bytes.length < prefixBytes ||
         bytes.length > bounds.maximumStateBytes ||
         !equalBytes(bytes.subarray(0, marker.length), marker) ||

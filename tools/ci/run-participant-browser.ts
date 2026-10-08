@@ -31,6 +31,7 @@ import {
     closureBodyFile,
     closureSubmissionFile,
 } from '#packages/sdk/src/participant/worker/close.js';
+import { targetPhase } from '#packages/sdk/src/participant/worker/root-generation.js';
 import { chunkBytes } from '#packages/sdk/src/participant/worker/root.js';
 import {
     evaluatedTargetName,
@@ -38,7 +39,6 @@ import {
     participantDatabaseName,
     setupCacheName,
 } from '#packages/sdk/src/participant/worker/storage.js';
-import { targetPhase } from '#packages/sdk/src/participant/worker/target-state.js';
 import type { WorkerResult } from '#packages/sdk/src/participant/worker/worker.js';
 import { compileOperationProofDraws } from '#tests/operation-seed-model.js';
 import { compileParticipantRuntimeProfile } from '#tests/participant-runtime-bounds-model.js';

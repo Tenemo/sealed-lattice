@@ -14,6 +14,7 @@ import { operationSeedBytes } from './kernel.js';
 import type { ParticipantStoredRecord } from './predecessor.js';
 import { recordKeyBytes, sealedLength } from './records.js';
 import type { RecordContext } from './records.js';
+import { ballotPhase, isRootGeneration } from './root-generation.js';
 
 // A participant's ballot beneath its authenticated root. Generation 13 locks
 // the attempt's scores and ballot time; generation 14 adds the seed of all
@@ -25,12 +26,6 @@ import type { RecordContext } from './records.js';
 // ballot stays retained unchanged through the later generations, and a
 // participant without a ballot keeps an empty suffix.
 
-export const ballotPhase = {
-    locked: 13,
-    ready: 14,
-    body: 15,
-    signed: 17,
-} as const;
 const marker = encodeText('BST3');
 const envelopeMarker = encodeText('LBE2');
 
@@ -113,7 +108,7 @@ export const decodeBallotState = (
     if (
         generation < ballotPhase.locked ||
         generation > ballotPhase.signed ||
-        generation === 16 ||
+        !isRootGeneration(generation) ||
         bytes.length > bounds.maximumStateBytes ||
         !equalBytes(bytes.subarray(0, marker.length), marker)
     )

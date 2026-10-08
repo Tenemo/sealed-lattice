@@ -47,6 +47,7 @@ import {
     streamCandidateFile,
 } from './public.js';
 import type { CandidateView, PublicRelay } from './public.js';
+import { targetPhase } from './root-generation.js';
 import { commitRoot, dataRecordInventory } from './root.js';
 import { deliverFinalAggregate, readFinalAggregate } from './setup.js';
 import {
@@ -59,7 +60,6 @@ import {
     ballotStatuses,
     decodeTargetState,
     encodeTargetState,
-    targetPhase,
 } from './target-state.js';
 import type { TargetState } from './target-state.js';
 

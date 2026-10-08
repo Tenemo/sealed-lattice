@@ -1,6 +1,5 @@
 import {
     ballotEnvelopeMatches,
-    ballotPhase,
     ballotRecordAssociatedData,
     ballotRecordInventory,
     ballotRecordLength,
@@ -34,6 +33,7 @@ import { createCandidatePublication } from './public.js';
 import type { PublicRelay } from './public.js';
 import { openRecord, recordContext, sealRecord } from './records.js';
 import type { RecordContext } from './records.js';
+import { ballotPhase } from './root-generation.js';
 import {
     commitRoot,
     dataKind,
