@@ -244,6 +244,31 @@ const buildLanes = (): {
                                 : 'cargo-clippy-wasm-invalid-ballot',
                         ),
                     ),
+                    // The numerical probes and the key-source screen, with
+                    // their binaries, compile only under their features.
+                    ...[
+                        ['encrypted-ranking', 'numerical-probes'],
+                        ['setup-witness', 'key-source-screen'],
+                    ].map(([packageName, feature]) =>
+                        rustWorkspaceCommand(
+                            `cargo clippy ${feature}`,
+                            [
+                                'clippy',
+                                '--offline',
+                                '--locked',
+                                '--no-default-features',
+                                '-p',
+                                packageName,
+                                '--features',
+                                feature,
+                                '--all-targets',
+                                '--',
+                                '-D',
+                                'warnings',
+                            ],
+                            `cargo-clippy-${feature}`,
+                        ),
+                    ),
                     ...rustFastTestCommands(),
                 ],
                 name: 'Rust (fmt, clippy, fast test)',

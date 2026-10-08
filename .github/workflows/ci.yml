@@ -73,6 +73,8 @@ jobs:
             - run: cargo +1.95.0 clippy --manifest-path crates/protocol-research/Cargo.toml --offline --locked --no-default-features --workspace --all-targets -- -D warnings
             - run: cargo +1.95.0 clippy --manifest-path crates/protocol-research/Cargo.toml --offline --locked -p participant-module --lib --target wasm32-unknown-unknown -- -D warnings
             - run: cargo +1.95.0 clippy --manifest-path crates/protocol-research/Cargo.toml --offline --locked -p participant-module --lib --target wasm32-unknown-unknown --features invalid-ballot -- -D warnings
+            - run: cargo +1.95.0 clippy --manifest-path crates/protocol-research/Cargo.toml --offline --locked --no-default-features -p encrypted-ranking --features numerical-probes --all-targets -- -D warnings
+            - run: cargo +1.95.0 clippy --manifest-path crates/protocol-research/Cargo.toml --offline --locked --no-default-features -p setup-witness --features key-source-screen --all-targets -- -D warnings
             - name: Run fast Rust tests
               timeout-minutes: 110
               run: pnpm run test:rust:fast
