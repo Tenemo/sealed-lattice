@@ -3,7 +3,7 @@ use crate::{
     Credential,
     foundation::{
         StabilizedDisplayText,
-        ceremony::{Manifest, OptionDefinition},
+        manifest::{Manifest, OptionDefinition},
         normalize_username,
     },
     poll::{PollDraft, verify_poll},

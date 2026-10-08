@@ -1,4 +1,4 @@
-use crate::certification::VerifiedTargetCertificate;
+use crate::certification::VerifiedInventoryCertificate;
 use linked_release_proof::statement::{self, PublicStatement};
 use num_bigint::{BigInt, Sign};
 use registration_credentials::foundation::participant_identity::{
@@ -82,7 +82,7 @@ pub(crate) fn decode_polynomial(
 /// Neither an uncertified body nor a caller-selected ciphertext enters here.
 pub struct ReleaseContext {
     profile: Profile,
-    certificate: Arc<VerifiedTargetCertificate>,
+    certificate: Arc<VerifiedInventoryCertificate>,
     position: usize,
     header: [u8; RELEASE_HEADER_BYTES],
     constant: VerifiedAggregatePolynomial,
@@ -92,7 +92,7 @@ pub struct ReleaseContext {
 }
 impl ReleaseContext {
     pub fn new(
-        certificate: Arc<VerifiedTargetCertificate>,
+        certificate: Arc<VerifiedInventoryCertificate>,
         position: usize,
         constant: VerifiedAggregatePolynomial,
         linear: VerifiedAggregatePolynomial,
@@ -151,7 +151,7 @@ impl ReleaseContext {
     pub fn position(&self) -> usize {
         self.position
     }
-    pub fn certificate(&self) -> &Arc<VerifiedTargetCertificate> {
+    pub fn certificate(&self) -> &Arc<VerifiedInventoryCertificate> {
         &self.certificate
     }
     pub fn proof_role(&self) -> Result<Vec<u8>, Error> {

@@ -229,7 +229,7 @@ impl SecondOracle {
             field::add(sum_mask[0], sum_mask[SYSTEMATIC]),
             SYSTEMATIC as u128,
         );
-        let tree = Tree::new(role, 1, DOMAIN, relation.second_width());
+        let tree = Tree::new(role, 1, EVALUATION_DOMAIN_SIZE, relation.second_width());
         let rows = Some(RowShards::open(&tree));
         Self {
             masks,
@@ -366,7 +366,10 @@ impl SecondOracle {
     }
 }
 pub fn coset(index: usize) -> u128 {
-    base::multiply(7, base::power(field::root(DOMAIN), index as u128))
+    base::multiply(
+        7,
+        base::power(field::root(EVALUATION_DOMAIN_SIZE), index as u128),
+    )
 }
 fn query_groups(indices: &[usize]) -> [Vec<(usize, usize)>; 4] {
     let mut groups: [Vec<(usize, usize)>; 4] = std::array::from_fn(|_| Vec::new());
@@ -499,11 +502,11 @@ impl FirstOracle {
         let masks = (0..relation.columns() + 1)
             .map(|_| random_base(MASKS))
             .collect();
-        let mut degree_mask = random_extension(MAX_DEGREE + 1);
+        let mut degree_mask = random_extension(MAXIMUM_DEGREE + 1);
         if excess_degree {
             degree_mask.push(field::ONE);
         }
-        let tree = Tree::new(role, 0, DOMAIN, relation.first_width());
+        let tree = Tree::new(role, 0, EVALUATION_DOMAIN_SIZE, relation.first_width());
         let rows = Some(RowShards::open(&tree));
         Self {
             masks,

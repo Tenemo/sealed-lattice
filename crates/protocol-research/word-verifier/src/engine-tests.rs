@@ -83,21 +83,21 @@ fn points_match_direct_powers() {
         511,
         512,
         513,
-        H - 1,
-        H,
-        D / 2 + 5,
-        D - 2,
-        D - 1,
+        SYSTEMATIC - 1,
+        SYSTEMATIC,
+        EVALUATION_DOMAIN_SIZE / 2 + 5,
+        EVALUATION_DOMAIN_SIZE - 2,
+        EVALUATION_DOMAIN_SIZE - 1,
     ] {
-        let value = multiply_base(7, power_base(root(D), index as u128));
-        let vanishing = subtract_base(power_base(value, H as u128), 1);
+        let value = multiply_base(7, power_base(root(EVALUATION_DOMAIN_SIZE), index as u128));
+        let vanishing = subtract_base(power_base(value, SYSTEMATIC as u128), 1);
         let point = Point::new(index, 11);
         assert_eq!(point.inverse, power_base(value, MODULUS - 2));
         assert_eq!(multiply_base(point.inverse, value), 1);
         assert_eq!(point.vanishing, vanishing);
         assert_eq!(point.inverse_vanishing, power_base(vanishing, MODULUS - 2));
         for (power, degree) in point.powers.iter().zip(CORRECTED_DEGREES) {
-            assert_eq!(*power, power_base(value, (MAX_DEGREE - degree) as u128));
+            assert_eq!(*power, power_base(value, (MAXIMUM_DEGREE - degree) as u128));
         }
         assert_eq!(point.table, 11);
     }
@@ -109,9 +109,12 @@ fn points_match_direct_powers() {
 fn fold_points_invert_the_direct_points() {
     let coset = Coset::get();
     assert_eq!(multiply_base(coset.half, 2), 1);
-    assert_eq!(multiply_base(coset.inverse_systematic, H as u128), 1);
+    assert_eq!(
+        multiply_base(coset.inverse_systematic, SYSTEMATIC as u128),
+        1
+    );
     for round in [0, 1, 7, FOLDS - 2, FOLDS - 1] {
-        let length = D >> round;
+        let length = EVALUATION_DOMAIN_SIZE >> round;
         for index in [0, 1, 2, 3, length / 4 + 1, length / 2 - 1] {
             if index >= length / 2 {
                 continue;

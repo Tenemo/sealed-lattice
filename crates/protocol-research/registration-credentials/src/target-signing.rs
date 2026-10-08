@@ -5,7 +5,7 @@ use crate::{
         CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple,
         hash_foundation_tuple_512,
     },
-    roster_authentication::OrganizerSignedRoster,
+    roster_authentication::AuthenticatedRosterProposal,
 };
 use fips204::{
     ml_dsa_65,
@@ -208,7 +208,7 @@ impl Credential {
     pub(crate) fn check_target_owner(
         &self,
         owner: &RetainedBallotOwner,
-        roster: &OrganizerSignedRoster,
+        roster: &AuthenticatedRosterProposal,
         message: &TargetMessage,
     ) -> Result<(), Error> {
         self.check_ballot_owner(owner)?;
@@ -232,7 +232,7 @@ impl Credential {
     pub(crate) fn check_target_predecessors(
         &self,
         owner: &RetainedBallotOwner,
-        roster: &OrganizerSignedRoster,
+        roster: &AuthenticatedRosterProposal,
     ) -> Result<(), Error> {
         if self.close_response.is_none()
             || (owner.position() == roster.proposal().organizer_position()
@@ -248,7 +248,7 @@ impl Credential {
     pub fn sign_target(
         &mut self,
         owner: &RetainedBallotOwner,
-        roster: &OrganizerSignedRoster,
+        roster: &AuthenticatedRosterProposal,
         message: &TargetMessage,
     ) -> Result<TargetVote, Error> {
         self.check_target_owner(owner, roster, message)?;
@@ -272,7 +272,7 @@ impl Credential {
     pub fn restore_target(
         &mut self,
         owner: &RetainedBallotOwner,
-        roster: &OrganizerSignedRoster,
+        roster: &AuthenticatedRosterProposal,
         message: &TargetMessage,
         packet: &[u8],
     ) -> Result<(), Error> {

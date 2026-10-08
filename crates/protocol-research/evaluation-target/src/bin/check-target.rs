@@ -18,7 +18,7 @@ use registration_credentials::{
     contribution_offer::{MAXIMUM_OFFER_BYTES, authenticate_offer},
     foundation::{CanonicalDecodeLimits, CanonicalItemType, CanonicalTuple},
     roster::MAXIMUM_PROPOSAL_BYTES,
-    roster_authentication::verify_roster_proposal,
+    roster_authentication::authenticate_roster_proposal,
     roster_input::RosterInputVerifier,
     setup_selection::{MAXIMUM_SELECTION_BYTES, authenticate_certificate, certificate_bytes},
 };
@@ -351,7 +351,7 @@ fn main() -> io::Result<()> {
     }
     let poll = Arc::new(roster.into_poll());
     let proposal = Arc::new(
-        verify_roster_proposal(
+        authenticate_roster_proposal(
             proposal,
             &bounded(
                 ceremony.join("proposal-signature.bin"),

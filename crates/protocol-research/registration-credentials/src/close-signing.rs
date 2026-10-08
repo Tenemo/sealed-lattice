@@ -5,7 +5,7 @@ use crate::{
         CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple,
         hash_foundation_tuple_512,
     },
-    roster_authentication::OrganizerSignedRoster,
+    roster_authentication::AuthenticatedRosterProposal,
 };
 use fips204::{
     ml_dsa_65,
@@ -436,7 +436,7 @@ impl Credential {
     fn check_close_owner(
         &self,
         owner: &RetainedBallotOwner,
-        roster: &OrganizerSignedRoster,
+        roster: &AuthenticatedRosterProposal,
         poll: &[u8; 64],
         setup_identity: &[u8; 64],
     ) -> Result<(), Error> {
@@ -456,7 +456,7 @@ impl Credential {
     }
     fn check_organizer(
         owner: &RetainedBallotOwner,
-        roster: &OrganizerSignedRoster,
+        roster: &AuthenticatedRosterProposal,
     ) -> Result<(), Error> {
         if owner.position() != roster.proposal().organizer_position() {
             return Err(Error::Context);
@@ -496,7 +496,7 @@ impl Credential {
     pub fn sign_close_intent(
         &mut self,
         owner: &RetainedBallotOwner,
-        roster: &OrganizerSignedRoster,
+        roster: &AuthenticatedRosterProposal,
         message: &CloseIntentMessage,
     ) -> Result<[u8; SIGNATURE_BYTES], Error> {
         self.check_close_owner(owner, roster, message.poll(), message.setup_identity())?;
@@ -519,7 +519,7 @@ impl Credential {
     pub fn lock_close_intent(
         &mut self,
         owner: &RetainedBallotOwner,
-        roster: &OrganizerSignedRoster,
+        roster: &AuthenticatedRosterProposal,
         message: &CloseIntentMessage,
         signature: &[u8],
     ) -> Result<(), Error> {
@@ -540,7 +540,7 @@ impl Credential {
     pub fn sign_close_response(
         &mut self,
         owner: &RetainedBallotOwner,
-        roster: &OrganizerSignedRoster,
+        roster: &AuthenticatedRosterProposal,
         message: &CloseResponseMessage,
     ) -> Result<[u8; SIGNATURE_BYTES], Error> {
         self.check_close_owner(owner, roster, message.poll(), message.setup_identity())?;
@@ -566,7 +566,7 @@ impl Credential {
     pub fn sign_close_proposal(
         &mut self,
         owner: &RetainedBallotOwner,
-        roster: &OrganizerSignedRoster,
+        roster: &AuthenticatedRosterProposal,
         message: &CloseProposalMessage,
     ) -> Result<[u8; SIGNATURE_BYTES], Error> {
         self.check_close_owner(owner, roster, message.poll(), message.setup_identity())?;
@@ -591,7 +591,7 @@ impl Credential {
     pub fn restore_close_message(
         &mut self,
         owner: &RetainedBallotOwner,
-        roster: &OrganizerSignedRoster,
+        roster: &AuthenticatedRosterProposal,
         message: CloseMessage<'_>,
         signature: &[u8],
     ) -> Result<(), Error> {

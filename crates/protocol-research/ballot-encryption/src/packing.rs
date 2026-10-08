@@ -1,7 +1,5 @@
 pub use supported_profile::DEGREE;
-use supported_profile::{
-    MAXIMUM_SCORE, MINIMUM_SCORE, PLAINTEXT_MODULUS as MODULUS, Profile, plaintext,
-};
+use supported_profile::{MAXIMUM_SCORE, MINIMUM_SCORE, PLAINTEXT_MODULUS, Profile, plaintext};
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Refusal {
@@ -33,9 +31,9 @@ impl PackingMatrix {
             .into_iter()
             .zip(&self.baseline)
             .map(|(value, baseline)| {
-                let value = (value - baseline).rem_euclid(MODULUS as i32);
-                if value > (MODULUS / 2) as i32 {
-                    value - MODULUS as i32
+                let value = (value - baseline).rem_euclid(PLAINTEXT_MODULUS as i32);
+                if value > (PLAINTEXT_MODULUS / 2) as i32 {
+                    value - PLAINTEXT_MODULUS as i32
                 } else {
                     value
                 }
@@ -64,8 +62,8 @@ impl PackingWitness {
             .zip(integer_message.iter())
             .map(|(canonical, integer)| {
                 let difference = canonical - integer;
-                assert_eq!(difference.rem_euclid(MODULUS as i32), 0);
-                i16::try_from(difference / MODULUS as i32).expect(
+                assert_eq!(difference.rem_euclid(PLAINTEXT_MODULUS as i32), 0);
+                i16::try_from(difference / PLAINTEXT_MODULUS as i32).expect(
                     "The supported score and option bounds fit the signed packing quotient.",
                 )
             })
@@ -125,7 +123,8 @@ fn encode_with_degree(scores: &[u8], degree: usize) -> Result<Vec<i32>, Refusal>
         for rank in 0..ranks {
             for (opponent, other) in scores.iter().enumerate() {
                 slots[(option * ranks + rank) * window + opponent] =
-                    (2 * (i32::from(*other) - i32::from(*score))).rem_euclid(MODULUS as i32) as u32;
+                    (2 * (i32::from(*other) - i32::from(*score)))
+                        .rem_euclid(PLAINTEXT_MODULUS as i32) as u32;
             }
         }
     }

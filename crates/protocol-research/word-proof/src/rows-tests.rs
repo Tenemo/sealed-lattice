@@ -29,12 +29,12 @@ fn direct_tree(seed: &[u8; tree::SALT_SEED_BYTES], polynomials: &[Polynomial]) -
     let mut tree = Tree::with_seed(
         b"row shards",
         3,
-        DOMAIN,
+        EVALUATION_DOMAIN_SIZE,
         polynomials.len(),
         Zeroizing::new(*seed),
     );
     let prefix = tree.leaf_hash_prefix();
-    let mut hashers: Vec<_> = (0..DOMAIN)
+    let mut hashers: Vec<_> = (0..EVALUATION_DOMAIN_SIZE)
         .map(|row| tree.leaf_hasher(row, &prefix))
         .collect();
     let transform = Transform::cached(SYSTEMATIC);
@@ -107,7 +107,7 @@ fn shards_hash_the_rows_of_the_direct_tree() {
     let mut tree = unfinished(&expected);
     let mut shards = RowShards::with_classes(2).opened(&tree);
     absorb(&mut shards, &polynomials[0]);
-    let states = shards.export(0, DOMAIN);
+    let states = shards.export(0, EVALUATION_DOMAIN_SIZE);
     let mut first = 0;
     for count in [1, 7, 5_216, 20_000, 1] {
         assert_eq!(
@@ -117,16 +117,16 @@ fn shards_hash_the_rows_of_the_direct_tree() {
         first += count;
     }
     assert_eq!(
-        *shards.export(DOMAIN - 3, 3),
-        states[STATE_BYTES * (DOMAIN - 3)..]
+        *shards.export(EVALUATION_DOMAIN_SIZE - 3, 3),
+        states[STATE_BYTES * (EVALUATION_DOMAIN_SIZE - 3)..]
     );
     let abandoned = shards.session;
     drop(shards);
     assert!(!resident(abandoned));
     let mut shards = RowShards::with_classes(4);
     let mut first = 0;
-    while first < DOMAIN {
-        let count = 5_216.min(DOMAIN - first);
+    while first < EVALUATION_DOMAIN_SIZE {
+        let count = 5_216.min(EVALUATION_DOMAIN_SIZE - first);
         shards.import(
             first,
             &states[STATE_BYTES * first..STATE_BYTES * (first + count)],

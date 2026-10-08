@@ -3,7 +3,7 @@ use crate::{
     BodyDigest, SIGNATURE_BYTES,
     foundation::{
         CanonicalDecodeLimits, CanonicalTuple, RegistrationHeader, StabilizedDisplayText,
-        ceremony::{Manifest, OptionDefinition},
+        manifest::{Manifest, OptionDefinition},
         normalize_username,
     },
     poll::{PollDraft, verify_poll},

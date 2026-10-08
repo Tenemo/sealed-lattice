@@ -75,7 +75,7 @@ export const moduleFunctions = [
     'participant_close_command',
     'participant_finality_command',
     'participant_release_command',
-    // The target certificate, release contexts and release shares.
+    // The inventory certificate, release contexts and release shares.
     'completion_input_pointer',
     'completion_input_capacity',
     'completion_output_pointer',
@@ -118,8 +118,8 @@ export const moduleFunctions = [
     'retain_evaluation',
     'restore_evaluation',
     'confirm_roster',
-    'offer_signing',
-    'selection_signing',
+    'offer_signing_command',
+    'selection_signing_command',
     'retain_selection_inputs',
     'restore_selection_inputs',
     'contribution_output_pointer',

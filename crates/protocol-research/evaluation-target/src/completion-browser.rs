@@ -1,5 +1,5 @@
 use crate::{
-    certification::{CertificateCollector, VerifiedTargetCertificate},
+    certification::{CertificateCollector, VerifiedInventoryCertificate},
     release::{Error, ReleaseContext},
     release_body::{AuthenticatedReleaseEnvelope, ReleaseBodyVerifier},
     terminal::{ReleaseCollector, VerifiedNoResult, VerifiedResult, verify_no_result},
@@ -21,7 +21,7 @@ struct State {
     input: Vec<u8>,
     output: Vec<u8>,
     votes: Option<CertificateCollector>,
-    certificate: Option<Arc<VerifiedTargetCertificate>>,
+    certificate: Option<Arc<VerifiedInventoryCertificate>>,
     operand: Option<Operand>,
     context: Option<Arc<ReleaseContext>>,
     authentication: Option<AuthenticatedReleaseEnvelope>,
@@ -234,7 +234,7 @@ thread_local! {static STATE:RefCell<State>=RefCell::new(State::new());}
 pub(crate) fn verified_context() -> Option<Arc<ReleaseContext>> {
     STATE.with(|state| state.borrow().context.clone())
 }
-pub(crate) fn verified_certificate() -> Option<Arc<VerifiedTargetCertificate>> {
+pub(crate) fn verified_certificate() -> Option<Arc<VerifiedInventoryCertificate>> {
     STATE.with(|state| state.borrow().certificate.clone())
 }
 #[unsafe(no_mangle)]

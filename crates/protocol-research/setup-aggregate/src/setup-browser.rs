@@ -9,7 +9,7 @@ use registration_credentials::{
     contribution_offer::{AuthenticatedContributionOffer, MAXIMUM_OFFER_BYTES, authenticate_offer},
     poll::VerifiedPoll,
     roster::MAXIMUM_PROPOSAL_BYTES,
-    roster_authentication::{OrganizerSignedRoster, verify_roster_proposal},
+    roster_authentication::{AuthenticatedRosterProposal, authenticate_roster_proposal},
     roster_input::RosterInputVerifier,
     setup_selection::{
         AuthenticatedSelectionCertificate, AuthenticatedSelectionEndorsement,
@@ -26,7 +26,7 @@ struct Session {
     input: Vec<u8>,
     output: Vec<u8>,
     roster: Option<RosterInputVerifier>,
-    proposal: Option<Arc<OrganizerSignedRoster>>,
+    proposal: Option<Arc<AuthenticatedRosterProposal>>,
     poll: Option<Arc<VerifiedPoll>>,
     offer: Option<ContributionOfferVerifier>,
     offers: Vec<Arc<VerifiedContributionOffer>>,
@@ -61,7 +61,10 @@ struct OfferInput<'a> {
     body_header: &'a [u8],
     proof_header: &'a [u8],
 }
-fn offer_input(roster: Arc<OrganizerSignedRoster>, bytes: &[u8]) -> Result<OfferInput<'_>, ()> {
+fn offer_input(
+    roster: Arc<AuthenticatedRosterProposal>,
+    bytes: &[u8],
+) -> Result<OfferInput<'_>, ()> {
     let envelope_length =
         u32::from_le_bytes(bytes.get(..4).ok_or(())?.try_into().unwrap()) as usize;
     if envelope_length > MAXIMUM_OFFER_BYTES
@@ -210,7 +213,7 @@ pub extern "C" fn setup_roster_finish(length: usize) -> u32 {
         if proposal.body() != body {
             return 1;
         }
-        let Ok(proposal) = verify_roster_proposal(proposal, signature) else {
+        let Ok(proposal) = authenticate_roster_proposal(proposal, signature) else {
             return 1;
         };
         value.proposal = Some(Arc::new(proposal));
@@ -231,7 +234,7 @@ pub extern "C" fn setup_option_count() -> usize {
     })
 }
 
-pub fn roster_context() -> Option<(Arc<VerifiedPoll>, Arc<OrganizerSignedRoster>)> {
+pub fn roster_context() -> Option<(Arc<VerifiedPoll>, Arc<AuthenticatedRosterProposal>)> {
     SESSION.with(|state| {
         let state = state.borrow();
         Some((state.poll.clone()?, state.proposal.clone()?))

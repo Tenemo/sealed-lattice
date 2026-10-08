@@ -158,10 +158,10 @@ describe('prover Merkle opening work', () => {
         expect(tree).toContain('const RECOMPUTED_LEVELS: usize = 4;');
         expect(tree).toContain('for local in (2..span).rev()');
         expect(oracles).toContain(
-            'let tree = Tree::new(role, 0, DOMAIN, relation.first_width());',
+            'let tree = Tree::new(role, 0, EVALUATION_DOMAIN_SIZE, relation.first_width());',
         );
         expect(oracles).toContain(
-            'let tree = Tree::new(role, 1, DOMAIN, relation.second_width());',
+            'let tree = Tree::new(role, 1, EVALUATION_DOMAIN_SIZE, relation.second_width());',
         );
         expect(tree).toContain('forgotten: false,');
         expect(linear).toContain('tree.forget_leaves();');

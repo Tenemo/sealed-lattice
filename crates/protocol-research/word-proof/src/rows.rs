@@ -494,7 +494,7 @@ impl RowShards {
     pub fn close(mut self, tree: &mut Tree) {
         self.settle();
         let shards = self.shards();
-        let count = tree::SUBTREE_LEAVES.min(DOMAIN) / shards;
+        let count = tree::SUBTREE_LEAVES.min(EVALUATION_DOMAIN_SIZE) / shards;
         let subtrees = (0..self.rows()).step_by(count).map(|first| {
             let tickets: Vec<_> = (0..shards)
                 .map(|shard| self.range_job(&CLOSE, shard, (first, count), &[], 64 * count))
@@ -514,7 +514,7 @@ impl RowShards {
     // job for at most the job bound of the shard's consecutive rows: the
     // shard, its first row and their count.
     fn ranges(&self, first: usize, count: usize) -> Vec<(usize, usize, usize)> {
-        assert!(first + count <= DOMAIN);
+        assert!(first + count <= EVALUATION_DOMAIN_SIZE);
         let shards = self.shards();
         let mut ranges = Vec::new();
         for shard in 0..shards {

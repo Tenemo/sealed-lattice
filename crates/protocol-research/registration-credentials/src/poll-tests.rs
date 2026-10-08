@@ -1,5 +1,5 @@
 use super::*;
-use crate::foundation::{StabilizedDisplayText, ceremony::OptionDefinition};
+use crate::foundation::{StabilizedDisplayText, manifest::OptionDefinition};
 use fips204::traits::{KeyGen, Signer};
 fn label(value: &str) -> StabilizedDisplayText {
     StabilizedDisplayText::from_ingress_utf8(value.as_bytes()).unwrap()

@@ -8,7 +8,8 @@ fn evaluate(coefficients: &[i32], subring_point: u32) -> i64 {
         .step_by(2)
         .rev()
         .fold(0i64, |sum, value| {
-            (sum * i64::from(subring_point) + i64::from(*value)).rem_euclid(i64::from(MODULUS))
+            (sum * i64::from(subring_point) + i64::from(*value))
+                .rem_euclid(i64::from(PLAINTEXT_MODULUS))
         })
 }
 fn check(scores: &[u8], degree: usize, sample: &[usize]) {
@@ -26,7 +27,7 @@ fn check(scores: &[u8], degree: usize, sample: &[usize]) {
             .step_by(2)
             .all(|value| *value == 0)
     );
-    let root = power(3, (MODULUS - 1) / degree as u32);
+    let root = power(3, (PLAINTEXT_MODULUS - 1) / degree as u32);
     let window = scores.len().next_power_of_two();
     let active = scores.len() * scores.len() * window;
     for position in sample {
@@ -47,7 +48,7 @@ fn check(scores: &[u8], degree: usize, sample: &[usize]) {
         };
         assert_eq!(
             evaluate(&coefficients, point),
-            expected.rem_euclid(i64::from(MODULUS))
+            expected.rem_euclid(i64::from(PLAINTEXT_MODULUS))
         );
         assert_eq!(
             evaluate(&coefficients, power(root, (degree - exponent) as u32)),
@@ -132,7 +133,7 @@ fn integer_lift_matches_each_public_matrix_row() {
             };
             assert_eq!(
                 evaluate(column, power(3, exponent as u32)),
-                expected.rem_euclid(i64::from(MODULUS))
+                expected.rem_euclid(i64::from(PLAINTEXT_MODULUS))
             );
         }
     }
@@ -145,7 +146,7 @@ fn integer_lift_matches_each_public_matrix_row() {
         assert_eq!(
             i64::from(witness.message()[position])
                 - expected
-                - i64::from(MODULUS) * i64::from(witness.quotients()[position]),
+                - i64::from(PLAINTEXT_MODULUS) * i64::from(witness.quotients()[position]),
             0
         );
     }

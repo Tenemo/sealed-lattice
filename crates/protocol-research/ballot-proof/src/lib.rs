@@ -1,5 +1,4 @@
 #![deny(unsafe_op_in_unsafe_fn)]
-pub mod admission;
 pub mod body;
 #[cfg(target_arch = "wasm32")]
 #[path = "body-browser.rs"]
@@ -9,6 +8,7 @@ pub mod context;
 #[path = "private-ballot.rs"]
 pub mod private_ballot;
 pub mod proof;
+pub mod relation;
 pub mod statement;
 pub mod submission;
 use statement::{StatementOutput, StatementStream};

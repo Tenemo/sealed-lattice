@@ -254,16 +254,16 @@ impl Profile {
         self.options
     }
     /// At most f = floor((n - 1) / 3) participants are corrupt.
-    pub fn corrupt(self) -> usize {
+    pub fn maximum_corrupt_participants(self) -> usize {
         (self.participants - 1) / 3
     }
     /// Inventory certificates and closing need n - f participants.
     pub fn inventory_threshold(self) -> usize {
-        self.participants - self.corrupt()
+        self.participants - self.maximum_corrupt_participants()
     }
     /// Result release needs d = max(f + 1, 2) shares.
     pub fn release_threshold(self) -> usize {
-        (self.corrupt() + 1).max(2)
+        (self.maximum_corrupt_participants() + 1).max(2)
     }
     /// A certified setup selection contains d valid contributions.
     pub fn setup_contributors(self) -> usize {
@@ -272,11 +272,11 @@ impl Profile {
     /// The fixed eligible prefix leaves d possible contributors after any f
     /// permitted departures; selection preserves the original roster.
     pub fn setup_eligible_contributors(self) -> usize {
-        self.setup_contributors() + self.corrupt()
+        self.setup_contributors() + self.maximum_corrupt_participants()
     }
     /// A result needs f + 2 accepted ballots.
     pub fn minimum_turnout(self) -> usize {
-        self.corrupt() + 2
+        self.maximum_corrupt_participants() + 2
     }
     /// Sharing polynomials have degree d - 1, so they have d - 1 random
     /// coefficients.

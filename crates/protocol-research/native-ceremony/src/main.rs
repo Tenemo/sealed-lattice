@@ -18,12 +18,12 @@ use registration_credentials::{
     ballot_authentication::BallotEnvelope,
     foundation::{
         StabilizedDisplayText,
-        ceremony::{Manifest, OptionDefinition},
+        manifest::{Manifest, OptionDefinition},
     },
     poll::{PollDraft, SignedPoll, VerifiedPoll, verify_poll},
     registration::RegistrationVerifier,
     roster::{RetainedContributionContext, RosterProposal},
-    roster_authentication::verify_roster_proposal,
+    roster_authentication::authenticate_roster_proposal,
 };
 use registration_enrollment::{Enrollment, finality_work::OwnBallotInclusion};
 use scenario::Scenario;
@@ -433,7 +433,7 @@ fn main() {
         .unwrap();
     write(output.join("proposal.bin"), proposal.body());
     write(output.join("proposal-signature.bin"), &proposal_signature);
-    let roster = Arc::new(verify_roster_proposal(proposal, &proposal_signature).unwrap());
+    let roster = Arc::new(authenticate_roster_proposal(proposal, &proposal_signature).unwrap());
     println!("Verified original enrollment roster");
     let mut enrollments = OriginalEnrollments::new(enrollments);
     if let Some(position) = scenario.departed {

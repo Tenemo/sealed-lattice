@@ -22,7 +22,7 @@ struct Builder {
     starts: Vec<usize>,
     words: usize,
     alpha: Element,
-    omega: Element,
+    limb_weight: Element,
     geometric: Vec<Element>,
     coefficients: Vec<Vec<Element>>,
     target: Element,
@@ -46,7 +46,7 @@ impl Builder {
             starts,
             words,
             alpha,
-            omega: power(alpha, SYSTEMATIC),
+            limb_weight: power(alpha, SYSTEMATIC),
             geometric,
             coefficients: vec![vec![ZERO; SYSTEMATIC]; words + 2],
             target: ZERO,
@@ -159,9 +159,10 @@ impl Builder {
             4 => {
                 let adjoint = polynomial.adjoint()?;
                 let base = power(self.alpha, 4 * SYSTEMATIC);
-                let (omega, clearing) = (self.omega, self.profile.clearing_factor() as u128);
+                let (limb_weight, clearing) =
+                    (self.limb_weight, self.profile.clearing_factor() as u128);
                 self.release_limbs(SHARE, &adjoint, |limb| {
-                    field::scale(field::multiply(base, power(omega, limb)), clearing)
+                    field::scale(field::multiply(base, power(limb_weight, limb)), clearing)
                 });
             }
             5 => {
@@ -182,14 +183,19 @@ impl Builder {
             return Err(Error::Shape);
         }
         let geometric = std::mem::take(&mut self.geometric);
-        let omega = self.omega;
-        let share_modulus = fingerprint(supported_profile::share_modulus(), DECODING_CHUNK, omega);
+        let limb_weight = self.limb_weight;
+        let share_modulus = fingerprint(
+            supported_profile::share_modulus(),
+            DECODING_CHUNK,
+            limb_weight,
+        );
         let release_modulus = fingerprint(
             &self.profile.release_modulus().to_bytes(),
             RELEASE_CHUNK,
-            omega,
+            limb_weight,
         );
-        let decoding_carry = field::subtract(omega, [1u128 << RELEASE_DECODING_LIMB_BITS, 0, 0]);
+        let decoding_carry =
+            field::subtract(limb_weight, [1u128 << RELEASE_DECODING_LIMB_BITS, 0, 0]);
         // The recipient key equation.
         self.variable(
             KEY_QUOTIENT,
@@ -226,13 +232,13 @@ impl Builder {
             ),
         ] {
             let weight = field::scale(
-                field::multiply(decryption, power(omega, limb)),
+                field::multiply(decryption, power(limb_weight, limb)),
                 signed(-i128::from(SHARE_SCALE)),
             );
             self.part(SHARE, first, width, true, &times(&geometric, weight));
         }
         let offset = BigInt::from(SHARE_SCALE) << (RELEASE_DECODING_LIMB_BITS - 1);
-        let offset = fingerprint(&offset.to_bytes_le().1, DECODING_CHUNK, omega);
+        let offset = fingerprint(&offset.to_bytes_le().1, DECODING_CHUNK, limb_weight);
         let geometric_sum = geometric.iter().copied().fold(ZERO, field::add);
         self.target = field::add(
             self.target,
@@ -242,23 +248,26 @@ impl Builder {
         let release = power(self.alpha, 4 * SYSTEMATIC);
         let clearing = self.profile.clearing_factor() as u128;
         self.release_limbs(NOISE, &geometric, |limb| {
-            field::scale(field::multiply(release, power(omega, limb)), clearing)
+            field::scale(field::multiply(release, power(limb_weight, limb)), clearing)
         });
         self.release_limbs(RELEASE_QUOTIENT, &geometric, |limb| {
             field::subtract(
                 ZERO,
                 field::multiply(
-                    field::multiply(release, power(omega, limb)),
+                    field::multiply(release, power(limb_weight, limb)),
                     release_modulus,
                 ),
             )
         });
-        let release_carry = field::subtract(omega, [1u128 << RELEASE_LIMB_BITS, 0, 0]);
+        let release_carry = field::subtract(limb_weight, [1u128 << RELEASE_LIMB_BITS, 0, 0]);
         let output_limbs = self.profile.release_output_limbs();
         for limb in 0..output_limbs - 1 {
             self.variable(
                 FIRST_RELEASE_CARRY + limb,
-                field::multiply(field::multiply(release, power(omega, limb)), release_carry),
+                field::multiply(
+                    field::multiply(release, power(limb_weight, limb)),
+                    release_carry,
+                ),
                 &geometric,
             );
         }

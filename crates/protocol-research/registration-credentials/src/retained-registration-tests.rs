@@ -4,7 +4,7 @@ use crate::{
     SIGNATURE_BYTES,
     foundation::{
         StabilizedDisplayText,
-        ceremony::{Manifest, OptionDefinition},
+        manifest::{Manifest, OptionDefinition},
         normalize_username,
     },
     poll::{PollDraft, verify_poll},
@@ -160,7 +160,7 @@ fn retained_registrations_bind_the_credential_poll_header_and_exact_bytes() {
 // The retained copy replaces the proof only after the exact key the
 // header names, and never after proof bytes.
 #[test]
-fn restored_registrations_need_the_named_key_and_no_proof() {
+fn restore_refuses_before_the_named_key_and_after_another_key() {
     let registration = registration([4; 64], 7);
     let (poll, credential) = (&registration.poll, &registration.credential);
     let retained = registration.verified.retain(credential, poll).unwrap();

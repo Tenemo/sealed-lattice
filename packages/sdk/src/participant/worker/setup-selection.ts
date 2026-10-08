@@ -47,7 +47,7 @@ const selectionCommand = (
 ) => {
     const { context } = session;
     writeModuleInput(context, input);
-    if (context.module.selection_signing(operation, input.length) !== 0)
+    if (context.module.selection_signing_command(operation, input.length) !== 0)
         throw new Error('The original preparation signer refused.');
     return readModuleMemory(
         context.module,

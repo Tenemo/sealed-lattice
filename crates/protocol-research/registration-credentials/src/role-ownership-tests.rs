@@ -6,9 +6,9 @@ use crate::{
     BodyDigest, Credential, Error,
     foundation::{
         CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple,
-        RegistrationHeader, StabilizedDisplayText,
-        ceremony::{Manifest, OptionDefinition},
-        derive_participant_identity, normalize_username,
+        RegistrationHeader, StabilizedDisplayText, derive_participant_identity,
+        manifest::{Manifest, OptionDefinition},
+        normalize_username,
     },
     poll::{PollDraft, SignedPoll, VerifiedPoll, verify_poll},
     registration::{KEY_BYTES, RegistrationVerifier, VerifiedRegistration},
@@ -127,7 +127,8 @@ fn clear_preparation_purposes_share_one_original_confirmed_roster() {
         .sign_roster_proposal(&fixture.proposal)
         .unwrap();
     let roster = Arc::new(
-        crate::roster_authentication::verify_roster_proposal(fixture.proposal, &signature).unwrap(),
+        crate::roster_authentication::authenticate_roster_proposal(fixture.proposal, &signature)
+            .unwrap(),
     );
     // A corrupt organizer can authenticate another roster; that does not
     // let an honest member split its preparation purposes between them.
@@ -135,7 +136,7 @@ fn clear_preparation_purposes_share_one_original_confirmed_roster() {
     equivocator.completed_body = Some(foreign.records()[0].body_digest());
     let signature = equivocator.sign_roster_proposal(&foreign).unwrap();
     let foreign =
-        crate::roster_authentication::verify_roster_proposal(foreign, &signature).unwrap();
+        crate::roster_authentication::authenticate_roster_proposal(foreign, &signature).unwrap();
     let profile = roster.proposal().profile();
     let envelope = OfferEnvelope::new(
         roster.proposal(),
@@ -245,7 +246,8 @@ fn a_losing_endorsement_never_blocks_authenticating_the_winning_certificate() {
         .sign_roster_proposal(&fixture.proposal)
         .unwrap();
     let roster = Arc::new(
-        crate::roster_authentication::verify_roster_proposal(fixture.proposal, &signature).unwrap(),
+        crate::roster_authentication::authenticate_roster_proposal(fixture.proposal, &signature)
+            .unwrap(),
     );
     let winning =
         SelectionProposal::new(roster.proposal(), &[(0, [13; 64]), (2, [14; 64])]).unwrap();
@@ -315,7 +317,8 @@ fn selection_certificates_bind_complete_canonical_choices_but_not_quorum_carrier
         .sign_roster_proposal(&fixture.proposal)
         .unwrap();
     let roster = Arc::new(
-        crate::roster_authentication::verify_roster_proposal(fixture.proposal, &signature).unwrap(),
+        crate::roster_authentication::authenticate_roster_proposal(fixture.proposal, &signature)
+            .unwrap(),
     );
     let entries = [(0, [13; 64]), (2, [14; 64])];
     for malformed in [
@@ -588,7 +591,8 @@ fn retained_context_refuses_other_original_owners_and_positions_before_signing()
         fixture.credentials[0].sign_roster_proposal(&fixture.proposal),
         Err(Error::Consumed)
     ));
-    crate::roster_authentication::verify_roster_proposal(fixture.proposal, &signature).unwrap();
+    crate::roster_authentication::authenticate_roster_proposal(fixture.proposal, &signature)
+        .unwrap();
 }
 
 #[test]

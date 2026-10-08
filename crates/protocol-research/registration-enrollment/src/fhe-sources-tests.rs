@@ -2,7 +2,7 @@ use super::*;
 use registration_credentials::{
     foundation::{
         StabilizedDisplayText,
-        ceremony::{Manifest, OptionDefinition},
+        manifest::{Manifest, OptionDefinition},
     },
     poll::{PollDraft, verify_poll},
 };

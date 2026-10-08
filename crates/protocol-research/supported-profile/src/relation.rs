@@ -11,14 +11,14 @@ use crate::{
 
 /// Witness columns have one row per ring coefficient.
 pub const SYSTEMATIC: usize = DEGREE;
-pub const DOMAIN: usize = 4 * SYSTEMATIC;
+pub const EVALUATION_DOMAIN_SIZE: usize = 4 * SYSTEMATIC;
 pub const QUERY_COUNT: usize = 704;
 pub const MASKS: usize = 2 * QUERY_COUNT + 1;
-pub const MAX_DEGREE: usize = 2 * SYSTEMATIC - 1;
+pub const MAXIMUM_DEGREE: usize = 2 * SYSTEMATIC - 1;
 pub const WITNESS_DEGREE: usize = SYSTEMATIC + MASKS - 1;
 pub const SUM_DEGREE: usize = 2 * SYSTEMATIC + MASKS - 2;
 /// Folding halves the evaluation domain down to two points.
-pub const FOLDS: usize = (DOMAIN / 2).ilog2() as usize;
+pub const FOLDS: usize = (EVALUATION_DOMAIN_SIZE / 2).ilog2() as usize;
 const DIGEST_BYTES: usize = 64;
 const SALT_BYTES: usize = 128;
 /// The prover draws uniform field elements as candidate words of this many
@@ -149,8 +149,8 @@ impl Relation {
             SYSTEMATIC,
             QUERY_COUNT,
             MASKS,
-            DOMAIN,
-            MAX_DEGREE,
+            EVALUATION_DOMAIN_SIZE,
+            MAXIMUM_DEGREE,
             2,
             self.message_bytes,
         ]
@@ -182,9 +182,9 @@ impl Relation {
         };
         let mut total = PROOF_HEADER_BYTES;
         for width in [self.first_width(), self.second_width(), EXTENSION_BYTES] {
-            total += multiproof(DOMAIN, width);
+            total += multiproof(EVALUATION_DOMAIN_SIZE, width);
         }
-        let mut length = DOMAIN / 2;
+        let mut length = EVALUATION_DOMAIN_SIZE / 2;
         while length > 2 {
             total += multiproof(length, EXTENSION_BYTES);
             length /= 2;

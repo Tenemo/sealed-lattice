@@ -11,7 +11,7 @@ use sha3::{
 };
 use std::{collections::BTreeMap, sync::OnceLock};
 use supported_profile::relation::{
-    DOMAIN as D, MASKS, MAX_DEGREE, QUERY_COUNT as QUERIES, Relation, SYSTEMATIC as H,
+    EVALUATION_DOMAIN_SIZE, MASKS, MAXIMUM_DEGREE, QUERY_COUNT, Relation, SYSTEMATIC,
     WITNESS_DEGREE,
 };
 
@@ -21,7 +21,7 @@ mod lookup_table;
 type Element = [u128; 3];
 const ZERO: Element = [0, 0, 0];
 const ONE: Element = [1, 0, 0];
-const FOLDS: usize = (D / 2).ilog2() as usize;
+const FOLDS: usize = (EVALUATION_DOMAIN_SIZE / 2).ilog2() as usize;
 pub const HEADER_LENGTH: usize =
     4 + 64 + 64 + 3 * 64 + 48 + (FOLDS + 3) * 128 + (FOLDS - 1) * 64 + 48;
 pub const CHUNK_LIMIT: usize = 1 << 20;
@@ -102,21 +102,29 @@ fn degree(shape: &Shape, index: usize) -> usize {
     } else if index == shape.original - 1 || index == shape.oracles - 2 {
         WITNESS_DEGREE - 1
     } else if index == shape.oracles - 1 {
-        H - 2
+        SYSTEMATIC - 2
     } else {
-        2 * WITNESS_DEGREE - H
+        2 * WITNESS_DEGREE - SYSTEMATIC
     }
 }
 /// The relation parameters, oracle degrees and lookups that a proof's
 /// context binds.
 pub(crate) fn context_parameters(relation: &Relation) -> Vec<u8> {
     let shape = &Shape::new(relation);
-    let mut bytes: Vec<u8> = [H, QUERIES, MASKS, D, MAX_DEGREE, 2, shape.message_bytes]
-        .into_iter()
-        .chain(relation.parameters.iter().copied())
-        .chain((0..shape.oracles).map(|index| degree(shape, index)))
-        .flat_map(|value| (value as u32).to_le_bytes())
-        .collect();
+    let mut bytes: Vec<u8> = [
+        SYSTEMATIC,
+        QUERY_COUNT,
+        MASKS,
+        EVALUATION_DOMAIN_SIZE,
+        MAXIMUM_DEGREE,
+        2,
+        shape.message_bytes,
+    ]
+    .into_iter()
+    .chain(relation.parameters.iter().copied())
+    .chain((0..shape.oracles).map(|index| degree(shape, index)))
+    .flat_map(|value| (value as u32).to_le_bytes())
+    .collect();
     for (column, scale) in &shape.lookups {
         bytes.extend((*column as u32).to_le_bytes());
         bytes.extend((*scale as u32).to_le_bytes());
@@ -367,10 +375,10 @@ fn challenges(shape: &Shape, role: &[u8], header: &Header) -> Challenges {
         ],
         length,
     );
-    let queries = (0..QUERIES)
+    let queries = (0..QUERY_COUNT)
         .map(|index| {
             u32::from_le_bytes(message[4 * index..4 * (index + 1)].try_into().unwrap()) as usize
-                % (D / 2)
+                % (EVALUATION_DOMAIN_SIZE / 2)
         })
         .collect();
     Challenges {
@@ -399,8 +407,8 @@ fn requested(queries: &[usize], length: usize) -> Vec<usize> {
 const CORRECTED_DEGREES: [usize; 4] = [
     WITNESS_DEGREE,
     WITNESS_DEGREE - 1,
-    2 * WITNESS_DEGREE - H,
-    H - 2,
+    2 * WITNESS_DEGREE - SYSTEMATIC,
+    SYSTEMATIC - 2,
 ];
 /// The low bits of an exponent of the domain's root, which index the table
 /// of its first powers.
@@ -410,7 +418,7 @@ const LOW_BITS: usize = 9;
 /// domain's root w. Every queried point's values follow from constants this
 /// instance computes once: the powers of w as two tables, the shift's
 /// inverse, the systematic vanishing polynomial's values on the coset and
-/// their inverses, which repeat with the index modulo four because w^H has
+/// their inverses, which repeat with the index modulo four because w^SYSTEMATIC has
 /// order four, and the shift's power at each degree correction. Each fold
 /// round's points follow from the shift's inverse raised to that round's
 /// power of two.
@@ -429,7 +437,7 @@ impl Coset {
     fn get() -> &'static Self {
         static COSET: OnceLock<Coset> = OnceLock::new();
         COSET.get_or_init(|| {
-            let root = root(D);
+            let root = root(EVALUATION_DOMAIN_SIZE);
             let powers = |step: u128, count: usize| {
                 let mut value = 1;
                 (0..count)
@@ -440,8 +448,8 @@ impl Coset {
                     })
                     .collect()
             };
-            let order_four = power_base(root, H as u128);
-            let shifted = power_base(7, H as u128);
+            let order_four = power_base(root, SYSTEMATIC as u128);
+            let shifted = power_base(7, SYSTEMATIC as u128);
             let vanishing: [u128; 4] = std::array::from_fn(|residue| {
                 subtract_base(
                     multiply_base(shifted, power_base(order_four, residue as u128)),
@@ -451,17 +459,20 @@ impl Coset {
             let inverse_shift = power_base(7, MODULUS - 2);
             Self {
                 low: powers(root, 1 << LOW_BITS),
-                high: powers(power_base(root, 1 << LOW_BITS), D >> LOW_BITS),
+                high: powers(
+                    power_base(root, 1 << LOW_BITS),
+                    EVALUATION_DOMAIN_SIZE >> LOW_BITS,
+                ),
                 inverse_shift,
                 inverse_vanishing: vanishing.map(|value| power_base(value, MODULUS - 2)),
                 vanishing,
                 shifts: CORRECTED_DEGREES
-                    .map(|degree| power_base(7, (MAX_DEGREE - degree) as u128)),
+                    .map(|degree| power_base(7, (MAXIMUM_DEGREE - degree) as u128)),
                 inverse_fold_shifts: std::array::from_fn(|round| {
                     power_base(inverse_shift, 1 << round)
                 }),
                 half: power_base(2, MODULUS - 2),
-                inverse_systematic: power_base(H as u128, MODULUS - 2),
+                inverse_systematic: power_base(SYSTEMATIC as u128, MODULUS - 2),
             }
         })
     }
@@ -469,12 +480,12 @@ impl Coset {
     fn inverse_fold_point(&self, round: usize, index: usize) -> u128 {
         multiply_base(
             self.inverse_fold_shifts[round],
-            self.root_power(D as u64 - ((index as u64) << round)),
+            self.root_power(EVALUATION_DOMAIN_SIZE as u64 - ((index as u64) << round)),
         )
     }
     /// w to the exponent modulo the domain's size.
     fn root_power(&self, exponent: u64) -> u128 {
-        let exponent = (exponent % D as u64) as usize;
+        let exponent = (exponent % EVALUATION_DOMAIN_SIZE as u64) as usize;
         multiply_base(
             self.high[exponent >> LOW_BITS],
             self.low[exponent & ((1 << LOW_BITS) - 1)],
@@ -490,20 +501,25 @@ struct Point {
     table: u128,
 }
 impl Point {
-    /// The values at the point 7 w^index: its inverse 7^-1 w^(D - index),
+    /// The values at the point 7 w^index: its inverse 7^-1 w^(EVALUATION_DOMAIN_SIZE - index),
     /// the vanishing polynomial's value, and 7^e w^(index e) for each
     /// correction exponent e.
     fn new(index: usize, table: u128) -> Self {
         let coset = Coset::get();
         let index = index as u64;
         Self {
-            inverse: multiply_base(coset.inverse_shift, coset.root_power(D as u64 - index)),
+            inverse: multiply_base(
+                coset.inverse_shift,
+                coset.root_power(EVALUATION_DOMAIN_SIZE as u64 - index),
+            ),
             vanishing: coset.vanishing[index as usize % 4],
             inverse_vanishing: coset.inverse_vanishing[index as usize % 4],
             powers: std::array::from_fn(|correction| {
                 multiply_base(
                     coset.shifts[correction],
-                    coset.root_power(index * (MAX_DEGREE - CORRECTED_DEGREES[correction]) as u64),
+                    coset.root_power(
+                        index * (MAXIMUM_DEGREE - CORRECTED_DEGREES[correction]) as u64,
+                    ),
                 )
             }),
             table,
@@ -580,7 +596,7 @@ impl<S: Statement> Verifier<S> {
         }
         let shape = Shape::new(&relation);
         let challenges = challenges(&shape, role, &header);
-        let indices = requested(&challenges.queries, D);
+        let indices = requested(&challenges.queries, EVALUATION_DOMAIN_SIZE);
         let selected: Vec<u32> = indices.iter().map(|index| *index as u32).collect();
         let statement = open_statement(challenges.alpha, &selected).ok_or(Refusal::Context)?;
         let mut context_hash = HashStream::new(Sponge::ProtocolHash);
@@ -668,13 +684,17 @@ impl<S: Statement> Verifier<S> {
     fn stage_shape(&self) -> (usize, usize, [u8; 64]) {
         if self.stage < 3 {
             (
-                D,
+                EVALUATION_DOMAIN_SIZE,
                 [self.shape.first_width, self.shape.second_width, 48][self.stage],
                 self.header.roots[self.stage],
             )
         } else {
             let round = self.stage - 3;
-            (D >> (round + 1), 48, self.header.fold_roots[round])
+            (
+                EVALUATION_DOMAIN_SIZE >> (round + 1),
+                48,
+                self.header.fold_roots[round],
+            )
         }
     }
     fn missing_siblings(&self, index: usize, length: usize) -> usize {
@@ -936,9 +956,9 @@ impl<S: Statement> Verifier<S> {
         }
         if self.stage >= 2 {
             let length = if self.stage == 2 {
-                D
+                EVALUATION_DOMAIN_SIZE
             } else {
-                D >> (self.stage - 2)
+                EVALUATION_DOMAIN_SIZE >> (self.stage - 2)
             };
             let round = if self.stage == 2 { 0 } else { self.stage - 2 };
             let coset = Coset::get();
@@ -992,9 +1012,9 @@ impl<S: Statement> Verifier<S> {
         self.leaf_prefix = prefix(b"bounded-proof/leaf", &[&self.role, &stage]);
         self.node_prefix = prefix(b"bounded-proof/node", &[&self.role, &stage]);
         let length = if self.stage < 3 {
-            D
+            EVALUATION_DOMAIN_SIZE
         } else {
-            D >> (self.stage - 2)
+            EVALUATION_DOMAIN_SIZE >> (self.stage - 2)
         };
         self.indices = requested(&self.challenges.queries, length);
         self.position = 0;

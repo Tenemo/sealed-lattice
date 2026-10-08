@@ -1,6 +1,6 @@
 use crate::{
     Credential, Error, RETAINED_TAG_BYTES, SIGNATURE_BYTES, SIGNING_PUBLIC_KEY_BYTES,
-    SigningPurpose, roster_authentication::OrganizerSignedRoster,
+    SigningPurpose, roster_authentication::AuthenticatedRosterProposal,
 };
 use crate::{
     foundation::{CanonicalItem, hash_foundation_tuple_512},
@@ -253,7 +253,7 @@ impl Credential {
     /// The caller must derive the envelope from the exact verified body and setup.
     pub fn sign_ballot_envelope(
         &mut self,
-        roster: &OrganizerSignedRoster,
+        roster: &AuthenticatedRosterProposal,
         envelope: &BallotEnvelope,
     ) -> Result<[u8; SIGNATURE_BYTES], Error> {
         if self.signed_ballot.is_some() {
@@ -287,7 +287,7 @@ impl Credential {
 }
 
 pub fn verify_ballot_signature(
-    roster: &OrganizerSignedRoster,
+    roster: &AuthenticatedRosterProposal,
     expected_setup_identity: &[u8; 64],
     envelope: &BallotEnvelope,
     signature: &[u8],

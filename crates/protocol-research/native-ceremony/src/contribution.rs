@@ -2,7 +2,7 @@ use num_bigint::{BigInt, Sign};
 use num_traits::Signed;
 use parallel_work::ProtocolHash;
 use registration_credentials::roster::RetainedContributionContext;
-use registration_credentials::roster_authentication::OrganizerSignedRoster;
+use registration_credentials::roster_authentication::AuthenticatedRosterProposal;
 use registration_enrollment::{Enrollment, offer_signing::OfferSigning};
 use setup_aggregate::contribution_family;
 use setup_witness::{
@@ -91,7 +91,11 @@ fn public_bytes(values: &[BigInt], width: usize) -> Vec<u8> {
 }
 /// A setup statement polynomial: a published body polynomial, a roster
 /// member's registration key or a recomputed common polynomial.
-fn polynomial_bytes(roster: &OrganizerSignedRoster, directory: &Path, index: usize) -> Vec<u8> {
+fn polynomial_bytes(
+    roster: &AuthenticatedRosterProposal,
+    directory: &Path,
+    index: usize,
+) -> Vec<u8> {
     let profile = roster.proposal().profile();
     if contribution_family(profile, index).is_some() {
         return std::fs::read(directory.join(format!("polynomial-{index:02}.bin"))).unwrap();
@@ -110,7 +114,7 @@ fn polynomial_bytes(roster: &OrganizerSignedRoster, directory: &Path, index: usi
 }
 pub fn generate(
     poll: &registration_credentials::poll::VerifiedPoll,
-    roster: &Arc<OrganizerSignedRoster>,
+    roster: &Arc<AuthenticatedRosterProposal>,
     enrollment: &mut Enrollment,
     position: usize,
     directory: &Path,

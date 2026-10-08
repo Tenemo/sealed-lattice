@@ -15,7 +15,7 @@ pub enum Error {
     Incomplete,
 }
 
-fn verify_vote(
+fn authenticate_vote(
     identity: &[u8; 64],
     keys: &[[u8; SIGNING_PUBLIC_KEY_BYTES]],
     packet: &[u8],
@@ -65,7 +65,7 @@ impl CertificateCollector {
     }
     /// Invalid and duplicate packets never replace an already verified vote.
     pub fn insert(&mut self, packet: &[u8]) -> Result<bool, Error> {
-        let vote = verify_vote(self.target.identity(), &self.keys, packet)?;
+        let vote = authenticate_vote(self.target.identity(), &self.keys, packet)?;
         let slot = &mut self.votes[vote.position()];
         if slot.is_some() {
             return Ok(false);
@@ -73,11 +73,11 @@ impl CertificateCollector {
         *slot = Some(vote);
         Ok(true)
     }
-    pub fn certificate(&self) -> Result<VerifiedTargetCertificate, Error> {
+    pub fn certificate(&self) -> Result<VerifiedInventoryCertificate, Error> {
         if self.accepted() < self.threshold() {
             return Err(Error::Incomplete);
         }
-        Ok(VerifiedTargetCertificate {
+        Ok(VerifiedInventoryCertificate {
             target: self.target.clone(),
             votes: self.votes.iter().filter_map(Clone::clone).collect(),
         })
@@ -87,11 +87,11 @@ impl CertificateCollector {
 /// Cryptographic certificate evidence. Publication of this certificate and its
 /// complete dependencies to the relay remains a lifecycle step, and no relay
 /// receipt replaces any predicate verified here.
-pub struct VerifiedTargetCertificate {
+pub struct VerifiedInventoryCertificate {
     target: Arc<VerifiedEvaluationTarget>,
     votes: Vec<TargetVote>,
 }
-impl VerifiedTargetCertificate {
+impl VerifiedInventoryCertificate {
     pub fn target(&self) -> &Arc<VerifiedEvaluationTarget> {
         &self.target
     }

@@ -48,7 +48,7 @@ fn deterministic_signing_replays_the_locked_frame_without_fresh_coins() {
             let (_, key) = ml_dsa_65::KG::keygen_from_seed(&[seed; 32]);
             assert_eq!(
                 signature,
-                key.try_sign_with_seed(&[0; 32], &digest, SIGNATURE_CONTEXT)
+                key.try_sign_with_seed(&[0; 32], &digest, REGISTRATION_SIGNATURE_CONTEXT)
                     .unwrap()
             );
             let mut interrupted = Credential::from_seed([seed; 32]);

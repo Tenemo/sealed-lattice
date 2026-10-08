@@ -149,7 +149,7 @@ struct Builder {
     starts: Vec<usize>,
     words: usize,
     alpha: Element,
-    omega: Element,
+    limb_weight: Element,
     // The sum of the powers of alpha, each column's weight on them and on
     // the share polynomial's adjoint, that adjoint and its sum, and the
     // weighted adjoints of the recipient key's polynomials, which the
@@ -179,7 +179,7 @@ impl Builder {
             starts,
             words,
             alpha,
-            omega: power(alpha, SYSTEMATIC),
+            limb_weight: power(alpha, SYSTEMATIC),
             powers_sum,
             powers: vec![ZERO; words + 2],
             share: vec![ZERO; words + 2],
@@ -292,9 +292,10 @@ impl Builder {
                 self.share_sum = adjoint.iter().copied().fold(ZERO, field::add);
                 self.share_adjoint = adjoint;
                 let base = power(self.alpha, 4 * SYSTEMATIC);
-                let (omega, clearing) = (self.omega, self.profile.clearing_factor() as u128);
+                let (limb_weight, clearing) =
+                    (self.limb_weight, self.profile.clearing_factor() as u128);
                 self.release_limbs(SHARE, Basis::Share, |limb| {
-                    field::scale(field::multiply(base, power(omega, limb)), clearing)
+                    field::scale(field::multiply(base, power(limb_weight, limb)), clearing)
                 });
             }
             5 => {
@@ -314,14 +315,19 @@ impl Builder {
         if self.consumed != POLYNOMIALS {
             return Err(Error::Shape);
         }
-        let omega = self.omega;
-        let share_modulus = fingerprint(supported_profile::share_modulus(), DECODING_CHUNK, omega);
+        let limb_weight = self.limb_weight;
+        let share_modulus = fingerprint(
+            supported_profile::share_modulus(),
+            DECODING_CHUNK,
+            limb_weight,
+        );
         let release_modulus = fingerprint(
             &self.profile.release_modulus().to_bytes(),
             RELEASE_CHUNK,
-            omega,
+            limb_weight,
         );
-        let decoding_carry = field::subtract(omega, [1u128 << RELEASE_DECODING_LIMB_BITS, 0, 0]);
+        let decoding_carry =
+            field::subtract(limb_weight, [1u128 << RELEASE_DECODING_LIMB_BITS, 0, 0]);
         // The recipient key equation.
         self.variable(KEY_QUOTIENT, field::subtract(ZERO, share_modulus));
         self.variable(KEY_CARRY, decoding_carry);
@@ -345,13 +351,13 @@ impl Builder {
             ),
         ] {
             let weight = field::scale(
-                field::multiply(decryption, power(omega, limb)),
+                field::multiply(decryption, power(limb_weight, limb)),
                 signed(-i128::from(SHARE_SCALE)),
             );
             self.part(SHARE, first, width, true, Basis::Powers, weight);
         }
         let offset = BigInt::from(SHARE_SCALE) << (RELEASE_DECODING_LIMB_BITS - 1);
-        let offset = fingerprint(&offset.to_bytes_le().1, DECODING_CHUNK, omega);
+        let offset = fingerprint(&offset.to_bytes_le().1, DECODING_CHUNK, limb_weight);
         self.target = field::add(
             self.target,
             field::multiply(field::multiply(decryption, offset), self.powers_sum),
@@ -360,23 +366,26 @@ impl Builder {
         let release = power(self.alpha, 4 * SYSTEMATIC);
         let clearing = self.profile.clearing_factor() as u128;
         self.release_limbs(NOISE, Basis::Powers, |limb| {
-            field::scale(field::multiply(release, power(omega, limb)), clearing)
+            field::scale(field::multiply(release, power(limb_weight, limb)), clearing)
         });
         self.release_limbs(RELEASE_QUOTIENT, Basis::Powers, |limb| {
             field::subtract(
                 ZERO,
                 field::multiply(
-                    field::multiply(release, power(omega, limb)),
+                    field::multiply(release, power(limb_weight, limb)),
                     release_modulus,
                 ),
             )
         });
-        let release_carry = field::subtract(omega, [1u128 << RELEASE_LIMB_BITS, 0, 0]);
+        let release_carry = field::subtract(limb_weight, [1u128 << RELEASE_LIMB_BITS, 0, 0]);
         let output_limbs = self.profile.release_output_limbs();
         for limb in 0..output_limbs - 1 {
             self.variable(
                 FIRST_RELEASE_CARRY + limb,
-                field::multiply(field::multiply(release, power(omega, limb)), release_carry),
+                field::multiply(
+                    field::multiply(release, power(limb_weight, limb)),
+                    release_carry,
+                ),
             );
         }
         // Each half of the recipient secret's support follows every limb row.
@@ -477,7 +486,9 @@ impl StatementStream {
         if alpha.iter().any(|value| *value >= MODULUS)
             || queries.is_empty()
             || queries.len() > 2 * QUERY_COUNT
-            || queries.iter().any(|value| *value as usize >= DOMAIN)
+            || queries
+                .iter()
+                .any(|value| *value as usize >= EVALUATION_DOMAIN_SIZE)
             || queries.windows(2).any(|pair| pair[0] >= pair[1])
         {
             return Err(Error::Shape);

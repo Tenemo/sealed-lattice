@@ -1,6 +1,8 @@
+#[path = "foundation/canonical-tuple.rs"]
 pub mod canonical_tuple;
-pub mod ceremony;
 pub mod hash;
+pub mod manifest;
+#[path = "foundation/participant-identity.rs"]
 pub mod participant_identity;
 pub mod refusal;
 pub mod schemas;

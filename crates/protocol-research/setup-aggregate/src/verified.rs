@@ -6,7 +6,7 @@ use registration_credentials::{
     contribution_offer::AuthenticatedContributionOffer,
     identity::{IdentityHasher, PUBLIC_POLYNOMIAL_DOMAIN},
     poll::VerifiedPoll,
-    roster_authentication::OrganizerSignedRoster,
+    roster_authentication::AuthenticatedRosterProposal,
     setup_selection::{
         AuthenticatedSelectionCertificate, AuthenticatedSelectionProposal, SelectionProposal,
     },
@@ -43,7 +43,7 @@ impl VerifiedSetupAggregate {
     pub fn identity(&self) -> [u8; 64] {
         self.inputs.identity()
     }
-    pub fn roster(&self) -> &Arc<OrganizerSignedRoster> {
+    pub fn roster(&self) -> &Arc<AuthenticatedRosterProposal> {
         self.inputs.roster()
     }
     pub fn profile(&self) -> Profile {
@@ -66,7 +66,7 @@ impl VerifiedSetupAggregate {
     }
 }
 
-fn check_poll(roster: &OrganizerSignedRoster, poll: &VerifiedPoll) -> Result<(), Refusal> {
+fn check_poll(roster: &AuthenticatedRosterProposal, poll: &VerifiedPoll) -> Result<(), Refusal> {
     if roster.proposal().records()[0].header().poll != poll.identity()
         || roster.proposal().records()[0].header().runtime != poll.runtime()
     {
@@ -79,7 +79,7 @@ impl VerifiedSelectionInputs {
     pub fn identity(&self) -> [u8; 64] {
         self.selection.selection().identity()
     }
-    pub fn roster(&self) -> &Arc<OrganizerSignedRoster> {
+    pub fn roster(&self) -> &Arc<AuthenticatedRosterProposal> {
         self.selection.roster()
     }
     pub fn profile(&self) -> Profile {
@@ -176,7 +176,7 @@ impl VerifiedSetupAggregate {
 
 /// The organizer can propose only a complete set of this verifier's offers.
 pub fn build_selection(
-    roster: &Arc<OrganizerSignedRoster>,
+    roster: &Arc<AuthenticatedRosterProposal>,
     offers: &[Arc<VerifiedContributionOffer>],
 ) -> Result<SelectionProposal, Refusal> {
     if offers

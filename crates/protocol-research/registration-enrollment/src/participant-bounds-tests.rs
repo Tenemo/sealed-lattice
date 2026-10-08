@@ -16,7 +16,7 @@ fn records_have_their_declared_lengths() {
         assert_eq!(bounds.len(), 28 + checkpoints + 3 * polynomials);
         assert_eq!(
             bounds[15],
-            (profile.setup_contributors() + profile.corrupt()) as u64
+            (profile.setup_contributors() + profile.maximum_corrupt_participants()) as u64
         );
         assert_eq!(
             bounds[..2],

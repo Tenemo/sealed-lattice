@@ -101,7 +101,7 @@ pub fn profile_bounds(profile: Profile) -> Vec<u64> {
         *ballot.start(),
         *ballot.end(),
         close_quorum(participants),
-        profile.corrupt(),
+        profile.maximum_corrupt_participants(),
         profile.setup_contributors(),
         profile.setup_eligible_contributors(),
         response,

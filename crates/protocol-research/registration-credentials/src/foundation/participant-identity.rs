@@ -64,5 +64,5 @@ pub fn derive_participant_identity(
 }
 
 #[cfg(test)]
-#[path = "participant_identity-tests.rs"]
+#[path = "participant-identity-tests.rs"]
 mod tests;

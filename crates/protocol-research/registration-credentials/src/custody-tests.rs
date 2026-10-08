@@ -34,7 +34,7 @@ fn restored_signing_keys_cannot_recreate_authority_the_root_does_not_unlock() {
     assert!(restored.sign_registration(for_repeat).is_err());
     assert!(restored.seal_complete().is_err());
     let purposes = [
-        SigningPurpose::Proposal,
+        SigningPurpose::RosterProposal,
         SigningPurpose::Offer,
         SigningPurpose::SelectionProposal,
         SigningPurpose::SelectionEndorsement,
@@ -91,7 +91,7 @@ fn restored_signing_keys_cannot_recreate_authority_the_root_does_not_unlock() {
 #[test]
 fn signing_purpose_positions_are_fixed() {
     for (purpose, position) in [
-        (SigningPurpose::Proposal, 0),
+        (SigningPurpose::RosterProposal, 0),
         (SigningPurpose::Offer, 1),
         (SigningPurpose::SelectionProposal, 2),
         (SigningPurpose::SelectionEndorsement, 3),

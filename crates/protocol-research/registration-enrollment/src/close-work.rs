@@ -148,7 +148,9 @@ impl CloseWork {
     fn count(&self) -> usize {
         self.context.participant_count()
     }
-    fn roster(&self) -> &registration_credentials::roster_authentication::OrganizerSignedRoster {
+    fn roster(
+        &self,
+    ) -> &registration_credentials::roster_authentication::AuthenticatedRosterProposal {
         self.context.setup().roster()
     }
     fn known(&self, identity: &[u8; 64]) -> bool {

@@ -5,7 +5,7 @@ use registration_credentials::foundation::{
 use registration_credentials::{
     SIGNATURE_BYTES,
     roster::{RetainedContributionContext, RosterProposal},
-    roster_authentication::{OrganizerSignedRoster, verify_roster_proposal},
+    roster_authentication::{AuthenticatedRosterProposal, authenticate_roster_proposal},
     roster_input::RosterInputVerifier,
 };
 use std::{cell::RefCell, sync::Arc};
@@ -50,7 +50,7 @@ struct Session {
     roster: Option<RosterInputVerifier>,
     proposal: Option<RosterProposal>,
     proposal_signature: Option<[u8; SIGNATURE_BYTES]>,
-    signed_proposal: Option<Arc<OrganizerSignedRoster>>,
+    signed_proposal: Option<Arc<AuthenticatedRosterProposal>>,
     offer: OfferSigning,
     contribution_output: Vec<u8>,
     unsigned_selection: Option<registration_credentials::setup_selection::SelectionProposal>,
@@ -105,7 +105,7 @@ fn organizer_context(
 )> {
     use registration_credentials::foundation::{
         StabilizedDisplayText,
-        ceremony::{Manifest, OptionDefinition},
+        manifest::{Manifest, OptionDefinition},
     };
     let runtime = input.get(..64)?.try_into().ok()?;
     let top_count = u16::from_le_bytes(input.get(64..66)?.try_into().ok()?);
@@ -721,7 +721,7 @@ pub extern "C" fn verify_roster_signature(length: usize) -> u32 {
         let Ok(proposal) = roster.finish() else {
             return 1;
         };
-        let Ok(verified) = verify_roster_proposal(proposal, &state.input[..length]) else {
+        let Ok(verified) = authenticate_roster_proposal(proposal, &state.input[..length]) else {
             return 1;
         };
         state.proposal_signature = Some(*verified.signature());
@@ -877,7 +877,7 @@ fn offer_operation(
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn offer_signing(operation: u32, argument: usize, length: usize) -> u32 {
+pub extern "C" fn offer_signing_command(operation: u32, argument: usize, length: usize) -> u32 {
     SESSION.with(|state| {
         u32::from(offer_operation(&mut state.borrow_mut(), operation, argument, length).is_err())
     })
@@ -989,7 +989,7 @@ fn selection_operation(
     Ok(())
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn selection_signing(operation: u32, length: usize) -> u32 {
+pub extern "C" fn selection_signing_command(operation: u32, length: usize) -> u32 {
     SESSION.with(|state| {
         u32::from(selection_operation(&mut state.borrow_mut(), operation, length).is_err())
     })

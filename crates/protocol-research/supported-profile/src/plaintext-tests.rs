@@ -8,14 +8,15 @@ fn evaluate(coefficients: &[i32], point: u32) -> u32 {
         .step_by(2)
         .rev()
         .fold(0, |sum, coefficient| {
-            (multiply(sum, point) + coefficient.rem_euclid(PRIME as i32) as u32) % PRIME
+            (multiply(sum, point) + coefficient.rem_euclid(PLAINTEXT_MODULUS as i32) as u32)
+                % PLAINTEXT_MODULUS
         })
 }
 
 fn canonical(coefficients: &[i32]) -> Vec<u32> {
     coefficients
         .iter()
-        .map(|value| value.rem_euclid(PRIME as i32) as u32)
+        .map(|value| value.rem_euclid(PLAINTEXT_MODULUS as i32) as u32)
         .collect()
 }
 
@@ -23,7 +24,7 @@ fn canonical(coefficients: &[i32]) -> Vec<u32> {
 fn slots_are_the_values_at_the_orbit_of_five() {
     for degree in [16, 64, 256] {
         let slots: Vec<u32> = (0..degree / 4)
-            .map(|slot| (slot as u32 * 7_919 + 13) % PRIME)
+            .map(|slot| (slot as u32 * 7_919 + 13) % PLAINTEXT_MODULUS)
             .collect();
         let coefficients = encode_slots(&slots, degree);
         assert_eq!(coefficients.len(), degree);
@@ -37,9 +38,9 @@ fn slots_are_the_values_at_the_orbit_of_five() {
         assert!(
             coefficients
                 .iter()
-                .all(|value| value.unsigned_abs() <= PRIME / 2)
+                .all(|value| value.unsigned_abs() <= PLAINTEXT_MODULUS / 2)
         );
-        let root = power(3, (PRIME - 1) / degree as u32);
+        let root = power(3, (PLAINTEXT_MODULUS - 1) / degree as u32);
         let positions: Vec<usize> = slot_positions(degree).collect();
         let mut exponent = 1;
         for (slot, position) in slots.iter().zip(&positions) {
@@ -62,7 +63,7 @@ fn slots_are_the_values_at_the_orbit_of_five() {
 fn full_degree_slots_survive_a_round_trip_and_ignore_odd_coefficients() {
     let degree = 65_536;
     let slots: Vec<u32> = (0..degree / 4)
-        .map(|slot| (slot as u32).wrapping_mul(2_654_435_761) % PRIME)
+        .map(|slot| (slot as u32).wrapping_mul(2_654_435_761) % PLAINTEXT_MODULUS)
         .collect();
     let mut coefficients = canonical(&encode_slots(&slots, degree));
     let values = odd_power_values(&coefficients);
@@ -79,16 +80,22 @@ fn full_degree_slots_survive_a_round_trip_and_ignore_odd_coefficients() {
         slots
     );
     coefficients[1] = 5;
-    coefficients[degree - 1] = PRIME - 1;
+    coefficients[degree - 1] = PLAINTEXT_MODULUS - 1;
     assert_eq!(odd_power_values(&coefficients), values);
 }
 
 #[test]
 fn centered_residues_stay_within_half_the_modulus() {
     assert_eq!(centered(0), 0);
-    assert_eq!(centered(PRIME / 2), (PRIME / 2) as i32);
-    assert_eq!(centered(PRIME / 2 + 1), -((PRIME / 2) as i32));
-    assert_eq!(centered(PRIME - 1), -1);
-    assert_eq!(multiply(power(3, PRIME - 2), 3), 1);
-    assert_eq!(power(3, (PRIME - 1) / 2), PRIME - 1);
+    assert_eq!(
+        centered(PLAINTEXT_MODULUS / 2),
+        (PLAINTEXT_MODULUS / 2) as i32
+    );
+    assert_eq!(
+        centered(PLAINTEXT_MODULUS / 2 + 1),
+        -((PLAINTEXT_MODULUS / 2) as i32)
+    );
+    assert_eq!(centered(PLAINTEXT_MODULUS - 1), -1);
+    assert_eq!(multiply(power(3, PLAINTEXT_MODULUS - 2), 3), 1);
+    assert_eq!(power(3, (PLAINTEXT_MODULUS - 1) / 2), PLAINTEXT_MODULUS - 1);
 }

@@ -1,6 +1,6 @@
 use crate::{
     CHUNK_LIMIT, HEADER_LENGTH,
-    admission::{BallotRelationVerifier, VerifiedBallotRelation},
+    relation::{BallotRelationVerifier, VerifiedBallotRelation},
     statement::setup_input,
 };
 use registration_credentials::{ballot_body, identity::BodyHasher, poll::VerifiedPoll};
@@ -39,7 +39,7 @@ impl VerifiedBallotBody {
 
 /// The statement polynomials that every ballot under one verified setup
 /// shares: the common polynomials' canonical records and the encryption keys
-/// read from that setup, in statement order. The admission verifier still
+/// read from that setup, in statement order. The relation verifier still
 /// checks each one's identity in every statement.
 pub struct BallotInputs {
     setup: Arc<VerifiedSetupAggregate>,

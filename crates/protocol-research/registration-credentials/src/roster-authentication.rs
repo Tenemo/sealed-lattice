@@ -6,11 +6,11 @@ use fips204::{
 
 pub const ROSTER_SIGNATURE_CONTEXT: &[u8] = b"sealed-lattice/roster-proposal/v1";
 
-pub struct OrganizerSignedRoster {
+pub struct AuthenticatedRosterProposal {
     proposal: RosterProposal,
     signature: [u8; SIGNATURE_BYTES],
 }
-impl OrganizerSignedRoster {
+impl AuthenticatedRosterProposal {
     pub fn proposal(&self) -> &RosterProposal {
         &self.proposal
     }
@@ -21,7 +21,7 @@ impl OrganizerSignedRoster {
 
 impl Credential {
     pub fn validate_roster_proposal_target(&self, proposal: &RosterProposal) -> Result<(), Error> {
-        self.check_unlocked(SigningPurpose::Proposal)?;
+        self.check_unlocked(SigningPurpose::RosterProposal)?;
         if self.proposal_signed {
             return Err(Error::Consumed);
         }
@@ -43,10 +43,10 @@ impl Credential {
     }
 }
 
-pub fn verify_roster_proposal(
+pub fn authenticate_roster_proposal(
     proposal: RosterProposal,
     signature: &[u8],
-) -> Result<OrganizerSignedRoster, Error> {
+) -> Result<AuthenticatedRosterProposal, Error> {
     let signature: [u8; SIGNATURE_BYTES] = signature.try_into().map_err(|_| Error::Shape)?;
     let key = proposal.records()[proposal.organizer_position()]
         .header()
@@ -55,7 +55,7 @@ pub fn verify_roster_proposal(
     if !public.verify(&proposal.identity(), &signature, ROSTER_SIGNATURE_CONTEXT) {
         return Err(Error::Crypto);
     }
-    Ok(OrganizerSignedRoster {
+    Ok(AuthenticatedRosterProposal {
         proposal,
         signature,
     })

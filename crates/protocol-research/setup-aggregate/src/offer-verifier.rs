@@ -3,7 +3,7 @@ use registration_credentials::{
     contribution_body::{ContributionBodyHasher, ContributionBodyHeader, body_length},
     contribution_offer::{AuthenticatedContributionOffer, OfferEnvelope},
     identity::{IdentityHasher, PUBLIC_POLYNOMIAL_DOMAIN},
-    roster_authentication::OrganizerSignedRoster,
+    roster_authentication::AuthenticatedRosterProposal,
     source_binding::FheKeyCommitmentHasher,
 };
 use setup_witness::{Profile, contribution::common_records_job};
@@ -50,7 +50,7 @@ pub struct VerifiedContributionOffer {
     polynomials: Vec<OfferPolynomial>,
 }
 impl VerifiedContributionOffer {
-    pub fn roster(&self) -> &Arc<OrganizerSignedRoster> {
+    pub fn roster(&self) -> &Arc<AuthenticatedRosterProposal> {
         self.offer.roster()
     }
     pub fn envelope(&self) -> &OfferEnvelope {

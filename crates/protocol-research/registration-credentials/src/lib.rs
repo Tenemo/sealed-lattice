@@ -44,7 +44,7 @@ use poll::VerifiedPoll;
 
 use zeroize::Zeroizing;
 
-pub const SIGNATURE_CONTEXT: &[u8] = b"sealed-lattice/registration/v1";
+pub const REGISTRATION_SIGNATURE_CONTEXT: &[u8] = b"sealed-lattice/registration/v1";
 /// Every participant signature is one ML-DSA-65 signature.
 pub const SIGNATURE_BYTES: usize = ml_dsa_65::SIG_LEN;
 /// Every participant signing key is one ML-DSA-65 public key.
@@ -133,7 +133,8 @@ impl Credential {
         }
         self.signed = true;
         self.poll_creation_consumed = true;
-        let signature = self.sign_deterministically(&body.digest, SIGNATURE_CONTEXT)?;
+        let signature =
+            self.sign_deterministically(&body.digest, REGISTRATION_SIGNATURE_CONTEXT)?;
         self.completed_body = Some(body.digest);
         Ok(signature)
     }
@@ -270,7 +271,7 @@ pub fn verify_registration_signature(body: BodyDigest, signature: &[u8]) -> bool
     let Ok(public) = ml_dsa_65::PublicKey::try_from_bytes(body.signing_public) else {
         return false;
     };
-    public.verify(&body.digest, &signature, SIGNATURE_CONTEXT)
+    public.verify(&body.digest, &signature, REGISTRATION_SIGNATURE_CONTEXT)
 }
 
 #[cfg(test)]

@@ -51,11 +51,11 @@ impl Fri {
         transcript: &mut Transcript,
     ) -> Self {
         let mut coefficients = Zeroizing::new(coefficients);
-        assert_eq!(coefficients.len(), MAX_DEGREE + 1);
-        let mut length = DOMAIN;
+        assert_eq!(coefficients.len(), MAXIMUM_DEGREE + 1);
+        let mut length = EVALUATION_DOMAIN_SIZE;
         let mut coset = 7;
         let mut layers = Vec::new();
-        let rounds = (DOMAIN / 2).ilog2() as usize;
+        let rounds = (EVALUATION_DOMAIN_SIZE / 2).ilog2() as usize;
         for round in 0..rounds {
             if round > 0 {
                 transcript.next();
@@ -105,7 +105,7 @@ impl Fri {
                         .try_into()
                         .unwrap(),
                 ) as usize
-                    % (DOMAIN / 2)
+                    % (EVALUATION_DOMAIN_SIZE / 2)
             })
             .collect();
         Self {

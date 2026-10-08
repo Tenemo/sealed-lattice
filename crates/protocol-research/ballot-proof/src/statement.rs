@@ -515,7 +515,9 @@ impl StatementStream {
         if alpha.iter().any(|value| *value >= MODULUS)
             || queries.is_empty()
             || queries.len() > 2 * QUERY_COUNT
-            || queries.iter().any(|value| *value as usize >= DOMAIN)
+            || queries
+                .iter()
+                .any(|value| *value as usize >= EVALUATION_DOMAIN_SIZE)
             || queries.windows(2).any(|pair| pair[0] >= pair[1])
         {
             return Err(Error::Shape);

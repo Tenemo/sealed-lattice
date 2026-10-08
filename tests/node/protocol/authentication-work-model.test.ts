@@ -430,7 +430,7 @@ describe('complete participant authentication accounting', () => {
         const roles = compileCompleteAuthenticationFrameWork();
         for (const [purpose, file, name] of [
             ['poll-definition', 'poll.rs', 'POLL_SIGNATURE_CONTEXT'],
-            ['registration', 'lib.rs', 'SIGNATURE_CONTEXT'],
+            ['registration', 'lib.rs', 'REGISTRATION_SIGNATURE_CONTEXT'],
             [
                 'roster-proposal',
                 'roster-authentication.rs',

@@ -203,5 +203,5 @@ fn read_display_text(item: &CanonicalItem) -> SchemaResult<StabilizedDisplayText
 }
 
 #[cfg(test)]
-#[path = "ceremony-tests.rs"]
+#[path = "manifest-tests.rs"]
 mod tests;

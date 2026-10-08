@@ -589,7 +589,13 @@ const signing = (
     argument = 0,
 ) => {
     writeModuleInput(context, bytes);
-    if (context.module.offer_signing(operation, argument, bytes.length) !== 0)
+    if (
+        context.module.offer_signing_command(
+            operation,
+            argument,
+            bytes.length,
+        ) !== 0
+    )
         throw new Error('The contribution signer refused an operation.');
     return readModuleMemory(
         context.module,

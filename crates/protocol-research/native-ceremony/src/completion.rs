@@ -340,7 +340,7 @@ pub fn run(
     }
     let certificate = Arc::new(collector.certificate().unwrap());
     assert_eq!(certificate.target().identity(), target.identity());
-    println!("Verified complete original-credential target certificate");
+    println!("Verified complete original-credential inventory certificate");
     if target.ciphertext().is_none() {
         let terminal = verify_no_result(certificate).unwrap();
         assert_eq!(
@@ -464,7 +464,12 @@ pub fn run(
     }
     let subsets = checked.len();
     let departure_sets = scenario.departed.map_or_else(
-        || crate::scenario::checked_departures(profile.participants(), profile.corrupt()),
+        || {
+            crate::scenario::checked_departures(
+                profile.participants(),
+                profile.maximum_corrupt_participants(),
+            )
+        },
         |position| vec![vec![position]],
     );
     for missing in &departure_sets {

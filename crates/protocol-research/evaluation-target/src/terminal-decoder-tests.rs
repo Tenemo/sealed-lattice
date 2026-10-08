@@ -133,7 +133,7 @@ fn slot_value(coefficients: &[u32], slot: usize) -> u32 {
         .step_by(2)
         .rev()
         .fold(0u64, |sum, value| {
-            (sum * point + u64::from(*value)) % u64::from(PRIME)
+            (sum * point + u64::from(*value)) % u64::from(PLAINTEXT_MODULUS)
         }) as u32
 }
 #[test]
@@ -154,15 +154,16 @@ fn packed_ballots_decode_through_every_requested_result_length() {
         for scores in &ballots {
             let packed = ballot_encryption::packing::encode(scores).unwrap();
             for (total, value) in sum.iter_mut().zip(packed) {
-                *total = (*total + value.rem_euclid(PRIME as i32) as u32) % PRIME;
+                *total = (*total + value.rem_euclid(PLAINTEXT_MODULUS as i32) as u32)
+                    % PLAINTEXT_MODULUS;
             }
         }
         let totals: Vec<i64> = (0..options)
             .map(|option| ballots.iter().map(|scores| i64::from(scores[option])).sum())
             .collect();
         let centered = |value: u32| {
-            if value > PRIME / 2 {
-                i64::from(value) - i64::from(PRIME)
+            if value > PLAINTEXT_MODULUS / 2 {
+                i64::from(value) - i64::from(PLAINTEXT_MODULUS)
             } else {
                 i64::from(value)
             }

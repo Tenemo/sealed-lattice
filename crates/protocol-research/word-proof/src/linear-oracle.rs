@@ -428,7 +428,7 @@ impl AffineValues {
         while !self.prepared.is_empty() {
             self.start_oldest();
         }
-        let mut values = Zeroizing::new(vec![ZERO; DOMAIN]);
+        let mut values = Zeroizing::new(vec![ZERO; EVALUATION_DOMAIN_SIZE]);
         self.sums.finish(|shard, first, output| {
             for (row, value) in output.chunks_exact(ELEMENT_BYTES).enumerate() {
                 values[shard + SHARDS * (first + row)] = field::decode(value);
@@ -464,7 +464,7 @@ impl LinearOracle {
         adversarial_affine: bool,
     ) -> Self {
         let mut evaluations = Zeroizing::new(evaluations);
-        assert_eq!(evaluations.len(), DOMAIN);
+        assert_eq!(evaluations.len(), EVALUATION_DOMAIN_SIZE);
         Transform::cached(SYSTEMATIC).extension(&mut evaluations, true);
         let inverse_coset = base::power(7, MODULUS - 2);
         let mut weight = 1;
@@ -510,7 +510,7 @@ impl LinearOracle {
         }
         let mut remainder = Zeroizing::new(evaluations[1..SYSTEMATIC].to_vec());
         drop(evaluations);
-        let mut tree = Tree::new(role, 2, DOMAIN, 48);
+        let mut tree = Tree::new(role, 2, EVALUATION_DOMAIN_SIZE, 48);
         // Openings compute the quotient's values again.
         tree.forget_leaves();
         let mut rows = RowShards::open(&tree);
@@ -539,7 +539,10 @@ impl LinearOracle {
             if selected.is_empty() {
                 continue;
             }
-            let twist = base::multiply(7, base::power(field::root(DOMAIN), coset as u128));
+            let twist = base::multiply(
+                7,
+                base::power(field::root(EVALUATION_DOMAIN_SIZE), coset as u128),
+            );
             let positions: Vec<_> = selected.iter().map(|(_, index)| **index / 4).collect();
             let values = Zeroizing::new(crate::oracles::extension_values_selected(
                 &self.quotient,

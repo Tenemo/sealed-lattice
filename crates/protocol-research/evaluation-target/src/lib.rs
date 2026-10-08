@@ -15,10 +15,10 @@ pub fn restore_browser_target(target: target::VerifiedEvaluationTarget) -> bool 
 pub fn verified_browser_release_context() -> Option<std::sync::Arc<release::ReleaseContext>> {
     completion_browser::verified_context()
 }
-/// The target certificate that this instance's completion verified.
+/// The inventory certificate that this instance's completion verified.
 #[cfg(target_arch = "wasm32")]
 pub fn verified_browser_certificate()
--> Option<std::sync::Arc<certification::VerifiedTargetCertificate>> {
+-> Option<std::sync::Arc<certification::VerifiedInventoryCertificate>> {
     completion_browser::verified_certificate()
 }
 pub mod certification;

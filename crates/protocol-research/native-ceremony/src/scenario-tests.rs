@@ -13,7 +13,7 @@ fn selection_fork_has_only_a_corrupt_organizer_and_no_unavailable_participant() 
 fn setup_departure_keeps_the_original_roster_and_separates_corruption_from_loss() {
     let scenario = Scenario::setup_departure();
     assert_eq!(scenario.profile().participants(), 4);
-    assert_eq!(scenario.profile().corrupt(), 1);
+    assert_eq!(scenario.profile().maximum_corrupt_participants(), 1);
     assert_eq!(scenario.profile().setup_eligible_contributors(), 3);
     assert_eq!(scenario.profile().setup_contributors(), 2);
     assert_eq!(scenario.profile().inventory_threshold(), 3);
@@ -47,7 +47,7 @@ fn every_profile_meets_the_turnout_and_bounds_its_omission() {
     for participants in 3..=20 {
         let profile = Profile::new(participants, 2).unwrap();
         let scenario = Scenario::new(profile);
-        let corrupt = profile.corrupt();
+        let corrupt = profile.maximum_corrupt_participants();
         assert_eq!(scenario.voters.len(), profile.minimum_turnout());
         assert!(
             scenario

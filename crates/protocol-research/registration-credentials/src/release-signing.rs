@@ -1,6 +1,6 @@
 use crate::{
     Credential, Error, SIGNATURE_BYTES, SigningPurpose, ballot_authentication::RetainedBallotOwner,
-    identity::BodyHasher, roster_authentication::OrganizerSignedRoster,
+    identity::BodyHasher, roster_authentication::AuthenticatedRosterProposal,
     target_signing::TargetMessage,
 };
 use std::ops::RangeInclusive;
@@ -146,7 +146,7 @@ impl Credential {
     pub fn begin_release(
         &mut self,
         owner: &RetainedBallotOwner,
-        roster: &OrganizerSignedRoster,
+        roster: &AuthenticatedRosterProposal,
         message: &TargetMessage,
     ) -> Result<(), Error> {
         self.check_target_owner(owner, roster, message)?;
@@ -167,7 +167,7 @@ impl Credential {
     pub fn sign_release(
         &mut self,
         owner: &RetainedBallotOwner,
-        roster: &OrganizerSignedRoster,
+        roster: &AuthenticatedRosterProposal,
         envelope: &ReleaseEnvelope,
     ) -> Result<[u8; SIGNATURE_BYTES], Error> {
         self.check_ballot_owner(owner)?;

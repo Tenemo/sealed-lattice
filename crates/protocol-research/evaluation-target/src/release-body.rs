@@ -168,14 +168,14 @@ impl ReleaseBodyVerifier {
     }
 }
 pub struct VerifiedReleaseBody {
-    certificate: Arc<crate::certification::VerifiedTargetCertificate>,
+    certificate: Arc<crate::certification::VerifiedInventoryCertificate>,
     position: usize,
     identity: [u8; 64],
     length: usize,
     partial: Vec<BigInt>,
 }
 impl VerifiedReleaseBody {
-    pub fn certificate(&self) -> &Arc<crate::certification::VerifiedTargetCertificate> {
+    pub fn certificate(&self) -> &Arc<crate::certification::VerifiedInventoryCertificate> {
         &self.certificate
     }
     pub fn position(&self) -> usize {

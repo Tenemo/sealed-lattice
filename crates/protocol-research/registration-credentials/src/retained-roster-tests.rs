@@ -3,7 +3,7 @@ use crate::registration::CHUNK_LIMIT;
 use crate::{
     foundation::{
         RegistrationHeader, StabilizedDisplayText,
-        ceremony::{Manifest, OptionDefinition},
+        manifest::{Manifest, OptionDefinition},
         normalize_username,
     },
     poll::{PollDraft, SignedPoll, verify_poll},

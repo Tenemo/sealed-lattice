@@ -1,5 +1,5 @@
 use crate::{
-    certification::VerifiedTargetCertificate,
+    certification::VerifiedInventoryCertificate,
     interpolation::cleared_weights,
     release::{self, Error},
     release_body::VerifiedReleaseShare,
@@ -8,7 +8,7 @@ use linked_release_proof::statement::release_modulus;
 use num_bigint::BigInt;
 use std::sync::Arc;
 use supported_profile::{
-    PLAINTEXT_MODULUS as PRIME, Profile,
+    PLAINTEXT_MODULUS, Profile,
     plaintext::{multiply, odd_power_values, power, slot_positions},
     relation::{SYSTEMATIC, release_coefficient_bytes},
 };
@@ -24,7 +24,7 @@ fn selected_positions(
     let window = profile.rank_window();
     if !(1..=options).contains(&top_count)
         || coefficients.len() != SYSTEMATIC
-        || coefficients.iter().any(|value| *value >= PRIME)
+        || coefficients.iter().any(|value| *value >= PLAINTEXT_MODULUS)
         || coefficients
             .iter()
             .skip(1)
@@ -80,15 +80,15 @@ fn selected_positions(
 }
 
 pub struct VerifiedNoResult {
-    certificate: Arc<VerifiedTargetCertificate>,
+    certificate: Arc<VerifiedInventoryCertificate>,
 }
 impl VerifiedNoResult {
-    pub fn certificate(&self) -> &Arc<VerifiedTargetCertificate> {
+    pub fn certificate(&self) -> &Arc<VerifiedInventoryCertificate> {
         &self.certificate
     }
 }
 pub fn verify_no_result(
-    certificate: Arc<VerifiedTargetCertificate>,
+    certificate: Arc<VerifiedInventoryCertificate>,
 ) -> Result<VerifiedNoResult, Error> {
     if certificate.target().ciphertext().is_some() {
         return Err(Error::Context);
@@ -96,7 +96,7 @@ pub fn verify_no_result(
     Ok(VerifiedNoResult { certificate })
 }
 pub struct VerifiedResult {
-    certificate: Arc<VerifiedTargetCertificate>,
+    certificate: Arc<VerifiedInventoryCertificate>,
     identifiers: Vec<String>,
     participants: Vec<usize>,
 }
@@ -107,16 +107,16 @@ impl VerifiedResult {
     pub fn participants(&self) -> &[usize] {
         &self.participants
     }
-    pub fn certificate(&self) -> &Arc<VerifiedTargetCertificate> {
+    pub fn certificate(&self) -> &Arc<VerifiedInventoryCertificate> {
         &self.certificate
     }
 }
 pub struct ReleaseCollector {
-    certificate: Arc<VerifiedTargetCertificate>,
+    certificate: Arc<VerifiedInventoryCertificate>,
     shares: Vec<Option<Arc<VerifiedReleaseShare>>>,
 }
 impl ReleaseCollector {
-    pub fn new(certificate: Arc<VerifiedTargetCertificate>) -> Result<Self, Error> {
+    pub fn new(certificate: Arc<VerifiedInventoryCertificate>) -> Result<Self, Error> {
         let target = certificate.target();
         if target.ciphertext().is_none() {
             return Err(Error::NoResult);
@@ -203,7 +203,7 @@ impl ReleaseCollector {
                 }
             }
         }
-        let inverse_plain_clearing = power(profile.clearing_factor() as u32, PRIME - 2);
+        let inverse_plain_clearing = power(profile.clearing_factor() as u32, PLAINTEXT_MODULUS - 2);
         let plaintext: Vec<u32> = phase
             .into_iter()
             .map(|value| {
@@ -213,9 +213,9 @@ impl ReleaseCollector {
                 }
                 let negative = value > half;
                 let magnitude = if negative { &modulus - value } else { value };
-                let rounded = (magnitude * PRIME + &half) / &modulus;
+                let rounded = (magnitude * PLAINTEXT_MODULUS + &half) / &modulus;
                 let value = if negative { -rounded } else { rounded };
-                let residue = ((value % PRIME) + PRIME) % PRIME;
+                let residue = ((value % PLAINTEXT_MODULUS) + PLAINTEXT_MODULUS) % PLAINTEXT_MODULUS;
                 let digits = residue.to_u32_digits().1;
                 let value = digits.first().copied().unwrap_or(0);
                 multiply(value, inverse_plain_clearing)

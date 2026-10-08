@@ -6,7 +6,7 @@ use crate::{
     identity::identity,
     poll::VerifiedPoll,
     roster::RosterProposal,
-    roster_authentication::OrganizerSignedRoster,
+    roster_authentication::AuthenticatedRosterProposal,
 };
 use fips204::{
     ml_dsa_65,
@@ -143,12 +143,12 @@ impl SelectionProposal {
 
 #[derive(Clone)]
 pub struct AuthenticatedSelectionProposal {
-    roster: Arc<OrganizerSignedRoster>,
+    roster: Arc<AuthenticatedRosterProposal>,
     selection: SelectionProposal,
     signature: [u8; SIGNATURE_BYTES],
 }
 impl AuthenticatedSelectionProposal {
-    pub fn roster(&self) -> &Arc<OrganizerSignedRoster> {
+    pub fn roster(&self) -> &Arc<AuthenticatedRosterProposal> {
         &self.roster
     }
     pub fn selection(&self) -> &SelectionProposal {
@@ -159,7 +159,7 @@ impl AuthenticatedSelectionProposal {
     }
 }
 pub fn authenticate_selection(
-    roster: Arc<OrganizerSignedRoster>,
+    roster: Arc<AuthenticatedRosterProposal>,
     body: &[u8],
     signature: &[u8],
 ) -> Result<AuthenticatedSelectionProposal, Error> {
@@ -248,7 +248,7 @@ fn endorsement_packet(
     bytes
 }
 pub fn authenticate_endorsement(
-    roster: &OrganizerSignedRoster,
+    roster: &AuthenticatedRosterProposal,
     selection: &SelectionProposal,
     packet: &[u8],
 ) -> Result<AuthenticatedSelectionEndorsement, Error> {
@@ -333,7 +333,7 @@ pub fn encode_certificate(
     Ok(bytes)
 }
 pub fn authenticate_certificate(
-    roster: Arc<OrganizerSignedRoster>,
+    roster: Arc<AuthenticatedRosterProposal>,
     bytes: &[u8],
 ) -> Result<AuthenticatedSelectionCertificate, Error> {
     if bytes.len() < 8 || &bytes[..4] != b"SSC1" {
@@ -372,7 +372,7 @@ pub fn authenticate_certificate(
 impl Credential {
     pub fn sign_selection_proposal(
         &mut self,
-        roster: &OrganizerSignedRoster,
+        roster: &AuthenticatedRosterProposal,
         selection: &SelectionProposal,
     ) -> Result<[u8; SIGNATURE_BYTES], Error> {
         self.check_unlocked(SigningPurpose::SelectionProposal)?;
@@ -388,7 +388,7 @@ impl Credential {
     }
     pub fn endorse_selection(
         &mut self,
-        roster: &OrganizerSignedRoster,
+        roster: &AuthenticatedRosterProposal,
         selection: &SelectionProposal,
         position: usize,
     ) -> Result<Vec<u8>, Error> {
@@ -430,7 +430,7 @@ impl Credential {
     }
     pub fn restore_selection_endorsement(
         &mut self,
-        roster: &OrganizerSignedRoster,
+        roster: &AuthenticatedRosterProposal,
         endorsement: &AuthenticatedSelectionEndorsement,
     ) -> Result<(), Error> {
         self.check_confirmed_position(roster.proposal(), endorsement.position)?;

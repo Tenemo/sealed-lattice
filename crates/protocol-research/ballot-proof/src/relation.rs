@@ -236,5 +236,5 @@ impl BallotRelationVerifier {
 }
 
 #[cfg(test)]
-#[path = "admission-tests.rs"]
+#[path = "relation-tests.rs"]
 mod tests;

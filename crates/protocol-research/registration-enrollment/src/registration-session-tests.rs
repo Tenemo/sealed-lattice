@@ -6,7 +6,7 @@ use registration_credentials::{
     Credential, Error,
     foundation::{
         CanonicalItem, CanonicalTuple, StabilizedDisplayText,
-        ceremony::{Manifest, OptionDefinition},
+        manifest::{Manifest, OptionDefinition},
         participant_identity::derive_participant_identity,
     },
     poll::{PollDraft, VerifiedPoll, verify_poll},

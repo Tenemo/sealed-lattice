@@ -66,7 +66,7 @@ fn direct_combination(
 // The weighted products of two polynomials' values at each coset row.
 fn direct_products(weight: Element, left: &[Element], right: &[Element]) -> Vec<Element> {
     let transform = Transform::new(SYSTEMATIC);
-    let mut output = vec![ZERO; DOMAIN];
+    let mut output = vec![ZERO; EVALUATION_DOMAIN_SIZE];
     for index in 0..4 {
         let left = extension_values(left, coset(index), &transform);
         let right = extension_values(right, coset(index), &transform);
@@ -220,7 +220,7 @@ fn term_jobs_equal_their_direct_values() {
     );
     let products = finished(products);
     let transform = Transform::new(SYSTEMATIC);
-    let mut expected = vec![ZERO; DOMAIN];
+    let mut expected = vec![ZERO; EVALUATION_DOMAIN_SIZE];
     for index in 0..4 {
         for (weight, coefficients) in weights.iter().zip(&terms) {
             let values = extension_values(coefficients, coset(index), &transform);

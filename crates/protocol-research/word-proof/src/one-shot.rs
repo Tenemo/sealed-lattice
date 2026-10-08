@@ -101,7 +101,7 @@ impl OneShotProof {
             self.second.mask_sum,
             &self.folding,
         );
-        let indices = fri::requested(&self.folding.queries, DOMAIN);
+        let indices = fri::requested(&self.folding.queries, EVALUATION_DOMAIN_SIZE);
         self.first.tree.write_multiproof(
             &indices,
             |leaves| self.first.opened_rows(&self.witness, leaves),

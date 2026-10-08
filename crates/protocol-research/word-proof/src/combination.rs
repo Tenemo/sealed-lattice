@@ -199,7 +199,7 @@ fn encode_common(relation: &Relation, message: &[u8], beta: Element) -> Vec<u8> 
         bytes.extend(field::encode(challenge(message, index, false)));
     }
     for degree in relation.degrees() {
-        bytes.extend(((MAX_DEGREE - degree) as u32).to_le_bytes());
+        bytes.extend(((MAXIMUM_DEGREE - degree) as u32).to_le_bytes());
     }
     bytes.extend(field::encode(beta));
     bytes

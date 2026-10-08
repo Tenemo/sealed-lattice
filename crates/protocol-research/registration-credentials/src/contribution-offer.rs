@@ -3,7 +3,7 @@ use crate::{
     foundation::{CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple},
     identity::identity,
     roster::{RetainedContributionContext, RosterProposal},
-    roster_authentication::OrganizerSignedRoster,
+    roster_authentication::AuthenticatedRosterProposal,
 };
 use fips204::{
     ml_dsa_65,
@@ -171,12 +171,12 @@ impl OfferEnvelope {
     }
 }
 pub struct AuthenticatedContributionOffer {
-    roster: Arc<OrganizerSignedRoster>,
+    roster: Arc<AuthenticatedRosterProposal>,
     envelope: OfferEnvelope,
     signature: [u8; SIGNATURE_BYTES],
 }
 impl AuthenticatedContributionOffer {
-    pub fn roster(&self) -> &Arc<OrganizerSignedRoster> {
+    pub fn roster(&self) -> &Arc<AuthenticatedRosterProposal> {
         &self.roster
     }
     pub fn envelope(&self) -> &OfferEnvelope {
@@ -187,7 +187,7 @@ impl AuthenticatedContributionOffer {
     }
 }
 pub fn authenticate_offer(
-    roster: Arc<OrganizerSignedRoster>,
+    roster: Arc<AuthenticatedRosterProposal>,
     bytes: &[u8],
     signature: &[u8],
 ) -> Result<AuthenticatedContributionOffer, Error> {

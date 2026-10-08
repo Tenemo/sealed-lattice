@@ -3,7 +3,7 @@ use registration_credentials::{
     contribution_offer::authenticate_offer,
     poll::VerifiedPoll,
     roster::RetainedContributionContext,
-    roster_authentication::OrganizerSignedRoster,
+    roster_authentication::AuthenticatedRosterProposal,
     setup_selection::{
         AuthenticatedSelectionCertificate, authenticate_certificate, authenticate_endorsement,
         authenticate_selection, encode_certificate,
@@ -22,7 +22,7 @@ pub struct Prepared {
 pub fn run(
     output: &Path,
     poll: &VerifiedPoll,
-    roster: Arc<OrganizerSignedRoster>,
+    roster: Arc<AuthenticatedRosterProposal>,
     enrollments: &mut OriginalEnrollments,
     selected_authors: &[usize],
     mut alternate_endorser: Option<(usize, registration_credentials::Credential)>,

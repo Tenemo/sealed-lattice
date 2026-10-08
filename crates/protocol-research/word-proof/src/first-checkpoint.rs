@@ -101,9 +101,9 @@ fn fields(relation: &Relation) -> [(usize, usize); 5] {
     [
         (relation.columns() * SYSTEMATIC, 2),
         ((relation.columns() + 1) * MASKS, 16),
-        (MAX_DEGREE + 1, 48),
+        (MAXIMUM_DEGREE + 1, 48),
         (1, SALT_SEED_BYTES),
-        (DOMAIN, 201),
+        (EVALUATION_DOMAIN_SIZE, 201),
     ]
 }
 /// Records of a checkpoint of the relation's first oracle.
@@ -169,7 +169,7 @@ impl Export {
         };
         let first = prover.first.as_mut().ok_or(())?;
         let transcript = prover.transcript.as_ref().ok_or(())?;
-        if first.degree_mask.len() != MAX_DEGREE + 1
+        if first.degree_mask.len() != MAXIMUM_DEGREE + 1
             || transcript.round != 1
             || !transcript.salts.is_empty()
         {
@@ -377,7 +377,7 @@ impl Import {
             tree: Tree::with_seed(
                 &self.header.role,
                 0,
-                DOMAIN,
+                EVALUATION_DOMAIN_SIZE,
                 self.relation.first_width(),
                 self.seed,
             ),

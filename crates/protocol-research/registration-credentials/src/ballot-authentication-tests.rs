@@ -2,7 +2,7 @@ use super::*;
 use crate::ballot_body::*;
 use crate::foundation::{
     StabilizedDisplayText,
-    ceremony::{Manifest, OptionDefinition},
+    manifest::{Manifest, OptionDefinition},
 };
 use crate::poll::{PollDraft, verify_poll};
 fn verified_poll(runtime: [u8; 64]) -> VerifiedPoll {

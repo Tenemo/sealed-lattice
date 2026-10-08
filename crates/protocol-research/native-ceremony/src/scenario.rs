@@ -33,7 +33,7 @@ pub struct Scenario {
 }
 impl Scenario {
     pub fn new(profile: Profile) -> Self {
-        let corrupt = profile.corrupt();
+        let corrupt = profile.maximum_corrupt_participants();
         let role = |rank: usize| corrupt.checked_sub(rank).filter(|position| *position > 0);
         let honest: Vec<_> = (0..profile.participants())
             .filter(|position| *position == 0 || *position > corrupt)
@@ -103,7 +103,7 @@ impl Scenario {
         } else if self.departed.is_some() {
             position == 2
         } else {
-            (1..=self.profile.corrupt()).contains(&position)
+            (1..=self.profile.maximum_corrupt_participants()).contains(&position)
         }
     }
     /// The authors of the usable slots: every accepted voter and the corrupt
@@ -119,7 +119,7 @@ impl Scenario {
     /// its author.
     pub fn omitted_holders(&self) -> std::ops::Range<usize> {
         let participants = self.profile.participants();
-        participants - self.profile.corrupt()..participants
+        participants - self.profile.maximum_corrupt_participants()..participants
     }
     /// The positions the equivocator's first and second on-time envelopes
     /// reach besides itself. The organizer holds neither and the omitted

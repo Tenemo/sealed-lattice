@@ -29,7 +29,7 @@ fn parser(profile: Profile, fhe_key: &[u8]) -> BallotRelationVerifier {
 }
 
 #[test]
-fn admission_stream_refuses_substituted_fixed_auxiliary_coordinates() {
+fn relation_stream_refuses_substituted_fixed_auxiliary_coordinates() {
     let profile = Profile::new(3, 2).unwrap();
     let common =
         setup_witness::contribution::common_records(profile, setup_input(profile).1).unwrap();

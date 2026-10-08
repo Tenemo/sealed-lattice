@@ -1,6 +1,6 @@
 use super::DEGREE;
 use supported_profile::{
-    PLAINTEXT_MODULUS as PRIME, Profile,
+    PLAINTEXT_MODULUS, Profile,
     plaintext::{centered, encode_slots, multiply, power},
 };
 
@@ -8,20 +8,24 @@ fn interpolate(points: &[u32], values: &[u32]) -> Vec<u32> {
     let mut differences = values.to_vec();
     for order in 1..points.len() {
         for index in (order..points.len()).rev() {
-            let numerator = (differences[index] + PRIME - differences[index - 1]) % PRIME;
-            let denominator = (points[index] + PRIME - points[index - order]) % PRIME;
+            let numerator = (differences[index] + PLAINTEXT_MODULUS - differences[index - 1])
+                % PLAINTEXT_MODULUS;
+            let denominator =
+                (points[index] + PLAINTEXT_MODULUS - points[index - order]) % PLAINTEXT_MODULUS;
             assert_ne!(denominator, 0);
-            differences[index] = multiply(numerator, power(denominator, PRIME - 2));
+            differences[index] = multiply(numerator, power(denominator, PLAINTEXT_MODULUS - 2));
         }
     }
     let mut polynomial = vec![*differences.last().unwrap()];
     for index in (0..points.len() - 1).rev() {
         let mut next = vec![0; polynomial.len() + 1];
         for (degree, coefficient) in polynomial.into_iter().enumerate() {
-            next[degree] = (next[degree] + PRIME - multiply(coefficient, points[index])) % PRIME;
-            next[degree + 1] = (next[degree + 1] + coefficient) % PRIME;
+            next[degree] = (next[degree] + PLAINTEXT_MODULUS
+                - multiply(coefficient, points[index]))
+                % PLAINTEXT_MODULUS;
+            next[degree + 1] = (next[degree + 1] + coefficient) % PLAINTEXT_MODULUS;
         }
-        next[0] = (next[0] + differences[index]) % PRIME;
+        next[0] = (next[0] + differences[index]) % PLAINTEXT_MODULUS;
         polynomial = next;
     }
     polynomial
@@ -44,13 +48,13 @@ pub fn parameters(profile: Profile, top_count: usize) -> (Vec<i32>, Vec<Vec<i32>
     assert!((1..=options).contains(&top_count));
     let maximum = profile.comparison_degree() as i32;
     let points: Vec<_> = (0..=maximum)
-        .map(|index| (2 * index - maximum).rem_euclid(PRIME as i32) as u32)
+        .map(|index| (2 * index - maximum).rem_euclid(PLAINTEXT_MODULUS as i32) as u32)
         .collect();
     let values: Vec<_> = (0..=maximum)
         .map(|index| u32::from(2 * index > maximum))
         .collect();
     let comparison = interpolate(&points, &values);
-    assert_eq!(comparison[0], power(2, PRIME - 2));
+    assert_eq!(comparison[0], power(2, PLAINTEXT_MODULUS - 2));
     assert!(
         comparison
             .iter()
@@ -80,7 +84,7 @@ pub fn parameters(profile: Profile, top_count: usize) -> (Vec<i32>, Vec<Vec<i32>
             encode(&slots)
         })
         .collect();
-    let mut offset = vec![PRIME - 1; DEGREE / 4];
+    let mut offset = vec![PLAINTEXT_MODULUS - 1; DEGREE / 4];
     for option in 0..options {
         for rank in 0..options {
             for opponent in 0..option {

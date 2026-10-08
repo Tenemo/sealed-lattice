@@ -44,7 +44,16 @@ fn terms_give_every_column_the_values_of_its_rows() {
         target: ZERO,
         lookup_weight: ZERO,
     };
-    let queries = [0, 1, 2, 3, 17, 1000, SYSTEMATIC as u32, DOMAIN as u32 - 1];
+    let queries = [
+        0,
+        1,
+        2,
+        3,
+        17,
+        1000,
+        SYSTEMATIC as u32,
+        EVALUATION_DOMAIN_SIZE as u32 - 1,
+    ];
     let columns = operator.columns(7);
     assert!(columns[6].iter().all(|value| *value == ZERO));
     let expected = setup_stream_kernel::evaluate_public_columns(columns, &queries).unwrap();

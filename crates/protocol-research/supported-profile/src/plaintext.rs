@@ -3,10 +3,10 @@
 //! is `g(x^2)` for a polynomial `g` of half the degree. Slot `s` holds
 //! `g(r^(5^s))` for the primitive `n`-th root of unity `r`, so the `n / 4`
 //! slots are `g`'s values at the orbit of five among the odd powers of `r`.
-use crate::PLAINTEXT_MODULUS as PRIME;
+use crate::PLAINTEXT_MODULUS;
 
 pub fn multiply(left: u32, right: u32) -> u32 {
-    (u64::from(left) * u64::from(right) % u64::from(PRIME)) as u32
+    (u64::from(left) * u64::from(right) % u64::from(PLAINTEXT_MODULUS)) as u32
 }
 pub fn power(mut value: u32, mut exponent: u32) -> u32 {
     let mut result = 1;
@@ -21,8 +21,8 @@ pub fn power(mut value: u32, mut exponent: u32) -> u32 {
 }
 /// The representative of a residue in the centered range.
 pub fn centered(value: u32) -> i32 {
-    if value > PRIME / 2 {
-        value as i32 - PRIME as i32
+    if value > PLAINTEXT_MODULUS / 2 {
+        value as i32 - PLAINTEXT_MODULUS as i32
     } else {
         value as i32
     }
@@ -30,8 +30,8 @@ pub fn centered(value: u32) -> i32 {
 /// The primitive root of unity of a power-of-two order that divides the
 /// modulus less one, a power of the generator three.
 fn primitive_root(order: usize) -> u32 {
-    assert!(order.is_power_of_two() && ((PRIME - 1) as usize).is_multiple_of(order));
-    power(3, (PRIME - 1) / order as u32)
+    assert!(order.is_power_of_two() && ((PLAINTEXT_MODULUS - 1) as usize).is_multiple_of(order));
+    power(3, (PLAINTEXT_MODULUS - 1) / order as u32)
 }
 /// Replaces the values with their transform at the root, whose order is
 /// their number: each position's new value is the sum of every value times
@@ -54,8 +54,8 @@ fn transform(values: &mut [u32], root: u32) {
             for (left, right) in left.iter_mut().zip(right) {
                 let first = *left;
                 let second = multiply(*right, twiddle);
-                *left = (first + second) % PRIME;
-                *right = (first + PRIME - second) % PRIME;
+                *left = (first + second) % PLAINTEXT_MODULUS;
+                *right = (first + PLAINTEXT_MODULUS - second) % PLAINTEXT_MODULUS;
                 twiddle = multiply(twiddle, step);
             }
         }
@@ -81,9 +81,9 @@ pub fn encode_slots(slots: &[u32], degree: usize) -> Vec<i32> {
     for (position, value) in slot_positions(degree).zip(slots) {
         values[position] = *value;
     }
-    let inverse_root = power(primitive_root(degree), PRIME - 2);
+    let inverse_root = power(primitive_root(degree), PLAINTEXT_MODULUS - 2);
     transform(&mut values, multiply(inverse_root, inverse_root));
-    let mut twist = power((degree / 2) as u32, PRIME - 2);
+    let mut twist = power((degree / 2) as u32, PLAINTEXT_MODULUS - 2);
     let mut coefficients = vec![0; degree];
     for (position, value) in values.into_iter().enumerate() {
         coefficients[2 * position] = centered(multiply(value, twist));

@@ -1,5 +1,5 @@
 use super::*;
-use supported_profile::relation::DOMAIN;
+use supported_profile::relation::EVALUATION_DOMAIN_SIZE;
 
 // Each coefficient is the subgroup's discrete Fourier sum of the indices
 // divided by the subgroup's size.
@@ -55,7 +55,7 @@ fn matches_horner_at_every_small_coset_point() {
 fn transform_matches_the_prover_transform() {
     let mut state = 1;
     let mut length = 2;
-    while length <= DOMAIN {
+    while length <= EVALUATION_DOMAIN_SIZE {
         let values: Vec<u128> = (0..length)
             .map(|_| {
                 state = add(
@@ -91,11 +91,14 @@ fn table_holds_the_index_polynomial_on_the_proof_domain() {
         );
     }
     let table = on_proof_domain();
-    assert_eq!(table.len(), DOMAIN);
-    for index in [0, 1, DOMAIN / 2, DOMAIN - 1] {
+    assert_eq!(table.len(), EVALUATION_DOMAIN_SIZE);
+    for index in [0, 1, EVALUATION_DOMAIN_SIZE / 2, EVALUATION_DOMAIN_SIZE - 1] {
         assert_eq!(
             table[index],
-            evaluate(multiply(7, power(root(DOMAIN), index as u128)))
+            evaluate(multiply(
+                7,
+                power(root(EVALUATION_DOMAIN_SIZE), index as u128)
+            ))
         );
     }
 }

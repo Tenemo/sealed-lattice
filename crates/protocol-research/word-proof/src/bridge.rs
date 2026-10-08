@@ -310,9 +310,9 @@ impl Prover {
             return Ok(());
         }
         let length = if self.output_stage < 3 {
-            DOMAIN
+            EVALUATION_DOMAIN_SIZE
         } else {
-            DOMAIN >> (self.output_stage - 2)
+            EVALUATION_DOMAIN_SIZE >> (self.output_stage - 2)
         };
         if self.rows.is_empty() {
             self.multiproof = Multiproof::default();

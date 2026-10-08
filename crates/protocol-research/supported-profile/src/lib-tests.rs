@@ -75,7 +75,7 @@ fn thresholds_and_interpolation_match_the_census() {
         let profile = Profile::new(participants, 2).unwrap();
         assert_eq!(
             (
-                profile.corrupt(),
+                profile.maximum_corrupt_participants(),
                 profile.inventory_threshold(),
                 profile.release_threshold(),
                 profile.minimum_turnout(),

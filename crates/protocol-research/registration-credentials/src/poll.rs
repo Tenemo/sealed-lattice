@@ -2,7 +2,7 @@ use crate::{
     Credential, Error, SIGNATURE_BYTES, SIGNING_PUBLIC_KEY_BYTES,
     foundation::{
         CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple,
-        ceremony::Manifest, hash_foundation_tuple_512,
+        hash_foundation_tuple_512, manifest::Manifest,
     },
 };
 use fips204::{

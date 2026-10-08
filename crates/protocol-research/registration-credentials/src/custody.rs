@@ -11,7 +11,7 @@ pub const SEALED_SIGNING_SEED_BYTES: usize = 4 + 32 + TAG_BYTES;
 /// mask, which the worker names the same way.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SigningPurpose {
-    Proposal = 0,
+    RosterProposal = 0,
     Offer = 1,
     SelectionProposal = 2,
     SelectionEndorsement = 3,

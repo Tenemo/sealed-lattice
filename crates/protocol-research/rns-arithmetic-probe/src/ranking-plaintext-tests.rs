@@ -2,7 +2,8 @@ use super::*;
 
 fn evaluate(coefficients: &[i32], point: u32) -> u32 {
     coefficients.iter().rev().fold(0, |sum, coefficient| {
-        (multiply(sum, point) + coefficient.rem_euclid(PRIME as i32) as u32) % PRIME
+        (multiply(sum, point) + coefficient.rem_euclid(PLAINTEXT_MODULUS as i32) as u32)
+            % PLAINTEXT_MODULUS
     })
 }
 
@@ -20,7 +21,8 @@ fn evaluate_subring(coefficients: &[i32], point: u32) -> u32 {
         .step_by(2)
         .rev()
         .fold(0, |sum, coefficient| {
-            (multiply(sum, point) + coefficient.rem_euclid(PRIME as i32) as u32) % PRIME
+            (multiply(sum, point) + coefficient.rem_euclid(PLAINTEXT_MODULUS as i32) as u32)
+                % PLAINTEXT_MODULUS
         })
 }
 
@@ -48,7 +50,10 @@ fn comparison_and_encoded_rank_coefficients_match_direct_evaluation() {
         let maximum = profile.comparison_degree() as i32;
         for difference in (-maximum..=maximum).step_by(2) {
             assert_eq!(
-                evaluate(&comparison, difference.rem_euclid(PRIME as i32) as u32),
+                evaluate(
+                    &comparison,
+                    difference.rem_euclid(PLAINTEXT_MODULUS as i32) as u32
+                ),
                 u32::from(difference > 0)
             );
         }
@@ -78,14 +83,13 @@ fn comparison_and_encoded_rank_coefficients_match_direct_evaluation() {
             let expected_offset = if slot < active && slot % window < option {
                 1
             } else {
-                PRIME - 1
+                PLAINTEXT_MODULUS - 1
             };
             assert_eq!(evaluate_subring(&offset, point), expected_offset);
-            assert!(
-                ranking
-                    .iter()
-                    .all(|polynomial| evaluate_subring(polynomial, power(point, PRIME - 2)) == 0)
-            );
+            assert!(ranking.iter().all(|polynomial| evaluate_subring(
+                polynomial,
+                power(point, PLAINTEXT_MODULUS - 2)
+            ) == 0));
         }
     }
 }
@@ -102,7 +106,7 @@ fn requested_rank_coefficients_zero_every_omitted_output_in_the_same_subring() {
             let (_, ranking, _) = parameters(profile, top_count);
             for polynomial in &ranking {
                 assert!(polynomial.iter().enumerate().all(|(index, value)| {
-                    value.unsigned_abs() <= PRIME / 2 && (index % 2 == 0 || *value == 0)
+                    value.unsigned_abs() <= PLAINTEXT_MODULUS / 2 && (index % 2 == 0 || *value == 0)
                 }));
             }
             let mut slots = vec![1, active - 1, active, DEGREE / 4 - 1];
@@ -130,7 +134,7 @@ fn requested_rank_coefficients_zero_every_omitted_output_in_the_same_subring() {
                     );
                 }
                 assert!(ranking.iter().all(|polynomial| {
-                    evaluate_subring(polynomial, power(point, PRIME - 2)) == 0
+                    evaluate_subring(polynomial, power(point, PLAINTEXT_MODULUS - 2)) == 0
                 }));
             }
         }
