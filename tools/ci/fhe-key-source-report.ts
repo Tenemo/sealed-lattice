@@ -152,9 +152,10 @@ const readNativeSourceMetadata = async (source: string, root: string) => {
     };
 };
 
-// The scalar-only entropy adapter has no native binary compilation claim.
-// Pin its exact bytes separately; every other Rust input, including
-// manifests and native wrappers, must belong to the native compiled closure.
+// The scalar target's allocator is its only input that the native build does
+// not compile. Pin its exact bytes separately; every other Rust input,
+// including manifests and native wrappers, must belong to the native compiled
+// closure.
 export const assertScalarNativeInputs = async (
     source: Pick<
         Awaited<ReturnType<typeof readNativeSourceMetadata>>,
@@ -170,7 +171,7 @@ export const assertScalarNativeInputs = async (
         'The native source used another compiler.',
     );
     const adapters = new Set([
-        'crates/protocol-research/setup-witness/src/browser_random.rs',
+        'crates/protocol-research/parallel-work/src/scalar-allocator.rs',
     ]);
     const rustInputs = [
         ...new Set(files.map((file) => file.replace(/\\/gu, '/'))),

@@ -137,8 +137,8 @@ export const kernelFunctions = [
     // The randomness of a contribution generation or continuation, a ballot
     // or a release, expanded from the seed its root retains.
     'operation_random_input_pointer',
-    'operation_random_output_pointer',
     'operation_random_command',
+    'operation_random_drawn',
     'setup_input_pointer',
     'setup_input_capacity',
     'setup_chunk_capacity',
@@ -194,12 +194,8 @@ export type ParticipantKernel = Readonly<
     }
 >;
 
-// The randomness each import draws: registration and credential generation,
-// contribution witnesses, proofs, and ballot encryption.
-type RandomSource = 'enrollment' | 'witness' | 'proof' | 'ballot';
-
 export type KernelHandlers = {
-    random?: (source: RandomSource, target: Uint8Array<ArrayBuffer>) => void;
+    random?: (target: Uint8Array<ArrayBuffer>) => void;
     staged?: (kind: number, offset: number, bytes: Uint8Array) => void;
     contribution?: (object: number, offset: number, bytes: Uint8Array) => void;
 };
@@ -228,13 +224,15 @@ export const instantiateParticipantKernel = async (
             length >>> 0,
         );
     };
-    const random =
-        (source: RandomSource) => (pointer: number, length: number) => {
-            if (handlers.random === undefined || length > maximumRandomRequest)
-                throw new Error('Unexpected participant randomness request.');
-            handlers.random(source, view(pointer, length));
-            return 0;
-        };
+    // Fresh randomness for the purpose each import names: registration and
+    // credential generation, witnesses, and proofs. An installed operation
+    // seed serves its operation's draws within the module.
+    const random = (pointer: number, length: number) => {
+        if (handlers.random === undefined || length > maximumRandomRequest)
+            throw new Error('Unexpected participant randomness request.');
+        handlers.random(view(pointer, length));
+        return 0;
+    };
     const instance = await WebAssembly.instantiate(module, {
         allocator: {
             exhausted: (bytes: number) => {
@@ -251,7 +249,7 @@ export const instantiateParticipantKernel = async (
             return instantiated.memory;
         }),
         enrollment: {
-            fill_random: random('enrollment'),
+            fill_random: random,
             staged_chunk: (
                 kind: number,
                 offset: number,
@@ -268,9 +266,8 @@ export const instantiateParticipantKernel = async (
                 return 0;
             },
         },
-        setup_witness: { fill_random: random('witness') },
-        word_proof: { fill_random: random('proof') },
-        ballot: { fill_random: random('ballot') },
+        setup_witness: { fill_random: random },
+        word_proof: { fill_random: random },
         contribution: {
             public_chunk: (
                 object: number,
@@ -372,21 +369,20 @@ export const writeSetupInput = (
 // Every private randomness of a contribution generation or continuation, a
 // ballot or a release comes from one seed its root retains before the
 // operation draws any byte. The module expands the seed into the operation's
-// first stream and its proof stream; a release has only the proof stream.
+// first stream and its proof stream, which serve the operation's draws
+// within the module; a release has only the proof stream.
 export const operationSeedBytes = 64;
 const operationPurpose = { contribution: 0, ballot: 4, release: 5 } as const;
-const operationStream = { first: 1, proof: 2 } as const;
+const proofStream = 1;
 const discardOperationSeed = 3;
 
-// Installs an operation's retained seed and returns the handler that answers
-// the module's requests: the first source from the first stream and proofs
-// from the proof stream. Any other request refuses, and each copied output
-// is cleared. The seed must be discarded once the operation stops drawing.
+// Installs an operation's retained seed, whose streams then serve every
+// draw of the operation and refuse any other. The seed must be discarded
+// once the operation stops drawing.
 export const seededRandomness = (
     kernel: ParticipantKernel,
     purpose: keyof typeof operationPurpose,
     seed: Uint8Array,
-    first?: RandomSource,
 ) => {
     if (seed.length !== operationSeedBytes)
         throw new Error('No ' + purpose + ' randomness seed is retained.');
@@ -403,41 +399,13 @@ export const seededRandomness = (
         ) !== 0
     )
         throw new Error('The ' + purpose + ' randomness refused its seed.');
-    let drawn = 0;
-    let proofDrawn = 0;
-    const random: NonNullable<KernelHandlers['random']> = (source, target) => {
-        const pointer = target.byteOffset;
-        const length = target.byteLength;
-        const stream =
-            source === 'proof'
-                ? operationStream.proof
-                : source === first
-                  ? operationStream.first
-                  : undefined;
-        if (
-            stream === undefined ||
-            kernel.operation_random_command(stream, length) !== 0
-        )
-            throw new Error(
-                'The ' + purpose + ' randomness refused a request.',
-            );
-        const outputPointer = kernel.operation_random_output_pointer() >>> 0;
-        const output = new Uint8Array(
-            kernel.memory.buffer,
-            outputPointer,
-            length,
-        );
-        // The import supplied a module-memory view; nested calls may detach it.
-        new Uint8Array(kernel.memory.buffer, pointer, length).set(output);
-        output.fill(0);
-        drawn += length;
-        if (stream === operationStream.proof) proofDrawn += length;
-    };
+    // The module counts each stream's bytes until the next seed is installed.
+    const drawn = (stream: number) =>
+        kernel.operation_random_drawn(stream) >>> 0;
     return {
-        random,
-        drawn: () => drawn,
+        drawn: () => drawn(0) + drawn(proofStream),
         // The bytes the proof stream served.
-        proofDrawn: () => proofDrawn,
+        proofDrawn: () => drawn(proofStream),
         discard: () => {
             kernel.operation_random_command(discardOperationSeed, 0);
         },

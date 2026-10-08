@@ -9,6 +9,7 @@
 
 #[path = "protocol-hash.rs"]
 mod protocol_hash;
+pub mod random;
 #[cfg(target_arch = "wasm32")]
 #[path = "scalar-allocator.rs"]
 pub mod scalar_allocator;

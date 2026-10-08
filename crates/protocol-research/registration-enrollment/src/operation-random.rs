@@ -5,8 +5,10 @@
 //! same order, so it reproduces its outputs exactly instead of sampling anew.
 //! Each seed yields the operation's streams: SHAKE256 over the canonical
 //! foundation tuple of the stream's domain and the seed, whose first 64 bytes
-//! are the foundation hash of that tuple.
+//! are the foundation hash of that tuple. While a seed is installed, its
+//! streams serve the operation's draws within the module.
 
+use parallel_work::random;
 use registration_credentials::foundation::{
     CANONICAL_TUPLE_SCHEMA_IDENTIFIER, CANONICAL_TUPLE_VERSION, CanonicalItem, CanonicalItemType,
 };
@@ -17,7 +19,6 @@ use sha3::{
 use zeroize::{Zeroize, Zeroizing};
 
 const SEED_BYTES: usize = 64;
-const REQUEST_BYTES: usize = 65_536;
 
 /// The operations whose randomness a retained seed supplies.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -41,6 +42,14 @@ impl Purpose {
                 Some("sealed-lattice/ballot-proof-randomness/v1"),
             ],
             Self::Release => [None, Some("sealed-lattice/release-proof-randomness/v1")],
+        }
+    }
+    /// The draws the first stream serves.
+    fn first(self) -> Option<random::Purpose> {
+        match self {
+            Self::Contribution => Some(random::Purpose::Witness),
+            Self::Ballot => Some(random::Purpose::Ballot),
+            Self::Release => None,
         }
     }
 }
@@ -67,32 +76,28 @@ fn stream(domain: &str, seed: &[u8; SEED_BYTES]) -> Shake256Reader {
 struct Streams {
     purpose: Purpose,
     readers: [Option<Shake256Reader>; 2],
-    // Whether any byte of either stream was read.
-    drawn: bool,
 }
 
 struct State {
     input: Zeroizing<[u8; SEED_BYTES]>,
-    output: Zeroizing<Vec<u8>>,
     streams: Option<Streams>,
+    // The bytes each stream of the last installed seed served.
+    drawn: [usize; 2],
 }
 impl Default for State {
     fn default() -> Self {
         Self {
             input: Zeroizing::new([0; SEED_BYTES]),
-            output: Zeroizing::new(vec![0; REQUEST_BYTES]),
             streams: None,
+            drawn: [0; 2],
         }
     }
 }
 impl State {
     /// Operations zero, four and five install the seed in the input for a
-    /// contribution, a ballot or a release; one and two write the next
-    /// `length` bytes of the first or the proof stream to the output; three
-    /// discards the streams. Every call clears the previous output and the
-    /// input.
+    /// contribution, a ballot or a release, and three discards the streams.
+    /// Every call clears the input.
     fn command(&mut self, operation: u32, length: usize) -> Result<(), ()> {
-        self.output.as_mut_slice().zeroize();
         let result = self.command_inner(operation, length);
         self.input.zeroize();
         result
@@ -114,17 +119,8 @@ impl State {
                     readers: purpose
                         .domains()
                         .map(|domain| domain.map(|domain| stream(domain, seed))),
-                    drawn: false,
                 });
-            }
-            1 | 2 => {
-                let streams = self.streams.as_mut().ok_or(())?;
-                let reader = streams.readers[operation as usize - 1].as_mut().ok_or(())?;
-                if !(1..=REQUEST_BYTES).contains(&length) {
-                    return Err(());
-                }
-                reader.read(&mut self.output[..length]);
-                streams.drawn = true;
+                self.drawn = [0; 2];
             }
             3 => {
                 if length != 0 {
@@ -136,21 +132,48 @@ impl State {
         }
         Ok(())
     }
+    /// Serves a draw of the installed operation: its first stream serves the
+    /// draws of its first purpose and its proof stream every proof. Any other
+    /// draw is refused.
+    fn serve(&mut self, purpose: random::Purpose, bytes: &mut [u8]) -> bool {
+        let Some(streams) = self.streams.as_mut() else {
+            return false;
+        };
+        let stream = if purpose == random::Purpose::Proof {
+            1
+        } else if streams.purpose.first() == Some(purpose) {
+            0
+        } else {
+            return false;
+        };
+        let Some(reader) = streams.readers[stream].as_mut() else {
+            return false;
+        };
+        reader.read(bytes);
+        self.drawn[stream] += bytes.len();
+        true
+    }
     /// Whether the purpose's streams are installed and nothing was read.
     fn ready(&self, purpose: Purpose) -> bool {
         self.streams
             .as_ref()
-            .is_some_and(|streams| streams.purpose == purpose && !streams.drawn)
+            .is_some_and(|streams| streams.purpose == purpose)
+            && self.drawn == [0; 2]
     }
 }
 
 #[cfg(target_arch = "wasm32")]
 mod browser {
     use super::{Purpose, State};
+    use parallel_work::random;
     use std::cell::RefCell;
     use zeroize::Zeroize;
 
     thread_local! {static STATE:RefCell<State>=RefCell::new(State::default());}
+
+    fn serve(purpose: random::Purpose, bytes: &mut [u8]) -> bool {
+        STATE.with(|state| state.borrow_mut().serve(purpose, bytes))
+    }
 
     /// Whether the purpose's randomness is installed from its seed and
     /// undrawn, so that the operation draws only from that seed.
@@ -170,7 +193,7 @@ mod browser {
             {
                 state.streams = None;
                 state.input.zeroize();
-                state.output.zeroize();
+                random::release();
             }
         });
     }
@@ -179,13 +202,27 @@ mod browser {
     pub extern "C" fn operation_random_input_pointer() -> usize {
         STATE.with(|state| state.borrow_mut().input.as_mut_ptr() as usize)
     }
+    /// The bytes the first or the proof stream of the last installed seed
+    /// served.
     #[unsafe(no_mangle)]
-    pub extern "C" fn operation_random_output_pointer() -> usize {
-        STATE.with(|state| state.borrow().output.as_ptr() as usize)
+    pub extern "C" fn operation_random_drawn(stream: u32) -> usize {
+        STATE.with(|state| state.borrow().drawn[stream as usize])
     }
+    /// While a seed's streams are installed, they serve the operation's
+    /// draws.
     #[unsafe(no_mangle)]
     pub extern "C" fn operation_random_command(operation: u32, length: usize) -> u32 {
-        STATE.with(|state| u32::from(state.borrow_mut().command(operation, length).is_err()))
+        STATE.with(|state| {
+            let mut state = state.borrow_mut();
+            let installed = state.streams.is_some();
+            let refused = state.command(operation, length).is_err();
+            match (installed, state.streams.is_some()) {
+                (false, true) => random::install(serve),
+                (true, false) => random::release(),
+                _ => {}
+            }
+            u32::from(refused)
+        })
     }
 }
 #[cfg(target_arch = "wasm32")]

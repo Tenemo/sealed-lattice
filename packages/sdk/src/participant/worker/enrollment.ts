@@ -277,9 +277,7 @@ export const createEnrollment = async (
             lengths[kind] += bytes.length;
         };
         let randomBytes = 0;
-        handlers.random = (source, target) => {
-            if (source === 'ballot')
-                throw new Error('Enrollment requested ballot randomness.');
+        handlers.random = (target) => {
             crypto.getRandomValues(target);
             randomBytes += target.length;
         };

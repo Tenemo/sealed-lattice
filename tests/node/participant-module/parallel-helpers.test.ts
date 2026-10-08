@@ -303,7 +303,7 @@ const prepare = (
         parts.set(kind, [...(parts.get(kind) ?? []), bytes.slice()]);
     };
     let requests = 0;
-    handlers.random = (_source, target) => {
+    handlers.random = (target) => {
         target.set(shake(name + '/' + String(requests), target.length));
         requests += 1;
     };

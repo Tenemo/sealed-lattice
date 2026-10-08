@@ -26,7 +26,6 @@ const rustflagSeparator = '\x1f';
 // The imports the participant module may declare, by module and name.
 const allowedImports = [
     'allocator.exhausted',
-    'ballot.fill_random',
     'contribution.public_chunk',
     'enrollment.fill_random',
     'enrollment.staged_chunk',

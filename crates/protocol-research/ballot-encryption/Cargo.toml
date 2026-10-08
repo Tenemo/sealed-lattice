@@ -11,13 +11,11 @@ crate-type = ["rlib"]
 zeroize.workspace = true
 
 num-bigint.workspace = true
+parallel-work = { path = "../parallel-work" }
 setup-aggregate = { path = "../setup-aggregate" }
 setup-witness = { path = "../setup-witness" }
 registration-credentials = { path = "../registration-credentials" }
 supported-profile = { path = "../supported-profile" }
-
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-getrandom.workspace = true
 
 [dev-dependencies]
 num-traits.workspace = true

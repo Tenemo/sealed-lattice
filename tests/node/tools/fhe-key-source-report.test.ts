@@ -312,18 +312,21 @@ describe('FHE key source report and source intake', () => {
             readFheKeySourceNativeSource(fixture.source, fixture.root),
         ).rejects.toThrow();
     });
-    it('pins only the exact browser entropy adapter while requiring the screen arithmetic in the native closure', async () => {
+    it('pins only the exact scalar allocator while requiring the screen arithmetic in the native closure', async () => {
         const fixture = await nativeFixture();
         const source = await readFheKeySourceNativeSource(
             fixture.source,
             fixture.root,
         );
         const adapter = {
-            file: 'crates/protocol-research/setup-witness/src/browser_random.rs',
+            file: 'crates/protocol-research/parallel-work/src/scalar-allocator.rs',
             bytes: 1,
             sha512: digest('x'),
         };
         source.sources.set(adapter.file, adapter);
+        await mkdir(path.dirname(path.join(fixture.root, adapter.file)), {
+            recursive: true,
+        });
         await writeFile(path.join(fixture.root, adapter.file), 'x');
         const files = [...source.compiledInputs.keys(), adapter.file];
         await expect(
@@ -370,11 +373,14 @@ describe('FHE key source report and source intake', () => {
             fixture.root,
         );
         const adapter = {
-            file: 'crates/protocol-research/setup-witness/src/browser_random.rs',
+            file: 'crates/protocol-research/parallel-work/src/scalar-allocator.rs',
             bytes: 1,
             sha512: digest('x'),
         };
         source.sources.set(adapter.file, adapter);
+        await mkdir(path.dirname(path.join(fixture.root, adapter.file)), {
+            recursive: true,
+        });
         await writeFile(path.join(fixture.root, adapter.file), 'x');
         const files = [...source.compiledInputs.keys(), adapter.file];
         const inspect = (

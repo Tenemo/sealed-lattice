@@ -20,9 +20,6 @@ parallel-work = { path = "../parallel-work" }
 setup-stream-kernel = { path = "../setup-stream-kernel" }
 supported-profile = { path = "../supported-profile" }
 
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-getrandom.workspace = true
-
 [features]
 custody = ["dep:aes-gcm", "dep:aes"]
 key-source-screen = []

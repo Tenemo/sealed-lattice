@@ -1,6 +1,11 @@
 use sha3::digest::XofReader;
 use zeroize::Zeroizing;
 
+/// A witness's private randomness, drawn in blocks of this many bytes, so an
+/// operation's seed serves the same bytes however the sampler divides its
+/// reads.
+const BLOCK_BYTES: usize = 65_520;
+
 pub struct Reader {
     bytes: Zeroizing<Vec<u8>>,
     position: usize,
@@ -8,24 +13,16 @@ pub struct Reader {
 impl Reader {
     pub fn new() -> Self {
         Self {
-            bytes: Zeroizing::new(vec![0; 65520]),
-            position: 65520,
+            bytes: Zeroizing::new(vec![0; BLOCK_BYTES]),
+            position: BLOCK_BYTES,
         }
     }
 }
 impl XofReader for Reader {
     fn read(&mut self, mut output: &mut [u8]) {
-        #[link(wasm_import_module = "setup_witness")]
-        unsafe extern "C" {
-            fn fill_random(pointer: *mut u8, length: usize) -> u32;
-        }
         while !output.is_empty() {
             if self.position == self.bytes.len() {
-                // The browser writes exactly this live, exclusively owned buffer.
-                assert_eq!(
-                    unsafe { fill_random(self.bytes.as_mut_ptr(), self.bytes.len()) },
-                    0
-                );
+                parallel_work::random::witness(&mut self.bytes);
                 self.position = 0;
             }
             let count = output.len().min(self.bytes.len() - self.position);

@@ -74,16 +74,7 @@ pub enum Error {
 
 fn random<const N: usize>() -> Zeroizing<[u8; N]> {
     let mut bytes = Zeroizing::new([0; N]);
-    #[cfg(not(target_arch = "wasm32"))]
-    getrandom::fill(bytes.as_mut()).unwrap();
-    #[cfg(target_arch = "wasm32")]
-    {
-        #[link(wasm_import_module = "enrollment")]
-        unsafe extern "C" {
-            fn fill_random(pointer: *mut u8, length: usize) -> u32;
-        }
-        assert_eq!(unsafe { fill_random(bytes.as_mut_ptr(), N) }, 0);
-    }
+    parallel_work::random::fresh(bytes.as_mut());
     bytes
 }
 struct RecordWriter<'a, F: FnMut(u32, usize, &[u8])> {

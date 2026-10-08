@@ -544,19 +544,7 @@ fn share_ciphertexts(
     ciphertexts
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+mod random;
 fn private_reader(_label: &str) -> impl XofReader + use<> {
-    struct NativeRandom;
-    impl XofReader for NativeRandom {
-        fn read(&mut self, bytes: &mut [u8]) {
-            getrandom::fill(bytes).expect("OS private entropy unavailable");
-        }
-    }
-    NativeRandom
-}
-#[cfg(target_arch = "wasm32")]
-mod browser_random;
-#[cfg(target_arch = "wasm32")]
-fn private_reader(_label: &str) -> impl XofReader + use<> {
-    browser_random::Reader::new()
+    random::Reader::new()
 }

@@ -446,18 +446,16 @@ const lockRelease = async (
 // envelope before any signature, retiring the seed.
 const proveRelease = async (session: ReleaseSession) => {
     const { context } = session.close.participant;
-    const { profile, kernel, handlers } = context;
+    const { profile, kernel } = context;
     const bounds = profile.release;
     const { state } = session;
     if (state === undefined) throw new Error('No release seed is retained.');
     const randomness = seededRandomness(kernel, 'release', state.seed);
     let envelope: Uint8Array;
     try {
-        handlers.random = randomness.random;
         envelope = releaseCommand(context, 0, releaseTarget(session).body);
         session.proofRandomBytes = randomness.proofDrawn();
     } finally {
-        handlers.random = undefined;
         randomness.discard();
     }
     // The envelope ends with the body length and the body identity.

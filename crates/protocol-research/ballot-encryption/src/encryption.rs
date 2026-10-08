@@ -18,7 +18,6 @@ use zeroize::Zeroizing;
 pub enum Refusal {
     Context,
     Scores,
-    Randomness,
     Arithmetic,
 }
 
@@ -40,24 +39,12 @@ impl Random {
             cursor: READ_BYTES,
         }
     }
-    fn read<const N: usize>(&mut self) -> Result<Zeroizing<[u8; N]>, Refusal> {
+    fn read<const N: usize>(&mut self) -> Zeroizing<[u8; N]> {
         let mut result = Zeroizing::new([0; N]);
         let mut filled = 0;
         while filled < N {
             if self.cursor == self.bytes.len() {
-                #[cfg(not(target_arch = "wasm32"))]
-                getrandom::fill(&mut self.bytes).map_err(|_| Refusal::Randomness)?;
-                #[cfg(target_arch = "wasm32")]
-                {
-                    #[link(wasm_import_module = "ballot")]
-                    unsafe extern "C" {
-                        fn fill_random(pointer: *mut u8, length: usize) -> u32;
-                    }
-                    // SAFETY: the host receives this live writable buffer and its exact bound.
-                    if unsafe { fill_random(self.bytes.as_mut_ptr(), self.bytes.len()) } != 0 {
-                        return Err(Refusal::Randomness);
-                    }
-                }
+                parallel_work::random::ballot(&mut self.bytes);
                 self.cursor = 0;
             }
             let count = (N - filled).min(self.bytes.len() - self.cursor);
@@ -67,25 +54,26 @@ impl Random {
             self.cursor += count;
             filled += count;
         }
-        Ok(result)
+        result
     }
-    fn sparse(&mut self, degree: usize, support: usize) -> Result<Zeroizing<Vec<i8>>, Refusal> {
+    fn sparse(&mut self, degree: usize, support: usize) -> Zeroizing<Vec<i8>> {
         let mut values = Zeroizing::new(vec![0; degree]);
         let mut selected = 0;
         while selected < support {
-            let position = u32::from_le_bytes(*self.read::<DRAW_BYTES>()?) as usize % degree;
+            let position = u32::from_le_bytes(*self.read::<DRAW_BYTES>()) as usize % degree;
             if values[position] == 0 {
                 values[position] = if selected < support / 2 { 1 } else { -1 };
                 selected += 1;
             }
         }
-        Ok(values)
+        values
     }
-    fn errors(&mut self, degree: usize) -> Result<Zeroizing<Vec<i8>>, Refusal> {
-        (0..degree)
-            .map(|_| Ok(gaussian::sample(&*self.read::<SAMPLE_BYTES>()?) as i8))
-            .collect::<Result<Vec<_>, _>>()
-            .map(Zeroizing::new)
+    fn errors(&mut self, degree: usize) -> Zeroizing<Vec<i8>> {
+        Zeroizing::new(
+            (0..degree)
+                .map(|_| gaussian::sample(&self.read::<SAMPLE_BYTES>()) as i8)
+                .collect(),
+        )
     }
 }
 
@@ -255,7 +243,7 @@ impl EncryptionWitness {
         let scale = (&modulus - BigInt::from(1)) / BigInt::from(plaintext_modulus);
         let random = &mut Random::new();
         let plan = Plan::new(degree);
-        let ephemeral = random.sparse(degree, support)?;
+        let ephemeral = random.sparse(degree, support);
         let transformed = Zeroizing::new(plan.sparse_transform(&ephemeral));
         let first = component(
             &plan,
@@ -266,7 +254,7 @@ impl EncryptionWitness {
                 modulus: &modulus,
                 scale: &scale,
                 message: Some(message),
-                errors: random.errors(degree)?,
+                errors: random.errors(degree),
             },
         )?;
         let second = component(
@@ -278,7 +266,7 @@ impl EncryptionWitness {
                 modulus: &modulus,
                 scale: &scale,
                 message: None,
-                errors: random.errors(degree)?,
+                errors: random.errors(degree),
             },
         )?;
         Ok(Self {

@@ -13,9 +13,6 @@ parallel-work = { path = "../parallel-work" }
 setup-stream-kernel = { path = "../setup-stream-kernel" }
 supported-profile = { path = "../supported-profile" }
 
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-getrandom.workspace = true
-
 [features]
 # Test aids for the crates that prove with this engine: a replayed seed in
 # place of the host's randomness, and every row of an affine operator.

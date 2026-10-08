@@ -652,9 +652,7 @@ const proverRun = (session: ContributionSession, statement: boolean) => {
         kernel,
         'contribution',
         session.state.seed,
-        'witness',
     );
-    handlers.random = randomness.random;
     handlers.contribution = (object, offset, bytes) => {
         if (
             !statement ||
@@ -751,7 +749,6 @@ const proverRun = (session: ContributionSession, statement: boolean) => {
         emitted: () => emitted,
         randomBytes: randomness.drawn,
         close: () => {
-            handlers.random = undefined;
             handlers.contribution = undefined;
             for (const record of pending) record.bytes.fill(0);
             pending.length = 0;

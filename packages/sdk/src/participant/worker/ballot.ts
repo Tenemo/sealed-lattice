@@ -396,18 +396,15 @@ const createBallot = (session: BallotSession) => {
         context.kernel,
         'ballot',
         session.state.seed,
-        'ballot',
     );
     const input = concatenate(
         unsigned64(session.state.ballotTime),
         session.state.scores,
     );
-    context.handlers.random = randomness.random;
     try {
         ballotCommand(context, 4, 0, input);
         session.proofRandomBytes = randomness.proofDrawn();
     } finally {
-        context.handlers.random = undefined;
         input.fill(0);
         randomness.discard();
     }

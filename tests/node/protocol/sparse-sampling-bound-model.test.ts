@@ -42,7 +42,7 @@ describe('bounded sparse-support sampling comparison', () => {
             );
         const [reader, source, contribution, registration, shared] =
             await Promise.all([
-                read('setup-witness/src/browser_random.rs'),
+                read('setup-witness/src/random.rs'),
                 read('setup-witness/src/lib.rs'),
                 read('setup-witness/src/contribution.rs'),
                 read('setup-witness/src/registration.rs'),
@@ -51,7 +51,9 @@ describe('bounded sparse-support sampling comparison', () => {
         const profile = completionProfile();
         const rows = compileSparseSupportSamplingCensus(profile);
         const bufferBytes = BigInt(
-            reader.match(/vec!\[0; ([\d_]+)\]/u)![1].replace(/_/gu, ''),
+            reader
+                .match(/const BLOCK_BYTES: usize = ([\d_]+);/u)![1]
+                .replace(/_/gu, ''),
         );
         expect(
             rows.every((value) => value.browserBufferBytes === bufferBytes),
