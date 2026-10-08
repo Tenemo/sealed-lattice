@@ -1,3 +1,5 @@
+import { awaitLater, requestResult, transactionCompletion } from './storage.js';
+
 // Whether a readback confirmed the stop marker's strict write.
 export type StopPersistence = 'confirmed' | 'unconfirmed';
 
@@ -6,36 +8,24 @@ export type StopPersistence = 'confirmed' | 'unconfirmed';
 export async function stopParticipant(
     database: IDBDatabase,
 ): Promise<StopPersistence> {
-    let stopped = false;
     try {
-        await new Promise<void>((resolve, reject) => {
-            const transaction = database.transaction('stopped', 'readwrite', {
-                durability: 'strict',
-            });
-            transaction.oncomplete = () => resolve();
-            transaction.onabort = () =>
-                reject(new Error('Stop write aborted.'));
-            transaction.onerror = () => {};
-            if (transaction.durability !== 'strict') {
-                transaction.abort();
-                return;
-            }
-            transaction.objectStore('stopped').put(true, 0);
+        const write = database.transaction('stopped', 'readwrite', {
+            durability: 'strict',
         });
-        stopped = await new Promise<boolean>((resolve, reject) => {
-            const transaction = database.transaction('stopped', 'readonly');
-            let marker: unknown;
-            transaction.oncomplete = () => resolve(marker === true);
-            transaction.onabort = () =>
-                reject(new Error('Stop readback aborted.'));
-            transaction.onerror = () => {};
-            const request = transaction.objectStore('stopped').get(0);
-            request.onsuccess = () => {
-                marker = request.result;
-            };
-        });
+        const written = awaitLater(transactionCompletion(write));
+        if (write.durability === 'strict')
+            write.objectStore('stopped').put(true, 0);
+        else write.abort();
+        await written;
+        const read = database.transaction('stopped', 'readonly');
+        const readDone = awaitLater(transactionCompletion(read));
+        const [marker] = await Promise.all([
+            requestResult<unknown>(read.objectStore('stopped').get(0)),
+            readDone,
+        ]);
+        return marker === true ? 'confirmed' : 'unconfirmed';
     } catch {
         // A committed marker can still exist when readback fails.
+        return 'unconfirmed';
     }
-    return stopped ? 'confirmed' : 'unconfirmed';
 }

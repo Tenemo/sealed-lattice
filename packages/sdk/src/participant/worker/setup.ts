@@ -48,7 +48,12 @@ import {
 import { readParticipantProfile } from './runtime-bounds.js';
 import { encodeSignedPacket } from './signed-packet.js';
 import type { SignedPacket } from './signed-packet.js';
-import { namespacedName, setupCacheName } from './storage.js';
+import {
+    namespacedName,
+    requestResult,
+    setupCacheName,
+    transactionCompletion,
+} from './storage.js';
 
 // The owning Rust verifiers authenticate the roster, complete selected offers,
 // organizer proposal and endorsement certificate. The public aggregate cache
@@ -56,30 +61,13 @@ import { namespacedName, setupCacheName } from './storage.js';
 
 const cacheStore = 'aggregate';
 
-const cacheRequest = <Value>(request: IDBRequest<Value>) =>
-    new Promise<Value>((resolve, reject) => {
-        request.onsuccess = () => resolve(request.result);
-        request.onerror = () =>
-            reject(request.error ?? new Error('A setup cache request failed.'));
-    });
-
-const cacheCompletion = (transaction: IDBTransaction) =>
-    new Promise<void>((resolve, reject) => {
-        transaction.oncomplete = () => resolve();
-        transaction.onabort = () =>
-            reject(
-                transaction.error ??
-                    new Error('A setup cache transaction aborted.'),
-            );
-    });
-
 // The aggregate cache holds only public bytes; a cache failure leaves the
 // participant pending, like any other public input.
 const openSetupCache = async (namespace: string) => {
     const opened = indexedDB.open(namespacedName(setupCacheName, namespace), 1);
     opened.onupgradeneeded = () => opened.result.createObjectStore(cacheStore);
     try {
-        return await cacheRequest(opened);
+        return await requestResult(opened);
     } catch {
         throw new PublicInputFailure('The setup cache is unavailable.');
     }
@@ -93,7 +81,7 @@ const writeCache = async (
         const transaction = cache.transaction(cacheStore, 'readwrite', {
             durability: 'strict',
         });
-        const done = cacheCompletion(transaction);
+        const done = transactionCompletion(transaction);
         write(transaction.objectStore(cacheStore));
         await done;
     } catch {
@@ -158,8 +146,10 @@ const holdsFinalAggregate = async (context: PublicProfileContext) => {
             true,
         );
         const [keys] = await Promise.all([
-            cacheRequest(transaction.objectStore(cacheStore).getAllKeys(range)),
-            cacheCompletion(transaction),
+            requestResult(
+                transaction.objectStore(cacheStore).getAllKeys(range),
+            ),
+            transactionCompletion(transaction),
         ]);
         return (
             keys.length === expected.size &&
@@ -206,10 +196,10 @@ const readCachedAggregateChunk = async (
         const transaction = cache.transaction(cacheStore, 'readonly');
         const store = transaction.objectStore(cacheStore);
         [value] = await Promise.all([
-            cacheRequest<unknown>(
+            requestResult<unknown>(
                 store.get([accepted, expandedIndex, chunk.offset]),
             ),
-            cacheCompletion(transaction),
+            transactionCompletion(transaction),
         ]);
     } catch {
         throw new PublicInputFailure('The setup cache refused a read.');

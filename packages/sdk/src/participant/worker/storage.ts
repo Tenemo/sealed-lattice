@@ -74,19 +74,35 @@ export const deleteWorkingStorage = async (namespace: string) => {
         });
 };
 
-const requestResult = <Value>(request: IDBRequest<Value>) =>
+// Settles with a request's result. A failed request rejects with the
+// caller's failure, or else with its own error.
+export const requestResult = <Value>(
+    request: IDBRequest<Value>,
+    failure?: () => Error,
+) =>
     new Promise<Value>((resolve, reject) => {
         request.onsuccess = () => resolve(request.result);
         request.onerror = () =>
-            reject(request.error ?? new Error('Local record request failed.'));
+            reject(
+                failure?.() ??
+                    request.error ??
+                    new Error('Local record request failed.'),
+            );
     });
 
-const transactionCompletion = (transaction: IDBTransaction) =>
+// Settles once a transaction commits. An aborted transaction rejects with the
+// caller's failure, or else with its own error.
+export const transactionCompletion = (
+    transaction: IDBTransaction,
+    failure?: () => Error,
+) =>
     new Promise<void>((resolve, reject) => {
         transaction.oncomplete = () => resolve();
         transaction.onabort = () =>
             reject(
-                transaction.error ?? new Error('Local transaction aborted.'),
+                failure?.() ??
+                    transaction.error ??
+                    new Error('Local transaction aborted.'),
             );
     });
 

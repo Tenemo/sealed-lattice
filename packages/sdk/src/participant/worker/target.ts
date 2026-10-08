@@ -56,6 +56,8 @@ import {
     evaluatedTargetName,
     namespacedName,
     publicEvaluationName,
+    requestResult,
+    transactionCompletion,
 } from './storage.js';
 import {
     ballotInclusions,
@@ -650,19 +652,10 @@ const deliverEvaluationInput = async (
         throw new PublicInputFailure(reason);
 };
 
-const request = <Value>(value: IDBRequest<Value>) =>
-    new Promise<Value>((resolve, reject) => {
-        value.onsuccess = () => resolve(value.result);
-        value.onerror = () =>
-            reject(new PublicInputFailure('The evaluation storage failed.'));
-    });
-
-const completion = (transaction: IDBTransaction) =>
-    new Promise<void>((resolve, reject) => {
-        transaction.oncomplete = () => resolve();
-        transaction.onabort = () =>
-            reject(new PublicInputFailure('The evaluation storage failed.'));
-    });
+// The evaluation storage holds only public work, so its failure leaves the
+// participant pending, like any other public input.
+const evaluationStorageFailure = () =>
+    new PublicInputFailure('The evaluation storage failed.');
 
 const openEvaluationStorage = async (namespace: string) => {
     const opened = indexedDB.open(
@@ -671,7 +664,7 @@ const openEvaluationStorage = async (namespace: string) => {
     );
     opened.onupgradeneeded = () =>
         opened.result.createObjectStore(evaluationStore);
-    return request(opened);
+    return requestResult(opened, evaluationStorageFailure);
 };
 
 // Writes the evaluation's public work in one transaction, which a write that
@@ -681,7 +674,7 @@ const writeEvaluationStorage = async (
     write: (store: IDBObjectStore) => void,
 ) => {
     const transaction = storage.transaction(evaluationStore, 'readwrite');
-    const done = completion(transaction);
+    const done = transactionCompletion(transaction, evaluationStorageFailure);
     try {
         write(transaction.objectStore(evaluationStore));
     } catch (error) {
@@ -704,14 +697,19 @@ const evaluatedTargetRequest = async <Value>(
     );
     opened.onupgradeneeded = () =>
         opened.result.createObjectStore(evaluatedTargetStore);
-    const database = await request(opened);
+    const database = await requestResult(opened, evaluationStorageFailure);
     try {
         const transaction = database.transaction(evaluatedTargetStore, mode);
         // Observe completion before creating the request: a synchronous
         // factory failure can still be followed by a transaction abort.
-        const done = awaitLater(completion(transaction));
+        const done = awaitLater(
+            transactionCompletion(transaction, evaluationStorageFailure),
+        );
         const [value] = await Promise.all([
-            request(run(transaction.objectStore(evaluatedTargetStore))),
+            requestResult(
+                run(transaction.objectStore(evaluatedTargetStore)),
+                evaluationStorageFailure,
+            ),
             done,
         ]);
         return value;
@@ -848,10 +846,12 @@ const readStoredBlobs = async (
     keys: readonly IDBValidKey[],
 ) => {
     const transaction = storage.transaction(evaluationStore, 'readonly');
-    const done = completion(transaction);
+    const done = transactionCompletion(transaction, evaluationStorageFailure);
     const store = transaction.objectStore(evaluationStore);
     const values = await Promise.all(
-        keys.map((key) => request<unknown>(store.get(key))),
+        keys.map((key) =>
+            requestResult<unknown>(store.get(key), evaluationStorageFailure),
+        ),
     );
     await done;
     return values;
