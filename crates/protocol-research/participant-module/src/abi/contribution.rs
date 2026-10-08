@@ -1,7 +1,9 @@
 //! The contribution: its offer signing, its proof and checkpoints, and the
 //! retained proposal it names.
 use super::{SESSION, Session, emitted_packet, original_context, signed_packet};
+use contribution_prover::contribution_session::{CONTRIBUTION_INPUT_BYTES, ContributionSession};
 use protocol_foundations::roster::RetainedContributionContext;
+use std::cell::RefCell;
 use zeroize::{Zeroize, Zeroizing};
 fn offer_operation(
     state: &mut Session,
@@ -86,6 +88,27 @@ pub extern "C" fn offer_signing_command(operation: u32, argument: usize, length:
     })
 }
 
+// The host receives each chunk of the public setup objects in order.
+fn send_public_chunk(object: usize, offset: usize, bytes: &[u8]) {
+    #[link(wasm_import_module = "contribution")]
+    unsafe extern "C" {
+        fn public_chunk(object: u32, offset: u32, pointer: *const u8, length: usize) -> u32;
+    }
+    assert_eq!(
+        unsafe { public_chunk(object as u32, offset as u32, bytes.as_ptr(), bytes.len()) },
+        0
+    );
+}
+
+thread_local! {static CONTRIBUTION: RefCell<ContributionSession> = RefCell::new(ContributionSession::new(send_public_chunk));}
+
+/// Drops the completed contribution's private prover state and its
+/// remaining random stream state.
+pub(super) fn retire() {
+    CONTRIBUTION.with(|session| session.borrow_mut().retire());
+    super::operation_random::retire_contribution();
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn begin_contribution(position: usize) -> u32 {
     SESSION.with(|state| {
@@ -118,21 +141,26 @@ pub extern "C" fn begin_contribution(position: usize) -> u32 {
         let Ok(source) = enrollment.contribution_source(proposal.proposal().profile()) else {
             return 1;
         };
-        u32::from(
-            contribution_prover::browser::begin_verified(proposal.proposal(), position, source)
-                .is_err(),
-        )
+        CONTRIBUTION.with(|session| {
+            u32::from(
+                session
+                    .borrow_mut()
+                    .begin_verified(proposal.proposal(), position, source)
+                    .is_err(),
+            )
+        })
     })
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn contribution_proof_input_pointer() -> usize {
-    contribution_prover::browser::input_pointer()
+    CONTRIBUTION.with(|session| session.borrow_mut().input().as_mut_ptr() as usize)
 }
 
+/// The input buffer's length; the host never writes more.
 #[unsafe(no_mangle)]
 pub extern "C" fn contribution_proof_input_capacity() -> usize {
-    contribution_prover::browser::input_capacity()
+    CONTRIBUTION_INPUT_BYTES
 }
 
 #[unsafe(no_mangle)]
@@ -141,27 +169,34 @@ pub extern "C" fn contribution_proof_command(
     argument: usize,
     length: usize,
 ) -> u32 {
-    contribution_prover::browser::command(operation, argument, length)
+    CONTRIBUTION.with(|session| {
+        u32::from(
+            session
+                .borrow_mut()
+                .command(operation, argument, length)
+                .is_err(),
+        )
+    })
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn contribution_proof_phase() -> u32 {
-    contribution_prover::browser::phase()
+    CONTRIBUTION.with(|session| session.borrow().phase())
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn contribution_proof_output_pointer() -> usize {
-    contribution_prover::browser::output_pointer()
+    CONTRIBUTION.with(|session| session.borrow().output().as_ptr() as usize)
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn contribution_proof_output_length() -> usize {
-    contribution_prover::browser::output_length()
+    CONTRIBUTION.with(|session| session.borrow().output().len())
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn contribution_checkpoint_records() -> usize {
-    contribution_prover::browser::checkpoint_records()
+    CONTRIBUTION.with(|session| session.borrow().checkpoint_records())
 }
 
 #[unsafe(no_mangle)]
@@ -185,13 +220,27 @@ pub extern "C" fn contribution_checkpoint_command(
         {
             return 1;
         }
-        contribution_prover::browser::checkpoint_command(operation, position, length, Some(context))
+        CONTRIBUTION.with(|session| {
+            u32::from(
+                session
+                    .borrow_mut()
+                    .checkpoint_command(operation, position, length, context)
+                    .is_err(),
+            )
+        })
     })
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn contribution_checkpoint_key(position: usize, length: usize) -> u32 {
-    contribution_prover::browser::checkpoint_key(position, length)
+    CONTRIBUTION.with(|session| {
+        u32::from(
+            session
+                .borrow_mut()
+                .checkpoint_key(position, length)
+                .is_err(),
+        )
+    })
 }
 
 #[unsafe(no_mangle)]
@@ -209,7 +258,7 @@ pub extern "C" fn retain_proposal(length: usize) -> u32 {
         if !(134..=state.input.len()).contains(&length)
             || state.retained_context.is_some()
             || state.offer.body_started()
-            || contribution_prover::browser::phase() != 0
+            || CONTRIBUTION.with(|session| session.borrow().phase()) != 0
         {
             return 1;
         }

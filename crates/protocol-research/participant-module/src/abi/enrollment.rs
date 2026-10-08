@@ -343,8 +343,7 @@ fn restore_enrollment(length: usize, prepared: bool) -> u32 {
         }
         state.poll_identity = header.poll;
         if prepared {
-            contribution_prover::browser::retire();
-            super::operation_random::retire_contribution();
+            super::contribution::retire();
         }
         0
     })

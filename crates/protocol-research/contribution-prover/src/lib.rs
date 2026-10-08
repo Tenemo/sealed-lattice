@@ -1,6 +1,6 @@
 #![deny(unsafe_op_in_unsafe_fn)]
-#[cfg(target_arch = "wasm32")]
-pub mod browser;
+#[path = "contribution-session.rs"]
+pub mod contribution_session;
 
 use protocol_foundations::roster::RetainedContributionContext;
 use supported_profile::{Profile, relation::setup_relation};

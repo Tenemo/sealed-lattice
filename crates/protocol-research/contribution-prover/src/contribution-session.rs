@@ -1,3 +1,5 @@
+//! The participant's contribution proof: its generation from the verified
+//! proposal, its proof rounds and its sealed checkpoints.
 use num_bigint::{BigInt, Sign};
 use num_traits::Zero;
 use parallel_work::ProtocolHash;
@@ -11,7 +13,7 @@ use setup_witness::{
     contribution::{Contribution, common_records},
 };
 
-use std::{cell::RefCell, sync::Arc};
+use std::sync::Arc;
 use supported_profile::{DEGREE, Profile, relation::setup_relation, share_modulus};
 use word_proof::{
     bridge::{Prover, first_checkpoint},
@@ -22,10 +24,18 @@ use zeroize::Zeroize;
 const CHUNK: usize = 1 << 20;
 /// The input buffer: one polynomial chunk, one checkpoint import context,
 /// or one checkpoint record with its key.
-const INPUT_BYTES: usize = 1_572_864;
+pub const CONTRIBUTION_INPUT_BYTES: usize = 1_572_864;
 const _: () = assert!(
-    sealing::KEY_BYTES + first_checkpoint::RECORD_BYTES + sealing::TAG_BYTES <= INPUT_BYTES
+    sealing::KEY_BYTES + first_checkpoint::RECORD_BYTES + sealing::TAG_BYTES
+        <= CONTRIBUTION_INPUT_BYTES
 );
+/// A refused contribution step.
+#[derive(Debug)]
+pub struct Refused;
+/// The host's receipt of one chunk of a public setup object at an
+/// offset: object zero is the statement header and object i + 1 setup
+/// polynomial i.
+pub type PublicChunk = fn(object: usize, offset: usize, bytes: &[u8]);
 struct PublicOutput {
     profile: Profile,
     // The statement's digest and context, which helpers hash when there are
@@ -36,9 +46,10 @@ struct PublicOutput {
     total: usize,
     offset: usize,
     buffer: Vec<u8>,
+    public_chunk: PublicChunk,
 }
 impl PublicOutput {
-    fn new(profile: Profile, role: &[u8]) -> Self {
+    fn new(profile: Profile, role: &[u8], public_chunk: PublicChunk) -> Self {
         let mut output = Self {
             profile,
             hash: HashStream::new(Sponge::ProtocolHash),
@@ -47,6 +58,7 @@ impl PublicOutput {
             total: 0,
             offset: 0,
             buffer: Vec::with_capacity(CHUNK),
+            public_chunk,
         };
         output.append(&profile.setup_statement_header());
         output.flush();
@@ -71,22 +83,8 @@ impl PublicOutput {
         }
         self.hash.update(&self.buffer);
         self.context.update(&self.buffer);
-        #[link(wasm_import_module = "contribution")]
-        unsafe extern "C" {
-            fn public_chunk(object: u32, offset: u32, pointer: *const u8, length: usize) -> u32;
-        }
         // Only canonical public polynomial/header bytes cross this callback.
-        assert_eq!(
-            unsafe {
-                public_chunk(
-                    self.next as u32,
-                    self.offset as u32,
-                    self.buffer.as_ptr(),
-                    self.buffer.len(),
-                )
-            },
-            0
-        );
+        (self.public_chunk)(self.next, self.offset, &self.buffer);
         self.offset += self.buffer.len();
         self.buffer.clear();
     }
@@ -128,6 +126,7 @@ impl Work {
         proposal: &RosterProposal,
         position: usize,
         source: setup_witness::fhe_key_source::FheKeySource,
+        public_chunk: PublicChunk,
     ) -> Result<Self, ()> {
         let profile = proposal.profile();
         let role = proposal.contribution_role(position).map_err(|_| ())?;
@@ -142,7 +141,7 @@ impl Work {
                 .collect(),
             generator: Some(Contribution::from_source(profile, source).map_err(|_| ())?),
             proof: None,
-            public: Some(PublicOutput::new(profile, &role)),
+            public: Some(PublicOutput::new(profile, &role, public_chunk)),
             role,
             next_gadget: 0,
             shares_started: false,
@@ -302,7 +301,10 @@ impl Work {
         }
     }
 }
-struct Session {
+/// The participant's contribution proof, from the verified proposal or
+/// from an imported checkpoint. A failed proof step, a checkpoint record that
+/// does not open and the retirement each stop it.
+pub struct ContributionSession {
     input: Vec<u8>,
     output: Vec<u8>,
     work: Option<Work>,
@@ -310,73 +312,73 @@ struct Session {
     checkpoint_export: Option<first_checkpoint::Export>,
     checkpoint_import: Option<first_checkpoint::Import>,
     restore_keys: Vec<Option<Vec<u8>>>,
+    public_chunk: PublicChunk,
 }
-thread_local! { static SESSION: RefCell<Session> = RefCell::new(Session { input: vec![0; INPUT_BYTES], output: Vec::new(), work: None, stopped: false, checkpoint_export: None, checkpoint_import: None, restore_keys: Vec::new() }); }
-/// Initializes an embedded prover from the owning verifier's immutable proposal.
-/// The participant worker persists its one-shot intent before invoking this.
-pub fn begin_verified(
-    proposal: &RosterProposal,
-    position: usize,
-    source: setup_witness::fhe_key_source::FheKeySource,
-) -> Result<(), protocol_foundations::Error> {
-    use protocol_foundations::Error;
-    SESSION.with(|state| {
-        let mut state = state.borrow_mut();
-        if state.stopped
-            || state.work.is_some()
-            || state.checkpoint_import.is_some()
-            || state.checkpoint_export.is_some()
+impl ContributionSession {
+    pub fn new(public_chunk: PublicChunk) -> Self {
+        Self {
+            input: vec![0; CONTRIBUTION_INPUT_BYTES],
+            output: Vec::new(),
+            work: None,
+            stopped: false,
+            checkpoint_export: None,
+            checkpoint_import: None,
+            restore_keys: Vec::new(),
+            public_chunk,
+        }
+    }
+    /// Initializes an embedded prover from the owning verifier's immutable proposal.
+    /// The participant worker persists its one-shot intent before invoking this.
+    pub fn begin_verified(
+        &mut self,
+        proposal: &RosterProposal,
+        position: usize,
+        source: setup_witness::fhe_key_source::FheKeySource,
+    ) -> Result<(), protocol_foundations::Error> {
+        use protocol_foundations::Error;
+        if self.stopped
+            || self.work.is_some()
+            || self.checkpoint_import.is_some()
+            || self.checkpoint_export.is_some()
         {
             return Err(Error::Consumed);
         }
-        let work = Work::new(proposal, position, source).map_err(|_| Error::Context)?;
-        state.output.clear();
-        state.work = Some(work);
+        let work =
+            Work::new(proposal, position, source, self.public_chunk).map_err(|_| Error::Context)?;
+        self.output.clear();
+        self.work = Some(work);
         Ok(())
-    })
-}
-pub fn input_pointer() -> usize {
-    SESSION.with(|state| state.borrow_mut().input.as_mut_ptr() as usize)
-}
-/// The input buffer's length; the host never writes more.
-pub fn input_capacity() -> usize {
-    INPUT_BYTES
-}
-
-/// Records of the checkpoint being imported, or else of the running proof's
-/// checkpoint.
-pub fn checkpoint_records() -> usize {
-    SESSION.with(|state| {
-        let state = state.borrow();
-        state
-            .checkpoint_import
+    }
+    pub fn input(&mut self) -> &mut [u8] {
+        &mut self.input
+    }
+    /// Records of the checkpoint being imported, or else of the running proof's
+    /// checkpoint.
+    pub fn checkpoint_records(&self) -> usize {
+        self.checkpoint_import
             .as_ref()
             .map(first_checkpoint::Import::relation)
             .or_else(|| {
-                state
-                    .work
+                self.work
                     .as_ref()
                     .and_then(|work| work.proof.as_ref())
                     .map(Prover::relation)
             })
             .map_or(0, first_checkpoint::record_count)
-    })
-}
-
-pub fn checkpoint_command(
-    operation: u32,
-    position: usize,
-    length: usize,
-    retained: Option<&RetainedContributionContext>,
-) -> u32 {
-    SESSION.with(|state| {
-        let mut state = state.borrow_mut();
-        if state.stopped || (operation != 4 && position != 0) {
-            return 1;
+    }
+    pub fn checkpoint_command(
+        &mut self,
+        operation: u32,
+        position: usize,
+        length: usize,
+        retained: &RetainedContributionContext,
+    ) -> Result<(), Refused> {
+        if self.stopped || (operation != 4 && position != 0) {
+            return Err(Refused);
         }
         // The previous output may hold a checkpoint record's key.
-        state.output.zeroize();
-        let Session {
+        self.output.zeroize();
+        let Self {
             input,
             output,
             work,
@@ -384,7 +386,8 @@ pub fn checkpoint_command(
             checkpoint_import,
             restore_keys,
             stopped,
-        } = &mut *state;
+            ..
+        } = self;
         let result = (|| {
             let bytes = input.get(..length).ok_or(())?;
             match operation {
@@ -421,8 +424,8 @@ pub fn checkpoint_command(
                     && checkpoint_export.is_none()
                     && checkpoint_import.is_none() =>
                 {
-                    let import = crate::import_checkpoint(retained.ok_or(())?, position, bytes)
-                        .map_err(|_| ())?;
+                    let import =
+                        crate::import_checkpoint(retained, position, bytes).map_err(|_| ())?;
                     let participants = import.profile().participants();
                     *checkpoint_import = Some(import);
                     *restore_keys = vec![None; participants];
@@ -470,50 +473,46 @@ pub fn checkpoint_command(
             restore_keys.clear();
             *stopped = true;
         }
-        u32::from(result.is_err())
-    })
-}
-pub fn output_pointer() -> usize {
-    SESSION.with(|state| state.borrow().output.as_ptr() as usize)
-}
-pub fn output_length() -> usize {
-    SESSION.with(|state| state.borrow().output.len())
-}
-pub fn phase() -> u32 {
-    SESSION.with(|state| state.borrow().work.as_ref().map_or(0, Work::phase))
-}
-/// Drops the completed private source/proof state after the enrollment owner
-/// has verified setup and the participant root has retired its dependencies.
-pub fn retire() {
-    SESSION.with(|state| {
-        let mut state = state.borrow_mut();
-        state.work = None;
-        state.checkpoint_export = None;
-        state.checkpoint_import = None;
-        state.restore_keys.clear();
-        state.input.zeroize();
-        state.output.zeroize();
-        state.output.clear();
-        state.stopped = true;
-    });
-}
-pub fn command(operation: u32, argument: usize, length: usize) -> u32 {
-    SESSION.with(|state| {
-        let mut state = state.borrow_mut();
-        if state.checkpoint_export.is_some() || state.checkpoint_import.is_some() {
-            return 1;
+        result.map_err(|()| Refused)
+    }
+    pub fn output(&self) -> &[u8] {
+        &self.output
+    }
+    pub fn phase(&self) -> u32 {
+        self.work.as_ref().map_or(0, Work::phase)
+    }
+    /// Drops the completed private source/proof state after the enrollment owner
+    /// has verified setup and the participant root has retired its dependencies.
+    pub fn retire(&mut self) {
+        self.work = None;
+        self.checkpoint_export = None;
+        self.checkpoint_import = None;
+        self.restore_keys.clear();
+        self.input.zeroize();
+        self.output.zeroize();
+        self.output.clear();
+        self.stopped = true;
+    }
+    pub fn command(
+        &mut self,
+        operation: u32,
+        argument: usize,
+        length: usize,
+    ) -> Result<(), Refused> {
+        if self.checkpoint_export.is_some() || self.checkpoint_import.is_some() {
+            return Err(Refused);
         }
         if !matches!(operation, 2 | 7..=11 | 14) || length > CHUNK {
-            return 1;
+            return Err(Refused);
         }
-        state.output.clear();
-        let Session {
+        self.output.clear();
+        let Self {
             input,
             output,
             work,
             stopped,
             ..
-        } = &mut *state;
+        } = self;
         let result = (|| {
             if *stopped {
                 return Err(());
@@ -538,34 +537,31 @@ pub fn command(operation: u32, argument: usize, length: usize) -> u32 {
             input.zeroize();
             output.clear();
         }
-        u32::from(result.is_err())
-    })
-}
-pub fn checkpoint_key(position: usize, length: usize) -> u32 {
-    SESSION.with(|state| {
-        let mut state = state.borrow_mut();
-        if state.stopped
-            || state.work.is_some()
+        result.map_err(|()| Refused)
+    }
+    pub fn checkpoint_key(&mut self, position: usize, length: usize) -> Result<(), Refused> {
+        if self.stopped
+            || self.work.is_some()
             || length != KEY_BYTES
-            || position >= state.restore_keys.len()
-            || state.restore_keys[position].is_some()
+            || position >= self.restore_keys.len()
+            || self.restore_keys[position].is_some()
         {
-            return 1;
+            return Err(Refused);
         }
-        let Some(import) = state.checkpoint_import.as_ref() else {
-            return 1;
+        let Some(import) = self.checkpoint_import.as_ref() else {
+            return Err(Refused);
         };
         let Some(expected) = import.input_hashes().get(position) else {
-            return 1;
+            return Err(Refused);
         };
-        let Some(bytes) = state.input.get(..length) else {
-            return 1;
+        let Some(bytes) = self.input.get(..length) else {
+            return Err(Refused);
         };
         if ProtocolHash::digest(bytes) != *expected {
-            return 1;
+            return Err(Refused);
         }
         let key = bytes.to_vec();
-        state.restore_keys[position] = Some(key);
-        0
-    })
+        self.restore_keys[position] = Some(key);
+        Ok(())
+    }
 }

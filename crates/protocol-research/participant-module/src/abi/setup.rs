@@ -231,8 +231,7 @@ pub extern "C" fn retire_contribution_sources() -> u32 {
         state.enrollment.as_mut().unwrap().retire_sources();
         state.offer = OfferSigning::default();
         state.unsigned_selection = None;
-        contribution_prover::browser::retire();
-        super::operation_random::retire_contribution();
+        super::contribution::retire();
         0
     })
 }

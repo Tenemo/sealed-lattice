@@ -2,6 +2,8 @@
 //! registration: the same verified record however the bytes are divided or
 //! interleaved, and the verifier's own refusal of changed bytes.
 use crate::registration_fixture::{Record, registration};
+use contribution_prover::contribution_session::ContributionSession;
+use parallel_work::sealing;
 use protocol_foundations::{
     Credential, Error,
     foundation::{
@@ -211,4 +213,96 @@ fn checkpoint_import_preserves_the_verified_original_owner(
     assert_eq!(imported.role(), expected_role);
     assert!(!imported.complete());
     assert!(imported.finish().is_err());
+    contribution_session_imports_the_checkpoint(&context, &valid, original.public_key(), profile);
+}
+
+// The prover session's import of the same checkpoint: it takes each
+// recipient key only when the key hashes to the checkpoint's input hash,
+// cannot finish before every record opened, and stops when a record does
+// not open, when a proof command fails or when it retires.
+fn contribution_session_imports_the_checkpoint(
+    context: &RetainedContributionContext,
+    request: &[u8],
+    key: &[u8],
+    profile: Profile,
+) {
+    let session =
+        || ContributionSession::new(|_, _, _| unreachable!("An import emits no public chunk."));
+    let write = |session: &mut ContributionSession, bytes: &[u8]| {
+        session.input()[..bytes.len()].copy_from_slice(bytes);
+    };
+    let mut importing = session();
+    write(&mut importing, request);
+    importing
+        .checkpoint_command(4, 0, request.len(), context)
+        .unwrap();
+    assert_eq!(
+        importing.checkpoint_records(),
+        contribution_prover::checkpoint_layout(profile).1.len()
+    );
+    // A second import is refused without stopping the first.
+    write(&mut importing, request);
+    assert!(
+        importing
+            .checkpoint_command(4, 0, request.len(), context)
+            .is_err()
+    );
+    // A short key, a changed key and a position beyond the roster.
+    let mut changed = key.to_vec();
+    changed[0] ^= 1;
+    for (position, bytes) in [
+        (0, &key[1..]),
+        (0, changed.as_slice()),
+        (profile.participants(), key),
+    ] {
+        write(&mut importing, bytes);
+        assert!(importing.checkpoint_key(position, bytes.len()).is_err());
+    }
+    // Each position takes its key once.
+    for position in 0..profile.participants() {
+        write(&mut importing, key);
+        importing.checkpoint_key(position, key.len()).unwrap();
+        write(&mut importing, key);
+        assert!(importing.checkpoint_key(position, key.len()).is_err());
+    }
+    // No record opened yet, so the import cannot finish and stays open.
+    assert!(importing.checkpoint_command(6, 0, 0, context).is_err());
+    assert_ne!(importing.checkpoint_records(), 0);
+    // A record that does not open under its key stops the session.
+    let unopened = [0; sealing::KEY_BYTES + sealing::TAG_BYTES];
+    write(&mut importing, &unopened);
+    assert!(
+        importing
+            .checkpoint_command(5, 0, unopened.len(), context)
+            .is_err()
+    );
+    assert_eq!(importing.checkpoint_records(), 0);
+    write(&mut importing, request);
+    assert!(
+        importing
+            .checkpoint_command(4, 0, request.len(), context)
+            .is_err()
+    );
+    // A failed proof command stops a session before any import.
+    let mut failed = session();
+    write(&mut failed, request);
+    assert!(failed.command(2, 0, 0).is_err());
+    assert!(
+        failed
+            .checkpoint_command(4, 0, request.len(), context)
+            .is_err()
+    );
+    // The retirement drops the import and stops the session.
+    let mut retired = session();
+    write(&mut retired, request);
+    retired
+        .checkpoint_command(4, 0, request.len(), context)
+        .unwrap();
+    retired.retire();
+    assert_eq!(retired.checkpoint_records(), 0);
+    assert!(
+        retired
+            .checkpoint_command(4, 0, request.len(), context)
+            .is_err()
+    );
 }
