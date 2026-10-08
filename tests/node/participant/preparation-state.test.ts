@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -17,6 +19,10 @@ import type {
 } from '#packages/sdk/src/participant/worker/preparation-state.js';
 import { encodeManifest } from '#packages/sdk/src/participant/worker/root.js';
 import { compileParticipantRuntimeProfile } from '#tests/participant-runtime-bounds-model.js';
+
+// The SHA-256 digest of stored bytes, which pins their exact format.
+const storedDigest = (bytes: Uint8Array) =>
+    createHash('sha256').update(bytes).digest('hex');
 
 const profile = compileParticipantRuntimeProfile(4, 2);
 const bounds = profile.preparation;
@@ -361,5 +367,27 @@ describe('independent preparation authority journal', () => {
         expect(() =>
             decodeContributionState(decoded.contribution!, profile),
         ).toThrow();
+    });
+
+    it('pins the bytes of an empty, an intended and a signed journal', () => {
+        expect(
+            [
+                {},
+                {
+                    contribution: encodeContributionState(unfinished(5)),
+                    selection: selection('intent'),
+                    endorsement: endorsement('intent'),
+                },
+                {
+                    contribution: encodeContributionState(unfinished(6)),
+                    selection: selection('signed'),
+                    endorsement: endorsement('signed'),
+                },
+            ].map((state) => storedDigest(encodePreparationState(state))),
+        ).toEqual([
+            '336148d39032496ea4772e27e7f26f8d11c94dcc36c920e297e339976ec97359',
+            '8bc5ce9c593e15110308dc1cb4f58d6da0ffa9faa1599cda55db84c46a98d002',
+            '3a6b3862d77a809fdc26aed51f79a89730b843b6fa722f6950c9eb95679e74c3',
+        ]);
     });
 });

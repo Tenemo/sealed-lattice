@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -13,6 +15,10 @@ import type {
     CloseState,
 } from '#packages/sdk/src/participant/worker/close-state.js';
 import { compileParticipantRuntimeProfile } from '#tests/participant-runtime-bounds-model.js';
+
+// The SHA-256 digest of stored bytes, which pins their exact format.
+const storedDigest = (bytes: Uint8Array) =>
+    createHash('sha256').update(bytes).digest('hex');
 
 const profile = compileParticipantRuntimeProfile(3, 2);
 const { close, ballot, registration } = profile;
@@ -305,5 +311,23 @@ describe('participant close state', () => {
             ),
         );
         expect(bindings.size).toBe(records.length);
+    });
+
+    it('pins the bytes every phase stores', () => {
+        expect(
+            phases.map(([generation, isOrganizer, value]) =>
+                storedDigest(encodeCloseState(generation, isOrganizer, value)),
+            ),
+        ).toEqual([
+            '220373f4b246356283e15274d8c926f391ab405338eccb637abf75b9e123fbd8',
+            '220373f4b246356283e15274d8c926f391ab405338eccb637abf75b9e123fbd8',
+            'f033bb5bf3c43b8d755dc4a5b42e22a98e8ae07ae661db5ce32411b3775a6ed0',
+            '41ba80cdf0115db59a13cd90671885ae640ce25e085ea5aadbdf14e10fb6d2ce',
+            'c5ee516dfbd4752819a7388cc03d3dbb0b64a6751a4765f2dc0cff9b1a70b004',
+            'bee4a610aca1ea4fc8b6e7ed7d33a7c780964764b70539a7cb7489d7ca10fa90',
+            '8a1b5b2dbc921cdbf144d000e85af5112085c50878c5fed2b69b3910e1b17803',
+            'cd57fe2154156ead007f464f5e8fabe3a20e6683fbb4694221410bca504bab9a',
+            '01ff1d44e0c31819ef1763aaae4dc968c1e325517943d5120840b3f6053063e3',
+        ]);
     });
 });

@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import { describe, expect, it } from 'vitest';
 
 import { completedClosePhase } from '#packages/sdk/src/participant/worker/close-state.js';
@@ -10,6 +12,10 @@ import {
 import type { BallotInclusion } from '#packages/sdk/src/participant/worker/target-state.js';
 import { compileParticipantRuntimeProfile } from '#tests/participant-runtime-bounds-model.js';
 import { compileTargetSigningStateCensus } from '#tests/target-signing-state-model.js';
+
+// The SHA-256 digest of stored bytes, which pins their exact format.
+const storedDigest = (bytes: Uint8Array) =>
+    createHash('sha256').update(bytes).digest('hex');
 
 const profile = compileParticipantRuntimeProfile(3, 2);
 const census = compileTargetSigningStateCensus();
@@ -139,5 +145,22 @@ describe('participant target signing state', () => {
             state(false, profile.target.maximumBodyBytes + 1),
         );
         refused(targetPhase.intent, false, oversized);
+    });
+
+    it('pins the bytes both phases store for both roles', () => {
+        expect(
+            [false, true].flatMap((isOrganizer) =>
+                [targetPhase.intent, targetPhase.signed].map((phase) =>
+                    storedDigest(
+                        encodeTargetState(phase, state(isOrganizer, 1)),
+                    ),
+                ),
+            ),
+        ).toEqual([
+            '53e4ef42312e6eec3c33fe66ccbe9b0e62c26f60f3d22c80bd8bb75c4052590d',
+            '30757a8897523115fee6c082ee25cbe0e6a8a12fbec4321c6a59c21e52876a08',
+            '8ea12efe2c1d3334de605952118a524717c6fdf075f9c3e182428d96f72fe0e9',
+            '8c3594d5bedc1000449b42a45cdc047d3f93b2e4dbc870599ce89d2da05aba7b',
+        ]);
     });
 });
