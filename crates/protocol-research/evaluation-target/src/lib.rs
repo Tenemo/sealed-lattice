@@ -34,17 +34,8 @@ pub mod program;
 pub mod release;
 #[path = "release-body.rs"]
 pub mod release_body;
-#[cfg(target_arch = "wasm32")]
-#[path = "scalar-allocator.rs"]
-mod scalar_allocator;
-#[cfg(target_arch = "wasm32")]
-pub use scalar_allocator::{limit_linear_memory, linear_memory_high_water};
 pub mod target;
 pub mod terminal;
-
-/// The absolute bound on the linear memory of an operation's instances
-/// together, which bounds a lone instance too.
-pub const MAXIMUM_LINEAR_MEMORY_BYTES: usize = 671_088_640;
 
 /// Plans a helper instance's memory for the evaluation's jobs: a growth
 /// brings it to the bytes its live allocations hold and the bytes its input
@@ -57,7 +48,7 @@ pub static PLAN: parallel_work::Job = parallel_work::Job {
 fn plan(input: &[u8]) -> Vec<u8> {
     let bytes = u64::from_le_bytes(input.try_into().expect("Planned length"));
     #[cfg(target_arch = "wasm32")]
-    scalar_allocator::plan_linear_memory(bytes as usize);
+    parallel_work::scalar_allocator::plan_linear_memory(bytes as usize);
     #[cfg(not(target_arch = "wasm32"))]
     let _ = bytes;
     Vec::new()

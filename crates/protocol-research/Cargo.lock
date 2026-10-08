@@ -170,7 +170,6 @@ version = "0.0.0"
 dependencies = [
  "ballot-encryption",
  "ballot-proof",
- "dlmalloc",
  "fips204",
  "linked-release-proof",
  "num-bigint",
@@ -324,6 +323,7 @@ checksum = "c08d65885ee38876c4f86fa503fb49d7b507c2b62552df7c70b2fce627e06381"
 name = "parallel-work"
 version = "0.0.0"
 dependencies = [
+ "dlmalloc",
  "keccak",
  "sha3",
  "zeroize",

@@ -6,10 +6,7 @@
 //! job's memory. The worker keeps what its helpers leave. Each instance
 //! lowers its bound to its share before its first allocation, so an
 //! operation that needs more ends pending rather than growing beyond it.
-use evaluation_target::MAXIMUM_LINEAR_MEMORY_BYTES;
-use parallel_work::{JOB_MEMORY_BYTES, MAXIMUM_HELPERS};
-
-const PAGE_BYTES: usize = 65_536;
+use parallel_work::{JOB_MEMORY_BYTES, MAXIMUM_HELPERS, MAXIMUM_LINEAR_MEMORY_BYTES, PAGE_BYTES};
 
 /// The bound of each of an operation's helpers, or none beyond the most
 /// helpers an operation starts.

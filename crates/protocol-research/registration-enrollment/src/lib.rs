@@ -41,6 +41,11 @@ mod own_verification;
 #[path = "parallel-browser.rs"]
 mod parallel_browser;
 
+#[cfg(target_arch = "wasm32")]
+#[global_allocator]
+static ALLOCATOR: parallel_work::scalar_allocator::ScalarAllocator =
+    parallel_work::scalar_allocator::ScalarAllocator::new();
+
 pub struct Enrollment {
     pub key: RegistrationKey,
     pub credential: Credential,

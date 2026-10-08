@@ -12,7 +12,7 @@ pub extern "C" fn parallel_reserve(helpers: usize, evaluation: u32) -> u32 {
         0 | 1 => crate::memory_plan::helper_memory_bytes(helpers, evaluation == 1),
         _ => None,
     };
-    u32::from(!bytes.is_some_and(evaluation_target::limit_linear_memory))
+    u32::from(!bytes.is_some_and(parallel_work::scalar_allocator::limit_linear_memory))
 }
 
 /// A zeroed input buffer of the length, or zero beyond the job bound.

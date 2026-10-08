@@ -9,6 +9,9 @@
 
 #[path = "protocol-hash.rs"]
 mod protocol_hash;
+#[cfg(target_arch = "wasm32")]
+#[path = "scalar-allocator.rs"]
+pub mod scalar_allocator;
 #[cfg(not(target_arch = "wasm32"))]
 mod simulated;
 mod stream;
@@ -32,6 +35,11 @@ pub const MAXIMUM_JOB_PARTS: usize = 4;
 pub const JOB_MEMORY_BYTES: usize = 32 << 20;
 /// The most helpers an operation's worker starts.
 pub const MAXIMUM_HELPERS: usize = 8;
+/// The absolute bound on the linear memory of an operation's instances
+/// together, which bounds a lone instance too.
+pub const MAXIMUM_LINEAR_MEMORY_BYTES: usize = 671_088_640;
+/// The bytes of one WebAssembly memory page.
+pub const PAGE_BYTES: usize = 65_536;
 
 /// A job. A helper instance runs the function its kind names.
 pub struct Job {

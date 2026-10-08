@@ -162,8 +162,8 @@ impl ClassifiedClosedInventory {
         if let Some(engine) = &mut engine {
             #[cfg(target_arch = "wasm32")]
             {
-                engine.bound_instance(crate::scalar_allocator::linear_memory_bound());
-                crate::scalar_allocator::plan_linear_memory(engine.planned_memory_bytes());
+                engine.bound_instance(parallel_work::scalar_allocator::linear_memory_bound());
+                parallel_work::scalar_allocator::plan_linear_memory(engine.planned_memory_bytes());
             }
             let helpers = parallel_work::helpers();
             let tickets: Vec<_> = (0..helpers)

@@ -10,7 +10,7 @@
 //! allocation. An allocation that finds no memory within the bound hands the
 //! call to the host, which ends it, so the host tells exhaustion apart from
 //! a trap.
-use crate::MAXIMUM_LINEAR_MEMORY_BYTES;
+use crate::{MAXIMUM_LINEAR_MEMORY_BYTES, PAGE_BYTES};
 use core::{
     alloc::{GlobalAlloc, Layout},
     arch::wasm32,
@@ -20,9 +20,8 @@ use core::{
 };
 
 #[cfg(target_feature = "atomics")]
-compile_error!("The evaluation allocator requires an unshared scalar Wasm instance.");
+compile_error!("The scalar allocator requires an unshared scalar Wasm instance.");
 
-const PAGE_BYTES: usize = 65_536;
 /// The fewest pages a growing region adds at once.
 const MINIMUM_GROWTH_PAGES: usize = 16;
 // The instance's memory bound, which the instance lowers before its first
@@ -148,7 +147,21 @@ unsafe impl dlmalloc::Allocator for SystemRegion {
     }
 }
 
-struct ScalarAllocator(UnsafeCell<dlmalloc::Dlmalloc<SystemRegion>>);
+/// The allocator over the bounded system region, which the participant
+/// module declares as its global allocator.
+pub struct ScalarAllocator(UnsafeCell<dlmalloc::Dlmalloc<SystemRegion>>);
+impl ScalarAllocator {
+    pub const fn new() -> Self {
+        Self(UnsafeCell::new(dlmalloc::Dlmalloc::new_with_allocator(
+            SystemRegion,
+        )))
+    }
+}
+impl Default for ScalarAllocator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 // SAFETY: Atomics/shared-memory builds are rejected above. Allocator operations
 // never yield, and the one import they call, once no memory is left, never
 // returns into the instance, so the single worker cannot reenter them.
@@ -188,8 +201,3 @@ unsafe impl GlobalAlloc for ScalarAllocator {
         moved
     }
 }
-
-#[global_allocator]
-static ALLOCATOR: ScalarAllocator = ScalarAllocator(UnsafeCell::new(
-    dlmalloc::Dlmalloc::new_with_allocator(SystemRegion),
-));

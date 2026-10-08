@@ -175,7 +175,7 @@ mod browser {
     /// reached, which the worker reports with each operation.
     #[unsafe(no_mangle)]
     pub extern "C" fn linear_memory_high_water() -> usize {
-        evaluation_target::linear_memory_high_water()
+        parallel_work::scalar_allocator::linear_memory_high_water()
     }
 
     // An operation's memory plan with the helpers, which evaluates the
@@ -207,7 +207,7 @@ mod browser {
     #[unsafe(no_mangle)]
     pub extern "C" fn worker_reserve(helpers: usize, evaluation: u32) -> u32 {
         let bytes = worker_memory_bound(helpers, evaluation);
-        u32::from(bytes == 0 || !evaluation_target::limit_linear_memory(bytes))
+        u32::from(bytes == 0 || !parallel_work::scalar_allocator::limit_linear_memory(bytes))
     }
 }
 
