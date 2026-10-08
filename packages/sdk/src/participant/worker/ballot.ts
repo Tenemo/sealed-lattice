@@ -319,6 +319,25 @@ export const ballotWorkInput = async (
     );
 };
 
+// The ballot work's operations, as the module's ballot command numbers them.
+const ballotOperation = {
+    begin: 0,
+    // The FHE key, delivered in chunks from the final aggregate.
+    beginKey: 1,
+    pushKey: 2,
+    finishKey: 3,
+    // Creates the ballot from the randomness of its seed.
+    create: 4,
+    // Imports a retained body, which the module verifies against the key.
+    beginImport: 5,
+    pushImport: 6,
+    finishImport: 7,
+    sign: 8,
+    envelope: 10,
+    bodySlice: 11,
+    signature: 12,
+} as const;
+
 const tryBallotCommand = (
     context: PublicContext,
     operation: number,
@@ -370,9 +389,9 @@ export const deliverBallotKey = (
                 throw new PublicInputFailure('A ballot key was refused.');
         };
         await readFinalAggregate(context, index, (offset, bytes) => {
-            deliver(2, offset, bytes);
+            deliver(ballotOperation.pushKey, offset, bytes);
         });
-        deliver(3);
+        deliver(ballotOperation.finishKey);
     });
 
 // Starts the module's ballot work from the retained poll, opening and setup
@@ -385,12 +404,12 @@ const startBallotWork = async (session: BallotSession) => {
     const { kernel } = context;
     ballotCommand(
         context,
-        0,
+        ballotOperation.begin,
         0,
         await ballotWorkInput(participant, session.records.inventory),
     );
     const index = kernel.participant_ballot_key_index() >>> 0;
-    ballotCommand(context, 1, index);
+    ballotCommand(context, ballotOperation.beginKey, index);
     await deliverBallotKey(context, index);
 };
 
@@ -409,13 +428,13 @@ const createBallot = (session: BallotSession) => {
         session.state.scores,
     );
     try {
-        ballotCommand(context, 4, 0, input);
+        ballotCommand(context, ballotOperation.create, 0, input);
         session.proofRandomBytes = randomness.proofDrawn();
     } finally {
         input.fill(0);
         randomness.discard();
     }
-    return ballotCommand(context, 10);
+    return ballotCommand(context, ballotOperation.envelope);
 };
 
 // Creates the ballot from the seed and retains its envelope and complete body
@@ -438,7 +457,12 @@ const retainBallot = async (session: BallotSession) => {
     const added: SealedRecord[] = [];
     for (let offset = 0; offset < bodyLength; offset += recordBytes) {
         const length = Math.min(recordBytes, bodyLength - offset);
-        const bytes = ballotCommand(context, 11, offset, unsigned32(length));
+        const bytes = ballotCommand(
+            context,
+            ballotOperation.bodySlice,
+            offset,
+            unsigned32(length),
+        );
         try {
             if (bytes.length !== length)
                 throw new Error('A ballot body record is incomplete.');
@@ -466,14 +490,24 @@ const retainBallot = async (session: BallotSession) => {
 // keys and must reproduce the retained envelope.
 const importBody = async (session: BallotSession) => {
     const { context } = session.participant;
-    ballotCommand(context, 5, 0, session.state.envelope);
+    ballotCommand(
+        context,
+        ballotOperation.beginImport,
+        0,
+        session.state.envelope,
+    );
     let offset = 0;
     await readBallotBody(session, (bytes) => {
-        ballotCommand(context, 6, offset, bytes);
+        ballotCommand(context, ballotOperation.pushImport, offset, bytes);
         offset += bytes.length;
     });
-    ballotCommand(context, 7);
-    if (!equalBytes(ballotCommand(context, 10), session.state.envelope))
+    ballotCommand(context, ballotOperation.finishImport);
+    if (
+        !equalBytes(
+            ballotCommand(context, ballotOperation.envelope),
+            session.state.envelope,
+        )
+    )
         throw new Error('The verified ballot changed its envelope.');
 };
 
@@ -502,8 +536,8 @@ export const completeBallot = async (
         });
     if (generation() === ballotPhase.ready) await retainBallot(session);
     else await importBody(session);
-    ballotCommand(context, 8, 0, session.state.envelope);
-    const signature = ballotCommand(context, 12);
+    ballotCommand(context, ballotOperation.sign, 0, session.state.envelope);
+    const signature = ballotCommand(context, ballotOperation.signature);
     if (signature.length !== context.profile.registration.signatureBytes)
         throw new Error('The ballot signature is incomplete.');
     await commitBallot(session, {

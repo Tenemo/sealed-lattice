@@ -3,10 +3,6 @@ use crate::{
     identity::BodyHasher, roster_authentication::OrganizerSignedRoster,
     target_signing::TargetMessage,
 };
-use fips204::{
-    ml_dsa_65,
-    traits::{SerDes, Verifier},
-};
 use std::ops::RangeInclusive;
 use supported_profile::relation::{release_coefficient_bytes, release_header_position};
 use supported_profile::{
@@ -195,40 +191,6 @@ impl Credential {
         }
         self.release_signed = true;
         self.sign_deterministically(envelope.bytes(), RELEASE_SIGNATURE_CONTEXT)
-    }
-    pub fn restore_release(
-        &mut self,
-        owner: &RetainedBallotOwner,
-        roster: &OrganizerSignedRoster,
-        message: &TargetMessage,
-        envelope: &ReleaseEnvelope,
-        signature: &[u8],
-    ) -> Result<(), Error> {
-        self.check_target_owner(owner, roster, message)?;
-        self.check_target_predecessors(owner, roster)?;
-        if !message.encrypted() || self.release_started || self.release_signed {
-            return Err(Error::Consumed);
-        }
-        if envelope.poll() != owner.poll()
-            || envelope.inventory() != owner.inventory()
-            || envelope.position() != owner.position()
-            || envelope.target() != message.identity()
-            || self
-                .target_lock
-                .is_some_and(|target| target != *message.identity())
-        {
-            return Err(Error::Context);
-        }
-        let signature = signature.try_into().map_err(|_| Error::Shape)?;
-        let key =
-            ml_dsa_65::PublicKey::try_from_bytes(self.signing_public).map_err(|_| Error::Crypto)?;
-        if !key.verify(envelope.bytes(), &signature, RELEASE_SIGNATURE_CONTEXT) {
-            return Err(Error::Crypto);
-        }
-        self.target_lock = Some(*message.identity());
-        self.release_started = true;
-        self.release_signed = true;
-        Ok(())
     }
 }
 

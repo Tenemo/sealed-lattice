@@ -1,13 +1,11 @@
 use super::{SESSION, Session};
 use evaluation_target::release_body::{ReleaseBodyVerifier, VerifiedReleaseBody};
 use registration_credentials::{
-    Error, SIGNATURE_BYTES,
-    identity::BodyHasher,
+    Error,
     release_signing::{
-        RELEASE_BODY_HEADER_BYTES, RELEASE_ENVELOPE_BYTES, ReleaseEnvelope, body_hasher,
-        body_header,
+        RELEASE_BODY_HEADER_BYTES, RELEASE_ENVELOPE_BYTES, ReleaseEnvelope, body_header,
     },
-    target_signing::{MAXIMUM_TARGET_BODY_BYTES, TargetMessage},
+    target_signing::TargetMessage,
 };
 use zeroize::{Zeroize, Zeroizing};
 
@@ -19,8 +17,6 @@ pub(super) struct ReleaseState {
     body: Vec<u8>,
     envelope: ReleaseEnvelope,
     verified: Option<VerifiedReleaseBody>,
-    completed: Option<(Vec<u8>, Vec<u8>)>,
-    hasher: Option<BodyHasher>,
     import_closed: bool,
 }
 
@@ -76,8 +72,6 @@ fn command(session: &mut Session, operation: u32, input: &[u8]) -> Result<Vec<u8
                 body,
                 envelope,
                 verified: Some(verified),
-                completed: None,
-                hasher: None,
                 import_closed: false,
             });
             Ok(output)
@@ -127,8 +121,6 @@ fn command(session: &mut Session, operation: u32, input: &[u8]) -> Result<Vec<u8
                 body: Vec::with_capacity(envelope.body_length()),
                 envelope,
                 verified: None,
-                completed: None,
-                hasher: None,
                 import_closed: false,
             });
             Ok(Vec::new())
@@ -143,9 +135,6 @@ fn command(session: &mut Session, operation: u32, input: &[u8]) -> Result<Vec<u8
             {
                 state.import_closed = true;
                 return Err(Error::Shape);
-            }
-            if let Some(hasher) = state.hasher.as_mut() {
-                hasher.push(input)?;
             }
             state.body.extend(input);
             Ok(Vec::new())
@@ -164,31 +153,13 @@ fn command(session: &mut Session, operation: u32, input: &[u8]) -> Result<Vec<u8
             }
             // Any failed verification permanently closes this volatile import.
             state.import_closed = true;
-            if let Some((body, signature)) = state.completed.as_ref() {
-                let identity = state.hasher.take().ok_or(Error::Consumed)?.finish()?;
-                if &identity != state.envelope.body_identity() {
-                    return Err(Error::Crypto);
-                }
-                let message = TargetMessage::parse(body, roster.proposal().records().len())?;
-                let enrollment = session.enrollment.as_mut().ok_or(Error::Context)?;
-                enrollment.credential.restore_release(
-                    &owner,
-                    roster,
-                    &message,
-                    &state.envelope,
-                    signature,
-                )?;
-            } else {
-                let context =
-                    evaluation_target::verified_browser_release_context().ok_or(Error::Context)?;
-                let verified = verify_body(context, &state.body)?;
-                if verified.envelope().bytes() != state.envelope.bytes() {
-                    return Err(Error::Context);
-                }
-                state.verified = Some(verified);
+            let context =
+                evaluation_target::verified_browser_release_context().ok_or(Error::Context)?;
+            let verified = verify_body(context, &state.body)?;
+            if verified.envelope().bytes() != state.envelope.bytes() {
+                return Err(Error::Context);
             }
-            // A completed import restores consumed authority only. It does not
-            // create a public release-share capability or permit signing.
+            state.verified = Some(verified);
             Ok(state.envelope.bytes().to_vec())
         }
         5 => {
@@ -207,47 +178,6 @@ fn command(session: &mut Session, operation: u32, input: &[u8]) -> Result<Vec<u8
             let mut packet = verified.envelope().bytes().to_vec();
             packet.extend(signature);
             Ok(packet)
-        }
-        6 => {
-            if session.release.is_some()
-                || input.len() < 4 + RELEASE_ENVELOPE_BYTES + SIGNATURE_BYTES
-            {
-                return Err(Error::Consumed);
-            }
-            let length = u32::from_le_bytes(input[..4].try_into().unwrap()) as usize;
-            if length == 0
-                || length > MAXIMUM_TARGET_BODY_BYTES
-                || input.len() != 4 + length + RELEASE_ENVELOPE_BYTES + SIGNATURE_BYTES
-            {
-                return Err(Error::Shape);
-            }
-            let body = &input[4..4 + length];
-            let message = TargetMessage::parse(body, roster.proposal().records().len())?;
-            let envelope = ReleaseEnvelope::decode(
-                profile,
-                &input[4 + length..4 + length + RELEASE_ENVELOPE_BYTES],
-            )?;
-            if !message.encrypted()
-                || envelope.target() != message.identity()
-                || envelope.poll() != owner.poll()
-                || envelope.inventory() != owner.inventory()
-                || envelope.position() != owner.position()
-            {
-                return Err(Error::Context);
-            }
-            let hasher = body_hasher(profile, envelope.body_length())?;
-            session.release = Some(ReleaseState {
-                body: Vec::with_capacity(envelope.body_length()),
-                envelope,
-                verified: None,
-                completed: Some((
-                    body.to_vec(),
-                    input[4 + length + RELEASE_ENVELOPE_BYTES..].to_vec(),
-                )),
-                hasher: Some(hasher),
-                import_closed: false,
-            });
-            Ok(Vec::new())
         }
         _ => Err(Error::Shape),
     }

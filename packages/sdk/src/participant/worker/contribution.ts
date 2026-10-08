@@ -144,7 +144,7 @@ const proverPhase = {
     done: 111,
 } as const;
 
-const proverCommand = {
+const proverOperation = {
     generate: 2,
     step: 7,
     beginPolynomial: 8,
@@ -154,7 +154,7 @@ const proverCommand = {
     consumePredecessor: 14,
 } as const;
 
-const checkpointCommand = {
+const checkpointOperation = {
     exportHeader: 1,
     seal: 2,
     complete: 3,
@@ -163,7 +163,7 @@ const checkpointCommand = {
     finish: 6,
 } as const;
 
-const signingCommand = {
+const signingOperation = {
     beginBody: 1,
     polynomial: 2,
     proof: 3,
@@ -796,7 +796,7 @@ export const generateContribution = async (session: ContributionSession) => {
         if (kernel.begin_contribution(session.state.position) !== 0)
             throw new Error('The credential refused contribution generation.');
         await run.store();
-        while (run.phase() < 100) await run.advance(proverCommand.generate);
+        while (run.phase() < 100) await run.advance(proverOperation.generate);
         await run.flush();
         if (
             run.phase() !== proverPhase.firstInitialize ||
@@ -807,12 +807,12 @@ export const generateContribution = async (session: ContributionSession) => {
             throw new Error('The generated contribution is incomplete.');
         // The checkpoint follows every first-oracle column but the last.
         for (let step = 0; step < bounds.firstOracleColumns + 2; step++)
-            await run.advance(proverCommand.step);
+            await run.advance(proverOperation.step);
         if (
             run.phase() !== proverPhase.firstColumn ||
             kernel.contribution_checkpoint_records() !==
                 bounds.checkpointLengths.length ||
-            checkpoint(context, checkpointCommand.exportHeader) !== 0
+            checkpoint(context, checkpointOperation.exportHeader) !== 0
         )
             throw new Error('The first-oracle checkpoint is unavailable.');
         header = proverOutput(context);
@@ -830,7 +830,7 @@ export const generateContribution = async (session: ContributionSession) => {
             crypto.getRandomValues(target);
         };
         for (const [index, length] of bounds.checkpointLengths.entries()) {
-            if (checkpoint(context, checkpointCommand.seal) !== 0)
+            if (checkpoint(context, checkpointOperation.seal) !== 0)
                 throw new Error('A checkpoint record was refused.');
             const output = proverOutput(context);
             const key = output.slice(0, recordKeyBytes);
@@ -861,7 +861,7 @@ export const generateContribution = async (session: ContributionSession) => {
         }
         await writing;
         await run.flush();
-        if (checkpoint(context, checkpointCommand.complete) !== 0)
+        if (checkpoint(context, checkpointOperation.complete) !== 0)
             throw new Error('The checkpoint is incomplete.');
     } finally {
         context.handlers.random = undefined;
@@ -895,7 +895,7 @@ export const restoreCheckpoint = async (
     if (
         checkpoint(
             context,
-            checkpointCommand.import,
+            checkpointOperation.import,
             state.position,
             concatenate(
                 session.records.poll,
@@ -925,7 +925,7 @@ export const restoreCheckpoint = async (
             throw new Error('A checkpoint record changed.');
         const input = concatenate(record.key, sealed);
         try {
-            if (checkpoint(context, checkpointCommand.open, 0, input) !== 0)
+            if (checkpoint(context, checkpointOperation.open, 0, input) !== 0)
                 throw new Error('A checkpoint record was refused.');
         } finally {
             input.fill(0);
@@ -957,7 +957,7 @@ export const restoreCheckpoint = async (
         );
     }
     if (
-        checkpoint(context, checkpointCommand.finish) !== 0 ||
+        checkpoint(context, checkpointOperation.finish) !== 0 ||
         kernel.contribution_proof_phase() !== proverPhase.firstColumn
     )
         throw new Error('The contribution did not resume exactly.');
@@ -1029,28 +1029,28 @@ export const continueContribution = async (session: ContributionSession) => {
     };
     try {
         while (run.phase() !== proverPhase.polynomials)
-            await run.advance(proverCommand.step);
+            await run.advance(proverOperation.step);
         for (const [index, records] of retained.entries()) {
             if (records.length === 0) {
-                await run.advance(proverCommand.consumePredecessor, index);
+                await run.advance(proverOperation.consumePredecessor, index);
                 continue;
             }
-            await run.advance(proverCommand.beginPolynomial, index);
+            await run.advance(proverOperation.beginPolynomial, index);
             for (let count = records.length; count > 0; count--) {
                 const bytes = await openNext();
                 try {
-                    await run.advance(proverCommand.pushPolynomial, 0, bytes);
+                    await run.advance(proverOperation.pushPolynomial, 0, bytes);
                 } finally {
                     bytes.fill(0);
                 }
             }
-            await run.advance(proverCommand.finishPolynomial);
+            await run.advance(proverOperation.finishPolynomial);
         }
         // The linear oracle, then the folded combination.
-        await run.advance(proverCommand.step);
-        await run.advance(proverCommand.step);
+        await run.advance(proverOperation.step);
+        await run.advance(proverOperation.step);
         while (run.phase() === proverPhase.output) {
-            await run.advance(proverCommand.nextOutput);
+            await run.advance(proverOperation.nextOutput);
             const bytes = proverOutput(context);
             try {
                 await writer.append(bytes);
@@ -1065,7 +1065,7 @@ export const continueContribution = async (session: ContributionSession) => {
         const length = await writer.finish();
         header = signing(
             context,
-            signingCommand.bodyHeader,
+            signingOperation.bodyHeader,
             concatenate(unsigned16(state.position), unsigned64(BigInt(length))),
         );
         if (proofLength(bounds, header) !== length)
@@ -1131,7 +1131,7 @@ const bodyOffer = async (session: ContributionSession) => {
         unsigned64(BigInt(proofLength(profile.contribution, state.header))),
     );
     try {
-        const header = signing(context, signingCommand.beginBody, control);
+        const header = signing(context, signingOperation.beginBody, control);
         if (!equalBytes(header, state.header))
             throw new Error('The original source opening changed.');
     } finally {
@@ -1146,7 +1146,7 @@ const bodyOffer = async (session: ContributionSession) => {
             try {
                 signing(
                     context,
-                    signingCommand.polynomial,
+                    signingOperation.polynomial,
                     input,
                     polynomial.expandedIndex,
                 );
@@ -1156,9 +1156,9 @@ const bodyOffer = async (session: ContributionSession) => {
             }
         }
     await readRetainedProof(session, (offset, bytes) => {
-        signing(context, signingCommand.proof, bytes, offset);
+        signing(context, signingOperation.proof, bytes, offset);
     });
-    return signing(context, signingCommand.finishBody);
+    return signing(context, signingOperation.finishBody);
 };
 
 const storedOffer = async (
@@ -1197,7 +1197,7 @@ export const signContribution = async (
     if (!equalBytes(envelope, body))
         throw new Error('The locked offer changed.');
     const signed = decodeSignedPacket(
-        signing(context, signingCommand.signOffer),
+        signing(context, signingOperation.signOffer),
         profile.registration.signatureBytes,
     );
     if (signed === undefined)

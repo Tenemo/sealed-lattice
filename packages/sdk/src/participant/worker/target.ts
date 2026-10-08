@@ -1100,6 +1100,16 @@ const evaluate = async (
     );
 };
 
+// The finality work's operations, as the module's finality command numbers
+// them.
+export const finalityOperation = {
+    // The own ballot's status and the target body to retain before signing.
+    begin: 0,
+    signVote: 1,
+    restoreSignedTarget: 2,
+    certifiedBallotStatus: 3,
+} as const;
+
 const finalityCommand = (
     context: ProfileContext,
     operation: number,
@@ -1121,7 +1131,10 @@ const finalityCommand = (
 // The own ballot's status in the target this instance certified, which the
 // finality work reads for a participant that signed no target of its own.
 export const certifiedBallotStatus = (context: ProfileContext) => {
-    const output = finalityCommand(context, 3);
+    const output = finalityCommand(
+        context,
+        finalityOperation.certifiedBallotStatus,
+    );
     if (output.length !== 1 || output[0] >= ballotStatuses.length)
         throw new Error('The finality work reported no ballot status.');
     return ballotStatuses[output[0]];
@@ -1246,7 +1259,7 @@ export const signTarget = async (close: CloseSession, relay: PublicRelay) => {
         relay,
     );
     await retainEvaluation(context);
-    const finality = finalityCommand(context, 0);
+    const finality = finalityCommand(context, finalityOperation.begin);
     if (!equalBytes(finality.subarray(1), body))
         throw new Error('The finality work names another target.');
     const code = finality[0];
@@ -1269,7 +1282,11 @@ export const signTarget = async (close: CloseSession, relay: PublicRelay) => {
         );
     else if (state.ballotStatus !== ballotStatus)
         throw new Error('The finality work reported another ballot status.');
-    const vote = finalityCommand(context, 1, state.body);
+    const vote = finalityCommand(
+        context,
+        finalityOperation.signVote,
+        state.body,
+    );
     await commitTarget(close, targetPhase.signed, {
         ...state,
 

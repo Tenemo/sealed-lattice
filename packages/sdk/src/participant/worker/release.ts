@@ -46,6 +46,7 @@ import type { BallotStatus, TargetState } from './target-state.js';
 import {
     certifiedBallotStatus,
     discardEvaluation,
+    finalityOperation,
     restoreOrEvaluateTarget,
     resumeTarget,
     targetVoteCandidateKey,
@@ -154,6 +155,19 @@ export const resumeRelease = async (
         state,
     };
 };
+
+// The release work's operations, as the module's release command numbers
+// them.
+const releaseOperation = {
+    // Proves the release from the randomness of its seed.
+    create: 0,
+    bodySlice: 1,
+    // Imports a retained body, which the module verifies again.
+    beginImport: 2,
+    pushImport: 3,
+    finishImport: 4,
+    sign: 5,
+} as const;
 
 const releaseCommand = (
     context: ProfileContext,
@@ -453,7 +467,11 @@ const proveRelease = async (session: ReleaseSession) => {
     const randomness = seededRandomness(kernel, 'release', state.seed);
     let envelope: Uint8Array;
     try {
-        envelope = releaseCommand(context, 0, releaseTarget(session).body);
+        envelope = releaseCommand(
+            context,
+            releaseOperation.create,
+            releaseTarget(session).body,
+        );
         session.proofRandomBytes = randomness.proofDrawn();
     } finally {
         randomness.discard();
@@ -479,7 +497,7 @@ const proveRelease = async (session: ReleaseSession) => {
                 index,
                 releaseCommand(
                     context,
-                    1,
+                    releaseOperation.bodySlice,
                     concatenate(
                         unsigned32(index * bounds.recordBytes),
                         unsigned32(length),
@@ -506,12 +524,12 @@ const restoreReleaseBody = async (session: ReleaseSession) => {
     const { context } = session.close.participant;
     const { state } = session;
     if (state === undefined) throw new Error('No release body is retained.');
-    releaseCommand(context, 2, state.envelope);
+    releaseCommand(context, releaseOperation.beginImport, state.envelope);
     for (let index = 0; index < state.bodyKeys.length; index++) {
         const bytes = await openReleaseRecord(session, index);
-        releaseCommand(context, 3, bytes);
+        releaseCommand(context, releaseOperation.pushImport, bytes);
     }
-    releaseCommand(context, 4);
+    releaseCommand(context, releaseOperation.finishImport);
 };
 
 // The verified body transaction already locks the exact signing envelope.
@@ -520,7 +538,11 @@ const signRelease = async (session: ReleaseSession) => {
     if (session.state === undefined)
         throw new Error('No release body is retained.');
     const state = session.state;
-    const packet = releaseCommand(context, 5, state.envelope);
+    const packet = releaseCommand(
+        context,
+        releaseOperation.sign,
+        state.envelope,
+    );
     await commitRelease(session, {
         generation: releasePhase.signed,
         state: {
@@ -539,7 +561,7 @@ const restoreSignedTarget = (context: ProfileContext, signed: TargetState) => {
     sessionInput(context, concatenate(unsigned32(body.length), body, vote));
     if (
         kernel.participant_finality_command(
-            2,
+            finalityOperation.restoreSignedTarget,
             4 + body.length + vote.length,
         ) !== 0
     )

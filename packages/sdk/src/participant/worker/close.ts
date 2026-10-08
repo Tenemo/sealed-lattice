@@ -131,6 +131,29 @@ type AddedRecord = Readonly<{
     ciphertext: Uint8Array;
 }>;
 
+// The close work's operations, as the module's close command numbers them.
+const closeOperation = {
+    begin: 0,
+    prepareIntent: 1,
+    lockIntent: 2,
+    // A held envelope and its complete body, transferred in chunks.
+    beginHeldBody: 3,
+    pushHeldBody: 4,
+    finishHeldBody: 5,
+    prepareResponse: 6,
+    admitResponse: 7,
+    sign: 8,
+    prepareProposal: 9,
+    restoreMessage: 10,
+    restoreBallotSigning: 11,
+    discardHeldBody: 12,
+    wantedBodies: 13,
+    envelopeIdentity: 14,
+} as const;
+
+// The completed close message that a restore names.
+const closeMessage = { intent: 0, response: 1, proposal: 2 } as const;
+
 const tryCloseCommand = (
     context: ProfileContext,
     operation: number,
@@ -321,7 +344,7 @@ const commitClose = async (
 const envelopeIdentity = (context: ProfileContext, submission: Uint8Array) =>
     tryCloseCommand(
         context,
-        14,
+        closeOperation.envelopeIdentity,
         0,
         submission.subarray(0, context.profile.ballot.envelopeBytes),
     );
@@ -590,11 +613,16 @@ const replayEvent = async (session: CloseSession, event: CloseEvent) => {
             const { ballot } = session;
             if (ballot === undefined)
                 throw new Error('The close log names an unsigned ballot.');
-            closeCommand(context, 3, 0, ownSubmission(ballot));
+            closeCommand(
+                context,
+                closeOperation.beginHeldBody,
+                0,
+                ownSubmission(ballot),
+            );
             await readBallotBody(ballot, (bytes) => {
-                closeCommand(context, 4, 0, bytes);
+                closeCommand(context, closeOperation.pushHeldBody, 0, bytes);
             });
-            closeCommand(context, 5);
+            closeCommand(context, closeOperation.finishHeldBody);
             learnSubmission(session, event.serial, ballot.state.envelope);
             break;
         }
@@ -605,25 +633,35 @@ const replayEvent = async (session: CloseSession, event: CloseEvent) => {
                 BigInt(event.length)
             )
                 throw new Error('A held body changed its length.');
-            closeCommand(context, 3, 0, submission);
+            closeCommand(context, closeOperation.beginHeldBody, 0, submission);
             for (let index = 1; index < event.keys.length; index++) {
                 const bytes = await openCloseRecord(session, event, index);
                 try {
-                    closeCommand(context, 4, 0, bytes);
+                    closeCommand(
+                        context,
+                        closeOperation.pushHeldBody,
+                        0,
+                        bytes,
+                    );
                 } finally {
                     bytes.fill(0);
                 }
             }
-            closeCommand(context, 5);
+            closeCommand(context, closeOperation.finishHeldBody);
             learnSubmission(session, event.serial, submission);
             break;
         }
         case closeEventKind.lock:
-            closeCommand(context, 2, 0, session.state.intentPacket);
+            closeCommand(
+                context,
+                closeOperation.lockIntent,
+                0,
+                session.state.intentPacket,
+            );
             break;
         case closeEventKind.response: {
             const record = await openCloseRecord(session, event, 0);
-            closeCommand(context, 7, 0, record);
+            closeCommand(context, closeOperation.admitResponse, 0, record);
             learnResponse(session, event.serial, record);
             break;
         }
@@ -642,17 +680,32 @@ const startCloseWork = async (session: CloseSession) => {
     const generation = generationOf(session);
     closeCommand(
         context,
-        0,
+        closeOperation.begin,
         0,
         await ballotWorkInput(participant, session.records.inventory),
     );
     if (session.ballot !== undefined)
-        closeCommand(context, 11, 0, ownSubmission(session.ballot));
+        closeCommand(
+            context,
+            closeOperation.restoreBallotSigning,
+            0,
+            ownSubmission(session.ballot),
+        );
     if (session.organizer && generation >= closePhase.locked)
-        closeCommand(context, 10, 0, session.state.intentPacket);
+        closeCommand(
+            context,
+            closeOperation.restoreMessage,
+            closeMessage.intent,
+            session.state.intentPacket,
+        );
     for (const event of session.state.events) await replayEvent(session, event);
     if (generation >= closePhase.responded)
-        closeCommand(context, 10, 1, session.state.responsePacket);
+        closeCommand(
+            context,
+            closeOperation.restoreMessage,
+            closeMessage.response,
+            session.state.responsePacket,
+        );
 };
 
 // Restores the authority a completed close retains without replaying its
@@ -666,16 +719,38 @@ export const restoreCompletedClose = async (session: CloseSession) => {
         throw new Error('The close is not complete.');
     closeCommand(
         context,
-        0,
+        closeOperation.begin,
         0,
         await ballotWorkInput(participant, session.records.inventory),
     );
     if (session.ballot !== undefined)
-        closeCommand(context, 11, 0, ownSubmission(session.ballot));
-    if (session.organizer) closeCommand(context, 10, 0, state.intentPacket);
-    closeCommand(context, 2, 0, state.intentPacket);
-    closeCommand(context, 10, 1, state.responsePacket);
-    if (session.organizer) closeCommand(context, 10, 2, state.proposalPacket);
+        closeCommand(
+            context,
+            closeOperation.restoreBallotSigning,
+            0,
+            ownSubmission(session.ballot),
+        );
+    if (session.organizer)
+        closeCommand(
+            context,
+            closeOperation.restoreMessage,
+            closeMessage.intent,
+            state.intentPacket,
+        );
+    closeCommand(context, closeOperation.lockIntent, 0, state.intentPacket);
+    closeCommand(
+        context,
+        closeOperation.restoreMessage,
+        closeMessage.response,
+        state.responsePacket,
+    );
+    if (session.organizer)
+        closeCommand(
+            context,
+            closeOperation.restoreMessage,
+            closeMessage.proposal,
+            state.proposalPacket,
+        );
 };
 
 // The close records the root lists.
@@ -707,12 +782,19 @@ const deliverOwnBallot = async (session: CloseSession) => {
         return;
     const { context } = session.participant;
     // A late own ballot after the lock is refused and never listed.
-    if (tryCloseCommand(context, 3, 0, ownSubmission(ballot)) === undefined)
+    if (
+        tryCloseCommand(
+            context,
+            closeOperation.beginHeldBody,
+            0,
+            ownSubmission(ballot),
+        ) === undefined
+    )
         return;
     await readBallotBody(ballot, (bytes) => {
-        closeCommand(context, 4, 0, bytes);
+        closeCommand(context, closeOperation.pushHeldBody, 0, bytes);
     });
-    closeCommand(context, 5);
+    closeCommand(context, closeOperation.finishHeldBody);
     const serial = nextSerial(session.state);
     await appendEvent(session, {
         kind: closeEventKind.own,
@@ -766,7 +848,15 @@ const deliverBody = async (
 ) => {
     const { context } = session.participant;
     const { profile } = context;
-    if (tryCloseCommand(context, 3, 0, submission) === undefined) return false;
+    if (
+        tryCloseCommand(
+            context,
+            closeOperation.beginHeldBody,
+            0,
+            submission,
+        ) === undefined
+    )
+        return false;
     const length = Number(readUnsigned64(submission, envelopeLengthOffset));
     const { recordBytes, minimumBodyBytes, maximumBodyBytes } = profile.ballot;
     const event = {
@@ -781,7 +871,14 @@ const deliverBody = async (
         const bytes = pending.slice(0, used);
         used = 0;
         try {
-            if (tryCloseCommand(context, 4, 0, bytes) === undefined)
+            if (
+                tryCloseCommand(
+                    context,
+                    closeOperation.pushHeldBody,
+                    0,
+                    bytes,
+                ) === undefined
+            )
                 accepted = false;
             else
                 added.push(
@@ -821,10 +918,11 @@ const deliverBody = async (
     // A stream may fail after its last payload byte. Cancel before finish so
     // that failed transport cannot install even a complete tentative body.
     if (!accepted) {
-        closeCommand(context, 12);
+        closeCommand(context, closeOperation.discardHeldBody);
         return false;
     }
-    if (tryCloseCommand(context, 5) === undefined) return false;
+    if (tryCloseCommand(context, closeOperation.finishHeldBody) === undefined)
+        return false;
     await appendEvent(
         session,
         { ...event, length, keys: added.map((record) => record.key) },
@@ -868,13 +966,23 @@ const signIntent = async (session: CloseSession, closeTime?: bigint) => {
     let body: Uint8Array;
     if (generationOf(session) === closePhase.intent) {
         const retained = session.state.intentBody;
-        body = closeCommand(context, 1, 0, retained.subarray(-8));
+        body = closeCommand(
+            context,
+            closeOperation.prepareIntent,
+            0,
+            retained.subarray(-8),
+        );
         if (!equalBytes(body, retained))
             throw new Error('The retained intent body changed.');
     } else {
         if (closeTime === undefined)
             throw new Error('No close time was requested.');
-        body = closeCommand(context, 1, 0, unsigned64(closeTime));
+        body = closeCommand(
+            context,
+            closeOperation.prepareIntent,
+            0,
+            unsigned64(closeTime),
+        );
         await commitClose(session, {
             generation: closePhase.intent,
             state: {
@@ -883,7 +991,7 @@ const signIntent = async (session: CloseSession, closeTime?: bigint) => {
             },
         });
     }
-    const signature = closeCommand(context, 8, 0, body);
+    const signature = closeCommand(context, closeOperation.sign, 0, body);
     return encodeSignedPacket({ body, signature });
 };
 
@@ -892,7 +1000,10 @@ const signIntent = async (session: CloseSession, closeTime?: bigint) => {
 // list, and appends the lock event, so replay applies it where it arrived.
 const lockIntent = async (session: CloseSession, intentPacket: Uint8Array) => {
     const { context } = session.participant;
-    if (tryCloseCommand(context, 2, 0, intentPacket) === undefined)
+    if (
+        tryCloseCommand(context, closeOperation.lockIntent, 0, intentPacket) ===
+        undefined
+    )
         throw new PublicInputFailure('The close intent was refused.');
     const { close } = session.participant.context.profile;
     const closeTime = readUnsigned64(
@@ -935,10 +1046,10 @@ const takeResponses = async (session: CloseSession, relay: PublicRelay) => {
     const taken = new Set(session.responders.values());
     // Authentication does not establish body availability. Only the owning
     // close machine may prepare the organizer's response from a ready quorum.
-    const restored = tryCloseCommand(context, 6);
+    const restored = tryCloseCommand(context, closeOperation.prepareResponse);
     if (restored !== undefined) return restored;
     await deliverWantedBodies(session, relay);
-    const recovered = tryCloseCommand(context, 6);
+    const recovered = tryCloseCommand(context, closeOperation.prepareResponse);
     if (recovered !== undefined) return recovered;
     const remaining = new Map(
         Array.from(
@@ -1020,7 +1131,12 @@ const takeResponses = async (session: CloseSession, relay: PublicRelay) => {
             const record = concatenate(response, ...supplied);
             if (
                 record.length > close.maximumResponseRecordBytes ||
-                tryCloseCommand(context, 7, 0, record) === undefined
+                tryCloseCommand(
+                    context,
+                    closeOperation.admitResponse,
+                    0,
+                    record,
+                ) === undefined
             )
                 continue;
             const event = {
@@ -1035,11 +1151,17 @@ const takeResponses = async (session: CloseSession, relay: PublicRelay) => {
             );
             learnResponse(session, event.serial, record);
             remaining.delete(responder);
-            const prepared = tryCloseCommand(context, 6);
+            const prepared = tryCloseCommand(
+                context,
+                closeOperation.prepareResponse,
+            );
             if (prepared !== undefined) return prepared;
         }
         await deliverWantedBodies(session, relay);
-        const prepared = tryCloseCommand(context, 6);
+        const prepared = tryCloseCommand(
+            context,
+            closeOperation.prepareResponse,
+        );
         if (prepared !== undefined) return prepared;
     }
     return undefined;
@@ -1055,7 +1177,7 @@ const deliverWantedBodies = async (
 ) => {
     const { context } = session.participant;
     const { profile } = context;
-    const wanted = closeCommand(context, 13);
+    const wanted = closeCommand(context, closeOperation.wantedBodies);
     if (wanted.length === 0) return;
     const submissions = await heldSubmissions(session);
     const responses = await heldResponses(session);
@@ -1111,7 +1233,9 @@ const deliverWantedBodies = async (
 const respond = async (session: CloseSession, preparedBody?: Uint8Array) => {
     const { context } = session.participant;
     const resumed = generationOf(session) === closePhase.responding;
-    const body = preparedBody ?? tryCloseCommand(context, 6);
+    const body =
+        preparedBody ??
+        tryCloseCommand(context, closeOperation.prepareResponse);
     if (body === undefined) {
         if (resumed)
             throw new Error('The retained response can no longer be prepared.');
@@ -1130,7 +1254,7 @@ const respond = async (session: CloseSession, preparedBody?: Uint8Array) => {
                 responseBody: body,
             },
         });
-    const signature = closeCommand(context, 8, 0, body);
+    const signature = closeCommand(context, closeOperation.sign, 0, body);
     const responsePacket = encodeSignedPacket({ body, signature });
     let state: CloseState = {
         ...session.state,
@@ -1139,10 +1263,10 @@ const respond = async (session: CloseSession, preparedBody?: Uint8Array) => {
         responsePacket,
     };
     if (session.organizer) {
-        closeCommand(context, 7, 0, responsePacket);
+        closeCommand(context, closeOperation.admitResponse, 0, responsePacket);
         state = {
             ...state,
-            proposalBody: closeCommand(context, 9),
+            proposalBody: closeCommand(context, closeOperation.prepareProposal),
         };
     }
     await commitClose(session, { generation: closePhase.responded, state });
@@ -1154,13 +1278,28 @@ const respond = async (session: CloseSession, preparedBody?: Uint8Array) => {
 const propose = async (session: CloseSession, prepared: boolean) => {
     const { context } = session.participant;
     if (!prepared) {
-        closeCommand(context, 7, 0, session.state.responsePacket);
-        if (!equalBytes(closeCommand(context, 9), session.state.proposalBody))
+        closeCommand(
+            context,
+            closeOperation.admitResponse,
+            0,
+            session.state.responsePacket,
+        );
+        if (
+            !equalBytes(
+                closeCommand(context, closeOperation.prepareProposal),
+                session.state.proposalBody,
+            )
+        )
             throw new Error(
                 'The replayed proposal differs from the retained one.',
             );
     }
-    const signature = closeCommand(context, 8, 0, session.state.proposalBody);
+    const signature = closeCommand(
+        context,
+        closeOperation.sign,
+        0,
+        session.state.proposalBody,
+    );
     await commitClose(session, {
         generation: closePhase.proposed,
         state: {

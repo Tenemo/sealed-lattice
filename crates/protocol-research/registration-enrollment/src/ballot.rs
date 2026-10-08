@@ -240,24 +240,6 @@ impl BallotWork {
                 self.signature =
                     Some(credential.sign_retained_ballot_envelope(&self.owner, envelope)?);
             }
-            9 => {
-                if argument != 0
-                    || input.len() != ENVELOPE_BYTES + SIGNATURE_BYTES
-                    || self.signature.is_some()
-                {
-                    return Err(Error::Consumed);
-                }
-                let envelope = self.envelope.as_ref().ok_or(Error::Consumed)?;
-                if input[..ENVELOPE_BYTES] != *envelope.bytes() {
-                    return Err(Error::Context);
-                }
-                credential.restore_retained_ballot_signing(
-                    &self.owner,
-                    envelope,
-                    &input[ENVELOPE_BYTES..],
-                )?;
-                self.signature = Some(input[ENVELOPE_BYTES..].try_into().unwrap());
-            }
             10 => {
                 if argument != 0 || !input.is_empty() {
                     return Err(Error::Shape);

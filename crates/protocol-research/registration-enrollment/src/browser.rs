@@ -984,17 +984,6 @@ fn selection_operation(
                 .credential
                 .restore_selection_endorsement(&roster, &endorsement)?;
         }
-        6 => {
-            if !input.is_empty() {
-                return Err(Error::Shape);
-            }
-            state.contribution_output = state
-                .unsigned_selection
-                .as_ref()
-                .ok_or(Error::Context)?
-                .identity()
-                .to_vec();
-        }
         _ => return Err(Error::Shape),
     }
     Ok(())

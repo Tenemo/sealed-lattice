@@ -33,6 +33,16 @@ import type { SelectedOffer } from './setup.js';
 import { decodeSignedPacket, encodeSignedPacket } from './signed-packet.js';
 import type { SignedPacket } from './signed-packet.js';
 
+// The original preparation signer's operations, as the module numbers them.
+const selectionOperation = {
+    unsignedBody: 0,
+    signProposal: 1,
+    endorse: 2,
+    restoreProposal: 3,
+    restoreEndorsement: 4,
+    endorsementBody: 5,
+} as const;
+
 const selectionCommand = (
     session: ParticipantSession,
     operation: number,
@@ -93,7 +103,7 @@ const buildOriginalSelection = (
             'The complete selected offers were refused.',
         );
     const expected = setupOutput(session.context);
-    const actual = selectionCommand(session, 0);
+    const actual = selectionCommand(session, selectionOperation.unsignedBody);
     if (!equalBytes(actual, expected))
         throw new Error('The organizer signer changed the verified selection.');
     return actual;
@@ -108,7 +118,11 @@ export const selectSetup = async (
     await verifySetupRoster(session, relay);
     let retained = session.preparation.selection;
     if (retained?.stage === 'signed') {
-        selectionCommand(session, 3, encodeSignedPacket(retained));
+        selectionCommand(
+            session,
+            selectionOperation.restoreProposal,
+            encodeSignedPacket(retained),
+        );
     } else {
         const offers: SelectedOffer[] = [];
         if (retained !== undefined) {
@@ -140,7 +154,7 @@ export const selectSetup = async (
         if (retained?.stage !== 'intent' || !equalBytes(retained.body, body))
             throw new Error('The original selection intent changed.');
         const signed = decodeSignedPacket(
-            selectionCommand(session, 1),
+            selectionCommand(session, selectionOperation.signProposal),
             session.context.profile.registration.signatureBytes,
         );
         if (signed === undefined)
@@ -219,7 +233,10 @@ export const endorseSetup = async (
             throw new Error(
                 'The retained selection inputs have another length.',
             );
-        const body = selectionCommand(session, 5);
+        const body = selectionCommand(
+            session,
+            selectionOperation.endorsementBody,
+        );
         await commitPreparation(session, {
             endorsement: {
                 stage: 'intent',
@@ -244,9 +261,14 @@ export const endorseSetup = async (
     if (retained === undefined)
         throw new Error('No endorsement intent is retained.');
     if (retained.stage === 'intent') {
-        if (!equalBytes(selectionCommand(session, 5), retained.body))
+        if (
+            !equalBytes(
+                selectionCommand(session, selectionOperation.endorsementBody),
+                retained.body,
+            )
+        )
             throw new Error('The original endorsement intent changed.');
-        const signed = selectionCommand(session, 2);
+        const signed = selectionCommand(session, selectionOperation.endorse);
         const fields = tupleFields(retained.body);
         const prefix = concatenate(fields[2], fields[1]);
         if (
@@ -268,7 +290,7 @@ export const endorseSetup = async (
     } else {
         selectionCommand(
             session,
-            4,
+            selectionOperation.restoreEndorsement,
             concatenate(
                 encodeSignedPacket(retained.selection),
                 endorsementPacket(session, retained),
