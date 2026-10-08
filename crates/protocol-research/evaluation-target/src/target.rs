@@ -12,7 +12,7 @@ use protocol_foundations::{
     },
     identity::{PUBLIC_POLYNOMIAL_DOMAIN, identity},
     poll::VerifiedPoll,
-    target_signing::{MAXIMUM_TARGET_BODY_BYTES, TargetMessage, minimum_turnout},
+    target_signing::{MAXIMUM_TARGET_BODY_BYTES, TARGET_PURPOSE, TargetMessage, minimum_turnout},
 };
 use setup_aggregate::verified::VerifiedSetupAggregate;
 use std::{io::Read, sync::Arc};
@@ -127,8 +127,7 @@ impl ClassifiedClosedInventory {
     }
     fn target_fields(&self) -> Result<Vec<CanonicalItem>, Error> {
         Ok(vec![
-            CanonicalItem::nonempty_ascii("sealed-lattice/evaluation-target/v2")
-                .map_err(|_| Error::Encoding)?,
+            CanonicalItem::nonempty_ascii(TARGET_PURPOSE).map_err(|_| Error::Encoding)?,
             CanonicalItem::hash512(self.poll.identity()),
             CanonicalItem::hash512(self.setup.identity()),
             CanonicalItem::hash512(*self.barrier.proposal().identity()),

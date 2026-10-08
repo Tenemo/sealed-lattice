@@ -11,18 +11,12 @@ use fips204::{
 };
 use supported_profile::Profile;
 
-pub const POLL_SIGNATURE_CONTEXT: &[u8] = b"sealed-lattice/poll-definition/v2";
+/// The poll definition's purpose, which is also its signature context.
+const POLL_PURPOSE: &str = "sealed-lattice/poll-definition/v2";
+pub const POLL_SIGNATURE_CONTEXT: &[u8] = POLL_PURPOSE.as_bytes();
 pub const MAXIMUM_POLL_BYTES: usize = 1_048_576;
-pub const POLL_BODY_OVERHEAD: usize = 8
-    + 7 * 6
-    + 4
-    + b"sealed-lattice/poll-definition/v2".len()
-    + 64
-    + 32
-    + SIGNING_PUBLIC_KEY_BYTES
-    + 4
-    + 2
-    + 2;
+pub const POLL_BODY_OVERHEAD: usize =
+    8 + 7 * 6 + 4 + POLL_PURPOSE.len() + 64 + 32 + SIGNING_PUBLIC_KEY_BYTES + 4 + 2 + 2;
 
 pub struct PollDraft {
     manifest: Manifest,
@@ -82,8 +76,7 @@ impl PollDraft {
             1,
             1,
             vec![
-                CanonicalItem::nonempty_ascii("sealed-lattice/poll-definition/v2")
-                    .map_err(|_| Error::Shape)?,
+                CanonicalItem::nonempty_ascii(POLL_PURPOSE).map_err(|_| Error::Shape)?,
                 CanonicalItem::hash512(runtime),
                 CanonicalItem::fixed_bytes(nonce).map_err(|_| Error::Shape)?,
                 CanonicalItem::fixed_bytes(organizer).map_err(|_| Error::Shape)?,
@@ -192,8 +185,7 @@ pub fn verify_poll(
     }
     let items = &tuple.items;
     if items[0].item_type() != CanonicalItemType::Ascii
-        || items[0].variable_value_bytes().map_err(|_| Error::Shape)?
-            != b"sealed-lattice/poll-definition/v2"
+        || items[0].variable_value_bytes().map_err(|_| Error::Shape)? != POLL_PURPOSE.as_bytes()
         || items[1].item_type() != CanonicalItemType::Hash512
         || items[1].canonical_bytes() != expected_runtime
         || items[2].item_type() != CanonicalItemType::RawBytes

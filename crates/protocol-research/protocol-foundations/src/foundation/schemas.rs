@@ -10,7 +10,7 @@ use super::{
     RefusalReason, derive_participant_identity,
 };
 
-const FOUNDATION_SCHEMA_VERSION: u16 = 1;
+pub(super) const FOUNDATION_SCHEMA_VERSION: u16 = 1;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FoundationSchemaError {

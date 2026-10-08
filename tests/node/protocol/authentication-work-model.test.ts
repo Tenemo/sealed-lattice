@@ -428,14 +428,12 @@ describe('complete participant authentication accounting', () => {
     });
     it('matches the original poll, registration and clear-preparation signature contexts', async () => {
         const roles = compileCompleteAuthenticationFrameWork();
+        // The poll and roster signature contexts are the bytes of the
+        // purposes their signed objects carry.
         for (const [purpose, file, name] of [
-            ['poll-definition', 'poll.rs', 'POLL_SIGNATURE_CONTEXT'],
+            ['poll-definition', 'poll.rs', 'POLL_PURPOSE'],
             ['registration', 'lib.rs', 'REGISTRATION_SIGNATURE_CONTEXT'],
-            [
-                'roster-proposal',
-                'roster-authentication.rs',
-                'ROSTER_SIGNATURE_CONTEXT',
-            ],
+            ['roster-proposal', 'roster.rs', 'PROPOSAL_PURPOSE'],
             ['contribution-offer', 'contribution-offer.rs', 'OFFER_PURPOSE'],
             [
                 'setup-selection-proposal',
@@ -457,7 +455,7 @@ describe('complete participant authentication accounting', () => {
                 'utf8',
             );
             const actual = source.match(
-                new RegExp('pub const ' + name + ': [^=]+ = b?"([^"]+)";', 'u'),
+                new RegExp('const ' + name + ': [^=]+ = b?"([^"]+)";', 'u'),
             );
             expect(actual).not.toBeNull();
             expect(

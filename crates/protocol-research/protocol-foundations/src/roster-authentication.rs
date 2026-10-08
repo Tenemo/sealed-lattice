@@ -4,7 +4,7 @@ use fips204::{
     traits::{SerDes, Verifier},
 };
 
-pub const ROSTER_SIGNATURE_CONTEXT: &[u8] = b"sealed-lattice/roster-proposal/v2";
+pub const ROSTER_SIGNATURE_CONTEXT: &[u8] = crate::roster::PROPOSAL_PURPOSE.as_bytes();
 
 pub struct AuthenticatedRosterProposal {
     proposal: RosterProposal,

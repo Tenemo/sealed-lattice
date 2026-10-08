@@ -21,6 +21,7 @@ pub(crate) use schemas::FoundationSchemaError;
 pub use text::StabilizedDisplayText;
 
 pub const MAXIMUM_USERNAME_BYTES: usize = 128;
+const REGISTRATION_HEADER_PURPOSE: &str = "sealed-lattice/registration-header/v6";
 /// A username arrives as at most this many bytes before normalization.
 pub const MAXIMUM_USERNAME_INGRESS_BYTES: usize = 512;
 pub fn normalize_username(bytes: &[u8]) -> Result<StabilizedDisplayText, crate::Error> {
@@ -75,7 +76,7 @@ impl RegistrationHeader {
             1,
             1,
             vec![
-                CanonicalItem::nonempty_ascii("sealed-lattice/registration-header/v6").unwrap(),
+                CanonicalItem::nonempty_ascii(REGISTRATION_HEADER_PURPOSE).unwrap(),
                 CanonicalItem::hash512(self.poll),
                 CanonicalItem::fixed_bytes(self.signing_public).unwrap(),
                 CanonicalItem::hash512(self.recipient_key_hash),
@@ -112,7 +113,7 @@ impl RegistrationHeader {
             || items[0]
                 .variable_value_bytes()
                 .map_err(|_| crate::Error::Shape)?
-                != b"sealed-lattice/registration-header/v6"
+                != REGISTRATION_HEADER_PURPOSE.as_bytes()
         {
             return Err(crate::Error::Context);
         }

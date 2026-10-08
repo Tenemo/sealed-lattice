@@ -15,6 +15,9 @@ use supported_profile::Profile;
 /// A retained proposal is at most this long; the largest supported roster's
 /// proposal fits.
 pub const MAXIMUM_PROPOSAL_BYTES: usize = 2048;
+/// The proposal's purpose, which is also the organizer's signature context.
+pub(crate) const PROPOSAL_PURPOSE: &str = "sealed-lattice/roster-proposal/v2";
+const PROPOSAL_IDENTITY_DOMAIN: &str = "sealed-lattice/roster-proposal-identity/v1";
 
 /// Parsed context for private continuation after the current local root is authenticated.
 /// This is not a verified public proposal and cannot initialize contribution generation.
@@ -65,7 +68,7 @@ impl RetainedContributionContext {
         let items = &tuple.items;
         if items[0].item_type() != CanonicalItemType::Ascii
             || items[0].variable_value_bytes().map_err(|_| Error::Shape)?
-                != b"sealed-lattice/roster-proposal/v2"
+                != PROPOSAL_PURPOSE.as_bytes()
             || items[1].item_type() != CanonicalItemType::Hash512
             || items[1].canonical_bytes() != poll
             || items[2].item_type() != CanonicalItemType::RawBytes
@@ -92,7 +95,7 @@ impl RetainedContributionContext {
             return Err(Error::Context);
         }
         let proposal = hash_foundation_tuple_512(
-            "sealed-lattice/roster-proposal-identity/v1",
+            PROPOSAL_IDENTITY_DOMAIN,
             &[CanonicalItem::variable_bytes(bytes).map_err(|_| Error::Shape)?],
         )
         .map_err(|_| Error::Shape)?
@@ -150,8 +153,7 @@ fn encode_proposal(poll: [u8; 64], bodies: Vec<u8>) -> Result<Vec<u8>, Error> {
         1,
         1,
         vec![
-            CanonicalItem::nonempty_ascii("sealed-lattice/roster-proposal/v2")
-                .map_err(|_| Error::Shape)?,
+            CanonicalItem::nonempty_ascii(PROPOSAL_PURPOSE).map_err(|_| Error::Shape)?,
             CanonicalItem::hash512(poll),
             CanonicalItem::variable_bytes(bodies).map_err(|_| Error::Shape)?,
         ],
@@ -216,7 +218,7 @@ impl RosterProposal {
         Roster::new(entries).map_err(|_| Error::Shape)?;
         let body = encode_proposal(poll.identity(), bodies)?;
         let identity = hash_foundation_tuple_512(
-            "sealed-lattice/roster-proposal-identity/v1",
+            PROPOSAL_IDENTITY_DOMAIN,
             &[CanonicalItem::variable_bytes(&body).map_err(|_| Error::Shape)?],
         )
         .map_err(|_| Error::Shape)?

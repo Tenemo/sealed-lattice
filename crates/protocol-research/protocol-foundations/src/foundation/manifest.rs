@@ -4,8 +4,8 @@ use supported_profile::Profile;
 
 use super::canonical_tuple::CanonicalDecodeBudget;
 use super::schemas::{
-    SchemaResult, read_ascii, read_nested_tuple_list_with_budget, read_u16, read_variable_item,
-    require_header,
+    FOUNDATION_SCHEMA_VERSION, SchemaResult, read_ascii, read_nested_tuple_list_with_budget,
+    read_u16, read_variable_item, require_header,
 };
 use super::{
     CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple, FoundationSchemaError,
@@ -14,8 +14,6 @@ use super::{
 
 const MANIFEST_SCHEMA_IDENTIFIER: u16 = 0x0110;
 const OPTION_DEFINITION_SCHEMA_IDENTIFIER: u16 = 0x0111;
-
-const FOUNDATION_SCHEMA_VERSION: u16 = 1;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OptionDefinition {
