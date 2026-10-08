@@ -1,13 +1,13 @@
 use super::*;
 use crate::registration::CHUNK_LIMIT;
-use crate::registration::{KEY_BYTES, session::tests::unproved_record};
+use crate::registration::{KEY_BYTES, session::tests::keyless_record};
 
 // One record is open for each helper, or one without helpers. Each
 // candidate opens once, every step names an open record, and no failed
 // proof becomes a positive record or poisons other positions.
 #[test]
 fn records_open_within_the_limit_and_the_roster_waits_for_every_verdict() {
-    let (packet, header) = unproved_record([4; 64]);
+    let (packet, header) = keyless_record([4; 64]);
     let input = [
         packet.identity.as_slice(),
         &[4; 64],

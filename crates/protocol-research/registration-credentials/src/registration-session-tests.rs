@@ -28,9 +28,9 @@ fn open_sessions() -> usize {
         .sum()
 }
 
-/// A signed poll, its runtime, and the header of a registration of it
-/// with the runtime whose key and proof nothing produced.
-pub(crate) fn unproved_record(runtime: [u8; 64]) -> (SignedPoll, Vec<u8>) {
+/// A signed poll and the header of a registration of it with the runtime,
+/// whose key nothing produced.
+pub(crate) fn keyless_record(runtime: [u8; 64]) -> (SignedPoll, Vec<u8>) {
     let text = |value: &str| StabilizedDisplayText::from_ingress_utf8(value.as_bytes()).unwrap();
     let options = (0..2)
         .map(|index| {
@@ -65,10 +65,10 @@ pub(crate) fn unproved_record(runtime: [u8; 64]) -> (SignedPoll, Vec<u8>) {
 // when it finishes, with the verifier's refusal.
 #[test]
 fn sessions_refuse_as_the_verifier_does_and_leave_no_state() {
-    let (packet, header) = unproved_record([4; 64]);
+    let (packet, header) = keyless_record([4; 64]);
     let poll = verify_poll(packet.identity, [4; 64], &packet.body, &packet.signature).unwrap();
     let signature = [0; SIGNATURE_BYTES];
-    let (_, foreign) = unproved_record([9; 64]);
+    let (_, foreign) = keyless_record([9; 64]);
     assert!(matches!(
         RegistrationSession::open(&poll, 0, &foreign, &signature),
         Err(Error::Context)

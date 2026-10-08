@@ -18,8 +18,8 @@ use std::{cell::RefCell, collections::HashMap};
 pub static REGISTRATION: Job = Job { kind: 0x0600, run };
 const OPEN: u8 = 0;
 const KEY: u8 = 1;
-const FINISH: u8 = 3;
-const DISCARD: u8 = 4;
+const FINISH: u8 = 2;
+const DISCARD: u8 = 3;
 const OPERATION_BYTES: usize = 9;
 /// A verdict: zero, the body digest, or the code of the
 /// refusal that ended the session.

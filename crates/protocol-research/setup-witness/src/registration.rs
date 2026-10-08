@@ -54,8 +54,6 @@ impl RegistrationKey {
         };
         let products = input.products();
         key(&mut witness, &mut output, input, products);
-        assert_eq!(witness.words.len(), 3);
-        assert_eq!(witness.booleans.len(), 2);
         Self {
             public: output.values.unwrap(),
             secret: Zeroizing::new(std::mem::take(&mut *secret.values)),
@@ -98,8 +96,10 @@ impl RegistrationKey {
         if self.secret.len() != DEGREE
             || self.public.len() != DEGREE
             || self.public.iter().any(|value| value.abs() > public_half)
-            || self.secret.iter().filter(|value| **value == 1).count() != 128
-            || self.secret.iter().filter(|value| **value == -1).count() != 128
+            || self.secret.iter().filter(|value| **value == 1).count()
+                != RECIPIENT_SECRET_SUPPORT / 2
+            || self.secret.iter().filter(|value| **value == -1).count()
+                != RECIPIENT_SECRET_SUPPORT / 2
             || self.secret.iter().any(|value| !(-1..=1).contains(value))
         {
             return Err(Error::InvalidState);
