@@ -46,8 +46,7 @@ fn command(session: &mut Session, operation: u32, input: &[u8]) -> Result<Vec<u8
             if session.release.is_some() {
                 return Err(Error::Consumed);
             }
-            let context =
-                evaluation_target::verified_browser_release_context().ok_or(Error::Context)?;
+            let context = super::completion::verified_release_context().ok_or(Error::Context)?;
             if input != context.certificate().target().body() {
                 return Err(Error::Context);
             }
@@ -99,8 +98,7 @@ fn command(session: &mut Session, operation: u32, input: &[u8]) -> Result<Vec<u8
                 return Err(Error::Consumed);
             }
             let envelope = ReleaseEnvelope::decode(profile, input)?;
-            let context =
-                evaluation_target::verified_browser_release_context().ok_or(Error::Context)?;
+            let context = super::completion::verified_release_context().ok_or(Error::Context)?;
             if context.position() != owner.position()
                 || envelope.position() != owner.position()
                 || envelope.poll() != owner.poll()
@@ -153,8 +151,7 @@ fn command(session: &mut Session, operation: u32, input: &[u8]) -> Result<Vec<u8
             }
             // Any failed verification permanently closes this volatile import.
             state.import_closed = true;
-            let context =
-                evaluation_target::verified_browser_release_context().ok_or(Error::Context)?;
+            let context = super::completion::verified_release_context().ok_or(Error::Context)?;
             let verified = verify_body(context, &state.body)?;
             if verified.envelope().bytes() != state.envelope.bytes() {
                 return Err(Error::Context);

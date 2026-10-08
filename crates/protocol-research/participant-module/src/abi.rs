@@ -12,6 +12,7 @@ use std::{cell::RefCell, sync::Arc};
 
 mod ballot;
 mod close;
+mod completion;
 mod contribution;
 #[path = "abi/custody-identity.rs"]
 mod custody_identity;

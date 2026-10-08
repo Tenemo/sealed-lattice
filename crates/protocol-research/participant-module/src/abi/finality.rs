@@ -27,7 +27,7 @@ fn command(session: &mut Session, operation: u32, input: &[u8]) -> Result<Vec<u8
             if session.finality.is_some() || !input.is_empty() {
                 return Err(Error::Consumed);
             }
-            let target = evaluation_target::verified_browser_target().ok_or(Error::Context)?;
+            let target = super::evaluation::verified_target().ok_or(Error::Context)?;
             let work = crate::finality_work::FinalityWork::new(close.owner(), target)?;
             let enrollment = session.enrollment.as_ref().ok_or(Error::Context)?;
             let mut output = vec![work.ballot_inclusion(&enrollment.credential).code()];
@@ -64,8 +64,7 @@ fn command(session: &mut Session, operation: u32, input: &[u8]) -> Result<Vec<u8
             if !input.is_empty() {
                 return Err(Error::Shape);
             }
-            let certificate =
-                evaluation_target::verified_browser_certificate().ok_or(Error::Context)?;
+            let certificate = super::completion::verified_certificate().ok_or(Error::Context)?;
             let enrollment = session.enrollment.as_ref().ok_or(Error::Context)?;
             close
                 .released_ballot_inclusion(&enrollment.credential, certificate.target().body())

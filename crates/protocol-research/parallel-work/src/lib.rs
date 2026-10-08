@@ -161,14 +161,21 @@ pub fn share(bytes: Zeroizing<Vec<u8>>) -> Shared {
 /// Bytes that the host shared itself, such as records it read from
 /// storage, by their handle and length, which the host holds; none for a
 /// handle or length that no host with helpers gives, as only such a host
-/// shares bytes itself.
-#[cfg(target_arch = "wasm32")]
+/// shares bytes itself. A native process has no such host.
 pub fn adopt(remote: u32, length: usize) -> Option<Shared> {
-    (helpers() > 0 && remote != 0 && length <= MAXIMUM_JOB_BYTES).then(|| Shared {
-        local: Zeroizing::new(Vec::new()),
-        length,
-        remote,
-    })
+    #[cfg(target_arch = "wasm32")]
+    {
+        (helpers() > 0 && remote != 0 && length <= MAXIMUM_JOB_BYTES).then(|| Shared {
+            local: Zeroizing::new(Vec::new()),
+            length,
+            remote,
+        })
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (remote, length);
+        None
+    }
 }
 
 impl Shared {

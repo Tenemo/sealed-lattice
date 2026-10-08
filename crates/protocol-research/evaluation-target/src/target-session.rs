@@ -1,3 +1,4 @@
+use crate::close::VerifiedCloseBarrier;
 use crate::target::{
     ClassifiedClosedInventory, Error, EvaluationSession, VerifiedEvaluationTarget,
 };
@@ -12,11 +13,22 @@ use protocol_foundations::{
     poll::VerifiedPoll,
 };
 use setup_aggregate::verified::VerifiedSetupAggregate;
-use std::{cell::RefCell, sync::Arc};
+use std::sync::Arc;
 
-const EVALUATION_INPUT_BYTES: usize = 1 << 20;
+/// The input buffer's length; the host never writes more.
+pub const EVALUATION_INPUT_BYTES: usize = 1 << 20;
 // A key record after its prime fits the input buffer.
 const _: () = assert!(4 + KEY_RECORD_BYTES <= EVALUATION_INPUT_BYTES);
+/// What an evaluation target takes from the instance's other verifiers: its
+/// verified setup, each ballot's classification, the release of the
+/// statement inputs the classified ballots shared, and the verified close
+/// barrier.
+pub trait EvaluationInputs {
+    fn setup(&mut self) -> Option<(Arc<VerifiedPoll>, Arc<VerifiedSetupAggregate>)>;
+    fn take_classification(&mut self) -> Option<BallotBodyClassification>;
+    fn release_ballot_inputs(&mut self);
+    fn take_barrier(&mut self) -> Option<VerifiedCloseBarrier>;
+}
 /// What an incoming stream becomes as its pieces arrive: a key polynomial
 /// of the ordinal, a ballot body of the author, whose FHE ciphertext's two
 /// components follow its header, or a stored value; each with the identity
@@ -41,7 +53,9 @@ struct Incoming {
     received: usize,
     payload: Payload,
 }
-struct State {
+/// The evaluation target of one instance: its classified inputs, the
+/// running evaluation and the target it certifies.
+pub struct TargetSession {
     input: Vec<u8>,
     output: Vec<u8>,
     context: Option<(Arc<VerifiedPoll>, Arc<VerifiedSetupAggregate>)>,
@@ -50,8 +64,8 @@ struct State {
     incoming: Option<Incoming>,
     target: Option<Arc<VerifiedEvaluationTarget>>,
 }
-impl State {
-    fn new() -> Self {
+impl TargetSession {
+    pub fn new() -> Self {
         Self {
             input: vec![0; EVALUATION_INPUT_BYTES],
             output: Vec::with_capacity(EVALUATION_INPUT_BYTES),
@@ -61,6 +75,36 @@ impl State {
             incoming: None,
             target: None,
         }
+    }
+    pub fn input(&mut self) -> &mut [u8] {
+        &mut self.input
+    }
+    pub fn output(&self) -> &[u8] {
+        &self.output
+    }
+    pub fn target(&self) -> Option<Arc<VerifiedEvaluationTarget>> {
+        self.target.clone()
+    }
+    /// Takes a target restored from the participant's retained copy while
+    /// this instance holds no target and runs no evaluation.
+    pub fn restore_target(&mut self, target: VerifiedEvaluationTarget) -> bool {
+        if self.target.is_some()
+            || self.context.is_some()
+            || self.session.is_some()
+            || self.incoming.is_some()
+            || !self.classifications.is_empty()
+        {
+            return false;
+        }
+        self.target = Some(Arc::new(target));
+        true
+    }
+    /// Whether the running evaluation executed its last instruction.
+    pub fn finished(&self) -> bool {
+        self.session
+            .as_ref()
+            .and_then(|session| session.engine.as_ref())
+            .is_some_and(Engine::finished)
     }
     fn session(&mut self) -> Result<&mut EvaluationSession, Error> {
         self.session.as_mut().ok_or(Error::Context)
@@ -176,7 +220,13 @@ impl State {
             Payload::Stored(read) => engine.finish_read(read).map_err(|_| Error::Storage),
         }
     }
-    fn command(&mut self, operation: u32, argument: usize, length: usize) -> Result<(), Error> {
+    pub fn command(
+        &mut self,
+        inputs: &mut impl EvaluationInputs,
+        operation: u32,
+        argument: usize,
+        length: usize,
+    ) -> Result<(), Error> {
         if length > EVALUATION_INPUT_BYTES {
             return Err(Error::Encoding);
         }
@@ -193,10 +243,9 @@ impl State {
                 {
                     return Err(Error::Context);
                 }
-                self.context =
-                    Some(setup_aggregate::setup_browser::context().ok_or(Error::Context)?);
+                self.context = Some(inputs.setup().ok_or(Error::Context)?);
                 // Inputs an earlier, unfinished classification kept.
-                ballot_proof::release_browser_ballot_inputs();
+                inputs.release_ballot_inputs();
                 Ok(())
             }
             1 => {
@@ -207,8 +256,7 @@ impl State {
                 if self.classifications.len() >= setup.profile().participants() {
                     return Err(Error::Incomplete);
                 }
-                self.classifications
-                    .push(ballot_proof::take_browser_classification());
+                self.classifications.push(inputs.take_classification());
                 Ok(())
             }
             2 => {
@@ -218,8 +266,8 @@ impl State {
                 let (poll, setup) = self.context.take().ok_or(Error::Context)?;
                 // Every classification is taken, so the ballots' shared
                 // inputs are not held through the evaluation.
-                ballot_proof::release_browser_ballot_inputs();
-                let barrier = crate::close_browser::take_barrier().ok_or(Error::Incomplete)?;
+                inputs.release_ballot_inputs();
+                let barrier = inputs.take_barrier().ok_or(Error::Incomplete)?;
                 // The barrier must come from this instance's own setup verifier.
                 if barrier.poll().identity() != poll.identity()
                     || barrier.setup().identity() != setup.identity()
@@ -524,79 +572,12 @@ impl State {
         }
     }
 }
-thread_local! {static STATE:RefCell<State>=RefCell::new(State::new());}
-pub(crate) fn verified_target() -> Option<Arc<VerifiedEvaluationTarget>> {
-    STATE.with(|state| state.borrow().target.clone())
+impl Default for TargetSession {
+    fn default() -> Self {
+        Self::new()
+    }
 }
-pub(crate) fn restore_target(target: VerifiedEvaluationTarget) -> bool {
-    STATE.with(|state| {
-        let mut state = state.borrow_mut();
-        if state.target.is_some()
-            || state.context.is_some()
-            || state.session.is_some()
-            || state.incoming.is_some()
-            || !state.classifications.is_empty()
-        {
-            return false;
-        }
-        state.target = Some(Arc::new(target));
-        true
-    })
-}
-#[unsafe(no_mangle)]
-pub extern "C" fn evaluation_target_input_pointer() -> usize {
-    STATE.with(|state| state.borrow_mut().input.as_mut_ptr() as usize)
-}
-/// The input buffer's length; the host never writes more.
-#[unsafe(no_mangle)]
-pub extern "C" fn evaluation_target_input_capacity() -> usize {
-    EVALUATION_INPUT_BYTES
-}
-#[unsafe(no_mangle)]
-pub extern "C" fn evaluation_target_output_pointer() -> usize {
-    STATE.with(|state| state.borrow().output.as_ptr() as usize)
-}
-#[unsafe(no_mangle)]
-pub extern "C" fn evaluation_target_output_length() -> usize {
-    STATE.with(|state| state.borrow().output.len())
-}
-#[unsafe(no_mangle)]
-pub extern "C" fn evaluation_target_command(operation: u32, argument: usize, length: usize) -> u32 {
-    STATE.with(|state| {
-        let mut state = state.borrow_mut();
-        u32::from(state.command(operation, argument, length).is_err())
-    })
-}
-#[unsafe(no_mangle)]
-pub extern "C" fn evaluation_target_body_pointer() -> usize {
-    STATE.with(|state| {
-        state
-            .borrow()
-            .target
-            .as_ref()
-            .map_or(0, |target| target.body().as_ptr() as usize)
-    })
-}
-#[unsafe(no_mangle)]
-pub extern "C" fn evaluation_target_body_length() -> usize {
-    STATE.with(|state| {
-        state
-            .borrow()
-            .target
-            .as_ref()
-            .map_or(0, |target| target.body().len())
-    })
-}
-#[unsafe(no_mangle)]
-pub extern "C" fn evaluation_target_finished() -> u32 {
-    STATE.with(|state| {
-        u32::from(
-            state
-                .borrow()
-                .session
-                .as_ref()
-                .and_then(|session| session.engine.as_ref())
-                .is_some_and(Engine::finished),
-        )
-    })
-}
+
+#[cfg(test)]
+#[path = "target-session-tests.rs"]
+mod tests;

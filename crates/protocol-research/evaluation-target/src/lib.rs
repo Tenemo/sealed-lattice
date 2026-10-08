@@ -1,40 +1,18 @@
 #![deny(unsafe_op_in_unsafe_fn)]
-#[cfg(target_arch = "wasm32")]
-mod browser;
-#[cfg(target_arch = "wasm32")]
-pub fn verified_browser_target() -> Option<std::sync::Arc<target::VerifiedEvaluationTarget>> {
-    browser::verified_target()
-}
-/// Takes a target restored from the participant's retained copy while this
-/// instance holds no target and runs no evaluation.
-#[cfg(target_arch = "wasm32")]
-pub fn restore_browser_target(target: target::VerifiedEvaluationTarget) -> bool {
-    browser::restore_target(target)
-}
-#[cfg(target_arch = "wasm32")]
-pub fn verified_browser_release_context() -> Option<std::sync::Arc<release::ReleaseContext>> {
-    completion_browser::verified_context()
-}
-/// The inventory certificate that this instance's completion verified.
-#[cfg(target_arch = "wasm32")]
-pub fn verified_browser_certificate()
--> Option<std::sync::Arc<certification::VerifiedInventoryCertificate>> {
-    completion_browser::verified_certificate()
-}
 pub mod certification;
 pub mod close;
-#[cfg(target_arch = "wasm32")]
-#[path = "close-browser.rs"]
-mod close_browser;
-#[cfg(target_arch = "wasm32")]
-#[path = "completion-browser.rs"]
-mod completion_browser;
+#[path = "close-session.rs"]
+pub mod close_session;
+#[path = "completion-session.rs"]
+pub mod completion_session;
 mod interpolation;
 pub mod program;
 pub mod release;
 #[path = "release-body.rs"]
 pub mod release_body;
 pub mod target;
+#[path = "target-session.rs"]
+pub mod target_session;
 pub mod terminal;
 
 /// Plans a helper instance's memory for the evaluation's jobs: a growth

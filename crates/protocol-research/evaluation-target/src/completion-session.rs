@@ -2,12 +2,14 @@ use crate::{
     certification::{CertificateCollector, VerifiedInventoryCertificate},
     release::{Error, ReleaseContext},
     release_body::{AuthenticatedReleaseEnvelope, ReleaseBodyVerifier},
+    target::VerifiedEvaluationTarget,
     terminal::{ReleaseCollector, VerifiedNoResult, VerifiedResult, verify_no_result},
 };
 use setup_aggregate::{AggregatePolynomialReader, VerifiedAggregatePolynomial};
-use std::{cell::RefCell, sync::Arc};
+use std::sync::Arc;
 
-const COMPLETION_INPUT_BYTES: usize = 1 << 20;
+/// The input buffer's length; the host never writes more.
+pub const COMPLETION_INPUT_BYTES: usize = 1 << 20;
 enum Terminal {
     NoResult(VerifiedNoResult),
     Result(VerifiedResult),
@@ -17,7 +19,9 @@ struct Operand {
     reader: AggregatePolynomialReader,
     constant: Option<VerifiedAggregatePolynomial>,
 }
-struct State {
+/// The completion of one instance: the target's certificate from its votes,
+/// the verified release shares and the terminal they reach.
+pub struct CompletionSession {
     input: Vec<u8>,
     output: Vec<u8>,
     votes: Option<CertificateCollector>,
@@ -29,8 +33,8 @@ struct State {
     releases: Option<ReleaseCollector>,
     terminal: Option<Terminal>,
 }
-impl State {
-    fn new() -> Self {
+impl CompletionSession {
+    pub fn new() -> Self {
         Self {
             input: vec![0; COMPLETION_INPUT_BYTES],
             output: Vec::new(),
@@ -44,10 +48,32 @@ impl State {
             terminal: None,
         }
     }
+    pub fn input(&mut self) -> &mut [u8] {
+        &mut self.input
+    }
+    pub fn output(&self) -> &[u8] {
+        &self.output
+    }
+    /// The release context of the share being verified.
+    pub fn context(&self) -> Option<Arc<ReleaseContext>> {
+        self.context.clone()
+    }
+    /// The inventory certificate this instance verified.
+    pub fn certificate(&self) -> Option<Arc<VerifiedInventoryCertificate>> {
+        self.certificate.clone()
+    }
     fn word(&mut self, value: usize) {
         self.output.extend((value as u32).to_le_bytes());
     }
-    fn command(&mut self, operation: u32, argument: usize, length: usize) -> Result<(), Error> {
+    /// Runs a completion operation. The first one takes the instance's
+    /// verified evaluation target, which `target` reads.
+    pub fn command(
+        &mut self,
+        target: impl FnOnce() -> Option<Arc<VerifiedEvaluationTarget>>,
+        operation: u32,
+        argument: usize,
+        length: usize,
+    ) -> Result<(), Error> {
         if length > COMPLETION_INPUT_BYTES || (!matches!(operation, 3 | 4) && argument != 0) {
             return Err(Error::Encoding);
         }
@@ -57,7 +83,7 @@ impl State {
                 if length != 0 || self.votes.is_some() {
                     return Err(Error::Context);
                 }
-                let target = crate::browser::verified_target().ok_or(Error::Incomplete)?;
+                let target = target().ok_or(Error::Incomplete)?;
                 let count = target.setup().profile().participants();
                 let collector = CertificateCollector::new(target);
                 self.word(count);
@@ -230,38 +256,12 @@ impl State {
         Ok(())
     }
 }
-thread_local! {static STATE:RefCell<State>=RefCell::new(State::new());}
-pub(crate) fn verified_context() -> Option<Arc<ReleaseContext>> {
-    STATE.with(|state| state.borrow().context.clone())
+impl Default for CompletionSession {
+    fn default() -> Self {
+        Self::new()
+    }
 }
-pub(crate) fn verified_certificate() -> Option<Arc<VerifiedInventoryCertificate>> {
-    STATE.with(|state| state.borrow().certificate.clone())
-}
-#[unsafe(no_mangle)]
-pub extern "C" fn completion_input_pointer() -> usize {
-    STATE.with(|state| state.borrow_mut().input.as_mut_ptr() as usize)
-}
-/// The input buffer's length; the host never writes more.
-#[unsafe(no_mangle)]
-pub extern "C" fn completion_input_capacity() -> usize {
-    COMPLETION_INPUT_BYTES
-}
-#[unsafe(no_mangle)]
-pub extern "C" fn completion_output_pointer() -> usize {
-    STATE.with(|state| state.borrow().output.as_ptr() as usize)
-}
-#[unsafe(no_mangle)]
-pub extern "C" fn completion_output_length() -> usize {
-    STATE.with(|state| state.borrow().output.len())
-}
-#[unsafe(no_mangle)]
-pub extern "C" fn completion_command(operation: u32, argument: usize, length: usize) -> u32 {
-    STATE.with(|state| {
-        u32::from(
-            state
-                .borrow_mut()
-                .command(operation, argument, length)
-                .is_err(),
-        )
-    })
-}
+
+#[cfg(test)]
+#[path = "completion-session-tests.rs"]
+mod tests;
