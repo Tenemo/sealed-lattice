@@ -50,6 +50,11 @@ export const sumProtocolProcessTree = (
     }, 0);
 };
 
+// One snapshot of every process takes about a second on an idle Windows host,
+// most of it the WMI enumeration, and several seconds beside the heavy work a
+// guard watches; the deadline ends only a reader that no longer progresses.
+const snapshotTimeoutMilliseconds = 60_000;
+
 // Reads every process's parent and private bytes, and on Windows when it
 // started, in one snapshot, from which several process trees can be summed.
 // Elsewhere an exited parent's children pass to another process, so their
@@ -66,7 +71,11 @@ export const readProtocolProcesses = async (): Promise<
                 '-Command',
                 "$taskRows = @(Get-CimInstance Win32_Process -ErrorAction Stop | Select-Object ProcessId,ParentProcessId,PrivatePageCount,@{Name='Started';Expression={if ($_.CreationDate) { [math]::Floor($_.CreationDate.ToFileTimeUtc() / 10000) } else { $null }}}); ConvertTo-Json -Compress -InputObject $taskRows",
             ],
-            { windowsHide: true, timeout: 10_000, maxBuffer: 2 ** 22 },
+            {
+                windowsHide: true,
+                timeout: snapshotTimeoutMilliseconds,
+                maxBuffer: 2 ** 22,
+            },
         );
         const rows = JSON.parse(result.stdout) as {
             ProcessId: number;
@@ -83,7 +92,7 @@ export const readProtocolProcesses = async (): Promise<
         }));
     }
     const result = await execute('ps', ['-axo', 'pid=,ppid=,rss='], {
-        timeout: 10_000,
+        timeout: snapshotTimeoutMilliseconds,
         maxBuffer: 2 ** 22,
     });
     return result.stdout
