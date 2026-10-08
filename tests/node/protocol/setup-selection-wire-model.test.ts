@@ -7,6 +7,8 @@ import {
     setupSelectionIdentityModel,
 } from '#tests/setup-selection-wire-model.js';
 
+// FIPS 204 Table 2: an ML-DSA-65 signature has 3309 bytes.
+const signatureBytes = 3309;
 const roster = 'a2'.repeat(64);
 const selected = (count: number) =>
     Array.from({ length: count }, (_, position) => ({
@@ -25,7 +27,7 @@ describe('clear setup wire census and semantic identity', () => {
                 entries,
             );
             expect(BigInt(body.length)).toBe(census.selectionBodyBytes);
-            const signature = Buffer.alloc(3309, 17);
+            const signature = Buffer.alloc(signatureBytes, 17);
             const endorsements = Array.from(
                 { length: census.quorum },
                 (_, position) => ({ position, signature }),
@@ -42,14 +44,20 @@ describe('clear setup wire census and semantic identity', () => {
             expect(carrier.subarray(8, 8 + body.length)).toEqual(body);
             expect(BigInt(carrier.length)).toBe(census.certificateBytes);
             expect(carrier.length).toBe(
-                4 + 4 + body.length + 3309 + census.quorum * (2 + 3309),
+                4 +
+                    4 +
+                    body.length +
+                    signatureBytes +
+                    census.quorum * (2 + signatureBytes),
             );
-            expect(census.endorsementPacketBytes).toBe(2n + 64n + 3309n);
+            expect(census.endorsementPacketBytes).toBe(
+                2n + 64n + BigInt(signatureBytes),
+            );
             expect(census.offerPacketBytes).toBe(
-                4n + census.offerEnvelopeBytes + 3309n,
+                4n + census.offerEnvelopeBytes + BigInt(signatureBytes),
             );
             expect(census.signedSelectionPacketBytes).toBe(
-                4n + BigInt(body.length) + 3309n,
+                4n + BigInt(body.length) + BigInt(signatureBytes),
             );
         },
     );
@@ -63,10 +71,10 @@ describe('clear setup wire census and semantic identity', () => {
                 4,
                 roster,
                 entries,
-                Buffer.alloc(3309, variant),
+                Buffer.alloc(signatureBytes, variant),
                 positions.map((position) => ({
                     position,
-                    signature: Buffer.alloc(3309, position + variant),
+                    signature: Buffer.alloc(signatureBytes, position + variant),
                 })),
             ),
         );
@@ -97,7 +105,7 @@ describe('clear setup wire census and semantic identity', () => {
             expect(() => encodeSetupSelectionModel(4, roster, bad)).toThrow(
                 'inventory',
             );
-        const signature = Buffer.alloc(3309);
+        const signature = Buffer.alloc(signatureBytes);
         for (const positions of [
             [0, 1],
             [0, 1, 1],

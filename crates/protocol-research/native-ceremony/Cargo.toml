@@ -7,6 +7,7 @@ publish.workspace = true
 [dependencies]
 parallel-work = { path = "../parallel-work" }
 participant-module = { path = "../participant-module" }
+contribution-prover = { path = "../contribution-prover" }
 protocol-foundations = { path = "../protocol-foundations" }
 setup-witness = { path = "../setup-witness" }
 word-proof = { path = "../word-proof" }

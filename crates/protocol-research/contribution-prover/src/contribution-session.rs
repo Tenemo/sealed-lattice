@@ -258,29 +258,10 @@ impl Work {
     fn generate_recipient(&mut self) -> Result<(), ()> {
         let index = self.next_recipient;
         let record = self.registrations.get(index).ok_or(())?;
-        let key = record.public_key();
         if !self.shares_started || self.proof.is_some() {
             return Err(());
         }
-        if ProtocolHash::digest(key) != record.header().recipient_key_hash {
-            return Err(());
-        }
-        let half = BigInt::from_bytes_le(Sign::Plus, share_modulus()) >> 1usize;
-        let mut values = Vec::with_capacity(DEGREE);
-        for coefficient in key.chunks_exact(1 + share_modulus().len()) {
-            let magnitude = BigInt::from_bytes_le(Sign::Plus, &coefficient[1..]);
-            if coefficient[0] > 1
-                || magnitude > half
-                || (coefficient[0] == 1 && magnitude.is_zero())
-            {
-                return Err(());
-            }
-            values.push(if coefficient[0] == 1 {
-                -magnitude
-            } else {
-                magnitude
-            });
-        }
+        let values = recipient_key_values(record).map_err(|_| ())?;
         self.generator
             .as_mut()
             .ok_or(())?
@@ -336,6 +317,30 @@ impl Work {
             3
         }
     }
+}
+/// The share coefficients of a roster member's recipient key, once the key
+/// matches the hash its header commits and each coefficient is canonical: a
+/// sign byte of zero or one before a magnitude within half the share modulus,
+/// nonzero when negative.
+pub fn recipient_key_values(record: &VerifiedRegistration) -> Result<Vec<BigInt>, Refused> {
+    let key = record.public_key();
+    if ProtocolHash::digest(key) != record.header().recipient_key_hash {
+        return Err(Refused);
+    }
+    let half = BigInt::from_bytes_le(Sign::Plus, share_modulus()) >> 1usize;
+    let mut values = Vec::with_capacity(DEGREE);
+    for coefficient in key.chunks_exact(1 + share_modulus().len()) {
+        let magnitude = BigInt::from_bytes_le(Sign::Plus, &coefficient[1..]);
+        if coefficient[0] > 1 || magnitude > half || (coefficient[0] == 1 && magnitude.is_zero()) {
+            return Err(Refused);
+        }
+        values.push(if coefficient[0] == 1 {
+            -magnitude
+        } else {
+            magnitude
+        });
+    }
+    Ok(values)
 }
 /// The participant's contribution proof, from the verified proposal or
 /// from an imported checkpoint. A failed proof step, a checkpoint record that

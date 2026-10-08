@@ -1,3 +1,4 @@
+use contribution_prover::contribution_session::recipient_key_values;
 use num_bigint::{BigInt, Sign};
 use num_traits::Signed;
 use parallel_work::ProtocolHash;
@@ -141,16 +142,8 @@ pub fn generate(
         generator.gadget(gadget, &mut output).unwrap();
     }
     generator.begin_shares(&mut output).unwrap();
-    let width = 1 + supported_profile::share_modulus().len();
     for (recipient, record) in roster.proposal().records().iter().enumerate() {
-        let values = record
-            .public_key()
-            .chunks_exact(width)
-            .map(|bytes| {
-                let magnitude = BigInt::from_bytes_le(Sign::Plus, &bytes[1..]);
-                if bytes[0] == 1 { -magnitude } else { magnitude }
-            })
-            .collect::<Vec<_>>();
+        let values = recipient_key_values(record).unwrap();
         generator.share(recipient, &values, &mut output).unwrap();
     }
     generator.finish().unwrap();
