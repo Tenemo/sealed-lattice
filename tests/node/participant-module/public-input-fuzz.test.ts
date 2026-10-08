@@ -798,7 +798,7 @@ describe('participant module public input', () => {
         expect(genuineRecord()).toEqual(accepted);
     });
 
-    it('refuses every changed registration record in its own registration verification, and verifies the genuine record however it is divided', async () => {
+    it('refuses every changed registration record and a second begin in its own registration verification, and verifies the genuine record however it is divided', async () => {
         type RegistrationRecord = Readonly<{
             header: Uint8Array;
             signature: Uint8Array;
@@ -846,6 +846,9 @@ describe('participant module public input', () => {
                           kernel.contribution_output_length(),
                       )
                     : undefined;
+            // An accepted begin names the poll and the registration this
+            // instance verifies, which a second begin cannot replace.
+            const repeatedBegins: number[] = [];
             for (const [operation, bytes] of steps) {
                 expect(verifiedPoll(), label).toBeUndefined();
                 writeOwnRegistrationInput(kernel, bytes);
@@ -858,7 +861,19 @@ describe('participant module public input', () => {
                     ) !== 0
                 )
                     return undefined;
+                if (operation === 0) {
+                    writeOwnRegistrationInput(kernel, bytes);
+                    repeatedBegins.push(
+                        call(
+                            kernel,
+                            'own_registration_command',
+                            [0, bytes.length],
+                            label,
+                        ),
+                    );
+                }
             }
+            expect(repeatedBegins, label).toEqual([1]);
             return {
                 username: new TextDecoder().decode(
                     readKernel(

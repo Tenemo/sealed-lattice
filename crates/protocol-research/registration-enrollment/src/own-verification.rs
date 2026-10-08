@@ -38,8 +38,8 @@ impl State {
         }
     }
     fn begin(&mut self, bytes: &[u8]) -> Result<(), Error> {
-        if self.verified.is_some() || bytes.len() < 132 {
-            return Err(Error::Consumed);
+        if bytes.len() < 132 {
+            return Err(Error::Shape);
         }
         let definition_bytes = u32::from_le_bytes(bytes[128..132].try_into().unwrap()) as usize;
         if definition_bytes > MAXIMUM_POLL_BYTES
@@ -69,7 +69,6 @@ impl State {
         )?);
         self.options = poll.manifest().option_count();
         self.poll = Some(poll);
-        self.retained = None;
         Ok(())
     }
     fn command(&mut self, operation: u32, length: usize) -> Result<(), Error> {
@@ -77,8 +76,11 @@ impl State {
             return Err(Error::Shape);
         }
         if operation == 0 {
+            // Only a refused begin leaves another begin open.
+            if self.poll.is_some() {
+                return Err(Error::Consumed);
+            }
             let bytes = self.input[..length].to_vec();
-            self.pending = None;
             return self.begin(&bytes);
         }
         if self.verified.is_some() {

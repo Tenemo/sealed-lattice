@@ -17,6 +17,9 @@ pub mod custody_identity;
 mod fhe_sources;
 #[path = "finality-work.rs"]
 pub mod finality_work;
+#[cfg(test)]
+#[path = "helper-jobs-tests.rs"]
+mod helper_jobs_tests;
 #[path = "memory-plan.rs"]
 pub mod memory_plan;
 #[path = "offer-signing.rs"]
@@ -40,6 +43,18 @@ mod own_verification;
 #[cfg(target_arch = "wasm32")]
 #[path = "parallel-browser.rs"]
 mod parallel_browser;
+
+/// Every job a helper instance runs. Every proof crate proves with the one
+/// shared engine, so its jobs serve every proof kind.
+pub static HELPER_JOBS: [&[&parallel_work::Job]; 7] = [
+    &parallel_work::JOBS,
+    &registration_credentials::JOBS,
+    &word_proof::jobs::JOBS,
+    &setup_stream_kernel::JOBS,
+    &setup_witness::JOBS,
+    &rns_arithmetic_probe::JOBS,
+    &evaluation_target::JOBS,
+];
 
 #[cfg(target_arch = "wasm32")]
 #[global_allocator]
