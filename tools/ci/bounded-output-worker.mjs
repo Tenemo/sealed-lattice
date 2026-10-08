@@ -10,7 +10,7 @@ import {
 
 import { createBoundedOutputSink } from './bounded-output-sink.mjs';
 import { runFheKeySourceScreen } from './fhe-key-source-scalar.mjs';
-import { withOperatorProcessGates } from './operator-process-gates.mjs';
+import { withProcessGates } from './process-gates.mjs';
 
 /** @typedef {{module:string,moduleSha512:string,outputFile:string,expectedBytes:number,expectedSha512:string,operation:'fhe-key-source',caseIndex:number}} Configuration */
 /** @typedef {Awaited<ReturnType<typeof runFheKeySourceScreen>>} GenerationResult */
@@ -141,7 +141,7 @@ if (isMainThread) {
             await sink.close();
         }
     };
-    await withOperatorProcessGates(process.argv.slice(3), run);
+    await withProcessGates(process.argv.slice(3), run);
 } else {
     const configuration = /** @type {Configuration} */ (workerData);
     const moduleBytes = await readFile(configuration.module);

@@ -86,9 +86,9 @@ describe('native operation sampling handshake', () => {
                     '-e',
                     name === 'operator host'
                         ? `
-            import {withOperatorProcessGates} from ${JSON.stringify(pathToFileURL(path.resolve('tools/ci/operator-process-gates.mjs')).href)};
+            import {withProcessGates} from ${JSON.stringify(pathToFileURL(path.resolve('tools/ci/process-gates.mjs')).href)};
             const [start,finish]=process.argv.slice(1);
-            await withOperatorProcessGates(['--guard-start',start,'--guard-finish',finish],async()=>{process.stdout.write(JSON.stringify({event:'work-started'})+'\\n');});
+            await withProcessGates(['--guard-start',start,'--guard-finish',finish],async()=>{process.stdout.write(JSON.stringify({event:'work-started'})+'\\n');});
         `
                         : `
             import { existsSync, watch } from 'node:fs';

@@ -171,7 +171,7 @@ describe('participant browser cohort selection', () => {
             sequential: false,
             basePort: 43600,
         });
-        const arguments_ = [
+        const commandLineArguments = [
             '--',
             '4',
             '3',
@@ -182,7 +182,9 @@ describe('participant browser cohort selection', () => {
             '--top-count=3',
             '--base-port=44000',
         ];
-        expect(selectParticipantBrowserOptions(arguments_)).toMatchObject({
+        expect(
+            selectParticipantBrowserOptions(commandLineArguments),
+        ).toMatchObject({
             participantCount: 4,
             optionCount: 3,
             mode: 'plain',
@@ -191,7 +193,7 @@ describe('participant browser cohort selection', () => {
             sequential: true,
             profiling: true,
             basePort: 44000,
-            commandLineArguments: arguments_.slice(1),
+            commandLineArguments: commandLineArguments.slice(1),
         });
     });
 
@@ -219,7 +221,7 @@ describe('participant browser cohort selection', () => {
     });
 
     it('refuses malformed, duplicate and out-of-profile selections before browser work', () => {
-        for (const arguments_ of [
+        for (const commandLineArguments of [
             ['2', '2'],
             ['3', '21'],
             ['3', '1'],
@@ -252,8 +254,8 @@ describe('participant browser cohort selection', () => {
             ['preparation', '--memory-pressure'],
         ])
             expect(
-                () => selectParticipantBrowserOptions(arguments_),
-                arguments_.join(' '),
+                () => selectParticipantBrowserOptions(commandLineArguments),
+                commandLineArguments.join(' '),
             ).toThrow();
     });
 

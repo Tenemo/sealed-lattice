@@ -19,9 +19,13 @@ const publicPackageManifestPath = path.resolve(
 const prototypeVersionPattern =
     /^0\.(?<minor>0|[1-9]\d*)\.(?<patch>0|[1-9]\d*)$/u;
 
-const parseIncrement = (arguments_: readonly string[]): ReleaseIncrement => {
+const parseIncrement = (
+    commandLineArguments: readonly string[],
+): ReleaseIncrement => {
     const normalizedArguments =
-        arguments_[0] === '--' ? arguments_.slice(1) : arguments_;
+        commandLineArguments[0] === '--'
+            ? commandLineArguments.slice(1)
+            : commandLineArguments;
     const [increment] = normalizedArguments;
     if (
         normalizedArguments.length !== 1 ||

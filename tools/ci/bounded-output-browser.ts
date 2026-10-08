@@ -10,7 +10,7 @@ import { fileDigest } from '#tools/ci/fixture-sources.js';
 import type { ActiveLocalRunLog } from '#tools/ci/local-run-log.js';
 import { launchChromeParticipant } from '#tools/ci/participant-runtime-chrome.js';
 import type { ChromeParticipant } from '#tools/ci/participant-runtime-chrome.js';
-import { guardProcessTreeMemory } from '#tools/ci/protocol-process-memory.js';
+import { guardProcessTreeMemory } from '#tools/ci/process-tree-memory.js';
 
 export const boundedBrowserSources = [
     'tools/ci/bounded-output-browser.ts',
@@ -30,7 +30,7 @@ type OutputTarget = {
     expectedSha512: string;
 };
 
-const page = `<!doctype html><meta charset="utf-8"><title>Bounded operator experiment</title>
+const page = `<!doctype html><meta charset="utf-8"><title>Bounded output screen</title>
 <script>
 window.runBoundedExperiment = (configuration) => new Promise((resolve, reject) => {
     const worker = new Worker('/bounded-output-browser-worker.mjs', {type: 'module'});
@@ -44,13 +44,13 @@ window.runBoundedExperiment = (configuration) => new Promise((resolve, reject) =
         else resolve(result);
     };
     window.boundedExperimentProgress = {sequence:0,progress:null};
-    const timer = setTimeout(() => finish('The browser experiment worker exceeded its deadline.'), configuration.timeoutMilliseconds);
+    const timer = setTimeout(() => finish('The browser screen worker exceeded its deadline.'), configuration.timeoutMilliseconds);
     worker.onmessage = ({data}) => {
         if (Object.hasOwn(data,'progress')) {
             window.boundedExperimentProgress = {sequence:window.boundedExperimentProgress.sequence+1,progress:data.progress};
         } else finish(data.error, data.result);
     };
-    worker.onerror = (event) => finish(event.message || 'The browser experiment worker failed.');
+    worker.onerror = (event) => finish(event.message || 'The browser screen worker failed.');
     worker.postMessage(configuration);
 });
 </script>`;
@@ -363,7 +363,7 @@ export const runFheKeySourceInChrome = async ({
             peakMemory,
             samples,
             milliseconds: performance.now() - started,
-            experimentDeadlineMilliseconds: timeoutMilliseconds,
+            screenDeadlineMilliseconds: timeoutMilliseconds,
             browser: {
                 version: browser.version,
                 launchArguments: browser.launchArguments,

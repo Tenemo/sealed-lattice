@@ -3,13 +3,13 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { freemem } from 'node:os';
 import path from 'node:path';
 
+import { runCommandsInSeries } from '#tools/ci/command-runner.js';
 import type { ActiveLocalRunLog } from '#tools/ci/local-run-log.js';
 import { createNativeOperationGuard } from '#tools/ci/native-operation-guard.js';
 import {
     guardProcessTreeMemory,
     readProtocolProcessTree,
-} from '#tools/ci/protocol-process-memory.js';
-import { runCommandsInSeries } from '#tools/ci/run-command.js';
+} from '#tools/ci/process-tree-memory.js';
 
 export const runGuardedFixture = async ({
     root,

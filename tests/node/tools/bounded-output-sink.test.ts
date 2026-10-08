@@ -14,7 +14,7 @@ const fixture = async () => {
     return { directory, file: path.join(directory, 'proof.data') };
 };
 
-describe('generated proof artifact writer', () => {
+describe('bounded output artifact writer', () => {
     it('exclusively creates its artifact and matches complete bytes before finishing', async () => {
         const files = await fixture();
         const bytes = new Uint8Array([1, 3, 5, 7]);

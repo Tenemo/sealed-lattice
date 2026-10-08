@@ -14,7 +14,11 @@ const protocolResearchCases = {
     'native-result': { execution: true, noResult: false, profile: true },
     'native-empty': { execution: true, noResult: true, profile: true },
     'native-invalid-only': { execution: true, noResult: true, profile: true },
-    'native-prefix': { execution: true, noResult: false, profile: false },
+    'native-requested-output': {
+        execution: true,
+        noResult: false,
+        profile: false,
+    },
 } as const;
 
 type ProtocolResearchSelection = {
@@ -35,9 +39,9 @@ type ProtocolResearchSelection = {
 );
 
 export const selectProtocolResearchCase = (
-    arguments_: readonly string[],
+    commandLineArguments: readonly string[],
 ): ProtocolResearchSelection => {
-    const values = arguments_.filter((value) => value !== '--');
+    const values = commandLineArguments.filter((value) => value !== '--');
     if (
         values[0] === 'native-setup-departure' ||
         values[0] === 'native-selection-fork'
@@ -147,8 +151,10 @@ export const selectProtocolResearchCase = (
     };
 };
 
-export const selectPublicCompletionCase = (arguments_: readonly string[]) => {
-    const values = arguments_.filter((value) => value !== '--');
+export const selectPublicCompletionCase = (
+    commandLineArguments: readonly string[],
+) => {
+    const values = commandLineArguments.filter((value) => value !== '--');
     if (
         values.length === 3 &&
         (values[0] === 'certificate-records' ||

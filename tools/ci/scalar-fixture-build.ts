@@ -6,8 +6,8 @@ import path from 'node:path';
 
 import binaryen from 'binaryen';
 
+import { runCommandAndCaptureOutput } from '#tools/ci/command-runner.js';
 import type { ActiveLocalRunLog } from '#tools/ci/local-run-log.js';
-import { runCommandAndCaptureOutput } from '#tools/ci/run-command.js';
 
 export type FixtureBuildContext = Readonly<{
     root: string;

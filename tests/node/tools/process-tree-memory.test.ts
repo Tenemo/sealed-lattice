@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
     guardProcessTreeMemory,
     sumProtocolProcessTree,
-} from '#tools/ci/protocol-process-memory.js';
+} from '#tools/ci/process-tree-memory.js';
 
 const children: ReturnType<typeof spawn>[] = [];
 // A child that stays alive until the test ends, so the guard samples a real

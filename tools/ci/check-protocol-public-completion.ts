@@ -12,17 +12,17 @@ import { freemem } from 'node:os';
 import path from 'node:path';
 
 import {
+    runCommandAndCaptureOutput,
+    runCommandsInSeries,
+} from '#tools/ci/command-runner.js';
+import {
     runArtifactDirectoryPath,
     runWithLocalRunLog,
 } from '#tools/ci/local-run-log.js';
-import { guardProcessTreeMemory } from '#tools/ci/protocol-process-memory.js';
+import { guardProcessTreeMemory } from '#tools/ci/process-tree-memory.js';
 import { acquireProtocolResearchLock } from '#tools/ci/protocol-research-lock.js';
 import { selectPublicCompletionCase } from '#tools/ci/protocol-research-registry.js';
 import { deriveResearchScenario } from '#tools/ci/protocol-research-scenario.js';
-import {
-    runCommandAndCaptureOutput,
-    runCommandsInSeries,
-} from '#tools/ci/run-command.js';
 
 // A passed research run. The ceremony directory among its artifacts holds
 // the public setup, close and completion records the reader verifies.
@@ -64,7 +64,7 @@ await runWithLocalRunLog(
                 : []),
         ],
         lanes: ['Independent public setup, target and completion verification'],
-        scriptName: 'research:protocol:public',
+        scriptName: 'research:protocol:public-records',
     },
     async (log) => {
         const releaseLock = await acquireProtocolResearchLock(

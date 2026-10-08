@@ -13,8 +13,8 @@ import { shareEncryptionParameters } from '#tests/wide-share-lifting-model.js';
 
 // The research crates read the searched parameters of every supported
 // profile from this table and derive every other size by closed-form rules.
-const researchProfileTableMagic = 'SPT1';
-export const researchProfileRecordBytes = 30;
+const supportedProfileTableMagic = 'SPT1';
+export const supportedProfileRecordBytes = 30;
 
 const unsigned = (value: bigint | number, bytes: number): Buffer => {
     let remaining = BigInt(value);
@@ -57,7 +57,7 @@ const encodeProfile = (profile: SupportedProfile): Buffer => {
         unsigned(profile.shareLifting.limbBits, 2),
         unsigned(profile.shareLifting.carryBits, 2),
     ]);
-    if (record.length !== researchProfileRecordBytes)
+    if (record.length !== supportedProfileRecordBytes)
         throw new Error('A profile record has the wrong length.');
     return record;
 };
@@ -66,7 +66,7 @@ const encodeProfile = (profile: SupportedProfile): Buffer => {
 // their families, then one record per profile by participant count and then
 // option count over both contiguous ranges, as listSupportedProfiles orders
 // them.
-export const encodeResearchProfileTable = (): Buffer => {
+export const encodeSupportedProfileTable = (): Buffer => {
     const participantCounts = compileSupportedThresholdCompletionProfiles().map(
         (profile) => profile.participantCount,
     );
@@ -87,7 +87,7 @@ export const encodeResearchProfileTable = (): Buffer => {
     if (profiles.length !== participantCounts.length * optionCounts.length)
         throw new Error('The supported profiles are not contiguous.');
     return Buffer.concat([
-        Buffer.from(researchProfileTableMagic),
+        Buffer.from(supportedProfileTableMagic),
         magnitudeBytes(shareEncryptionParameters.modulus),
         magnitudeBytes(auxiliaryInputEncryptionParameters.modulus),
         unsigned(fixedFamilyBitsPerCoefficient, 2),

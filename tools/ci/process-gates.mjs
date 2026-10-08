@@ -21,7 +21,7 @@ const waitForGate = (file) =>
                         : new Error(
                               typeof error === 'string'
                                   ? error
-                                  : 'The operator gate failed.',
+                                  : 'The process gate failed.',
                           ),
                 );
         };
@@ -54,7 +54,7 @@ const waitForGate = (file) =>
     });
 
 /** @template T @param {string[]} args @param {()=>Promise<T>} operation */
-export const withOperatorProcessGates = async (args, operation) => {
+export const withProcessGates = async (args, operation) => {
     assert.equal(
         args.length,
         4,

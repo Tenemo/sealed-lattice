@@ -3,8 +3,8 @@ import { readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { runPackageManagerAndCaptureOutput } from './command-runner.js';
 import { resolvePackageManagerRunner } from './package-manager-runner.js';
-import { runPackageManagerAndCaptureOutput } from './run-command.js';
 
 import { participantRuntimeIdentity } from '#tools/ci/build-participant-module.js';
 import { runWithLocalRunLog } from '#tools/ci/local-run-log.js';

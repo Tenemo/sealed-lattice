@@ -3,7 +3,7 @@ import { access, mkdir, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 
-import { killProcessTree } from '#tools/ci/run-command.js';
+import { killProcessTree } from '#tools/ci/command-runner.js';
 
 // Drives an installed release Chrome over its DevTools socket with Runtime
 // and Page control, and records CPU samples only when a trace is requested.

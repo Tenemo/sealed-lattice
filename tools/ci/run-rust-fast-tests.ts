@@ -1,12 +1,12 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { runWithLocalRunLog, type ActiveLocalRunLog } from './local-run-log.js';
 import {
     runCommandAndCaptureOutput,
     runCommandsInSeries,
     type CommandInvocation,
-} from './run-command.js';
+} from './command-runner.js';
+import { runWithLocalRunLog, type ActiveLocalRunLog } from './local-run-log.js';
 
 const usage =
     'Usage: run-rust-fast-tests.ts [<test name, module name, or Rust file filter>].';

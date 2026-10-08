@@ -4,7 +4,7 @@ import {
     installProcessSignalChildCleanup,
     killProcessTree,
     runCommandAndCaptureOutput,
-} from '#tools/ci/run-command';
+} from '#tools/ci/command-runner';
 
 describe('command execution', () => {
     it('captures asynchronous output and a nonzero process status', async () => {

@@ -15,14 +15,14 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import {
+    runCommandsInSeries,
+    type CommandInvocation,
+} from '#tools/ci/command-runner';
+import {
     createLocalRunLog,
     runArtifactDirectoryPath,
     runWithLocalRunLog,
 } from '#tools/ci/local-run-log';
-import {
-    runCommandsInSeries,
-    type CommandInvocation,
-} from '#tools/ci/run-command';
 
 const repositoryRootDirectoryPath = path.resolve(
     path.dirname(fileURLToPath(import.meta.url)),

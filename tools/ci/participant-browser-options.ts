@@ -108,9 +108,11 @@ export const scheduleParticipantDepartures = (
 
 // These select a development cohort, not supported-phone qualification.
 export const selectParticipantBrowserOptions = (
-    arguments_: readonly string[],
+    commandLineArguments: readonly string[],
 ) => {
-    const argumentsList = arguments_.filter((value) => value !== '--');
+    const argumentsList = commandLineArguments.filter(
+        (value) => value !== '--',
+    );
     const counts: string[] = [];
     const switches = new Set<string>();
     const values = new Map<string, string>();

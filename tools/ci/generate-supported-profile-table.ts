@@ -1,10 +1,10 @@
 import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import { encodeResearchProfileTable } from '#tests/research-profile-table-model.js';
+import { encodeSupportedProfileTable } from '#tests/supported-profile-table-model.js';
 
 // The tracked table's correspondence test rebuilds it from the same models.
-const usage = 'Usage: generate-research-profile-table.ts --output <file>';
+const usage = 'Usage: generate-supported-profile-table.ts --output <file>';
 
 const main = async (): Promise<void> => {
     const rawArguments = process.argv.slice(2);
@@ -18,7 +18,7 @@ const main = async (): Promise<void> => {
     )
         throw new Error(usage);
     const targetPath = path.resolve(target);
-    const table = encodeResearchProfileTable();
+    const table = encodeSupportedProfileTable();
     await writeFile(targetPath, table);
     process.stdout.write(
         `Wrote ${String(table.length)} bytes to ${targetPath}\n`,

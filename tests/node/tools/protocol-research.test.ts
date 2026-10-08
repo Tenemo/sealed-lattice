@@ -213,7 +213,7 @@ describe('guarded protocol research entry', () => {
             ['native-result', '20', '-2'],
             ['native-result', '3.5', '2'],
             ['native-empty', '', '2'],
-            ['native-prefix', '3', '2'],
+            ['native-requested-output', '3', '2'],
             ['check', '10', '10'],
             ['check', '--simulated-helpers', '3'],
             ['native-result', '--simulated-helpers'],
@@ -272,20 +272,22 @@ describe('guarded protocol research entry', () => {
         }
         expect(
             selectProtocolResearchCase([
-                'native-prefix',
+                'native-requested-output',
                 '--simulated-helpers',
                 '3',
             ]).simulatedHelpers,
         ).toBe(3);
         expect(selectProtocolResearchCase(['check']).execution).toBe(false);
-        expect(selectProtocolResearchCase(['native-prefix'])).toEqual({
-            name: 'native-prefix',
-            execution: true,
-            noResult: false,
-            participantCount: 10,
-            optionCount: 10,
-            simulatedHelpers: 0,
-        });
+        expect(selectProtocolResearchCase(['native-requested-output'])).toEqual(
+            {
+                name: 'native-requested-output',
+                execution: true,
+                noResult: false,
+                participantCount: 10,
+                optionCount: 10,
+                simulatedHelpers: 0,
+            },
+        );
     });
 
     it('derives the native ceremony expectations from the thresholds', () => {

@@ -18,16 +18,16 @@ import {
     checkParticipantModule,
     participantRuntimeIdentity,
 } from './build-participant-module.js';
+import {
+    runCommandAndCaptureOutput,
+    type CommandInvocation,
+} from './command-runner.js';
 import { runWithLocalRunLog, type ActiveLocalRunLog } from './local-run-log.js';
 import {
     resolvePackageManagerRunner,
     resolvePackageManagerRunnerForPackageManager,
     type PackageManagerRunner,
 } from './package-manager-runner.js';
-import {
-    runCommandAndCaptureOutput,
-    type CommandInvocation,
-} from './run-command.js';
 
 import { kernelFunctions } from '#packages/sdk/src/participant/worker/kernel.js';
 import { helperFunctions } from '#packages/sdk/src/participant/worker/parallel.js';
@@ -115,7 +115,7 @@ const runCommand = async (
 const runPackageManager = (
     runLog: ActiveLocalRunLog,
     runner: PackageManagerRunner,
-    arguments_: readonly string[],
+    commandLineArguments: readonly string[],
     input: {
         readonly description: string;
         readonly environment?: NodeJS.ProcessEnv;
@@ -123,7 +123,7 @@ const runPackageManager = (
     },
 ): Promise<string> =>
     runCommand(runLog, {
-        args: [...runner.commandArgumentsPrefix, ...arguments_],
+        args: [...runner.commandArgumentsPrefix, ...commandLineArguments],
         command: runner.command,
         description: input.description,
         env: input.environment,
@@ -382,9 +382,13 @@ const writeConsumer = async (consumerDirectoryPath: string): Promise<void> => {
     ]);
 };
 
-const parseOutputPath = (arguments_: readonly string[]): string | undefined => {
+const parseOutputPath = (
+    commandLineArguments: readonly string[],
+): string | undefined => {
     const normalizedArguments =
-        arguments_[0] === '--' ? arguments_.slice(1) : arguments_;
+        commandLineArguments[0] === '--'
+            ? commandLineArguments.slice(1)
+            : commandLineArguments;
     if (normalizedArguments.length === 0) return undefined;
     if (
         normalizedArguments.length === 2 &&
@@ -556,17 +560,17 @@ const verifyPackedPackage = async (
 };
 
 const main = async (): Promise<void> => {
-    const arguments_ = process.argv.slice(2);
+    const commandLineArguments = process.argv.slice(2);
     await runWithLocalRunLog(
         {
-            commandLineArguments: arguments_,
+            commandLineArguments: commandLineArguments,
             lanes: ['Packed package smoke'],
             scriptName: 'smoke:pack:npm',
         },
         async (runLog) => {
             const result = await verifyPackedPackage(
                 runLog,
-                parseOutputPath(arguments_),
+                parseOutputPath(commandLineArguments),
             );
             if (
                 result.tarballPath !== undefined &&

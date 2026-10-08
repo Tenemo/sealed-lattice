@@ -3,11 +3,11 @@ import { readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 
 import { auxiliaryInputEncryptionParameters } from '#tests/auxiliary-input-encryption-parameters.js';
-import {
-    encodeResearchProfileTable,
-    researchProfileRecordBytes,
-} from '#tests/research-profile-table-model.js';
 import { setupGaussianParameters } from '#tests/setup-randomness-model.js';
+import {
+    encodeSupportedProfileTable,
+    supportedProfileRecordBytes,
+} from '#tests/supported-profile-table-model.js';
 import { shareEncryptionParameters } from '#tests/wide-share-lifting-model.js';
 
 const unsigned = (value: bigint, bytes: number) => {
@@ -36,7 +36,7 @@ describe('tracked research parameter correspondence', () => {
         const stored = await readFile(
             'crates/protocol-research/supported-profile/profiles.bin',
         );
-        expect(stored).toEqual(encodeResearchProfileTable());
+        expect(stored).toEqual(encodeSupportedProfileTable());
         // Header: magic, both length-prefixed moduli, their families' common
         // sample width and the count ranges.
         expect(stored.subarray(0, 4).toString()).toBe('SPT1');
@@ -54,15 +54,15 @@ describe('tracked research parameter correspondence', () => {
         );
         expect(stored.readUInt16LE(31)).toBe(320);
         expect([...stored.subarray(33, 37)]).toEqual([3, 20, 2, 20]);
-        expect(stored.length).toBe(37 + 18 * 19 * researchProfileRecordBytes);
+        expect(stored.length).toBe(37 + 18 * 19 * supportedProfileRecordBytes);
         // The completion record, independently of the search: the FHE
         // modulus 65537*65319*2^832+1 and the release modulus
         // 65537*65445*2^160+1, both with Proth witness 7.
         const offset =
-            37 + ((10 - 3) * 19 + (10 - 2)) * researchProfileRecordBytes;
+            37 + ((10 - 3) * 19 + (10 - 2)) * supportedProfileRecordBytes;
         const record = stored.subarray(
             offset,
-            offset + researchProfileRecordBytes,
+            offset + supportedProfileRecordBytes,
         );
         expect(record.readUInt16LE(0)).toBe(832);
         expect(record.readUInt32LE(2)).toBe(65537 * 65319);

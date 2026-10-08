@@ -103,7 +103,7 @@ import {
 import {
     readProtocolProcesses,
     sumProtocolProcessTree,
-} from '#tools/ci/protocol-process-memory.js';
+} from '#tools/ci/process-tree-memory.js';
 import { acquireProtocolResearchLock } from '#tools/ci/protocol-research-lock.js';
 import { redactDiagnosticText } from '#tools/ci/run-log-diagnostics.js';
 

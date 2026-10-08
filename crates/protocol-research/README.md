@@ -68,7 +68,7 @@ For a ceremony, the runner derives the expected roles, ranking and checked set c
 The focused numerical case checks complete and shorter output prefixes at the smallest, the ten-participant and the largest profile, each prefix from the same deterministic BFV ciphertext inputs as its complete ordering:
 
 ```text
-pnpm run research:protocol -- native-prefix
+pnpm run research:protocol -- native-requested-output
 ```
 
 It exercises the coefficient-selection gates and checks every decrypted coefficient with a test-only secret and an independent interpolation oracle. Because these numerical probes decrypt synthetic test ciphertexts, they compile only with the `numerical-probes` feature, which this case enables; evaluation modules neither contain nor export them. It creates no participants, ballots, certificate or protocol terminal.
@@ -76,7 +76,7 @@ It exercises the coefficient-selection gates and checks every decrypted coeffici
 For focused retrieval checks, a passed native result, setup-departure or selection-fork run supplies its public ceremony records:
 
 ```text
-pnpm run research:protocol:public -- available-records <native-completion-run>
+pnpm run research:protocol:public-records -- available-records <native-completion-run>
 ```
 
 This case supplies the certificate's votes and a nonconsecutive release subset, leaves other files absent, and injects corrupt extras. It recomputes setup, the close barrier and evaluation before consuming completion records. This is a retrieval test after generation; it does not demonstrate participants disappearing before their later actions.
@@ -84,9 +84,9 @@ This case supplies the certificate's votes and a nonconsecutive release subset, 
 The public setup and close records of a passed native run can also be checked against a directory containing actual participant messages:
 
 ```text
-pnpm run research:protocol:public -- certificate-records <native-run> <public-record-directory>
-pnpm run research:protocol:public -- release-records <native-run> <public-record-directory>
-pnpm run research:protocol:public -- terminal-records <native-run> <public-record-directory>
+pnpm run research:protocol:public-records -- certificate-records <native-run> <public-record-directory>
+pnpm run research:protocol:public-records -- release-records <native-run> <public-record-directory>
+pnpm run research:protocol:public-records -- terminal-records <native-run> <public-record-directory>
 ```
 
 All three modes recompute setup, the close barrier from the published intent, responses, proposal and listed envelopes, the classification of each usable slot and the target. Only usable slots' bodies are read. The certificate mode needs only a valid quorum of target votes and does not request release messages. The release mode additionally verifies one available release message and runs wrong-target, incomplete-proof, altered-proof and duplicate controls at its actual author; it requires an encrypted target and emits no result identifiers. The terminal mode verifies sufficient release shares when the target is encrypted. These checks do not establish durable publication by themselves.

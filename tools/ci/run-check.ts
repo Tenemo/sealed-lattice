@@ -1,14 +1,14 @@
 import { performance } from 'node:perf_hooks';
 import { stripVTControlCharacters } from 'node:util';
 
-import { runWithLocalRunLog, type ActiveLocalRunLog } from './local-run-log.js';
-import { resolvePackageManagerRunner } from './package-manager-runner.js';
 import {
     createPackageManagerCommand,
     runCommandsInSeries,
     type CommandInvocation,
     type CommandRunObserver,
-} from './run-command.js';
+} from './command-runner.js';
+import { runWithLocalRunLog, type ActiveLocalRunLog } from './local-run-log.js';
+import { resolvePackageManagerRunner } from './package-manager-runner.js';
 import {
     rustFastTestCommands,
     rustWorkspaceCommand,

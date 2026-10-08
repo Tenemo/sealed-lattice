@@ -41,7 +41,7 @@ const packageName = 'setup-witness';
 const binaryName = 'screen-fhe-key-source';
 const features = ['--features', 'key-source-screen'];
 const sourcesForHost = [
-    'tools/ci/run-arithmetic-screen.ts',
+    'tools/ci/run-fhe-key-source-screen.ts',
     'tools/ci/fhe-key-source-report.ts',
     'tests/fhe-key-source-resource-model.ts',
     'tools/ci/fixture-sources.ts',
@@ -51,23 +51,16 @@ const sourcesForHost = [
     'tools/ci/scalar-fixture-build.ts',
     'tools/ci/compiled-inputs.ts',
     'tools/ci/bounded-output-worker.mjs',
-    'tools/ci/operator-process-gates.mjs',
+    'tools/ci/process-gates.mjs',
     ...boundedBrowserSources,
 ];
 
-export const runArithmeticScreenFixture = async (
-    host: 'native' | 'node' | 'chrome',
+export const runFheKeySourceScreen = async (
+    host: 'native' | 'scalar' | 'browser',
     sourceDirectory?: string,
 ) => {
     assert.equal(sourceDirectory === undefined, host === 'native');
-    const name =
-        (host === 'node'
-            ? 'scalar'
-            : host === 'chrome'
-              ? 'browser'
-              : 'native') +
-        '-' +
-        screenKind;
+    const name = `${host}-${screenKind}`;
     const root = path.resolve('.');
     const workspace = path.join(root, 'crates/protocol-research');
     await runWithLocalRunLog(
@@ -78,11 +71,11 @@ export const runArithmeticScreenFixture = async (
                 ...(sourceDirectory === undefined ? [] : [sourceDirectory]),
             ],
             lanes: [
-                'Pin arithmetic screen inputs',
-                'Build arithmetic screen fixture',
+                'Pin FHE key-source screen inputs',
+                'Build FHE key-source screen fixture',
                 host === 'native'
-                    ? 'Native arithmetic screens'
-                    : 'Source-matched bounded scalar arithmetic screens',
+                    ? 'Native FHE key-source screen'
+                    : 'Source-matched bounded scalar FHE key-source screen',
             ],
         },
         async (log) => {
@@ -346,7 +339,7 @@ export const runArithmeticScreenFixture = async (
                         assert.ok(source && module);
                         const expected = source.artifacts[model.caseId];
                         let result;
-                        if (host === 'chrome')
+                        if (host === 'browser')
                             result = await runFheKeySourceInChrome({
                                 root,
                                 log,
@@ -395,7 +388,7 @@ export const runArithmeticScreenFixture = async (
                         }
                         assert.equal(
                             result.result.kind,
-                            host === 'chrome'
+                            host === 'browser'
                                 ? 'browser-' + screenKind + '-screen'
                                 : 'scalar-' + screenKind + '-screen',
                         );

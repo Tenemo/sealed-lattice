@@ -23,17 +23,17 @@ import { compileRegistrationEnrollmentCensus } from '#tests/registration-enrollm
 import { compileRosterProposalCensus } from '#tests/roster-proposal-model.js';
 import { compileSetupAggregateResources } from '#tests/setup-aggregate-resource-model.js';
 import { deriveSupportedProfile } from '#tests/supported-profile-model.js';
-import { snapshotResearchSources } from '#tools/ci/fixture-sources.js';
-import { runWithLocalRunLog } from '#tools/ci/local-run-log.js';
-import { guardProcessTreeMemory } from '#tools/ci/protocol-process-memory.js';
-import { acquireProtocolResearchLock } from '#tools/ci/protocol-research-lock.js';
-import { selectProtocolResearchCase } from '#tools/ci/protocol-research-registry.js';
-import { deriveResearchScenario } from '#tools/ci/protocol-research-scenario.js';
-import { runArithmeticScreenFixture } from '#tools/ci/run-arithmetic-screen.js';
 import {
     runCommandAndCaptureOutput,
     runCommandsInSeries,
-} from '#tools/ci/run-command.js';
+} from '#tools/ci/command-runner.js';
+import { snapshotResearchSources } from '#tools/ci/fixture-sources.js';
+import { runWithLocalRunLog } from '#tools/ci/local-run-log.js';
+import { guardProcessTreeMemory } from '#tools/ci/process-tree-memory.js';
+import { acquireProtocolResearchLock } from '#tools/ci/protocol-research-lock.js';
+import { selectProtocolResearchCase } from '#tools/ci/protocol-research-registry.js';
+import { deriveResearchScenario } from '#tools/ci/protocol-research-scenario.js';
+import { runFheKeySourceScreen } from '#tools/ci/run-fhe-key-source-screen.js';
 import { runRegistrationSession } from '#tools/ci/run-registration-session.js';
 
 type NativeResult = {
@@ -69,18 +69,18 @@ if (
     selected.name === 'scalar-fhe-key-source' ||
     selected.name === 'browser-fhe-key-source'
 ) {
-    await runArithmeticScreenFixture(
+    await runFheKeySourceScreen(
         selected.name.startsWith('native-')
             ? 'native'
             : selected.name.startsWith('scalar-')
-              ? 'node'
-              : 'chrome',
+              ? 'scalar'
+              : 'browser',
         'source' in selected ? selected.source : undefined,
     );
     process.exit(process.exitCode ?? 0);
 }
 
-const prefixCase = selected.name === 'native-prefix';
+const requestedOutputCase = selected.name === 'native-requested-output';
 // The ceremony's roles and expected outcome for the selected profile.
 const scenario = deriveResearchScenario(
     selected.participantCount,
@@ -90,7 +90,7 @@ const scenario = deriveResearchScenario(
 );
 // The requested-output probe's profiles, each with its complete ordering
 // and then a shorter prefix.
-const prefixProfiles = [
+const requestedOutputProfiles = [
     { participantCount: 3, optionCount: 2, topCounts: [2, 1] },
     { participantCount: 10, optionCount: 10, topCounts: [10, 3] },
     { participantCount: 20, optionCount: 20, topCounts: [20, 1] },
@@ -117,7 +117,7 @@ const proofSimulatedHelpers = 8;
 const proofCrates = ['word-proof', 'ballot-proof', 'linked-release-proof'];
 // A native ceremony generates and proves one contribution per participant,
 // which dominates its duration.
-const executionTimeout = prefixCase
+const executionTimeout = requestedOutputCase
     ? 3_600_000
     : 900_000 * selected.participantCount;
 
@@ -140,7 +140,7 @@ await runWithLocalRunLog(
             'Pinned protocol research build',
             ...(selected.execution
                 ? [
-                      prefixCase
+                      requestedOutputCase
                           ? 'Encrypted requested-output gates'
                           : 'Native original-credential completion',
                   ]
@@ -522,7 +522,7 @@ await runWithLocalRunLog(
                     ...['native-ceremony', 'rns-arithmetic-probe'].flatMap(
                         (name) => ['-p', name],
                     ),
-                    ...(prefixCase
+                    ...(requestedOutputCase
                         ? [
                               '--features',
                               'rns-arithmetic-probe/numerical-probes',
@@ -535,7 +535,7 @@ await runWithLocalRunLog(
             const executable = path.join(
                 workspace,
                 'target/release/' +
-                    (prefixCase
+                    (requestedOutputCase
                         ? 'check-requested-output'
                         : 'native-ceremony') +
                     (process.platform === 'win32' ? '.exe' : ''),
@@ -570,12 +570,12 @@ await runWithLocalRunLog(
                 'runtime.bin',
             );
             await writeFile(runtimeFile, runtime, { flag: 'wx' });
-            const scratch = prefixCase
+            const scratch = requestedOutputCase
                 ? undefined
                 : await mkdtemp(path.join(root, 'temp/protocol-research-'));
             const output = path.join(
                 log.artifactDirectoryPath,
-                prefixCase ? 'requested-output' : 'ceremony',
+                requestedOutputCase ? 'requested-output' : 'ceremony',
             );
             const controller = new AbortController();
             let guard: { stop: () => Promise<void> } | undefined,
@@ -588,7 +588,7 @@ await runWithLocalRunLog(
                     [
                         {
                             command: executable,
-                            args: prefixCase
+                            args: requestedOutputCase
                                 ? [output]
                                 : [
                                       output,
@@ -612,7 +612,7 @@ await runWithLocalRunLog(
                             env: withSimulatedHelpers(
                                 selected.simulatedHelpers,
                             ),
-                            description: prefixCase
+                            description: requestedOutputCase
                                 ? 'Verify encrypted requested-output coefficients'
                                 : 'Execute original credentials through terminal verification',
                             logFileSlug: 'completion',
@@ -678,12 +678,14 @@ await runWithLocalRunLog(
                 await readFile(
                     path.join(
                         output,
-                        prefixCase ? 'result.json' : 'completion/result.json',
+                        requestedOutputCase
+                            ? 'result.json'
+                            : 'completion/result.json',
                     ),
                     'utf8',
                 ),
             ) as NativeResult;
-            if (prefixCase) {
+            if (requestedOutputCase) {
                 assert.equal(result.kind, 'requested-output');
                 assert.ok(result.cases);
                 const cases = result.cases.map((value) => value.result);
@@ -693,7 +695,7 @@ await runWithLocalRunLog(
                         value.options,
                         value.topCount,
                     ]),
-                    prefixProfiles.flatMap((value) =>
+                    requestedOutputProfiles.flatMap((value) =>
                         value.topCounts.map((topCount) => [
                             value.participantCount,
                             value.optionCount,
@@ -785,7 +787,7 @@ await runWithLocalRunLog(
                     );
                 }
             }
-            if (!prefixCase && !selected.noResult) {
+            if (!requestedOutputCase && !selected.noResult) {
                 // The reference ranking of the accepted ballots; ties go to
                 // the lower option position.
                 assert.deepEqual(result.identifiers, scenario.identifiers);
@@ -852,7 +854,7 @@ await runWithLocalRunLog(
             const publicDiagnosticBytes = await countFiles(output);
             assert.ok(
                 BigInt(publicDiagnosticBytes) <=
-                    (prefixCase ? 16_384n : diagnosticBound),
+                    (requestedOutputCase ? 16_384n : diagnosticBound),
             );
             await writeFile(
                 path.join(log.runDirectoryPath, 'result.json'),
@@ -878,7 +880,7 @@ await runWithLocalRunLog(
                             networkTransfers: null,
                             recoveryWork: null,
                         },
-                        scope: prefixCase
+                        scope: requestedOutputCase
                             ? 'Real full-degree BFV coefficient-selection operations on deterministic synthetic ciphertexts encrypting known rank powers. A test-only secret decoder checks every plaintext coefficient against direct interpolation, including all omitted ranks and padding. No participant, ballot proof, certificate, release share or terminal is created.'
                             : selected.noResult
                               ? 'Fresh native certified no-result execution using original credentials. No release shares are generated. This is not durable browser participation, security admission or physical qualification.'
