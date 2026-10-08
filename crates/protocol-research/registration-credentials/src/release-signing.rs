@@ -7,8 +7,8 @@ use fips204::{
     ml_dsa_65,
     traits::{SerDes, Verifier},
 };
-use linked_release_proof::statement::{header_position, release_coefficient_bytes};
 use std::ops::RangeInclusive;
+use supported_profile::relation::{release_coefficient_bytes, release_header_position};
 use supported_profile::{
     Profile,
     relation::{PROOF_HEADER_BYTES, RELEASE_HEADER_BYTES, SYSTEMATIC, release_relation},
@@ -117,7 +117,8 @@ pub fn body_header(
     context: &[u8; RELEASE_HEADER_BYTES],
     proof_bytes: usize,
 ) -> Result<Vec<u8>, Error> {
-    if header_position(profile, context).is_none() || !proof_lengths(profile).contains(&proof_bytes)
+    if release_header_position(profile, context).is_none()
+        || !proof_lengths(profile).contains(&proof_bytes)
     {
         return Err(Error::Shape);
     }

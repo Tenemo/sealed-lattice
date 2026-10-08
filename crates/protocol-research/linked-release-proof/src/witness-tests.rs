@@ -86,7 +86,7 @@ pub(crate) fn synthetic_release(profile: Profile) -> (PreparedRelease, Vec<BigIn
     )
     .unwrap();
     let mut header = [0; RELEASE_HEADER_BYTES];
-    header[..4].copy_from_slice(statement::HEADER_MAGIC);
+    header[..4].copy_from_slice(RELEASE_HEADER_MAGIC);
     let position = (profile.participants() - 1) as u16;
     header[RELEASE_HEADER_BYTES - 2..].copy_from_slice(&position.to_le_bytes());
     (derive_bound(inputs, header).unwrap(), shares)
@@ -170,13 +170,13 @@ fn weighted_operators_equal_the_dense_reference_at_every_row() {
 fn headers_outside_the_roster_or_with_another_magic_are_refused() {
     let profile = Profile::new(3, 2).unwrap();
     let mut header = [0; RELEASE_HEADER_BYTES];
-    header[..4].copy_from_slice(statement::HEADER_MAGIC);
+    header[..4].copy_from_slice(RELEASE_HEADER_MAGIC);
     header[RELEASE_HEADER_BYTES - 2] = 2;
-    assert_eq!(statement::header_position(profile, &header), Some(2));
+    assert_eq!(release_header_position(profile, &header), Some(2));
     header[RELEASE_HEADER_BYTES - 2] = 3;
-    assert_eq!(statement::header_position(profile, &header), None);
+    assert_eq!(release_header_position(profile, &header), None);
     header[RELEASE_HEADER_BYTES - 2] = 0;
     header[0] ^= 1;
-    assert_eq!(statement::header_position(profile, &header), None);
-    assert_eq!(statement::header_position(profile, &header[1..]), None);
+    assert_eq!(release_header_position(profile, &header), None);
+    assert_eq!(release_header_position(profile, &header[1..]), None);
 }

@@ -23,7 +23,6 @@ pub(crate) const DECODING_CARRY: usize = 6;
 pub(crate) const NOISE: usize = 7;
 pub(crate) const RELEASE_QUOTIENT: usize = 8;
 pub(crate) const FIRST_RELEASE_CARRY: usize = 9;
-pub(crate) const HEADER_MAGIC: &[u8; 4] = b"LRS1";
 /// Share-modulus polynomials fingerprint in decoding limbs and
 /// release-modulus polynomials in release limbs.
 const DECODING_CHUNK: usize = RELEASE_DECODING_LIMB_BITS / 8;
@@ -62,26 +61,12 @@ pub fn release_modulus(profile: Profile) -> BigInt {
 pub fn share_coefficient_bytes() -> usize {
     1 + supported_profile::share_modulus().len()
 }
-pub fn release_coefficient_bytes(profile: Profile) -> usize {
-    1 + profile.release_modulus().byte_length()
-}
 fn coefficient_bytes(profile: Profile, index: usize) -> usize {
     if index < SHARE_POLYNOMIALS {
         share_coefficient_bytes()
     } else {
         release_coefficient_bytes(profile)
     }
-}
-/// The release position a header names, when it has the release magic and
-/// names a roster position of the profile.
-pub fn header_position(profile: Profile, header: &[u8]) -> Option<usize> {
-    if header.len() != RELEASE_HEADER_BYTES || &header[..4] != HEADER_MAGIC {
-        return None;
-    }
-    let position = usize::from(u16::from_le_bytes(
-        header[RELEASE_HEADER_BYTES - 2..].try_into().unwrap(),
-    ));
-    (position < profile.participants()).then_some(position)
 }
 pub struct PublicStatement {
     pub profile: Profile,
@@ -181,7 +166,7 @@ struct Builder {
 }
 impl Builder {
     fn new(profile: Profile, alpha: Element, header: &[u8]) -> Result<Self, Error> {
-        header_position(profile, header).ok_or(Error::Shape)?;
+        release_header_position(profile, header).ok_or(Error::Shape)?;
         let (starts, words) = release_variable_starts(profile);
         let mut value = ONE;
         let mut powers_sum = ZERO;

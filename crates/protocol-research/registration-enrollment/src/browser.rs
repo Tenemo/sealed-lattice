@@ -1351,7 +1351,7 @@ fn restore_evaluation_step(state: &mut Session, operation: u32, length: usize) -
             let maximum = 8
                 + registration_credentials::target_signing::MAXIMUM_TARGET_BODY_BYTES
                 + 2 * supported_profile::relation::SYSTEMATIC
-                    * linked_release_proof::statement::release_coefficient_bytes(setup.profile())
+                    * supported_profile::relation::release_coefficient_bytes(setup.profile())
                 + registration_credentials::RETAINED_TAG_BYTES;
             (state.evaluation.is_none() && length <= maximum).then_some(())?;
             state.evaluation = Some((length, Vec::with_capacity(length)));

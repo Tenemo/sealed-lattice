@@ -40,6 +40,24 @@ const MESSAGE_BYTES: usize = 262_144;
 /// Registration, ballot and release statement headers.
 pub const BALLOT_HEADER_BYTES: usize = 4 + 2 * DIGEST_BYTES + 2 + 1 + 1;
 pub const RELEASE_HEADER_BYTES: usize = 4 + 3 * DIGEST_BYTES + 2;
+/// The magic that opens a release statement's header.
+pub const RELEASE_HEADER_MAGIC: &[u8; 4] = b"LRS1";
+/// Bytes of one encoded release-modulus coefficient: a sign byte and the
+/// magnitude.
+pub fn release_coefficient_bytes(profile: Profile) -> usize {
+    1 + profile.release_modulus().byte_length()
+}
+/// The release position a header names, when it has the release magic and
+/// names a roster position of the profile.
+pub fn release_header_position(profile: Profile, header: &[u8]) -> Option<usize> {
+    if header.len() != RELEASE_HEADER_BYTES || &header[..4] != RELEASE_HEADER_MAGIC {
+        return None;
+    }
+    let position = usize::from(u16::from_le_bytes(
+        header[RELEASE_HEADER_BYTES - 2..].try_into().unwrap(),
+    ));
+    (position < profile.participants()).then_some(position)
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Relation {

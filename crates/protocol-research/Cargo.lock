@@ -398,7 +398,6 @@ dependencies = [
  "aes",
  "aes-gcm",
  "fips204",
- "linked-release-proof",
  "parallel-work",
  "sha3",
  "supported-profile",

@@ -30,7 +30,7 @@ struct Builder {
 }
 impl Builder {
     fn new(profile: Profile, alpha: Element, header: &[u8]) -> Result<Self, Error> {
-        header_position(profile, header).ok_or(Error::Shape)?;
+        release_header_position(profile, header).ok_or(Error::Shape)?;
         let (starts, words) = release_variable_starts(profile);
         let mut value = ONE;
         let geometric = (0..SYSTEMATIC)

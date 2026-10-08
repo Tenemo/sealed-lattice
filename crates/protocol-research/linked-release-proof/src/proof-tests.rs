@@ -39,7 +39,7 @@ fn release_proofs_verify_only_for_their_role_and_true_partial() {
     // A proof of a partial decryption one less than the derived value
     // cannot meet the affine relation.
     let (mut prepared, _) = synthetic_release(profile);
-    let width = crate::statement::release_coefficient_bytes(profile);
+    let width = supported_profile::relation::release_coefficient_bytes(profile);
     let coefficient = &mut prepared.statement.polynomials[5][..width];
     let mut magnitude = num_bigint::BigUint::from_bytes_le(&coefficient[1..]);
     let negative = coefficient[0] == 1;

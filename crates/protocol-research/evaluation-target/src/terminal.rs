@@ -4,15 +4,13 @@ use crate::{
     release::{self, Error},
     release_body::VerifiedReleaseShare,
 };
-use linked_release_proof::{
-    parameters::SYSTEMATIC,
-    statement::{release_coefficient_bytes, release_modulus},
-};
+use linked_release_proof::{parameters::SYSTEMATIC, statement::release_modulus};
 use num_bigint::BigInt;
 use std::sync::Arc;
 use supported_profile::{
     PLAINTEXT_MODULUS as PRIME, Profile,
     plaintext::{multiply, odd_power_values, power, slot_positions},
+    relation::release_coefficient_bytes,
 };
 
 /// The option at each requested rank. The result plaintext is one at the

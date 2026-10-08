@@ -10,7 +10,7 @@ use registration_credentials::foundation::participant_identity::{
 use registration_credentials::foundation::{CanonicalItem, CanonicalTuple};
 use setup_aggregate::VerifiedAggregatePolynomial;
 use std::sync::Arc;
-use supported_profile::Profile;
+use supported_profile::{Profile, relation::release_coefficient_bytes};
 
 /// Canonical public role bytes; this encoding alone grants no release authority.
 fn encode_release_proof_role(
@@ -102,7 +102,7 @@ impl ReleaseContext {
         let profile = setup.profile();
         let ciphertext = target.ciphertext().ok_or(Error::NoResult)?;
         let records = setup.roster().proposal().records();
-        let release_bytes = statement::release_coefficient_bytes(profile);
+        let release_bytes = release_coefficient_bytes(profile);
         if position >= profile.participants()
             || records.len() != profile.participants()
             || records[position].header().poll != target.poll().identity()
@@ -188,7 +188,7 @@ impl ReleaseContext {
     pub fn statement(&self, partial: &[u8]) -> Result<PublicStatement, Error> {
         // The parser checks the actual partial, not a producer's range claim.
         let profile = self.profile;
-        let release_bytes = statement::release_coefficient_bytes(profile);
+        let release_bytes = release_coefficient_bytes(profile);
         decode_polynomial(partial, release_bytes, &statement::release_modulus(profile))?;
         let common = setup_witness::contribution::common_polynomial(
             profile,

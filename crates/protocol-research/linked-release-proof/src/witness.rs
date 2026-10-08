@@ -160,7 +160,7 @@ pub fn derive_bound(
     inputs: ReleaseInputs,
     header: [u8; RELEASE_HEADER_BYTES],
 ) -> Result<PreparedRelease, ReleaseInputError> {
-    statement::header_position(inputs.profile, &header).ok_or(ReleaseInputError::Shape)?;
+    release_header_position(inputs.profile, &header).ok_or(ReleaseInputError::Shape)?;
     derive_inner(inputs, header)
 }
 fn derive_inner(
@@ -344,7 +344,7 @@ fn derive_inner(
         }
         partial.push(value);
     }
-    let release_bytes = statement::release_coefficient_bytes(profile);
+    let release_bytes = release_coefficient_bytes(profile);
     let polynomials = [
         &inputs.common,
         &inputs.public_key,
