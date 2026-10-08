@@ -50,7 +50,7 @@ const fixture = async () => {
     databases.push(database);
     const context = {
         namespace,
-        kernel: { setup_chunk_capacity: () => 8 },
+        module: { setup_chunk_capacity: () => 8 },
         profile: {
             setupContributorCount: 2,
             contribution: {
@@ -154,13 +154,13 @@ describe('bounded public aggregate cache reads', () => {
 
 // A stand-in for the module's ballot key commands: it records each call and
 // answers as told. No key is verified here.
-const withBallotKernel = (
+const withBallotModule = (
     context: PublicProfileContext,
     answer: (operation: number, offset: number) => number,
 ) => {
     const calls: number[][] = [];
-    const kernel = {
-        ...context.kernel,
+    const module = {
+        ...context.module,
         memory: new WebAssembly.Memory({ initial: 1 }),
         input_pointer: () => 0,
         input_capacity: () => 64,
@@ -177,7 +177,7 @@ const withBallotKernel = (
     };
     return {
         calls,
-        context: { ...context, kernel } as unknown as PublicProfileContext,
+        context: { ...context, module } as unknown as PublicProfileContext,
     };
 };
 const cachedChunks = async (database: IDBDatabase) =>
@@ -191,7 +191,7 @@ const cachedChunks = async (database: IDBDatabase) =>
 describe('ballot key delivery', () => {
     it('streams every cached chunk of the key and finishes it, keeping the cache', async () => {
         const fixed = await fixture();
-        const { calls, context } = withBallotKernel(fixed.context, () => 0);
+        const { calls, context } = withBallotModule(fixed.context, () => 0);
         await deliverBallotKey(context, 7);
         expect(calls).toEqual([
             [2, 0, 6],
@@ -209,7 +209,7 @@ describe('ballot key delivery', () => {
         ];
         for (const refused of refusals) {
             const fixed = await fixture();
-            const { context } = withBallotKernel(
+            const { context } = withBallotModule(
                 fixed.context,
                 (operation, offset) => (refused(operation, offset) ? 1 : 0),
             );
@@ -223,7 +223,7 @@ describe('ballot key delivery', () => {
     it('keeps a module failure a module failure instead of public input, and discards the cache', async () => {
         const fixed = await fixture();
         const failure = new ModuleFailure('The participant module failed.');
-        const { context } = withBallotKernel(fixed.context, (operation) => {
+        const { context } = withBallotModule(fixed.context, (operation) => {
             if (operation === 3) throw failure;
             return 0;
         });

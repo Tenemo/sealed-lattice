@@ -1,4 +1,3 @@
-import type { ParticipantProfile } from './bounds.js';
 import {
     concatenate,
     encodeText,
@@ -9,9 +8,10 @@ import {
     unsigned32,
 } from './bytes.js';
 import type { ParticipantStoredRecord } from './predecessor.js';
-import { recordKeyBytes, sealedLength } from './records.js';
-import type { RecordContext } from './records.js';
+import { recordKeyBytes, sealedLength } from './private-records.js';
+import type { RecordContext } from './private-records.js';
 import { closePhase, rootGeneration } from './root-generation.js';
+import type { ParticipantProfile } from './runtime-bounds.js';
 
 // The close log beneath the authenticated root. It retains every close input
 // the participant's state machine accepted, in arrival order, so restoration
@@ -69,18 +69,23 @@ export const collectingCloseState = (): CloseState => ({
 
 // The completed close of a participant: its signed response, and for the
 // organizer its signed proposal.
-export const completedClosePhase = (organizer: boolean) =>
-    organizer ? closePhase.proposed : closePhase.responded;
+export const completedClosePhase = (isOrganizer: boolean) =>
+    isOrganizer ? closePhase.proposed : closePhase.responded;
 
 // The close phase a root generation supplies: zero while the log collects,
 // and the completed close after it.
-const phaseOf = (generation: number, organizer: boolean) => {
-    if (generation > closePhase.proposed) return completedClosePhase(organizer);
+const phaseOf = (generation: number, isOrganizer: boolean) => {
+    if (generation > closePhase.proposed)
+        return completedClosePhase(isOrganizer);
     return generation >= closePhase.intent ? generation : 0;
 };
 
 // The fields each phase retains after the events.
-const phaseFields = (phase: number, organizer: boolean, state: CloseState) => {
+const phaseFields = (
+    phase: number,
+    isOrganizer: boolean,
+    state: CloseState,
+) => {
     switch (phase) {
         case closePhase.intent:
             return [state.intentBody];
@@ -93,7 +98,7 @@ const phaseFields = (phase: number, organizer: boolean, state: CloseState) => {
                 state.responseBody,
             ];
         case closePhase.responded:
-            return organizer
+            return isOrganizer
                 ? [state.intentPacket, state.responsePacket, state.proposalBody]
                 : [state.intentPacket, state.responsePacket];
         case closePhase.proposed:
@@ -109,7 +114,7 @@ const phaseFields = (phase: number, organizer: boolean, state: CloseState) => {
 
 export const encodeCloseState = (
     generation: number,
-    organizer: boolean,
+    isOrganizer: boolean,
     state: CloseState,
 ) =>
     concatenate(
@@ -122,7 +127,7 @@ export const encodeCloseState = (
             unsigned32(event.length),
             ...event.keys,
         ]),
-        ...phaseFields(phaseOf(generation, organizer), organizer, state),
+        ...phaseFields(phaseOf(generation, isOrganizer), isOrganizer, state),
     );
 
 // The plaintext length of each record of an event, in record order.
@@ -194,14 +199,14 @@ const packetLength = (
 export const decodeCloseState = (
     profile: ParticipantProfile,
     generation: number,
-    organizer: boolean,
+    isOrganizer: boolean,
     bytes: Uint8Array,
 ): CloseState => {
     const { close, registration } = profile;
-    const phase = phaseOf(generation, organizer);
+    const phase = phaseOf(generation, isOrganizer);
     if (
         generation < rootGeneration.setupRetained ||
-        (!organizer &&
+        (!isOrganizer &&
             (phase === closePhase.intent || phase === closePhase.proposed)) ||
         bytes.length > close.maximumStateBytes ||
         !equalBytes(bytes.subarray(0, marker.length), marker)
@@ -240,7 +245,7 @@ export const decodeCloseState = (
             !validEvent(profile, event) ||
             (events.length > 0 && serial <= events[events.length - 1].serial) ||
             (kind === closeEventKind.lock && locked) ||
-            (kind === closeEventKind.response && (!organizer || !locked))
+            (kind === closeEventKind.response && (!isOrganizer || !locked))
         )
             throw new Error('The close log is inconsistent.');
         if (kind === closeEventKind.lock) locked = true;
@@ -284,7 +289,7 @@ export const decodeCloseState = (
                 ),
             );
             result = { ...result, responsePacket };
-            if (organizer && phase === closePhase.responded)
+            if (isOrganizer && phase === closePhase.responded)
                 result = {
                     ...result,
                     proposalBody: take(close.proposalBodyBytes),

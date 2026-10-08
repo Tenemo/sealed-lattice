@@ -1,4 +1,3 @@
-import { readParticipantProfile } from './bounds.js';
 import {
     concatenate,
     equalBytes,
@@ -7,7 +6,7 @@ import {
     unsigned32,
 } from './bytes.js';
 import { collectingCloseState, encodeCloseState } from './close-state.js';
-import { sessionInput } from './context.js';
+import { writeModuleInput } from './context.js';
 import type { PublicContext, PublicProfileContext } from './context.js';
 import {
     contributionCandidateKey,
@@ -21,7 +20,7 @@ import {
     PublicInputFailure,
     ResourceFailure,
 } from './failures.js';
-import { readKernel, writeSetupInput } from './kernel.js';
+import { readModuleMemory, writeSetupInput } from './participant-module.js';
 import { encodePreparationState } from './preparation-state.js';
 import {
     createCandidatePublication,
@@ -29,8 +28,8 @@ import {
     readCandidateFile,
     readCandidates,
     streamCandidateFile,
-} from './public.js';
-import type { CandidateView, PublicRelay } from './public.js';
+} from './relay.js';
+import type { CandidateView, PublicRelay } from './relay.js';
 import { rootGeneration } from './root-generation.js';
 import {
     addedReferences,
@@ -46,6 +45,7 @@ import {
     streamRegistrations,
     validRegistrationBodyDigests,
 } from './roster.js';
+import { readParticipantProfile } from './runtime-bounds.js';
 import { encodeSignedPacket } from './signed-packet.js';
 import type { SignedPacket } from './signed-packet.js';
 import { namespacedName, setupCacheName } from './storage.js';
@@ -109,7 +109,7 @@ const aggregateCapacity = (
     polynomial: Readonly<{ bytes: number; coefficients: number }>,
 ) => {
     const width = polynomial.bytes / polynomial.coefficients;
-    return Math.floor(context.kernel.setup_chunk_capacity() / width) * width;
+    return Math.floor(context.module.setup_chunk_capacity() / width) * width;
 };
 
 // The chunks of an aggregate of the given length: each but the last fills
@@ -268,18 +268,18 @@ const offerKey = (offer: SelectedOffer) =>
 
 // These getters describe only a selection already authenticated by Rust.
 const selectedSetup = (context: PublicProfileContext): SetupSelection => {
-    const { kernel, profile } = context;
-    const count = kernel.setup_selection_count();
-    const pointer = kernel.setup_selection_identity_pointer();
+    const { module, profile } = context;
+    const count = module.setup_selection_count();
+    const pointer = module.setup_selection_identity_pointer();
     if (count !== profile.setupContributorCount || pointer === 0)
         throw new PublicInputFailure(
             'No authenticated setup selection is available.',
         );
-    const identity = readKernel(kernel, pointer, 64);
+    const identity = readModuleMemory(module, pointer, 64);
     const offers = Array.from({ length: count }, (_, ordinal) => {
-        const position = kernel.setup_selection_position(ordinal) >>> 0;
+        const position = module.setup_selection_position(ordinal) >>> 0;
         const bodyIdentityPointer =
-            kernel.setup_selection_body_identity_pointer(ordinal);
+            module.setup_selection_body_identity_pointer(ordinal);
         if (
             position >= profile.eligibleContributorCount ||
             bodyIdentityPointer === 0
@@ -289,17 +289,17 @@ const selectedSetup = (context: PublicProfileContext): SetupSelection => {
             );
         return {
             position,
-            identity: readKernel(kernel, bodyIdentityPointer, 64),
+            identity: readModuleMemory(module, bodyIdentityPointer, 64),
         };
     });
     return { identity, offers };
 };
 
 export const setupOutput = (context: PublicContext) =>
-    readKernel(
-        context.kernel,
-        context.kernel.setup_output_pointer(),
-        context.kernel.setup_output_length(),
+    readModuleMemory(
+        context.module,
+        context.module.setup_output_pointer(),
+        context.module.setup_output_length(),
     );
 
 export const authenticateSelection = (
@@ -308,8 +308,8 @@ export const authenticateSelection = (
     retained = false,
 ) => {
     const bytes = encodeSignedPacket(packet);
-    writeSetupInput(context.kernel, bytes);
-    if (context.kernel.setup_selection_begin(bytes.length) !== 0)
+    writeSetupInput(context.module, bytes);
+    if (context.module.setup_selection_begin(bytes.length) !== 0)
         throw retained
             ? new Error('The retained setup selection was refused.')
             : new PublicInputFailure('The setup selection was refused.');
@@ -375,9 +375,9 @@ const offerAvailable = (
     context: PublicProfileContext,
     offer: SelectedOffer,
 ) => {
-    writeSetupInput(context.kernel, offer.identity);
+    writeSetupInput(context.module, offer.identity);
     return (
-        context.kernel.setup_offer_available(
+        context.module.setup_offer_available(
             offer.position,
             offer.identity.length,
         ) === 1
@@ -393,7 +393,7 @@ const beginOffer = async (
     candidate: CandidateView,
     begin: (length: number) => number,
 ) => {
-    const { kernel, profile } = context;
+    const { module, profile } = context;
     const bounds = profile.contribution;
     const envelope = await readCandidateFile(
         relay,
@@ -428,7 +428,7 @@ const beginOffer = async (
         header,
         proofPrefix,
     );
-    writeSetupInput(kernel, control);
+    writeSetupInput(module, control);
     if (begin(control.length) !== 0)
         throw new PublicInputFailure('A contribution offer was refused.');
     // Check the authenticated envelope's transport destination before its
@@ -456,7 +456,7 @@ const streamOfferProof = async (
         'proof.bin',
         context.profile.contribution.maximumProofBytes,
         (bytes) => {
-            writeSetupInput(context.kernel, bytes);
+            writeSetupInput(context.module, bytes);
             if (absorb(offset, bytes.length) !== 0)
                 throw new PublicInputFailure(
                     'A contribution offer proof was refused.',
@@ -475,7 +475,7 @@ export const verifyOffer = async (
     relay: PublicRelay,
     offer: SelectedOffer,
 ) => {
-    const { kernel, profile } = context;
+    const { module, profile } = context;
     if (offerAvailable(context, offer)) return;
     await findCandidate(relay, offerKey(offer), async (candidate) => {
         await beginOffer(
@@ -483,7 +483,7 @@ export const verifyOffer = async (
             relay,
             offer,
             candidate,
-            kernel.setup_offer_begin,
+            module.setup_offer_begin,
         );
         const bounds = profile.contribution;
         for (const polynomial of bounds.polynomials) {
@@ -494,9 +494,9 @@ export const verifyOffer = async (
                 polynomialFile(polynomial.expandedIndex),
                 polynomial.bytes,
                 (bytes) => {
-                    writeSetupInput(kernel, bytes);
+                    writeSetupInput(module, bytes);
                     if (
-                        kernel.setup_offer_polynomial(
+                        module.setup_offer_polynomial(
                             polynomial.expandedIndex,
                             offset,
                             bytes.length,
@@ -517,9 +517,9 @@ export const verifyOffer = async (
             context,
             relay,
             candidate,
-            kernel.setup_offer_proof,
+            module.setup_offer_proof,
         );
-        if (kernel.setup_offer_finish() !== 0)
+        if (module.setup_offer_finish() !== 0)
             throw new PublicInputFailure('A contribution offer was refused.');
         if (!offerAvailable(context, offer))
             throw new PublicInputFailure(
@@ -535,12 +535,12 @@ const aggregateOffer = async (
     offer: SelectedOffer,
     candidate: CandidateView,
 ) => {
-    const { kernel, profile } = context;
+    const { module, profile } = context;
     const bounds = profile.contribution;
-    const accepted = kernel.setup_accepted();
+    const accepted = module.setup_accepted();
     const verified = offerAvailable(context, offer);
     if (verified) {
-        if (kernel.setup_begin_selected_offer(offer.position) !== 0)
+        if (module.setup_begin_selected_offer(offer.position) !== 0)
             throw new PublicInputFailure(
                 'A selected verified offer was refused.',
             );
@@ -550,9 +550,9 @@ const aggregateOffer = async (
             relay,
             offer,
             candidate,
-            kernel.setup_begin_selected_offer_verification,
+            module.setup_begin_selected_offer_verification,
         );
-    const chunk = kernel.setup_chunk_capacity();
+    const chunk = module.setup_chunk_capacity();
     // One incoming chunk and one previous/output chunk suffice. Replacing
     // each ordinal in one transaction leaves only disposable mixed scratch
     // until the complete offer and every aggregate digest have verified.
@@ -571,10 +571,10 @@ const aggregateOffer = async (
                           polynomial.expandedIndex,
                           { offset, length: incoming.length },
                       );
-            writeSetupInput(kernel, incoming);
-            writeSetupInput(kernel, prior, chunk);
+            writeSetupInput(module, incoming);
+            writeSetupInput(module, prior, chunk);
             if (
-                kernel.setup_polynomial(
+                module.setup_polynomial(
                     polynomial.expandedIndex,
                     offset,
                     incoming.length,
@@ -584,11 +584,11 @@ const aggregateOffer = async (
                     'A contribution polynomial was refused.',
                 );
             // Copy into the existing previous chunk before any awaited work;
-            // no borrowed Wasm view escapes the synchronous kernel call.
+            // no borrowed Wasm view escapes the synchronous module call.
             prior.set(
                 new Uint8Array(
-                    kernel.memory.buffer,
-                    kernel.setup_input_pointer() + chunk,
+                    module.memory.buffer,
+                    module.setup_input_pointer() + chunk,
                     incoming.length,
                 ),
             );
@@ -636,11 +636,11 @@ const aggregateOffer = async (
             context,
             relay,
             candidate,
-            kernel.setup_selected_offer_proof,
+            module.setup_selected_offer_proof,
         );
     if (
-        kernel.setup_finish_selected_offer() !== 0 ||
-        kernel.setup_accepted() !== accepted + 1
+        module.setup_finish_selected_offer() !== 0 ||
+        module.setup_accepted() !== accepted + 1
     )
         throw new PublicInputFailure(
             'A selected contribution aggregate was refused.',
@@ -656,7 +656,7 @@ const aggregateSelection = async (
     relay: PublicRelay,
     selection: SetupSelection,
 ) => {
-    const { kernel } = context;
+    const { module } = context;
     const candidates: (CandidateView | undefined)[] = selection.offers.map(
         () => undefined,
     );
@@ -668,7 +668,7 @@ const aggregateSelection = async (
         cache = await openSetupCache(context.namespace);
         for (;;) {
             let retry = false;
-            if (kernel.setup_selection_aggregate() !== 0)
+            if (module.setup_selection_aggregate() !== 0)
                 throw new PublicInputFailure(
                     'The selected aggregation was refused.',
                 );
@@ -699,7 +699,7 @@ const aggregateSelection = async (
                         throw error;
                     }
                 }
-                if (kernel.setup_selection_finish() !== 0)
+                if (module.setup_selection_finish() !== 0)
                     throw new PublicInputFailure(
                         'The selected aggregate was refused.',
                     );
@@ -713,7 +713,7 @@ const aggregateSelection = async (
                     if (
                         !(error instanceof ResourceFailure) &&
                         !(error instanceof ModuleFailure) &&
-                        kernel.setup_discard_aggregation() !== 0
+                        module.setup_discard_aggregation() !== 0
                     )
                         throw Object.assign(
                             new Error(
@@ -751,8 +751,8 @@ export const verifySetupRoster = async (
     relay: PublicRelay,
 ) => {
     const { context } = session;
-    const { kernel, profile } = context;
-    if (preparedRosters.has(kernel)) return;
+    const { module, profile } = context;
+    if (preparedRosters.has(module)) return;
     const { manifest } = session.root;
     const proposal = await readDataKind(context, manifest, dataKind.proposal);
     const definition = await readDataKind(
@@ -779,18 +779,18 @@ export const verifySetupRoster = async (
         begin,
         await readDataKind(context, manifest, dataKind.retainedRoster),
     );
-    sessionInput(context, input);
-    if (kernel.setup_roster_begin_retained(begin.length, input.length) !== 0)
+    writeModuleInput(context, input);
+    if (module.setup_roster_begin_retained(begin.length, input.length) !== 0)
         throw new Error('The setup verifier refused the retained roster.');
     await streamRegistrations(
         relay,
         registrationBodyDigests,
         profile.registration,
-        kernel.roster_open_records(),
+        module.roster_open_records(),
         (operation, position, bytes) => {
-            writeSetupInput(kernel, bytes);
+            writeSetupInput(module, bytes);
             return (
-                kernel.setup_roster_record(
+                module.setup_roster_record(
                     operation,
                     position,
                     bytes.length,
@@ -809,15 +809,15 @@ export const verifySetupRoster = async (
         proposal,
         proposalSignature,
     );
-    writeSetupInput(kernel, proposalPacket);
+    writeSetupInput(module, proposalPacket);
     // The retained roster, proposal and signature are authenticated, so a
     // refusal means the relay served other headers or keys under their
     // names.
-    if (kernel.setup_roster_finish(proposalPacket.length) !== 0)
+    if (module.setup_roster_finish(proposalPacket.length) !== 0)
         throw new PublicInputFailure(
             'The published registrations are not the retained roster.',
         );
-    preparedRosters.add(kernel);
+    preparedRosters.add(module);
 };
 
 export const verifySelectionInputs = async (
@@ -837,8 +837,8 @@ const authenticateCertificate = (
     bytes: Uint8Array,
     retained = false,
 ) => {
-    writeSetupInput(context.kernel, bytes);
-    if (context.kernel.setup_certificate(bytes.length) !== 0)
+    writeSetupInput(context.module, bytes);
+    if (context.module.setup_certificate(bytes.length) !== 0)
         throw retained
             ? new Error('The retained setup certificate was refused.')
             : new PublicInputFailure('The setup certificate was refused.');
@@ -923,9 +923,9 @@ const readSetupCertificate = async (
                             readUnsigned16(bytes, 0) !== position
                         )
                             continue;
-                        writeSetupInput(context.kernel, bytes);
+                        writeSetupInput(context.module, bytes);
                         if (
-                            context.kernel.setup_endorsement(bytes.length) !== 0
+                            context.module.setup_endorsement(bytes.length) !== 0
                         )
                             continue;
                         remaining.delete(position);
@@ -936,7 +936,7 @@ const readSetupCertificate = async (
                     }
                 }
             }
-            if (context.kernel.setup_certificate_build() !== 0)
+            if (context.module.setup_certificate_build() !== 0)
                 throw new PublicInputFailure(
                     'A complete setup endorsement quorum is unavailable.',
                 );
@@ -960,7 +960,7 @@ const verifyCertificateInputs = async (
 ) => {
     const selection = authenticateCertificate(context, certificate, retained);
     await aggregateSelection(context, relay, selection);
-    if (context.kernel.setup_finish_certificate() !== 0)
+    if (context.module.setup_finish_certificate() !== 0)
         throw new PublicInputFailure(
             'The complete certified setup was refused.',
         );
@@ -968,12 +968,12 @@ const verifyCertificateInputs = async (
 };
 
 const retainedReference = (context: PublicProfileContext) => {
-    if (context.kernel.retain_setup() !== 0)
+    if (context.module.retain_setup() !== 0)
         throw new Error('The credential refused the verified setup.');
-    const reference = readKernel(
-        context.kernel,
-        context.kernel.contribution_output_pointer(),
-        context.kernel.contribution_output_length(),
+    const reference = readModuleMemory(
+        context.module,
+        context.module.contribution_output_pointer(),
+        context.module.contribution_output_length(),
     );
     if (reference.length !== context.profile.root.setupReferenceBytes)
         throw new Error('The setup reference has another length.');
@@ -999,9 +999,9 @@ const certifyRetainedSelection = (
         retained.selection,
         true,
     );
-    sessionInput(session.context, retained.reference);
+    writeModuleInput(session.context, retained.reference);
     if (
-        session.context.kernel.restore_selection_inputs(
+        session.context.module.restore_selection_inputs(
             retained.reference.length,
         ) !== 0
     )
@@ -1012,7 +1012,7 @@ const certifyRetainedSelection = (
     // Rust. Equality preserves the credential-keyed original verified inputs.
     authenticateCertificate(session.context, certificate);
     if (!equalBytes(original.identity, selection.identity)) return undefined;
-    if (session.context.kernel.setup_finish_certificate() !== 0)
+    if (session.context.module.setup_finish_certificate() !== 0)
         throw new PublicInputFailure(
             'The certificate does not match the verified selection.',
         );
@@ -1059,7 +1059,7 @@ export const ensureFinalAggregate = async (
     if (await holdsFinalAggregate(session.context)) return false;
     // A cache loss can also occur after certification in this same operation.
     // Rebuild from fresh owning verification, not an existing aggregate flag.
-    preparedRosters.delete(session.context.kernel);
+    preparedRosters.delete(session.context.module);
     await verifySetupRoster(session, relay);
     const certificate = await readDataKind(
         session.context,
@@ -1098,8 +1098,8 @@ export const restoreSetup = async (
         root.manifest,
         dataKind.setupReference,
     );
-    sessionInput(context, reference);
-    if (context.kernel.restore_setup(reference.length) !== 0)
+    writeModuleInput(context, reference);
+    if (context.module.restore_setup(reference.length) !== 0)
         throw new Error('The credential refused the retained setup.');
 };
 
@@ -1123,7 +1123,7 @@ export const verifyPublicSetup = async (
     relay: PublicRelay,
     poll: Uint8Array,
 ): Promise<PublicProfileContext> => {
-    const { kernel, limits } = context;
+    const { module, limits } = context;
     const { registration } = limits;
     return findCandidate(relay, 'poll', async (pollCandidate) => {
         const definition = await readCandidateFile(
@@ -1162,18 +1162,18 @@ export const verifyPublicSetup = async (
                 pollSignature,
                 registrationBodyDigests.length,
             );
-            writeSetupInput(kernel, begin);
-            if (kernel.setup_roster_begin(begin.length) !== 0)
+            writeSetupInput(module, begin);
+            if (module.setup_roster_begin(begin.length) !== 0)
                 throw new PublicInputFailure('The poll was refused.');
             await streamRegistrations(
                 relay,
                 registrationBodyDigests,
                 registration,
-                kernel.roster_open_records(),
+                module.roster_open_records(),
                 (operation, position, bytes) => {
-                    writeSetupInput(kernel, bytes);
+                    writeSetupInput(module, bytes);
                     return (
-                        kernel.setup_roster_record(
+                        module.setup_roster_record(
                             operation,
                             position,
                             bytes.length,
@@ -1186,16 +1186,16 @@ export const verifyPublicSetup = async (
                 proposal,
                 proposalSignature,
             );
-            writeSetupInput(kernel, proposalPacket);
-            if (kernel.setup_roster_finish(proposalPacket.length) !== 0)
+            writeSetupInput(module, proposalPacket);
+            if (module.setup_roster_finish(proposalPacket.length) !== 0)
                 throw new PublicInputFailure(
                     'The roster proposal was refused.',
                 );
             const profile = readParticipantProfile(
-                kernel,
+                module,
                 limits,
                 registrationBodyDigests.length,
-                kernel.setup_option_count(),
+                module.setup_option_count(),
             );
             if (
                 profile === undefined ||
@@ -1205,7 +1205,7 @@ export const verifyPublicSetup = async (
                     'The poll names no supported profile.',
                 );
             const profiled = { ...context, profile };
-            preparedRosters.add(kernel);
+            preparedRosters.add(module);
             const certificate = await readSetupCertificate(profiled, relay);
             await verifyCertificateInputs(profiled, relay, certificate.bytes);
             return profiled;
@@ -1263,7 +1263,7 @@ export const retainSetup = async (
     // predecessor and committed successor have authenticated.
     root.manifest.dataKeys.subarray(64).fill(0);
     root.plaintext.subarray(4 + 64, 4 + 96).fill(0);
-    if (context.kernel.retire_contribution_sources() !== 0)
+    if (context.module.retire_contribution_sources() !== 0)
         throw new Error('The original key sources could not be retired.');
     session.root = retained;
     session.preparation = {};

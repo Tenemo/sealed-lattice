@@ -18,11 +18,11 @@ const filled = (length: number, value: number) =>
     new Uint8Array(length).fill(value);
 
 const state = (
-    organizer: boolean,
+    isOrganizer: boolean,
     bodyLength: number,
     ballotInclusion: BallotInclusion = 'included',
 ) => ({
-    predecessor: completedClosePhase(organizer),
+    predecessor: completedClosePhase(isOrganizer),
     ballotInclusion,
     body: filled(bodyLength, 7),
 
@@ -31,9 +31,9 @@ const state = (
 
 describe('participant target signing state', () => {
     it('round-trips both phases for both roles at the body bounds', () => {
-        for (const organizer of [false, true])
+        for (const isOrganizer of [false, true])
             for (const bodyLength of [1, profile.target.maximumBodyBytes]) {
-                const value = state(organizer, bodyLength);
+                const value = state(isOrganizer, bodyLength);
                 const intent = encodeTargetState(targetPhase.intent, value);
                 expect(intent.length).toBe(
                     Number(census.prefixBytes) + bodyLength,
@@ -42,7 +42,7 @@ describe('participant target signing state', () => {
                     decodeTargetState(
                         profile,
                         targetPhase.intent,
-                        organizer,
+                        isOrganizer,
                         intent,
                     ),
                 ).toEqual({ ...value, vote: new Uint8Array() });
@@ -56,7 +56,7 @@ describe('participant target signing state', () => {
                     decodeTargetState(
                         profile,
                         targetPhase.signed,
-                        organizer,
+                        isOrganizer,
                         signed,
                     ),
                 ).toEqual(value);
@@ -65,7 +65,7 @@ describe('participant target signing state', () => {
                     decodeTargetState(
                         profile,
                         targetPhase.signed + 5,
-                        organizer,
+                        isOrganizer,
                         signed,
                     ),
                 ).toEqual(value);
@@ -108,11 +108,11 @@ describe('participant target signing state', () => {
         const signed = encodeTargetState(targetPhase.signed, value);
         const refused = (
             generation: number,
-            organizer: boolean,
+            isOrganizer: boolean,
             bytes: Uint8Array,
         ) =>
             expect(() =>
-                decodeTargetState(profile, generation, organizer, bytes),
+                decodeTargetState(profile, generation, isOrganizer, bytes),
             ).toThrow();
         // Each phase carries its own tail.
         refused(targetPhase.signed, false, intent);

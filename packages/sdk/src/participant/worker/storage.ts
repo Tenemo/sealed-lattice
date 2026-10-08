@@ -1,4 +1,4 @@
-import { StoragePending, UnrecognizedState } from './failures.js';
+import { StorageFailure, UnrecognizedState } from './failures.js';
 
 // The participant's origin-local database. The key, root and head stores hold
 // the single authenticated root; every other store holds records that root
@@ -162,7 +162,7 @@ export const addParticipantRecords = async (
             error instanceof DOMException &&
             error.name === 'QuotaExceededError'
         )
-            throw new StoragePending(
+            throw new StorageFailure(
                 'The origin lacks room for staged participant records.',
             );
         throw error;

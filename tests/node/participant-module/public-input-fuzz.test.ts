@@ -3,27 +3,27 @@ import { readFile } from 'node:fs/promises';
 
 import { describe, expect, it } from 'vitest';
 
-import { readParticipantLimits } from '#packages/sdk/src/participant/worker/bounds.js';
 import {
     concatenate,
     encodeText,
     unsigned16,
     unsigned32,
 } from '#packages/sdk/src/participant/worker/bytes.js';
+import { noParallelHelpers } from '#packages/sdk/src/participant/worker/parallel-helpers.js';
 import {
-    instantiateParticipantKernel,
-    readKernel,
+    instantiateParticipantModule,
+    readModuleMemory,
     writeBufferInput,
     writeInput,
     writeOwnRegistrationInput,
     writeSetupInput,
-} from '#packages/sdk/src/participant/worker/kernel.js';
-import type { ParticipantKernel } from '#packages/sdk/src/participant/worker/kernel.js';
-import { noParallelHelpers } from '#packages/sdk/src/participant/worker/parallel.js';
+} from '#packages/sdk/src/participant/worker/participant-module.js';
+import type { ParticipantModule } from '#packages/sdk/src/participant/worker/participant-module.js';
 import {
     chunkBytes,
     dataKind,
 } from '#packages/sdk/src/participant/worker/root.js';
+import { readParticipantLimits } from '#packages/sdk/src/participant/worker/runtime-bounds.js';
 
 // The packaged participant module, fed public input that no honest relay or
 // participant produces. A command must refuse such input and return: a trap
@@ -34,7 +34,7 @@ const participantModule = await WebAssembly.compile(
     ),
 );
 const instantiate = () =>
-    instantiateParticipantKernel(participantModule, noParallelHelpers);
+    instantiateParticipantModule(participantModule, noParallelHelpers);
 
 // Every case derives its bytes and choices from its label, so a failing case
 // replays from the label its failure names.
@@ -65,17 +65,17 @@ const changedByte = (bytes: Uint8Array, offset: number, mask: number) => {
     return copy;
 };
 
-type KernelCommand = Exclude<keyof ParticipantKernel, 'memory'>;
+type ModuleCommand = Exclude<keyof ParticipantModule, 'memory'>;
 // Calls a command and names the case when the call does not return.
 const call = (
-    kernel: ParticipantKernel,
-    name: KernelCommand,
+    module: ParticipantModule,
+    name: ModuleCommand,
     values: readonly number[],
     label: string,
 ) => {
     let failure: unknown;
     try {
-        return kernel[name](...values);
+        return module[name](...values);
     } catch (error) {
         failure = error;
     }
@@ -102,8 +102,8 @@ const pollText = concatenate(
 );
 const organizerName = 'Organizer';
 const organizer = await (async () => {
-    const { kernel, handlers } = await instantiate();
-    const limits = readParticipantLimits(kernel);
+    const { module, handlers } = await instantiate();
+    const limits = readParticipantLimits(module);
     const username = encodeText(organizerName);
     // The smallest roster the runtime supports is the poll's largest.
     const input = concatenate(
@@ -114,8 +114,8 @@ const organizer = await (async () => {
         unsigned32(username.length),
         username,
     );
-    writeInput(kernel, input);
-    if (kernel.validate_organizer(input.length) !== 0)
+    writeInput(module, input);
+    if (module.validate_organizer(input.length) !== 0)
         throw new Error('The organizer input was refused.');
     const parts = new Map<number, Uint8Array[]>();
     handlers.staged = (kind, _offset, bytes) => {
@@ -128,8 +128,8 @@ const organizer = await (async () => {
         );
         requests += 1;
     };
-    writeInput(kernel, input);
-    if (kernel.prepare_organizer(input.length) !== 0)
+    writeInput(module, input);
+    if (module.prepare_organizer(input.length) !== 0)
         throw new Error('The organizer enrollment was refused.');
     const record = (kind: number) => {
         const chunks = parts.get(kind);
@@ -139,7 +139,7 @@ const organizer = await (async () => {
     };
     return {
         limits,
-        poll: readKernel(kernel, kernel.poll_identity_pointer(), 64),
+        poll: readModuleMemory(module, module.poll_identity_pointer(), 64),
         definition: record(dataKind.pollDefinition),
         definitionSignature: record(dataKind.pollSignature),
         header: record(dataKind.header),
@@ -194,42 +194,42 @@ const recordBegin = concatenate(
 // The module's input buffers and the commands that read public input from
 // them. Every command refuses with one; a query answers zero when it refuses.
 type InputBuffer = Readonly<{
-    pointer: (kernel: ParticipantKernel) => number;
-    capacity: (kernel: ParticipantKernel) => number;
+    pointer: (module: ParticipantModule) => number;
+    capacity: (module: ParticipantModule) => number;
 }>;
 const inputBuffers = {
     session: {
-        pointer: (kernel) => kernel.input_pointer(),
-        capacity: (kernel) => kernel.input_capacity(),
+        pointer: (module) => module.input_pointer(),
+        capacity: (module) => module.input_capacity(),
     },
     ownRegistration: {
-        pointer: (kernel) => kernel.own_registration_input_pointer(),
-        capacity: (kernel) => kernel.own_registration_input_capacity(),
+        pointer: (module) => module.own_registration_input_pointer(),
+        capacity: (module) => module.own_registration_input_capacity(),
     },
     setup: {
-        pointer: (kernel) => kernel.setup_input_pointer(),
-        capacity: (kernel) => kernel.setup_input_capacity(),
+        pointer: (module) => module.setup_input_pointer(),
+        capacity: (module) => module.setup_input_capacity(),
     },
     close: {
-        pointer: (kernel) => kernel.close_input_pointer(),
-        capacity: (kernel) => kernel.close_input_capacity(),
+        pointer: (module) => module.close_input_pointer(),
+        capacity: (module) => module.close_input_capacity(),
     },
     ballotBody: {
-        pointer: (kernel) => kernel.ballot_body_input_pointer(),
-        capacity: (kernel) => kernel.ballot_body_input_capacity(),
+        pointer: (module) => module.ballot_body_input_pointer(),
+        capacity: (module) => module.ballot_body_input_capacity(),
     },
     evaluationTarget: {
-        pointer: (kernel) => kernel.evaluation_target_input_pointer(),
-        capacity: (kernel) => kernel.evaluation_target_input_capacity(),
+        pointer: (module) => module.evaluation_target_input_pointer(),
+        capacity: (module) => module.evaluation_target_input_capacity(),
     },
     completion: {
-        pointer: (kernel) => kernel.completion_input_pointer(),
-        capacity: (kernel) => kernel.completion_input_capacity(),
+        pointer: (module) => module.completion_input_pointer(),
+        capacity: (module) => module.completion_input_capacity(),
     },
 } as const satisfies Record<string, InputBuffer>;
 type Parameter = 'operation' | 'index' | 'length';
 type PublicInputCommand = Readonly<{
-    name: KernelCommand;
+    name: ModuleCommand;
     buffer: keyof typeof inputBuffers;
     parameters: readonly Parameter[];
     query?: true;
@@ -437,7 +437,7 @@ const writtenBytes = 16_384;
 
 describe('participant module public input', () => {
     it('withholds offer and setup authority for partial carriers and proof bytes without a verified roster', async () => {
-        const { kernel } = await instantiate();
+        const { module } = await instantiate();
         const signatureBytes = organizer.limits.registration.signatureBytes;
         const envelope = shake('unscoped-offer/envelope', 96);
         const selection = shake('unscoped-selection/body', 128);
@@ -484,41 +484,41 @@ describe('participant module public input', () => {
         // These are controls of the prerequisite boundary. Authenticated
         // roster/body/certificate controls run in the guarded complete cohort.
         for (const { name, bytes } of carriers) {
-            writeSetupInput(kernel, bytes);
-            expect(call(kernel, name, [bytes.length], name)).not.toBe(0);
-            expect(kernel.setup_offer_finish()).toBe(1);
-            expect(kernel.setup_selection_finish()).toBe(1);
-            expect(kernel.setup_finish_certificate()).toBe(1);
-            expect(kernel.setup_selection_count()).toBe(0);
-            expect(kernel.setup_selection_position(0) >>> 0).toBe(0xffff_ffff);
-            expect(kernel.setup_selection_body_identity_pointer(0)).toBe(0);
+            writeSetupInput(module, bytes);
+            expect(call(module, name, [bytes.length], name)).not.toBe(0);
+            expect(module.setup_offer_finish()).toBe(1);
+            expect(module.setup_selection_finish()).toBe(1);
+            expect(module.setup_finish_certificate()).toBe(1);
+            expect(module.setup_selection_count()).toBe(0);
+            expect(module.setup_selection_position(0) >>> 0).toBe(0xffff_ffff);
+            expect(module.setup_selection_body_identity_pointer(0)).toBe(0);
         }
         for (const length of [0, 1, 64, 4095]) {
-            writeSetupInput(kernel, organizer.publicKey.subarray(0, length));
+            writeSetupInput(module, organizer.publicKey.subarray(0, length));
             expect(
                 call(
-                    kernel,
+                    module,
                     'setup_offer_proof',
                     [0, length],
                     `unscoped-proof/${String(length)}`,
                 ),
             ).not.toBe(0);
-            expect(kernel.setup_offer_finish()).toBe(1);
+            expect(module.setup_offer_finish()).toBe(1);
         }
         const begin = rosterBegin(minimumParticipants);
-        writeSetupInput(kernel, begin);
-        expect(kernel.setup_roster_begin(begin.length)).toBe(0);
+        writeSetupInput(module, begin);
+        expect(module.setup_roster_begin(begin.length)).toBe(0);
     });
 
     it('refuses arbitrary arguments and bytes at every command that reads public input, and the instance stays usable', async () => {
-        const { kernel } = await instantiate();
+        const { module } = await instantiate();
         // Open roster verifications give the record commands a verifier to
         // refuse in.
         const begin = rosterBegin(minimumParticipants);
-        writeInput(kernel, begin);
-        expect(kernel.roster_begin(begin.length)).toBe(0);
-        writeSetupInput(kernel, begin);
-        expect(kernel.setup_roster_begin(begin.length)).toBe(0);
+        writeInput(module, begin);
+        expect(module.roster_begin(begin.length)).toBe(0);
+        writeSetupInput(module, begin);
+        expect(module.setup_roster_begin(begin.length)).toBe(0);
         // Writes the case's bytes up to its length, the last argument, and
         // expects the command to refuse.
         const refuses = (
@@ -532,17 +532,17 @@ describe('participant module public input', () => {
                     ? 0
                     : Math.min(
                           values[values.length - 1],
-                          buffer.capacity(kernel),
+                          buffer.capacity(module),
                           writtenBytes,
                       );
             // The pointer call may grow the memory, so the view is taken
             // after it.
-            const pointer = buffer.pointer(kernel) >>> 0;
+            const pointer = buffer.pointer(module) >>> 0;
             if (length > 0)
-                new Uint8Array(kernel.memory.buffer, pointer, length).set(
+                new Uint8Array(module.memory.buffer, pointer, length).set(
                     shake(label + '/bytes', length),
                 );
-            const result = call(kernel, command.name, values, label);
+            const result = call(module, command.name, values, label);
             // Empty cancellation discards tentative public input at a roster
             // position. Success is cleanup, not an accepted registration.
             const cancellation =
@@ -561,7 +561,7 @@ describe('participant module public input', () => {
             ).toBe(true);
         };
         for (const command of publicInputCommands) {
-            const capacity = inputBuffers[command.buffer].capacity(kernel);
+            const capacity = inputBuffers[command.buffer].capacity(module);
             for (let index = 0; index < 64; index += 1) {
                 const label = command.name + '/' + String(index);
                 const draw = draws(label);
@@ -593,20 +593,20 @@ describe('participant module public input', () => {
                                 `${command.name}/operation/${String(operation)}/${String(length)}/${String(index)}`,
                             );
         const join = joinInput('First voter');
-        writeInput(kernel, join);
-        expect(kernel.validate_joiner(join.length)).toBe(0);
-        writeInput(kernel, begin);
-        expect(kernel.roster_begin(begin.length)).toBe(0);
-        writeSetupInput(kernel, begin);
-        expect(kernel.setup_roster_begin(begin.length)).toBe(0);
+        writeInput(module, join);
+        expect(module.validate_joiner(join.length)).toBe(0);
+        writeInput(module, begin);
+        expect(module.roster_begin(begin.length)).toBe(0);
+        writeSetupInput(module, begin);
+        expect(module.setup_roster_begin(begin.length)).toBe(0);
     });
 
     it('writes each input buffer up to the capacity the module reports, in memory no other buffer holds', async () => {
-        const { kernel } = await instantiate();
+        const { module } = await instantiate();
         const extents = Object.entries(inputBuffers).map(([name, buffer]) => ({
             name,
-            start: buffer.pointer(kernel) >>> 0,
-            capacity: buffer.capacity(kernel),
+            start: buffer.pointer(module) >>> 0,
+            capacity: buffer.capacity(module),
         }));
         // The buffers of the certificate collector, close verifier, ballot
         // classifier and evaluation each hold a mebibyte.
@@ -631,7 +631,7 @@ describe('participant module public input', () => {
             ).toBeLessThanOrEqual(
                 index + 1 < sorted.length
                     ? sorted[index + 1].start
-                    : kernel.memory.buffer.byteLength,
+                    : module.memory.buffer.byteLength,
             );
         }
         for (const buffer of [
@@ -640,16 +640,16 @@ describe('participant module public input', () => {
             'ballotBody',
             'evaluationTarget',
         ] as const) {
-            const capacity = inputBuffers[buffer].capacity(kernel);
-            writeBufferInput(kernel, buffer, new Uint8Array(capacity));
+            const capacity = inputBuffers[buffer].capacity(module);
+            writeBufferInput(module, buffer, new Uint8Array(capacity));
             expect(() =>
-                writeBufferInput(kernel, buffer, new Uint8Array(capacity + 1)),
+                writeBufferInput(module, buffer, new Uint8Array(capacity + 1)),
             ).toThrow('Module input exceeds its buffer.');
         }
     });
 
     it('refuses every join and roster input with a changed byte, length or roster count', async () => {
-        const { kernel } = await instantiate();
+        const { module } = await instantiate();
         const join = joinInput('First voter');
         // The username is the voter's own and may change to another valid
         // one; every earlier byte is the poll's or a length.
@@ -665,28 +665,28 @@ describe('participant module public input', () => {
                 draw(usernameStart),
                 1 + draw(255),
             );
-            writeInput(kernel, changedJoin);
-            expect(kernel.validate_joiner(changedJoin.length), label).toBe(1);
+            writeInput(module, changedJoin);
+            expect(module.validate_joiner(changedJoin.length), label).toBe(1);
             const offset = draw(begin.length - 2);
             const changedBegin = changedByte(
                 begin,
                 offset < countOffset ? offset : offset + 2,
                 1 + draw(255),
             );
-            writeInput(kernel, changedBegin);
-            expect(kernel.roster_begin(changedBegin.length), label).toBe(1);
-            writeSetupInput(kernel, changedBegin);
-            expect(kernel.setup_roster_begin(changedBegin.length), label).toBe(
+            writeInput(module, changedBegin);
+            expect(module.roster_begin(changedBegin.length), label).toBe(1);
+            writeSetupInput(module, changedBegin);
+            expect(module.setup_roster_begin(changedBegin.length), label).toBe(
                 1,
             );
             // A shorter or longer length over the genuine bytes.
             const shift = 1 + draw(2048);
-            writeInput(kernel, join);
+            writeInput(module, join);
             for (const length of [join.length - shift, join.length + shift])
-                expect(kernel.validate_joiner(length), label).toBe(1);
-            writeInput(kernel, begin);
+                expect(module.validate_joiner(length), label).toBe(1);
+            writeInput(module, begin);
             for (const length of [begin.length - shift, begin.length + shift])
-                expect(kernel.roster_begin(length), label).toBe(1);
+                expect(module.roster_begin(length), label).toBe(1);
         }
         // The poll admits only the smallest roster.
         for (const count of [
@@ -699,35 +699,35 @@ describe('participant module public input', () => {
             0xffff,
         ].filter((value) => value !== minimumParticipants)) {
             const counted = rosterBegin(count);
-            writeInput(kernel, counted);
-            expect(kernel.roster_begin(counted.length), String(count)).toBe(1);
-            writeSetupInput(kernel, counted);
+            writeInput(module, counted);
+            expect(module.roster_begin(counted.length), String(count)).toBe(1);
+            writeSetupInput(module, counted);
             expect(
-                kernel.setup_roster_begin(counted.length),
+                module.setup_roster_begin(counted.length),
                 String(count),
             ).toBe(1);
         }
-        writeInput(kernel, join);
-        expect(kernel.validate_joiner(join.length)).toBe(0);
-        writeInput(kernel, begin);
-        expect(kernel.roster_begin(begin.length)).toBe(0);
-        writeSetupInput(kernel, begin);
-        expect(kernel.setup_roster_begin(begin.length)).toBe(0);
+        writeInput(module, join);
+        expect(module.validate_joiner(join.length)).toBe(0);
+        writeInput(module, begin);
+        expect(module.roster_begin(begin.length)).toBe(0);
+        writeSetupInput(module, begin);
+        expect(module.setup_roster_begin(begin.length)).toBe(0);
     });
 
     it('takes the genuine registration record before and after arbitrary record steps that do not end the instance', async () => {
-        const { kernel } = await instantiate();
+        const { module } = await instantiate();
         const begin = rosterBegin(minimumParticipants);
         // Each step of the genuine record in a new roster verification.
         const genuineRecord = () => {
-            writeInput(kernel, begin);
-            expect(kernel.roster_begin(begin.length)).toBe(0);
+            writeInput(module, begin);
+            expect(module.roster_begin(begin.length)).toBe(0);
             const step = (
                 operation: number,
                 bytes: Uint8Array = new Uint8Array(),
             ) => {
-                writeInput(kernel, bytes);
-                return kernel.roster_record(operation, 0, bytes.length);
+                writeInput(module, bytes);
+                return module.roster_record(operation, 0, bytes.length);
             };
             // The key in the worker's streamed parts.
             const streamed = (operation: number, bytes: Uint8Array) => {
@@ -765,8 +765,8 @@ describe('participant module public input', () => {
             0xffff_ffff,
         ];
         for (let sequence = 0; sequence < 8; sequence += 1) {
-            writeInput(kernel, begin);
-            expect(kernel.roster_begin(begin.length)).toBe(0);
+            writeInput(module, begin);
+            expect(module.roster_begin(begin.length)).toBe(0);
             for (let step = 0; step < 32; step += 1) {
                 const label = `record/${String(sequence)}/${String(step)}`;
                 const draw = draws(label);
@@ -784,15 +784,15 @@ describe('participant module public input', () => {
                         : part.length > 0 && draw(2) === 0
                           ? changedByte(part, draw(part.length), 1 + draw(255))
                           : part;
-                writeInput(kernel, bytes);
+                writeInput(module, bytes);
                 call(
-                    kernel,
+                    module,
                     'roster_record',
                     [draw(6), positions[draw(positions.length)], bytes.length],
                     label,
                 );
             }
-            expect(kernel.roster_finish()).toBe(1);
+            expect(module.roster_finish()).toBe(1);
         }
         expect(genuineRecord()).toEqual(accepted);
     });
@@ -807,7 +807,7 @@ describe('participant module public input', () => {
         // that parts end inside encoded key coefficients; a fresh instance
         // verifies each record, as a verified registration is final.
         const verify = async (record: RegistrationRecord, label: string) => {
-            const { kernel } = await instantiate();
+            const { module } = await instantiate();
             const draw = draws(label + '/parts');
             const parts = (bytes: Uint8Array) => {
                 const divided: Uint8Array[] = [];
@@ -838,11 +838,11 @@ describe('participant module public input', () => {
             // The poll the module verified the registration against, which
             // it reports only once the registration verifies.
             const verifiedPoll = () =>
-                kernel.own_registration_poll() === 0
-                    ? readKernel(
-                          kernel,
-                          kernel.contribution_output_pointer(),
-                          kernel.contribution_output_length(),
+                module.own_registration_poll() === 0
+                    ? readModuleMemory(
+                          module,
+                          module.contribution_output_pointer(),
+                          module.contribution_output_length(),
                       )
                     : undefined;
             // An accepted begin names the poll and the registration this
@@ -850,10 +850,10 @@ describe('participant module public input', () => {
             const repeatedBegins: number[] = [];
             for (const [operation, bytes] of steps) {
                 expect(verifiedPoll(), label).toBeUndefined();
-                writeOwnRegistrationInput(kernel, bytes);
+                writeOwnRegistrationInput(module, bytes);
                 if (
                     call(
-                        kernel,
+                        module,
                         'own_registration_command',
                         [operation, bytes.length],
                         label,
@@ -861,10 +861,10 @@ describe('participant module public input', () => {
                 )
                     return undefined;
                 if (operation === 0) {
-                    writeOwnRegistrationInput(kernel, bytes);
+                    writeOwnRegistrationInput(module, bytes);
                     repeatedBegins.push(
                         call(
-                            kernel,
+                            module,
                             'own_registration_command',
                             [0, bytes.length],
                             label,
@@ -875,10 +875,10 @@ describe('participant module public input', () => {
             expect(repeatedBegins, label).toEqual([1]);
             return {
                 username: new TextDecoder().decode(
-                    readKernel(
-                        kernel,
-                        kernel.own_registration_username_pointer(),
-                        kernel.own_registration_username_length(),
+                    readModuleMemory(
+                        module,
+                        module.own_registration_username_pointer(),
+                        module.own_registration_username_length(),
                     ),
                 ),
                 poll: verifiedPoll(),
@@ -937,7 +937,7 @@ describe('participant module public input', () => {
     });
 
     it('refuses a creator input whose poll the module cannot frame', async () => {
-        const { kernel } = await instantiate();
+        const { module } = await instantiate();
         const creatorInput = (
             question: string,
             labels: readonly string[],
@@ -953,8 +953,8 @@ describe('participant module public input', () => {
                 framedText(organizerName),
             );
         const validates = (input: Uint8Array) => {
-            writeInput(kernel, input);
-            return kernel.validate_organizer(input.length) === 0;
+            writeInput(module, input);
+            return module.validate_organizer(input.length) === 0;
         };
         const question = 'Which option leads?';
         const genuine = creatorInput(question, ['Option 0', 'Option 1'], 2);

@@ -1,4 +1,3 @@
-import type { ParticipantProfile } from './bounds.js';
 import {
     concatenate,
     encodeText,
@@ -9,15 +8,16 @@ import {
     unsigned32,
 } from './bytes.js';
 import { completedClosePhase } from './close-state.js';
-import { operationSeedBytes } from './kernel.js';
+import { operationSeedBytes } from './participant-module.js';
 import type { ParticipantStoredRecord } from './predecessor.js';
-import { recordKeyBytes, sealedLength } from './records.js';
-import type { RecordContext } from './records.js';
+import { recordKeyBytes, sealedLength } from './private-records.js';
+import type { RecordContext } from './private-records.js';
 import {
     isRootGeneration,
     releasePhase,
     targetPhase,
 } from './root-generation.js';
+import type { ParticipantProfile } from './runtime-bounds.js';
 import { ballotInclusions } from './target-state.js';
 import type { BallotInclusion } from './target-state.js';
 
@@ -88,7 +88,7 @@ export const releaseRecordLengths = (
 export const decodeReleaseState = (
     profile: ParticipantProfile,
     generation: number,
-    organizer: boolean,
+    isOrganizer: boolean,
     bytes: Uint8Array,
 ): ReleaseState => {
     const bounds = profile.release;
@@ -100,7 +100,7 @@ export const decodeReleaseState = (
         bytes.length > bounds.maximumStateBytes ||
         !equalBytes(bytes.subarray(0, marker.length), marker) ||
         (bytes[marker.length] !== targetPhase.signed &&
-            bytes[marker.length] !== completedClosePhase(organizer)) ||
+            bytes[marker.length] !== completedClosePhase(isOrganizer)) ||
         bytes[marker.length + 1] >= ballotInclusions.length
     )
         throw new Error('The release state is malformed.');

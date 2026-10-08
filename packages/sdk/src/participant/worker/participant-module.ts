@@ -1,11 +1,11 @@
 import { ModuleFailure, ResourceFailure } from './failures.js';
-import type { ParallelHelpers } from './parallel.js';
+import type { ParallelHelpers } from './parallel-helpers.js';
 
 // The participant scalar module's exports that the worker calls. Every
 // command returns zero when it accepts and one when it refuses, and a query's
 // comment states its answer; the owning Rust state machine decides
 // acceptance.
-export const kernelFunctions = [
+export const moduleFunctions = [
     // The shared bounds and one profile's, each written as 64-bit words; a
     // command returns the word count, zero for an unsupported profile.
     'participant_bounds_pointer',
@@ -187,14 +187,14 @@ export const kernelFunctions = [
     'custody_identity_finish',
 ] as const;
 
-type KernelFunction = (...values: number[]) => number;
-export type ParticipantKernel = Readonly<
-    Record<(typeof kernelFunctions)[number], KernelFunction> & {
+type ModuleFunction = (...values: number[]) => number;
+export type ParticipantModule = Readonly<
+    Record<(typeof moduleFunctions)[number], ModuleFunction> & {
         memory: WebAssembly.Memory;
     }
 >;
 
-export type KernelHandlers = {
+export type ModuleHandlers = {
     random?: (target: Uint8Array<ArrayBuffer>) => void;
     staged?: (kind: number, offset: number, bytes: Uint8Array) => void;
     contribution?: (object: number, offset: number, bytes: Uint8Array) => void;
@@ -203,17 +203,17 @@ export type KernelHandlers = {
 // Randomness requests are bounded before any view of module memory exists.
 const maximumRandomRequest = 65_536;
 
-export type LoadedKernel = Readonly<{
-    kernel: ParticipantKernel;
+export type LoadedModule = Readonly<{
+    module: ParticipantModule;
     // Handlers for the current operation; an absent handler refuses.
-    handlers: KernelHandlers;
+    handlers: ModuleHandlers;
 }>;
 
-export const instantiateParticipantKernel = async (
-    module: WebAssembly.Module,
+export const instantiateParticipantModule = async (
+    compiledModule: WebAssembly.Module,
     helpers: ParallelHelpers,
-): Promise<LoadedKernel> => {
-    const handlers: KernelHandlers = {};
+): Promise<LoadedModule> => {
+    const handlers: ModuleHandlers = {};
     const instantiated: { memory?: WebAssembly.Memory } = {};
     const view = (pointer: number, length: number) => {
         if (instantiated.memory === undefined)
@@ -233,7 +233,7 @@ export const instantiateParticipantKernel = async (
         handlers.random(view(pointer, length));
         return 0;
     };
-    const instance = await WebAssembly.instantiate(module, {
+    const instance = await WebAssembly.instantiate(compiledModule, {
         allocator: {
             exhausted: (bytes: number) => {
                 throw new ResourceFailure(
@@ -294,15 +294,15 @@ export const instantiateParticipantKernel = async (
     // that failed, leaves the instance in an unknown state, so every later
     // call ends with the same failure.
     let ended: { error: unknown } | undefined;
-    const kernel: Record<string, unknown> = { memory: exports.memory };
-    for (const name of kernelFunctions) {
+    const module: Record<string, unknown> = { memory: exports.memory };
+    for (const name of moduleFunctions) {
         const call = exports[name];
         if (typeof call !== 'function')
             throw new Error('The participant module lacks ' + name + '.');
-        kernel[name] = (...values: number[]): number => {
+        module[name] = (...values: number[]): number => {
             if (ended !== undefined) throw ended.error;
             try {
-                return (call as KernelFunction)(...values);
+                return (call as ModuleFunction)(...values);
             } catch (error) {
                 const failure =
                     error instanceof ResourceFailure
@@ -320,47 +320,52 @@ export const instantiateParticipantKernel = async (
             }
         };
     }
-    return { kernel: kernel as ParticipantKernel, handlers };
+    return { module: module as ParticipantModule, handlers };
 };
 
 // The module may grow its memory during any call, so every access takes a
 // fresh view of the current buffer. A write never exceeds the capacity of
 // the module buffer it fills.
-const writeKernel = (
-    kernel: ParticipantKernel,
+const writeModuleMemory = (
+    module: ParticipantModule,
     pointer: number,
     bytes: Uint8Array,
     capacity: number,
 ): void => {
     if (bytes.length > capacity)
         throw new Error('Module input exceeds its buffer.');
-    new Uint8Array(kernel.memory.buffer, pointer >>> 0, bytes.length).set(
+    new Uint8Array(module.memory.buffer, pointer >>> 0, bytes.length).set(
         bytes,
     );
 };
 
-export const readKernel = (
-    kernel: ParticipantKernel,
+export const readModuleMemory = (
+    module: ParticipantModule,
     pointer: number,
     length: number,
 ): Uint8Array =>
-    new Uint8Array(kernel.memory.buffer, pointer >>> 0, length >>> 0).slice();
+    new Uint8Array(module.memory.buffer, pointer >>> 0, length >>> 0).slice();
 
-export const writeInput = (kernel: ParticipantKernel, bytes: Uint8Array) =>
-    writeKernel(kernel, kernel.input_pointer(), bytes, kernel.input_capacity());
+export const writeInput = (module: ParticipantModule, bytes: Uint8Array) =>
+    writeModuleMemory(
+        module,
+        module.input_pointer(),
+        bytes,
+        module.input_capacity(),
+    );
 
 // Writes the setup verifier's input at an offset; a polynomial's previous
 // aggregate chunk follows its incoming chunk.
 export const writeSetupInput = (
-    kernel: ParticipantKernel,
+    module: ParticipantModule,
     bytes: Uint8Array,
     offset = 0,
 ) => {
-    const capacity = kernel.setup_input_capacity();
+    const capacity = module.setup_input_capacity();
     if (offset > capacity) throw new Error('Module input exceeds its buffer.');
-    writeKernel(
-        kernel,
-        kernel.setup_input_pointer() + offset,
+    writeModuleMemory(
+        module,
+        module.setup_input_pointer() + offset,
         bytes,
         capacity - offset,
     );
@@ -380,20 +385,20 @@ const discardOperationSeed = 3;
 // draw of the operation and refuse any other. The seed must be discarded
 // once the operation stops drawing.
 export const seededRandomness = (
-    kernel: ParticipantKernel,
+    module: ParticipantModule,
     purpose: keyof typeof operationPurpose,
     seed: Uint8Array,
 ) => {
     if (seed.length !== operationSeedBytes)
         throw new Error('No ' + purpose + ' randomness seed is retained.');
-    writeKernel(
-        kernel,
-        kernel.operation_random_input_pointer(),
+    writeModuleMemory(
+        module,
+        module.operation_random_input_pointer(),
         seed,
         operationSeedBytes,
     );
     if (
-        kernel.operation_random_command(
+        module.operation_random_command(
             operationPurpose[purpose],
             operationSeedBytes,
         ) !== 0
@@ -401,23 +406,23 @@ export const seededRandomness = (
         throw new Error('The ' + purpose + ' randomness refused its seed.');
     // The module counts each stream's bytes until the next seed is installed.
     const drawn = (stream: number) =>
-        kernel.operation_random_drawn(stream) >>> 0;
+        module.operation_random_drawn(stream) >>> 0;
     return {
         drawn: () => drawn(0) + drawn(proofStream),
         // The bytes the proof stream served.
         proofDrawn: () => drawn(proofStream),
         discard: () => {
-            kernel.operation_random_command(discardOperationSeed, 0);
+            module.operation_random_command(discardOperationSeed, 0);
         },
     };
 };
 
-export const writeProofInput = (kernel: ParticipantKernel, bytes: Uint8Array) =>
-    writeKernel(
-        kernel,
-        kernel.contribution_proof_input_pointer(),
+export const writeProofInput = (module: ParticipantModule, bytes: Uint8Array) =>
+    writeModuleMemory(
+        module,
+        module.contribution_proof_input_pointer(),
         bytes,
-        kernel.contribution_proof_input_capacity(),
+        module.contribution_proof_input_capacity(),
     );
 
 // The certificate collector's, close verifier's, ballot classifier's and
@@ -434,23 +439,23 @@ const inputBuffers = {
 } as const;
 
 export const writeBufferInput = (
-    kernel: ParticipantKernel,
+    module: ParticipantModule,
     buffer: keyof typeof inputBuffers,
     bytes: Uint8Array,
 ) => {
     const [pointer, capacity] = inputBuffers[buffer];
-    writeKernel(kernel, kernel[pointer](), bytes, kernel[capacity]());
+    writeModuleMemory(module, module[pointer](), bytes, module[capacity]());
 };
 
 // Refuses, before an operation starts, a module whose certificate, close,
 // classifier or evaluation buffer cannot take the largest input the worker
 // writes into it at once.
 export const requireInputCapacities = (
-    kernel: ParticipantKernel,
+    module: ParticipantModule,
     largestInputBytes: number,
 ) => {
     for (const [buffer, [, capacity]] of Object.entries(inputBuffers))
-        if (kernel[capacity]() < largestInputBytes)
+        if (module[capacity]() < largestInputBytes)
             throw new ModuleFailure(
                 'The participant module cannot take the largest input in its ' +
                     buffer +
@@ -459,12 +464,12 @@ export const requireInputCapacities = (
 };
 
 export const writeOwnRegistrationInput = (
-    kernel: ParticipantKernel,
+    module: ParticipantModule,
     bytes: Uint8Array,
 ) =>
-    writeKernel(
-        kernel,
-        kernel.own_registration_input_pointer(),
+    writeModuleMemory(
+        module,
+        module.own_registration_input_pointer(),
         bytes,
-        kernel.own_registration_input_capacity(),
+        module.own_registration_input_capacity(),
     );

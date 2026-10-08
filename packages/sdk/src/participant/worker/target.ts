@@ -24,9 +24,9 @@ import {
     restoreCompletedClose,
 } from './close.js';
 import type { CloseSession } from './close.js';
-import { sessionInput } from './context.js';
+import { writeModuleInput } from './context.js';
 import type {
-    ProfileContext,
+    ParticipantProfileContext,
     PublicContext,
     PublicProfileContext,
 } from './context.js';
@@ -37,8 +37,8 @@ import {
     PublicInputFailure,
     ResourceFailure,
 } from './failures.js';
-import { readKernel, writeBufferInput } from './kernel.js';
-import type { ParticipantKernel } from './kernel.js';
+import { readModuleMemory, writeBufferInput } from './participant-module.js';
+import type { ParticipantModule } from './participant-module.js';
 import {
     createCandidatePublication,
     findCandidate,
@@ -46,8 +46,8 @@ import {
     readCandidates,
     streamCandidateFile,
     transferChunkBytes,
-} from './public.js';
-import type { CandidateView, PublicRelay } from './public.js';
+} from './relay.js';
+import type { CandidateView, PublicRelay } from './relay.js';
 import { targetPhase } from './root-generation.js';
 import { chunkBytes, commitRoot, dataRecordInventory } from './root.js';
 import { deliverFinalAggregate, readFinalAggregate } from './setup.js';
@@ -94,11 +94,11 @@ const evaluationStoreChunkBytes = 1 << 20;
 // retained record chunk, a cached aggregate chunk or an evaluation store
 // chunk. Every whole record and concatenation it writes there is smaller at
 // every supported profile.
-export const largestBufferInputBytes = (kernel: ParticipantKernel) =>
+export const largestBufferInputBytes = (module: ParticipantModule) =>
     Math.max(
         transferChunkBytes,
         chunkBytes,
-        kernel.setup_chunk_capacity(),
+        module.setup_chunk_capacity(),
         evaluationStoreChunkBytes,
     );
 
@@ -209,9 +209,9 @@ const barrierCommand = (
     operation: number,
     input: Uint8Array = new Uint8Array(),
 ) => {
-    const { kernel } = context;
-    writeBufferInput(kernel, 'close', input);
-    return kernel.close_command(operation, input.length) === 0;
+    const { module } = context;
+    writeBufferInput(module, 'close', input);
+    return module.close_command(operation, input.length) === 0;
 };
 
 const requireBarrier = (
@@ -357,7 +357,7 @@ const verifyCloseBarrier = async (
     relay: PublicRelay,
 ) => {
     const { context } = records;
-    const { profile, kernel } = context;
+    const { profile, module } = context;
     const { close, registration } = profile;
     const { signatureBytes } = registration;
     return findCandidate(
@@ -442,10 +442,10 @@ const verifyCloseBarrier = async (
                 proposal,
                 'The close proposal was refused.',
             );
-            const missing = readKernel(
-                kernel,
-                kernel.close_missing_pointer(),
-                kernel.close_missing_count() * 64,
+            const missing = readModuleMemory(
+                module,
+                module.close_missing_pointer(),
+                module.close_missing_count() * 64,
             );
             const usable = new Map<number, UsableSlot>();
             for (let offset = 0; offset < missing.length; offset += 64) {
@@ -479,8 +479,8 @@ const verifyCloseBarrier = async (
 };
 
 const classifierInput = (context: PublicProfileContext, bytes: Uint8Array) => {
-    const { kernel } = context;
-    writeBufferInput(kernel, 'ballotBody', bytes);
+    const { module } = context;
+    writeBufferInput(module, 'ballotBody', bytes);
     return bytes.length;
 };
 
@@ -492,30 +492,30 @@ const beginClassification = async (
     submission: Uint8Array,
     header: Uint8Array,
 ) => {
-    const { kernel } = context;
+    const { module } = context;
     if (
-        kernel.ballot_classification_begin(
+        module.ballot_classification_begin(
             classifierInput(context, concatenate(submission, header)),
         ) !== 0
     )
         throw new PublicInputFailure('A usable ballot was refused.');
-    if (kernel.ballot_classification_requires_key() === 1) {
-        const index = kernel.ballot_classification_key_index() >>> 0;
+    if (module.ballot_classification_requires_key() === 1) {
+        const index = module.ballot_classification_key_index() >>> 0;
         if (
             index === unusedWord ||
-            kernel.ballot_classification_key_begin(index) !== 0
+            module.ballot_classification_key_begin(index) !== 0
         )
             throw new Error('The ballot classifier refused its key.');
         await deliverFinalAggregate(context, async () => {
             await readFinalAggregate(context, index, (_offset, bytes) => {
                 if (
-                    kernel.ballot_classification_key_chunk(
+                    module.ballot_classification_key_chunk(
                         classifierInput(context, bytes),
                     ) !== 0
                 )
                     throw new PublicInputFailure('A ballot key was refused.');
             });
-            if (kernel.ballot_classification_key_finish() !== 0)
+            if (module.ballot_classification_key_finish() !== 0)
                 throw new PublicInputFailure('A ballot key was refused.');
         });
     }
@@ -530,7 +530,7 @@ const classifyBallot = async (
     slot: UsableSlot,
 ) => {
     const { context } = records;
-    const { kernel, profile } = context;
+    const { module, profile } = context;
     const { headerBytes } = profile.ballot;
     let header: Uint8Array = new Uint8Array();
     await readBody(
@@ -550,7 +550,7 @@ const classifyBallot = async (
             }
             if (
                 rest.length > 0 &&
-                kernel.ballot_classification_chunk(
+                module.ballot_classification_chunk(
                     classifierInput(context, rest),
                 ) !== 0
             )
@@ -559,7 +559,7 @@ const classifyBallot = async (
     );
     const classification =
         header.length === headerBytes
-            ? kernel.ballot_classification_finish()
+            ? module.ballot_classification_finish()
             : 0;
     if (classification === 0)
         throw new PublicInputFailure('A usable ballot changed.');
@@ -597,17 +597,17 @@ const tryEvaluationCommand = (
     argument = 0,
     input: Uint8Array = new Uint8Array(),
 ) => {
-    const { kernel } = context;
-    writeBufferInput(kernel, 'evaluationTarget', input);
+    const { module } = context;
+    writeBufferInput(module, 'evaluationTarget', input);
     if (
-        kernel.evaluation_target_command(operation, argument, input.length) !==
+        module.evaluation_target_command(operation, argument, input.length) !==
         0
     )
         return undefined;
-    return readKernel(
-        kernel,
-        kernel.evaluation_target_output_pointer(),
-        kernel.evaluation_target_output_length(),
+    return readModuleMemory(
+        module,
+        module.evaluation_target_output_pointer(),
+        module.evaluation_target_output_length(),
     );
 };
 
@@ -721,12 +721,12 @@ const evaluatedTargetRequest = async <Value>(
 };
 
 // Retains the target this instance evaluated, keyed to the credential.
-export const retainEvaluation = async (context: ProfileContext) => {
-    const { kernel } = context;
-    if (kernel.retain_evaluation() !== 0)
+export const retainEvaluation = async (context: ParticipantProfileContext) => {
+    const { module } = context;
+    if (module.retain_evaluation() !== 0)
         throw new Error('The credential refused the evaluated target.');
-    const pointer = kernel.contribution_output_pointer() >>> 0;
-    const length = kernel.contribution_output_length();
+    const pointer = module.contribution_output_pointer() >>> 0;
+    const length = module.contribution_output_length();
     const parts: Blob[] = [];
     for (let offset = 0; offset < length; offset += chunkBytes)
         // Blob snapshots this bounded view synchronously. No Wasm call or
@@ -734,7 +734,7 @@ export const retainEvaluation = async (context: ProfileContext) => {
         parts.push(
             new Blob([
                 new Uint8Array(
-                    kernel.memory.buffer,
+                    module.memory.buffer,
                     pointer + offset,
                     Math.min(chunkBytes, length - offset),
                 ),
@@ -760,7 +760,7 @@ export const discardEvaluation = async (context: PublicContext) => {
 // read, that the module refuses or on which the module fails is discarded,
 // so a later operation evaluates the target again. Returns whether the target
 // was restored.
-export const restoreEvaluation = async (context: ProfileContext) => {
+export const restoreEvaluation = async (context: ParticipantProfileContext) => {
     try {
         return await restoreEvaluationCopy(context);
     } catch (error) {
@@ -772,7 +772,7 @@ export const restoreEvaluation = async (context: ProfileContext) => {
     }
 };
 
-const restoreEvaluationCopy = async (context: ProfileContext) => {
+const restoreEvaluationCopy = async (context: ParticipantProfileContext) => {
     const value = await evaluatedTargetRequest<unknown>(
         context.namespace,
         'readonly',
@@ -788,9 +788,9 @@ const restoreEvaluationCopy = async (context: ProfileContext) => {
     }
     // The module bounds the copy's length before any of it is read, and its
     // last step ends the copy it began whether or not the copy restores.
-    const { kernel } = context;
+    const { module } = context;
     let restored =
-        kernel.restore_evaluation(evaluationRestore.begin, length) === 0;
+        module.restore_evaluation(evaluationRestore.begin, length) === 0;
     if (restored) {
         let terminal = false;
         try {
@@ -817,9 +817,9 @@ const restoreEvaluationCopy = async (context: ProfileContext) => {
                     break;
                 }
                 const chunk = new Uint8Array(buffer);
-                sessionInput(context, chunk);
+                writeModuleInput(context, chunk);
                 restored =
-                    kernel.restore_evaluation(
+                    module.restore_evaluation(
                         evaluationRestore.push,
                         chunk.length,
                     ) === 0;
@@ -834,7 +834,7 @@ const restoreEvaluationCopy = async (context: ProfileContext) => {
             // instances cannot be entered again, including for cleanup.
             if (!terminal)
                 restored =
-                    kernel.restore_evaluation(evaluationRestore.finish, 0) ===
+                    module.restore_evaluation(evaluationRestore.finish, 0) ===
                         0 && restored;
         }
     }
@@ -898,10 +898,10 @@ const evaluate = async (
     usable: ReadonlyMap<number, UsableSlot>,
 ) => {
     const { context } = source;
-    const { kernel, profile } = context;
+    const { module, profile } = context;
     const { polynomialDegree, storedCoefficientBytes } = profile.evaluation;
     const coefficients = 2 * polynomialDegree;
-    const inputCapacity = kernel.evaluation_target_input_capacity();
+    const inputCapacity = module.evaluation_target_input_capacity();
     const chunkCoefficients = Math.floor(
         evaluationStoreChunkBytes / storedCoefficientBytes,
     );
@@ -975,8 +975,8 @@ const evaluate = async (
         const spilled = new Set<number>();
         evaluationCommand(context, evaluationOperation.start);
         while (
-            kernel.evaluation_target_body_length() === 0 &&
-            kernel.evaluation_target_finished() !== 1
+            module.evaluation_target_body_length() === 0 &&
+            module.evaluation_target_finished() !== 1
         ) {
             const required = words(
                 evaluationCommand(context, evaluationOperation.requirements),
@@ -1172,16 +1172,16 @@ const evaluate = async (
                             );
             }
         }
-        if (kernel.evaluation_target_body_length() === 0)
+        if (module.evaluation_target_body_length() === 0)
             evaluationCommand(context, evaluationOperation.finish);
         await writeEvaluationStorage(storage, (store) => store.clear());
     } finally {
         storage.close();
     }
-    return readKernel(
-        kernel,
-        kernel.evaluation_target_body_pointer(),
-        kernel.evaluation_target_body_length(),
+    return readModuleMemory(
+        module,
+        module.evaluation_target_body_pointer(),
+        module.evaluation_target_body_length(),
     );
 };
 
@@ -1196,26 +1196,28 @@ export const finalityOperation = {
 } as const;
 
 const finalityCommand = (
-    context: ProfileContext,
+    context: ParticipantProfileContext,
     operation: number,
     input: Uint8Array = new Uint8Array(),
 ) => {
-    const { kernel } = context;
-    sessionInput(context, input);
-    if (kernel.participant_finality_command(operation, input.length) !== 0)
+    const { module } = context;
+    writeModuleInput(context, input);
+    if (module.participant_finality_command(operation, input.length) !== 0)
         throw new Error(
             'The finality work refused operation ' + String(operation) + '.',
         );
-    return readKernel(
-        kernel,
-        kernel.contribution_output_pointer(),
-        kernel.contribution_output_length(),
+    return readModuleMemory(
+        module,
+        module.contribution_output_pointer(),
+        module.contribution_output_length(),
     );
 };
 
 // The own ballot's status in the target this instance certified, which the
 // finality work reads for a participant that signed no target of its own.
-export const certifiedBallotInclusion = (context: ProfileContext) => {
+export const certifiedBallotInclusion = (
+    context: ParticipantProfileContext,
+) => {
     const output = finalityCommand(
         context,
         finalityOperation.certifiedBallotInclusion,
@@ -1234,7 +1236,7 @@ export const resumeTarget = (close: CloseSession): TargetState | undefined => {
     return decodeTargetState(
         context.profile,
         root.head.generation,
-        close.organizer,
+        close.isOrganizer,
         bytes,
     );
 };
@@ -1310,12 +1312,12 @@ export const restoreOrEvaluateTarget = async (
 ) => {
     const { context } = close.participant;
     if (await restoreEvaluation(context)) {
-        const { kernel } = context;
+        const { module } = context;
         return {
-            body: readKernel(
-                kernel,
-                kernel.evaluation_target_body_pointer(),
-                kernel.evaluation_target_body_length(),
+            body: readModuleMemory(
+                module,
+                module.evaluation_target_body_pointer(),
+                module.evaluation_target_body_length(),
             ),
             restored: true,
         };
@@ -1352,7 +1354,7 @@ export const signTarget = async (close: CloseSession, relay: PublicRelay) => {
     let state = resumeTarget(close);
     if (state === undefined) {
         state = {
-            predecessor: completedClosePhase(close.organizer),
+            predecessor: completedClosePhase(close.isOrganizer),
             ballotInclusion,
             body,
 
@@ -1395,6 +1397,6 @@ export const publishTarget = async (
         delivery,
     );
     await publication.addBytes('vote.bin', state.vote);
-    if (close.organizer) await publication.addBytes('target.bin', state.body);
+    if (close.isOrganizer) await publication.addBytes('target.bin', state.body);
     await publication.finish();
 };

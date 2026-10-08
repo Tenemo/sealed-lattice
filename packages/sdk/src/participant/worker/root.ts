@@ -1,9 +1,4 @@
 import {
-    foregroundVisitMilliseconds,
-    participantDataKindMaximums,
-} from './bounds.js';
-import type { ParticipantLimits } from './bounds.js';
-import {
     concatenate,
     encodeText,
     equalBytes,
@@ -11,9 +6,9 @@ import {
     readUnsigned32,
     unsigned32,
 } from './bytes.js';
-import { describe } from './context.js';
+import { errorMessage } from './context.js';
 import type { ParticipantContext } from './context.js';
-import { StoragePending } from './failures.js';
+import { StorageFailure } from './failures.js';
 import {
     custodyIdentities,
     custodyIdentity,
@@ -26,6 +21,11 @@ import {
     lastRootGeneration,
     rootGeneration,
 } from './root-generation.js';
+import type { ParticipantLimits } from './runtime-bounds.js';
+import {
+    foregroundVisitMilliseconds,
+    participantDataKindMaximums,
+} from './runtime-bounds.js';
 import { commitParticipantState } from './state-transaction.js';
 import {
     isParticipantHead,
@@ -346,7 +346,7 @@ export type AuthenticatedRoot = Readonly<{
 export const authenticateRoot = async (
     context: ParticipantContext,
 ): Promise<AuthenticatedRoot> => {
-    const { database, kernel, runtime, limits } = context;
+    const { database, module, runtime, limits } = context;
     const snapshot = await snapshotParticipant(database);
     if (
         snapshot.counts.key !== 1 ||
@@ -363,7 +363,7 @@ export const authenticateRoot = async (
             provisionalRootBound(limits, snapshot.head.generation) ||
         snapshot.head.hash !==
             hexadecimal(
-                custodyIdentity(kernel, custodyPurpose.root, snapshot.root),
+                custodyIdentity(module, custodyPurpose.root, snapshot.root),
             )
     )
         throw new Error('Missing or inconsistent participant authority.');
@@ -397,7 +397,7 @@ export const readDataRecord = async (
     const bytes = new Uint8Array(await blob.arrayBuffer());
     if (
         !equalBytes(
-            custodyIdentity(context.kernel, custodyPurpose.record, bytes),
+            custodyIdentity(context.module, custodyPurpose.record, bytes),
             reference.hash,
         )
     )
@@ -462,7 +462,7 @@ export const authenticateRecords = (
                 maximumRootBytes: rootBound(context, root.head.generation),
                 recordStores: participantRecordStores,
                 records,
-                identities: custodyIdentities(context.kernel),
+                identities: custodyIdentities(context.module),
             }),
         write: () => undefined,
     });
@@ -486,7 +486,7 @@ const referenceData = (
                 offset: start,
                 length: chunk.length,
                 hash: custodyIdentity(
-                    context.kernel,
+                    context.module,
                     custodyPurpose.record,
                     chunk,
                 ),
@@ -515,7 +515,7 @@ export const commitRoot = async (
     predecessor: AuthenticatedRoot,
     transition: RootTransition,
 ): Promise<AuthenticatedRoot> => {
-    const { database, kernel, runtime } = context;
+    const { database, module, runtime } = context;
     const associatedData = rootAssociatedData(runtime);
     const plaintext = encodeManifest(
         transition.manifest,
@@ -532,7 +532,7 @@ export const commitRoot = async (
     );
     const head: ParticipantHead = {
         generation: transition.generation,
-        hash: hexadecimal(custodyIdentity(kernel, custodyPurpose.root, sealed)),
+        hash: hexadecimal(custodyIdentity(module, custodyPurpose.root, sealed)),
         runtime: hexadecimal(runtime),
     };
     const added = (transition.addedData ?? []).flatMap((record) => {
@@ -564,7 +564,7 @@ export const commitRoot = async (
             ...(rollback
                 ? { provisionalRecords: transition.stagedRecords ?? [] }
                 : {}),
-            identities: custodyIdentities(kernel),
+            identities: custodyIdentities(module),
         });
     try {
         await commitParticipantState({
@@ -596,8 +596,8 @@ export const commitRoot = async (
             validate: (reader) => validate(reader, true),
             write: () => undefined,
         });
-        throw new StoragePending(
-            'The participant root was not committed: ' + describe(error),
+        throw new StorageFailure(
+            'The participant root was not committed: ' + errorMessage(error),
         );
     }
     const snapshot = await snapshotParticipant(database);

@@ -6,19 +6,16 @@ import {
     tupleFields,
     unsigned16,
 } from './bytes.js';
-import { sessionInput } from './context.js';
+import { writeModuleInput } from './context.js';
 import { commitPreparation } from './contribution.js';
 import type { ParticipantSession } from './contribution.js';
 import { openDelivery } from './delivery.js';
 import { PublicInputFailure } from './failures.js';
-import { readKernel, writeSetupInput } from './kernel.js';
 import { discoverContributionOffers } from './offer-discovery.js';
+import { readModuleMemory, writeSetupInput } from './participant-module.js';
 import type { PreparationEndorsement } from './preparation-state.js';
-import {
-    createCandidatePublication,
-    readOfferAnnouncements,
-} from './public.js';
-import type { PublicRelay } from './public.js';
+import { createCandidatePublication, readOfferAnnouncements } from './relay.js';
+import type { PublicRelay } from './relay.js';
 import { rootGeneration } from './root-generation.js';
 import {
     authenticateSelection,
@@ -49,13 +46,13 @@ const selectionCommand = (
     input: Uint8Array = new Uint8Array(),
 ) => {
     const { context } = session;
-    sessionInput(context, input);
-    if (context.kernel.selection_signing(operation, input.length) !== 0)
+    writeModuleInput(context, input);
+    if (context.module.selection_signing(operation, input.length) !== 0)
         throw new Error('The original preparation signer refused.');
-    return readKernel(
-        context.kernel,
-        context.kernel.contribution_output_pointer(),
-        context.kernel.contribution_output_length(),
+    return readModuleMemory(
+        context.module,
+        context.module.contribution_output_pointer(),
+        context.module.contribution_output_length(),
     );
 };
 
@@ -97,8 +94,8 @@ const buildOriginalSelection = (
     const bytes = concatenate(
         ...offers.map(({ position }) => unsigned16(position)),
     );
-    writeSetupInput(session.context.kernel, bytes);
-    if (session.context.kernel.setup_selection_build(bytes.length) !== 0)
+    writeSetupInput(session.context.module, bytes);
+    if (session.context.module.setup_selection_build(bytes.length) !== 0)
         throw new PublicInputFailure(
             'The complete selected offers were refused.',
         );
@@ -219,15 +216,15 @@ export const endorseSetup = async (
             selection,
             ownSelection !== undefined,
         );
-        const { kernel, profile } = session.context;
-        if (kernel.retain_selection_inputs() !== 0)
+        const { module, profile } = session.context;
+        if (module.retain_selection_inputs() !== 0)
             throw new Error(
                 'The credential refused the verified selection inputs.',
             );
-        const reference = readKernel(
-            kernel,
-            kernel.contribution_output_pointer(),
-            kernel.contribution_output_length(),
+        const reference = readModuleMemory(
+            module,
+            module.contribution_output_pointer(),
+            module.contribution_output_length(),
         );
         if (reference.length !== profile.preparation.selectionReferenceBytes)
             throw new Error(
@@ -248,9 +245,9 @@ export const endorseSetup = async (
         retained = session.preparation.endorsement;
     } else {
         authenticateSelection(session.context, retained.selection, true);
-        sessionInput(session.context, retained.reference);
+        writeModuleInput(session.context, retained.reference);
         if (
-            session.context.kernel.restore_selection_inputs(
+            session.context.module.restore_selection_inputs(
                 retained.reference.length,
             ) !== 0
         )

@@ -5,11 +5,11 @@ import {
     ModuleFailure,
     ResourceFailure,
 } from '#packages/sdk/src/participant/worker/failures.js';
+import type { ParallelHelpers } from '#packages/sdk/src/participant/worker/parallel-helpers.js';
 import {
-    instantiateParticipantKernel,
-    kernelFunctions,
-} from '#packages/sdk/src/participant/worker/kernel.js';
-import type { ParallelHelpers } from '#packages/sdk/src/participant/worker/parallel.js';
+    instantiateParticipantModule,
+    moduleFunctions,
+} from '#packages/sdk/src/participant/worker/participant-module.js';
 
 // A stand-in participant module that exports every function the worker
 // calls. One export traps, one reports an exhausted memory bound through the
@@ -23,7 +23,7 @@ const standInModule = () => {
         '  (import "allocator" "exhausted" (func $exhausted (param i32)))',
         '  (import "setup_witness" "fill_random" (func $random (param i32 i32) (result i32)))',
         '  (memory (export "memory") 1)',
-        ...kernelFunctions.map((name) =>
+        ...moduleFunctions.map((name) =>
             name === trapping
                 ? `  (func (export "${name}") (result i32) unreachable)`
                 : name === exhausting
@@ -49,14 +49,14 @@ const noHelpers = {
 
 describe('participant module failures', () => {
     it('reports a trap as a module failure and never enters the instance again', async () => {
-        const { kernel } = await instantiateParticipantKernel(
+        const { module } = await instantiateParticipantModule(
             standInModule(),
             noHelpers,
         );
-        expect(kernel.input_capacity()).toBe(0);
+        expect(module.input_capacity()).toBe(0);
         let failure: unknown;
         try {
-            kernel.restore();
+            module.restore();
         } catch (error) {
             failure = error;
         }
@@ -67,37 +67,37 @@ describe('participant module failures', () => {
         // Every later call ends with the same failure, whichever export it
         // names, because the instance's state is unknown.
         for (const call of [
-            () => kernel.input_capacity(),
-            () => kernel.restore(),
+            () => module.input_capacity(),
+            () => module.restore(),
         ])
             expect(call).toThrow(failure);
     });
 
     it('keeps an exhausted memory bound a resource failure', async () => {
-        const { kernel } = await instantiateParticipantKernel(
+        const { module } = await instantiateParticipantModule(
             standInModule(),
             noHelpers,
         );
         let failure: unknown;
         try {
-            kernel.check_retained();
+            module.check_retained();
         } catch (error) {
             failure = error;
         }
         expect(failure).toBeInstanceOf(ResourceFailure);
         expect(failure).not.toBeInstanceOf(ModuleFailure);
-        expect(() => kernel.input_capacity()).toThrow(failure);
+        expect(() => module.input_capacity()).toThrow(failure);
     });
 
     it('reports a host function that refused its call as a module failure', async () => {
-        const { kernel, handlers } = await instantiateParticipantKernel(
+        const { module, handlers } = await instantiateParticipantModule(
             standInModule(),
             noHelpers,
         );
         // No operation installed a randomness handler, so the import refuses.
-        expect(() => kernel.prepare_organizer()).toThrow(ModuleFailure);
+        expect(() => module.prepare_organizer()).toThrow(ModuleFailure);
         // With a handler, a fresh instance draws and returns.
-        const fresh = await instantiateParticipantKernel(
+        const fresh = await instantiateParticipantModule(
             standInModule(),
             noHelpers,
         );
@@ -105,7 +105,7 @@ describe('participant module failures', () => {
         fresh.handlers.random = (target) => {
             drawn += target.length;
         };
-        expect(fresh.kernel.prepare_organizer()).toBe(0);
+        expect(fresh.module.prepare_organizer()).toBe(0);
         expect(drawn).toBe(16);
         expect(handlers.random).toBeUndefined();
     });

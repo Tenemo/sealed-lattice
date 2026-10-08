@@ -10,26 +10,29 @@ import {
 import { completedClosePhase } from './close-state.js';
 import { completedCloseRecords, restoreCompletedClose } from './close.js';
 import type { CloseSession } from './close.js';
-import { sessionInput } from './context.js';
-import type { ProfileContext, PublicProfileContext } from './context.js';
+import { writeModuleInput } from './context.js';
+import type {
+    ParticipantProfileContext,
+    PublicProfileContext,
+} from './context.js';
 import { contributionRecords } from './contribution.js';
 import { openDelivery } from './delivery.js';
 import { PublicInputFailure } from './failures.js';
 import { custodyIdentity, custodyPurpose } from './identity.js';
 import {
     operationSeedBytes,
-    readKernel,
+    readModuleMemory,
     seededRandomness,
     writeBufferInput,
-} from './kernel.js';
+} from './participant-module.js';
+import { openRecord, sealRecord } from './private-records.js';
 import {
     createCandidatePublication,
     readCandidateFile,
     readCandidates,
     streamCandidateFile,
-} from './public.js';
-import type { PublicRelay } from './public.js';
-import { openRecord, sealRecord } from './records.js';
+} from './relay.js';
+import type { PublicRelay } from './relay.js';
 import {
     decodeReleaseState,
     encodeReleaseState,
@@ -101,7 +104,7 @@ export const resumeRelease = async (
 ): Promise<ReleaseSession> => {
     const { root, context } = close.participant;
     const { generation } = root.head;
-    const closed = completedClosePhase(close.organizer);
+    const closed = completedClosePhase(close.isOrganizer);
     if (generation !== closed && generation < targetPhase.signed)
         throw new Error('No completed close or signed target is retained.');
     const bytes = root.manifest.suffixes.release;
@@ -113,7 +116,7 @@ export const resumeRelease = async (
               : decodeReleaseState(
                     context.profile,
                     generation,
-                    close.organizer,
+                    close.isOrganizer,
                     bytes,
                 );
     if (generation >= releasePhase.locked && state === undefined)
@@ -147,7 +150,7 @@ export const resumeRelease = async (
                 : {
                       body,
                       digest: custodyIdentity(
-                          context.kernel,
+                          context.module,
                           custodyPurpose.target,
                           body,
                       ),
@@ -170,20 +173,20 @@ const releaseOperation = {
 } as const;
 
 const releaseCommand = (
-    context: ProfileContext,
+    context: ParticipantProfileContext,
     operation: number,
     input: Uint8Array = new Uint8Array(),
 ) => {
-    const { kernel } = context;
-    sessionInput(context, input);
-    if (kernel.participant_release_command(operation, input.length) !== 0)
+    const { module } = context;
+    writeModuleInput(context, input);
+    if (module.participant_release_command(operation, input.length) !== 0)
         throw new Error(
             'The release work refused operation ' + String(operation) + '.',
         );
-    return readKernel(
-        kernel,
-        kernel.contribution_output_pointer(),
-        kernel.contribution_output_length(),
+    return readModuleMemory(
+        module,
+        module.contribution_output_pointer(),
+        module.contribution_output_length(),
     );
 };
 
@@ -210,14 +213,14 @@ const tryCompletionCommand = (
     argument = 0,
     input: Uint8Array = new Uint8Array(),
 ) => {
-    const { kernel } = context;
-    writeBufferInput(kernel, 'completion', input);
-    if (kernel.completion_command(operation, argument, input.length) !== 0)
+    const { module } = context;
+    writeBufferInput(module, 'completion', input);
+    if (module.completion_command(operation, argument, input.length) !== 0)
         return undefined;
-    return readKernel(
-        kernel,
-        kernel.completion_output_pointer(),
-        kernel.completion_output_length(),
+    return readModuleMemory(
+        module,
+        module.completion_output_pointer(),
+        module.completion_output_length(),
     );
 };
 
@@ -472,7 +475,7 @@ const lockRelease = async (
             state: {
                 predecessor:
                     session.signed === undefined
-                        ? completedClosePhase(session.close.organizer)
+                        ? completedClosePhase(session.close.isOrganizer)
                         : targetPhase.signed,
                 ballotInclusion,
                 target: releaseTarget(session).body,
@@ -503,11 +506,11 @@ const lockRelease = async (
 // envelope before any signature, retiring the seed.
 const proveRelease = async (session: ReleaseSession) => {
     const { context } = session.close.participant;
-    const { profile, kernel } = context;
+    const { profile, module } = context;
     const bounds = profile.release;
     const { state } = session;
     if (state === undefined) throw new Error('No release seed is retained.');
-    const randomness = seededRandomness(kernel, 'release', state.seed);
+    const randomness = seededRandomness(module, 'release', state.seed);
     let envelope: Uint8Array;
     try {
         envelope = releaseCommand(
@@ -598,12 +601,15 @@ const signRelease = async (session: ReleaseSession) => {
 
 // Restores the signed target the credential retains, so a release can only
 // follow that target.
-const restoreSignedTarget = (context: ProfileContext, signed: TargetState) => {
-    const { kernel } = context;
+const restoreSignedTarget = (
+    context: ParticipantProfileContext,
+    signed: TargetState,
+) => {
+    const { module } = context;
     const { body, vote } = signed;
-    sessionInput(context, concatenate(unsigned32(body.length), body, vote));
+    writeModuleInput(context, concatenate(unsigned32(body.length), body, vote));
     if (
-        kernel.participant_finality_command(
+        module.participant_finality_command(
             finalityOperation.restoreSignedTarget,
             4 + body.length + vote.length,
         ) !== 0
@@ -649,7 +655,7 @@ export const advanceRelease = async (
     session.target ??= {
         body: evaluated.body,
         digest: custodyIdentity(
-            context.kernel,
+            context.module,
             custodyPurpose.target,
             evaluated.body,
         ),

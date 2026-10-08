@@ -61,10 +61,10 @@ const phases = Object.values(releasePhase);
 
 describe('participant release state', () => {
     it('round-trips every phase and status after a signed target or a completed close', () => {
-        for (const organizer of [false, true])
+        for (const isOrganizer of [false, true])
             for (const predecessor of [
                 targetPhase.signed,
-                completedClosePhase(organizer),
+                completedClosePhase(isOrganizer),
             ])
                 for (const phase of phases)
                     for (const ballotInclusion of ballotInclusions)
@@ -83,7 +83,7 @@ describe('participant release state', () => {
                                 decodeReleaseState(
                                     profile,
                                     phase,
-                                    organizer,
+                                    isOrganizer,
                                     encodeReleaseState(phase, state),
                                 ),
                             ).toEqual(state);
@@ -111,10 +111,10 @@ describe('participant release state', () => {
         const refused = (
             generation: number,
             bytes: Uint8Array,
-            organizer = false,
+            isOrganizer = false,
         ) =>
             expect(() =>
-                decodeReleaseState(profile, generation, organizer, bytes),
+                decodeReleaseState(profile, generation, isOrganizer, bytes),
             ).toThrow();
         const body = encodeReleaseState(
             releasePhase.body,
@@ -141,9 +141,9 @@ describe('participant release state', () => {
         const predecessor = body.slice();
         predecessor[4] = targetPhase.intent;
         refused(releasePhase.body, predecessor);
-        for (const organizer of [false, true]) {
-            predecessor[4] = completedClosePhase(!organizer);
-            refused(releasePhase.body, predecessor, organizer);
+        for (const isOrganizer of [false, true]) {
+            predecessor[4] = completedClosePhase(!isOrganizer);
+            refused(releasePhase.body, predecessor, isOrganizer);
         }
         // The body must fit its bounds and its record count.
         refused(

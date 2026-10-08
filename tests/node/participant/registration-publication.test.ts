@@ -72,7 +72,7 @@ afterEach(() => vi.unstubAllGlobals());
 
 const fixture = async (
     keyBytes = 65_536 * 21,
-    organizer = false,
+    isOrganizer = false,
     generation = 1,
 ) => {
     const records = new Map<string, Blob>();
@@ -124,7 +124,7 @@ const fixture = async (
     const context = { runtime } as ParticipantContext;
     const enrollment = {
         registrationBodyDigest: new Uint8Array(64).fill(3),
-        isOrganizer: organizer,
+        isOrganizer: isOrganizer,
     } as RestoredEnrollment;
     const prefix = `registration/${hexadecimal(enrollment.registrationBodyDigest)}/`;
     const names = new Map([
@@ -140,7 +140,7 @@ const fixture = async (
     const reads: string[] = [];
     const posts: Posted[] = [];
     local.identity.mockImplementation(
-        (_kernel: unknown, purpose: number, bytes: Uint8Array) => {
+        (_module: unknown, purpose: number, bytes: Uint8Array) => {
             if (purpose === custodyPurpose.record) {
                 expect(
                     copies.every((copy) => copy.every((byte) => byte === 0)),

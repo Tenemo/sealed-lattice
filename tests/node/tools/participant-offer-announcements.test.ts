@@ -5,7 +5,7 @@ import path from 'node:path';
 
 import { expect, it } from 'vitest';
 
-import { readOfferAnnouncements } from '#packages/sdk/src/participant/worker/public.js';
+import { readOfferAnnouncements } from '#packages/sdk/src/participant/worker/relay.js';
 import {
     participantOfferAnnouncements,
     serveOfferAnnouncements,

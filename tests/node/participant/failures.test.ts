@@ -8,7 +8,7 @@ import {
     pendingCause,
     PublicInputFailure,
     ResourceFailure,
-    StoragePending,
+    StorageFailure,
     UnrecognizedState,
 } from '#packages/sdk/src/participant/worker/failures.js';
 import { authenticateSelection } from '#packages/sdk/src/participant/worker/setup.js';
@@ -18,7 +18,7 @@ describe('participant failures', () => {
         expect(pendingCause(new PublicInputFailure('missing'))).toBe(
             'public input',
         );
-        expect(pendingCause(new StoragePending('quota'))).toBe('storage');
+        expect(pendingCause(new StorageFailure('quota'))).toBe('storage');
         expect(pendingCause(new ResourceFailure('memory'))).toBe('resource');
         expect(pendingCause(new ModuleFailure('trap'))).toBe('module');
         // Any other failure ended the worker before authority started.
@@ -51,7 +51,7 @@ describe('participant failures', () => {
                 pending('public input'),
             ],
             [
-                new StoragePending('quota'),
+                new StorageFailure('quota'),
                 pending('storage'),
                 pending('storage'),
             ],
@@ -73,7 +73,7 @@ describe('participant failures', () => {
 
     it('stop a participant whose own retained selection the module refuses, and leave one pending whose published selection it refuses', () => {
         const context = {
-            kernel: {
+            module: {
                 memory: new WebAssembly.Memory({ initial: 1 }),
                 setup_input_pointer: () => 0,
                 setup_input_capacity: () => 64,

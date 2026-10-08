@@ -2,12 +2,12 @@ import { createHash } from 'node:crypto';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { foregroundVisitMilliseconds } from '#packages/sdk/src/participant/worker/bounds.js';
 import { PublicInputFailure } from '#packages/sdk/src/participant/worker/failures.js';
 import {
     readBounded,
     streamBounded,
-} from '#packages/sdk/src/participant/worker/public.js';
+} from '#packages/sdk/src/participant/worker/relay.js';
+import { foregroundVisitMilliseconds } from '#packages/sdk/src/participant/worker/runtime-bounds.js';
 
 const relay = { base: 'https://relay.invalid/' };
 const pageBytes = 1 << 20;

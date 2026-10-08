@@ -1,4 +1,3 @@
-import { readParticipantLimits } from '#packages/sdk/src/participant/worker/bounds.js';
 import {
     fromHexadecimal,
     hexadecimal,
@@ -8,14 +7,15 @@ import {
     resumeParticipant,
 } from '#packages/sdk/src/participant/worker/contribution.js';
 import { restoreEnrollment } from '#packages/sdk/src/participant/worker/enrollment.js';
-import { instantiateParticipantKernel } from '#packages/sdk/src/participant/worker/kernel.js';
-import { noParallelHelpers } from '#packages/sdk/src/participant/worker/parallel.js';
+import { noParallelHelpers } from '#packages/sdk/src/participant/worker/parallel-helpers.js';
+import { instantiateParticipantModule } from '#packages/sdk/src/participant/worker/participant-module.js';
 import {
     authenticateRoot,
     dataKind,
     readDataKind,
 } from '#packages/sdk/src/participant/worker/root.js';
 import { retainedProfile } from '#packages/sdk/src/participant/worker/roster.js';
+import { readParticipantLimits } from '#packages/sdk/src/participant/worker/runtime-bounds.js';
 import {
     openParticipantDatabase,
     readParticipantValue,
@@ -79,11 +79,11 @@ export const inspectParticipantCheckpointCustody = async (
     const moduleBytes = new Uint8Array(await response.arrayBuffer());
     if ((await digest(moduleBytes)) !== request.moduleDigest)
         throw new Error('The checkpoint fixture received another module.');
-    const { kernel, handlers } = await instantiateParticipantKernel(
+    const { module, handlers } = await instantiateParticipantModule(
         await WebAssembly.compile(moduleBytes),
         noParallelHelpers,
     );
-    if (kernel.worker_reserve(0, 0) !== 0)
+    if (module.worker_reserve(0, 0) !== 0)
         throw new Error('The checkpoint fixture memory plan was refused.');
     const database = await openParticipantDatabase(request.namespace);
     const privateBytes: Uint8Array[] = [];
@@ -91,11 +91,11 @@ export const inspectParticipantCheckpointCustody = async (
         const initial = {
             namespace: request.namespace,
             database,
-            kernel,
+            module,
             handlers,
             parallel: noParallelHelpers,
             runtime: fromHexadecimal(request.runtimeIdentity),
-            limits: readParticipantLimits(kernel),
+            limits: readParticipantLimits(module),
             separateEvaluation: false,
         };
         const root = await authenticateRoot(initial);
@@ -253,11 +253,11 @@ export const inspectParticipantSourceCustody = async (
         ) !== request.moduleDigest
     )
         throw new Error('The source custody fixture received another module.');
-    const { kernel, handlers } = await instantiateParticipantKernel(
+    const { module, handlers } = await instantiateParticipantModule(
         await WebAssembly.compile(bytes),
         noParallelHelpers,
     );
-    if (kernel.worker_reserve(0, 0) !== 0)
+    if (module.worker_reserve(0, 0) !== 0)
         throw new Error('The source custody fixture memory plan was refused.');
     const database = await openParticipantDatabase(request.namespace);
     const privateBytes: Uint8Array[] = [];
@@ -265,11 +265,11 @@ export const inspectParticipantSourceCustody = async (
         const context = {
             namespace: request.namespace,
             database,
-            kernel,
+            module,
             handlers,
             parallel: noParallelHelpers,
             runtime: fromHexadecimal(request.runtimeIdentity),
-            limits: readParticipantLimits(kernel),
+            limits: readParticipantLimits(module),
             separateEvaluation: false,
         };
         const root = await authenticateRoot(context);

@@ -15,7 +15,7 @@ import {
     createCandidatePublication,
     findCandidate,
     readCandidateFile,
-} from '#packages/sdk/src/participant/worker/public.js';
+} from '#packages/sdk/src/participant/worker/relay.js';
 import { serveParticipantCandidates } from '#tools/ci/participant-candidate-http.js';
 import { participantCandidateView } from '#tools/ci/participant-candidate-view.js';
 import type { ViewedParticipantRecord } from '#tools/ci/participant-candidate-view.js';

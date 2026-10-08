@@ -7,7 +7,6 @@ import { MessageChannel, Worker } from 'node:worker_threads';
 import binaryen from 'binaryen';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { readParticipantLimits } from '#packages/sdk/src/participant/worker/bounds.js';
 import {
     concatenate,
     unsigned16,
@@ -19,16 +18,16 @@ import {
     custodyPurpose,
 } from '#packages/sdk/src/participant/worker/identity.js';
 import {
-    instantiateParticipantKernel,
-    readKernel,
-    writeInput,
-} from '#packages/sdk/src/participant/worker/kernel.js';
-import {
     helperStartMilliseconds,
     noParallelHelpers,
     startParallelHelpers,
-} from '#packages/sdk/src/participant/worker/parallel.js';
-import type { ParallelHelpers } from '#packages/sdk/src/participant/worker/parallel.js';
+} from '#packages/sdk/src/participant/worker/parallel-helpers.js';
+import type { ParallelHelpers } from '#packages/sdk/src/participant/worker/parallel-helpers.js';
+import {
+    instantiateParticipantModule,
+    readModuleMemory,
+    writeInput,
+} from '#packages/sdk/src/participant/worker/participant-module.js';
 import { dataKind } from '#packages/sdk/src/participant/worker/root.js';
 import {
     registrationFile,
@@ -36,6 +35,7 @@ import {
     streamRegistrations,
     verifiedRosterUsernames,
 } from '#packages/sdk/src/participant/worker/roster.js';
+import { readParticipantLimits } from '#packages/sdk/src/participant/worker/runtime-bounds.js';
 import { participantRelayFixture } from '#tests/participant-relay-fixture.js';
 
 // The packaged participant module and worker, whose helper role runs on
@@ -163,14 +163,14 @@ const payloadLengths = [
 const realTimeout = setTimeout;
 const realClearTimeout = clearTimeout;
 const answeredStart = async (
-    module: WebAssembly.Module,
+    compiledModule: WebAssembly.Module,
     ports: readonly MessagePort[],
 ) => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     let guard: ReturnType<typeof setTimeout> | undefined;
     try {
         return await Promise.race([
-            startParallelHelpers(module, ports, false),
+            startParallelHelpers(compiledModule, ports, false),
             new Promise<never>((_resolve, reject) => {
                 guard = realTimeout(() => {
                     reject(new Error('No helper answered.'));
@@ -210,13 +210,13 @@ describe('participant custody identities', () => {
     });
 
     it('return the identities the independent framing yields', async () => {
-        const { kernel } = await instantiateParticipantKernel(
+        const { module } = await instantiateParticipantModule(
             participantModule,
             noParallelHelpers,
         );
         expect(
             payloadLengths.map((length) =>
-                custodyIdentity(kernel, custodyPurpose.root, payload(length)),
+                custodyIdentity(module, custodyPurpose.root, payload(length)),
             ),
         ).toEqual(
             payloadLengths.map((length) =>
@@ -226,7 +226,7 @@ describe('participant custody identities', () => {
     });
 
     it('name the target, envelope and close response by their own domains', async () => {
-        const { kernel } = await instantiateParticipantKernel(
+        const { module } = await instantiateParticipantModule(
             participantModule,
             noParallelHelpers,
         );
@@ -240,7 +240,7 @@ describe('participant custody identities', () => {
         for (const [purpose, domain] of domains)
             for (const length of [0, 1, 65_537])
                 expect(
-                    custodyIdentity(kernel, purpose, payload(length)),
+                    custodyIdentity(module, purpose, payload(length)),
                 ).toEqual(independentIdentity(domain, payload(length)));
     });
 });
@@ -264,11 +264,11 @@ type JoinedPoll = Readonly<{
     signature: Uint8Array;
 }>;
 type ParticipantInstance = Awaited<
-    ReturnType<typeof instantiateParticipantKernel>
+    ReturnType<typeof instantiateParticipantModule>
 >;
 // Validates and prepares an enrollment in the instance.
 const prepare = (
-    { kernel, handlers }: ParticipantInstance,
+    { module, handlers }: ParticipantInstance,
     name: string,
     joining?: JoinedPoll,
 ): Enrollment => {
@@ -292,11 +292,11 @@ const prepare = (
                   unsigned32(username.length),
                   username,
               );
-    writeInput(kernel, input);
+    writeInput(module, input);
     expect(
         joining === undefined
-            ? kernel.validate_organizer(input.length)
-            : kernel.validate_joiner(input.length),
+            ? module.validate_organizer(input.length)
+            : module.validate_joiner(input.length),
     ).toBe(0);
     const parts = new Map<number, Uint8Array[]>();
     handlers.staged = (kind, _offset, bytes) => {
@@ -307,15 +307,15 @@ const prepare = (
         target.set(shake(name + '/' + String(requests), target.length));
         requests += 1;
     };
-    writeInput(kernel, input);
+    writeInput(module, input);
     expect(
         joining === undefined
-            ? kernel.prepare_organizer(input.length)
-            : kernel.prepare_joiner(input.length),
+            ? module.prepare_organizer(input.length)
+            : module.prepare_joiner(input.length),
     ).toBe(0);
-    expect(kernel.check_retained()).toBe(0);
+    expect(module.check_retained()).toBe(0);
     return {
-        poll: readKernel(kernel, kernel.poll_identity_pointer(), 64),
+        poll: readModuleMemory(module, module.poll_identity_pointer(), 64),
         records: new Map(
             [...parts].map(([kind, chunks]) => [kind, concatenate(...chunks)]),
         ),
@@ -328,7 +328,7 @@ const enroll = async (
     joining?: JoinedPoll,
 ) =>
     prepare(
-        await instantiateParticipantKernel(participantModule, helpers),
+        await instantiateParticipantModule(participantModule, helpers),
         name,
         joining,
     );
@@ -375,7 +375,7 @@ const verifyRoster = async (
     registrations: readonly ReadonlyMap<number, Uint8Array>[],
     registrationBodyDigests: readonly string[],
 ) => {
-    const { kernel } = await instantiateParticipantKernel(
+    const { module } = await instantiateParticipantModule(
         participantModule,
         helpers,
     );
@@ -387,8 +387,8 @@ const verifyRoster = async (
         poll.definition,
         poll.signature,
     );
-    writeInput(kernel, begin);
-    expect(kernel.roster_begin(begin.length)).toBe(0);
+    writeInput(module, begin);
+    expect(module.roster_begin(begin.length)).toBe(0);
     const transport = participantRelayFixture();
     for (const [position, records] of registrations.entries()) {
         const files = new Map(
@@ -426,12 +426,12 @@ const verifyRoster = async (
         await streamRegistrations(
             relay,
             registrationBodyDigests,
-            readParticipantLimits(kernel).registration,
-            kernel.roster_open_records(),
+            readParticipantLimits(module).registration,
+            module.roster_open_records(),
             (operation, position, bytes) => {
-                writeInput(kernel, bytes);
+                writeInput(module, bytes);
                 return (
-                    kernel.roster_record(operation, position, bytes.length) ===
+                    module.roster_record(operation, position, bytes.length) ===
                     0
                 );
             },
@@ -441,14 +441,14 @@ const verifyRoster = async (
     } finally {
         served.mockRestore();
     }
-    return kernel.roster_finish() === 0
+    return module.roster_finish() === 0
         ? {
-              body: readKernel(
-                  kernel,
-                  kernel.roster_body_pointer(),
-                  kernel.roster_body_length(),
+              body: readModuleMemory(
+                  module,
+                  module.roster_body_pointer(),
+                  module.roster_body_length(),
               ),
-              usernames: verifiedRosterUsernames(kernel),
+              usernames: verifiedRosterUsernames(module),
           }
         : undefined;
 };
@@ -548,7 +548,7 @@ describe('participant helpers with registration work', () => {
         }
         // The poll admits at most three participants, so the roster
         // verifier refuses a roster of four before reading any record.
-        const { kernel } = await instantiateParticipantKernel(
+        const { module } = await instantiateParticipantModule(
             participantModule,
             noParallelHelpers,
         );
@@ -564,8 +564,8 @@ describe('participant helpers with registration work', () => {
                 poll.definition,
                 poll.signature,
             );
-            writeInput(kernel, begin);
-            expect(kernel.roster_begin(begin.length)).toBe(refusal);
+            writeInput(module, begin);
+            expect(module.roster_begin(begin.length)).toBe(refusal);
         }
     });
 
@@ -592,7 +592,7 @@ describe('participant helpers with registration work', () => {
             },
         };
         try {
-            const instance = await instantiateParticipantKernel(
+            const instance = await instantiateParticipantModule(
                 participantModule,
                 failing,
             );
@@ -603,12 +603,12 @@ describe('participant helpers with registration work', () => {
             );
             expect(
                 failureOf(() =>
-                    instance.kernel.custody_identity_input_capacity(),
+                    instance.module.custody_identity_input_capacity(),
                 ),
             ).toBe(failure);
             expect(
                 failureOf(() =>
-                    instance.kernel.custody_identity_begin(
+                    instance.module.custody_identity_begin(
                         custodyPurpose.root,
                         0,
                     ),
@@ -804,9 +804,9 @@ describe('parallel job host', () => {
     });
 
     it("reports a job's output, a helper's exhausted memory, a trap that ends its helper's later jobs, and an exhausted arena", async () => {
-        const module = await compileText(standIn);
+        const compiledModule = await compileText(standIn);
         const helpers = await startParallelHelpers(
-            module,
+            compiledModule,
             helperPorts(2),
             false,
         );
@@ -837,7 +837,7 @@ describe('parallel job host', () => {
             helpers.stop();
         }
         const arenaHelpers = await startParallelHelpers(
-            module,
+            compiledModule,
             helperPorts(1),
             false,
         );
@@ -1272,14 +1272,14 @@ describe('participant module memory', () => {
                 '--input-type=module',
                 '--eval',
                 [
-                    `const { instantiateParticipantKernel } = await import(${source('kernel.ts')});`,
+                    `const { instantiateParticipantModule } = await import(${source('participant-module.ts')});`,
                     `const { ResourceFailure } = await import(${source('failures.ts')});`,
-                    `const { noParallelHelpers } = await import(${source('parallel.ts')});`,
+                    `const { noParallelHelpers } = await import(${source('parallel-helpers.ts')});`,
                     `const bytes = await (await import('node:fs/promises')).readFile(${JSON.stringify(fileURLToPath(new URL('participant.wasm', distribution)))});`,
-                    'const { kernel } = await instantiateParticipantKernel(await WebAssembly.compile(bytes), noParallelHelpers);',
+                    'const { module } = await instantiateParticipantModule(await WebAssembly.compile(bytes), noParallelHelpers);',
                     'const failureOf = (call) => { try { call(); } catch (error) { return error; } };',
-                    'const first = failureOf(() => kernel.custody_identity_begin(0, 0));',
-                    'const later = failureOf(() => kernel.custody_identity_input_capacity());',
+                    'const first = failureOf(() => module.custody_identity_begin(0, 0));',
+                    'const later = failureOf(() => module.custody_identity_input_capacity());',
                     'process.stdout.write(JSON.stringify({ resource: first instanceof ResourceFailure, message: first?.message, same: later === first }));',
                 ].join('\n'),
             ],

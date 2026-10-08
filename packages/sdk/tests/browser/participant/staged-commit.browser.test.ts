@@ -1,19 +1,15 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import {
-    readParticipantLimits,
-    readParticipantProfile,
-} from '#packages/sdk/src/participant/worker/bounds.js';
-import type { ProfileContext } from '#packages/sdk/src/participant/worker/context.js';
-import { StoragePending } from '#packages/sdk/src/participant/worker/failures.js';
+import type { ParticipantProfileContext } from '#packages/sdk/src/participant/worker/context.js';
+import { StorageFailure } from '#packages/sdk/src/participant/worker/failures.js';
 import {
     custodyIdentity,
     custodyPurpose,
 } from '#packages/sdk/src/participant/worker/identity.js';
-import { instantiateParticipantKernel } from '#packages/sdk/src/participant/worker/kernel.js';
-import { noParallelHelpers } from '#packages/sdk/src/participant/worker/parallel.js';
+import { noParallelHelpers } from '#packages/sdk/src/participant/worker/parallel-helpers.js';
+import { instantiateParticipantModule } from '#packages/sdk/src/participant/worker/participant-module.js';
 import type { ParticipantStoredRecord } from '#packages/sdk/src/participant/worker/predecessor.js';
-import { sealRecord } from '#packages/sdk/src/participant/worker/records.js';
+import { sealRecord } from '#packages/sdk/src/participant/worker/private-records.js';
 import {
     commitRoot,
     createRootKey,
@@ -28,13 +24,17 @@ import type {
     RootTransition,
 } from '#packages/sdk/src/participant/worker/root.js';
 import {
+    readParticipantLimits,
+    readParticipantProfile,
+} from '#packages/sdk/src/participant/worker/runtime-bounds.js';
+import {
     openParticipantDatabase,
     readParticipantValue,
     snapshotParticipant,
 } from '#packages/sdk/src/participant/worker/storage.js';
 import type { ParticipantStore } from '#packages/sdk/src/participant/worker/storage.js';
 
-const module = await WebAssembly.compile(
+const compiledModule = await WebAssembly.compile(
     await (
         await fetch(new URL('../../../dist/participant.wasm', import.meta.url))
     ).arrayBuffer(),
@@ -72,20 +72,20 @@ const fixture = async () => {
     const namespace = 'staged-' + crypto.randomUUID();
     const database = await openParticipantDatabase(namespace);
     databases.push(database);
-    const { kernel, handlers } = await instantiateParticipantKernel(
-        module,
+    const { module, handlers } = await instantiateParticipantModule(
+        compiledModule,
         noParallelHelpers,
     );
-    expect(kernel.worker_reserve(0, 0)).toBe(0);
-    const limits = readParticipantLimits(kernel);
-    const profile = readParticipantProfile(kernel, limits, 3, 2);
+    expect(module.worker_reserve(0, 0)).toBe(0);
+    const limits = readParticipantLimits(module);
+    const profile = readParticipantProfile(module, limits, 3, 2);
     if (profile === undefined)
         throw new Error('The fixture profile was refused.');
     const runtime = new Uint8Array(64).fill(29);
-    const context: ProfileContext = {
+    const context: ParticipantProfileContext = {
         namespace,
         database,
-        kernel,
+        module,
         handlers,
         parallel: noParallelHelpers,
         runtime,
@@ -137,7 +137,7 @@ const fixture = async () => {
     const head = {
         generation: 4,
         runtime: hexadecimal(runtime),
-        hash: hexadecimal(custodyIdentity(kernel, custodyPurpose.root, sealed)),
+        hash: hexadecimal(custodyIdentity(module, custodyPurpose.root, sealed)),
     };
     const predecessor: AuthenticatedRoot = { head, plaintext, manifest };
     const successor: ParticipantManifest = {
@@ -229,7 +229,7 @@ describe('staged-record root commit boundary', () => {
                 (error: unknown) => error,
             );
             await fixed.assertOriginal();
-            expect(failure).toBeInstanceOf(StoragePending);
+            expect(failure).toBeInstanceOf(StorageFailure);
         },
     );
 
@@ -257,7 +257,7 @@ describe('staged-record root commit boundary', () => {
                 error = failure;
             }
             expect(error).toBeInstanceOf(Error);
-            expect(error).not.toBeInstanceOf(StoragePending);
+            expect(error).not.toBeInstanceOf(StorageFailure);
             expect((await snapshotParticipant(fixed.database)).head).toEqual(
                 fixed.predecessor.head,
             );
@@ -283,7 +283,7 @@ describe('staged-record root commit boundary', () => {
             error = failure;
         }
         expect(error).toBeInstanceOf(Error);
-        expect(error).not.toBeInstanceOf(StoragePending);
+        expect(error).not.toBeInstanceOf(StorageFailure);
         const snapshot = await snapshotParticipant(fixed.database);
         expect(snapshot.head).toEqual(successor.head);
         expect(snapshot.counts.checkpoint).toBe(0);
@@ -319,7 +319,7 @@ describe('staged-record root commit boundary', () => {
             (error: unknown) => error,
         );
         expect(failure).toBeInstanceOf(Error);
-        expect(failure).not.toBeInstanceOf(StoragePending);
+        expect(failure).not.toBeInstanceOf(StorageFailure);
         await fixed.assertOriginal();
         expect(
             (await snapshotParticipant(fixed.database)).counts.contribution,

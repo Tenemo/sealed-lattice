@@ -26,8 +26,8 @@ import {
     type PackageManagerRunner,
 } from './package-manager-runner.js';
 
-import { kernelFunctions } from '#packages/sdk/src/participant/worker/kernel.js';
-import { helperFunctions } from '#packages/sdk/src/participant/worker/parallel.js';
+import { helperFunctions } from '#packages/sdk/src/participant/worker/parallel-helpers.js';
+import { moduleFunctions } from '#packages/sdk/src/participant/worker/participant-module.js';
 
 const repositoryRoot = fileURLToPath(new URL('../../', import.meta.url));
 const expectedPackageFiles = [
@@ -196,7 +196,7 @@ const requireParticipantRuntime = async (packageDirectoryPath: string) => {
         .map((entry) => entry.name)
         .sort();
     const expectedExportNames = [
-        ...kernelFunctions,
+        ...moduleFunctions,
         ...helperFunctions,
         '__data_end',
         '__heap_base',

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import type { ProfileContext } from '#packages/sdk/src/participant/worker/context.js';
+import type { ParticipantProfileContext } from '#packages/sdk/src/participant/worker/context.js';
 import {
     ModuleFailure,
     ResourceFailure,
@@ -78,7 +78,7 @@ const fixture = async (length = 2 * chunkBytes + 37) => {
             operation !== 2 || count !== 0 || copied !== bytes.length || !equal,
         );
     });
-    const kernel = {
+    const module = {
         memory,
         retain_evaluation: () => 0,
         contribution_output_pointer: () => 32,
@@ -87,9 +87,12 @@ const fixture = async (length = 2 * chunkBytes + 37) => {
         input_capacity: () => chunkBytes,
         restore_evaluation: restore,
     };
-    const context = { namespace, kernel } as unknown as ProfileContext;
+    const context = {
+        namespace,
+        module,
+    } as unknown as ParticipantProfileContext;
     await storeCopy(database, new Blob([bytes]));
-    return { context, database, bytes, kernel, calls, copied: () => copied };
+    return { context, database, bytes, module, calls, copied: () => copied };
 };
 
 afterEach(async () => {
@@ -117,7 +120,7 @@ describe('retained target bounded copies', () => {
         } finally {
             vi.unstubAllGlobals();
         }
-        new Uint8Array(fixed.kernel.memory.buffer).fill(0);
+        new Uint8Array(fixed.module.memory.buffer).fill(0);
         const stored = await storedCopy(fixed.database);
         expect(stored).toBeInstanceOf(Blob);
         expect(new Uint8Array(await (stored as Blob).arrayBuffer())).toEqual(
@@ -225,7 +228,7 @@ describe('retained target bounded copies', () => {
     it('finishes an incomplete copy after a nonterminal host failure', async () => {
         const fixed = await fixture();
         const failure = new Error('The host input copy failed.');
-        fixed.kernel.input_capacity = () => {
+        fixed.module.input_capacity = () => {
             throw failure;
         };
         await expect(restoreEvaluation(fixed.context)).rejects.toBe(failure);
@@ -258,7 +261,7 @@ describe('retained target bounded copies', () => {
             new ResourceFailure('Bound exhausted.'),
         ]) {
             const fixed = await fixture();
-            fixed.kernel.restore_evaluation.mockImplementation(
+            fixed.module.restore_evaluation.mockImplementation(
                 (operation, length) => {
                     fixed.calls.push([operation, length]);
                     if (operation === 1) throw failure;
@@ -278,7 +281,7 @@ describe('retained target bounded copies', () => {
         }
         const fixed = await fixture();
         const failure = new ModuleFailure('Module failed before cleanup.');
-        fixed.kernel.restore_evaluation.mockImplementation(() => {
+        fixed.module.restore_evaluation.mockImplementation(() => {
             throw failure;
         });
         const transaction = fixed.database.transaction.bind(fixed.database);
@@ -292,7 +295,7 @@ describe('retained target bounded copies', () => {
                 },
             );
         await expect(restoreEvaluation(fixed.context)).rejects.toBe(failure);
-        expect(fixed.kernel.restore_evaluation).toHaveBeenCalledTimes(1);
+        expect(fixed.module.restore_evaluation).toHaveBeenCalledTimes(1);
         refused.mockRestore();
     });
 
@@ -302,7 +305,7 @@ describe('retained target bounded copies', () => {
             const failure = new ModuleFailure(
                 'Module failed before an aborted cleanup.',
             );
-            fixed.kernel.restore_evaluation.mockImplementation(() => {
+            fixed.module.restore_evaluation.mockImplementation(() => {
                 throw failure;
             });
             const events: string[] = [];
@@ -345,7 +348,7 @@ describe('retained target bounded copies', () => {
                 await new Promise<void>((resolve) => setTimeout(resolve, 0));
                 expect(events).toEqual(['request error', 'transaction abort']);
                 expect(unhandled).not.toHaveBeenCalled();
-                expect(fixed.kernel.restore_evaluation).toHaveBeenCalledTimes(
+                expect(fixed.module.restore_evaluation).toHaveBeenCalledTimes(
                     1,
                 );
             } finally {

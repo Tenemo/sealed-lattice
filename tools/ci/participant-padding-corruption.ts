@@ -1,4 +1,3 @@
-import { readParticipantLimits } from '#packages/sdk/src/participant/worker/bounds.js';
 import {
     equalBytes,
     fromHexadecimal,
@@ -16,14 +15,14 @@ import {
     custodyIdentity,
     custodyPurpose,
 } from '#packages/sdk/src/participant/worker/identity.js';
-import { instantiateParticipantKernel } from '#packages/sdk/src/participant/worker/kernel.js';
-import { noParallelHelpers } from '#packages/sdk/src/participant/worker/parallel.js';
+import { noParallelHelpers } from '#packages/sdk/src/participant/worker/parallel-helpers.js';
+import { instantiateParticipantModule } from '#packages/sdk/src/participant/worker/participant-module.js';
 import { validateParticipantPredecessor } from '#packages/sdk/src/participant/worker/predecessor.js';
 import { encodePreparationState } from '#packages/sdk/src/participant/worker/preparation-state.js';
 import {
     openRecord,
     sealRecord,
-} from '#packages/sdk/src/participant/worker/records.js';
+} from '#packages/sdk/src/participant/worker/private-records.js';
 import {
     authenticateRoot,
     commitRoot,
@@ -31,6 +30,7 @@ import {
     rootAssociatedData,
 } from '#packages/sdk/src/participant/worker/root.js';
 import { retainedProfile } from '#packages/sdk/src/participant/worker/roster.js';
+import { readParticipantLimits } from '#packages/sdk/src/participant/worker/runtime-bounds.js';
 import { commitParticipantState } from '#packages/sdk/src/participant/worker/state-transaction.js';
 import {
     openParticipantDatabase,
@@ -70,11 +70,11 @@ export const mutateParticipantPadding = async (
         ) !== options.moduleDigest
     )
         throw new Error('The padding control received another module.');
-    const { kernel, handlers } = await instantiateParticipantKernel(
+    const { module, handlers } = await instantiateParticipantModule(
         await WebAssembly.compile(moduleBytes),
         noParallelHelpers,
     );
-    if (kernel.worker_reserve(0, 0) !== 0)
+    if (module.worker_reserve(0, 0) !== 0)
         throw new Error('The padding control memory plan was refused.');
     const database = await openParticipantDatabase(options.namespace);
     const privateBytes: Uint8Array[] = [];
@@ -82,11 +82,11 @@ export const mutateParticipantPadding = async (
         const initial = {
             namespace: options.namespace,
             database,
-            kernel,
+            module,
             handlers,
             parallel: noParallelHelpers,
             runtime: fromHexadecimal(options.runtimeIdentity),
-            limits: readParticipantLimits(kernel),
+            limits: readParticipantLimits(module),
             separateEvaluation: false,
         };
         const root = await authenticateRoot(initial);
@@ -171,7 +171,7 @@ export const mutateParticipantPadding = async (
                         maximumRootBytes: context.profile.root.maximumRootBytes,
                         recordStores: participantRecordStores,
                         records: predecessorRecords,
-                        identities: custodyIdentities(kernel),
+                        identities: custodyIdentities(module),
                     }),
                 write: (transaction) => {
                     transaction.objectStore('contribution').delete(coordinates);
@@ -200,7 +200,7 @@ export const mutateParticipantPadding = async (
                 ...record,
                 key: sealed.key,
                 hash: custodyIdentity(
-                    kernel,
+                    module,
                     custodyPurpose.record,
                     sealed.ciphertext,
                 ),

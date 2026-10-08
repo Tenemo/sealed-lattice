@@ -3,18 +3,18 @@ import { describe, expect, it } from 'vitest';
 import {
     operationSeedBytes,
     seededRandomness,
-} from '#packages/sdk/src/participant/worker/kernel.js';
-import type { ParticipantKernel } from '#packages/sdk/src/participant/worker/kernel.js';
+} from '#packages/sdk/src/participant/worker/participant-module.js';
+import type { ParticipantModule } from '#packages/sdk/src/participant/worker/participant-module.js';
 
 // A module memory whose randomness state accepts one seed and reports the
 // bytes each of its two streams served.
-const seededKernel = (refuseSeed = false) => {
+const seededModule = (refuseSeed = false) => {
     const memory = new WebAssembly.Memory({ initial: 1 });
     const inputPointer = 1024;
     const calls: [number, number][] = [];
     const installed: number[][] = [];
     const drawn = [0, 0];
-    const kernel = {
+    const module = {
         memory,
         operation_random_input_pointer: () => inputPointer,
         operation_random_drawn: (stream: number) => drawn[stream],
@@ -29,8 +29,8 @@ const seededKernel = (refuseSeed = false) => {
             }
             return operation === 3 && length === 0 ? 0 : 1;
         },
-    } as unknown as ParticipantKernel;
-    return { kernel, calls, installed, drawn };
+    } as unknown as ParticipantModule;
+    return { module, calls, installed, drawn };
 };
 
 const seed = Uint8Array.from(
@@ -45,8 +45,8 @@ describe('seeded operation randomness', () => {
             ['ballot', 4],
             ['release', 5],
         ] as const) {
-            const { kernel, calls, installed } = seededKernel();
-            const randomness = seededRandomness(kernel, purpose, seed);
+            const { module, calls, installed } = seededModule();
+            const randomness = seededRandomness(module, purpose, seed);
             expect(installed).toEqual([[...seed]]);
             randomness.discard();
             expect(calls).toEqual([
@@ -57,8 +57,8 @@ describe('seeded operation randomness', () => {
     });
 
     it('reports the bytes both streams served and those of the proof stream', () => {
-        const { kernel, drawn } = seededKernel();
-        const randomness = seededRandomness(kernel, 'ballot', seed);
+        const { module, drawn } = seededModule();
+        const randomness = seededRandomness(module, 'ballot', seed);
         expect([randomness.drawn(), randomness.proofDrawn()]).toEqual([0, 0]);
         drawn[0] = 53;
         drawn[1] = 31;
@@ -69,13 +69,13 @@ describe('seeded operation randomness', () => {
         for (const length of [0, Number(operationSeedBytes) - 1])
             expect(() =>
                 seededRandomness(
-                    seededKernel().kernel,
+                    seededModule().module,
                     'ballot',
                     seed.subarray(0, length),
                 ),
             ).toThrow('No ballot randomness seed is retained.');
         expect(() =>
-            seededRandomness(seededKernel(true).kernel, 'contribution', seed),
+            seededRandomness(seededModule(true).module, 'contribution', seed),
         ).toThrow('The contribution randomness refused its seed.');
     });
 });

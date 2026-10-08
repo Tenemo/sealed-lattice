@@ -1,4 +1,3 @@
-import type { ParticipantProfile } from './bounds.js';
 import {
     concatenate,
     encodeText,
@@ -8,6 +7,7 @@ import {
 } from './bytes.js';
 import { completedClosePhase } from './close-state.js';
 import { targetPhase } from './root-generation.js';
+import type { ParticipantProfile } from './runtime-bounds.js';
 
 // The target signing suffix follows the completed close: the participant's
 // signed response, and for the organizer its signed proposal. Generation 23
@@ -51,7 +51,7 @@ export const encodeTargetState = (generation: number, state: TargetState) =>
 export const decodeTargetState = (
     profile: ParticipantProfile,
     generation: number,
-    organizer: boolean,
+    isOrganizer: boolean,
     bytes: Uint8Array,
 ): TargetState => {
     const { maximumBodyBytes, votePacketBytes } = profile.target;
@@ -60,7 +60,7 @@ export const decodeTargetState = (
         generation < targetPhase.intent ||
         bytes.length < marker.length + 4 ||
         !equalBytes(bytes.subarray(0, marker.length), marker) ||
-        bytes[marker.length] !== completedClosePhase(organizer) ||
+        bytes[marker.length] !== completedClosePhase(isOrganizer) ||
         bytes[marker.length + 1] >= ballotInclusions.length
     )
         throw new Error('The target state is malformed.');

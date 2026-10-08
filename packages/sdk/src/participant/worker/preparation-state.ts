@@ -1,4 +1,3 @@
-import type { ParticipantProfile } from './bounds.js';
 import {
     concatenate,
     encodeText,
@@ -6,6 +5,7 @@ import {
     readUnsigned32,
     unsigned32,
 } from './bytes.js';
+import type { ParticipantProfile } from './runtime-bounds.js';
 import { purposeBit, signingPurpose } from './signing-purpose.js';
 
 export type PreparationSignature = Readonly<

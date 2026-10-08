@@ -10,10 +10,10 @@ const downstream = vi.hoisted(() => ({
     database: vi.fn(),
 }));
 vi.mock(
-    '#packages/sdk/src/participant/worker/parallel.js',
+    '#packages/sdk/src/participant/worker/parallel-helpers.js',
     async (original) => ({
         ...(await original<
-            typeof import('#packages/sdk/src/participant/worker/parallel.js')
+            typeof import('#packages/sdk/src/participant/worker/parallel-helpers.js')
         >()),
         startParallelHelpers: downstream.helpers,
     }),

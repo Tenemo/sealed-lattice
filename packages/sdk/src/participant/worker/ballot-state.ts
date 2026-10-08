@@ -1,4 +1,3 @@
-import type { ParticipantProfile } from './bounds.js';
 import {
     concatenate,
     encodeText,
@@ -10,11 +9,12 @@ import {
     unsigned32,
     unsigned64,
 } from './bytes.js';
-import { operationSeedBytes } from './kernel.js';
+import { operationSeedBytes } from './participant-module.js';
 import type { ParticipantStoredRecord } from './predecessor.js';
-import { recordKeyBytes, sealedLength } from './records.js';
-import type { RecordContext } from './records.js';
+import { recordKeyBytes, sealedLength } from './private-records.js';
+import type { RecordContext } from './private-records.js';
 import { ballotPhase, isRootGeneration } from './root-generation.js';
+import type { ParticipantProfile } from './runtime-bounds.js';
 
 // A participant's ballot beneath its authenticated root. Generation 13 locks
 // the attempt's scores and ballot time; generation 14 adds the seed of all

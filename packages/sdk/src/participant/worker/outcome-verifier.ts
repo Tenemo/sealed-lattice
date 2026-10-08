@@ -1,5 +1,5 @@
 import type { PublicContext } from './context.js';
-import type { PublicRelay } from './public.js';
+import type { PublicRelay } from './relay.js';
 import { certifyTarget, combineReleaseShares } from './release.js';
 import { verifyPublicSetup } from './setup.js';
 import { evaluateClosedTarget, publicCloseRecords } from './target.js';

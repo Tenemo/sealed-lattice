@@ -1,4 +1,3 @@
-import type { ParticipantProfile } from './bounds.js';
 import {
     concatenate,
     encodeText,
@@ -11,8 +10,8 @@ import {
     unsigned32,
     unsigned64,
 } from './bytes.js';
-import { sessionInput } from './context.js';
-import type { ProfileContext } from './context.js';
+import { writeModuleInput } from './context.js';
+import type { ParticipantProfileContext } from './context.js';
 import {
     createProofWriter,
     proofLength,
@@ -20,14 +19,14 @@ import {
     readProof,
 } from './contribution-proof.js';
 import { openDelivery } from './delivery.js';
-import { PublicInputFailure, StoragePending } from './failures.js';
+import { PublicInputFailure, StorageFailure } from './failures.js';
 import { custodyIdentity, custodyPurpose } from './identity.js';
 import {
     operationSeedBytes,
-    readKernel,
+    readModuleMemory,
     seededRandomness,
     writeProofInput,
-} from './kernel.js';
+} from './participant-module.js';
 import type { ParticipantStoredRecord } from './predecessor.js';
 import type { PreparationState } from './preparation-state.js';
 import {
@@ -35,18 +34,18 @@ import {
     encodePreparationState,
 } from './preparation-state.js';
 import {
-    createCandidatePublication,
-    findCandidate,
-    publishOfferAnnouncement,
-    readCandidateFile,
-} from './public.js';
-import type { PublicRelay } from './public.js';
-import {
     openSealedRecord,
     recordKeyBytes,
     sealRecord,
     sealedLength,
-} from './records.js';
+} from './private-records.js';
+import {
+    createCandidatePublication,
+    findCandidate,
+    publishOfferAnnouncement,
+    readCandidateFile,
+} from './relay.js';
+import type { PublicRelay } from './relay.js';
 import { rootGeneration } from './root-generation.js';
 import {
     authenticateRecords,
@@ -63,6 +62,7 @@ import {
     registrationCandidateKey,
 } from './roster.js';
 import type { VerifiedProposal } from './roster.js';
+import type { ParticipantProfile } from './runtime-bounds.js';
 import { decodeSignedPacket } from './signed-packet.js';
 import type { SignedPacket } from './signed-packet.js';
 import {
@@ -111,7 +111,7 @@ type RecordContext = Readonly<{
 // Every original roster member has the same preparation journal. Own offer
 // work is optional and advances independently from quorum selection.
 export type ParticipantSession = {
-    readonly context: ProfileContext;
+    readonly context: ParticipantProfileContext;
     readonly records: RecordContext;
     root: AuthenticatedRoot;
     state?: ContributionState;
@@ -406,7 +406,7 @@ const sealContributionRecord = async (
             ...location,
             key,
             hash: custodyIdentity(
-                session.context.kernel,
+                session.context.module,
                 custodyPurpose.record,
                 ciphertext,
             ),
@@ -430,7 +430,7 @@ const openContributionRecord = async (
     if (
         !equalBytes(
             custodyIdentity(
-                session.context.kernel,
+                session.context.module,
                 custodyPurpose.record,
                 ciphertext,
             ),
@@ -561,21 +561,21 @@ const commitContribution = async (
         (await openContributionRecord(session, output.record)).fill(0);
 };
 
-const proverOutput = (context: ProfileContext) =>
-    readKernel(
-        context.kernel,
-        context.kernel.contribution_proof_output_pointer(),
-        context.kernel.contribution_proof_output_length(),
+const proverOutput = (context: ParticipantProfileContext) =>
+    readModuleMemory(
+        context.module,
+        context.module.contribution_proof_output_pointer(),
+        context.module.contribution_proof_output_length(),
     );
 
 const checkpoint = (
-    context: ProfileContext,
+    context: ParticipantProfileContext,
     operation: number,
     position = 0,
     bytes: Uint8Array = new Uint8Array(),
 ) => {
-    writeProofInput(context.kernel, bytes);
-    return context.kernel.contribution_checkpoint_command(
+    writeProofInput(context.module, bytes);
+    return context.module.contribution_checkpoint_command(
         operation,
         position,
         bytes.length,
@@ -583,18 +583,18 @@ const checkpoint = (
 };
 
 const signing = (
-    context: ProfileContext,
+    context: ParticipantProfileContext,
     operation: number,
     bytes: Uint8Array = new Uint8Array(),
     argument = 0,
 ) => {
-    sessionInput(context, bytes);
-    if (context.kernel.offer_signing(operation, argument, bytes.length) !== 0)
+    writeModuleInput(context, bytes);
+    if (context.module.offer_signing(operation, argument, bytes.length) !== 0)
         throw new Error('The contribution signer refused an operation.');
-    return readKernel(
-        context.kernel,
-        context.kernel.contribution_output_pointer(),
-        context.kernel.contribution_output_length(),
+    return readModuleMemory(
+        context.module,
+        context.module.contribution_output_pointer(),
+        context.module.contribution_output_length(),
     );
 };
 
@@ -604,7 +604,7 @@ const signing = (
 // stored as it arrives.
 const proverRun = (session: ContributionSession, statement: boolean) => {
     const { context } = session;
-    const { kernel, handlers, profile } = context;
+    const { module, handlers, profile } = context;
     const bounds = profile.contribution;
     const bodyObjects = new Set(
         bounds.publicRecords.map((record) => record.object),
@@ -615,7 +615,7 @@ const proverRun = (session: ContributionSession, statement: boolean) => {
     let current = 0;
     let emitted = 0;
     const randomness = seededRandomness(
-        kernel,
+        module,
         'contribution',
         session.state.seed,
     );
@@ -691,9 +691,9 @@ const proverRun = (session: ContributionSession, statement: boolean) => {
         argument = 0,
         bytes: Uint8Array = new Uint8Array(),
     ) => {
-        writeProofInput(kernel, bytes);
+        writeProofInput(module, bytes);
         if (
-            kernel.contribution_proof_command(
+            module.contribution_proof_command(
                 operation,
                 argument,
                 bytes.length,
@@ -710,7 +710,7 @@ const proverRun = (session: ContributionSession, statement: boolean) => {
         // Waits until every body output emitted so far is stored.
         flush: () => storing,
         stored,
-        phase: () => kernel.contribution_proof_phase(),
+        phase: () => module.contribution_proof_phase(),
         objects: () => lengths.size,
         emitted: () => emitted,
         randomBytes: randomness.drawn,
@@ -727,7 +727,7 @@ const proverRun = (session: ContributionSession, statement: boolean) => {
 // applies before every preparation operation, including certification of a
 // different contributor set after an interrupted own proof.
 const discardInterruptedRecords = async (
-    context: ProfileContext,
+    context: ParticipantProfileContext,
     state: ContributionState | undefined,
 ) => {
     const proof = proofObject(context.profile);
@@ -762,7 +762,7 @@ export const beginContribution = async (
         estimate.quota - estimate.usage <
             context.profile.contribution.requiredStorageBytes
     )
-        throw new StoragePending('The origin lacks room for a contribution.');
+        throw new StorageFailure('The origin lacks room for a contribution.');
     const state: ContributionState = {
         phase: 4,
         position: context.position,
@@ -785,7 +785,7 @@ export const beginContribution = async (
 // discarded.
 export const generateContribution = async (session: ContributionSession) => {
     const { context } = session;
-    const { kernel, profile } = context;
+    const { module, profile } = context;
     const bounds = profile.contribution;
     if (session.state.phase !== 4)
         throw new Error('No contribution intent is locked.');
@@ -793,7 +793,7 @@ export const generateContribution = async (session: ContributionSession) => {
     const privateRecords: CheckpointRecord[] = [];
     let header: Uint8Array;
     try {
-        if (kernel.begin_contribution(session.state.position) !== 0)
+        if (module.begin_contribution(session.state.position) !== 0)
             throw new Error('The credential refused contribution generation.');
         await run.store();
         while (run.phase() < 100) await run.advance(proverOperation.generate);
@@ -810,7 +810,7 @@ export const generateContribution = async (session: ContributionSession) => {
             await run.advance(proverOperation.step);
         if (
             run.phase() !== proverPhase.firstColumn ||
-            kernel.contribution_checkpoint_records() !==
+            module.contribution_checkpoint_records() !==
                 bounds.checkpointLengths.length ||
             checkpoint(context, checkpointOperation.exportHeader) !== 0
         )
@@ -840,7 +840,7 @@ export const generateContribution = async (session: ContributionSession) => {
                 throw new Error('A checkpoint record has another length.');
             privateRecords.push({
                 key,
-                hash: custodyIdentity(kernel, custodyPurpose.record, sealed),
+                hash: custodyIdentity(module, custodyPurpose.record, sealed),
             });
             batch.push({ key: index, bytes: sealed });
             batchBytes += sealed.length;
@@ -888,7 +888,7 @@ export const restoreCheckpoint = async (
     relay: PublicRelay,
 ) => {
     const { context, state } = session;
-    const { kernel, profile } = context;
+    const { module, profile } = context;
     const phase = session.state.phase;
     if (phase !== 5 && phase !== 6)
         throw new Error('No contribution checkpoint is retained.');
@@ -918,7 +918,7 @@ export const restoreCheckpoint = async (
         const sealed = new Uint8Array(await blob.arrayBuffer());
         if (
             !equalBytes(
-                custodyIdentity(context.kernel, custodyPurpose.record, sealed),
+                custodyIdentity(context.module, custodyPurpose.record, sealed),
                 record.hash,
             )
         )
@@ -945,9 +945,9 @@ export const restoreCheckpoint = async (
                     registrationFile.publicKey,
                     profile.registration.publicKeyBytes,
                 );
-                writeProofInput(kernel, key);
+                writeProofInput(module, key);
                 if (
-                    kernel.contribution_checkpoint_key(position, key.length) !==
+                    module.contribution_checkpoint_key(position, key.length) !==
                     0
                 )
                     throw new PublicInputFailure(
@@ -958,7 +958,7 @@ export const restoreCheckpoint = async (
     }
     if (
         checkpoint(context, checkpointOperation.finish) !== 0 ||
-        kernel.contribution_proof_phase() !== proverPhase.firstColumn
+        module.contribution_proof_phase() !== proverPhase.firstColumn
     )
         throw new Error('The contribution did not resume exactly.');
 };
@@ -1232,10 +1232,10 @@ export const polynomialFile = (expandedIndex: number) =>
 // Has the module retain the stored proposal's context at this participant's
 // position and returns the proposal's identity.
 const retainProposal = async (
-    context: ProfileContext,
+    context: ParticipantProfileContext,
     root: AuthenticatedRoot,
 ) => {
-    const { kernel } = context;
+    const { module } = context;
     const proposal = await readDataKind(
         context,
         root.manifest,
@@ -1248,18 +1248,18 @@ const retainProposal = async (
         unsigned32(proposal.length),
         proposal,
     );
-    sessionInput(context, control);
-    if (kernel.retain_proposal(control.length) !== 0)
+    writeModuleInput(context, control);
+    if (module.retain_proposal(control.length) !== 0)
         throw new Error('The retained proposal context was refused.');
-    return readKernel(
-        kernel,
-        kernel.retained_proposal_identity_pointer(),
+    return readModuleMemory(
+        module,
+        module.retained_proposal_identity_pointer(),
         identityBytes,
     );
 };
 
 export const resumeParticipant = async (
-    context: ProfileContext,
+    context: ParticipantProfileContext,
     root: AuthenticatedRoot,
     verified?: VerifiedProposal,
 ): Promise<ParticipantSession> => {
@@ -1304,7 +1304,7 @@ export const resumeParticipant = async (
         verified?.identity ?? (await retainProposal(context, root));
     if (
         generation >= rootGeneration.preparation &&
-        context.kernel.confirm_roster() !== 0
+        context.module.confirm_roster() !== 0
     )
         throw new Error('The original confirmed roster could not be restored.');
     const session: ParticipantSession = {
@@ -1328,7 +1328,7 @@ export const resumeParticipant = async (
 };
 
 export const resumeContribution = async (
-    context: ProfileContext,
+    context: ParticipantProfileContext,
     root: AuthenticatedRoot,
     verified?: VerifiedProposal,
 ): Promise<ContributionSession> => {
@@ -1366,7 +1366,7 @@ export const commitPreparation = async (
 export const confirmRoster = async (session: ParticipantSession) => {
     if (session.root.head.generation === rootGeneration.rosterSigned)
         await commitPreparation(session, {});
-    if (session.context.kernel.confirm_roster() !== 0)
+    if (session.context.module.confirm_roster() !== 0)
         throw new Error('The credential refused the confirmed roster.');
 };
 

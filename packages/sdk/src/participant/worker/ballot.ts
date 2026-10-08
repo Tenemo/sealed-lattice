@@ -8,7 +8,6 @@ import {
     validBallotScores,
 } from './ballot-state.js';
 import type { BallotState } from './ballot-state.js';
-import type { ParticipantProfile } from './bounds.js';
 import {
     concatenate,
     equalBytes,
@@ -17,22 +16,26 @@ import {
     unsigned64,
 } from './bytes.js';
 import { closeRecordInventory, decodeCloseState } from './close-state.js';
-import { sessionInput } from './context.js';
+import { writeModuleInput } from './context.js';
 import type {
-    ProfileContext,
+    ParticipantProfileContext,
     PublicContext,
     PublicProfileContext,
 } from './context.js';
 import { contributionRecords } from './contribution.js';
 import type { ParticipantSession } from './contribution.js';
 import { openDelivery } from './delivery.js';
-import { PublicInputFailure, StoragePending } from './failures.js';
-import { operationSeedBytes, readKernel, seededRandomness } from './kernel.js';
+import { PublicInputFailure, StorageFailure } from './failures.js';
+import {
+    operationSeedBytes,
+    readModuleMemory,
+    seededRandomness,
+} from './participant-module.js';
 import type { ParticipantStoredRecord } from './predecessor.js';
-import { createCandidatePublication } from './public.js';
-import type { PublicRelay } from './public.js';
-import { openRecord, recordContext, sealRecord } from './records.js';
-import type { RecordContext } from './records.js';
+import { openRecord, recordContext, sealRecord } from './private-records.js';
+import type { RecordContext } from './private-records.js';
+import { createCandidatePublication } from './relay.js';
+import type { PublicRelay } from './relay.js';
 import { ballotPhase } from './root-generation.js';
 import {
     commitRoot,
@@ -40,6 +43,7 @@ import {
     dataRecordInventory,
     readDataKind,
 } from './root.js';
+import type { ParticipantProfile } from './runtime-bounds.js';
 import {
     deliverFinalAggregate,
     ensureFinalAggregate,
@@ -233,7 +237,7 @@ export const beginBallot = async (
         estimate.usage === undefined ||
         estimate.quota - estimate.usage < profile.ballot.requiredStorageBytes
     )
-        throw new StoragePending('The origin lacks room for a ballot.');
+        throw new StorageFailure('The origin lacks room for a ballot.');
     const records = recordContext(
         participant,
         await retainedSetupInventory(participant),
@@ -344,22 +348,22 @@ const tryBallotCommand = (
     argument = 0,
     input: Uint8Array = new Uint8Array(),
 ) => {
-    const { kernel } = context;
-    sessionInput(context, input);
+    const { module } = context;
+    writeModuleInput(context, input);
     if (
-        kernel.participant_ballot_command(operation, argument, input.length) !==
+        module.participant_ballot_command(operation, argument, input.length) !==
         0
     )
         return undefined;
-    return readKernel(
-        kernel,
-        kernel.contribution_output_pointer(),
-        kernel.contribution_output_length(),
+    return readModuleMemory(
+        module,
+        module.contribution_output_pointer(),
+        module.contribution_output_length(),
     );
 };
 
 const ballotCommand = (
-    context: ProfileContext,
+    context: ParticipantProfileContext,
     operation: number,
     argument = 0,
     input: Uint8Array = new Uint8Array(),
@@ -401,14 +405,14 @@ export const deliverBallotKey = (
 const startBallotWork = async (session: BallotSession) => {
     const { participant } = session;
     const { context } = participant;
-    const { kernel } = context;
+    const { module } = context;
     ballotCommand(
         context,
         ballotOperation.begin,
         0,
         await ballotWorkInput(participant, session.records.inventory),
     );
-    const index = kernel.participant_ballot_key_index() >>> 0;
+    const index = module.participant_ballot_key_index() >>> 0;
     ballotCommand(context, ballotOperation.beginKey, index);
     await deliverBallotKey(context, index);
 };
@@ -419,7 +423,7 @@ const startBallotWork = async (session: BallotSession) => {
 const createBallot = (session: BallotSession) => {
     const { context } = session.participant;
     const randomness = seededRandomness(
-        context.kernel,
+        context.module,
         'ballot',
         session.state.seed,
     );

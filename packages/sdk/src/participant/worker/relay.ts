@@ -1,4 +1,3 @@
-import { foregroundVisitMilliseconds } from './bounds.js';
 import {
     equalBytes,
     hexadecimal,
@@ -19,9 +18,10 @@ import {
     type CandidateFile,
     type CandidateManifest,
 } from './candidate-codec.js';
-import { describe } from './context.js';
+import { errorMessage } from './context.js';
 import type { Delivery } from './delivery.js';
 import { PublicInputFailure } from './failures.js';
+import { foregroundVisitMilliseconds } from './runtime-bounds.js';
 
 // Public records come from an untrusted relay. Every read has an exact upper
 // bound checked before the bytes are kept and ends however the relay paces
@@ -84,7 +84,7 @@ export const streamBounded = async (
         );
     } catch (error) {
         throw new PublicInputFailure(
-            'A public record is unavailable: ' + describe(error),
+            'A public record is unavailable: ' + errorMessage(error),
         );
     }
     if (!response.ok || response.body === null)
@@ -98,7 +98,7 @@ export const streamBounded = async (
                 next = await wait(() => reader.read());
             } catch (error) {
                 throw new PublicInputFailure(
-                    'A public record was interrupted: ' + describe(error),
+                    'A public record was interrupted: ' + errorMessage(error),
                 );
             }
             if (next.done) break;
@@ -560,7 +560,7 @@ const postPublic = async (url: string, bytes: Uint8Array) => {
         );
     } catch (error) {
         throw new PublicInputFailure(
-            'Public delivery is unavailable: ' + describe(error),
+            'Public delivery is unavailable: ' + errorMessage(error),
         );
     }
     if (!response.ok)

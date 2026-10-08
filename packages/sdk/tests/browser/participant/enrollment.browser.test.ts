@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { readParticipantLimits } from '#packages/sdk/src/participant/worker/bounds.js';
 import {
     encodeText,
     hexadecimal,
@@ -10,18 +9,19 @@ import { createEnrollment } from '#packages/sdk/src/participant/worker/enrollmen
 import {
     ModuleFailure,
     ResourceFailure,
-    StoragePending,
+    StorageFailure,
 } from '#packages/sdk/src/participant/worker/failures.js';
 import {
     custodyIdentity,
     custodyPurpose,
 } from '#packages/sdk/src/participant/worker/identity.js';
-import { instantiateParticipantKernel } from '#packages/sdk/src/participant/worker/kernel.js';
-import { noParallelHelpers } from '#packages/sdk/src/participant/worker/parallel.js';
+import { noParallelHelpers } from '#packages/sdk/src/participant/worker/parallel-helpers.js';
+import { instantiateParticipantModule } from '#packages/sdk/src/participant/worker/participant-module.js';
 import {
     openRoot,
     rootAssociatedData,
 } from '#packages/sdk/src/participant/worker/root.js';
+import { readParticipantLimits } from '#packages/sdk/src/participant/worker/runtime-bounds.js';
 import {
     isParticipantHead,
     isRootKey,
@@ -30,7 +30,7 @@ import {
 } from '#packages/sdk/src/participant/worker/storage.js';
 
 const databases: IDBDatabase[] = [];
-const module = await WebAssembly.compile(
+const compiledModule = await WebAssembly.compile(
     await (
         await fetch(new URL('../../../dist/participant.wasm', import.meta.url))
     ).arrayBuffer(),
@@ -48,12 +48,12 @@ const fixture = async (): Promise<ParticipantContext> => {
     const namespace = 'enrollment-' + crypto.randomUUID();
     const database = await openParticipantDatabase(namespace);
     databases.push(database);
-    const { kernel, handlers } = await instantiateParticipantKernel(
-        module,
+    const { module, handlers } = await instantiateParticipantModule(
+        compiledModule,
         noParallelHelpers,
     );
-    expect(kernel.worker_reserve(0, 0)).toBe(0);
-    const limits = readParticipantLimits(kernel);
+    expect(module.worker_reserve(0, 0)).toBe(0);
+    const limits = readParticipantLimits(module);
     vi.spyOn(navigator.storage, 'estimate').mockResolvedValue({
         usage: 0,
         quota: 2 * limits.registration.publicKeyBytes,
@@ -61,7 +61,7 @@ const fixture = async (): Promise<ParticipantContext> => {
     return {
         namespace,
         database,
-        kernel,
+        module,
         handlers,
         parallel: noParallelHelpers,
         runtime: new Uint8Array(64).fill(7),
@@ -91,11 +91,11 @@ describe('enrollment interruption custody', () => {
         const context = await fixture();
         const failure = new ModuleFailure('Validation module interrupted.');
         const started = vi.fn();
-        const validate = context.kernel.validate_organizer;
+        const validate = context.module.validate_organizer;
         const failing = {
             ...context,
-            kernel: {
-                ...context.kernel,
+            module: {
+                ...context.module,
                 validate_organizer: (length: number) => {
                     expect(validate(length)).toBe(0);
                     throw failure;
@@ -119,7 +119,7 @@ describe('enrollment interruption custody', () => {
         for (const failure of [
             new ModuleFailure('Credential module interrupted.'),
             new ResourceFailure('Credential memory exhausted.'),
-            new StoragePending('Credential output could not be retained.'),
+            new StorageFailure('Credential output could not be retained.'),
         ]) {
             const context = await fixture();
             const started = vi.fn();
@@ -128,7 +128,7 @@ describe('enrollment interruption custody', () => {
             });
             const failing = {
                 ...context,
-                kernel: { ...context.kernel, prepare_organizer: prepare },
+                module: { ...context.module, prepare_organizer: prepare },
             };
             const rejected = await createEnrollment(
                 failing,
@@ -138,7 +138,7 @@ describe('enrollment interruption custody', () => {
             expect(rejected).toBeInstanceOf(Error);
             expect(rejected).not.toBeInstanceOf(ModuleFailure);
             expect(rejected).not.toBeInstanceOf(ResourceFailure);
-            expect(rejected).not.toBeInstanceOf(StoragePending);
+            expect(rejected).not.toBeInstanceOf(StorageFailure);
             expect(rejected).toHaveProperty('cause', failure);
             expect((rejected as Error).message).toContain(
                 'Enrollment stopped before its required secrets were retained',
@@ -157,7 +157,7 @@ describe('enrollment interruption custody', () => {
             expect(snapshot.head.hash).toBe(
                 hexadecimal(
                     custodyIdentity(
-                        context.kernel,
+                        context.module,
                         custodyPurpose.root,
                         snapshot.root,
                     ),

@@ -8,7 +8,7 @@ import {
 import {
     openRecord,
     sealRecord,
-} from '#packages/sdk/src/participant/worker/records.js';
+} from '#packages/sdk/src/participant/worker/private-records.js';
 import {
     openParticipantDatabase,
     readParticipantValue,

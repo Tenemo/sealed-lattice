@@ -118,20 +118,20 @@ const phases: readonly (readonly [number, boolean, CloseState])[] = [
     ],
 ];
 
-const decode = (generation: number, organizer: boolean, bytes: Uint8Array) =>
-    decodeCloseState(profile, generation, organizer, bytes);
+const decode = (generation: number, isOrganizer: boolean, bytes: Uint8Array) =>
+    decodeCloseState(profile, generation, isOrganizer, bytes);
 
 describe('participant close state', () => {
     it('decodes every phase it encodes', () => {
-        for (const [generation, organizer, value] of phases) {
-            const bytes = encodeCloseState(generation, organizer, value);
-            expect(decode(generation, organizer, bytes)).toEqual(value);
+        for (const [generation, isOrganizer, value] of phases) {
+            const bytes = encodeCloseState(generation, isOrganizer, value);
+            expect(decode(generation, isOrganizer, bytes)).toEqual(value);
             // Truncated and extended encodings are refused.
             expect(() =>
-                decode(generation, organizer, bytes.subarray(0, -1)),
+                decode(generation, isOrganizer, bytes.subarray(0, -1)),
             ).toThrow();
             expect(() =>
-                decode(generation, organizer, Uint8Array.of(...bytes, 0)),
+                decode(generation, isOrganizer, Uint8Array.of(...bytes, 0)),
             ).toThrow();
         }
     });
@@ -139,9 +139,9 @@ describe('participant close state', () => {
     it('refuses a log that disagrees with its phase or role', () => {
         const encoded = (
             generation: number,
-            organizer: boolean,
+            isOrganizer: boolean,
             value: CloseState,
-        ) => encodeCloseState(generation, organizer, value);
+        ) => encodeCloseState(generation, isOrganizer, value);
         const lockedState = state({ events: [...collected, lock], ...locked });
         // The lock is present exactly from generation 19.
         expect(() =>
@@ -195,14 +195,14 @@ describe('participant close state', () => {
             ),
         ).toThrow();
         // Only the organizer signs an intent or a proposal.
-        for (const [generation, organizer, value] of phases.filter(
+        for (const [generation, isOrganizer, value] of phases.filter(
             ([phase]) => phase === 18 || phase === 22,
         ))
             expect(() =>
                 decode(
                     generation,
                     false,
-                    encoded(generation, organizer, value),
+                    encoded(generation, isOrganizer, value),
                 ),
             ).toThrow();
         // Serials strictly ascend in arrival order.

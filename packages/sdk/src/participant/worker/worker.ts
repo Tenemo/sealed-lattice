@@ -5,7 +5,6 @@ import {
     publishBallot,
     resumeBallot,
 } from './ballot.js';
-import { readParticipantLimits } from './bounds.js';
 import {
     concatenate,
     encodeText,
@@ -24,7 +23,10 @@ import {
     resumeClose,
 } from './close.js';
 import { isEligibleContributor } from './context.js';
-import type { ParticipantContext, ProfileContext } from './context.js';
+import type {
+    ParticipantContext,
+    ParticipantProfileContext,
+} from './context.js';
 import {
     beginContribution,
     confirmRoster,
@@ -45,25 +47,25 @@ import {
     PublicInputFailure,
 } from './failures.js';
 import { participantRuntimeLabel } from './identity.js';
-import {
-    instantiateParticipantKernel,
-    requireInputCapacities,
-} from './kernel.js';
-import type { ParticipantKernel } from './kernel.js';
 import type {
     ParticipantPendingCause,
     ParticipantRefusalReason,
-} from './outcome.js';
+} from './operation-status.js';
+import { verifyPublishedOutcome } from './outcome-verifier.js';
 import {
     helperRole,
     listenAsHelper,
     startParallelHelpers,
-} from './parallel.js';
-import type { ParallelHelpers } from './parallel.js';
-import { endorseSetup, selectSetup } from './preparation-selection.js';
-import { readBounded } from './public.js';
-import type { PublicRelay } from './public.js';
+} from './parallel-helpers.js';
+import type { ParallelHelpers } from './parallel-helpers.js';
+import {
+    instantiateParticipantModule,
+    requireInputCapacities,
+} from './participant-module.js';
+import type { ParticipantModule } from './participant-module.js';
 import { publishRegistrationRecords } from './registration-publication.js';
+import { readBounded } from './relay.js';
+import type { PublicRelay } from './relay.js';
 import { decodeReleaseState } from './release-state.js';
 import {
     advanceRelease,
@@ -87,6 +89,8 @@ import {
     reverifyRoster,
     signRoster,
 } from './roster.js';
+import { readParticipantLimits } from './runtime-bounds.js';
+import { endorseSetup, selectSetup } from './setup-selection.js';
 import { restoreSetup, retainSetup, verifySetup } from './setup.js';
 import { stopParticipant } from './stop.js';
 import type { StopPersistence } from './stop.js';
@@ -105,7 +109,6 @@ import {
     publishTarget,
     signTarget,
 } from './target.js';
-import { verifyPublishedOutcome } from './verifier.js';
 
 // The application's SDK supplies the namespace of the participant's local
 // state, the relay's base URL, the module's URL and the identities its build
@@ -248,8 +251,8 @@ const ballotState = (root: AuthenticatedRoot) => {
 // signed no target and locked no release retains none.
 const ballotInclusion = (
     root: AuthenticatedRoot,
-    organizer: boolean,
-    profiled: ProfileContext | undefined,
+    isOrganizer: boolean,
+    profiled: ParticipantProfileContext | undefined,
 ) => {
     const { generation } = root.head;
     const { target, release } = root.manifest.suffixes;
@@ -262,12 +265,12 @@ const ballotInclusion = (
         return decodeTargetState(
             profiled.profile,
             generation,
-            organizer,
+            isOrganizer,
             target,
         ).ballotInclusion;
     return generation < releasePhase.locked || release === undefined
         ? undefined
-        : decodeReleaseState(profiled.profile, generation, organizer, release)
+        : decodeReleaseState(profiled.profile, generation, isOrganizer, release)
               .ballotInclusion;
 };
 
@@ -276,7 +279,7 @@ const ballotInclusion = (
 const summary = (
     root: AuthenticatedRoot,
     enrollment: RestoredEnrollment,
-    profiled: ProfileContext | undefined,
+    profiled: ParticipantProfileContext | undefined,
 ) => ({
     generation: root.head.generation,
     poll: hexadecimal(root.manifest.poll),
@@ -362,7 +365,7 @@ const execute = async (
             : undefined;
     // What an operation reports beside the participant's summary.
     let reported: Readonly<Record<string, unknown>> = {};
-    const profileContext = (): ProfileContext => {
+    const profileContext = (): ParticipantProfileContext => {
         if (profiled === undefined)
             throw new Error('The participant profile is not known.');
         return profiled;
@@ -451,7 +454,7 @@ const execute = async (
                 if (
                     !equalBytes(proposal.identity, session.records.proposal) ||
                     proposal.position !== session.records.position ||
-                    context.kernel.confirm_roster() !== 0
+                    context.module.confirm_roster() !== 0
                 )
                     throw new Error('The verified original roster changed.');
                 if (!isContributionSession(session))
@@ -735,17 +738,17 @@ const execute = async (
 // linear memory and how far its allocations reached, and its helpers' and
 // the shared arena's, beside the bounds of the operation's memory plan.
 const operationMemory = (
-    kernel: ParticipantKernel,
+    module: ParticipantModule,
     helpers: ParallelHelpers,
     evaluation: boolean,
 ) => ({
-    workerBytes: kernel.memory.buffer.byteLength,
-    workerUsedBytes: kernel.linear_memory_high_water() >>> 0,
+    workerBytes: module.memory.buffer.byteLength,
+    workerUsedBytes: module.linear_memory_high_water() >>> 0,
     workerBoundBytes:
-        kernel.worker_memory_bound(helpers.count, evaluation ? 1 : 0) >>> 0,
+        module.worker_memory_bound(helpers.count, evaluation ? 1 : 0) >>> 0,
     helpers: helpers.count,
     helperBoundBytes:
-        kernel.helper_memory_bound(helpers.count, evaluation ? 1 : 0) >>> 0,
+        module.helper_memory_bound(helpers.count, evaluation ? 1 : 0) >>> 0,
     ...helpers.memory(),
 });
 type OperationMemory = ReturnType<typeof operationMemory>;
@@ -783,9 +786,13 @@ const run = async (
             command.identity,
             delivered.digest,
         );
-        const module = await WebAssembly.compile(delivered.bytes);
+        const compiledModule = await WebAssembly.compile(delivered.bytes);
         const evaluation = evaluatingOperations.has(command.operation);
-        const started = startParallelHelpers(module, helperPorts, evaluation);
+        const started = startParallelHelpers(
+            compiledModule,
+            helperPorts,
+            evaluation,
+        );
         database = await openParticipantDatabase(command.namespace);
         helpers = await started;
         const opened = database;
@@ -793,18 +800,18 @@ const run = async (
         return await navigator.locks.request(
             namespacedName('sealed-lattice-participant', command.namespace),
             async (): Promise<WorkerResult> => {
-                let kernel: ParticipantKernel | undefined;
+                let module: ParticipantModule | undefined;
                 try {
-                    const instance = await instantiateParticipantKernel(
-                        module,
+                    const instance = await instantiateParticipantModule(
+                        compiledModule,
                         parallel,
                     );
-                    kernel = instance.kernel;
+                    module = instance.module;
                     // The worker's share of the operation's memory plan,
                     // whose other shares the started helpers hold, bounds
                     // its instance before the first allocation.
                     if (
-                        kernel.worker_reserve(
+                        module.worker_reserve(
                             parallel.count,
                             evaluation ? 1 : 0,
                         ) !== 0
@@ -813,18 +820,18 @@ const run = async (
                             'The participant module refused its memory plan.',
                         );
                     requireInputCapacities(
-                        kernel,
-                        largestBufferInputBytes(kernel),
+                        module,
+                        largestBufferInputBytes(module),
                     );
                     const result = await execute(
                         {
                             namespace: command.namespace,
                             database: opened,
-                            kernel,
+                            module,
                             handlers: instance.handlers,
                             parallel,
                             runtime,
-                            limits: readParticipantLimits(kernel),
+                            limits: readParticipantLimits(module),
                             separateEvaluation:
                                 command.separateEvaluation === true,
                         },
@@ -840,7 +847,7 @@ const run = async (
                               details: {
                                   ...result.details,
                                   memory: operationMemory(
-                                      kernel,
+                                      module,
                                       parallel,
                                       evaluation,
                                   ),
@@ -853,12 +860,12 @@ const run = async (
                     // retained the target it evaluated in fresh ones.
                     if (
                         error instanceof EvaluationRetained &&
-                        kernel !== undefined
+                        module !== undefined
                     )
                         return {
                             status: 'evaluated',
                             memory: operationMemory(
-                                kernel,
+                                module,
                                 parallel,
                                 evaluation,
                             ),
@@ -953,31 +960,31 @@ const runVerification = async (
             command.identity,
             delivered.digest,
         );
-        const module = await WebAssembly.compile(delivered.bytes);
-        helpers = await startParallelHelpers(module, helperPorts, true);
+        const compiledModule = await WebAssembly.compile(delivered.bytes);
+        helpers = await startParallelHelpers(compiledModule, helperPorts, true);
         const parallel = helpers;
         const namespace = verificationNamespace(command.poll);
         return await navigator.locks.request(
             namespacedName('sealed-lattice-verification', namespace),
             async (): Promise<WorkerResult> => {
-                const { kernel, handlers } = await instantiateParticipantKernel(
-                    module,
+                const { module, handlers } = await instantiateParticipantModule(
+                    compiledModule,
                     parallel,
                 );
-                if (kernel.worker_reserve(parallel.count, 1) !== 0)
+                if (module.worker_reserve(parallel.count, 1) !== 0)
                     throw new Error(
                         'The participant module refused its memory plan.',
                     );
-                requireInputCapacities(kernel, largestBufferInputBytes(kernel));
+                requireInputCapacities(module, largestBufferInputBytes(module));
                 try {
                     const outcome = await verifyPublishedOutcome(
                         {
                             namespace,
-                            kernel,
+                            module,
                             handlers,
                             parallel,
                             runtime,
-                            limits: readParticipantLimits(kernel),
+                            limits: readParticipantLimits(module),
                         },
                         { base: command.relay },
                         fromHexadecimal(command.poll),
@@ -987,7 +994,7 @@ const runVerification = async (
                         details: {
                             poll: command.poll,
                             ...outcome,
-                            memory: operationMemory(kernel, parallel, true),
+                            memory: operationMemory(module, parallel, true),
                         },
                     };
                 } finally {

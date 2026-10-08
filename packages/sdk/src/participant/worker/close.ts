@@ -7,7 +7,6 @@ import {
     retainedBallotRecords,
 } from './ballot.js';
 import type { BallotSession } from './ballot.js';
-import type { ParticipantProfile } from './bounds.js';
 import {
     concatenate,
     equalBytes,
@@ -28,25 +27,29 @@ import {
     encodeCloseState,
 } from './close-state.js';
 import type { CloseEvent, CloseState } from './close-state.js';
-import { sessionInput } from './context.js';
-import type { ProfileContext, PublicProfileContext } from './context.js';
+import { writeModuleInput } from './context.js';
+import type {
+    ParticipantProfileContext,
+    PublicProfileContext,
+} from './context.js';
 import { contributionRecords } from './contribution.js';
 import type { ParticipantSession } from './contribution.js';
 import { openDelivery } from './delivery.js';
 import { PublicInputFailure } from './failures.js';
 import { custodyIdentity, custodyPurpose } from './identity.js';
-import { readKernel } from './kernel.js';
+import { readModuleMemory } from './participant-module.js';
+import { openRecord, recordContext, sealRecord } from './private-records.js';
+import type { RecordContext } from './private-records.js';
 import {
     createCandidatePublication,
     readCandidateFile,
     readCandidates,
     streamCandidateFile,
-} from './public.js';
-import type { CandidateView, PublicRelay } from './public.js';
-import { openRecord, recordContext, sealRecord } from './records.js';
-import type { RecordContext } from './records.js';
+} from './relay.js';
+import type { CandidateView, PublicRelay } from './relay.js';
 import { ballotPhase, closePhase, rootGeneration } from './root-generation.js';
 import { commitRoot, dataRecordInventory } from './root.js';
+import type { ParticipantProfile } from './runtime-bounds.js';
 import { retainedSetupInventory } from './setup.js';
 import { encodeSignedPacket } from './signed-packet.js';
 import { snapshotParticipant } from './storage.js';
@@ -113,7 +116,7 @@ type Submission = Readonly<{
 export type CloseSession = {
     readonly participant: ParticipantSession;
     readonly records: RecordContext;
-    readonly organizer: boolean;
+    readonly isOrganizer: boolean;
     readonly ballot: BallotSession | undefined;
     state: CloseState;
     // The submission of each own or held event and the responder of each
@@ -155,27 +158,27 @@ const closeOperation = {
 const closeMessage = { intent: 0, response: 1, proposal: 2 } as const;
 
 const tryCloseCommand = (
-    context: ProfileContext,
+    context: ParticipantProfileContext,
     operation: number,
     argument = 0,
     input: Uint8Array = new Uint8Array(),
 ) => {
-    const { kernel } = context;
-    sessionInput(context, input);
+    const { module } = context;
+    writeModuleInput(context, input);
     if (
-        kernel.participant_close_command(operation, argument, input.length) !==
+        module.participant_close_command(operation, argument, input.length) !==
         0
     )
         return undefined;
-    return readKernel(
-        kernel,
-        kernel.contribution_output_pointer(),
-        kernel.contribution_output_length(),
+    return readModuleMemory(
+        module,
+        module.contribution_output_pointer(),
+        module.contribution_output_length(),
     );
 };
 
 const closeCommand = (
-    context: ProfileContext,
+    context: ParticipantProfileContext,
     operation: number,
     argument = 0,
     input: Uint8Array = new Uint8Array(),
@@ -203,7 +206,7 @@ const recordCount = (state: CloseState) =>
 // Every listed record must be stored and nothing else.
 export const resumeClose = async (
     participant: ParticipantSession,
-    organizer: boolean,
+    isOrganizer: boolean,
 ): Promise<CloseSession> => {
     const { context, root } = participant;
     const bytes = root.manifest.suffixes.close;
@@ -219,7 +222,7 @@ export const resumeClose = async (
     const state = decodeCloseState(
         context.profile,
         root.head.generation,
-        organizer,
+        isOrganizer,
         bytes,
     );
     const snapshot = await snapshotParticipant(context.database);
@@ -229,7 +232,7 @@ export const resumeClose = async (
     return {
         participant,
         records,
-        organizer,
+        isOrganizer,
         ballot:
             ballot !== undefined && isSignedBallot(ballot) ? ballot : undefined,
         state,
@@ -241,7 +244,7 @@ export const resumeClose = async (
 
 // Whether nothing remains for this participant's close.
 export const isCloseComplete = (session: CloseSession) =>
-    generationOf(session) >= completedClosePhase(session.organizer);
+    generationOf(session) >= completedClosePhase(session.isOrganizer);
 
 const openCloseRecord = (
     session: CloseSession,
@@ -298,7 +301,7 @@ const commitClose = async (
     const { profile } = context;
     const encoded = encodeCloseState(
         transition.generation,
-        session.organizer,
+        session.isOrganizer,
         transition.state,
     );
     if (encoded.length > profile.close.maximumStateBytes)
@@ -341,7 +344,10 @@ const commitClose = async (
 
 // The submission identity the module reports for an envelope, which
 // listings and wanted bodies name; undefined for bytes that are not one.
-const envelopeIdentity = (context: ProfileContext, submission: Uint8Array) =>
+const envelopeIdentity = (
+    context: ParticipantProfileContext,
+    submission: Uint8Array,
+) =>
     tryCloseCommand(
         context,
         closeOperation.envelopeIdentity,
@@ -350,7 +356,7 @@ const envelopeIdentity = (context: ProfileContext, submission: Uint8Array) =>
     );
 
 const namesEnvelope = (
-    context: ProfileContext,
+    context: ParticipantProfileContext,
     submission: Uint8Array,
     identity: Uint8Array,
 ) => {
@@ -366,7 +372,7 @@ const custodyEnvelopeIdentity = (
     submission: Uint8Array,
 ) =>
     custodyIdentity(
-        context.kernel,
+        context.module,
         custodyPurpose.envelope,
         submission.subarray(0, context.profile.ballot.envelopeBytes),
     );
@@ -406,7 +412,7 @@ export const responseIdentity = (
     response: Uint8Array,
 ) =>
     custodyIdentity(
-        context.kernel,
+        context.module,
         custodyPurpose.closeResponse,
         response.subarray(4, 4 + readUnsigned32(response, 0)),
     );
@@ -691,7 +697,7 @@ const startCloseWork = async (session: CloseSession) => {
             0,
             ownSubmission(session.ballot),
         );
-    if (session.organizer && generation >= closePhase.locked)
+    if (session.isOrganizer && generation >= closePhase.locked)
         closeCommand(
             context,
             closeOperation.restoreMessage,
@@ -730,7 +736,7 @@ export const restoreCompletedClose = async (session: CloseSession) => {
             0,
             ownSubmission(session.ballot),
         );
-    if (session.organizer)
+    if (session.isOrganizer)
         closeCommand(
             context,
             closeOperation.restoreMessage,
@@ -744,7 +750,7 @@ export const restoreCompletedClose = async (session: CloseSession) => {
         closeMessage.response,
         state.responsePacket,
     );
-    if (session.organizer)
+    if (session.isOrganizer)
         closeCommand(
             context,
             closeOperation.restoreMessage,
@@ -1262,7 +1268,7 @@ const respond = async (session: CloseSession, preparedBody?: Uint8Array) => {
 
         responsePacket,
     };
-    if (session.organizer) {
+    if (session.isOrganizer) {
         closeCommand(context, closeOperation.admitResponse, 0, responsePacket);
         state = {
             ...state,
@@ -1270,7 +1276,7 @@ const respond = async (session: CloseSession, preparedBody?: Uint8Array) => {
         };
     }
     await commitClose(session, { generation: closePhase.responded, state });
-    return session.organizer;
+    return session.isOrganizer;
 };
 
 // Signs the organizer's retained proposal. A restored organizer takes its
@@ -1348,7 +1354,7 @@ export const lockPublishedIntent = async (
     session: CloseSession,
     relay: PublicRelay,
 ) => {
-    if (session.organizer || generationOf(session) !== 12) return false;
+    if (session.isOrganizer || generationOf(session) !== 12) return false;
     await startCloseWork(session);
     return lockAvailableIntent(session, relay);
 };
@@ -1380,7 +1386,7 @@ export const advanceClose = async (
     const unlocked =
         generation() === rootGeneration.setupRetained ||
         generation() === ballotPhase.signed;
-    if (session.organizer) {
+    if (session.isOrganizer) {
         if (
             generation() === closePhase.intent ||
             (unlocked && request.closeTime !== undefined)
@@ -1393,7 +1399,7 @@ export const advanceClose = async (
         await lockAvailableIntent(session, relay);
     }
     let responseBody: Uint8Array | undefined;
-    if (session.organizer && generation() === closePhase.locked)
+    if (session.isOrganizer && generation() === closePhase.locked)
         responseBody = await takeResponses(session, relay);
     let prepared = false;
     if (
@@ -1401,7 +1407,7 @@ export const advanceClose = async (
         generation() === closePhase.responding
     )
         prepared = await respond(session, responseBody);
-    if (session.organizer && generation() === closePhase.responded)
+    if (session.isOrganizer && generation() === closePhase.responded)
         await propose(session, prepared);
 };
 
@@ -1525,11 +1531,12 @@ export const publishClose = async (
     const generation = generationOf(session);
     const { state } = session;
     const { position } = session.records;
-    const responder = !session.organizer && generation >= closePhase.responded;
+    const responder =
+        !session.isOrganizer && generation >= closePhase.responded;
     if (generation < closePhase.locked) return;
     const { context, root } = session.participant;
     const delivery = await openDelivery(context, root);
-    if (session.organizer) {
+    if (session.isOrganizer) {
         const publication = createCandidatePublication(
             relay,
             closeIntentCandidateKey,

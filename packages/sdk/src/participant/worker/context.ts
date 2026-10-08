@@ -1,7 +1,13 @@
-import type { ParticipantLimits, ParticipantProfile } from './bounds.js';
-import { writeInput, writeOwnRegistrationInput } from './kernel.js';
-import type { KernelHandlers, ParticipantKernel } from './kernel.js';
-import type { ParallelHelpers } from './parallel.js';
+import type { ParallelHelpers } from './parallel-helpers.js';
+import { writeInput, writeOwnRegistrationInput } from './participant-module.js';
+import type {
+    ModuleHandlers,
+    ParticipantModule,
+} from './participant-module.js';
+import type {
+    ParticipantLimits,
+    ParticipantProfile,
+} from './runtime-bounds.js';
 
 // What a verification of public records shares: the namespace that names
 // its public working storage, the module instance with its current handlers
@@ -9,8 +15,8 @@ import type { ParallelHelpers } from './parallel.js';
 // bounds.
 export type PublicContext = Readonly<{
     namespace: string;
-    kernel: ParticipantKernel;
-    handlers: KernelHandlers;
+    module: ParticipantModule;
+    handlers: ModuleHandlers;
     parallel: ParallelHelpers;
     runtime: Uint8Array;
     limits: ParticipantLimits;
@@ -32,20 +38,20 @@ export type ParticipantContext = PublicContext &
         profile?: ParticipantProfile;
     }>;
 
-export type ProfileContext = ParticipantContext &
+export type ParticipantProfileContext = ParticipantContext &
     Readonly<{ profile: ParticipantProfile; position: number }>;
 
 // Only the first roster positions contribute setup key material.
-export const isEligibleContributor = (context: ProfileContext) =>
+export const isEligibleContributor = (context: ParticipantProfileContext) =>
     context.position < context.profile.eligibleContributorCount;
 
-export const sessionInput = (context: PublicContext, bytes: Uint8Array) =>
-    writeInput(context.kernel, bytes);
+export const writeModuleInput = (context: PublicContext, bytes: Uint8Array) =>
+    writeInput(context.module, bytes);
 
 export const ownRegistrationInput = (
     context: ParticipantContext,
     bytes: Uint8Array,
-) => writeOwnRegistrationInput(context.kernel, bytes);
+) => writeOwnRegistrationInput(context.module, bytes);
 
-export const describe = (error: unknown) =>
+export const errorMessage = (error: unknown) =>
     error instanceof Error ? error.message : String(error);

@@ -1,4 +1,4 @@
-import type { ParticipantPendingCause } from './outcome.js';
+import type { ParticipantPendingCause } from './operation-status.js';
 
 // The failures that decide how an operation ends. Any other failure is a
 // local fault.
@@ -19,7 +19,7 @@ export class PublicInputFailure extends Error {}
 // was, a transition whose exact predecessor still authenticates or staged
 // records the origin had no room for, leaves the participant pending; any
 // other failure is local state loss.
-export class StoragePending extends Error {}
+export class StorageFailure extends Error {}
 
 // A helper that failed, and an exhausted memory bound of the module instance
 // or of the shared arena, end the operation as pending. The instance is not
@@ -36,7 +36,7 @@ export class ModuleFailure extends Error {}
 export const pendingCause = (error: unknown): ParticipantPendingCause =>
     error instanceof PublicInputFailure
         ? 'public input'
-        : error instanceof StoragePending
+        : error instanceof StorageFailure
           ? 'storage'
           : error instanceof ResourceFailure
             ? 'resource'

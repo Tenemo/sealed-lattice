@@ -3,10 +3,6 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { ballotRecordAssociatedData } from '#packages/sdk/src/participant/worker/ballot-state.js';
 import type { BallotSession } from '#packages/sdk/src/participant/worker/ballot.js';
 import {
-    readParticipantLimits,
-    readParticipantProfile,
-} from '#packages/sdk/src/participant/worker/bounds.js';
-import {
     closeEventKind,
     closeRecordAssociatedData,
     collectingCloseState,
@@ -17,9 +13,13 @@ import {
     custodyIdentity,
     custodyPurpose,
 } from '#packages/sdk/src/participant/worker/identity.js';
-import { instantiateParticipantKernel } from '#packages/sdk/src/participant/worker/kernel.js';
-import { noParallelHelpers } from '#packages/sdk/src/participant/worker/parallel.js';
-import { sealRecord } from '#packages/sdk/src/participant/worker/records.js';
+import { noParallelHelpers } from '#packages/sdk/src/participant/worker/parallel-helpers.js';
+import { instantiateParticipantModule } from '#packages/sdk/src/participant/worker/participant-module.js';
+import { sealRecord } from '#packages/sdk/src/participant/worker/private-records.js';
+import {
+    readParticipantLimits,
+    readParticipantProfile,
+} from '#packages/sdk/src/participant/worker/runtime-bounds.js';
 import {
     openParticipantDatabase,
     participantDatabaseName,
@@ -27,18 +27,18 @@ import {
 
 const opened: IDBDatabase[] = [];
 const names: string[] = [];
-const module = await WebAssembly.compile(
+const compiledModule = await WebAssembly.compile(
     await (
         await fetch(new URL('../../../dist/participant.wasm', import.meta.url))
     ).arrayBuffer(),
 );
-const { kernel: boundsKernel } = await instantiateParticipantKernel(
-    module,
+const { module: boundsModule } = await instantiateParticipantModule(
+    compiledModule,
     noParallelHelpers,
 );
 const profile = readParticipantProfile(
-    boundsKernel,
-    readParticipantLimits(boundsKernel),
+    boundsModule,
+    readParticipantLimits(boundsModule),
     3,
     2,
 );
@@ -81,12 +81,12 @@ const fixture = async (author = 1) => {
     view.setBigUint64(142, BigInt(body.length), true);
     const submission = new Uint8Array(profile.close.submissionBytes);
     submission.set(envelope);
-    const { kernel } = await instantiateParticipantKernel(
-        module,
+    const { module } = await instantiateParticipantModule(
+        compiledModule,
         noParallelHelpers,
     );
-    expect(kernel.worker_reserve(0, 0)).toBe(0);
-    const identity = custodyIdentity(kernel, custodyPurpose.envelope, envelope);
+    expect(module.worker_reserve(0, 0)).toBe(0);
+    const identity = custodyIdentity(module, custodyPurpose.envelope, envelope);
     const records = {
         poll: new Uint8Array(64).fill(2),
         runtime: new Uint8Array(64).fill(3),
@@ -122,7 +122,7 @@ const fixture = async (author = 1) => {
             store.add(new Blob([new Uint8Array(bytes)]), [0, index]);
     });
     const session = {
-        participant: { context: { database, profile, kernel, position: 0 } },
+        participant: { context: { database, profile, module, position: 0 } },
         records,
         ballot: undefined,
         state: { ...collectingCloseState(), events: [event] },

@@ -1,5 +1,5 @@
-import { operationSeedBytes, readKernel } from './kernel.js';
-import type { ParticipantKernel } from './kernel.js';
+import { operationSeedBytes, readModuleMemory } from './participant-module.js';
+import type { ParticipantModule } from './participant-module.js';
 
 // Every bound the worker enforces. The participant module reports the sizes
 // of the objects it encodes or verifies; the worker adds the layouts of the
@@ -168,10 +168,10 @@ export type ParticipantProfile = Readonly<{
 
 // Reads the module's last bounds record, one little-endian 64-bit word per
 // value, in the order the module writes them.
-const moduleRecord = (kernel: ParticipantKernel, count: number) => {
-    const bytes = readKernel(
-        kernel,
-        kernel.participant_bounds_pointer(),
+const moduleRecord = (module: ParticipantModule, count: number) => {
+    const bytes = readModuleMemory(
+        module,
+        module.participant_bounds_pointer(),
         8 * count,
     );
     const view = new DataView(bytes.buffer);
@@ -194,8 +194,8 @@ const moduleRecord = (kernel: ParticipantKernel, count: number) => {
 };
 
 // The bounds every profile shares, as the module reports them.
-const readModuleLimits = (kernel: ParticipantKernel) => {
-    const { take, finish } = moduleRecord(kernel, kernel.participant_limits());
+const readModuleLimits = (module: ParticipantModule) => {
+    const { take, finish } = moduleRecord(module, module.participant_limits());
     const limits = {
         participants: { minimum: take(), maximum: take() },
         options: { minimum: take(), maximum: take() },
@@ -249,13 +249,13 @@ type ModuleLimits = ReturnType<typeof readModuleLimits>;
 
 // One profile's sizes, as the module reports them.
 const readModuleProfile = (
-    kernel: ParticipantKernel,
+    module: ParticipantModule,
     participants: number,
     options: number,
 ) => {
-    const count = kernel.participant_profile_bounds(participants, options);
+    const count = module.participant_profile_bounds(participants, options);
     if (count === 0) return undefined;
-    const { take, list, finish } = moduleRecord(kernel, count);
+    const { take, list, finish } = moduleRecord(module, count);
     const profile = {
         participantCount: take(),
         optionCount: take(),
@@ -371,8 +371,11 @@ const privateEntryBytes = keyBytes + identityBytes;
 const signingEntryBytes = 2 + 4 + keyBytes + identityBytes;
 const signingRecords = 2;
 
-const contributionBounds = (module: ModuleLimits, profile: ModuleProfile) => {
-    const { contribution } = module;
+const contributionBounds = (
+    moduleLimits: ModuleLimits,
+    profile: ModuleProfile,
+) => {
+    const { contribution } = moduleLimits;
     const publicRecords = profile.polynomials.flatMap((polynomial) =>
         Array.from({ length: chunks(polynomial.bytes) }, (_unused, index) => ({
             object: polynomial.expandedIndex + 1,
@@ -421,7 +424,7 @@ const contributionBounds = (module: ModuleLimits, profile: ModuleProfile) => {
         ),
         signingBytes:
             contribution.offerEnvelopeBytes +
-            module.registration.signatureBytes +
+            moduleLimits.registration.signatureBytes +
             tagBytes * signingRecords,
     };
 };
@@ -434,11 +437,11 @@ const ballotPrefixBytes = 4 + 1 + 4 + 2;
 const ballotTimeBytes = 8;
 
 const ballotBounds = (
-    module: ModuleLimits,
+    moduleLimits: ModuleLimits,
     limits: ParticipantLimits,
     profile: ModuleProfile,
 ) => {
-    const { ballot } = module;
+    const { ballot } = moduleLimits;
     const bodyRecords = Math.ceil(
         profile.maximumBallotBodyBytes / ballot.recordBytes,
     );
@@ -446,7 +449,9 @@ const ballotBounds = (
         ballotPrefixBytes + limits.options.maximum + ballotTimeBytes;
     const retainedBody = keyBytes * bodyRecords + ballot.envelopeBytes;
     const signedStateBytes =
-        ballotPrefixBytes + retainedBody + module.registration.signatureBytes;
+        ballotPrefixBytes +
+        retainedBody +
+        moduleLimits.registration.signatureBytes;
     return {
         ...ballot,
         bodyRecords,
@@ -472,11 +477,11 @@ const closePrefixBytes = 4 + 4;
 const eventBytes = (records: number) => 1 + 2 + 4 + 4 + keyBytes * records;
 
 const closeBounds = (
-    module: ModuleLimits,
+    moduleLimits: ModuleLimits,
     profile: ModuleProfile,
     ballotBodyRecords: number,
 ) => {
-    const { close } = module;
+    const { close } = moduleLimits;
     const participants = profile.participantCount;
     const corrupt = profile.faultBound;
     const listed = close.maximumListedEnvelopesPerSlot;
@@ -522,8 +527,8 @@ const closeBounds = (
 
 // The target suffix: its marker, the close phase it follows, the own
 // ballot's status and the body length, the target body, then the signed vote once completed.
-const targetBounds = (module: ModuleLimits) => {
-    const { target } = module;
+const targetBounds = (moduleLimits: ModuleLimits) => {
+    const { target } = moduleLimits;
     const prefix = 4 + 1 + 1 + 2;
     return {
         ...target,
@@ -535,12 +540,13 @@ const targetBounds = (module: ModuleLimits) => {
 // The release suffix: its marker, predecessor, own ballot status, target
 // length, body length and key count, the target body, the randomness seed until the body exists,
 // a key per body record, the envelope and the signature.
-const releaseBounds = (module: ModuleLimits, profile: ModuleProfile) => {
-    const { release } = module;
+const releaseBounds = (moduleLimits: ModuleLimits, profile: ModuleProfile) => {
+    const { release } = moduleLimits;
     const bodyRecords = Math.ceil(
         profile.maximumReleaseBodyBytes / release.recordBytes,
     );
-    const attempt = 4 + 1 + 1 + 2 + 4 + 2 + module.target.maximumBodyBytes;
+    const attempt =
+        4 + 1 + 1 + 2 + 4 + 2 + moduleLimits.target.maximumBodyBytes;
     const retainedBody = keyBytes * bodyRecords + release.envelopeBytes;
     return {
         ...release,
@@ -549,7 +555,7 @@ const releaseBounds = (module: ModuleLimits, profile: ModuleProfile) => {
         maximumStateBytes: maximum(
             attempt + operationSeedBytes,
             attempt + retainedBody,
-            attempt + retainedBody + module.registration.signatureBytes,
+            attempt + retainedBody + moduleLimits.registration.signatureBytes,
         ),
     };
 };
@@ -566,7 +572,7 @@ const setupInventoryBytes = (profile: ModuleProfile) =>
 // Assembles one profile's bounds from the module's sizes and the retained
 // layouts.
 const profileBounds = (
-    module: ModuleLimits,
+    moduleLimits: ModuleLimits,
     limits: ParticipantLimits,
     profile: ModuleProfile,
 ): ParticipantProfile => {
@@ -575,20 +581,20 @@ const profileBounds = (
         checkpointCiphertextBytes,
         signingBytes,
         ...contribution
-    } = contributionBounds(module, profile);
+    } = contributionBounds(moduleLimits, profile);
     const { bodyRecords, signedStateBytes, sealedBodyBytes, ...ballot } =
-        ballotBounds(module, limits, profile);
+        ballotBounds(moduleLimits, limits, profile);
     const { collectingBytes, ...close } = closeBounds(
-        module,
+        moduleLimits,
         profile,
         bodyRecords,
     );
-    const target = targetBounds(module);
-    const release = releaseBounds(module, profile);
+    const target = targetBounds(moduleLimits);
+    const release = releaseBounds(moduleLimits, profile);
     const setupReference = setupReferenceBytes(profile);
     const setupInventory = setupInventoryBytes(profile);
     const preparation = {
-        ...module.preparation,
+        ...moduleLimits.preparation,
         selectionBodyBytes: profile.selectionBodyBytes,
         selectionReferenceBytes: profile.selectionReferenceBytes,
         certificateBytes: profile.certificateBytes,
@@ -597,14 +603,16 @@ const profileBounds = (
     // followed by the signature on completion. At activation all slots empty.
     const emptyPreparationBytes = 4 + 3 * suffixLengthBytes;
     const selectionSlotBytes =
-        1 + preparation.selectionBodyBytes + module.registration.signatureBytes;
+        1 +
+        preparation.selectionBodyBytes +
+        moduleLimits.registration.signatureBytes;
     const endorsementSlotBytes =
         1 +
         preparation.selectionBodyBytes +
-        module.registration.signatureBytes +
+        moduleLimits.registration.signatureBytes +
         preparation.selectionReferenceBytes +
         preparation.endorsementBodyBytes +
-        module.registration.signatureBytes;
+        moduleLimits.registration.signatureBytes;
     const maximumPreparationBytes =
         emptyPreparationBytes +
         contribution.maximumStateBytes +
@@ -684,7 +692,7 @@ const profileBounds = (
         target,
         release,
         evaluation: {
-            polynomialDegree: module.polynomialDegree,
+            polynomialDegree: moduleLimits.polynomialDegree,
             storedCoefficientBytes: profile.storedCoefficientBytes,
         },
     };
@@ -694,12 +702,12 @@ const profileBounds = (
 // which bound a root and its setup reference before the retained roster
 // names the profile.
 export const readParticipantLimits = (
-    kernel: ParticipantKernel,
+    module: ParticipantModule,
 ): ParticipantLimits => {
-    const module = readModuleLimits(kernel);
-    const { participants, options, registration } = module;
+    const moduleLimits = readModuleLimits(module);
+    const { participants, options, registration } = moduleLimits;
     const largest = readModuleProfile(
-        kernel,
+        module,
         participants.maximum,
         options.maximum,
     );
@@ -733,23 +741,23 @@ export const readParticipantLimits = (
         ...enrollment,
         root: {
             ...enrollment.root,
-            maximumRootBytes: profileBounds(module, enrollment, largest).root
-                .maximumRootBytes,
+            maximumRootBytes: profileBounds(moduleLimits, enrollment, largest)
+                .root.maximumRootBytes,
         },
     };
 };
 
 // A supported profile's bounds, or undefined for another profile.
 export const readParticipantProfile = (
-    kernel: ParticipantKernel,
+    module: ParticipantModule,
     limits: ParticipantLimits,
     participantCount: number,
     optionCount: number,
 ): ParticipantProfile | undefined => {
-    const profile = readModuleProfile(kernel, participantCount, optionCount);
+    const profile = readModuleProfile(module, participantCount, optionCount);
     return profile === undefined
         ? undefined
-        : profileBounds(readModuleLimits(kernel), limits, profile);
+        : profileBounds(readModuleLimits(module), limits, profile);
 };
 
 export const participantDataKindMaximums = (limits: ParticipantLimits) =>

@@ -1,8 +1,4 @@
 import {
-    foregroundVisitMilliseconds,
-    participantDataKindMaximums,
-} from './bounds.js';
-import {
     concatenate,
     encodeText,
     equalBytes,
@@ -13,15 +9,19 @@ import {
     unsigned16,
     unsigned32,
 } from './bytes.js';
-import { describe, ownRegistrationInput, sessionInput } from './context.js';
+import {
+    errorMessage,
+    ownRegistrationInput,
+    writeModuleInput,
+} from './context.js';
 import type { ParticipantContext } from './context.js';
 import {
     custodyIdentities,
     custodyIdentity,
     custodyPurpose,
 } from './identity.js';
-import { readKernel } from './kernel.js';
-import type { ParticipantRefusalReason } from './outcome.js';
+import type { ParticipantRefusalReason } from './operation-status.js';
+import { readModuleMemory } from './participant-module.js';
 import { validateParticipantPredecessor } from './predecessor.js';
 import { unusedPreparationPurposes } from './preparation-state.js';
 import {
@@ -43,6 +43,10 @@ import {
     sealRoot,
 } from './root.js';
 import type { AuthenticatedRoot, RecordReference } from './root.js';
+import {
+    foregroundVisitMilliseconds,
+    participantDataKindMaximums,
+} from './runtime-bounds.js';
 import { purposeBit, signingPurpose } from './signing-purpose.js';
 import { commitParticipantState } from './state-transaction.js';
 import {
@@ -143,7 +147,7 @@ export const createEnrollment = async (
 ): Promise<AuthenticatedRoot | EnrollmentRefusal> => {
     let enrollmentIncomplete = false;
     try {
-        const { database, limits, kernel, handlers, runtime } = context;
+        const { database, limits, module, handlers, runtime } = context;
         if (!(await isEmptyParticipant(database))) return 'participant exists';
         const name = encodeWellFormed(request.username);
         if (
@@ -183,10 +187,10 @@ export const createEnrollment = async (
                 unsigned32(name.length),
                 name,
             );
-            if (input.length > kernel.input_capacity())
+            if (input.length > module.input_capacity())
                 return 'invalid request';
-            sessionInput(context, input);
-            if (kernel.validate_organizer(input.length) !== 0)
+            writeModuleInput(context, input);
+            if (module.validate_organizer(input.length) !== 0)
                 return 'invalid request';
         } else {
             if (
@@ -204,10 +208,10 @@ export const createEnrollment = async (
                 unsigned32(name.length),
                 name,
             );
-            if (input.length > kernel.input_capacity())
+            if (input.length > module.input_capacity())
                 return 'invalid request';
-            sessionInput(context, input);
-            if (kernel.validate_joiner(input.length) !== 0)
+            writeModuleInput(context, input);
+            if (module.validate_joiner(input.length) !== 0)
                 return 'invalid request';
         }
         const estimate = await navigator.storage.estimate();
@@ -222,7 +226,7 @@ export const createEnrollment = async (
         const key = await createRootKey();
         const intentPlaintext = concatenate(
             encodeText('INI2'),
-            custodyIdentity(kernel, custodyPurpose.enrollmentInput, input),
+            custodyIdentity(module, custodyPurpose.enrollmentInput, input),
         );
         const intent = await sealRoot(
             key,
@@ -233,7 +237,7 @@ export const createEnrollment = async (
         const intentHead = {
             generation: rootGeneration.enrollmentIntent,
             hash: hexadecimal(
-                custodyIdentity(kernel, custodyPurpose.root, intent),
+                custodyIdentity(module, custodyPurpose.root, intent),
             ),
             runtime: hexadecimal(runtime),
         };
@@ -295,18 +299,22 @@ export const createEnrollment = async (
         };
         let prepared: number;
         try {
-            sessionInput(context, input);
+            writeModuleInput(context, input);
             prepared =
                 request.role === 'organizer'
-                    ? kernel.prepare_organizer(input.length)
-                    : kernel.prepare_joiner(input.length);
+                    ? module.prepare_organizer(input.length)
+                    : module.prepare_joiner(input.length);
         } finally {
             delete handlers.staged;
             delete handlers.random;
         }
-        if (prepared !== 0 || kernel.check_retained() !== 0)
+        if (prepared !== 0 || module.check_retained() !== 0)
             throw new Error('Enrollment preparation failed.');
-        const poll = readKernel(kernel, kernel.poll_identity_pointer(), 64);
+        const poll = readModuleMemory(
+            module,
+            module.poll_identity_pointer(),
+            64,
+        );
         if (request.role === 'joiner') {
             if (request.definition.length > maximums[dataKind.pollDefinition])
                 throw new Error('The poll definition exceeds its bound.');
@@ -343,9 +351,9 @@ export const createEnrollment = async (
             throw new Error('Incomplete enrollment.');
         const before = randomBytes;
         if (
-            kernel.prepare_organizer(0) !== 1 ||
-            kernel.prepare_joiner(0) !== 1 ||
-            kernel.check_retained() !== 0 ||
+            module.prepare_organizer(0) !== 1 ||
+            module.prepare_joiner(0) !== 1 ||
+            module.check_retained() !== 0 ||
             randomBytes !== before
         )
             throw new Error('Repeated preparation changed authority.');
@@ -361,7 +369,7 @@ export const createEnrollment = async (
                 offset: record.offset,
                 length: record.bytes.length,
                 hash: custodyIdentity(
-                    kernel,
+                    module,
                     custodyPurpose.record,
                     record.bytes,
                 ),
@@ -385,7 +393,7 @@ export const createEnrollment = async (
         const head = {
             generation: rootGeneration.registered,
             hash: hexadecimal(
-                custodyIdentity(kernel, custodyPurpose.root, sealed),
+                custodyIdentity(module, custodyPurpose.root, sealed),
             ),
             runtime: hexadecimal(runtime),
         };
@@ -401,7 +409,7 @@ export const createEnrollment = async (
                     maximumRootBytes: limits.root.maximumEnrollmentRootBytes,
                     recordStores: participantRecordStores,
                     records: [],
-                    identities: custodyIdentities(kernel),
+                    identities: custodyIdentities(module),
                 }),
             write: (transaction) => {
                 for (const record of records)
@@ -432,7 +440,7 @@ export const createEnrollment = async (
             throw Object.assign(
                 new Error(
                     'Enrollment stopped before its required secrets were retained: ' +
-                        describe(error),
+                        errorMessage(error),
                 ),
                 { cause: error },
             );
@@ -462,26 +470,26 @@ export type RestoredEnrollment = Readonly<{
 // registration, so that later operations restore it instead of reading and
 // verifying its signature again.
 export const retainRegistration = (context: ParticipantContext) => {
-    const { kernel } = context;
-    if (kernel.retain_registration() !== 0)
+    const { module } = context;
+    if (module.retain_registration() !== 0)
         throw new Error('The credential refused the verified registration.');
-    return readKernel(
-        kernel,
-        kernel.contribution_output_pointer(),
-        kernel.contribution_output_length(),
+    return readModuleMemory(
+        module,
+        module.contribution_output_pointer(),
+        module.contribution_output_length(),
     );
 };
 
 // The result length, question and options the module writes for the poll it
 // verified the participant's own registration against.
 const readVerifiedPoll = (context: ParticipantContext): VerifiedPoll => {
-    const { kernel } = context;
-    if (kernel.own_registration_poll() !== 0)
+    const { module } = context;
+    if (module.own_registration_poll() !== 0)
         throw new Error('The module verified no poll.');
-    const bytes = readKernel(
-        kernel,
-        kernel.contribution_output_pointer(),
-        kernel.contribution_output_length(),
+    const bytes = readModuleMemory(
+        module,
+        module.contribution_output_pointer(),
+        module.contribution_output_length(),
     );
     const decoder = new TextDecoder('utf-8', { fatal: true });
     let offset = 0;
@@ -513,7 +521,7 @@ export const restoreEnrollment = async (
     root: AuthenticatedRoot,
     created: boolean,
 ): Promise<RestoredEnrollment> => {
-    const { kernel, runtime } = context;
+    const { module, runtime } = context;
     const manifest = root.manifest;
     const read = (kind: number) => readDataKind(context, manifest, kind);
     const header = await read(dataKind.header);
@@ -523,7 +531,7 @@ export const restoreEnrollment = async (
     const pollContext = concatenate(manifest.poll, runtime);
     const own = (operation: number, bytes: Uint8Array = new Uint8Array()) => {
         ownRegistrationInput(context, bytes);
-        if (kernel.own_registration_command(operation, bytes.length) !== 0)
+        if (module.own_registration_command(operation, bytes.length) !== 0)
             throw new Error('The original registration verification refused.');
     };
     own(
@@ -554,9 +562,9 @@ export const restoreEnrollment = async (
         registrationBodyDigest = retained.slice(0, 64);
     } else {
         own(4);
-        registrationBodyDigest = readKernel(
-            kernel,
-            kernel.own_registration_body_digest_pointer(),
+        registrationBodyDigest = readModuleMemory(
+            module,
+            module.own_registration_body_digest_pointer(),
             64,
         );
     }
@@ -587,26 +595,26 @@ export const restoreEnrollment = async (
     );
     let status: number;
     try {
-        sessionInput(context, control);
+        writeModuleInput(context, control);
         status = sourcesRequired
-            ? kernel.restore(control.length)
-            : kernel.restore_prepared(control.length);
+            ? module.restore(control.length)
+            : module.restore_prepared(control.length);
     } finally {
         control.fill(0);
     }
     if (
         status !== 0 ||
-        kernel.prepare_organizer(0) !== 1 ||
-        kernel.prepare_joiner(0) !== 1 ||
-        kernel.restore(0) !== 1 ||
-        kernel.restore_prepared(0) !== 1
+        module.prepare_organizer(0) !== 1 ||
+        module.prepare_joiner(0) !== 1 ||
+        module.restore(0) !== 1 ||
+        module.restore_prepared(0) !== 1
     )
         throw new Error('The original enrollment keys could not be restored.');
     const poll = readVerifiedPoll(context);
-    const usernameBytes = readKernel(
-        kernel,
-        kernel.own_registration_username_pointer(),
-        kernel.own_registration_username_length(),
+    const usernameBytes = readModuleMemory(
+        module,
+        module.own_registration_username_pointer(),
+        module.own_registration_username_length(),
     );
     const username = new TextDecoder('utf-8', { fatal: true }).decode(
         usernameBytes,
@@ -619,8 +627,8 @@ export const restoreEnrollment = async (
         unsigned32(usernameBytes.length),
         usernameBytes,
     );
-    sessionInput(context, pollInput);
-    if (kernel.validate_joiner(pollInput.length) !== 0)
+    writeModuleInput(context, pollInput);
+    if (module.validate_joiner(pollInput.length) !== 0)
         throw new Error('The retained poll definition was refused.');
     const isOrganizer = equalBytes(
         tupleFields(header)[3],

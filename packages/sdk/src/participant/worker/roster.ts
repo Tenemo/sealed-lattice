@@ -1,5 +1,3 @@
-import { readParticipantProfile } from './bounds.js';
-import type { ParticipantLimits } from './bounds.js';
 import {
     concatenate,
     equalBytes,
@@ -10,23 +8,23 @@ import {
     unsigned16,
     unsigned32,
 } from './bytes.js';
-import { sessionInput } from './context.js';
+import { writeModuleInput } from './context.js';
 import type {
     ParticipantContext,
-    ProfileContext,
+    ParticipantProfileContext,
     PublicContext,
 } from './context.js';
 import { retainRegistration } from './enrollment.js';
 import type { RestoredEnrollment } from './enrollment.js';
 import { InvalidRequest, PublicInputFailure } from './failures.js';
-import { readKernel } from './kernel.js';
-import type { ParticipantKernel } from './kernel.js';
+import { readModuleMemory } from './participant-module.js';
+import type { ParticipantModule } from './participant-module.js';
 import {
     findCandidate,
     readCandidateFile,
     streamCandidateFile,
-} from './public.js';
-import type { PublicRelay } from './public.js';
+} from './relay.js';
+import type { PublicRelay } from './relay.js';
 import { rootGeneration } from './root-generation.js';
 import {
     addedReferences,
@@ -37,6 +35,8 @@ import {
     rootBound,
 } from './root.js';
 import type { AuthenticatedRoot } from './root.js';
+import type { ParticipantLimits } from './runtime-bounds.js';
+import { readParticipantProfile } from './runtime-bounds.js';
 
 // Registration record files as each participant publishes them, named by the
 // registration body digest.
@@ -225,13 +225,13 @@ export type VerifiedProposal = Readonly<{
 
 // The usernames of the proposal the module's roster verifier built, in
 // roster order.
-export const verifiedRosterUsernames = (kernel: ParticipantKernel) => {
-    if (kernel.roster_usernames() !== 0)
+export const verifiedRosterUsernames = (module: ParticipantModule) => {
+    if (module.roster_usernames() !== 0)
         throw new Error('The roster verifier holds no proposal.');
-    const bytes = readKernel(
-        kernel,
-        kernel.contribution_output_pointer(),
-        kernel.contribution_output_length(),
+    const bytes = readModuleMemory(
+        module,
+        module.contribution_output_pointer(),
+        module.contribution_output_length(),
     );
     const decoder = new TextDecoder('utf-8', { fatal: true });
     const usernames: string[] = [];
@@ -274,30 +274,30 @@ const finishProposal = async (
     registrationBodyDigests: readonly string[],
     restoring: boolean,
 ): Promise<VerifiedProposal> => {
-    const { kernel, limits } = context;
+    const { module, limits } = context;
     await streamRegistrations(
         relay,
         registrationBodyDigests,
         limits.registration,
-        kernel.roster_open_records(),
+        module.roster_open_records(),
         (operation, position, bytes) => {
-            sessionInput(context, bytes);
+            writeModuleInput(context, bytes);
             return (
-                kernel.roster_record(operation, position, bytes.length) === 0
+                module.roster_record(operation, position, bytes.length) === 0
             );
         },
         restoring,
     );
-    if (kernel.roster_finish() !== 0)
+    if (module.roster_finish() !== 0)
         throw new PublicInputFailure(
             restoring
                 ? 'The published registrations are not the retained roster.'
                 : 'The roster proposal was refused.',
         );
-    const body = readKernel(
-        kernel,
-        kernel.roster_body_pointer(),
-        kernel.roster_body_length(),
+    const body = readModuleMemory(
+        module,
+        module.roster_body_pointer(),
+        module.roster_body_length(),
     );
     if (
         proposalRegistrationBodyDigests(body).join(',') !==
@@ -309,12 +309,16 @@ const finishProposal = async (
     );
     if (position < 0)
         throw new PublicInputFailure('The proposal omits this participant.');
-    const usernames = verifiedRosterUsernames(kernel);
+    const usernames = verifiedRosterUsernames(module);
     if (usernames.length !== registrationBodyDigests.length)
         throw new Error('The roster verifier named another roster.');
     return {
         body,
-        identity: readKernel(kernel, kernel.roster_identity_pointer(), 64),
+        identity: readModuleMemory(
+            module,
+            module.roster_identity_pointer(),
+            64,
+        ),
         registrationBodyDigests,
         usernames,
         position,
@@ -338,7 +342,7 @@ const verifyProposalInputs = async (
             context.limits,
         ) ||
         registrationBodyDigests.length >
-            context.kernel.own_registration_maximum_participants()
+            context.module.own_registration_maximum_participants()
     )
         throw new InvalidRequest('The proposed records are invalid.');
     const begin = rosterBegin(
@@ -348,8 +352,8 @@ const verifyProposalInputs = async (
         enrollment.definitionSignature,
         registrationBodyDigests.length,
     );
-    sessionInput(context, begin);
-    if (context.kernel.roster_begin(begin.length) !== 0)
+    writeModuleInput(context, begin);
+    if (context.module.roster_begin(begin.length) !== 0)
         throw new PublicInputFailure('The proposed poll was refused.');
     return finishProposal(
         context,
@@ -363,13 +367,13 @@ const verifyProposalInputs = async (
 // The credential keys the roster the module verified in full, so that later
 // operations restore it from the published headers and keys alone.
 const retainRoster = (context: ParticipantContext) => {
-    const { kernel } = context;
-    if (kernel.retain_roster() !== 0)
+    const { module } = context;
+    if (module.retain_roster() !== 0)
         throw new Error('The credential refused the verified roster.');
-    return readKernel(
-        kernel,
-        kernel.contribution_output_pointer(),
-        kernel.contribution_output_length(),
+    return readModuleMemory(
+        module,
+        module.contribution_output_pointer(),
+        module.contribution_output_length(),
     );
 };
 
@@ -377,8 +381,8 @@ const verifySignature = (
     context: ParticipantContext,
     signature: Uint8Array,
 ) => {
-    sessionInput(context, signature);
-    return context.kernel.verify_roster_signature(signature.length) === 0;
+    writeModuleInput(context, signature);
+    return context.module.verify_roster_signature(signature.length) === 0;
 };
 
 // A roster this participant verified and retained, with its verified
@@ -410,7 +414,7 @@ export const proposeRoster = async (
         enrollment,
         registrationBodyDigests,
     );
-    if (context.kernel.validate_roster_signer() !== 0) return undefined;
+    if (context.module.validate_roster_signer() !== 0) return undefined;
     const added = [
         { kind: dataKind.proposal, bytes: proposal.body },
         { kind: dataKind.retainedRoster, bytes: retainRoster(context) },
@@ -445,20 +449,20 @@ export const signRoster = async (
 ): Promise<AuthenticatedRoot> => {
     if (root.head.generation !== rootGeneration.rosterLocked)
         throw new Error('No locked roster proposal exists.');
-    const { kernel, limits } = context;
+    const { module, limits } = context;
     const signing = proposal.identity.slice();
     let signed: number;
     try {
-        sessionInput(context, signing);
-        signed = kernel.sign_roster_proposal(signing.length);
+        writeModuleInput(context, signing);
+        signed = module.sign_roster_proposal(signing.length);
     } finally {
         signing.fill(0);
     }
     if (signed !== 0)
         throw new Error('The original credential refused the locked proposal.');
-    const signature = readKernel(
-        kernel,
-        kernel.roster_signature_pointer(),
+    const signature = readModuleMemory(
+        module,
+        module.roster_signature_pointer(),
         limits.registration.signatureBytes,
     );
     if (!verifySignature(context, signature))
@@ -577,8 +581,8 @@ export const reverifyRoster = async (
         begin,
         await readDataKind(context, root.manifest, dataKind.retainedRoster),
     );
-    sessionInput(context, input);
-    if (context.kernel.roster_begin_retained(begin.length, input.length) !== 0)
+    writeModuleInput(context, input);
+    if (context.module.roster_begin_retained(begin.length, input.length) !== 0)
         throw new Error('The credential refused the retained roster.');
     const proposal = await finishProposal(
         context,
@@ -610,17 +614,17 @@ export const retainedProfile = async (
     context: ParticipantContext,
     root: AuthenticatedRoot,
     enrollment: RestoredEnrollment,
-): Promise<ProfileContext> => {
+): Promise<ParticipantProfileContext> => {
     const proposal = await readDataKind(
         context,
         root.manifest,
         dataKind.proposal,
     );
     const profile = readParticipantProfile(
-        context.kernel,
+        context.module,
         context.limits,
         proposalRegistrationBodyDigests(proposal).length,
-        context.kernel.own_registration_option_count(),
+        context.module.own_registration_option_count(),
     );
     const retainedLength = (kind: number) =>
         root.manifest.references

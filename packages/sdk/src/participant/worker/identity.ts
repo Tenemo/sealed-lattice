@@ -1,4 +1,4 @@
-import type { ParticipantKernel } from './kernel.js';
+import type { ParticipantModule } from './participant-module.js';
 import type { ParticipantIdentities } from './predecessor.js';
 
 // The label of the runtime identity: the SHA-512 digest of this label and the
@@ -23,36 +23,36 @@ type CustodyPurpose = (typeof custodyPurpose)[keyof typeof custodyPurpose];
 // module's canonical SHAKE256 framing. The separately derived build runtime
 // identity is also bound into protocol contexts and retained state.
 export const custodyIdentity = (
-    kernel: ParticipantKernel,
+    module: ParticipantModule,
     purpose: CustodyPurpose,
     bytes: Uint8Array,
 ): Uint8Array => {
-    if (kernel.custody_identity_begin(purpose, bytes.length) !== 0)
+    if (module.custody_identity_begin(purpose, bytes.length) !== 0)
         throw new Error('The participant module refused an identity.');
-    const capacity = kernel.custody_identity_input_capacity() >>> 0;
+    const capacity = module.custody_identity_input_capacity() >>> 0;
     for (let offset = 0; offset < bytes.length; offset += capacity) {
         const part = bytes.subarray(offset, offset + capacity);
         new Uint8Array(
-            kernel.memory.buffer,
-            kernel.custody_identity_input_pointer() >>> 0,
+            module.memory.buffer,
+            module.custody_identity_input_pointer() >>> 0,
             part.length,
         ).set(part);
-        if (kernel.custody_identity_absorb(part.length) !== 0)
+        if (module.custody_identity_absorb(part.length) !== 0)
             throw new Error('The participant module refused an identity.');
     }
-    if (kernel.custody_identity_finish() !== 0)
+    if (module.custody_identity_finish() !== 0)
         throw new Error('The participant module refused an identity.');
     return new Uint8Array(
-        kernel.memory.buffer,
-        kernel.custody_identity_output_pointer() >>> 0,
+        module.memory.buffer,
+        module.custody_identity_output_pointer() >>> 0,
         64,
     ).slice();
 };
 
 // The root and record identities a predecessor check recomputes.
 export const custodyIdentities = (
-    kernel: ParticipantKernel,
+    module: ParticipantModule,
 ): ParticipantIdentities => ({
-    root: (bytes) => custodyIdentity(kernel, custodyPurpose.root, bytes),
-    record: (bytes) => custodyIdentity(kernel, custodyPurpose.record, bytes),
+    root: (bytes) => custodyIdentity(module, custodyPurpose.root, bytes),
+    record: (bytes) => custodyIdentity(module, custodyPurpose.record, bytes),
 });

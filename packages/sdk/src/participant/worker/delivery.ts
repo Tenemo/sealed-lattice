@@ -127,7 +127,7 @@ export const openDelivery = async (
     };
     return guardDelivery(() =>
         inspectRetainedAuthority(context.database, expected, (bytes) =>
-            custodyIdentity(context.kernel, custodyPurpose.root, bytes),
+            custodyIdentity(context.module, custodyPurpose.root, bytes),
         ),
     );
 };
