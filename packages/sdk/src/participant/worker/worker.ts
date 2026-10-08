@@ -2,8 +2,8 @@ import { errorMessage } from './module/context.js';
 import {
     helperRole,
     listenAsHelper,
-    startParallelHelpers,
-} from './module/parallel-helpers.js';
+} from './module/parallel-helper-instance.js';
+import { startParallelHelpers } from './module/parallel-helpers.js';
 import type { ParallelHelpers } from './module/parallel-helpers.js';
 import type { ParticipantModule } from './module/participant-module.js';
 import { readParticipantLimits } from './module/runtime-bounds.js';

@@ -1,7 +1,7 @@
+import { helperRole } from './worker/module/parallel-helper-instance.js';
 import {
     affordedHelpers,
     allStartedInTime,
-    helperRole,
 } from './worker/module/parallel-helpers.js';
 import type {
     VerificationCommand,
