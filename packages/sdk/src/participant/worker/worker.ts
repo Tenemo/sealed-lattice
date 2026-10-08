@@ -46,6 +46,7 @@ import { participantRuntimeLabel } from './identity.js';
 import {
     instantiateParticipantKernel,
     ModuleFailure,
+    requireInputCapacities,
     ResourceFailure,
 } from './kernel.js';
 import type { ParticipantKernel } from './kernel.js';
@@ -101,6 +102,7 @@ import { decodeTargetState } from './target-state.js';
 import {
     certifiedBallotStatus,
     EvaluationRetained,
+    largestBufferInputBytes,
     publishTarget,
     signTarget,
 } from './target.js';
@@ -802,6 +804,10 @@ const run = async (
                         throw new Error(
                             'The participant module refused its memory plan.',
                         );
+                    requireInputCapacities(
+                        kernel,
+                        largestBufferInputBytes(kernel),
+                    );
                     const result = await execute(
                         {
                             namespace: command.namespace,
@@ -956,6 +962,7 @@ const runVerification = async (
                     throw new Error(
                         'The participant module refused its memory plan.',
                     );
+                requireInputCapacities(kernel, largestBufferInputBytes(kernel));
                 try {
                     const outcome = await verifyPublishedOutcome(
                         {

@@ -12,15 +12,18 @@ import {
 } from '#packages/sdk/src/participant/worker/bytes.js';
 import {
     instantiateParticipantKernel,
-    moduleChunkBytes,
     readKernel,
+    writeBufferInput,
     writeInput,
     writeOwnRegistrationInput,
     writeSetupInput,
 } from '#packages/sdk/src/participant/worker/kernel.js';
 import type { ParticipantKernel } from '#packages/sdk/src/participant/worker/kernel.js';
 import { noParallelHelpers } from '#packages/sdk/src/participant/worker/parallel.js';
-import { dataKind } from '#packages/sdk/src/participant/worker/root.js';
+import {
+    chunkBytes,
+    dataKind,
+} from '#packages/sdk/src/participant/worker/root.js';
 
 // The packaged participant module, fed public input that no honest relay or
 // participant produces. A command must refuse such input and return: a trap
@@ -211,19 +214,19 @@ const inputBuffers = {
     },
     close: {
         pointer: (kernel) => kernel.close_input_pointer(),
-        capacity: () => moduleChunkBytes,
+        capacity: (kernel) => kernel.close_input_capacity(),
     },
-    ballot: {
+    ballotBody: {
         pointer: (kernel) => kernel.ballot_body_input_pointer(),
-        capacity: () => moduleChunkBytes,
+        capacity: (kernel) => kernel.ballot_body_input_capacity(),
     },
-    evaluation: {
+    evaluationTarget: {
         pointer: (kernel) => kernel.evaluation_target_input_pointer(),
-        capacity: () => moduleChunkBytes,
+        capacity: (kernel) => kernel.evaluation_target_input_capacity(),
     },
     completion: {
         pointer: (kernel) => kernel.completion_input_pointer(),
-        capacity: () => moduleChunkBytes,
+        capacity: (kernel) => kernel.completion_input_capacity(),
     },
 } as const satisfies Record<string, InputBuffer>;
 type Parameter = 'operation' | 'index' | 'length';
@@ -364,38 +367,38 @@ const publicInputCommands: readonly PublicInputCommand[] = [
     },
     {
         name: 'ballot_classification_begin',
-        buffer: 'ballot',
+        buffer: 'ballotBody',
         parameters: ['length'],
     },
     {
         name: 'ballot_classification_key_begin',
-        buffer: 'ballot',
+        buffer: 'ballotBody',
         parameters: ['index'],
     },
     {
         name: 'ballot_classification_key_chunk',
-        buffer: 'ballot',
+        buffer: 'ballotBody',
         parameters: ['length'],
     },
     {
         name: 'ballot_classification_key_finish',
-        buffer: 'ballot',
+        buffer: 'ballotBody',
         parameters: [],
     },
     {
         name: 'ballot_classification_chunk',
-        buffer: 'ballot',
+        buffer: 'ballotBody',
         parameters: ['length'],
     },
     {
         name: 'ballot_classification_finish',
-        buffer: 'ballot',
+        buffer: 'ballotBody',
         parameters: [],
         acceptsWithNonzero: true,
     },
     {
         name: 'evaluation_target_command',
-        buffer: 'evaluation',
+        buffer: 'evaluationTarget',
         parameters: ['operation', 'index', 'length'],
     },
     {
@@ -608,6 +611,53 @@ describe('participant module public input', () => {
         expect(kernel.setup_roster_begin(begin.length)).toBe(0);
     });
 
+    it('writes each input buffer up to the capacity the module reports, in memory no other buffer holds', async () => {
+        const { kernel } = await instantiate();
+        const extents = Object.entries(inputBuffers).map(([name, buffer]) => ({
+            name,
+            start: buffer.pointer(kernel) >>> 0,
+            capacity: buffer.capacity(kernel),
+        }));
+        // The buffers of the certificate collector, close verifier, ballot
+        // classifier and evaluation each hold a mebibyte.
+        for (const name of [
+            'completion',
+            'close',
+            'ballotBody',
+            'evaluationTarget',
+        ])
+            expect(
+                extents.find((extent) => extent.name === name)?.capacity,
+                name,
+            ).toBe(1 << 20);
+        const sorted = [...extents].sort(
+            (left, right) => left.start - right.start,
+        );
+        for (const [index, extent] of sorted.entries()) {
+            expect(extent.capacity, extent.name).toBeGreaterThan(0);
+            expect(
+                extent.start + extent.capacity,
+                extent.name,
+            ).toBeLessThanOrEqual(
+                index + 1 < sorted.length
+                    ? sorted[index + 1].start
+                    : kernel.memory.buffer.byteLength,
+            );
+        }
+        for (const buffer of [
+            'completion',
+            'close',
+            'ballotBody',
+            'evaluationTarget',
+        ] as const) {
+            const capacity = inputBuffers[buffer].capacity(kernel);
+            writeBufferInput(kernel, buffer, new Uint8Array(capacity));
+            expect(() =>
+                writeBufferInput(kernel, buffer, new Uint8Array(capacity + 1)),
+            ).toThrow('Module input exceeds its buffer.');
+        }
+    });
+
     it('refuses every join and roster input with a changed byte, length or roster count', async () => {
         const { kernel } = await instantiate();
         const join = joinInput('First voter');
@@ -695,12 +745,12 @@ describe('participant module public input', () => {
                 for (
                     let offset = 0;
                     offset < bytes.length;
-                    offset += moduleChunkBytes
+                    offset += chunkBytes
                 )
                     results.push(
                         step(
                             operation,
-                            bytes.subarray(offset, offset + moduleChunkBytes),
+                            bytes.subarray(offset, offset + chunkBytes),
                         ),
                     );
                 return results;
@@ -775,7 +825,7 @@ describe('participant module public input', () => {
                     const size =
                         divided.length < 3
                             ? 1 + draw(64)
-                            : 1 + draw(moduleChunkBytes);
+                            : 1 + draw(chunkBytes);
                     divided.push(bytes.subarray(offset, offset + size));
                     offset += size;
                 }

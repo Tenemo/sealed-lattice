@@ -7,7 +7,7 @@ use crate::{
 use setup_aggregate::{AggregatePolynomialReader, VerifiedAggregatePolynomial};
 use std::{cell::RefCell, sync::Arc};
 
-const CHUNK_BYTES: usize = 1 << 20;
+const COMPLETION_INPUT_BYTES: usize = 1 << 20;
 enum Terminal {
     NoResult(VerifiedNoResult),
     Result(VerifiedResult),
@@ -32,7 +32,7 @@ struct State {
 impl State {
     fn new() -> Self {
         Self {
-            input: vec![0; CHUNK_BYTES],
+            input: vec![0; COMPLETION_INPUT_BYTES],
             output: Vec::new(),
             votes: None,
             certificate: None,
@@ -48,7 +48,7 @@ impl State {
         self.output.extend((value as u32).to_le_bytes());
     }
     fn command(&mut self, operation: u32, argument: usize, length: usize) -> Result<(), Error> {
-        if length > CHUNK_BYTES || (!matches!(operation, 3 | 4) && argument != 0) {
+        if length > COMPLETION_INPUT_BYTES || (!matches!(operation, 3 | 4) && argument != 0) {
             return Err(Error::Encoding);
         }
         self.output.clear();
@@ -240,6 +240,11 @@ pub(crate) fn verified_certificate() -> Option<Arc<VerifiedTargetCertificate>> {
 #[unsafe(no_mangle)]
 pub extern "C" fn completion_input_pointer() -> usize {
     STATE.with(|state| state.borrow_mut().input.as_mut_ptr() as usize)
+}
+/// The input buffer's length; the host never writes more.
+#[unsafe(no_mangle)]
+pub extern "C" fn completion_input_capacity() -> usize {
+    COMPLETION_INPUT_BYTES
 }
 #[unsafe(no_mangle)]
 pub extern "C" fn completion_output_pointer() -> usize {

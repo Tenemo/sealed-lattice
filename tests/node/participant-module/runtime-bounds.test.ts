@@ -6,8 +6,14 @@ import {
     readParticipantLimits,
     readParticipantProfile,
 } from '#packages/sdk/src/participant/worker/bounds.js';
-import { instantiateParticipantKernel } from '#packages/sdk/src/participant/worker/kernel.js';
+import {
+    instantiateParticipantKernel,
+    ModuleFailure,
+    requireInputCapacities,
+} from '#packages/sdk/src/participant/worker/kernel.js';
 import { noParallelHelpers } from '#packages/sdk/src/participant/worker/parallel.js';
+import { chunkBytes } from '#packages/sdk/src/participant/worker/root.js';
+import { largestBufferInputBytes } from '#packages/sdk/src/participant/worker/target.js';
 import {
     compileParticipantRuntimeLimits,
     compileParticipantRuntimeProfile,
@@ -77,6 +83,50 @@ describe('participant runtime bounds', () => {
             expect(
                 readParticipantProfile(kernel, limits, participants, options),
             ).toBeUndefined();
+    });
+});
+
+describe('participant module input buffers', () => {
+    it('take the largest input the worker writes into them at every supported profile, and a buffer that holds less refuses the module', () => {
+        // A relay transfer chunk, a retained record chunk and an evaluation
+        // store chunk are a mebibyte each, a cached aggregate chunk half one.
+        const largest = largestBufferInputBytes(kernel);
+        expect(largest).toBe(1 << 20);
+        expect(() => requireInputCapacities(kernel, largest)).not.toThrow();
+        // Restoring a retained target streams retained record chunks into
+        // the session input.
+        expect(kernel.input_capacity()).toBeGreaterThanOrEqual(chunkBytes);
+        for (const participants of participantCounts)
+            for (const options of optionCounts) {
+                const profile = readParticipantProfile(
+                    kernel,
+                    limits,
+                    participants,
+                    options,
+                );
+                if (profile === undefined) continue;
+                const { ballot, close, registration, release, target } =
+                    profile;
+                const { signatureBytes } = registration;
+                // The whole records and concatenations the worker writes
+                // into the certificate, close and classifier buffers.
+                for (const bytes of [
+                    target.votePacketBytes,
+                    release.envelopeBytes + signatureBytes,
+                    release.bodyHeaderBytes,
+                    4 + close.intentBodyBytes + signatureBytes,
+                    close.submissionBytes,
+                    4 + close.maximumResponseBodyBytes + signatureBytes,
+                    4 + close.proposalBodyBytes + signatureBytes,
+                    close.submissionBytes + ballot.headerBytes,
+                ])
+                    expect(bytes).toBeLessThanOrEqual(largest);
+            }
+        expect(() => requireInputCapacities(kernel, largest + 1)).toThrow(
+            new ModuleFailure(
+                'The participant module cannot take the largest input in its completion buffer.',
+            ),
+        );
     });
 });
 

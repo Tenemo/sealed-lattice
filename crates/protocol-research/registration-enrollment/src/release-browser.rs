@@ -11,7 +11,9 @@ use registration_credentials::{
 };
 use zeroize::{Zeroize, Zeroizing};
 
-const CHUNK_BYTES: usize = 1 << 20;
+/// The largest slice of a release body that one call reads, imports or
+/// verifies.
+const RELEASE_CHUNK_BYTES: usize = 1 << 20;
 
 pub(super) struct ReleaseState {
     body: Vec<u8>,
@@ -28,7 +30,7 @@ fn verify_body(
 ) -> Result<VerifiedReleaseBody, Error> {
     let header = body.get(..RELEASE_BODY_HEADER_BYTES).ok_or(Error::Shape)?;
     let mut verifier = ReleaseBodyVerifier::new(context, header).map_err(|_| Error::Crypto)?;
-    for chunk in body[RELEASE_BODY_HEADER_BYTES..].chunks(CHUNK_BYTES) {
+    for chunk in body[RELEASE_BODY_HEADER_BYTES..].chunks(RELEASE_CHUNK_BYTES) {
         verifier.push(chunk).map_err(|_| Error::Crypto)?;
     }
     verifier.finish().map_err(|_| Error::Crypto)
@@ -87,7 +89,7 @@ fn command(session: &mut Session, operation: u32, input: &[u8]) -> Result<Vec<u8
             let offset = u32::from_le_bytes(input[..4].try_into().unwrap()) as usize;
             let length = u32::from_le_bytes(input[4..].try_into().unwrap()) as usize;
             let state = session.release.as_ref().ok_or(Error::Context)?;
-            if state.verified.is_none() || length == 0 || length > CHUNK_BYTES {
+            if state.verified.is_none() || length == 0 || length > RELEASE_CHUNK_BYTES {
                 return Err(Error::Context);
             }
             state
@@ -136,7 +138,7 @@ fn command(session: &mut Session, operation: u32, input: &[u8]) -> Result<Vec<u8
             if state.import_closed
                 || state.verified.is_some()
                 || input.is_empty()
-                || input.len() > CHUNK_BYTES
+                || input.len() > RELEASE_CHUNK_BYTES
                 || input.len() > state.envelope.body_length() - state.body.len()
             {
                 state.import_closed = true;

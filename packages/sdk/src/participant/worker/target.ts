@@ -34,21 +34,22 @@ import { contributionRecords } from './contribution.js';
 import { openDelivery } from './delivery.js';
 import {
     ModuleFailure,
-    moduleChunkBytes,
     readKernel,
     ResourceFailure,
-    writeChunkInput,
+    writeBufferInput,
 } from './kernel.js';
+import type { ParticipantKernel } from './kernel.js';
 import {
     createCandidatePublication,
     findCandidate,
     readCandidateFile,
     readCandidates,
     streamCandidateFile,
+    transferChunkBytes,
 } from './public.js';
 import type { CandidateView, PublicRelay } from './public.js';
 import { targetPhase } from './root-generation.js';
-import { commitRoot, dataRecordInventory } from './root.js';
+import { chunkBytes, commitRoot, dataRecordInventory } from './root.js';
 import { deliverFinalAggregate, readFinalAggregate } from './setup.js';
 import {
     awaitLater,
@@ -84,6 +85,22 @@ export const targetVoteCandidateKey = (position: number) =>
     'target-vote-' + String(position);
 const evaluationStore = 'values';
 const evaluatedTargetStore = 'target';
+// The evaluation's working storage keeps each spilled value in chunks of
+// whole coefficients within a mebibyte.
+const evaluationStoreChunkBytes = 1 << 20;
+
+// The largest input the worker writes at once into the module's close,
+// classifier, evaluation and certificate buffers: a relay transfer chunk, a
+// retained record chunk, a cached aggregate chunk or an evaluation store
+// chunk. Every whole record and concatenation it writes there is smaller at
+// every supported profile.
+export const largestBufferInputBytes = (kernel: ParticipantKernel) =>
+    Math.max(
+        transferChunkBytes,
+        chunkBytes,
+        kernel.setup_chunk_capacity(),
+        evaluationStoreChunkBytes,
+    );
 
 const words = (bytes: Uint8Array) => {
     if (bytes.length % 4 !== 0)
@@ -174,7 +191,7 @@ const barrierCommand = (
     input: Uint8Array = new Uint8Array(),
 ) => {
     const { kernel } = context;
-    writeChunkInput(kernel, kernel.close_input_pointer(), input);
+    writeBufferInput(kernel, 'close', input);
     return kernel.close_command(operation, input.length) === 0;
 };
 
@@ -438,7 +455,7 @@ const verifyCloseBarrier = async (
 
 const classifierInput = (context: PublicProfileContext, bytes: Uint8Array) => {
     const { kernel } = context;
-    writeChunkInput(kernel, kernel.ballot_body_input_pointer(), bytes);
+    writeBufferInput(kernel, 'ballotBody', bytes);
     return bytes.length;
 };
 
@@ -531,7 +548,7 @@ const tryEvaluationCommand = (
     input: Uint8Array = new Uint8Array(),
 ) => {
     const { kernel } = context;
-    writeChunkInput(kernel, kernel.evaluation_target_input_pointer(), input);
+    writeBufferInput(kernel, 'evaluationTarget', input);
     if (
         kernel.evaluation_target_command(operation, argument, input.length) !==
         0
@@ -651,7 +668,7 @@ export const retainEvaluation = async (context: ProfileContext) => {
     const pointer = kernel.contribution_output_pointer() >>> 0;
     const length = kernel.contribution_output_length();
     const parts: Blob[] = [];
-    for (let offset = 0; offset < length; offset += moduleChunkBytes)
+    for (let offset = 0; offset < length; offset += chunkBytes)
         // Blob snapshots this bounded view synchronously. No Wasm call or
         // awaited work changes the encoded target while its parts are copied.
         parts.push(
@@ -659,7 +676,7 @@ export const retainEvaluation = async (context: ProfileContext) => {
                 new Uint8Array(
                     kernel.memory.buffer,
                     pointer + offset,
-                    Math.min(moduleChunkBytes, length - offset),
+                    Math.min(chunkBytes, length - offset),
                 ),
             ]),
         );
@@ -719,12 +736,12 @@ const restoreEvaluationCopy = async (context: ProfileContext) => {
             for (
                 let offset = 0;
                 restored && offset < length;
-                offset += moduleChunkBytes
+                offset += chunkBytes
             ) {
                 // Every slice belongs to the immutable Blob snapshot read
                 // above, even if another connection replaces its stored key.
                 const buffer = await value
-                    .slice(offset, offset + moduleChunkBytes)
+                    .slice(offset, offset + chunkBytes)
                     .arrayBuffer()
                     .catch((error: unknown) => {
                         if (
@@ -783,6 +800,7 @@ const readStoredRecords = async (
     first: number,
     count: number,
     prime: number,
+    inputCapacity: number,
 ) => {
     const values = await readStoredBlobs(
         storage,
@@ -792,7 +810,7 @@ const readStoredRecords = async (
     );
     return Promise.all(
         values.map(async (value) => {
-            if (!(value instanceof Blob) || 4 + value.size > moduleChunkBytes)
+            if (!(value instanceof Blob) || 4 + value.size > inputCapacity)
                 throw new PublicInputFailure(
                     'A stored evaluation key is missing.',
                 );
@@ -816,8 +834,9 @@ const evaluate = async (
     const { kernel, profile } = context;
     const { polynomialDegree, storedCoefficientBytes } = profile.evaluation;
     const coefficients = 2 * polynomialDegree;
+    const inputCapacity = kernel.evaluation_target_input_capacity();
     const chunkCoefficients = Math.floor(
-        moduleChunkBytes / storedCoefficientBytes,
+        evaluationStoreChunkBytes / storedCoefficientBytes,
     );
     const chunks = (node: number) =>
         Array.from(
@@ -1009,6 +1028,7 @@ const evaluate = async (
                         first,
                         count,
                         prime,
+                        inputCapacity,
                     );
                     // A read that no request takes fails silently.
                     records.catch(() => undefined);

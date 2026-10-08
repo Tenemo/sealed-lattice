@@ -19,7 +19,7 @@ import {
     operationSeedBytes,
     readKernel,
     seededRandomness,
-    writeChunkInput,
+    writeBufferInput,
 } from './kernel.js';
 import {
     createCandidatePublication,
@@ -179,7 +179,7 @@ const tryCompletionCommand = (
     input: Uint8Array = new Uint8Array(),
 ) => {
     const { kernel } = context;
-    writeChunkInput(kernel, kernel.completion_input_pointer(), input);
+    writeBufferInput(kernel, 'completion', input);
     if (kernel.completion_command(operation, argument, input.length) !== 0)
         return undefined;
     return readKernel(

@@ -21,6 +21,11 @@ thread_local! { static SESSION: RefCell<Session> = RefCell::new(Session { input:
 pub extern "C" fn ballot_body_input_pointer() -> usize {
     SESSION.with(|session| session.borrow_mut().input.as_mut_ptr() as usize)
 }
+/// The input buffer's length; the host never writes more.
+#[unsafe(no_mangle)]
+pub extern "C" fn ballot_body_input_capacity() -> usize {
+    CHUNK_LIMIT
+}
 
 #[unsafe(no_mangle)]
 pub extern "C" fn ballot_classification_begin(length: usize) -> u32 {

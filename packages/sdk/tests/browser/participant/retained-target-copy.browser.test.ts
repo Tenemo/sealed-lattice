@@ -3,9 +3,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ProfileContext } from '#packages/sdk/src/participant/worker/context.js';
 import {
     ModuleFailure,
-    moduleChunkBytes,
     ResourceFailure,
 } from '#packages/sdk/src/participant/worker/kernel.js';
+import { chunkBytes } from '#packages/sdk/src/participant/worker/root.js';
 import {
     evaluatedTargetName,
     namespacedName,
@@ -39,7 +39,7 @@ const storedCopy = (database: IDBDatabase) =>
 // Transport stand-ins, not target verification: they record the actual
 // begin/append/finish calls and copied bytes. Only the real Rust lifecycle
 // gate can establish RET1 authentication or a verified evaluation capability.
-const fixture = async (length = 2 * moduleChunkBytes + 37) => {
+const fixture = async (length = 2 * chunkBytes + 37) => {
     const namespace = 'retained-target-' + crypto.randomUUID();
     const name = namespacedName(evaluatedTargetName, namespace);
     names.push(name);
@@ -84,7 +84,7 @@ const fixture = async (length = 2 * moduleChunkBytes + 37) => {
         contribution_output_pointer: () => 32,
         contribution_output_length: () => bytes.length,
         input_pointer: () => 32,
-        input_capacity: () => moduleChunkBytes,
+        input_capacity: () => chunkBytes,
         restore_evaluation: restore,
     };
     const context = { namespace, kernel } as unknown as ProfileContext;
@@ -123,7 +123,7 @@ describe('retained target bounded copies', () => {
         expect(new Uint8Array(await (stored as Blob).arrayBuffer())).toEqual(
             fixed.bytes,
         );
-        expect(sizes).toEqual([moduleChunkBytes, moduleChunkBytes, 37]);
+        expect(sizes).toEqual([chunkBytes, chunkBytes, 37]);
         const keys = await result(
             fixed.database
                 .transaction('target')
@@ -139,7 +139,7 @@ describe('retained target bounded copies', () => {
         vi.spyOn(Blob.prototype, 'arrayBuffer').mockImplementation(
             async function (this: Blob) {
                 sizes.push(this.size);
-                expect(this.size).toBeLessThanOrEqual(moduleChunkBytes);
+                expect(this.size).toBeLessThanOrEqual(chunkBytes);
                 expect(fixed.copied()).toBe(
                     sizes.slice(0, -1).reduce((sum, size) => sum + size, 0),
                 );
@@ -152,11 +152,11 @@ describe('retained target bounded copies', () => {
             },
         );
         await expect(restoreEvaluation(fixed.context)).resolves.toBe(true);
-        expect(sizes).toEqual([moduleChunkBytes, moduleChunkBytes, 37]);
+        expect(sizes).toEqual([chunkBytes, chunkBytes, 37]);
         expect(fixed.calls).toEqual([
             [0, fixed.bytes.length],
-            [1, moduleChunkBytes],
-            [1, moduleChunkBytes],
+            [1, chunkBytes],
+            [1, chunkBytes],
             [1, 37],
             [2, 0],
         ]);
@@ -216,7 +216,7 @@ describe('retained target bounded copies', () => {
         await expect(restoreEvaluation(fixed.context)).resolves.toBe(false);
         expect(fixed.calls).toEqual([
             [0, fixed.bytes.length],
-            [1, moduleChunkBytes],
+            [1, chunkBytes],
             [2, 0],
         ]);
         expect(await storedCopy(fixed.database)).toBeUndefined();
@@ -270,7 +270,7 @@ describe('retained target bounded copies', () => {
             );
             expect(fixed.calls).toEqual([
                 [0, fixed.bytes.length],
-                [1, moduleChunkBytes],
+                [1, chunkBytes],
             ]);
             expect((await storedCopy(fixed.database)) instanceof Blob).toBe(
                 failure instanceof ResourceFailure,

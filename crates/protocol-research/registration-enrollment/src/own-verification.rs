@@ -1,11 +1,12 @@
 use registration_credentials::{
     Credential, Error, SIGNATURE_BYTES,
     poll::{MAXIMUM_POLL_BYTES, VerifiedPoll, verify_poll},
-    registration::{RETAINED_REGISTRATION_BYTES, RegistrationVerifier, VerifiedRegistration},
+    registration::{
+        CHUNK_LIMIT, RETAINED_REGISTRATION_BYTES, RegistrationVerifier, VerifiedRegistration,
+    },
 };
 use std::{cell::RefCell, sync::Arc};
 
-const CHUNK_BYTES: usize = 1 << 20;
 const MAXIMUM_HEADER_BYTES: usize = 4096;
 const CONTROL_BYTES: usize =
     128 + 4 + MAXIMUM_POLL_BYTES + SIGNATURE_BYTES + 4 + MAXIMUM_HEADER_BYTES + SIGNATURE_BYTES;
@@ -72,7 +73,7 @@ impl State {
         Ok(())
     }
     fn command(&mut self, operation: u32, length: usize) -> Result<(), Error> {
-        if length > self.input.len() || (operation != 0 && length > CHUNK_BYTES) {
+        if length > self.input.len() || (operation != 0 && length > CHUNK_LIMIT) {
             return Err(Error::Shape);
         }
         if operation == 0 {

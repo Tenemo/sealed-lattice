@@ -14,7 +14,9 @@ use rns_arithmetic_probe::ranking::{
 use setup_aggregate::verified::VerifiedSetupAggregate;
 use std::{cell::RefCell, sync::Arc};
 
-const CHUNK_BYTES: usize = 1 << 20;
+const EVALUATION_INPUT_BYTES: usize = 1 << 20;
+// A key record after its prime fits the input buffer.
+const _: () = assert!(4 + KEY_RECORD_BYTES <= EVALUATION_INPUT_BYTES);
 /// What an incoming stream becomes as its pieces arrive: a key polynomial
 /// of the ordinal, a ballot body of the author, whose FHE ciphertext's two
 /// components follow its header, or a stored value; each with the identity
@@ -51,8 +53,8 @@ struct State {
 impl State {
     fn new() -> Self {
         Self {
-            input: vec![0; CHUNK_BYTES],
-            output: Vec::with_capacity(CHUNK_BYTES),
+            input: vec![0; EVALUATION_INPUT_BYTES],
+            output: Vec::with_capacity(EVALUATION_INPUT_BYTES),
             context: None,
             classifications: Vec::new(),
             session: None,
@@ -175,7 +177,7 @@ impl State {
         }
     }
     fn command(&mut self, operation: u32, argument: usize, length: usize) -> Result<(), Error> {
-        if length > CHUNK_BYTES {
+        if length > EVALUATION_INPUT_BYTES {
             return Err(Error::Encoding);
         }
         self.output.clear();
@@ -419,7 +421,10 @@ impl State {
                 // The stored value's coefficients in order: both components'
                 // words.
                 let words = value[0].len() / DEGREE;
-                if count == 0 || count > CHUNK_BYTES / (8 * words) || offset > 2 * DEGREE - count {
+                if count == 0
+                    || count > EVALUATION_INPUT_BYTES / (8 * words)
+                    || offset.checked_add(count).is_none_or(|end| end > 2 * DEGREE)
+                {
                     return Err(Error::Encoding);
                 }
                 let mut output = Vec::with_capacity(count * 8 * words);
@@ -541,6 +546,11 @@ pub(crate) fn restore_target(target: VerifiedEvaluationTarget) -> bool {
 #[unsafe(no_mangle)]
 pub extern "C" fn evaluation_target_input_pointer() -> usize {
     STATE.with(|state| state.borrow_mut().input.as_mut_ptr() as usize)
+}
+/// The input buffer's length; the host never writes more.
+#[unsafe(no_mangle)]
+pub extern "C" fn evaluation_target_input_capacity() -> usize {
+    EVALUATION_INPUT_BYTES
 }
 #[unsafe(no_mangle)]
 pub extern "C" fn evaluation_target_output_pointer() -> usize {

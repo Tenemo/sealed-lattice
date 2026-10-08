@@ -24,7 +24,7 @@ import type { Delivery } from './delivery.js';
 // Public records come from an untrusted relay. Every read has an exact upper
 // bound checked before the bytes are kept, and every failure leaves the
 // participant pending. Owning verifiers decide acceptance.
-const transferChunkBytes = 1 << 20;
+export const transferChunkBytes = 1 << 20;
 const networkMilliseconds = 60_000;
 
 export type PublicRelay = Readonly<{

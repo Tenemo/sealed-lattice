@@ -77,17 +77,20 @@ export const kernelFunctions = [
     'participant_release_command',
     // The target certificate, release contexts and release shares.
     'completion_input_pointer',
+    'completion_input_capacity',
     'completion_output_pointer',
     'completion_output_length',
     'completion_command',
     // The public close barrier verifier.
     'close_input_pointer',
+    'close_input_capacity',
     'close_command',
     'close_missing_pointer',
     'close_missing_count',
     // The signed ballot classifier. Finish returns one for a valid body, two
     // for an invalid one and zero when classification refused.
     'ballot_body_input_pointer',
+    'ballot_body_input_capacity',
     'ballot_classification_begin',
     // One when the body relation needs its encryption keys.
     'ballot_classification_requires_key',
@@ -101,6 +104,7 @@ export const kernelFunctions = [
     'ballot_classification_finish',
     // The public ranking evaluation.
     'evaluation_target_input_pointer',
+    'evaluation_target_input_capacity',
     'evaluation_target_output_pointer',
     'evaluation_target_output_length',
     'evaluation_target_command',
@@ -460,15 +464,43 @@ export const writeProofInput = (kernel: ParticipantKernel, bytes: Uint8Array) =>
         kernel.contribution_proof_input_capacity(),
     );
 
-// The close verifier, ballot classifier and evaluation each read one input
-// buffer of a mebibyte.
-export const moduleChunkBytes = 1 << 20;
+// The certificate collector's, close verifier's, ballot classifier's and
+// evaluation's input buffers, by the exports that give each one's address
+// and the capacity the module reports for it.
+const inputBuffers = {
+    completion: ['completion_input_pointer', 'completion_input_capacity'],
+    close: ['close_input_pointer', 'close_input_capacity'],
+    ballotBody: ['ballot_body_input_pointer', 'ballot_body_input_capacity'],
+    evaluationTarget: [
+        'evaluation_target_input_pointer',
+        'evaluation_target_input_capacity',
+    ],
+} as const;
 
-export const writeChunkInput = (
+export const writeBufferInput = (
     kernel: ParticipantKernel,
-    pointer: number,
+    buffer: keyof typeof inputBuffers,
     bytes: Uint8Array,
-) => writeKernel(kernel, pointer, bytes, moduleChunkBytes);
+) => {
+    const [pointer, capacity] = inputBuffers[buffer];
+    writeKernel(kernel, kernel[pointer](), bytes, kernel[capacity]());
+};
+
+// Refuses, before an operation starts, a module whose certificate, close,
+// classifier or evaluation buffer cannot take the largest input the worker
+// writes into it at once.
+export const requireInputCapacities = (
+    kernel: ParticipantKernel,
+    largestInputBytes: number,
+) => {
+    for (const [buffer, [, capacity]] of Object.entries(inputBuffers))
+        if (kernel[capacity]() < largestInputBytes)
+            throw new ModuleFailure(
+                'The participant module cannot take the largest input in its ' +
+                    buffer +
+                    ' buffer.',
+            );
+};
 
 export const writeOwnRegistrationInput = (
     kernel: ParticipantKernel,

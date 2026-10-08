@@ -15,6 +15,7 @@ use registration_credentials::{
 };
 use std::cell::RefCell;
 
+const CLOSE_INPUT_BYTES: usize = 1 << 20;
 /// Public close verification for one browser instance. Every listed envelope
 /// passes the owning envelope authentication before a response that lists it
 /// is authenticated; only the bodies of the proposal's usable slots stream
@@ -32,7 +33,7 @@ struct Session {
 }
 impl Session {
     fn new() -> Self {
-        Self::with_input(vec![0; 1 << 20])
+        Self::with_input(vec![0; CLOSE_INPUT_BYTES])
     }
     // A session that keeps the host's input buffer.
     fn with_input(input: Vec<u8>) -> Self {
@@ -232,6 +233,11 @@ thread_local! { static SESSION: RefCell<Session> = RefCell::new(Session::new());
 #[unsafe(no_mangle)]
 pub extern "C" fn close_input_pointer() -> usize {
     SESSION.with(|session| session.borrow_mut().input.as_mut_ptr() as usize)
+}
+/// The input buffer's length; the host never writes more.
+#[unsafe(no_mangle)]
+pub extern "C" fn close_input_capacity() -> usize {
+    CLOSE_INPUT_BYTES
 }
 #[unsafe(no_mangle)]
 pub extern "C" fn close_command(operation: u32, length: usize) -> u32 {
