@@ -85,7 +85,7 @@ const ordinary = (recovery = false): ParticipantOperationMeasurement[] => {
     add(2, [2], 'endorse-setup', 4);
     for (const position of [0, 1, 2]) {
         add(position, [3], 'verify-setup', 12);
-        add(position, [3], 'ballot', 17);
+        add(position, [3], 'cast-ballot', 17);
     }
     add(1, [4], 'close', 17);
     add(2, [4], 'close', 17);
@@ -93,9 +93,9 @@ const ordinary = (recovery = false): ParticipantOperationMeasurement[] => {
     add(1, [4], 'close', 21);
     add(2, [4], 'close', 21);
     add(0, [4, 5], 'close', 22, 19);
-    for (const position of [0, 1, 2]) add(position, [5], 'target', 24);
+    for (const position of [0, 1, 2]) add(position, [5], 'sign-target', 24);
     for (const position of [0, 1, 2]) add(position, [6], 'release', 29);
-    for (const position of [0, 1, 2]) add(position, [7], 'result', 29);
+    for (const position of [0, 1, 2]) add(position, [7], 'compute-result', 29);
     return operations;
 };
 
@@ -149,7 +149,7 @@ describe('explicit participant productive-visit trace', () => {
         );
         expect(
             measured.operations.filter(
-                (operation) => operation.operation === 'result',
+                (operation) => operation.operation === 'compute-result',
             ),
         ).toHaveLength(3);
     });
@@ -239,9 +239,11 @@ describe('explicit participant productive-visit trace', () => {
                 operation.operation === 'endorse-setup' &&
                 operation.position === 2,
             (operation: ParticipantOperationMeasurement) =>
-                operation.operation === 'target' && operation.position === 2,
+                operation.operation === 'sign-target' &&
+                operation.position === 2,
             (operation: ParticipantOperationMeasurement) =>
-                operation.operation === 'result' && operation.position === 1,
+                operation.operation === 'compute-result' &&
+                operation.position === 1,
         ])
             expect(() =>
                 measure(

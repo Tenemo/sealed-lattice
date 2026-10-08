@@ -11,13 +11,13 @@ use std::sync::Arc;
 /// omitted voter still signs the valid target; the application shows the
 /// omission instead.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum OwnBallotStatus {
+pub enum OwnBallotInclusion {
     NotCast,
     Late,
     Included,
     Omitted,
 }
-impl OwnBallotStatus {
+impl OwnBallotInclusion {
     /// The status's code in the browser interface.
     pub fn code(self) -> u8 {
         match self {
@@ -35,20 +35,20 @@ impl OwnBallotStatus {
 /// target classifies as invalid or accepted, and otherwise omitted. Only this
 /// participant signs envelopes for its slot, and it signs one, so a usable
 /// slot holds that ballot, as the barrier's status requires.
-pub fn classified_ballot_status(
+pub fn classified_ballot_inclusion(
     signed_time: Option<u64>,
     close_time: u64,
     classification: Option<u8>,
-) -> OwnBallotStatus {
+) -> OwnBallotInclusion {
     let Some(time) = signed_time else {
-        return OwnBallotStatus::NotCast;
+        return OwnBallotInclusion::NotCast;
     };
     if time > close_time {
-        return OwnBallotStatus::Late;
+        return OwnBallotInclusion::Late;
     }
     match classification {
-        Some(1 | 2) => OwnBallotStatus::Included,
-        _ => OwnBallotStatus::Omitted,
+        Some(1 | 2) => OwnBallotInclusion::Included,
+        _ => OwnBallotInclusion::Omitted,
     }
 }
 
@@ -98,21 +98,21 @@ impl FinalityWork {
             .expect("A finality target keeps its classified inventory.")
             .barrier()
     }
-    pub fn ballot_status(&self, credential: &Credential) -> OwnBallotStatus {
+    pub fn ballot_inclusion(&self, credential: &Credential) -> OwnBallotInclusion {
         let barrier = self.barrier();
         let Some((identity, time)) = credential.signed_ballot() else {
-            return OwnBallotStatus::NotCast;
+            return OwnBallotInclusion::NotCast;
         };
         if *time > barrier.intent().message().close_time() {
-            return OwnBallotStatus::Late;
+            return OwnBallotInclusion::Late;
         }
         match &barrier.slots()[self.owner.position()] {
             ClosedSlot::Usable(body)
                 if body.authentication().envelope().identity() == *identity =>
             {
-                OwnBallotStatus::Included
+                OwnBallotInclusion::Included
             }
-            _ => OwnBallotStatus::Omitted,
+            _ => OwnBallotInclusion::Omitted,
         }
     }
     /// A used response in this participant's name must be the one it signed.

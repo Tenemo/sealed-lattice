@@ -8,6 +8,6 @@ export type {
     ParticipantPendingCause,
     ParticipantRefusalReason,
     ParticipantRequest,
-    ParticipantResult,
+    ParticipantResponse,
     ParticipantSummary,
 } from './participant/participant.js';

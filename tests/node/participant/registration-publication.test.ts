@@ -123,10 +123,10 @@ const fixture = async (
     const root: AuthenticatedRoot = { head: { ...head }, plaintext, manifest };
     const context = { runtime } as ParticipantContext;
     const enrollment = {
-        bodyDigest: new Uint8Array(64).fill(3),
+        registrationBodyDigest: new Uint8Array(64).fill(3),
         isOrganizer: organizer,
     } as RestoredEnrollment;
-    const prefix = `registration/${hexadecimal(enrollment.bodyDigest)}/`;
+    const prefix = `registration/${hexadecimal(enrollment.registrationBodyDigest)}/`;
     const names = new Map([
         [prefix + 'polynomial-01.bin', dataKind.publicKey],
         [prefix + 'registration-header.bin', dataKind.header],

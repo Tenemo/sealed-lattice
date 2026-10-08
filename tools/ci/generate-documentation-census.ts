@@ -2810,9 +2810,9 @@ const renderCensusText = (): string => {
                     ),
                 ],
                 [
-                    'Maximum creator input bytes',
+                    'Maximum organizer input bytes',
                     formatCount(
-                        registrationEnrollment.maximumCreatorInputBytes,
+                        registrationEnrollment.maximumOrganizerInputBytes,
                     ),
                 ],
                 [

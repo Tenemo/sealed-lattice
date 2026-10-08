@@ -42,9 +42,9 @@ import { releasePhase, targetPhase } from './root-generation.js';
 import { commitRoot, dataRecordInventory } from './root.js';
 import { deliverFinalAggregate, readFinalAggregate } from './setup.js';
 import { snapshotParticipant } from './storage.js';
-import type { BallotStatus, TargetState } from './target-state.js';
+import type { BallotInclusion, TargetState } from './target-state.js';
 import {
-    certifiedBallotStatus,
+    certifiedBallotInclusion,
     discardEvaluation,
     finalityOperation,
     restoreOrEvaluateTarget,
@@ -55,7 +55,7 @@ import {
 // A participant's release of its share of the certified target. The release
 // follows the participant's own signed target, or its completed close when it
 // signed no target and a certificate already exists; a pending target
-// signature cannot be bypassed. Each visit restores the completed close and
+// signature cannot be bypassed. Each operation restores the completed close and
 // any signed target, restores the target this participant evaluated or else
 // evaluates it from the public close records, and certifies it from the
 // published votes; only the certificate verifier creates the release
@@ -74,7 +74,7 @@ export type ReleaseSession = {
     // evaluation of a release that follows the completed close.
     target: Readonly<{ body: Uint8Array; digest: Uint8Array }> | undefined;
     state: ReleaseState | undefined;
-    // The proof-stream bytes the module drew, when this visit generated the
+    // The proof-stream bytes the module drew, when this operation generated the
     // release.
     proofRandomBytes?: number;
 };
@@ -239,7 +239,7 @@ const completionCommand = (
 // certificate threshold. A missing or refused vote is skipped; too few leave
 // the participant pending. A restored target that the votes leave
 // uncertified while one of them was refused, as every vote for another target
-// is, is discarded, so that the next visit evaluates the target the public
+// is, is discarded, so that the next operation evaluates the target the public
 // close records name; missing votes alone keep it. Returns whether the target
 // is encrypted.
 export const certifyTarget = async (
@@ -464,7 +464,7 @@ const commitRelease = async (
 // status in it, then the seed of all its randomness.
 const lockRelease = async (
     session: ReleaseSession,
-    ballotStatus: BallotStatus,
+    ballotInclusion: BallotInclusion,
 ) => {
     if (generationOf(session) < releasePhase.locked)
         await commitRelease(session, {
@@ -474,7 +474,7 @@ const lockRelease = async (
                     session.signed === undefined
                         ? completedClosePhase(session.close.organizer)
                         : targetPhase.signed,
-                ballotStatus,
+                ballotInclusion,
                 target: releaseTarget(session).body,
                 seed: new Uint8Array(),
                 bodyLength: 0,
@@ -637,14 +637,14 @@ export const advanceRelease = async (
         );
     }
     const encrypted = await certifyTarget(context, relay, evaluated.restored);
-    const ballotStatus =
-        session.signed?.ballotStatus ?? certifiedBallotStatus(context);
+    const ballotInclusion =
+        session.signed?.ballotInclusion ?? certifiedBallotInclusion(context);
     if (
         session.state !== undefined &&
-        session.state.ballotStatus !== ballotStatus
+        session.state.ballotInclusion !== ballotInclusion
     )
         throw new Error('The release names another ballot status.');
-    if (!encrypted) return { encrypted, ballotStatus };
+    if (!encrypted) return { encrypted, ballotInclusion };
     // A release that follows the completed close takes the certified target.
     session.target ??= {
         body: evaluated.body,
@@ -655,12 +655,12 @@ export const advanceRelease = async (
         ),
     };
     await establishReleaseContext(context, close.records.position);
-    await lockRelease(session, ballotStatus);
+    await lockRelease(session, ballotInclusion);
     if (generationOf(session) === releasePhase.ready)
         await proveRelease(session);
     else await restoreReleaseBody(session);
     await signRelease(session);
-    return { encrypted, ballotStatus };
+    return { encrypted, ballotInclusion };
 };
 
 // Delivers the signed release body and then its envelope packet, inspecting

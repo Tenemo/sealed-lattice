@@ -145,13 +145,13 @@ export const compileRegistrationEnrollmentCensus = () => {
             identifierBytes += bytes(`option-${String(index)}`);
         return 30n + 36n * options + identifierBytes;
     };
-    // The creator input carries the runtime, the result length, the
+    // The organizer input carries the runtime, the result length, the
     // participant maximum, the question, the option count, each label and
     // the username, each text after its four-byte length, then the three data
     // keys. The texts fill what the poll definition leaves beside its own
     // framing and the manifest's, which grows faster with the option count
     // than the input's framing, so the fewest options give the longest input.
-    const creatorInputBytes = (options: bigint) =>
+    const organizerInputBytes = (options: bigint) =>
         64n +
         2n +
         2n +
@@ -165,10 +165,11 @@ export const compileRegistrationEnrollmentCensus = () => {
         inputs.maximumUsernameIngressBytes +
         96n;
     const { options } = supportedProfileRanges();
-    let maximumCreatorInputBytes = 0n;
+    let maximumOrganizerInputBytes = 0n;
     for (let count = options.minimum; count <= options.maximum; count++) {
-        const value = creatorInputBytes(BigInt(count));
-        if (value > maximumCreatorInputBytes) maximumCreatorInputBytes = value;
+        const value = organizerInputBytes(BigInt(count));
+        if (value > maximumOrganizerInputBytes)
+            maximumOrganizerInputBytes = value;
     }
     return {
         ...inputs,
@@ -188,7 +189,7 @@ export const compileRegistrationEnrollmentCensus = () => {
         maximumManifestBytes,
         maximumRootBytes,
         pollDefinitionOverheadBytes,
-        maximumCreatorInputBytes,
+        maximumOrganizerInputBytes,
         maximumJoinInputBytes:
             128n +
             4n +

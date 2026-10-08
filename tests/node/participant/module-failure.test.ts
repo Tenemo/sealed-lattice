@@ -16,7 +16,7 @@ import type { ParallelHelpers } from '#packages/sdk/src/participant/worker/paral
 // allocator's import and one draws randomness through the witness import.
 const trapping = 'restore';
 const exhausting = 'check_retained';
-const drawing = 'prepare_creator';
+const drawing = 'prepare_organizer';
 const standInModule = () => {
     const text = [
         '(module',
@@ -95,7 +95,7 @@ describe('participant module failures', () => {
             noHelpers,
         );
         // No operation installed a randomness handler, so the import refuses.
-        expect(() => kernel.prepare_creator()).toThrow(ModuleFailure);
+        expect(() => kernel.prepare_organizer()).toThrow(ModuleFailure);
         // With a handler, a fresh instance draws and returns.
         const fresh = await instantiateParticipantKernel(
             standInModule(),
@@ -105,7 +105,7 @@ describe('participant module failures', () => {
         fresh.handlers.random = (target) => {
             drawn += target.length;
         };
-        expect(fresh.kernel.prepare_creator()).toBe(0);
+        expect(fresh.kernel.prepare_organizer()).toBe(0);
         expect(drawn).toBe(16);
         expect(handlers.random).toBeUndefined();
     });

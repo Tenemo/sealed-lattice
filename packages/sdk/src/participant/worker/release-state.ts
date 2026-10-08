@@ -18,8 +18,8 @@ import {
     releasePhase,
     targetPhase,
 } from './root-generation.js';
-import { ballotStatuses } from './target-state.js';
-import type { BallotStatus } from './target-state.js';
+import { ballotInclusions } from './target-state.js';
+import type { BallotInclusion } from './target-state.js';
 
 // The release suffix follows the signed target, or the completed close when
 // the participant signed no target and a certificate already exists; the
@@ -37,7 +37,7 @@ export type ReleaseState = Readonly<{
     // The signed-target or completed-close generation the release follows.
     predecessor: number;
     // The own ballot's status in the certified target.
-    ballotStatus: BallotStatus;
+    ballotInclusion: BallotInclusion;
     // The certified target body.
     target: Uint8Array;
     // The randomness seed, retained only until the body is.
@@ -58,7 +58,7 @@ export const encodeReleaseState = (generation: number, state: ReleaseState) => {
         marker,
         Uint8Array.of(
             state.predecessor,
-            ballotStatuses.indexOf(state.ballotStatus),
+            ballotInclusions.indexOf(state.ballotInclusion),
         ),
         unsigned16(state.target.length),
         unsigned32(state.bodyLength),
@@ -101,7 +101,7 @@ export const decodeReleaseState = (
         !equalBytes(bytes.subarray(0, marker.length), marker) ||
         (bytes[marker.length] !== targetPhase.signed &&
             bytes[marker.length] !== completedClosePhase(organizer)) ||
-        bytes[marker.length + 1] >= ballotStatuses.length
+        bytes[marker.length + 1] >= ballotInclusions.length
     )
         throw new Error('The release state is malformed.');
     const targetLength = readUnsigned16(bytes, marker.length + 2);
@@ -132,7 +132,7 @@ export const decodeReleaseState = (
     const envelopeEnd = tailStart + (withBody ? bounds.envelopeBytes : 0);
     return {
         predecessor: bytes[marker.length],
-        ballotStatus: ballotStatuses[bytes[marker.length + 1]],
+        ballotInclusion: ballotInclusions[bytes[marker.length + 1]],
         target: bytes.slice(prefixBytes, seedStart),
         seed: bytes.slice(seedStart, keysStart),
         bodyLength,

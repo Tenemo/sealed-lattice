@@ -48,7 +48,7 @@ describe('corrupt participant module selection', () => {
         const corrupt = Uint8Array.of(4, 5, 6);
         const context = {
             location: { origin: 'https://participant.test' },
-            evaluatingOperations: new Set(['target']),
+            evaluatingOperations: new Set(['sign-target']),
             fetchModule: () => {
                 events.push('honest delivery');
                 return { bytes: honest, digest: 'digest' };
@@ -80,7 +80,7 @@ describe('corrupt participant module selection', () => {
             await context.run!({
                 module: 'honest',
                 identity: { module: 'digest' },
-                operation: 'ballot',
+                operation: 'cast-ballot',
             }),
         ).toEqual({ module: [4, 5, 6], evaluation: false });
         expect(events).toEqual([

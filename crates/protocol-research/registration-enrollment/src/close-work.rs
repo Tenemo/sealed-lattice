@@ -126,18 +126,18 @@ impl CloseWork {
     /// The own ballot's status in a certified target that this participant
     /// did not sign, from the target's classification of its slot and the
     /// locked close time.
-    pub fn released_ballot_status(
+    pub fn released_ballot_inclusion(
         &self,
         credential: &Credential,
         body: &[u8],
-    ) -> Result<crate::finality_work::OwnBallotStatus, Error> {
+    ) -> Result<crate::finality_work::OwnBallotInclusion, Error> {
         let message =
             registration_credentials::target_signing::TargetMessage::parse(body, self.count())?;
         let intent = self.intent.as_ref().ok_or(Error::Context)?;
         if message.poll() != self.owner.poll() || message.inventory() != self.owner.inventory() {
             return Err(Error::Context);
         }
-        Ok(crate::finality_work::classified_ballot_status(
+        Ok(crate::finality_work::classified_ballot_inclusion(
             credential.signed_ballot().map(|(_, time)| *time),
             intent.message().close_time(),
             message.classification(self.owner.position()),

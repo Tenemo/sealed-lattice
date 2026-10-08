@@ -51,7 +51,7 @@ import { retainedSetupInventory } from './setup.js';
 import { encodeSignedPacket } from './signed-packet.js';
 import { snapshotParticipant } from './storage.js';
 
-// A participant's close work. Each visit restores the module's close state
+// A participant's close work. Each operation restores the module's close state
 // from the retained log, then accepts the deliveries it is given, locks the
 // organizer's intent, responds, and for the organizer takes the other
 // responses and proposes. Every accepted input commits its event, records and
@@ -85,15 +85,15 @@ const maximumListedEntries = ({ close }: ParticipantProfile) =>
     (close.maximumResponseBodyBytes - close.minimumResponseBodyBytes) /
     listedEntryBytes;
 
-export type CloseRequest = Readonly<{
+export type CloseParameters = Readonly<{
     // The organizer's close time in Unix milliseconds, only before an intent.
     closeTime?: bigint;
 }>;
 
 // The close time a request supplies, or undefined when it is malformed.
-export const parseCloseRequest = (
+export const parseCloseParameters = (
     parameters: Readonly<Record<string, unknown>>,
-): CloseRequest | undefined => {
+): CloseParameters | undefined => {
     const { closeTime } = parameters;
     if (closeTime === undefined) return {};
     return typeof closeTime === 'number' &&
@@ -359,7 +359,7 @@ const namesEnvelope = (
 };
 
 // The identity of the envelope a retained submission begins with, derived
-// without the close module, so that a visit that restores no setup can name
+// without the close module, so that an operation that restores no setup can name
 // what its custody holds.
 const custodyEnvelopeIdentity = (
     context: PublicProfileContext,
@@ -1353,11 +1353,11 @@ export const lockPublishedIntent = async (
     return lockAvailableIntent(session, relay);
 };
 
-// One visit's close work after the complete setup verified in this instance.
+// One operation's close work after the complete setup verified in this instance.
 export const advanceClose = async (
     session: CloseSession,
     relay: PublicRelay,
-    request: CloseRequest,
+    request: CloseParameters,
 ) => {
     const generation = () => generationOf(session);
     const collecting = () =>

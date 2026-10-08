@@ -48,7 +48,7 @@ export const participantDatabaseName = (namespace: string) =>
     namespacedName('sealed-lattice-participant', namespace);
 
 // The public caches beside the participant's database, which hold no
-// authority and which a visit rebuilds from public records when they are
+// authority and which an operation rebuilds from public records when they are
 // lost: the verified setup's aggregate and the target the participant
 // evaluated.
 export const setupCacheName = 'sealed-lattice-setup';

@@ -46,12 +46,12 @@ export const registrationFile = {
     signature: 'signature.bin',
 } as const;
 
-export const registrationCandidateKey = (bodyDigest: string) =>
-    'registration/' + bodyDigest;
+export const registrationCandidateKey = (registrationBodyDigest: string) =>
+    'registration/' + registrationBodyDigest;
 
 // The ordered registration body digests a proposal lists: the fourth tuple
 // value holds its own length, the count and one digest per participant.
-export const proposalRecordIds = (body: Uint8Array): string[] => {
+export const proposalRegistrationBodyDigests = (body: Uint8Array): string[] => {
     const fields = tupleFields(body);
     const bodies = fields[3];
     if (
@@ -85,7 +85,7 @@ const recordStep = {
 // record and is thrown once every started record has stopped.
 export const streamRegistrations = async (
     relay: PublicRelay,
-    recordIds: readonly string[],
+    registrationBodyDigests: readonly string[],
     registration: ParticipantLimits['registration'],
     openRecords: number,
     step: (operation: number, position: number, bytes: Uint8Array) => boolean,
@@ -103,7 +103,7 @@ export const streamRegistrations = async (
             throw new PublicInputFailure(refusal);
     };
     const record = async (position: number) => {
-        const id = recordIds[position];
+        const id = registrationBodyDigests[position];
         await findCandidate(
             relay,
             registrationCandidateKey(id),
@@ -179,7 +179,7 @@ export const streamRegistrations = async (
     };
     let next = 0;
     const stream = async () => {
-        while (failure === undefined && next < recordIds.length) {
+        while (failure === undefined && next < registrationBodyDigests.length) {
             const position = next;
             next += 1;
             try {
@@ -191,7 +191,12 @@ export const streamRegistrations = async (
     };
     await Promise.all(
         Array.from(
-            { length: Math.min(Math.max(openRecords, 1), recordIds.length) },
+            {
+                length: Math.min(
+                    Math.max(openRecords, 1),
+                    registrationBodyDigests.length,
+                ),
+            },
             stream,
         ),
     );
@@ -200,7 +205,7 @@ export const streamRegistrations = async (
 
 // The module decides whether it supports a roster of this size; a request
 // outside every supported size is refused before it reaches the module.
-export const validRecordIds = (
+export const validRegistrationBodyDigests = (
     ids: readonly string[],
     limits: ParticipantLimits,
 ) =>
@@ -212,7 +217,7 @@ export const validRecordIds = (
 export type VerifiedProposal = Readonly<{
     body: Uint8Array;
     identity: Uint8Array;
-    recordIds: readonly string[];
+    registrationBodyDigests: readonly string[];
     // The verified registrations' usernames in roster order.
     usernames: readonly string[];
     position: number;
@@ -266,13 +271,13 @@ const finishProposal = async (
     context: ParticipantContext,
     relay: PublicRelay,
     enrollment: RestoredEnrollment,
-    recordIds: readonly string[],
+    registrationBodyDigests: readonly string[],
     restoring: boolean,
 ): Promise<VerifiedProposal> => {
     const { kernel, limits } = context;
     await streamRegistrations(
         relay,
-        recordIds,
+        registrationBodyDigests,
         limits.registration,
         kernel.roster_open_records(),
         (operation, position, bytes) => {
@@ -294,18 +299,23 @@ const finishProposal = async (
         kernel.roster_body_pointer(),
         kernel.roster_body_length(),
     );
-    if (proposalRecordIds(body).join(',') !== recordIds.join(','))
+    if (
+        proposalRegistrationBodyDigests(body).join(',') !==
+        registrationBodyDigests.join(',')
+    )
         throw new PublicInputFailure('The proposal lists other records.');
-    const position = recordIds.indexOf(hexadecimal(enrollment.bodyDigest));
+    const position = registrationBodyDigests.indexOf(
+        hexadecimal(enrollment.registrationBodyDigest),
+    );
     if (position < 0)
         throw new PublicInputFailure('The proposal omits this participant.');
     const usernames = verifiedRosterUsernames(kernel);
-    if (usernames.length !== recordIds.length)
+    if (usernames.length !== registrationBodyDigests.length)
         throw new Error('The roster verifier named another roster.');
     return {
         body,
         identity: readKernel(kernel, kernel.roster_identity_pointer(), 64),
-        recordIds,
+        registrationBodyDigests,
         usernames,
         position,
     };
@@ -318,13 +328,16 @@ const verifyProposalInputs = async (
     relay: PublicRelay,
     root: AuthenticatedRoot,
     enrollment: RestoredEnrollment,
-    recordIds: readonly string[],
+    registrationBodyDigests: readonly string[],
 ): Promise<VerifiedProposal> => {
     // The module verified the poll with the participant's own registration,
     // and the poll's signed maximum bounds the roster.
     if (
-        !validRecordIds(recordIds, context.limits) ||
-        recordIds.length >
+        !validRegistrationBodyDigests(
+            registrationBodyDigests,
+            context.limits,
+        ) ||
+        registrationBodyDigests.length >
             context.kernel.own_registration_maximum_participants()
     )
         throw new InvalidRequest('The proposed records are invalid.');
@@ -333,16 +346,22 @@ const verifyProposalInputs = async (
         root.manifest.poll,
         enrollment.definition,
         enrollment.definitionSignature,
-        recordIds.length,
+        registrationBodyDigests.length,
     );
     sessionInput(context, begin);
     if (context.kernel.roster_begin(begin.length) !== 0)
         throw new PublicInputFailure('The proposed poll was refused.');
-    return finishProposal(context, relay, enrollment, recordIds, false);
+    return finishProposal(
+        context,
+        relay,
+        enrollment,
+        registrationBodyDigests,
+        false,
+    );
 };
 
 // The credential keys the roster the module verified in full, so that later
-// visits restore it from the published headers and keys alone.
+// operations restore it from the published headers and keys alone.
 const retainRoster = (context: ParticipantContext) => {
     const { kernel } = context;
     if (kernel.retain_roster() !== 0)
@@ -377,7 +396,7 @@ export const proposeRoster = async (
     relay: PublicRelay,
     root: AuthenticatedRoot,
     enrollment: RestoredEnrollment,
-    recordIds: readonly string[],
+    registrationBodyDigests: readonly string[],
 ): Promise<RetainedRoster | undefined> => {
     if (
         !enrollment.isOrganizer ||
@@ -389,7 +408,7 @@ export const proposeRoster = async (
         relay,
         root,
         enrollment,
-        recordIds,
+        registrationBodyDigests,
     );
     if (context.kernel.validate_roster_signer() !== 0) return undefined;
     const added = [
@@ -465,7 +484,7 @@ export const acceptRoster = async (
     relay: PublicRelay,
     root: AuthenticatedRoot,
     enrollment: RestoredEnrollment,
-    recordIds: readonly string[],
+    registrationBodyDigests: readonly string[],
 ): Promise<RetainedRoster | undefined> => {
     if (
         enrollment.isOrganizer ||
@@ -477,7 +496,7 @@ export const acceptRoster = async (
         relay,
         root,
         enrollment,
-        recordIds,
+        registrationBodyDigests,
     );
     const signature = await findCandidate(
         relay,
@@ -546,13 +565,13 @@ export const reverifyRoster = async (
         root.manifest,
         dataKind.proposal,
     );
-    const recordIds = proposalRecordIds(stored);
+    const registrationBodyDigests = proposalRegistrationBodyDigests(stored);
     const begin = rosterBegin(
         context,
         root.manifest.poll,
         enrollment.definition,
         enrollment.definitionSignature,
-        recordIds.length,
+        registrationBodyDigests.length,
     );
     const input = concatenate(
         begin,
@@ -565,7 +584,7 @@ export const reverifyRoster = async (
         context,
         relay,
         enrollment,
-        recordIds,
+        registrationBodyDigests,
         true,
     );
     if (!equalBytes(proposal.body, stored))
@@ -600,7 +619,7 @@ export const retainedProfile = async (
     const profile = readParticipantProfile(
         context.kernel,
         context.limits,
-        proposalRecordIds(proposal).length,
+        proposalRegistrationBodyDigests(proposal).length,
         context.kernel.own_registration_option_count(),
     );
     const retainedLength = (kind: number) =>
@@ -624,15 +643,15 @@ export const retainedProfile = async (
         throw new Error(
             'The retained roster does not name a supported profile.',
         );
-    const position = proposalRecordIds(proposal).indexOf(
-        hexadecimal(enrollment.bodyDigest),
+    const position = proposalRegistrationBodyDigests(proposal).indexOf(
+        hexadecimal(enrollment.registrationBodyDigest),
     );
     if (position < 0)
         throw new Error('The retained roster omits this participant.');
     return { ...context, profile, position };
 };
 
-export const parseRecordIds = (value: unknown): string[] => {
+export const parseRegistrationBodyDigests = (value: unknown): string[] => {
     if (
         !Array.isArray(value) ||
         !value.every(

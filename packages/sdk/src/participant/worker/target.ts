@@ -58,7 +58,7 @@ import {
     publicEvaluationName,
 } from './storage.js';
 import {
-    ballotStatuses,
+    ballotInclusions,
     decodeTargetState,
     encodeTargetState,
 } from './target-state.js';
@@ -747,7 +747,7 @@ export const retainEvaluation = async (context: ProfileContext) => {
     );
 };
 
-// Discards the retained evaluated target, so that the next visit evaluates
+// Discards the retained evaluated target, so that the next operation evaluates
 // the target again.
 export const discardEvaluation = async (context: PublicContext) => {
     await evaluatedTargetRequest(context.namespace, 'readwrite', (store) =>
@@ -758,7 +758,7 @@ export const discardEvaluation = async (context: PublicContext) => {
 // Restores the target this participant evaluated earlier from its retained
 // copy, for the verified setup live in this instance. A copy that cannot be
 // read, that the module refuses or on which the module fails is discarded,
-// so a later visit evaluates the target again. Returns whether the target
+// so a later operation evaluates the target again. Returns whether the target
 // was restored.
 export const restoreEvaluation = async (context: ProfileContext) => {
     try {
@@ -1192,7 +1192,7 @@ export const finalityOperation = {
     begin: 0,
     signVote: 1,
     restoreSignedTarget: 2,
-    certifiedBallotStatus: 3,
+    certifiedBallotInclusion: 3,
 } as const;
 
 const finalityCommand = (
@@ -1215,14 +1215,14 @@ const finalityCommand = (
 
 // The own ballot's status in the target this instance certified, which the
 // finality work reads for a participant that signed no target of its own.
-export const certifiedBallotStatus = (context: ProfileContext) => {
+export const certifiedBallotInclusion = (context: ProfileContext) => {
     const output = finalityCommand(
         context,
-        finalityOperation.certifiedBallotStatus,
+        finalityOperation.certifiedBallotInclusion,
     );
-    if (output.length !== 1 || output[0] >= ballotStatuses.length)
+    if (output.length !== 1 || output[0] >= ballotInclusions.length)
         throw new Error('The finality work reported no ballot status.');
-    return ballotStatuses[output[0]];
+    return ballotInclusions[output[0]];
 };
 
 // The retained target signing state, or undefined before it begins.
@@ -1276,21 +1276,21 @@ export const evaluateClosedTarget = async (
     const { context } = records;
     const usable = await verifyCloseBarrier(records, relay);
     evaluationCommand(context, evaluationOperation.begin);
-    let validBallots = 0;
+    let acceptedBallots = 0;
     for (let author = 0; author < context.profile.participantCount; author++) {
         const slot = usable.get(author);
         if (
             slot !== undefined &&
             (await classifyBallot(records, relay, author, slot))
         )
-            validBallots++;
+            acceptedBallots++;
         // Each slot takes the classification just made, or none.
         evaluationCommand(context, evaluationOperation.takeClassification);
     }
     return {
         body: await evaluate(records, relay, usable),
-        usableBallots: usable.size,
-        validBallots,
+        usableSubmissions: usable.size,
+        acceptedBallots,
     };
 };
 
@@ -1339,23 +1339,21 @@ export const signTarget = async (close: CloseSession, relay: PublicRelay) => {
     const { participant } = close;
     const { context } = participant;
     await restoreCompletedClose(close);
-    const { body, usableBallots, validBallots } = await evaluateClosedTarget(
-        participantCloseRecords(close),
-        relay,
-    );
+    const { body, usableSubmissions, acceptedBallots } =
+        await evaluateClosedTarget(participantCloseRecords(close), relay);
     await retainEvaluation(context);
     const finality = finalityCommand(context, finalityOperation.begin);
     if (!equalBytes(finality.subarray(1), body))
         throw new Error('The finality work names another target.');
     const code = finality[0];
-    if (code >= ballotStatuses.length)
+    if (code >= ballotInclusions.length)
         throw new Error('The finality work reported no ballot status.');
-    const ballotStatus = ballotStatuses[code];
+    const ballotInclusion = ballotInclusions[code];
     let state = resumeTarget(close);
     if (state === undefined) {
         state = {
             predecessor: completedClosePhase(close.organizer),
-            ballotStatus,
+            ballotInclusion,
             body,
 
             vote: new Uint8Array(),
@@ -1365,7 +1363,7 @@ export const signTarget = async (close: CloseSession, relay: PublicRelay) => {
         throw new PublicInputFailure(
             'The public close records name another target.',
         );
-    else if (state.ballotStatus !== ballotStatus)
+    else if (state.ballotInclusion !== ballotInclusion)
         throw new Error('The finality work reported another ballot status.');
     const vote = finalityCommand(
         context,
@@ -1377,7 +1375,7 @@ export const signTarget = async (close: CloseSession, relay: PublicRelay) => {
 
         vote,
     });
-    return { usableBallots, validBallots };
+    return { usableSubmissions, acceptedBallots };
 };
 
 // Delivers the signed target vote, and the organizer the target body,

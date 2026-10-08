@@ -323,7 +323,7 @@ const participantConsumer = [
     "    commands[2] !== command('release', false) ||",
     '    JSON.stringify(released) !==',
     // Node offers no storage manager, so the storage stays best-effort.
-    "        JSON.stringify({ status: 'completed', details: { memory: { workerBytes: 1 }, evaluationMemory: { workerBytes: 2 }, persistentStorage: false } })",
+    "        JSON.stringify({ status: 'completed', details: { memory: { workerBytes: 1 }, evaluationMemory: { workerBytes: 2 }, isStoragePersistent: false } })",
     ')',
     "    throw new Error('The participant API did not run a separate evaluation: ' + JSON.stringify(released));",
     '',
@@ -353,9 +353,9 @@ const writeConsumer = async (consumerDirectoryPath: string): Promise<void> => {
         writeFile(
             path.join(consumerDirectoryPath, 'smoke.ts'),
             [
-                "import { openParticipant, type ParticipantResult, type ParticipantSummary } from 'sealed-lattice';",
+                "import { openParticipant, type ParticipantResponse, type ParticipantSummary } from 'sealed-lattice';",
                 "const participant = openParticipant({ namespace: 'smoke-poll', relay: 'https://relay.example/polls' });",
-                "const result: Promise<ParticipantResult> = participant.run({ operation: 'status' });",
+                "const result: Promise<ParticipantResponse> = participant.run({ operation: 'status' });",
                 "const options: ParticipantSummary['options'] = [{ identifier: 'option-0', label: 'Option 0' }];",
                 'void result;',
                 'void options;',

@@ -36,7 +36,7 @@ const module = await WebAssembly.compile(
     ).arrayBuffer(),
 );
 const enrollment = {
-    role: 'creator',
+    role: 'organizer',
     question: 'Which option?',
     options: ['First', 'Second'],
     topCount: 1,
@@ -91,12 +91,12 @@ describe('enrollment interruption custody', () => {
         const context = await fixture();
         const failure = new ModuleFailure('Validation module interrupted.');
         const started = vi.fn();
-        const validate = context.kernel.validate_creator;
+        const validate = context.kernel.validate_organizer;
         const failing = {
             ...context,
             kernel: {
                 ...context.kernel,
-                validate_creator: (length: number) => {
+                validate_organizer: (length: number) => {
                     expect(validate(length)).toBe(0);
                     throw failure;
                 },
@@ -128,7 +128,7 @@ describe('enrollment interruption custody', () => {
             });
             const failing = {
                 ...context,
-                kernel: { ...context.kernel, prepare_creator: prepare },
+                kernel: { ...context.kernel, prepare_organizer: prepare },
             };
             const rejected = await createEnrollment(
                 failing,

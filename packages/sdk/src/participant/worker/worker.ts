@@ -19,7 +19,7 @@ import {
     closeEvents,
     isCloseComplete,
     lockPublishedIntent,
-    parseCloseRequest,
+    parseCloseParameters,
     publishClose,
     resumeClose,
 } from './close.js';
@@ -81,7 +81,7 @@ import { authenticateRoot } from './root.js';
 import type { AuthenticatedRoot } from './root.js';
 import {
     acceptRoster,
-    parseRecordIds,
+    parseRegistrationBodyDigests,
     proposeRoster,
     retainedProfile,
     reverifyRoster,
@@ -99,7 +99,7 @@ import {
 } from './storage.js';
 import { decodeTargetState } from './target-state.js';
 import {
-    certifiedBallotStatus,
+    certifiedBallotInclusion,
     EvaluationRetained,
     largestBufferInputBytes,
     publishTarget,
@@ -246,7 +246,7 @@ const ballotState = (root: AuthenticatedRoot) => {
 // signing state retains from the evaluation on, and the release state of a
 // participant that signed no target from its lock on. A participant that
 // signed no target and locked no release retains none.
-const ballotStatus = (
+const ballotInclusion = (
     root: AuthenticatedRoot,
     organizer: boolean,
     profiled: ProfileContext | undefined,
@@ -264,11 +264,11 @@ const ballotStatus = (
             generation,
             organizer,
             target,
-        ).ballotStatus;
+        ).ballotInclusion;
     return generation < releasePhase.locked || release === undefined
         ? undefined
         : decodeReleaseState(profiled.profile, generation, organizer, release)
-              .ballotStatus;
+              .ballotInclusion;
 };
 
 // Whether the participant contributes setup key material is known once its
@@ -280,7 +280,7 @@ const summary = (
 ) => ({
     generation: root.head.generation,
     poll: hexadecimal(root.manifest.poll),
-    bodyDigest: hexadecimal(enrollment.bodyDigest),
+    registrationBodyDigest: hexadecimal(enrollment.registrationBodyDigest),
     username: enrollment.username,
     isOrganizer: enrollment.isOrganizer,
     question: enrollment.poll.question,
@@ -288,8 +288,8 @@ const summary = (
     topCount: enrollment.poll.topCount,
     isEligibleContributor:
         profiled === undefined ? undefined : isEligibleContributor(profiled),
-    ballot: ballotState(root),
-    ballotStatus: ballotStatus(root, enrollment.isOrganizer, profiled),
+    ballotState: ballotState(root),
+    ballotInclusion: ballotInclusion(root, enrollment.isOrganizer, profiled),
 });
 
 const execute = async (
@@ -302,7 +302,7 @@ const execute = async (
     if (command.operation === 'create') {
         const role = text(parameters.role);
         let request: EnrollmentRequest;
-        if (role === 'creator') {
+        if (role === 'organizer') {
             const { options } = parameters;
             if (!Array.isArray(options))
                 throw new InvalidRequest('Malformed option labels.');
@@ -314,7 +314,7 @@ const execute = async (
                 maximumParticipants: Number(parameters.maximumParticipants),
                 username: text(parameters.username),
             };
-        } else if (role === 'join')
+        } else if (role === 'joiner')
             request = {
                 role,
                 poll: bytes(parameters.poll),
@@ -376,7 +376,9 @@ const execute = async (
             await publishRegistrationRecords(context, relay, root, enrollment);
             break;
         case 'propose-roster': {
-            const recordIds = parseRecordIds(parameters.recordIds);
+            const registrationBodyDigests = parseRegistrationBodyDigests(
+                parameters.registrationBodyDigests,
+            );
             if (root.head.generation === rootGeneration.rosterLocked) {
                 const proposal = await reverifyRoster(
                     context,
@@ -384,7 +386,10 @@ const execute = async (
                     root,
                     enrollment,
                 );
-                if (proposal.recordIds.join(',') !== recordIds.join(','))
+                if (
+                    proposal.registrationBodyDigests.join(',') !==
+                    registrationBodyDigests.join(',')
+                )
                     return refused('invalid request');
                 root = await signRoster(context, root, proposal);
                 reported = { rosterUsernames: proposal.usernames };
@@ -394,9 +399,10 @@ const execute = async (
                     relay,
                     root,
                     enrollment,
-                    recordIds,
+                    registrationBodyDigests,
                 );
-                if (proposed === undefined) return refused('unavailable');
+                if (proposed === undefined)
+                    return refused('unavailable operation');
                 root = proposed.root;
                 reported = { rosterUsernames: proposed.usernames };
             }
@@ -408,9 +414,11 @@ const execute = async (
                 relay,
                 root,
                 enrollment,
-                parseRecordIds(parameters.recordIds),
+                parseRegistrationBodyDigests(
+                    parameters.registrationBodyDigests,
+                ),
             );
-            if (accepted === undefined) return refused('unavailable');
+            if (accepted === undefined) return refused('unavailable operation');
             root = accepted.root;
             reported = { rosterUsernames: accepted.usernames };
             break;
@@ -420,7 +428,7 @@ const execute = async (
                 root.head.generation !== rootGeneration.rosterSigned &&
                 root.head.generation !== rootGeneration.preparation
             )
-                return refused('unavailable');
+                return refused('unavailable operation');
             const session = await resumeParticipant(profileContext(), root);
             await confirmRoster(session);
             root = session.root;
@@ -431,7 +439,7 @@ const execute = async (
                 root.head.generation !== rootGeneration.preparation ||
                 !isEligibleContributor(profileContext())
             )
-                return refused('unavailable');
+                return refused('unavailable operation');
             let session = await resumeParticipant(profileContext(), root);
             if (session.state === undefined || session.state.phase === 4) {
                 const proposal = await reverifyRoster(
@@ -470,7 +478,7 @@ const execute = async (
                 root.head.generation !== rootGeneration.preparation ||
                 !enrollment.isOrganizer
             )
-                return refused('unavailable');
+                return refused('unavailable operation');
             const session = await resumeParticipant(profileContext(), root);
             await selectSetup(session, relay);
             root = session.root;
@@ -478,7 +486,7 @@ const execute = async (
         }
         case 'endorse-setup': {
             if (root.head.generation !== rootGeneration.preparation)
-                return refused('unavailable');
+                return refused('unavailable operation');
             const session = await resumeParticipant(profileContext(), root);
             await endorseSetup(session, relay);
             root = session.root;
@@ -490,7 +498,7 @@ const execute = async (
                 profiled === undefined ||
                 root.head.generation !== rootGeneration.preparation
             )
-                return refused('unavailable');
+                return refused('unavailable operation');
             const session = await resumeParticipant(profiled, root);
             root = await retainSetup(
                 session,
@@ -507,7 +515,7 @@ const execute = async (
             root = session.root;
             break;
         }
-        case 'ballot': {
+        case 'cast-ballot': {
             // Generation twelve starts an attempt with the requested scores.
             // A retained attempt continues only with its locked scores, and a
             // signed ballot is only delivered again, also after an intent.
@@ -516,7 +524,7 @@ const execute = async (
                 profiled === undefined ||
                 generation < rootGeneration.setupRetained
             )
-                return refused('unavailable');
+                return refused('unavailable operation');
             const scores =
                 parameters.scores === undefined
                     ? undefined
@@ -528,7 +536,7 @@ const execute = async (
             )
                 return refused('invalid request');
             if (generation >= ballotPhase.signed && scores !== undefined)
-                return refused('unavailable');
+                return refused('unavailable operation');
             const participant = await resumeParticipant(profileContext(), root);
             let session;
             if (
@@ -538,7 +546,8 @@ const execute = async (
                 session = await beginBallot(participant, scores);
             else {
                 session = await resumeBallot(participant);
-                if (session === undefined) return refused('unavailable');
+                if (session === undefined)
+                    return refused('unavailable operation');
                 if (
                     scores !== undefined &&
                     !equalBytes(scores, session.state.scores)
@@ -548,7 +557,7 @@ const execute = async (
             await completeBallot(session, relay);
             root = participant.root;
             await publishBallot(session, relay);
-            // A ballot created in this visit reports the proof randomness
+            // A ballot created in this operation reports the proof randomness
             // the module drew.
             if (session.proofRandomBytes !== undefined)
                 reported = { proofRandomBytes: session.proofRandomBytes };
@@ -562,8 +571,8 @@ const execute = async (
                 profiled === undefined ||
                 generation < rootGeneration.setupRetained
             )
-                return refused('unavailable');
-            const request = parseCloseRequest(parameters);
+                return refused('unavailable operation');
+            const request = parseCloseParameters(parameters);
             if (
                 request === undefined ||
                 (request.closeTime !== undefined && !enrollment.isOrganizer)
@@ -574,7 +583,7 @@ const execute = async (
                 generation !== rootGeneration.setupRetained &&
                 generation !== ballotPhase.signed
             )
-                return refused('unavailable');
+                return refused('unavailable operation');
             const participant = await resumeParticipant(profileContext(), root);
             const session = await resumeClose(
                 participant,
@@ -594,7 +603,7 @@ const execute = async (
                 },
             };
         }
-        case 'target': {
+        case 'sign-target': {
             // Target signing follows the completed close; a signed vote is
             // only delivered again. A release that followed the completed
             // close spent the target purpose without a vote.
@@ -604,7 +613,7 @@ const execute = async (
                 (generation >= releasePhase.locked &&
                     root.manifest.suffixes.target?.length === 0)
             )
-                return refused('unavailable');
+                return refused('unavailable operation');
             const participant = await resumeParticipant(profileContext(), root);
             const session = await resumeClose(
                 participant,
@@ -632,14 +641,14 @@ const execute = async (
                 generation !== completedClosePhase(enrollment.isOrganizer) &&
                 generation < targetPhase.signed
             )
-                return refused('unavailable');
+                return refused('unavailable operation');
             const participant = await resumeParticipant(profileContext(), root);
             const session = await resumeRelease(
                 await resumeClose(participant, enrollment.isOrganizer),
             );
             let released = {};
             if (generation < releasePhase.signed) {
-                // A release continued from an earlier visit reports the
+                // A release continued from an earlier operation reports the
                 // generation it resumed from.
                 const resumed =
                     session.state === undefined
@@ -647,7 +656,7 @@ const execute = async (
                         : { resumedFrom: { generation } };
                 await restoreSetup(participant, relay);
                 const advanced = await advanceRelease(session, relay);
-                // A release generated in this visit reports the proof
+                // A release generated in this operation reports the proof
                 // randomness the module drew.
                 const { proofRandomBytes } = session;
                 released = {
@@ -669,14 +678,14 @@ const execute = async (
                 },
             };
         }
-        case 'result': {
+        case 'compute-result': {
             // Any participant past its close combines the published release
             // shares in its own module; the result is not published.
             if (
                 root.head.generation <
                 completedClosePhase(enrollment.isOrganizer)
             )
-                return refused('unavailable');
+                return refused('unavailable operation');
             const participant = await resumeParticipant(profileContext(), root);
             const session = await resumeClose(
                 participant,
@@ -690,10 +699,10 @@ const execute = async (
                 details: {
                     ...summarized,
                     // A participant that retains no status reads it from
-                    // the target this visit certified.
-                    ...(summarized.ballotStatus === undefined
+                    // the target this operation certified.
+                    ...(summarized.ballotInclusion === undefined
                         ? {
-                              ballotStatus: certifiedBallotStatus(
+                              ballotInclusion: certifiedBallotInclusion(
                                   participant.context,
                               ),
                           }
@@ -744,9 +753,9 @@ type OperationMemory = ReturnType<typeof operationMemory>;
 // The operations that evaluate the ranking program, whose helpers keep the
 // evaluation's tables and the polynomials its multiplications keep.
 const evaluatingOperations: ReadonlySet<string> = new Set([
-    'target',
+    'sign-target',
     'release',
-    'result',
+    'compute-result',
 ]);
 
 const run = async (

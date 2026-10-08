@@ -24,7 +24,7 @@ struct Record {
     key: Vec<u8>,
 }
 
-// A poll and its creator's registration.
+// A poll and its organizer's registration.
 fn registration() -> (VerifiedPoll, Record, Enrollment) {
     let text = |value: &str| StabilizedDisplayText::from_ingress_utf8(value.as_bytes()).unwrap();
     let options = (0..2)
@@ -41,7 +41,7 @@ fn registration() -> (VerifiedPoll, Record, Enrollment) {
     let runtime = [7; 64];
     let mut parts: [Vec<u8>; 3] = Default::default();
     let (packet, enrollment, _) =
-        Enrollment::create_creator(draft, runtime, b"Creator", |kind, offset, bytes| {
+        Enrollment::create_organizer(draft, runtime, b"Organizer", |kind, offset, bytes| {
             if let Some(part) = parts.get_mut(kind as usize) {
                 assert_eq!(offset, part.len());
                 part.extend_from_slice(bytes);

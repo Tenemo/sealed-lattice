@@ -23,7 +23,7 @@ export class StoragePending extends Error {}
 
 // A helper that failed, and an exhausted memory bound of the module instance
 // or of the shared arena, end the operation as pending. The instance is not
-// used again; a later visit starts a fresh one.
+// used again; a later operation starts a fresh one.
 export class ResourceFailure extends Error {}
 
 // A module call that ended without returning for any other reason, a trap or

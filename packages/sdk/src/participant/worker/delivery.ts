@@ -14,7 +14,7 @@ import type { ParticipantHead, ParticipantStore } from './storage.js';
 // Delivery of a completed message's retained, already signed parts. The
 // participant's retained authority is inspected before the first transfer
 // and after every transfer, whether the transfer succeeded or failed: the
-// stored key must still open exactly the root this visit holds, the stored
+// stored key must still open exactly the root this operation holds, the stored
 // head must name it, no stop marker may exist, and every store must hold as
 // many records as when the delivery began. A failed inspection ends the
 // delivery before any further read or transfer and takes precedence over the
@@ -98,7 +98,7 @@ export const guardDelivery = async (
     };
 };
 
-// Opens a delivery under the root this visit holds. Its stores must hold the
+// Opens a delivery under the root this operation holds. Its stores must hold the
 // root's own data records and the record counts the caller requires.
 export const openDelivery = async (
     context: ParticipantContext,

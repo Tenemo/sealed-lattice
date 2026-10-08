@@ -98,11 +98,11 @@ export const summarizeParticipantWorkflow = (
         ['create', 'publish'],
         ['propose-roster', 'accept-roster', 'publish', 'confirm', 'contribute'],
         ['select-setup', 'endorse-setup'],
-        ['verify-setup', 'ballot'],
+        ['verify-setup', 'cast-ballot'],
         ['close'],
-        ['close', 'target'],
+        ['close', 'sign-target'],
         ['release'],
-        ['result'],
+        ['compute-result'],
     ];
     const traced = [];
     let lastFinished = -Infinity;
@@ -292,7 +292,7 @@ export const summarizeParticipantWorkflow = (
                     assert.equal(operation.generation, 12);
                     mark(key('setup', position));
                     break;
-                case 'ballot':
+                case 'cast-ballot':
                     requireEvent(key('setup', position));
                     assert.equal(operation.generation, 17);
                     mark(key('ballot', position));
@@ -323,7 +323,7 @@ export const summarizeParticipantWorkflow = (
                             'Unexpected ordinary close progress.',
                         );
                     break;
-                case 'target':
+                case 'sign-target':
                     requireEvent('close-proposal');
                     assert.equal(operation.generation, 24);
                     mark(key('target', position));
@@ -339,7 +339,7 @@ export const summarizeParticipantWorkflow = (
                     mark(key('release', position));
                     finishedStages[position].add(6);
                     break;
-                case 'result':
+                case 'compute-result':
                     requireCount('release', thresholds.resultReleaseThreshold);
                     requireEvent(key('release', position));
                     finishedStages[position].add(7);

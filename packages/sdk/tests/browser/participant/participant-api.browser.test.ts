@@ -93,7 +93,7 @@ describe('participant API', () => {
             for (const request of [
                 { operation: 'status' },
                 { operation: 'contribute' },
-                { operation: 'ballot', parameters: { scores: [1, 1] } },
+                { operation: 'cast-ballot', parameters: { scores: [1, 1] } },
             ] as const)
                 expect(await participant.run(request)).toEqual({
                     status: 'refused',
@@ -138,7 +138,7 @@ describe('participant API', () => {
             });
             for (const request of [
                 { operation: 'status' },
-                { operation: 'result' },
+                { operation: 'compute-result' },
             ] as const)
                 expect(await participant.run(request)).toEqual({
                     status: 'refused',
@@ -179,7 +179,10 @@ describe('participant API', () => {
                 });
                 for (const request of [
                     { operation: 'status' },
-                    { operation: 'ballot', parameters: { scores: [1, 1] } },
+                    {
+                        operation: 'cast-ballot',
+                        parameters: { scores: [1, 1] },
+                    },
                 ] as const)
                     expect(await participant.run(request)).toEqual({
                         status: 'refused',

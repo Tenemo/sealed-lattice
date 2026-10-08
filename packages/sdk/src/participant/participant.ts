@@ -56,7 +56,7 @@ export type ParticipantOptions = Readonly<{
  */
 export type ParticipantEnrollment = Readonly<
     | {
-          role: 'creator';
+          role: 'organizer';
           question: string;
           /** The option labels in order; the result names option `i` as `option-i`. */
           options: readonly string[];
@@ -67,7 +67,7 @@ export type ParticipantEnrollment = Readonly<
           username: string;
       }
     | {
-          role: 'join';
+          role: 'joiner';
           poll: string;
           definition: string;
           definitionSignature: string;
@@ -82,10 +82,11 @@ export type ParticipantRequest = Readonly<
     | { operation: 'create'; parameters: ParticipantEnrollment }
     | {
           operation: 'propose-roster' | 'accept-roster';
-          parameters: PollBinding & Readonly<{ recordIds: readonly string[] }>;
+          parameters: PollBinding &
+              Readonly<{ registrationBodyDigests: readonly string[] }>;
       }
     | {
-          operation: 'ballot';
+          operation: 'cast-ballot';
           parameters?: PollBinding & Readonly<{ scores?: readonly number[] }>;
       }
     | {
@@ -105,9 +106,9 @@ export type ParticipantRequest = Readonly<
               | 'select-setup'
               | 'endorse-setup'
               | 'verify-setup'
-              | 'target'
+              | 'sign-target'
               | 'release'
-              | 'result';
+              | 'compute-result';
           parameters?: PollBinding;
       }
 >;
@@ -116,7 +117,7 @@ export type ParticipantRequest = Readonly<
 export type ParticipantSummary = Readonly<{
     generation: number;
     poll: string;
-    bodyDigest: string;
+    registrationBodyDigest: string;
     username: string;
     isOrganizer: boolean;
     /** The poll's question, as the participant module verified it from the signed poll definition. */
@@ -131,19 +132,20 @@ export type ParticipantSummary = Readonly<{
      * The current local ballot state. `could not vote` means submission is
      * closed without an own ballot; it does not identify the cause of absence.
      */
-    ballot: 'open' | 'in progress' | 'signed' | 'could not vote' | undefined;
+    ballotState:
+        'open' | 'in progress' | 'signed' | 'could not vote' | undefined;
     /**
-     * The own ballot's status in the target the participant signs, once it
-     * has evaluated that target. A participant that signs no target reads it
-     * from the certified target in its release and result operations, and
+     * The own ballot's inclusion in the target the participant signs, once
+     * it has evaluated that target. A participant that signs no target reads
+     * it from the certified target in its release and result operations, and
      * every operation reports it again once its release is locked.
      */
-    ballotStatus: 'not cast' | 'late' | 'included' | 'omitted' | undefined;
+    ballotInclusion: 'not cast' | 'late' | 'included' | 'omitted' | undefined;
     /**
      * Whether the browser keeps the origin's storage under storage pressure.
      * It may evict best-effort storage, which stops the participant.
      */
-    persistentStorage: boolean;
+    isStoragePersistent: boolean;
 }>;
 
 /**
@@ -157,7 +159,7 @@ export type ParticipantSummary = Readonly<{
  * generation. A participant that another runtime created is refused, naming
  * that runtime, so the application can open it with the SDK of that runtime.
  */
-export type ParticipantResult = Readonly<
+export type ParticipantResponse = Readonly<
     | {
           status: 'completed';
           details: ParticipantSummary & Readonly<Record<string, unknown>>;
@@ -176,7 +178,7 @@ export type ParticipantResult = Readonly<
 >;
 
 export type Participant = Readonly<{
-    run: (request: ParticipantRequest) => Promise<ParticipantResult>;
+    run: (request: ParticipantRequest) => Promise<ParticipantResponse>;
 }>;
 
 /** What the outcome verifier reads. */
@@ -327,7 +329,7 @@ const runWorker = async (
             ...command,
             separateEvaluation: true,
         });
-        if (first.status !== 'evaluated') return first as ParticipantResult;
+        if (first.status !== 'evaluated') return first as ParticipantResponse;
         const result = await runWorkerOnce(url, {
             ...command,
             separateEvaluation: false,
@@ -348,7 +350,7 @@ const runWorker = async (
                       },
                   }
                 : result
-        ) as ParticipantResult;
+        ) as ParticipantResponse;
     } finally {
         URL.revokeObjectURL(url);
     }
@@ -425,7 +427,7 @@ export const openParticipant = (options: ParticipantOptions): Participant => {
     const relay = relayUrl(options.relay);
     return {
         run: async (request) => {
-            const persistentStorage = await persistStorage();
+            const isStoragePersistent = await persistStorage();
             const result = await runWorker(runtime.worker, {
                 operation: request.operation,
                 parameters: request.parameters ?? {},
@@ -437,7 +439,7 @@ export const openParticipant = (options: ParticipantOptions): Participant => {
             return result.status === 'completed'
                 ? {
                       status: 'completed',
-                      details: { ...result.details, persistentStorage },
+                      details: { ...result.details, isStoragePersistent },
                   }
                 : result;
         },

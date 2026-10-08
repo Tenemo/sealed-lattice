@@ -41,10 +41,10 @@ import {
 } from './root.js';
 import type { AuthenticatedRoot } from './root.js';
 import {
-    proposalRecordIds,
+    proposalRegistrationBodyDigests,
     rosterBegin,
     streamRegistrations,
-    validRecordIds,
+    validRegistrationBodyDigests,
 } from './roster.js';
 import { encodeSignedPacket } from './signed-packet.js';
 import type { SignedPacket } from './signed-packet.js';
@@ -122,7 +122,7 @@ const aggregateChunks = (capacity: number, bytes: number) => {
     return chunks;
 };
 
-// Discards every cached aggregate. The next visit that needs the setup then
+// Discards every cached aggregate. The next operation that needs the setup then
 // verifies it again, which rewrites the cache.
 const discardSetupCache = async (namespace: string) => {
     const cache = await openSetupCache(namespace);
@@ -178,7 +178,7 @@ const holdsFinalAggregate = async (context: PublicProfileContext) => {
 
 // Delivers cached final aggregate bytes into the module. Missing or refused
 // bytes are not the ones the retained setup reference names, so the cache
-// is discarded and the next visit verifies the setup again, which rewrites
+// is discarded and the next operation verifies the setup again, which rewrites
 // it.
 export const deliverFinalAggregate = async (
     context: PublicProfileContext,
@@ -765,13 +765,13 @@ export const verifySetupRoster = async (
         manifest,
         dataKind.pollSignature,
     );
-    const recordIds = proposalRecordIds(proposal);
+    const registrationBodyDigests = proposalRegistrationBodyDigests(proposal);
     const begin = rosterBegin(
         context,
         manifest.poll,
         definition,
         pollSignature,
-        recordIds.length,
+        registrationBodyDigests.length,
     );
     // The verified registrations are restored from the retained roster and
     // the published headers and keys.
@@ -784,7 +784,7 @@ export const verifySetupRoster = async (
         throw new Error('The setup verifier refused the retained roster.');
     await streamRegistrations(
         relay,
-        recordIds,
+        registrationBodyDigests,
         profile.registration,
         kernel.roster_open_records(),
         (operation, position, bytes) => {
@@ -1057,7 +1057,7 @@ export const ensureFinalAggregate = async (
     if (session.root.head.generation < rootGeneration.setupRetained)
         throw new Error('No setup reference is retained.');
     if (await holdsFinalAggregate(session.context)) return false;
-    // A cache loss can also occur after certification in this same visit.
+    // A cache loss can also occur after certification in this same operation.
     // Rebuild from fresh owning verification, not an existing aggregate flag.
     preparedRosters.delete(session.context.kernel);
     await verifySetupRoster(session, relay);
@@ -1103,16 +1103,19 @@ export const restoreSetup = async (
         throw new Error('The credential refused the retained setup.');
 };
 
-const publishedRecordIds = (context: PublicContext, proposal: Uint8Array) => {
-    let recordIds: string[];
+const publishedRegistrationBodyDigests = (
+    context: PublicContext,
+    proposal: Uint8Array,
+) => {
+    let registrationBodyDigests: string[];
     try {
-        recordIds = proposalRecordIds(proposal);
+        registrationBodyDigests = proposalRegistrationBodyDigests(proposal);
     } catch {
         throw new PublicInputFailure('The roster proposal is malformed.');
     }
-    if (!validRecordIds(recordIds, context.limits))
+    if (!validRegistrationBodyDigests(registrationBodyDigests, context.limits))
         throw new PublicInputFailure('The roster proposal is malformed.');
-    return recordIds;
+    return registrationBodyDigests;
 };
 
 export const verifyPublicSetup = async (
@@ -1148,20 +1151,23 @@ export const verifyPublicSetup = async (
                 'signature.bin',
                 registration.signatureBytes,
             );
-            const recordIds = publishedRecordIds(context, proposal);
+            const registrationBodyDigests = publishedRegistrationBodyDigests(
+                context,
+                proposal,
+            );
             const begin = rosterBegin(
                 context,
                 poll,
                 definition,
                 pollSignature,
-                recordIds.length,
+                registrationBodyDigests.length,
             );
             writeSetupInput(kernel, begin);
             if (kernel.setup_roster_begin(begin.length) !== 0)
                 throw new PublicInputFailure('The poll was refused.');
             await streamRegistrations(
                 relay,
-                recordIds,
+                registrationBodyDigests,
                 registration,
                 kernel.roster_open_records(),
                 (operation, position, bytes) => {
@@ -1188,7 +1194,7 @@ export const verifyPublicSetup = async (
             const profile = readParticipantProfile(
                 kernel,
                 limits,
-                recordIds.length,
+                registrationBodyDigests.length,
                 kernel.setup_option_count(),
             );
             if (

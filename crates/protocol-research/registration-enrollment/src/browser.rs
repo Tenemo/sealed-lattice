@@ -90,12 +90,12 @@ fn framed(input: &[u8], offset: usize) -> Option<(usize, usize)> {
     let end = start.checked_add(length)?;
     (end <= input.len()).then_some((start, end))
 }
-/// The creator input is the runtime, the result length, the participant
+/// The organizer input is the runtime, the result length, the participant
 /// maximum, the question, the option count, each option's label in order and
 /// the username, each text after its four-byte length. The question and
 /// labels become the poll's manifest under the module's own normalization,
 /// option `i` named `option-i`, and the poll definition bounds them all.
-fn creator_context(
+fn organizer_context(
     input: &[u8],
 ) -> Option<(
     registration_credentials::poll::PollDraft,
@@ -140,7 +140,7 @@ fn creator_context(
     normalize_username(&input[name_start..name_end]).ok()?;
     Some((draft, runtime, name_start, name_end))
 }
-fn join_context(
+fn joiner_context(
     input: &[u8],
 ) -> Option<(registration_credentials::poll::VerifiedPoll, usize, usize)> {
     if input.len() < 132 {
@@ -170,25 +170,25 @@ fn join_context(
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn validate_creator(length: usize) -> u32 {
+pub extern "C" fn validate_organizer(length: usize) -> u32 {
     SESSION.with(|state| {
         let state = state.borrow();
         if length > state.input.len() {
             return 1;
         }
         u32::from(
-            creator_context(&state.input[..length]).is_none_or(|(_, _, _, end)| end != length),
+            organizer_context(&state.input[..length]).is_none_or(|(_, _, _, end)| end != length),
         )
     })
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn validate_join(length: usize) -> u32 {
+pub extern "C" fn validate_joiner(length: usize) -> u32 {
     SESSION.with(|state| {
         let state = state.borrow();
         if length > state.input.len() {
             return 1;
         }
-        u32::from(join_context(&state.input[..length]).is_none_or(|(_, _, end)| end != length))
+        u32::from(joiner_context(&state.input[..length]).is_none_or(|(_, _, end)| end != length))
     })
 }
 
@@ -216,13 +216,13 @@ fn staged_output(kind: u32, offset: usize, bytes: &[u8]) {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn prepare_creator(length: usize) -> u32 {
+pub extern "C" fn prepare_organizer(length: usize) -> u32 {
     SESSION.with(|state| {
         let mut state = state.borrow_mut();
         if state.started || length > state.input.len() {
             return 1;
         }
-        let Some((draft, runtime, start, end)) = creator_context(&state.input[..length]) else {
+        let Some((draft, runtime, start, end)) = organizer_context(&state.input[..length]) else {
             return 1;
         };
         if length != end {
@@ -232,7 +232,7 @@ pub extern "C" fn prepare_creator(length: usize) -> u32 {
         let input = Zeroizing::new(state.input[..length].to_vec());
         state.input[..length].zeroize();
         let Ok((poll, enrollment, data_keys)) =
-            Enrollment::create_creator(draft, runtime, &input[start..end], staged_output)
+            Enrollment::create_organizer(draft, runtime, &input[start..end], staged_output)
         else {
             return 1;
         };
@@ -245,13 +245,13 @@ pub extern "C" fn prepare_creator(length: usize) -> u32 {
     })
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn prepare_join(length: usize) -> u32 {
+pub extern "C" fn prepare_joiner(length: usize) -> u32 {
     SESSION.with(|state| {
         let mut state = state.borrow_mut();
         if state.started || length > state.input.len() {
             return 1;
         }
-        let Some((poll, start, end)) = join_context(&state.input[..length]) else {
+        let Some((poll, start, end)) = joiner_context(&state.input[..length]) else {
             return 1;
         };
         if length != end {

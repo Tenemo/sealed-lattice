@@ -16,7 +16,7 @@ export type ParticipantRefusalReason =
     | 'insufficient storage'
     | 'another poll'
     | 'another runtime'
-    | 'unavailable';
+    | 'unavailable operation';
 
 /**
  * What a pending participant waits for or what ended its operation early:

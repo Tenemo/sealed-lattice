@@ -3,11 +3,11 @@ import { describe, expect, it } from 'vitest';
 import { completedClosePhase } from '#packages/sdk/src/participant/worker/close-state.js';
 import { targetPhase } from '#packages/sdk/src/participant/worker/root-generation.js';
 import {
-    ballotStatuses,
+    ballotInclusions,
     decodeTargetState,
     encodeTargetState,
 } from '#packages/sdk/src/participant/worker/target-state.js';
-import type { BallotStatus } from '#packages/sdk/src/participant/worker/target-state.js';
+import type { BallotInclusion } from '#packages/sdk/src/participant/worker/target-state.js';
 import { compileParticipantRuntimeProfile } from '#tests/participant-runtime-bounds-model.js';
 import { compileTargetSigningStateCensus } from '#tests/target-signing-state-model.js';
 
@@ -20,10 +20,10 @@ const filled = (length: number, value: number) =>
 const state = (
     organizer: boolean,
     bodyLength: number,
-    ballotStatus: BallotStatus = 'included',
+    ballotInclusion: BallotInclusion = 'included',
 ) => ({
     predecessor: completedClosePhase(organizer),
-    ballotStatus,
+    ballotInclusion,
     body: filled(bodyLength, 7),
 
     vote: filled(profile.target.votePacketBytes, 11),
@@ -73,8 +73,8 @@ describe('participant target signing state', () => {
     });
 
     it('retains every own ballot status through both phases', () => {
-        for (const ballotStatus of ballotStatuses) {
-            const value = state(false, 40, ballotStatus);
+        for (const ballotInclusion of ballotInclusions) {
+            const value = state(false, 40, ballotInclusion);
             for (const generation of [
                 targetPhase.intent,
                 targetPhase.signed,
@@ -86,8 +86,8 @@ describe('participant target signing state', () => {
                         generation,
                         false,
                         encodeTargetState(generation, value),
-                    ).ballotStatus,
-                ).toBe(ballotStatus);
+                    ).ballotInclusion,
+                ).toBe(ballotInclusion);
         }
     });
 
@@ -130,7 +130,7 @@ describe('participant target signing state', () => {
         unversioned[3] = '1'.charCodeAt(0);
         refused(targetPhase.intent, false, unversioned);
         const unknownStatus = intent.slice();
-        unknownStatus[5] = ballotStatuses.length;
+        unknownStatus[5] = ballotInclusions.length;
         refused(targetPhase.intent, false, unknownStatus);
         const empty = encodeTargetState(targetPhase.intent, state(false, 0));
         refused(targetPhase.intent, false, empty);

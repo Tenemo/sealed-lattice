@@ -1,7 +1,7 @@
 use crate::{BallotInputs, OriginalEnrollments, Scenario, aggregate, close, completion};
 use evaluation_target::close::{CloseContext, ClosedSlot};
 use registration_credentials::poll::{SignedPoll, VerifiedPoll};
-use registration_enrollment::finality_work::OwnBallotStatus;
+use registration_enrollment::finality_work::OwnBallotInclusion;
 use setup_aggregate::verified::VerifiedSetupAggregate;
 use std::{fs, path::Path, sync::Arc};
 
@@ -129,7 +129,7 @@ pub fn run(
             signers: active.clone(),
             statuses: active
                 .iter()
-                .map(|position| (*position, OwnBallotStatus::Included))
+                .map(|position| (*position, OwnBallotInclusion::Included))
                 .collect(),
             forks: Vec::new(),
         },

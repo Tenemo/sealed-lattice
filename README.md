@@ -55,7 +55,7 @@ const participant = openParticipant({
 const created = await participant.run({
     operation: "create",
     parameters: {
-        role: "creator",
+        role: "organizer",
         question: "Which proposals should be adopted?",
         options: Array.from(
             { length: 10 },
@@ -93,23 +93,23 @@ A refusal's `reason` is one of:
 - `participant exists`, `insufficient storage` or `another poll`;
 - `unrecognized state`, for a namespace whose participant database this SDK does not recognize, which it leaves unchanged;
 - `another runtime`, for a participant that another build of the SDK created, with that build's `runtime` identity, so the application can continue it with that build;
-- `unavailable`, for an operation that the participant's stage or role does not allow.
+- `unavailable operation`, for an operation that the participant's stage or role does not allow.
 
 A pending `cause` is `public input`, `storage` or a device `resource` such as memory when the operation waits for them, or `module` or `worker` when the participant module or its worker failed during the operation.
 
-Enrollment interrupted after its intent is retained but before its required secrets are retained stops that participant, because the intent cannot resume private generation. Before each operation the page asks the browser to keep the origin's storage with `navigator.storage.persist()`, and a completed operation reports whether it does as `persistentStorage`. A browser may evict storage it does not keep under storage pressure, which stops the participant, so the application warns the participant before its state becomes necessary.
+Enrollment interrupted after its intent is retained but before its required secrets are retained stops that participant, because the intent cannot resume private generation. Before each operation the page asks the browser to keep the origin's storage with `navigator.storage.persist()`, and a completed operation reports whether it does as `isStoragePersistent`. A browser may evict storage it does not keep under storage pressure, which stops the participant, so the application warns the participant before its state becomes necessary.
 
 The preparation operations follow this order:
 
-1. `create` registers the organizer from the poll question, ordered options, result length and participant maximum, or joins from its signed definition. `publish` delivers the registration and the organizer's poll and roster records again.
-2. `propose-roster` and `accept-roster` verify the roster and return `rosterUsernames` in order. The application displays them before `confirm` records that participant's roster confirmation.
+1. `create` registers the organizer, with the role `organizer`, from the poll question, ordered options, result length and participant maximum, or a participant, with the role `joiner`, from the poll's signed definition. Its completed details carry the participant's `registrationBodyDigest`. `publish` delivers the registration and the organizer's poll and roster records again.
+2. `propose-roster` and `accept-roster` take the ordered `registrationBodyDigests` of the roster's registrations, verify the roster and return `rosterUsernames` in order. The application displays them before `confirm` records that participant's roster confirmation.
 3. `contribute` generates and publishes a complete signed offer for an eligible original roster position. `isEligibleContributor` reports eligibility after roster retention. Eligible offers come from the first `max(f + 1, 2) + f` positions; the eventual selection uses exactly `max(f + 1, 2)` of them.
 4. The organizer calls `select-setup` to propose and endorse a complete valid set. Other available participants call `endorse-setup` after verifying that set. An unfinished own offer does not prevent endorsement, and each participant endorses at most one selection.
 5. `verify-setup` verifies the setup certificate and selected inputs, then activates ballot authority. It can accept the uniquely certified selection even when the participant's own offer or endorsement was not used.
 
-After preparation, `ballot` casts or delivers the participant's single ballot. `close` gathers complete available ballots and signed close responses; the organizer proposes when the quorum is ready. `target` verifies and signs that target, `release` publishes the release share, and `result` combines valid published shares. `status` reports progress. A participant learns whether its ballot is included, late, omitted or not cast when it verifies the target, including during release or result if it signed no target. Later operations report that status again.
+After preparation, `cast-ballot` casts or delivers the participant's single ballot. `close` gathers complete available ballots and signed close responses; the organizer proposes when the quorum is ready. `sign-target` verifies and signs that target, `release` publishes the release share, and `compute-result` combines valid published shares. `status` reports progress. A participant learns its `ballotInclusion`, whether its ballot is included, late, omitted or not cast, when it verifies the target, including during `release` or `compute-result` if it signed no target. Later operations report it again.
 
-Completed operations report the verified poll's `question`, ordered `options` with their identifiers and labels, and `topCount`. Byte parameters are lower-case hexadecimal. Each operation resumes only the original saved state of its runtime; completed signatures are retransmitted unchanged.
+Completed operations report the verified poll's `question`, ordered `options` with their identifiers and labels, and `topCount`, and the participant's local `ballotState`. Byte parameters are lower-case hexadecimal. Each operation resumes only the original saved state of its runtime; completed signatures are retransmitted unchanged.
 
 ### Outcome verification
 

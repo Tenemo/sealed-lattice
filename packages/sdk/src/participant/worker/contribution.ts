@@ -58,7 +58,7 @@ import {
 } from './root.js';
 import type { AuthenticatedRoot } from './root.js';
 import {
-    proposalRecordIds,
+    proposalRegistrationBodyDigests,
     registrationFile,
     registrationCandidateKey,
 } from './roster.js';
@@ -931,10 +931,10 @@ export const restoreCheckpoint = async (
             input.fill(0);
         }
     }
-    const recordIds = proposalRecordIds(
+    const registrationBodyDigests = proposalRegistrationBodyDigests(
         await readDataKind(context, session.root.manifest, dataKind.proposal),
     );
-    for (const [position, id] of recordIds.entries()) {
+    for (const [position, id] of registrationBodyDigests.entries()) {
         await findCandidate(
             relay,
             registrationCandidateKey(id),

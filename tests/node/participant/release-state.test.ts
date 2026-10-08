@@ -12,8 +12,8 @@ import {
     releasePhase,
     targetPhase,
 } from '#packages/sdk/src/participant/worker/root-generation.js';
-import { ballotStatuses } from '#packages/sdk/src/participant/worker/target-state.js';
-import type { BallotStatus } from '#packages/sdk/src/participant/worker/target-state.js';
+import { ballotInclusions } from '#packages/sdk/src/participant/worker/target-state.js';
+import type { BallotInclusion } from '#packages/sdk/src/participant/worker/target-state.js';
 import { compileParticipantReleaseCustody } from '#tests/participant-release-custody-model.js';
 import { compileParticipantRuntimeProfile } from '#tests/participant-runtime-bounds-model.js';
 import { deriveSupportedProfile } from '#tests/supported-profile-model.js';
@@ -37,10 +37,10 @@ const stateAt = (
     targetLength: number,
     bodyLength: number,
     predecessor: number = targetPhase.signed,
-    ballotStatus: BallotStatus = 'included',
+    ballotInclusion: BallotInclusion = 'included',
 ): ReleaseState => ({
     predecessor,
-    ballotStatus,
+    ballotInclusion,
     target: filled(targetLength, 5),
     seed: phase === releasePhase.ready ? filled(64, 6) : new Uint8Array(),
     bodyLength: phase >= releasePhase.body ? bodyLength : 0,
@@ -67,7 +67,7 @@ describe('participant release state', () => {
                 completedClosePhase(organizer),
             ])
                 for (const phase of phases)
-                    for (const ballotStatus of ballotStatuses)
+                    for (const ballotInclusion of ballotInclusions)
                         for (const bodyLength of [
                             bounds.minimumBodyBytes,
                             bounds.maximumBodyBytes,
@@ -77,7 +77,7 @@ describe('participant release state', () => {
                                 7,
                                 bodyLength,
                                 predecessor,
-                                ballotStatus,
+                                ballotInclusion,
                             );
                             expect(
                                 decodeReleaseState(
@@ -134,7 +134,7 @@ describe('participant release state', () => {
         unversioned[3] = '2'.charCodeAt(0);
         refused(releasePhase.body, unversioned);
         const unknownStatus = body.slice();
-        unknownStatus[5] = ballotStatuses.length;
+        unknownStatus[5] = ballotInclusions.length;
         refused(releasePhase.body, unknownStatus);
         // A release follows a signed target or the participant's own
         // completed close, never a pending signature or another role's close.

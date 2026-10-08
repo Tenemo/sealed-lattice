@@ -19,6 +19,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 
 import { build } from 'tsdown';
 
+import type { ParticipantRequest } from '#packages/sdk/src/participant/participant.js';
 import { tupleFields } from '#packages/sdk/src/participant/worker/bytes.js';
 import {
     decodeCandidateManifest,
@@ -107,6 +108,8 @@ import {
 } from '#tools/ci/process-tree-memory.js';
 import { acquireProtocolResearchLock } from '#tools/ci/protocol-research-lock.js';
 import { redactDiagnosticText } from '#tools/ci/run-log-diagnostics.js';
+
+type ParticipantOperation = ParticipantRequest['operation'];
 
 // Runs a browser cohort of the selected profile through the maintained
 // participant runtime: each participant is its own origin with its own
@@ -677,7 +680,7 @@ type ForeignPoll = Readonly<{
     // The passed cohort's run directory, relative to the repository.
     run: string;
     poll: string;
-    recordIds: readonly string[];
+    registrationBodyDigests: readonly string[];
     // The registration of the registrant its organizer left out of the
     // roster, when the other poll's run records one.
     leftOut: string | undefined;
@@ -699,21 +702,23 @@ const loadForeignPoll = async (run: string): Promise<ForeignPoll> => {
         'The foreign poll has another profile.',
     );
     const { poll } = result;
-    const recordIds: readonly unknown[] = Array.isArray(result.recordIds)
-        ? (result.recordIds as unknown[])
+    const registrationBodyDigests: readonly unknown[] = Array.isArray(
+        result.registrationBodyDigests,
+    )
+        ? (result.registrationBodyDigests as unknown[])
         : [];
     assert.ok(
         typeof poll === 'string' &&
             identifierPattern.test(poll) &&
-            recordIds.length === participantCount &&
-            recordIds.every(
+            registrationBodyDigests.length === participantCount &&
+            registrationBodyDigests.every(
                 (id) => typeof id === 'string' && identifierPattern.test(id),
             ),
         'The foreign poll names a malformed poll or roster.',
     );
     const leftOutDigest = (
-        result.leftOut as { bodyDigest?: unknown } | undefined
-    )?.bodyDigest;
+        result.leftOut as { registrationBodyDigest?: unknown } | undefined
+    )?.registrationBodyDigest;
     assert.ok(
         leftOutDigest === undefined ||
             (typeof leftOutDigest === 'string' &&
@@ -731,7 +736,7 @@ const loadForeignPoll = async (run: string): Promise<ForeignPoll> => {
     return {
         run: path.relative(root, directory).split(path.sep).join('/'),
         poll,
-        recordIds: recordIds.map(String),
+        registrationBodyDigests: registrationBodyDigests.map(String),
         leftOut: leftOutDigest,
         publicDirectory,
     };
@@ -770,10 +775,10 @@ const foreignFamilies = [
         family: 'registrations',
         pattern: /^registration\//u,
         details: (
-            recordIds: readonly string[],
+            registrationBodyDigests: readonly string[],
             foreignRecordIds: readonly string[],
         ) =>
-            recordIds
+            registrationBodyDigests
                 .filter((id, position) => id !== foreignRecordIds[position])
                 .map(
                     (id) =>
@@ -808,9 +813,12 @@ const foreignFamilies = [
 // position under this poll's record identifiers, and its other records under
 // their own names.
 const foreignRecordView = async (
-    foreign: Pick<ForeignPoll, 'publicDirectory' | 'recordIds' | 'leftOut'>,
+    foreign: Pick<
+        ForeignPoll,
+        'publicDirectory' | 'registrationBodyDigests' | 'leftOut'
+    >,
     publicDirectory: string,
-    recordIds: readonly string[],
+    registrationBodyDigests: readonly string[],
     pattern: RegExp,
 ) => {
     const view = new Map<string, ViewedRecord>();
@@ -825,7 +833,7 @@ const foreignRecordView = async (
         const position =
             registration === null
                 ? undefined
-                : foreign.recordIds.indexOf(registration[1]);
+                : foreign.registrationBodyDigests.indexOf(registration[1]);
         // The registrant the other poll's organizer left out of its roster
         // has no roster position to take in this poll.
         if (registration !== null && registration[1] === foreign.leftOut)
@@ -837,7 +845,7 @@ const foreignRecordView = async (
         view.set(
             registration === null || position === undefined
                 ? name
-                : `registration/${recordIds[position]}/${registration[2]}`,
+                : `registration/${registrationBodyDigests[position]}/${registration[2]}`,
             { file: path.join(foreign.publicDirectory, name) },
         );
         served++;
@@ -903,7 +911,7 @@ await runWithLocalRunLog(
         const pressured = new Set<number>();
         const memoryPressures: Readonly<{
             position: number;
-            operation: string;
+            operation: ParticipantOperation;
             pages: number;
             before: number;
             generation: number;
@@ -1551,7 +1559,7 @@ await runWithLocalRunLog(
             // private state.
             const request = async (
                 position: number,
-                operation: string,
+                operation: ParticipantOperation,
                 parameters: Record<string, unknown> = {},
                 copy?: string,
             ) =>
@@ -1691,7 +1699,7 @@ await runWithLocalRunLog(
                     )
                         assert.equal(
                             BigInt(result.details.proofRandomBytes as number),
-                            operation === 'ballot'
+                            operation === 'cast-ballot'
                                 ? proofDraws.ballot
                                 : proofDraws.release,
                             `${operation} at position ${String(position)} drew other proof randomness.`,
@@ -1737,7 +1745,7 @@ await runWithLocalRunLog(
                 });
             const run = async (
                 position: number,
-                operation: string,
+                operation: ParticipantOperation,
                 parameters: Record<string, unknown> = {},
             ) => {
                 const result = await request(position, operation, parameters);
@@ -1749,7 +1757,7 @@ await runWithLocalRunLog(
             };
             const expectStatus = async (
                 position: number,
-                operation: string,
+                operation: ParticipantOperation,
                 status: WorkerResult['status'],
                 parameters: Record<string, unknown> = {},
             ) => {
@@ -1842,7 +1850,10 @@ await runWithLocalRunLog(
             // WebAssembly memory at the pressure pages. Exhausting that bound
             // leaves the participant pending, not stopped, whatever its
             // operation retained; the capped browser then ends.
-            const pressure = async (position: number, operation: string) => {
+            const pressure = async (
+                position: number,
+                operation: ParticipantOperation,
+            ) => {
                 await endBrowser(position);
                 pressured.add(position);
                 try {
@@ -1951,7 +1962,7 @@ await runWithLocalRunLog(
             };
             const refuseLostSource = async (
                 position: number,
-                operation: string,
+                operation: ParticipantOperation,
             ) => {
                 assert.ok(honest(position));
                 assert.ok(relay);
@@ -2004,7 +2015,7 @@ await runWithLocalRunLog(
                             position,
                             'create',
                             {
-                                role: 'join',
+                                role: 'joiner',
                                 poll: organizer.poll,
                                 definition: hexadecimal(definition),
                                 definitionSignature:
@@ -2054,14 +2065,14 @@ await runWithLocalRunLog(
                 position: number;
                 store: string;
                 record: unknown;
-                operation: string;
+                operation: ParticipantOperation;
                 generation: number;
                 detail: string;
             }[] = [];
             const loseState = async (
                 position: number,
                 store: string,
-                operation: string,
+                operation: ParticipantOperation,
                 noPublications = false,
             ) => {
                 assert.ok(honest(position), 'Only honest state is lost.');
@@ -2152,7 +2163,7 @@ await runWithLocalRunLog(
             // worker again.
             const interruptions: {
                 position: number;
-                operation: string;
+                operation: ParticipantOperation;
                 generation: number;
                 // The records an interrupted operation had stored ahead of
                 // its next root.
@@ -2164,7 +2175,7 @@ await runWithLocalRunLog(
             }[] = [];
             const interrupt = async (
                 position: number,
-                operation: string,
+                operation: ParticipantOperation,
                 parameters: Record<string, unknown>,
                 generation: number,
             ) => {
@@ -2202,7 +2213,7 @@ await runWithLocalRunLog(
             };
             const interruptPreparation = async (
                 position: number,
-                operation: string,
+                operation: ParticipantOperation,
                 cut: PreparationCut,
             ) => {
                 assert.ok(honest(position));
@@ -2266,7 +2277,7 @@ await runWithLocalRunLog(
             // the operation stored and runs it again from its retained state.
             const interruptWhen = async (
                 position: number,
-                operation: string,
+                operation: ParticipantOperation,
                 generation: number,
                 reached: () => Promise<boolean>,
                 point: () => Promise<
@@ -2317,7 +2328,7 @@ await runWithLocalRunLog(
             // records in one store.
             const interruptStaged = (
                 position: number,
-                operation: string,
+                operation: ParticipantOperation,
                 generation: number,
                 store: string,
                 records: number,
@@ -2460,7 +2471,7 @@ await runWithLocalRunLog(
             // public record.
             const interruptDelivered = (
                 position: number,
-                operation: string,
+                operation: ParticipantOperation,
                 generation: number,
                 name: string,
             ) => {
@@ -2505,7 +2516,7 @@ await runWithLocalRunLog(
                 Buffer.from(bytes).toString('hex');
             // The poll admits exactly the roster's participants.
             const organizer = await run(0, 'create', {
-                role: 'creator',
+                role: 'organizer',
                 question,
                 options: labels,
                 topCount,
@@ -2532,7 +2543,7 @@ await runWithLocalRunLog(
             assert.deepEqual(verifiedPoll(organizer), createdPoll);
             // The page asked the browser to keep the origin's storage, which
             // it grants by its own policy.
-            assert.equal(typeof organizer.persistentStorage, 'boolean');
+            assert.equal(typeof organizer.isStoragePersistent, 'boolean');
             await run(0, 'publish');
             // An operation on an empty namespace is refused and leaves it
             // empty, so that participant still joins below.
@@ -2545,7 +2556,7 @@ await runWithLocalRunLog(
             );
             const join = async (position: number, username: string) => {
                 const details = await run(position, 'create', {
-                    role: 'join',
+                    role: 'joiner',
                     poll: organizer.poll,
                     definition: hexadecimal(definition),
                     definitionSignature: hexadecimal(definitionSignature),
@@ -2562,7 +2573,7 @@ await runWithLocalRunLog(
             type Member = Readonly<{ origin: number; copy?: string }>;
             const act = async (
                 member: Member,
-                operation: string,
+                operation: ParticipantOperation,
                 parameters: Record<string, unknown> = {},
             ) => {
                 const result = await request(
@@ -2583,7 +2594,7 @@ await runWithLocalRunLog(
                 joined: readonly Record<string, unknown>[],
             ) =>
                 [organizer, ...joined].map((details) =>
-                    String(details.bodyDigest),
+                    String(details.registrationBodyDigest),
                 );
             // The ordered option identifiers the scores rank first.
             const rankedIdentifiers = (
@@ -2675,7 +2686,7 @@ await runWithLocalRunLog(
             };
             const completeRoster = async (
                 members: readonly Member[],
-                recordIds: readonly string[],
+                registrationBodyDigests: readonly string[],
                 scores: readonly (readonly number[])[],
                 absent?: number,
             ) => {
@@ -2780,8 +2791,11 @@ await runWithLocalRunLog(
                 };
                 markStage([1]);
                 assert.equal(
-                    (await act(organizing, 'propose-roster', { recordIds }))
-                        .generation,
+                    (
+                        await act(organizing, 'propose-roster', {
+                            registrationBodyDigests,
+                        })
+                    ).generation,
                     3,
                 );
                 await act(organizing, 'publish');
@@ -2793,7 +2807,7 @@ await runWithLocalRunLog(
                         assert.equal(
                             (
                                 await act(value.member, 'accept-roster', {
-                                    recordIds,
+                                    registrationBodyDigests,
                                 })
                             ).generation,
                             3,
@@ -2803,7 +2817,9 @@ await runWithLocalRunLog(
                 } else {
                     for (const details of await Promise.all(
                         accepting.map(({ member }) =>
-                            act(member, 'accept-roster', { recordIds }),
+                            act(member, 'accept-roster', {
+                                registrationBodyDigests,
+                            }),
                         ),
                     ))
                         assert.equal(details.generation, 3);
@@ -3176,7 +3192,7 @@ await runWithLocalRunLog(
                         try {
                             const pending = await request(
                                 member.origin,
-                                'ballot',
+                                'cast-ballot',
                                 { scores: scores[position] },
                                 member.copy,
                             );
@@ -3214,13 +3230,13 @@ await runWithLocalRunLog(
                         if (measureRecovery && position === 0)
                             await interrupt(
                                 member.origin,
-                                'ballot',
+                                'cast-ballot',
                                 { scores: scores[position] },
                                 15,
                             );
                         assert.equal(
                             (
-                                await act(member, 'ballot', {
+                                await act(member, 'cast-ballot', {
                                     scores: scores[position],
                                 })
                             ).generation,
@@ -3232,7 +3248,7 @@ await runWithLocalRunLog(
                 await each(active, async ({ member, position }) => {
                     const verified = await act(member, 'verify-setup');
                     assert.equal(verified.generation, 12);
-                    assert.equal(verified.ballot, 'open');
+                    assert.equal(verified.ballotState, 'open');
                     if (measureWorkflow) await castBallot({ member, position });
                 });
                 if (unselectedCheckpoint) {
@@ -3401,19 +3417,19 @@ await runWithLocalRunLog(
                         if (measureRecovery && position === 0)
                             await interrupt(
                                 member.origin,
-                                'target',
+                                'sign-target',
                                 {},
                                 targetPhase.intent,
                             );
-                        const voted = await act(member, 'target');
+                        const voted = await act(member, 'sign-target');
                         assert.equal(voted.generation, 24);
-                        assert.equal(voted.ballotStatus, 'included');
+                        assert.equal(voted.ballotInclusion, 'included');
                         assert.equal(
-                            voted.usableBallots,
+                            voted.usableSubmissions,
                             active.length + departedVoters.length,
                         );
                         assert.equal(
-                            voted.validBallots,
+                            voted.acceptedBallots,
                             active.length + departedVoters.length,
                         );
                     },
@@ -3434,7 +3450,7 @@ await runWithLocalRunLog(
                 await each(
                     measureWorkflow ? active : [active[active.length - 1]],
                     async ({ member }) => {
-                        const combined = await act(member, 'result');
+                        const combined = await act(member, 'compute-result');
                         assert.equal(combined.encrypted, true);
                         assert.deepEqual(combined.identifiers, expected);
                     },
@@ -3451,7 +3467,7 @@ await runWithLocalRunLog(
                 for (const [name, bytes] of forgeries)
                     views[position].set(name, bytes);
                 try {
-                    const result = await request(position, 'result');
+                    const result = await request(position, 'compute-result');
                     assert.ok(result.status === 'pending');
                     const details =
                         typeof detail === 'string' ? [detail] : detail;
@@ -3486,7 +3502,7 @@ await runWithLocalRunLog(
                 for (const [name, bytes] of forgeries)
                     views[position].set(name, bytes);
                 try {
-                    const result = await run(position, 'result');
+                    const result = await run(position, 'compute-result');
                     assert.ok(
                         [...forgeries.keys()].every(
                             (name) => !deliveredRecords[position].has(name),
@@ -3532,8 +3548,8 @@ await runWithLocalRunLog(
                         ]),
                         [
                             [0, 'contribute', 5],
-                            [0, 'ballot', 15],
-                            [0, 'target', targetPhase.intent],
+                            [0, 'cast-ballot', 15],
+                            [0, 'sign-target', targetPhase.intent],
                             [0, 'release', 27],
                         ],
                     );
@@ -3936,7 +3952,7 @@ await runWithLocalRunLog(
                             independentOutcome,
                             setupDiscoveryFaults,
                             poll: organizer.poll,
-                            recordIds: plainRecordIds,
+                            registrationBodyDigests: plainRecordIds,
                             runtimeIdentity: runtime.identity.runtime,
                             peakProcessTreeBytes: peaks,
                             identifiers,
@@ -4026,7 +4042,7 @@ await runWithLocalRunLog(
                 for (const name of [
                     'poll-definition.bin',
                     'poll-signature.bin',
-                    'registration/' + String(organizer.bodyDigest),
+                    'registration/' + String(organizer.registrationBodyDigest),
                     'transport',
                 ])
                     await cp(
@@ -4090,14 +4106,20 @@ await runWithLocalRunLog(
                     hidden: number;
                     detail?: string;
                 }[] = [];
-                for (const [member, records, recordIds, other, identifiers] of [
+                for (const [
+                    member,
+                    records,
+                    registrationBodyDigests,
+                    other,
+                    identifiers,
+                ] of [
                     [
                         firstMembers[1],
                         publicDirectory,
                         firstRecordIds,
                         {
                             publicDirectory: secondRosterDirectory,
-                            recordIds: secondRecordIds,
+                            registrationBodyDigests: secondRecordIds,
                             leftOut: undefined,
                         },
                         firstIdentifiers,
@@ -4108,7 +4130,7 @@ await runWithLocalRunLog(
                         secondRecordIds,
                         {
                             publicDirectory,
-                            recordIds: firstRecordIds,
+                            registrationBodyDigests: firstRecordIds,
                             leftOut: undefined,
                         },
                         secondIdentifiers,
@@ -4122,7 +4144,7 @@ await runWithLocalRunLog(
                         const { view, served } = await foreignRecordView(
                             other,
                             records,
-                            recordIds,
+                            registrationBodyDigests,
                             pattern,
                         );
                         assert.ok(
@@ -4140,7 +4162,10 @@ await runWithLocalRunLog(
                             detail = await probe(
                                 member.origin,
                                 view,
-                                details(recordIds, other.recordIds),
+                                details(
+                                    registrationBodyDigests,
+                                    other.registrationBodyDigests,
+                                ),
                             );
                         crossRosterProbes.push({
                             origin: member.origin,
@@ -4151,7 +4176,7 @@ await runWithLocalRunLog(
                         });
                     }
                     assert.deepEqual(
-                        (await act(member, 'result')).identifiers,
+                        (await act(member, 'compute-result')).identifiers,
                         identifiers,
                     );
                 }
@@ -4168,7 +4193,7 @@ await runWithLocalRunLog(
                             optionCount,
                             mode,
                             poll: organizer.poll,
-                            recordIds: firstRecordIds,
+                            registrationBodyDigests: firstRecordIds,
                             runtimeIdentity: runtime.identity.runtime,
                             peakProcessTreeBytes: peaks,
                             copyPeakProcessTreeBytes:
@@ -4178,7 +4203,7 @@ await runWithLocalRunLog(
                                 origins: secondMembers.map(
                                     (member) => member.origin,
                                 ),
-                                recordIds: secondRecordIds,
+                                registrationBodyDigests: secondRecordIds,
                             },
                             results: {
                                 first: firstIdentifiers,
@@ -4211,16 +4236,16 @@ await runWithLocalRunLog(
                 ),
                 join(leftOut, 'Registrant left out'),
             ]);
-            const recordIds = [organizer, ...joined].map((value) =>
-                String(value.bodyDigest),
+            const registrationBodyDigests = [organizer, ...joined].map(
+                (value) => String(value.registrationBodyDigest),
             );
             // A proposal that also lists the registrant left out exceeds the
             // poll's participant maximum and is refused.
             assert.deepEqual(
                 await request(0, 'propose-roster', {
-                    recordIds: [
-                        ...recordIds,
-                        String(leftOutRegistration.bodyDigest),
+                    registrationBodyDigests: [
+                        ...registrationBodyDigests,
+                        String(leftOutRegistration.registrationBodyDigest),
                     ],
                 }),
                 { status: 'refused', reason: 'invalid request' },
@@ -4230,8 +4255,15 @@ await runWithLocalRunLog(
             // deterministically. The last honest participant crashes
             // right after it retains the accepted roster, and its next visit
             // continues from that roster.
-            await interrupt(0, 'propose-roster', { recordIds }, 2);
-            const proposed = await run(0, 'propose-roster', { recordIds });
+            await interrupt(
+                0,
+                'propose-roster',
+                { registrationBodyDigests },
+                2,
+            );
+            const proposed = await run(0, 'propose-roster', {
+                registrationBodyDigests,
+            });
             assert.equal(proposed.generation, 3);
             await run(0, 'publish');
             const rosterReplay = [...positions]
@@ -4242,11 +4274,13 @@ await runWithLocalRunLog(
                 joined.map(async (_details, index) => {
                     const position = index + 1;
                     if (position !== rosterReplay)
-                        return run(position, 'accept-roster', { recordIds });
+                        return run(position, 'accept-roster', {
+                            registrationBodyDigests,
+                        });
                     await interrupt(
                         position,
                         'accept-roster',
-                        { recordIds },
+                        { registrationBodyDigests },
                         3,
                     );
                     return run(position, 'status');
@@ -4256,7 +4290,9 @@ await runWithLocalRunLog(
             // The registrant left out stays pending when shown the roster
             // and keeps its registration; its browser then ends.
             assert.deepEqual(
-                await request(leftOut, 'accept-roster', { recordIds }),
+                await request(leftOut, 'accept-roster', {
+                    registrationBodyDigests,
+                }),
                 {
                     status: 'pending',
                     cause: 'public input',
@@ -4266,24 +4302,30 @@ await runWithLocalRunLog(
             const leftOutStatus = await run(leftOut, 'status');
             assert.equal(leftOutStatus.generation, 1);
             assert.equal(
-                leftOutStatus.bodyDigest,
-                leftOutRegistration.bodyDigest,
+                leftOutStatus.registrationBodyDigest,
+                leftOutRegistration.registrationBodyDigest,
             );
             await endBrowser(leftOut);
             // A second proposal, acceptance or enrollment is refused, and
             // every participant restores its retained state.
-            await expectStatus(0, 'propose-roster', 'refused', { recordIds });
-            await expectStatus(1, 'accept-roster', 'refused', { recordIds });
+            await expectStatus(0, 'propose-roster', 'refused', {
+                registrationBodyDigests,
+            });
+            await expectStatus(1, 'accept-roster', 'refused', {
+                registrationBodyDigests,
+            });
             // A malformed request is refused; the participant continues
             // below.
             assert.deepEqual(
                 await request(1, 'accept-roster', {
-                    recordIds: recordIds.map((id) => id.toUpperCase()),
+                    registrationBodyDigests: registrationBodyDigests.map((id) =>
+                        id.toUpperCase(),
+                    ),
                 }),
                 { status: 'refused', reason: 'invalid request' },
             );
             await expectStatus(1, 'create', 'refused', {
-                role: 'join',
+                role: 'joiner',
                 poll: organizer.poll,
                 definition: hexadecimal(definition),
                 definitionSignature: hexadecimal(definitionSignature),
@@ -4752,7 +4794,7 @@ await runWithLocalRunLog(
                     }
                 }),
             );
-            await expectStatus(0, 'ballot', 'refused', {
+            await expectStatus(0, 'cast-ballot', 'refused', {
                 scores: ballotScores(0),
             });
             // A successful POST is insufficient: activation must read back
@@ -4848,12 +4890,12 @@ await runWithLocalRunLog(
                             await interrupt(position, 'verify-setup', {}, 12);
                             const status = await run(position, 'status');
                             assert.equal(status.generation, 12);
-                            assert.equal(status.ballot, 'open');
+                            assert.equal(status.ballotState, 'open');
                             return;
                         }
                         const verified = await run(position, 'verify-setup');
                         assert.equal(verified.generation, 12);
-                        assert.equal(verified.ballot, 'open');
+                        assert.equal(verified.ballotState, 'open');
                     }),
             );
             for (const position of positions.filter(
@@ -4865,7 +4907,7 @@ await runWithLocalRunLog(
                     'select-setup',
                     'endorse-setup',
                     'verify-setup',
-                ])
+                ] as const)
                     await expectStatus(position, operation, 'refused');
             if (mode === 'preparation') {
                 const sourceRestarts: Record<string, unknown>[] = [];
@@ -4888,8 +4930,11 @@ await runWithLocalRunLog(
                     await endBrowser(position);
                     const restored = await run(position, 'status');
                     assert.equal(restored.generation, 12);
-                    assert.equal(restored.bodyDigest, recordIds[position]);
-                    assert.equal(restored.ballot, 'open');
+                    assert.equal(
+                        restored.registrationBodyDigest,
+                        registrationBodyDigests[position],
+                    );
+                    assert.equal(restored.ballotState, 'open');
                     // With no closeTime and no published intent, close only
                     // restores the credential-authenticated setup and scans
                     // the empty ballot inventory; it creates no close intent.
@@ -4897,7 +4942,7 @@ await runWithLocalRunLog(
                         relay.publicationAttempts[position];
                     const ready = await run(position, 'close');
                     assert.equal(ready.generation, 12);
-                    assert.equal(ready.ballot, 'open');
+                    assert.equal(ready.ballotState, 'open');
                     assert.equal(relay.publicationAttempts[position], attempts);
                     assert.equal(
                         await storedRecords(position, 'contribution'),
@@ -4919,7 +4964,7 @@ await runWithLocalRunLog(
                     const details = {
                         position,
                         generation: 12,
-                        originalBodyDigest: recordIds[position],
+                        originalBodyDigest: registrationBodyDigests[position],
                         restoredSetup: true,
                         privatePreparationRetired: true,
                     };
@@ -5010,7 +5055,7 @@ await runWithLocalRunLog(
                             mode,
                             scalar,
                             poll: organizer.poll,
-                            recordIds,
+                            registrationBodyDigests,
                             runtimeIdentity: runtime.identity.runtime,
                             peakProcessTreeBytes: peaks,
                             transfers,
@@ -5126,15 +5171,20 @@ await runWithLocalRunLog(
                 // with the retained body loses a body record and stops.
                 const halts = ballotHalts.get(position) ?? [];
                 for (const generation of halts) {
-                    await interrupt(position, 'ballot', { scores }, generation);
+                    await interrupt(
+                        position,
+                        'cast-ballot',
+                        { scores },
+                        generation,
+                    );
                     if (generation === 15)
-                        await loseState(position, 'ballot', 'ballot');
+                        await loseState(position, 'cast-ballot', 'cast-ballot');
                 }
                 assert.equal(
                     (
                         await run(
                             position,
-                            'ballot',
+                            'cast-ballot',
                             halts.includes(17) ? {} : { scores },
                         )
                     ).generation,
@@ -5146,7 +5196,7 @@ await runWithLocalRunLog(
                 assert.ok(equivocator !== undefined);
                 const result = await request(
                     equivocator,
-                    'ballot',
+                    'cast-ballot',
                     {
                         scores: ballotScores(
                             participantCount + copyNames.indexOf(copy),
@@ -5177,14 +5227,17 @@ await runWithLocalRunLog(
             if (equivocator !== undefined) {
                 // Retransmit the original bytes and restore the diagnostic
                 // inspection index before deleting the corrupt copies.
-                assert.equal((await run(equivocator, 'ballot')).generation, 17);
+                assert.equal(
+                    (await run(equivocator, 'cast-ballot')).generation,
+                    17,
+                );
                 for (const copy of copyNames) await removeCopy(copy);
             }
             if (ballotAuthors.includes(0)) {
-                await expectStatus(0, 'ballot', 'refused', {
+                await expectStatus(0, 'cast-ballot', 'refused', {
                     scores: ballotScores(1),
                 });
-                assert.equal((await run(0, 'ballot')).generation, 17);
+                assert.equal((await run(0, 'cast-ballot')).generation, 17);
             }
             const ballotBounds = bounds.ballot;
             // The diagnostic index names an original submission for fixture inspection.
@@ -5498,8 +5551,8 @@ await runWithLocalRunLog(
             if (lateSetup !== undefined) {
                 const verified = await run(lateSetup, 'verify-setup');
                 assert.equal(verified.generation, 19);
-                assert.equal(verified.ballot, 'could not vote');
-                await expectStatus(lateSetup, 'ballot', 'refused', {
+                assert.equal(verified.ballotState, 'could not vote');
+                await expectStatus(lateSetup, 'cast-ballot', 'refused', {
                     scores: ballotScores(lateSetup),
                 });
             }
@@ -5564,7 +5617,7 @@ await runWithLocalRunLog(
             // The lock ended the ballot window, so a participant without a
             // ballot starts none.
             if (mode === 'empty')
-                await expectStatus(1, 'ballot', 'refused', {
+                await expectStatus(1, 'cast-ballot', 'refused', {
                     scores: ballotScores(1),
                 });
             // The organizer takes the other responses, fetches the body they
@@ -5734,7 +5787,7 @@ await runWithLocalRunLog(
                 [0, 24] as const,
             ]);
             // A conflicting slot leaves the equivocator's ballot omitted.
-            const ballotStatus = (position: number) =>
+            const ballotInclusion = (position: number) =>
                 position === omittedVoter || position === equivocator
                     ? 'omitted'
                     : onTime(position)
@@ -5746,34 +5799,41 @@ await runWithLocalRunLog(
                 voters.map(async (position) => {
                     const halt = targetHalts.get(position);
                     if (halt !== undefined)
-                        await interrupt(position, 'target', {}, halt);
+                        await interrupt(position, 'sign-target', {}, halt);
                     if (halt === 23)
                         await loseState(
                             position,
                             await closeStore(position),
-                            'target',
+                            'sign-target',
                         );
-                    const details = await run(position, 'target');
+                    const details = await run(position, 'sign-target');
                     assert.equal(details.generation, 24);
                     // The signing state retains the own ballot's status, so
                     // a visit that only delivers the vote reports it too.
-                    assert.equal(details.ballotStatus, ballotStatus(position));
+                    assert.equal(
+                        details.ballotInclusion,
+                        ballotInclusion(position),
+                    );
                     if (halt === 24) return;
-                    assert.equal(details.usableBallots, usableCount);
-                    assert.equal(details.validBallots, validCount);
+                    assert.equal(details.usableSubmissions, usableCount);
+                    assert.equal(details.acceptedBallots, validCount);
                 }),
             );
-            // A signed vote is only delivered again, and every later visit
+            // A signed vote is only delivered again, and every later operation
             // reports the retained status.
-            const repeated = await run(voters[voters.length - 1], 'target');
+            const repeated = await run(
+                voters[voters.length - 1],
+                'sign-target',
+            );
             assert.equal(repeated.generation, 24);
             assert.equal(
-                repeated.ballotStatus,
-                ballotStatus(voters[voters.length - 1]),
+                repeated.ballotInclusion,
+                ballotInclusion(voters[voters.length - 1]),
             );
             assert.equal(
-                (await run(voters[voters.length - 1], 'status')).ballotStatus,
-                ballotStatus(voters[voters.length - 1]),
+                (await run(voters[voters.length - 1], 'status'))
+                    .ballotInclusion,
+                ballotInclusion(voters[voters.length - 1]),
             );
             const targetBounds = bounds.target;
             const completionDirectory = path.join(
@@ -5854,7 +5914,10 @@ await runWithLocalRunLog(
                     assert.equal(details.predecessor, undefined);
                     assert.equal(details.resumedFrom, undefined);
                     // A non-voter reads its status from the certified target.
-                    assert.equal(details.ballotStatus, ballotStatus(position));
+                    assert.equal(
+                        details.ballotInclusion,
+                        ballotInclusion(position),
+                    );
                 }
             } else {
                 // Every remaining participant certifies the target from the
@@ -5898,8 +5961,8 @@ await runWithLocalRunLog(
                     assert.equal(details.generation, 29);
                     assert.equal(details.encrypted, true);
                     assert.equal(
-                        details.ballotStatus,
-                        ballotStatus(interruptedPosition),
+                        details.ballotInclusion,
+                        ballotInclusion(interruptedPosition),
                     );
                     assert.equal(
                         details.predecessor,
@@ -5925,8 +5988,8 @@ await runWithLocalRunLog(
                             assert.equal(details.resumedFrom, undefined);
                             assert.equal(details.encrypted, true);
                             assert.equal(
-                                details.ballotStatus,
-                                ballotStatus(position),
+                                details.ballotInclusion,
+                                ballotInclusion(position),
                             );
                             assert.equal(
                                 details.predecessor,
@@ -5951,10 +6014,10 @@ await runWithLocalRunLog(
                 // A release after the completed close spent the target
                 // purpose, and its lock retains the own ballot's status.
                 for (const position of nonVoters) {
-                    await expectStatus(position, 'target', 'refused');
+                    await expectStatus(position, 'sign-target', 'refused');
                     assert.equal(
-                        (await run(position, 'status')).ballotStatus,
-                        ballotStatus(position),
+                        (await run(position, 'status')).ballotInclusion,
+                        ballotInclusion(position),
                     );
                 }
                 // A signed release is only delivered again.
@@ -6186,15 +6249,22 @@ await runWithLocalRunLog(
                 [1, 0],
             ] as const)
                 for (const file of await readdir(
-                    path.join(publicDirectory, 'registration', recordIds[from]),
+                    path.join(
+                        publicDirectory,
+                        'registration',
+                        registrationBodyDigests[from],
+                    ),
                 ))
                     registrationForgeries.set(
-                        'registration/' + recordIds[to] + '/' + file,
+                        'registration/' +
+                            registrationBodyDigests[to] +
+                            '/' +
+                            file,
                         await readFile(
                             path.join(
                                 publicDirectory,
                                 'registration',
-                                recordIds[from],
+                                registrationBodyDigests[from],
                                 file,
                             ),
                         ),
@@ -6329,7 +6399,7 @@ await runWithLocalRunLog(
                     const { view, served } = await foreignRecordView(
                         foreign,
                         publicDirectory,
-                        recordIds,
+                        registrationBodyDigests,
                         pattern,
                     );
                     if (family === 'release shares' && served === 0) continue;
@@ -6345,7 +6415,10 @@ await runWithLocalRunLog(
                         detail = await probe(
                             position,
                             view,
-                            details(recordIds, foreign.recordIds),
+                            details(
+                                registrationBodyDigests,
+                                foreign.registrationBodyDigests,
+                            ),
                         );
                     foreignProbes.push({
                         family,
@@ -6356,7 +6429,7 @@ await runWithLocalRunLog(
                 }
             };
             const [result] = await Promise.all([
-                run(combiningPosition, 'result'),
+                run(combiningPosition, 'compute-result'),
                 ...[...new Set([voteProbe, shareProbe])].map(
                     async (position) => {
                         // The vote probe reads the forged ballots before any
@@ -6378,7 +6451,7 @@ await runWithLocalRunLog(
                             await probe(
                                 position,
                                 registrationForgeries,
-                                recordIds
+                                registrationBodyDigests
                                     .slice(0, 2)
                                     .map(
                                         (id) =>
@@ -6416,7 +6489,7 @@ await runWithLocalRunLog(
             // None of the forged views stopped its participant or withdrew
             // its ballot: with the relay's own records it combines the same
             // outcome.
-            const recovered = await run(voteProbe, 'result');
+            const recovered = await run(voteProbe, 'compute-result');
             assert.equal(recovered.encrypted, result.encrypted);
             assert.deepEqual(recovered.identifiers, result.identifiers);
             // This untrusted public cache is outside the authenticated
@@ -6445,7 +6518,7 @@ await runWithLocalRunLog(
 })`),
             );
             deliveredRecords[voteProbe].clear();
-            const recomputed = await run(voteProbe, 'result');
+            const recomputed = await run(voteProbe, 'compute-result');
             assert.equal(recomputed.encrypted, result.encrypted);
             assert.deepEqual(recomputed.identifiers, result.identifiers);
             assert.ok(
@@ -6583,12 +6656,13 @@ await runWithLocalRunLog(
                         participantCount,
                         optionCount,
                         poll: organizer.poll,
-                        recordIds,
+                        registrationBodyDigests,
                         runtimeIdentity: runtime.identity.runtime,
                         corruptClient,
                         peakProcessTreeBytes: peaks.slice(0, leftOut),
                         leftOut: {
-                            bodyDigest: leftOutRegistration.bodyDigest,
+                            registrationBodyDigest:
+                                leftOutRegistration.registrationBodyDigest,
                             peakProcessTreeBytes: peaks[leftOut],
                         },
                         copyPeakProcessTreeBytes: Object.fromEntries(copyPeaks),

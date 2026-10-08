@@ -132,7 +132,7 @@ pub fn key_associated(body_digest: [u8; 64]) -> Vec<u8> {
 pub type DataKeys = Zeroizing<[u8; 96]>;
 
 impl Enrollment {
-    pub fn create_creator(
+    pub fn create_organizer(
         draft: registration_credentials::poll::PollDraft,
         runtime: [u8; 64],
         username: &[u8],

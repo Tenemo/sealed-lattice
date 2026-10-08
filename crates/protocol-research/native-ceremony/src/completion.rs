@@ -10,7 +10,7 @@ use registration_credentials::{
     Credential, release_signing::body_header, target_signing::TargetMessage,
 };
 use registration_enrollment::{
-    finality_work::{FinalityWork, OwnBallotStatus, classified_ballot_status},
+    finality_work::{FinalityWork, OwnBallotInclusion, classified_ballot_inclusion},
     release_work::ReleaseWork,
 };
 use rns_arithmetic_probe::ranking::{Ciphertext, stored_bytes, stored_value_bytes};
@@ -118,8 +118,8 @@ impl Write for ProofBytes {
 /// each enrolled credential and each extra corrupt fork must report.
 pub struct Finality {
     pub signers: Vec<usize>,
-    pub statuses: Vec<(usize, OwnBallotStatus)>,
-    pub forks: Vec<(usize, Credential, OwnBallotStatus)>,
+    pub statuses: Vec<(usize, OwnBallotInclusion)>,
+    pub forks: Vec<(usize, Credential, OwnBallotInclusion)>,
 }
 
 /// Certifies the target from the barrier with the given target signers; the
@@ -281,7 +281,7 @@ pub fn run(
         .message()
         .close_time();
     let released = |position: usize, credential: &Credential| {
-        classified_ballot_status(
+        classified_ballot_inclusion(
             credential.signed_ballot().map(|(_, time)| *time),
             close_time,
             message.classification(position),
@@ -290,7 +290,7 @@ pub fn run(
     for (position, status) in statuses {
         let work = FinalityWork::new(owners[&position].clone(), evaluated.clone()).unwrap();
         assert_eq!(
-            work.ballot_status(&enrollments[position].credential),
+            work.ballot_inclusion(&enrollments[position].credential),
             status
         );
         assert_eq!(
@@ -300,7 +300,7 @@ pub fn run(
     }
     for (position, credential, status) in &forks {
         let work = FinalityWork::new(owners[position].clone(), evaluated.clone()).unwrap();
-        assert_eq!(work.ballot_status(credential), *status);
+        assert_eq!(work.ballot_inclusion(credential), *status);
         assert_eq!(released(*position, credential), *status);
     }
     for (ordinal, &position) in signers.iter().enumerate() {

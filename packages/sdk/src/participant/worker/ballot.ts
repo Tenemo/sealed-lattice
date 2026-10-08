@@ -55,7 +55,7 @@ export type BallotSession = {
     readonly participant: ParticipantSession;
     readonly records: RecordContext;
     state: BallotState;
-    // The proof-stream bytes the module drew, when this visit created the
+    // The proof-stream bytes the module drew, when this operation created the
     // ballot.
     proofRandomBytes?: number;
 };

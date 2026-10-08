@@ -295,8 +295,8 @@ const prepare = (
     writeInput(kernel, input);
     expect(
         joining === undefined
-            ? kernel.validate_creator(input.length)
-            : kernel.validate_join(input.length),
+            ? kernel.validate_organizer(input.length)
+            : kernel.validate_joiner(input.length),
     ).toBe(0);
     const parts = new Map<number, Uint8Array[]>();
     handlers.staged = (kind, _offset, bytes) => {
@@ -310,8 +310,8 @@ const prepare = (
     writeInput(kernel, input);
     expect(
         joining === undefined
-            ? kernel.prepare_creator(input.length)
-            : kernel.prepare_join(input.length),
+            ? kernel.prepare_organizer(input.length)
+            : kernel.prepare_joiner(input.length),
     ).toBe(0);
     expect(kernel.check_retained()).toBe(0);
     return {
@@ -373,7 +373,7 @@ const verifyRoster = async (
     helpers: ParallelHelpers,
     poll: JoinedPoll,
     registrations: readonly ReadonlyMap<number, Uint8Array>[],
-    recordIds: readonly string[],
+    registrationBodyDigests: readonly string[],
 ) => {
     const { kernel } = await instantiateParticipantKernel(
         participantModule,
@@ -401,7 +401,7 @@ const verifyRoster = async (
                     [file as string, records.get(kind as number)!] as const,
             ),
         );
-        const key = registrationCandidateKey(recordIds[position]);
+        const key = registrationCandidateKey(registrationBodyDigests[position]);
         // A complete transport manifest can still carry an incomplete key.
         // The owning verifier must discard that attempt and accept later bytes.
         transport.publish(
@@ -425,7 +425,7 @@ const verifyRoster = async (
     try {
         await streamRegistrations(
             relay,
-            recordIds,
+            registrationBodyDigests,
             readParticipantLimits(kernel).registration,
             kernel.roster_open_records(),
             (operation, position, bytes) => {
@@ -512,7 +512,7 @@ describe('participant helpers with registration work', () => {
                 (await withHelpers((helpers) => enroll(helpers, name, poll)))
                     .records,
             );
-        const recordIds = registrations.map(registrationIdentity);
+        const registrationBodyDigests = registrations.map(registrationIdentity);
         // The true roster, a public key coefficient changed and a signature changed.
         for (const [candidate, accepted] of [
             [registrations, true],
@@ -525,7 +525,7 @@ describe('participant helpers with registration work', () => {
                 noParallelHelpers,
                 poll,
                 candidate,
-                recordIds,
+                registrationBodyDigests,
             );
             expect(verdictAlone !== undefined).toBe(accepted);
             // The verified roster names its registrations' usernames in
@@ -537,7 +537,12 @@ describe('participant helpers with registration work', () => {
             );
             expect(
                 await withHelpers((helpers) =>
-                    verifyRoster(helpers, poll, candidate, recordIds),
+                    verifyRoster(
+                        helpers,
+                        poll,
+                        candidate,
+                        registrationBodyDigests,
+                    ),
                 ),
             ).toEqual(verdictAlone);
         }

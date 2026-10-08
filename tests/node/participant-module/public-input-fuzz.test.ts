@@ -115,7 +115,7 @@ const organizer = await (async () => {
         username,
     );
     writeInput(kernel, input);
-    if (kernel.validate_creator(input.length) !== 0)
+    if (kernel.validate_organizer(input.length) !== 0)
         throw new Error('The organizer input was refused.');
     const parts = new Map<number, Uint8Array[]>();
     handlers.staged = (kind, _offset, bytes) => {
@@ -129,7 +129,7 @@ const organizer = await (async () => {
         requests += 1;
     };
     writeInput(kernel, input);
-    if (kernel.prepare_creator(input.length) !== 0)
+    if (kernel.prepare_organizer(input.length) !== 0)
         throw new Error('The organizer enrollment was refused.');
     const record = (kind: number) => {
         const chunks = parts.get(kind);
@@ -235,7 +235,7 @@ type PublicInputCommand = Readonly<{
     query?: true;
 }>;
 const publicInputCommands: readonly PublicInputCommand[] = [
-    { name: 'validate_join', buffer: 'session', parameters: ['length'] },
+    { name: 'validate_joiner', buffer: 'session', parameters: ['length'] },
     { name: 'roster_begin', buffer: 'session', parameters: ['length'] },
     {
         name: 'roster_record',
@@ -594,7 +594,7 @@ describe('participant module public input', () => {
                             );
         const join = joinInput('First voter');
         writeInput(kernel, join);
-        expect(kernel.validate_join(join.length)).toBe(0);
+        expect(kernel.validate_joiner(join.length)).toBe(0);
         writeInput(kernel, begin);
         expect(kernel.roster_begin(begin.length)).toBe(0);
         writeSetupInput(kernel, begin);
@@ -666,7 +666,7 @@ describe('participant module public input', () => {
                 1 + draw(255),
             );
             writeInput(kernel, changedJoin);
-            expect(kernel.validate_join(changedJoin.length), label).toBe(1);
+            expect(kernel.validate_joiner(changedJoin.length), label).toBe(1);
             const offset = draw(begin.length - 2);
             const changedBegin = changedByte(
                 begin,
@@ -683,7 +683,7 @@ describe('participant module public input', () => {
             const shift = 1 + draw(2048);
             writeInput(kernel, join);
             for (const length of [join.length - shift, join.length + shift])
-                expect(kernel.validate_join(length), label).toBe(1);
+                expect(kernel.validate_joiner(length), label).toBe(1);
             writeInput(kernel, begin);
             for (const length of [begin.length - shift, begin.length + shift])
                 expect(kernel.roster_begin(length), label).toBe(1);
@@ -708,7 +708,7 @@ describe('participant module public input', () => {
             ).toBe(1);
         }
         writeInput(kernel, join);
-        expect(kernel.validate_join(join.length)).toBe(0);
+        expect(kernel.validate_joiner(join.length)).toBe(0);
         writeInput(kernel, begin);
         expect(kernel.roster_begin(begin.length)).toBe(0);
         writeSetupInput(kernel, begin);
@@ -954,7 +954,7 @@ describe('participant module public input', () => {
             );
         const validates = (input: Uint8Array) => {
             writeInput(kernel, input);
-            return kernel.validate_creator(input.length) === 0;
+            return kernel.validate_organizer(input.length) === 0;
         };
         const question = 'Which option leads?';
         const genuine = creatorInput(question, ['Option 0', 'Option 1'], 2);

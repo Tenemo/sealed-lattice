@@ -25,7 +25,7 @@ use registration_credentials::{
     roster::{RetainedContributionContext, RosterProposal},
     roster_authentication::verify_roster_proposal,
 };
-use registration_enrollment::{Enrollment, finality_work::OwnBallotStatus};
+use registration_enrollment::{Enrollment, finality_work::OwnBallotInclusion};
 use scenario::Scenario;
 use setup_aggregate::verified::VerifiedSetupAggregate;
 use std::{
@@ -288,10 +288,10 @@ fn main() {
         .map(|_| std::array::from_fn(|_| Zeroizing::new(Vec::new())))
         .collect();
     let mut signing_capsule = Vec::new();
-    let mut creator_output = EnrollmentOutput::new(&directories[0], &mut controls[0]);
-    let (packet, creator, creator_keys) =
-        Enrollment::create_creator(draft, runtime, b"Creator", |kind, offset, bytes| {
-            creator_output.emit(kind, offset, bytes);
+    let mut organizer_output = EnrollmentOutput::new(&directories[0], &mut controls[0]);
+    let (packet, organizer, organizer_keys) =
+        Enrollment::create_organizer(draft, runtime, b"Organizer", |kind, offset, bytes| {
+            organizer_output.emit(kind, offset, bytes);
             if let Some(capsule) = match kind {
                 3 => Some(0),
                 4 => Some(1),
@@ -307,11 +307,11 @@ fn main() {
             }
         })
         .unwrap();
-    creator_output.finish();
-    // The creator's credential capsule key, which later steps reopen.
-    let creator_signing_key: Zeroizing<[u8; 32]> =
-        Zeroizing::new(creator_keys[32..64].try_into().unwrap());
-    let mut enrollment_data_keys = vec![creator_keys];
+    organizer_output.finish();
+    // The organizer's credential capsule key, which later steps reopen.
+    let organizer_signing_key: Zeroizing<[u8; 32]> =
+        Zeroizing::new(organizer_keys[32..64].try_into().unwrap());
+    let mut enrollment_data_keys = vec![organizer_keys];
     let poll =
         Arc::new(verify_poll(packet.identity, runtime, &packet.body, &packet.signature).unwrap());
     write(output.join("poll-definition.bin"), &packet.body);
@@ -320,7 +320,7 @@ fn main() {
         output.join("context.bin"),
         &[poll.identity().as_slice(), runtime.as_slice()].concat(),
     );
-    let mut enrollments = vec![creator];
+    let mut enrollments = vec![organizer];
     // The corrupt equivocator may fork its own signing state. These
     // encrypted key bytes and wrapping key remain in this process only.
     let mut corrupt_signing_capsule = Zeroizing::new(Vec::new());
@@ -450,7 +450,7 @@ fn main() {
         let position = if scenario.selection_fork { 0 } else { 2 };
         let record = &roster.proposal().records()[position];
         let key = if position == 0 {
-            &*creator_signing_key
+            &*organizer_signing_key
         } else {
             &*corrupt_wrapping_key
         };
@@ -534,9 +534,9 @@ fn main() {
                 (
                     position,
                     if invalid_only && position == 0 {
-                        OwnBallotStatus::Included
+                        OwnBallotInclusion::Included
                     } else {
-                        OwnBallotStatus::NotCast
+                        OwnBallotInclusion::NotCast
                     },
                 )
             })
@@ -853,7 +853,7 @@ fn main() {
         let mut credential = registration_credentials::Credential::open_complete(
             original.header().signing_public,
             original.body_digest(),
-            &creator_signing_key,
+            &organizer_signing_key,
             &signing_capsule,
         )
         .unwrap();
@@ -1226,11 +1226,11 @@ fn main() {
     let statuses = (0..count)
         .map(|position| {
             let status = if scenario.usable().contains(&position) {
-                OwnBallotStatus::Included
+                OwnBallotInclusion::Included
             } else if Some(position) == scenario.omitted {
-                OwnBallotStatus::Omitted
+                OwnBallotInclusion::Omitted
             } else {
-                OwnBallotStatus::NotCast
+                OwnBallotInclusion::NotCast
             };
             (position, status)
         })
@@ -1244,7 +1244,13 @@ fn main() {
             signers: scenario.honest(),
             statuses,
             forks: late_fork
-                .map(|fork| (scenario.equivocator.unwrap(), fork, OwnBallotStatus::Late))
+                .map(|fork| {
+                    (
+                        scenario.equivocator.unwrap(),
+                        fork,
+                        OwnBallotInclusion::Late,
+                    )
+                })
                 .into_iter()
                 .collect(),
         },

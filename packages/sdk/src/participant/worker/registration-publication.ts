@@ -21,7 +21,7 @@ export const publishRegistrationRecords = async (
     root: AuthenticatedRoot,
     enrollment: RestoredEnrollment,
 ) => {
-    const id = hexadecimal(enrollment.bodyDigest);
+    const id = hexadecimal(enrollment.registrationBodyDigest);
     const groups: [string, [number, string][]][] = [
         [
             registrationCandidateKey(id),

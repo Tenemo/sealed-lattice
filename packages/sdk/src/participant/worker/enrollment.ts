@@ -63,7 +63,7 @@ type EnrollmentRefusal = Extract<
 
 export type EnrollmentRequest = Readonly<
     | {
-          role: 'creator';
+          role: 'organizer';
           question: string;
           options: readonly string[];
           topCount: number;
@@ -71,7 +71,7 @@ export type EnrollmentRequest = Readonly<
           username: string;
       }
     | {
-          role: 'join';
+          role: 'joiner';
           poll: Uint8Array;
           definition: Uint8Array;
           definitionSignature: Uint8Array;
@@ -152,7 +152,7 @@ export const createEnrollment = async (
         )
             return 'invalid request';
         let input: Uint8Array;
-        if (request.role === 'creator') {
+        if (request.role === 'organizer') {
             const question = encodeWellFormed(request.question);
             if (
                 question === undefined ||
@@ -186,7 +186,7 @@ export const createEnrollment = async (
             if (input.length > kernel.input_capacity())
                 return 'invalid request';
             sessionInput(context, input);
-            if (kernel.validate_creator(input.length) !== 0)
+            if (kernel.validate_organizer(input.length) !== 0)
                 return 'invalid request';
         } else {
             if (
@@ -207,7 +207,7 @@ export const createEnrollment = async (
             if (input.length > kernel.input_capacity())
                 return 'invalid request';
             sessionInput(context, input);
-            if (kernel.validate_join(input.length) !== 0)
+            if (kernel.validate_joiner(input.length) !== 0)
                 return 'invalid request';
         }
         const estimate = await navigator.storage.estimate();
@@ -297,9 +297,9 @@ export const createEnrollment = async (
         try {
             sessionInput(context, input);
             prepared =
-                request.role === 'creator'
-                    ? kernel.prepare_creator(input.length)
-                    : kernel.prepare_join(input.length);
+                request.role === 'organizer'
+                    ? kernel.prepare_organizer(input.length)
+                    : kernel.prepare_joiner(input.length);
         } finally {
             delete handlers.staged;
             delete handlers.random;
@@ -307,7 +307,7 @@ export const createEnrollment = async (
         if (prepared !== 0 || kernel.check_retained() !== 0)
             throw new Error('Enrollment preparation failed.');
         const poll = readKernel(kernel, kernel.poll_identity_pointer(), 64);
-        if (request.role === 'join') {
+        if (request.role === 'joiner') {
             if (request.definition.length > maximums[dataKind.pollDefinition])
                 throw new Error('The poll definition exceeds its bound.');
             records.push(
@@ -343,8 +343,8 @@ export const createEnrollment = async (
             throw new Error('Incomplete enrollment.');
         const before = randomBytes;
         if (
-            kernel.prepare_creator(0) !== 1 ||
-            kernel.prepare_join(0) !== 1 ||
+            kernel.prepare_organizer(0) !== 1 ||
+            kernel.prepare_joiner(0) !== 1 ||
             kernel.check_retained() !== 0 ||
             randomBytes !== before
         )
@@ -451,7 +451,7 @@ export type RestoredEnrollment = Readonly<{
     username: string;
     isOrganizer: boolean;
     poll: VerifiedPoll;
-    bodyDigest: Uint8Array;
+    registrationBodyDigest: Uint8Array;
     header: Uint8Array;
     signature: Uint8Array;
     definition: Uint8Array;
@@ -459,7 +459,7 @@ export type RestoredEnrollment = Readonly<{
 }>;
 
 // The credential keys the module's verification of the participant's own
-// registration, so that later visits restore it instead of reading and
+// registration, so that later operations restore it instead of reading and
 // verifying its signature again.
 export const retainRegistration = (context: ParticipantContext) => {
     const { kernel } = context;
@@ -542,7 +542,7 @@ export const restoreEnrollment = async (
     for (let offset = 0; offset < publicKey.length; offset += chunkBytes)
         own(1, publicKey.subarray(offset, offset + chunkBytes));
     own(2);
-    let bodyDigest: Uint8Array;
+    let registrationBodyDigest: Uint8Array;
     // From the roster transition on, the root retains the module's
     // verification of the participant's own registration, keyed to its
     // credential.
@@ -551,10 +551,10 @@ export const restoreEnrollment = async (
         // credential it is keyed to.
         const retained = await read(dataKind.retainedRegistration);
         own(5, retained);
-        bodyDigest = retained.slice(0, 64);
+        registrationBodyDigest = retained.slice(0, 64);
     } else {
         own(4);
-        bodyDigest = readKernel(
+        registrationBodyDigest = readKernel(
             kernel,
             kernel.own_registration_body_digest_pointer(),
             64,
@@ -568,7 +568,7 @@ export const restoreEnrollment = async (
         pollContext,
         unsigned32(header.length),
         header,
-        bodyDigest,
+        registrationBodyDigest,
         manifest.dataKeys,
         publicKey,
         await read(dataKind.recipientCapsule),
@@ -596,8 +596,8 @@ export const restoreEnrollment = async (
     }
     if (
         status !== 0 ||
-        kernel.prepare_creator(0) !== 1 ||
-        kernel.prepare_join(0) !== 1 ||
+        kernel.prepare_organizer(0) !== 1 ||
+        kernel.prepare_joiner(0) !== 1 ||
         kernel.restore(0) !== 1 ||
         kernel.restore_prepared(0) !== 1
     )
@@ -620,7 +620,7 @@ export const restoreEnrollment = async (
         usernameBytes,
     );
     sessionInput(context, pollInput);
-    if (kernel.validate_join(pollInput.length) !== 0)
+    if (kernel.validate_joiner(pollInput.length) !== 0)
         throw new Error('The retained poll definition was refused.');
     const isOrganizer = equalBytes(
         tupleFields(header)[3],
@@ -630,7 +630,7 @@ export const restoreEnrollment = async (
         username,
         isOrganizer,
         poll,
-        bodyDigest,
+        registrationBodyDigest,
         header,
         signature,
         definition,

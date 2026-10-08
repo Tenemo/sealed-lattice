@@ -30,7 +30,7 @@ fn command(session: &mut Session, operation: u32, input: &[u8]) -> Result<Vec<u8
             let target = evaluation_target::verified_browser_target().ok_or(Error::Context)?;
             let work = crate::finality_work::FinalityWork::new(close.owner(), target)?;
             let enrollment = session.enrollment.as_ref().ok_or(Error::Context)?;
-            let mut output = vec![work.ballot_status(&enrollment.credential).code()];
+            let mut output = vec![work.ballot_inclusion(&enrollment.credential).code()];
             output.extend(work.body());
             session.finality = Some(work);
             Ok(output)
@@ -68,7 +68,7 @@ fn command(session: &mut Session, operation: u32, input: &[u8]) -> Result<Vec<u8
                 evaluation_target::verified_browser_certificate().ok_or(Error::Context)?;
             let enrollment = session.enrollment.as_ref().ok_or(Error::Context)?;
             close
-                .released_ballot_status(&enrollment.credential, certificate.target().body())
+                .released_ballot_inclusion(&enrollment.credential, certificate.target().body())
                 .map(|status| vec![status.code()])
         }
         _ => Err(Error::Shape),

@@ -200,9 +200,9 @@ const publicCandidate = (relay: PublicRelay, id: string): CandidateView => {
     };
 };
 
-// Freeze a finite discovery prefix for this visit. Yield each locator before
+// Freeze a finite discovery prefix for this operation. Yield each locator before
 // fetching its manifest, so a malformed candidate cannot monopolize a round
-// of a caller's fair scan across authors. A later visit sees later appends.
+// of a caller's fair scan across authors. A later operation sees later appends.
 export async function* readCandidates(relay: PublicRelay, key: string) {
     if (!isCandidateKey(key)) throw new Error('Invalid candidate key.');
     let offset = 0;

@@ -1,16 +1,18 @@
 import { describe, expect, it } from 'vitest';
 
-import { parseCloseRequest } from '#packages/sdk/src/participant/worker/close.js';
+import { parseCloseParameters } from '#packages/sdk/src/participant/worker/close.js';
 
-describe('close requests', () => {
+describe('close parameters', () => {
     it('carry the close time a request supplies', () => {
-        expect(parseCloseRequest({})).toEqual({});
-        expect(parseCloseRequest({ closeTime: 0 })).toEqual({ closeTime: 0n });
-        expect(parseCloseRequest({ closeTime: 1_700_000_000_000 })).toEqual({
+        expect(parseCloseParameters({})).toEqual({});
+        expect(parseCloseParameters({ closeTime: 0 })).toEqual({
+            closeTime: 0n,
+        });
+        expect(parseCloseParameters({ closeTime: 1_700_000_000_000 })).toEqual({
             closeTime: 1_700_000_000_000n,
         });
         expect(
-            parseCloseRequest({ closeTime: Number.MAX_SAFE_INTEGER }),
+            parseCloseParameters({ closeTime: Number.MAX_SAFE_INTEGER }),
         ).toEqual({ closeTime: BigInt(Number.MAX_SAFE_INTEGER) });
     });
 
@@ -23,6 +25,6 @@ describe('close requests', () => {
             { closeTime: '1700000000000' },
             { closeTime: Number.MAX_SAFE_INTEGER + 1 },
         ])
-            expect(parseCloseRequest(parameters)).toBeUndefined();
+            expect(parseCloseParameters(parameters)).toBeUndefined();
     });
 });

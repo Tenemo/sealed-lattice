@@ -19,18 +19,18 @@ import { targetPhase } from './root-generation.js';
 const marker = encodeText('TST3');
 
 // The own ballot's status in the target, by the finality work's code.
-export const ballotStatuses = [
+export const ballotInclusions = [
     'not cast',
     'late',
     'included',
     'omitted',
 ] as const;
-export type BallotStatus = (typeof ballotStatuses)[number];
+export type BallotInclusion = (typeof ballotInclusions)[number];
 
 export type TargetState = Readonly<{
     // The close generation the target signing follows.
     predecessor: number;
-    ballotStatus: BallotStatus;
+    ballotInclusion: BallotInclusion;
     body: Uint8Array;
 
     vote: Uint8Array;
@@ -41,7 +41,7 @@ export const encodeTargetState = (generation: number, state: TargetState) =>
         marker,
         Uint8Array.of(
             state.predecessor,
-            ballotStatuses.indexOf(state.ballotStatus),
+            ballotInclusions.indexOf(state.ballotInclusion),
         ),
         unsigned16(state.body.length),
         state.body,
@@ -61,7 +61,7 @@ export const decodeTargetState = (
         bytes.length < marker.length + 4 ||
         !equalBytes(bytes.subarray(0, marker.length), marker) ||
         bytes[marker.length] !== completedClosePhase(organizer) ||
-        bytes[marker.length + 1] >= ballotStatuses.length
+        bytes[marker.length + 1] >= ballotInclusions.length
     )
         throw new Error('The target state is malformed.');
     const length = readUnsigned16(bytes, marker.length + 2);
@@ -76,7 +76,7 @@ export const decodeTargetState = (
     const rest = bytes.slice(start + length);
     return {
         predecessor: bytes[marker.length],
-        ballotStatus: ballotStatuses[bytes[marker.length + 1]],
+        ballotInclusion: ballotInclusions[bytes[marker.length + 1]],
         body: bytes.slice(start, start + length),
         vote: signed ? rest : new Uint8Array(),
     };
