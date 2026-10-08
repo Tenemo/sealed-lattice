@@ -1,22 +1,26 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-    bruteForceListerSets,
     closeInventory,
-    compileCloseObligationCounterexamples,
-    compileCloseVisitCensus,
     deriveCloseProfile,
     envelopeIdentity,
-    exploreCompletionProfileExecutions,
-    exploreJointCloseViews,
     listKnownEnvelopes,
-    runCloseExecution,
     usableEnvelopes,
     verifyCloseProposal,
     verifyCloseResponse,
     type CloseEnvelope,
     type CloseIntent,
     type CloseResponse,
+} from '#tests/close-contract-model.js';
+import {
+    exploreCompletionProfileExecutions,
+    runCloseExecution,
+} from '#tests/close-execution-model.js';
+import {
+    bruteForceListerSets,
+    compileCloseObligationCounterexamples,
+    compileCloseVisitCensus,
+    exploreJointCloseViews,
 } from '#tests/close-response-model.js';
 
 // Product goals, maintained independently of the model: at most

@@ -1,5 +1,5 @@
 import { compileBallotBodyCensus } from '#tests/ballot-body-model.js';
-import { deriveCloseProfile } from '#tests/close-response-model.js';
+import { deriveCloseProfile } from '#tests/close-contract-model.js';
 import { compileRegistrationEnrollmentCensus } from '#tests/registration-enrollment-model.js';
 import type { SupportedProfile } from '#tests/supported-profile-model.js';
 
