@@ -91,6 +91,7 @@ A refusal's `reason` is one of:
 - `invalid request`, for malformed parameters or an unknown operation;
 - `no participant`, for an operation other than `create` on an empty namespace, which stays empty;
 - `participant exists`, `insufficient storage` or `another poll`;
+- `unrecognized state`, for a namespace whose participant database this SDK does not recognize, which it leaves unchanged;
 - `another runtime`, for a participant that another build of the SDK created, with that build's `runtime` identity, so the application can continue it with that build;
 - `unavailable`, for an operation that the participant's stage or role does not allow.
 

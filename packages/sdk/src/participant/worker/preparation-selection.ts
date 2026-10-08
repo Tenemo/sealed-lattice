@@ -202,7 +202,9 @@ const endorsementPacket = (
 export const endorseSetup = async (
     session: ParticipantSession,
     relay: PublicRelay,
-    publishedSelection?: SignedPacket,
+    // The organizer's own retained signed selection, which is retained state
+    // rather than public input.
+    ownSelection?: SignedPacket,
 ) => {
     if (session.root.head.generation !== rootGeneration.preparation)
         throw new Error('No confirmed roster permits setup endorsement.');
@@ -210,8 +212,13 @@ export const endorseSetup = async (
     let retained = session.preparation.endorsement;
     if (retained === undefined) {
         const selection =
-            publishedSelection ?? (await readSelection(session.context, relay));
-        await verifySelectionInputs(session, relay, selection);
+            ownSelection ?? (await readSelection(session.context, relay));
+        await verifySelectionInputs(
+            session,
+            relay,
+            selection,
+            ownSelection !== undefined,
+        );
         const { kernel, profile } = session.context;
         if (kernel.retain_selection_inputs() !== 0)
             throw new Error(

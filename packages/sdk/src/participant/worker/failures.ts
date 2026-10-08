@@ -7,6 +7,10 @@ import type { ParticipantPendingCause } from './outcome.js';
 // changes anything.
 export class InvalidRequest extends Error {}
 
+// A namespace whose participant database this SDK does not recognize is
+// refused, and nothing is written to it.
+export class UnrecognizedState extends Error {}
+
 // A public input that is unavailable or refused leaves the participant
 // pending; it never stops the participant or replaces retained state.
 export class PublicInputFailure extends Error {}
@@ -40,18 +44,24 @@ export const pendingCause = (error: unknown): ParticipantPendingCause =>
               ? 'module'
               : 'worker';
 
-// How a failure ends an operation: a malformed request is refused; a failure
-// with a cause of its own, and any failure before the participant's
-// authority started, leaves the participant pending; any other failure after
-// authority started stops it.
+// How a failure ends an operation: a malformed request and an unrecognized
+// participant database are refused; a failure with a cause of its own, and
+// any failure before the participant's authority started, leaves the
+// participant pending; any other failure after authority started stops it.
 export const classifyFailure = (
     error: unknown,
     authorityStarted: boolean,
 ):
-    | Readonly<{ status: 'refused' }>
+    | Readonly<{
+          status: 'refused';
+          reason: 'invalid request' | 'unrecognized state';
+      }>
     | Readonly<{ status: 'pending'; cause: ParticipantPendingCause }>
     | Readonly<{ status: 'stopped' }> => {
-    if (error instanceof InvalidRequest) return { status: 'refused' };
+    if (error instanceof InvalidRequest)
+        return { status: 'refused', reason: 'invalid request' };
+    if (error instanceof UnrecognizedState)
+        return { status: 'refused', reason: 'unrecognized state' };
     const cause = pendingCause(error);
     return !authorityStarted || cause !== 'worker'
         ? { status: 'pending', cause }

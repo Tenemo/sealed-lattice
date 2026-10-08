@@ -155,6 +155,46 @@ describe('participant API', () => {
         }
     });
 
+    it('refuses a namespace whose participant database it does not recognize and writes nothing to it', async () => {
+        for (const [version, stores] of [
+            [1, ['foreign']],
+            [1, participantStores.slice(1)],
+            [2, participantStores],
+        ] as const) {
+            const namespace = `unrecognized-${crypto.randomUUID()}`;
+            const name = `sealed-lattice-participant/${namespace}`;
+            try {
+                const opening = indexedDB.open(name, version);
+                opening.onupgradeneeded = () => {
+                    for (const store of stores)
+                        opening.result
+                            .createObjectStore(store)
+                            .put(Uint8Array.of(1), 0);
+                };
+                (await requestResult(opening)).close();
+                const before = await storeCounts(name);
+                const participant = openParticipant({
+                    namespace,
+                    relay: location.origin + '/',
+                });
+                for (const request of [
+                    { operation: 'status' },
+                    { operation: 'ballot', parameters: { scores: [1, 1] } },
+                ] as const)
+                    expect(await participant.run(request)).toEqual({
+                        status: 'refused',
+                        reason: 'unrecognized state',
+                    });
+                expect(await storeCounts(name)).toEqual(before);
+                const reopened = await requestResult(indexedDB.open(name));
+                expect(reopened.version).toBe(version);
+                reopened.close();
+            } finally {
+                await requestResult(indexedDB.deleteDatabase(name));
+            }
+        }
+    });
+
     it('stops a participant whose authority is damaged, and it stays stopped', async () => {
         for (const head of [
             undefined,

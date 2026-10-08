@@ -1,4 +1,4 @@
-import { StoragePending } from './failures.js';
+import { StoragePending, UnrecognizedState } from './failures.js';
 
 // The participant's origin-local database. The key, root and head stores hold
 // the single authenticated root; every other store holds records that root
@@ -105,11 +105,21 @@ export const openParticipantDatabase = async (
         for (const store of participantStores)
             request.result.createObjectStore(store);
     };
-    const database = await requestResult(request);
+    let database: IDBDatabase;
+    try {
+        database = await requestResult(request);
+    } catch (error) {
+        // A database of a later version is not one this SDK created.
+        if (error instanceof DOMException && error.name === 'VersionError')
+            throw new UnrecognizedState(
+                'The participant database has another version.',
+            );
+        throw error;
+    }
     const names = [...database.objectStoreNames].sort().join(',');
     if (names !== [...participantStores].sort().join(',')) {
         database.close();
-        throw new Error('Unexpected participant store inventory.');
+        throw new UnrecognizedState('Unexpected participant store inventory.');
     }
     return database;
 };

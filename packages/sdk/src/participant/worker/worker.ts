@@ -864,7 +864,7 @@ const run = async (
                     // state loss instead.
                     const outcome = classifyFailure(error, authorityStarted);
                     if (outcome.status === 'refused')
-                        return refused('invalid request');
+                        return refused(outcome.reason);
                     if (outcome.status === 'pending') throw error;
                     const stopPersistence = await stopParticipant(opened);
                     return {
@@ -879,8 +879,12 @@ const run = async (
             },
         );
     } catch (error) {
-        // Public input, pending storage, resource and module failures and
-        // failures before authority started leave the participant pending.
+        // An unrecognized participant database is refused before anything is
+        // written to it. Public input, pending storage, resource and module
+        // failures and failures before authority started leave the
+        // participant pending.
+        const outcome = classifyFailure(error, false);
+        if (outcome.status === 'refused') return refused(outcome.reason);
         return {
             status: 'pending',
             cause: pendingCause(error),
