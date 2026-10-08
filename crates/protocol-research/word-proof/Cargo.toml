@@ -6,8 +6,6 @@ publish.workspace = true
 
 [dependencies]
 sha3 = { workspace = true, features = ["zeroize"] }
-aes-gcm = { workspace = true, features = ["aes", "alloc", "zeroize"] }
-aes = { workspace = true, features = ["zeroize"] }
 zeroize.workspace = true
 parallel-work = { path = "../parallel-work" }
 setup-stream-kernel = { path = "../setup-stream-kernel" }

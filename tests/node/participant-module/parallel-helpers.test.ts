@@ -307,12 +307,11 @@ const prepare = (
         target.set(shake(name + '/' + String(requests), target.length));
         requests += 1;
     };
-    const control = concatenate(input, shake(name + '/data-keys', 96));
-    writeInput(kernel, control);
+    writeInput(kernel, input);
     expect(
         joining === undefined
-            ? kernel.prepare_creator(control.length)
-            : kernel.prepare_join(control.length),
+            ? kernel.prepare_creator(input.length)
+            : kernel.prepare_join(input.length),
     ).toBe(0);
     expect(kernel.check_retained()).toBe(0);
     return {

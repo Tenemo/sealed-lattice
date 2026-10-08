@@ -1,22 +1,19 @@
 use super::*;
-use aes_gcm::{
-    Aes256Gcm, Nonce,
-    aead::{AeadInPlace, KeyInit},
-};
+use parallel_work::sealing::{self, Sealed, TAG_BYTES};
 
 const PLAIN_BYTES: usize = 4 + 2 * RECIPIENT_SECRET_SUPPORT;
-pub const SEALED_BYTES: usize = PLAIN_BYTES + 16;
+pub const SEALED_BYTES: usize = PLAIN_BYTES + TAG_BYTES;
 
 impl RegistrationKey {
-    /// Seals one completed registration key with a fresh, single-use local key.
-    /// The caller owns that wrapping key's confidential browser-local custody.
-    pub fn seal_retained(&mut self, key: &[u8; 32], associated: &[u8]) -> Result<Vec<u8>, Error> {
+    /// Seals one completed registration key under a fresh, single-use local
+    /// key. The caller owns that key's confidential browser-local custody.
+    pub fn seal_retained(&mut self, associated: &[u8]) -> Result<Sealed, Error> {
         if self.sealed || associated.is_empty() || associated.len() > 2048 {
             return Err(Error::Consumed);
         }
         self.sealed = true;
         self.validate_retained()?;
-        let mut bytes = Zeroizing::new(Vec::with_capacity(SEALED_BYTES));
+        let mut bytes = Zeroizing::new(Vec::with_capacity(PLAIN_BYTES));
         bytes.extend(b"RKC1");
         for sign in [1i8, -1] {
             for (position, value) in self.secret.iter().enumerate() {
@@ -28,10 +25,7 @@ impl RegistrationKey {
         if bytes.len() != PLAIN_BYTES {
             return Err(Error::InvalidState);
         }
-        Aes256Gcm::new(key.into())
-            .encrypt_in_place(Nonce::from_slice(&[0; 12]), associated, &mut *bytes)
-            .map_err(|_| Error::InvalidState)?;
-        Ok(std::mem::take(&mut *bytes))
+        Ok(sealing::seal(&bytes, associated))
     }
 
     pub fn open_retained(
@@ -47,10 +41,7 @@ impl RegistrationKey {
         {
             return Err(Error::InvalidState);
         }
-        let mut bytes = Zeroizing::new(sealed.to_vec());
-        Aes256Gcm::new(key.into())
-            .decrypt_in_place(Nonce::from_slice(&[0; 12]), associated, &mut *bytes)
-            .map_err(|_| Error::InvalidState)?;
+        let bytes = sealing::open(key, associated, sealed).ok_or(Error::InvalidState)?;
         if bytes.len() != PLAIN_BYTES || &bytes[..4] != b"RKC1" {
             return Err(Error::InvalidState);
         }

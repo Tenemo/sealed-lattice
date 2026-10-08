@@ -855,15 +855,21 @@ export const generateContribution = async (session: ContributionSession) => {
             header.length > bounds.maximumCheckpointHeaderBytes
         )
             throw new Error('The checkpoint header has an invalid length.');
-        // Each batch is written while the next one is sealed.
+        // Each batch is written while the next one is sealed. The module
+        // draws each record's fresh key and returns it ahead of the record.
         const batch: { key: number; bytes: Uint8Array }[] = [];
         let batchBytes = 0;
         let writing: Promise<void> = Promise.resolve();
+        context.handlers.random = (target) => {
+            crypto.getRandomValues(target);
+        };
         for (const [index, length] of bounds.checkpointLengths.entries()) {
-            const key = crypto.getRandomValues(new Uint8Array(keyBytes));
-            if (checkpoint(context, checkpointCommand.seal, 0, key) !== 0)
+            if (checkpoint(context, checkpointCommand.seal) !== 0)
                 throw new Error('A checkpoint record was refused.');
-            const sealed = proverOutput(context);
+            const output = proverOutput(context);
+            const key = output.slice(0, keyBytes);
+            output.fill(0, 0, keyBytes);
+            const sealed = output.subarray(keyBytes);
             if (sealed.length !== length)
                 throw new Error('A checkpoint record has another length.');
             privateRecords.push({
@@ -892,6 +898,7 @@ export const generateContribution = async (session: ContributionSession) => {
         if (checkpoint(context, checkpointCommand.complete) !== 0)
             throw new Error('The checkpoint is incomplete.');
     } finally {
+        context.handlers.random = undefined;
         run.close();
     }
     await commitContribution(session, {

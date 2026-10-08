@@ -12,11 +12,9 @@ crate-type = ["rlib", "cdylib"]
 invalid-ballot = ["ballot-proof/invalid-ballot"]
 
 [dependencies]
-aes-gcm = { workspace = true, features = ["aes", "alloc", "zeroize"] }
-aes = { workspace = true, features = ["zeroize"] }
 registration-credentials = { path = "../registration-credentials" }
 contribution-prover = { path = "../contribution-prover" }
-setup-witness = { path = "../setup-witness", features = ["custody"] }
+setup-witness = { path = "../setup-witness" }
 supported-profile = { path = "../supported-profile" }
 num-bigint.workspace = true
 # The contribution randomness streams hold secret sponge states.

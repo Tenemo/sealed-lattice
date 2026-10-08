@@ -40,21 +40,14 @@ fn registration() -> (VerifiedPoll, Record, Enrollment) {
     let draft = PollDraft::new(Manifest::new(text("Question"), options).unwrap(), 2, 10).unwrap();
     let runtime = [7; 64];
     let mut parts: [Vec<u8>; 3] = Default::default();
-    let (packet, enrollment) = Enrollment::create_creator(
-        draft,
-        runtime,
-        b"Creator",
-        &[1; 32],
-        &[2; 32],
-        &[3; 32],
-        |kind, offset, bytes| {
+    let (packet, enrollment, _) =
+        Enrollment::create_creator(draft, runtime, b"Creator", |kind, offset, bytes| {
             if let Some(part) = parts.get_mut(kind as usize) {
                 assert_eq!(offset, part.len());
                 part.extend_from_slice(bytes);
             }
-        },
-    )
-    .unwrap();
+        })
+        .unwrap();
     let poll = verify_poll(packet.identity, runtime, &packet.body, &packet.signature).unwrap();
     let [key, header, signature] = parts;
     (

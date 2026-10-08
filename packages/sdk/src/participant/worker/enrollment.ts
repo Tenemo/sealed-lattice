@@ -51,6 +51,10 @@ import {
     participantStores,
 } from './storage.js';
 
+// The staged output that carries the three capsule keys, which the root
+// retains rather than as a record.
+const stagedDataKeys = 14;
+
 // Why an enrollment was refused.
 type EnrollmentRefusal = Extract<
     ParticipantRefusalReason,
@@ -179,7 +183,7 @@ export const createEnrollment = async (
                 unsigned32(name.length),
                 name,
             );
-            if (input.length + 96 > kernel.input_capacity())
+            if (input.length > kernel.input_capacity())
                 return 'invalid request';
             sessionInput(context, input);
             if (kernel.validate_creator(input.length) !== 0)
@@ -200,7 +204,7 @@ export const createEnrollment = async (
                 unsigned32(name.length),
                 name,
             );
-            if (input.length + 96 > kernel.input_capacity())
+            if (input.length > kernel.input_capacity())
                 return 'invalid request';
             sessionInput(context, input);
             if (kernel.validate_join(input.length) !== 0)
@@ -252,18 +256,26 @@ export const createEnrollment = async (
         });
         enrollmentIncomplete = true;
         onIntent();
-        // Each capsule uses its own one-use data key.
-        const dataKeys = crypto.getRandomValues(new Uint8Array(96));
-        if (
-            equalBytes(dataKeys.subarray(0, 32), dataKeys.subarray(32, 64)) ||
-            equalBytes(dataKeys.subarray(0, 32), dataKeys.subarray(64)) ||
-            equalBytes(dataKeys.subarray(32, 64), dataKeys.subarray(64))
-        )
-            throw new Error('Repeated enrollment data keys.');
+        // The module seals each capsule under its own fresh key and stages
+        // the three keys once, for the root rather than as a record.
+        const dataKeys = new Uint8Array(96);
+        let dataKeysStaged = false;
         const maximums = participantDataKindMaximums(limits);
         const lengths = maximums.map(() => 0);
         const records: StagedRecord[] = [];
         handlers.staged = (kind, offset, bytes) => {
+            if (kind === stagedDataKeys) {
+                if (
+                    dataKeysStaged ||
+                    offset !== 0 ||
+                    bytes.length !== dataKeys.length
+                )
+                    throw new Error('Invalid staged enrollment keys.');
+                dataKeys.set(bytes);
+                bytes.fill(0);
+                dataKeysStaged = true;
+                return;
+            }
             if (
                 (kind > dataKind.pollSignature &&
                     kind !== dataKind.sourceCapsule) ||
@@ -281,16 +293,14 @@ export const createEnrollment = async (
             crypto.getRandomValues(target);
             randomBytes += target.length;
         };
-        const control = concatenate(input, dataKeys);
         let prepared: number;
         try {
-            sessionInput(context, control);
+            sessionInput(context, input);
             prepared =
                 request.role === 'creator'
-                    ? kernel.prepare_creator(control.length)
-                    : kernel.prepare_join(control.length);
+                    ? kernel.prepare_creator(input.length)
+                    : kernel.prepare_join(input.length);
         } finally {
-            control.fill(0);
             delete handlers.staged;
             delete handlers.random;
         }
@@ -318,6 +328,7 @@ export const createEnrollment = async (
         }
         const registration = limits.registration;
         if (
+            !dataKeysStaged ||
             lengths[dataKind.publicKey] !== registration.publicKeyBytes ||
             lengths[dataKind.header] === 0 ||
             lengths[dataKind.signature] !== registration.signatureBytes ||

@@ -192,6 +192,9 @@ pub extern "C" fn validate_join(length: usize) -> u32 {
     })
 }
 
+/// The staged output that carries the enrollment's three capsule keys, which
+/// the worker retains in its root rather than as a record.
+const DATA_KEYS: u32 = 14;
 fn staged_output(kind: u32, offset: usize, bytes: &[u8]) {
     #[link(wasm_import_module = "enrollment")]
     unsafe extern "C" {
@@ -222,31 +225,20 @@ pub extern "C" fn prepare_creator(length: usize) -> u32 {
         let Some((draft, runtime, start, end)) = creator_context(&state.input[..length]) else {
             return 1;
         };
-        if length != end + 96
-            || !crate::distinct_data_keys(
-                state.input[end..end + 32].try_into().unwrap(),
-                state.input[end + 32..end + 64].try_into().unwrap(),
-                state.input[end + 64..length].try_into().unwrap(),
-            )
-        {
+        if length != end {
             return 1;
         }
         state.started = true;
         let input = Zeroizing::new(state.input[..length].to_vec());
         state.input[..length].zeroize();
-        let Ok((poll, enrollment)) = Enrollment::create_creator(
-            draft,
-            runtime,
-            &input[start..end],
-            input[end..end + 32].try_into().unwrap(),
-            input[end + 32..end + 64].try_into().unwrap(),
-            input[end + 64..].try_into().unwrap(),
-            staged_output,
-        ) else {
+        let Ok((poll, enrollment, data_keys)) =
+            Enrollment::create_creator(draft, runtime, &input[start..end], staged_output)
+        else {
             return 1;
         };
         staged_output(5, 0, &poll.body);
         staged_output(6, 0, &poll.signature);
+        staged_output(DATA_KEYS, 0, &*data_keys);
         state.poll_identity = poll.identity;
         state.enrollment = Some(enrollment);
         0
@@ -262,28 +254,18 @@ pub extern "C" fn prepare_join(length: usize) -> u32 {
         let Some((poll, start, end)) = join_context(&state.input[..length]) else {
             return 1;
         };
-        if length != end + 96
-            || !crate::distinct_data_keys(
-                state.input[end..end + 32].try_into().unwrap(),
-                state.input[end + 32..end + 64].try_into().unwrap(),
-                state.input[end + 64..length].try_into().unwrap(),
-            )
-        {
+        if length != end {
             return 1;
         }
         state.started = true;
         let input = Zeroizing::new(state.input[..length].to_vec());
         state.input[..length].zeroize();
-        let Ok(enrollment) = Enrollment::create_for_poll(
-            &poll,
-            &input[start..end],
-            input[end..end + 32].try_into().unwrap(),
-            input[end + 32..end + 64].try_into().unwrap(),
-            input[end + 64..].try_into().unwrap(),
-            staged_output,
-        ) else {
+        let Ok((enrollment, data_keys)) =
+            Enrollment::create_for_poll(&poll, &input[start..end], staged_output)
+        else {
             return 1;
         };
+        staged_output(DATA_KEYS, 0, &*data_keys);
         state.poll_identity = poll.identity();
         state.enrollment = Some(enrollment);
         0

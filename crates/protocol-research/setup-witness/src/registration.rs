@@ -20,7 +20,6 @@ impl PolynomialOutput for KeyOutput {
 pub struct RegistrationKey {
     public: Vec<BigInt>,
     secret: Zeroizing<Vec<i8>>,
-    #[cfg(feature = "custody")]
     sealed: bool,
 }
 impl Default for RegistrationKey {
@@ -57,7 +56,6 @@ impl RegistrationKey {
         Self {
             public: output.values.unwrap(),
             secret: Zeroizing::new(std::mem::take(&mut *secret.values)),
-            #[cfg(feature = "custody")]
             sealed: false,
         }
     }
@@ -139,12 +137,10 @@ impl RegistrationKey {
     }
 }
 
-#[cfg(feature = "custody")]
 #[path = "registration-custody.rs"]
 mod custody;
 /// A sealed registration key: its magic, its secret's support positions and
 /// the AES-GCM tag.
-#[cfg(feature = "custody")]
 pub use custody::SEALED_BYTES as SEALED_KEY_BYTES;
 
 #[cfg(test)]

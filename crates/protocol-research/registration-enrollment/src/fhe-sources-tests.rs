@@ -148,25 +148,26 @@ fn source_capsule_restores_original_entries_and_refuses_damage_or_resealing() {
         sealed: false,
     };
     let body = [61; 64];
-    let key = [67; 32];
-    let capsule = sources.seal(body, &key).unwrap();
+    let sealed = sources.seal(body).unwrap();
+    let (key, capsule) = (&*sealed.key, &sealed.bytes);
     assert_eq!(capsule.len(), capsule_bytes(&poll));
     assert!(capsule.len() <= maximum_capsule_bytes());
-    assert!(sources.seal(body, &key).is_err());
-    let mut restored =
-        Sources::open(&poll, &credential, &commitments, body, &key, &capsule).unwrap();
+    assert!(sources.seal(body).is_err());
+    let mut restored = Sources::open(&poll, &credential, &commitments, body, key, capsule).unwrap();
     for (original, retained) in sources.entries.iter().zip(&restored.entries) {
         assert_eq!(original.seed, retained.seed);
         assert_eq!(original.salt, retained.salt);
     }
-    assert!(restored.seal(body, &key).is_err());
-    assert!(Sources::open(&poll, &credential, &commitments, [62; 64], &key, &capsule).is_err());
-    assert!(Sources::open(&poll, &credential, &commitments, body, &[68; 32], &capsule).is_err());
-    assert!(Sources::open(&poll, &credential, &commitments[..0], body, &key, &capsule).is_err());
+    assert!(restored.seal(body).is_err());
+    assert!(Sources::open(&poll, &credential, &commitments, [62; 64], key, capsule).is_err());
+    let mut other_key = *key;
+    other_key[0] ^= 1;
+    assert!(Sources::open(&poll, &credential, &commitments, body, &other_key, capsule).is_err());
+    assert!(Sources::open(&poll, &credential, &commitments[..0], body, key, capsule).is_err());
     for offset in [0, 4, capsule.len() - 1] {
         let mut changed = capsule.clone();
         changed[offset] ^= 1;
-        assert!(Sources::open(&poll, &credential, &commitments, body, &key, &changed).is_err());
+        assert!(Sources::open(&poll, &credential, &commitments, body, key, &changed).is_err());
     }
     assert!(
         Sources::open(
@@ -174,7 +175,7 @@ fn source_capsule_restores_original_entries_and_refuses_damage_or_resealing() {
             &credential,
             &commitments,
             body,
-            &key,
+            key,
             &capsule[..capsule.len() - 1]
         )
         .is_err()

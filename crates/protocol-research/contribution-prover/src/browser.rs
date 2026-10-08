@@ -1,7 +1,7 @@
 use num_bigint::{BigInt, Sign};
 use num_traits::Zero;
 use parallel_work::ProtocolHash;
-use parallel_work::{HashStream, Sponge};
+use parallel_work::{HashStream, Sponge, sealing};
 use registration_credentials::{
     registration::{KEY_BYTES, VerifiedRegistration},
     roster::{RetainedContributionContext, RosterProposal},
@@ -23,7 +23,9 @@ const CHUNK: usize = 1 << 20;
 /// The input buffer: one polynomial chunk, one checkpoint import context,
 /// or one checkpoint record with its key.
 const INPUT_BYTES: usize = 1_572_864;
-const _: () = assert!(32 + first_checkpoint::RECORD_BYTES + 16 <= INPUT_BYTES);
+const _: () = assert!(
+    sealing::KEY_BYTES + first_checkpoint::RECORD_BYTES + sealing::TAG_BYTES <= INPUT_BYTES
+);
 struct PublicOutput {
     profile: Profile,
     // The statement's digest and context, which helpers hash when there are
@@ -372,7 +374,8 @@ pub fn checkpoint_command(
         if state.stopped || (operation != 4 && position != 0) {
             return 1;
         }
-        state.output.clear();
+        // The previous output may hold a checkpoint record's key.
+        state.output.zeroize();
         let Session {
             input,
             output,
@@ -395,17 +398,18 @@ pub fn checkpoint_command(
                     *output = export.header();
                     *checkpoint_export = Some(export);
                 }
-                2 if length == 32 => {
-                    let key = zeroize::Zeroizing::new(<[u8; 32]>::try_from(bytes).unwrap());
+                // The record follows the fresh key it is sealed under.
+                2 if length == 0 => {
                     let proof = work
                         .as_mut()
                         .and_then(|work| work.proof.as_mut())
                         .ok_or(())?;
-                    *output = checkpoint_export
+                    let sealed = checkpoint_export
                         .as_mut()
                         .ok_or(())?
-                        .seal(proof, &key)
+                        .seal(proof)
                         .map_err(|_| ())?;
+                    *output = [sealed.key.as_slice(), &sealed.bytes].concat();
                 }
                 3 if length == 0 => {
                     if !checkpoint_export.as_ref().ok_or(())?.complete() {
@@ -423,12 +427,19 @@ pub fn checkpoint_command(
                     *checkpoint_import = Some(import);
                     *restore_keys = vec![None; participants];
                 }
-                5 if (48..=32 + first_checkpoint::RECORD_BYTES + 16).contains(&length) => {
-                    let key = zeroize::Zeroizing::new(<[u8; 32]>::try_from(&bytes[..32]).unwrap());
+                5 if (sealing::KEY_BYTES + sealing::TAG_BYTES
+                    ..=sealing::KEY_BYTES
+                        + first_checkpoint::RECORD_BYTES
+                        + sealing::TAG_BYTES)
+                    .contains(&length) =>
+                {
+                    let key = zeroize::Zeroizing::new(
+                        <[u8; sealing::KEY_BYTES]>::try_from(&bytes[..sealing::KEY_BYTES]).unwrap(),
+                    );
                     checkpoint_import
                         .as_mut()
                         .ok_or(())?
-                        .open(&key, &bytes[32..])
+                        .open(&key, &bytes[sealing::KEY_BYTES..])
                         .map_err(|_| ())?;
                 }
                 6 if length == 0 => {

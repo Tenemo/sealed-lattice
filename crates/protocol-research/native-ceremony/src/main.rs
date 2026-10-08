@@ -284,21 +284,13 @@ fn main() {
         })
         .collect::<Vec<_>>();
     let mut controls: Vec<[Vec<u8>; 2]> = (0..count).map(|_| [Vec::new(), Vec::new()]).collect();
-    let data_keys = random::<96>();
-    let mut enrollment_data_keys = vec![Zeroizing::new(*data_keys)];
     let mut enrollment_capsules: Vec<[Zeroizing<Vec<u8>>; 3]> = (0..count)
         .map(|_| std::array::from_fn(|_| Zeroizing::new(Vec::new())))
         .collect();
     let mut signing_capsule = Vec::new();
     let mut creator_output = EnrollmentOutput::new(&directories[0], &mut controls[0]);
-    let (packet, creator) = Enrollment::create_creator(
-        draft,
-        runtime,
-        b"Creator",
-        data_keys[..32].try_into().unwrap(),
-        data_keys[32..64].try_into().unwrap(),
-        data_keys[64..].try_into().unwrap(),
-        |kind, offset, bytes| {
+    let (packet, creator, creator_keys) =
+        Enrollment::create_creator(draft, runtime, b"Creator", |kind, offset, bytes| {
             creator_output.emit(kind, offset, bytes);
             if let Some(capsule) = match kind {
                 3 => Some(0),
@@ -313,10 +305,13 @@ fn main() {
                 assert_eq!(offset, signing_capsule.len());
                 signing_capsule.extend(bytes);
             }
-        },
-    )
-    .unwrap();
+        })
+        .unwrap();
     creator_output.finish();
+    // The creator's credential capsule key, which later steps reopen.
+    let creator_signing_key: Zeroizing<[u8; 32]> =
+        Zeroizing::new(creator_keys[32..64].try_into().unwrap());
+    let mut enrollment_data_keys = vec![creator_keys];
     let poll =
         Arc::new(verify_poll(packet.identity, runtime, &packet.body, &packet.signature).unwrap());
     write(output.join("poll-definition.bin"), &packet.body);
@@ -331,36 +326,31 @@ fn main() {
     let mut corrupt_signing_capsule = Zeroizing::new(Vec::new());
     let mut corrupt_wrapping_key = Zeroizing::new([0u8; 32]);
     for (position, directory) in directories.iter().enumerate().skip(1) {
-        let keys = random::<96>();
         let retained_corrupt_signer = Some(position) == scenario.equivocator
             || (scenario.departed.is_some() && scenario.corrupt(position));
         let mut record_output = EnrollmentOutput::new(directory, &mut controls[position]);
-        enrollments.push(
-            Enrollment::create_for_poll(
-                &poll,
-                format!("Participant {position}").as_bytes(),
-                keys[..32].try_into().unwrap(),
-                keys[32..64].try_into().unwrap(),
-                keys[64..].try_into().unwrap(),
-                |kind, offset, bytes| {
-                    record_output.emit(kind, offset, bytes);
-                    if let Some(capsule) = match kind {
-                        3 => Some(0),
-                        4 => Some(1),
-                        13 => Some(2),
-                        _ => None,
-                    } {
-                        assert_eq!(offset, enrollment_capsules[position][capsule].len());
-                        enrollment_capsules[position][capsule].extend(bytes);
-                    }
-                    if retained_corrupt_signer && kind == 4 {
-                        assert_eq!(offset, corrupt_signing_capsule.len());
-                        corrupt_signing_capsule.extend(bytes);
-                    }
-                },
-            )
-            .unwrap(),
-        );
+        let (enrollment, keys) = Enrollment::create_for_poll(
+            &poll,
+            format!("Participant {position}").as_bytes(),
+            |kind, offset, bytes| {
+                record_output.emit(kind, offset, bytes);
+                if let Some(capsule) = match kind {
+                    3 => Some(0),
+                    4 => Some(1),
+                    13 => Some(2),
+                    _ => None,
+                } {
+                    assert_eq!(offset, enrollment_capsules[position][capsule].len());
+                    enrollment_capsules[position][capsule].extend(bytes);
+                }
+                if retained_corrupt_signer && kind == 4 {
+                    assert_eq!(offset, corrupt_signing_capsule.len());
+                    corrupt_signing_capsule.extend(bytes);
+                }
+            },
+        )
+        .unwrap();
+        enrollments.push(enrollment);
         record_output.finish();
         if retained_corrupt_signer {
             corrupt_wrapping_key.copy_from_slice(&keys[32..64]);
@@ -460,7 +450,7 @@ fn main() {
         let position = if scenario.selection_fork { 0 } else { 2 };
         let record = &roster.proposal().records()[position];
         let key = if position == 0 {
-            data_keys[32..64].try_into().unwrap()
+            &*creator_signing_key
         } else {
             &*corrupt_wrapping_key
         };
@@ -863,7 +853,7 @@ fn main() {
         let mut credential = registration_credentials::Credential::open_complete(
             original.header().signing_public,
             original.body_digest(),
-            data_keys[32..64].try_into().unwrap(),
+            &creator_signing_key,
             &signing_capsule,
         )
         .unwrap();

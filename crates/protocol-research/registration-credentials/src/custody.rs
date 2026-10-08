@@ -1,12 +1,9 @@
 use crate::{Credential, Error, SIGNING_PUBLIC_KEY_BYTES};
-use aes_gcm::{
-    Aes256Gcm, Nonce,
-    aead::{AeadInPlace, KeyInit},
-};
+use parallel_work::sealing::{self, Sealed, TAG_BYTES};
 use zeroize::Zeroizing;
 
 /// The sealed signing seed: its magic, the seed and the AES-GCM tag.
-pub const SEALED_SIGNING_SEED_BYTES: usize = 4 + 32 + 16;
+pub const SEALED_SIGNING_SEED_BYTES: usize = 4 + 32 + TAG_BYTES;
 
 /// Signing purposes that a restored credential withholds until the
 /// authenticated participant root unlocks those its records show unused.
@@ -39,7 +36,8 @@ fn associated(body: [u8; 64]) -> Vec<u8> {
 }
 
 impl Credential {
-    pub fn seal_complete(&mut self, key: &[u8; 32]) -> Result<Vec<u8>, Error> {
+    /// Seals the completed signing seed under a fresh key, once.
+    pub fn seal_complete(&mut self) -> Result<Sealed, Error> {
         if self.sealed {
             return Err(Error::Consumed);
         }
@@ -48,13 +46,10 @@ impl Credential {
         if !self.check_retained() {
             return Err(Error::Crypto);
         }
-        let mut bytes = Zeroizing::new(Vec::with_capacity(SEALED_SIGNING_SEED_BYTES));
+        let mut bytes = Zeroizing::new(Vec::with_capacity(4 + 32));
         bytes.extend(b"RCS1");
         bytes.extend(*self.signing_seed);
-        Aes256Gcm::new(key.into())
-            .encrypt_in_place(Nonce::from_slice(&[0; 12]), &associated(body), &mut *bytes)
-            .map_err(|_| Error::Crypto)?;
-        Ok(std::mem::take(&mut *bytes))
+        Ok(sealing::seal(&bytes, &associated(body)))
     }
     pub fn open_complete(
         signing_public: [u8; SIGNING_PUBLIC_KEY_BYTES],
@@ -65,10 +60,7 @@ impl Credential {
         if sealed.len() != SEALED_SIGNING_SEED_BYTES {
             return Err(Error::Shape);
         }
-        let mut bytes = Zeroizing::new(sealed.to_vec());
-        Aes256Gcm::new(key.into())
-            .decrypt_in_place(Nonce::from_slice(&[0; 12]), &associated(body), &mut *bytes)
-            .map_err(|_| Error::Crypto)?;
+        let bytes = sealing::open(key, &associated(body), sealed).ok_or(Error::Crypto)?;
         if bytes.len() != 36 || &bytes[..4] != b"RCS1" {
             return Err(Error::Shape);
         }

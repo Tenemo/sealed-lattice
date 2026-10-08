@@ -6,8 +6,7 @@ use crate::{
 #[test]
 fn restored_signing_keys_cannot_recreate_authority_the_root_does_not_unlock() {
     let mut original = Credential::from_seed([7; 32]);
-    let data_key = [11; 32];
-    assert!(original.seal_complete(&data_key).is_err());
+    assert!(original.seal_complete().is_err());
     let make = || {
         BodyDigest::new(RegistrationHeader {
             username: normalize_username(b"Participant").unwrap(),
@@ -24,14 +23,16 @@ fn restored_signing_keys_cannot_recreate_authority_the_root_does_not_unlock() {
     let body = digest.bytes();
     let for_repeat = make();
     original.sign_registration(digest).unwrap();
-    let sealed = original.seal_complete(&data_key).unwrap();
-    assert_eq!(sealed.len(), SEALED_SIGNING_SEED_BYTES);
-    assert!(original.seal_complete(&data_key).is_err());
-    let mut restored =
-        Credential::open_complete(*original.signing_public(), body, &data_key, &sealed).unwrap();
+    let sealed = original.seal_complete().unwrap();
+    assert_eq!(sealed.bytes.len(), SEALED_SIGNING_SEED_BYTES);
+    assert!(original.seal_complete().is_err());
+    let open = |key: &[u8; 32], bytes: &[u8], body: [u8; 64]| {
+        Credential::open_complete(*original.signing_public(), body, key, bytes)
+    };
+    let mut restored = open(&sealed.key, &sealed.bytes, body).unwrap();
     assert!(restored.check_retained());
     assert!(restored.sign_registration(for_repeat).is_err());
-    assert!(restored.seal_complete(&data_key).is_err());
+    assert!(restored.seal_complete().is_err());
     let purposes = [
         SigningPurpose::Proposal,
         SigningPurpose::Offer,
@@ -72,32 +73,18 @@ fn restored_signing_keys_cannot_recreate_authority_the_root_does_not_unlock() {
             )
         );
     }
-    let mut changed = sealed.clone();
+    let mut changed = sealed.bytes.clone();
     changed[20] ^= 1;
-    assert!(
-        Credential::open_complete(*original.signing_public(), body, &data_key, &changed).is_err()
-    );
+    assert!(open(&sealed.key, &changed, body).is_err());
+    // A capsule that authenticates but holds another signing seed.
     let mut wrong_seed = Vec::from(b"RCS1".as_slice());
     wrong_seed.extend([6u8; 32]);
-    Aes256Gcm::new((&data_key).into())
-        .encrypt_in_place(
-            Nonce::from_slice(&[0; 12]),
-            &associated(body),
-            &mut wrong_seed,
-        )
-        .unwrap();
-    assert!(
-        Credential::open_complete(*original.signing_public(), body, &data_key, &wrong_seed)
-            .is_err()
-    );
-    let mut extra = sealed.clone();
+    let wrong_seed = parallel_work::sealing::seal(&wrong_seed, &associated(body));
+    assert!(open(&wrong_seed.key, &wrong_seed.bytes, body).is_err());
+    let mut extra = sealed.bytes.clone();
     extra.push(0);
-    assert!(
-        Credential::open_complete(*original.signing_public(), body, &data_key, &extra).is_err()
-    );
-    assert!(
-        Credential::open_complete(*original.signing_public(), [0; 64], &data_key, &sealed).is_err()
-    );
+    assert!(open(&sealed.key, &extra, body).is_err());
+    assert!(open(&sealed.key, &sealed.bytes, [0; 64]).is_err());
 }
 
 // The worker computes the unused-purpose mask from these positions.

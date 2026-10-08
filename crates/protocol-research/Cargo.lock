@@ -323,6 +323,8 @@ checksum = "c08d65885ee38876c4f86fa503fb49d7b507c2b62552df7c70b2fce627e06381"
 name = "parallel-work"
 version = "0.0.0"
 dependencies = [
+ "aes",
+ "aes-gcm",
  "dlmalloc",
  "getrandom",
  "keccak",
@@ -376,8 +378,6 @@ checksum = "ec0be4795e2f6a28069bec0b5ff3e2ac9bafc99e6a9a7dc3547996c5c816922c"
 name = "registration-credentials"
 version = "0.0.0"
 dependencies = [
- "aes",
- "aes-gcm",
  "fips204",
  "parallel-work",
  "sha3",
@@ -390,8 +390,6 @@ dependencies = [
 name = "registration-enrollment"
 version = "0.0.0"
 dependencies = [
- "aes",
- "aes-gcm",
  "ballot-encryption",
  "ballot-proof",
  "contribution-prover",
@@ -448,8 +446,6 @@ dependencies = [
 name = "setup-witness"
 version = "0.0.0"
 dependencies = [
- "aes",
- "aes-gcm",
  "linked-release-proof",
  "num-bigint",
  "num-traits",
@@ -666,8 +662,6 @@ checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 name = "word-proof"
 version = "0.0.0"
 dependencies = [
- "aes",
- "aes-gcm",
  "parallel-work",
  "setup-stream-kernel",
  "sha3",

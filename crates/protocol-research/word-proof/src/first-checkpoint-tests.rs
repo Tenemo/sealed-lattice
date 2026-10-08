@@ -48,30 +48,31 @@ fn restored_checkpoints_commit_the_same_first_oracle() {
         step(&mut prover);
     }
     assert!(prover.phase == Phase::FirstColumn(3));
-    let key = [5; 32];
     let mut export = Export::begin_with_inputs(&mut prover, &[]).unwrap();
     let header = export.header();
     let mut import = Import::begin(&header).unwrap();
     let lengths = record_lengths(&relation);
     let mut records = Vec::new();
     while !export.complete() {
-        let record = export.seal(&mut prover, &key).unwrap();
-        assert_eq!(record.len(), lengths[records.len()]);
-        import.open(&key, &record).unwrap();
+        let record = export.seal(&mut prover).unwrap();
+        assert_eq!(record.bytes.len(), lengths[records.len()]);
+        import.open(&record.key, &record.bytes).unwrap();
         records.push(record);
     }
     assert_eq!(records.len(), record_count(&relation));
     assert!(import.complete());
     let restored = import.finish().unwrap();
     assert_eq!(first_root(restored), first_root(prover));
-    for hostile in [records[1].clone(), {
-        let mut altered = records[0].clone();
-        altered[0] ^= 1;
-        altered
-    }] {
+    // The second record under its own key fails at the first position.
+    let mut altered = records[0].bytes.clone();
+    altered[0] ^= 1;
+    for (key, hostile) in [
+        (&records[1].key, &records[1].bytes),
+        (&records[0].key, &altered),
+    ] {
         let mut import = Import::begin(&header).unwrap();
-        assert!(import.open(&key, &hostile).is_err());
-        assert!(import.open(&key, &records[0]).is_err());
+        assert!(import.open(key, hostile).is_err());
+        assert!(import.open(&records[0].key, &records[0].bytes).is_err());
         assert!(!import.complete());
     }
 }

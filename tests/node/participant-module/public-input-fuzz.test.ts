@@ -128,9 +128,8 @@ const organizer = await (async () => {
         );
         requests += 1;
     };
-    const control = concatenate(input, shake(organizerName + '/data-keys', 96));
-    writeInput(kernel, control);
-    if (kernel.prepare_creator(control.length) !== 0)
+    writeInput(kernel, input);
+    if (kernel.prepare_creator(input.length) !== 0)
         throw new Error('The organizer enrollment was refused.');
     const record = (kind: number) => {
         const chunks = parts.get(kind);

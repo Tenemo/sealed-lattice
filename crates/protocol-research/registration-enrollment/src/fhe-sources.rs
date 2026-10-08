@@ -3,11 +3,8 @@
 //! complete family inventory and the completed registration binds its custody.
 
 use crate::{Error, random};
-use aes_gcm::{
-    Aes256Gcm, Nonce,
-    aead::{AeadInPlace, KeyInit},
-};
 use num_bigint::BigInt;
+use parallel_work::sealing::{self, Sealed, TAG_BYTES};
 use registration_credentials::{
     Credential, SIGNING_PUBLIC_KEY_BYTES,
     contribution_body::{BODY_HEADER_BYTES, body_header},
@@ -28,7 +25,6 @@ use zeroize::Zeroizing;
 
 const SEED_BYTES: usize = 64;
 const MAGIC: &[u8; 4] = b"FSC1";
-const TAG_BYTES: usize = 16;
 
 struct Entry {
     seed: Zeroizing<[u8; SEED_BYTES]>,
@@ -203,20 +199,22 @@ impl Sources {
         .map_err(|_| Error::State)
     }
 
-    pub(crate) fn seal(&mut self, body: [u8; 64], key: &[u8; 32]) -> Result<Vec<u8>, Error> {
+    pub(crate) fn seal(&mut self, body: [u8; 64]) -> Result<Sealed, Error> {
         if self.sealed {
             return Err(Error::State);
         }
         self.sealed = true;
-        let mut bytes = Zeroizing::new(MAGIC.to_vec());
+        // The buffer holds every entry at once, so building it never moves a
+        // seed.
+        let mut bytes = Zeroizing::new(Vec::with_capacity(
+            MAGIC.len() + self.entries.len() * (SEED_BYTES + SALT_BYTES),
+        ));
+        bytes.extend(MAGIC);
         for entry in &self.entries {
             bytes.extend(entry.seed.as_ref());
             bytes.extend(entry.salt.as_ref());
         }
-        Aes256Gcm::new(key.into())
-            .encrypt_in_place(Nonce::from_slice(&[0; 12]), &associated(body), &mut *bytes)
-            .map_err(|_| Error::State)?;
-        Ok(std::mem::take(&mut *bytes))
+        Ok(sealing::seal(&bytes, &associated(body)))
     }
 
     pub(crate) fn open(
@@ -231,10 +229,7 @@ impl Sources {
         if capsule.len() != capsule_bytes(poll) || commitments.len() != families.len() {
             return Err(Error::Shape);
         }
-        let mut bytes = Zeroizing::new(capsule.to_vec());
-        Aes256Gcm::new(key.into())
-            .decrypt_in_place(Nonce::from_slice(&[0; 12]), &associated(body), &mut *bytes)
-            .map_err(|_| Error::State)?;
+        let bytes = sealing::open(key, &associated(body), capsule).ok_or(Error::State)?;
         if &bytes[..MAGIC.len()] != MAGIC {
             return Err(Error::Shape);
         }

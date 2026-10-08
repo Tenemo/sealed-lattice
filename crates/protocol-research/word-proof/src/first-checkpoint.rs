@@ -6,8 +6,10 @@ use crate::{
     transcript::Transcript,
     tree::{SALT_SEED_BYTES, Tree},
 };
-use aes_gcm::{Aes256Gcm, KeyInit, Nonce, aead::AeadInPlace};
-use parallel_work::ProtocolHash;
+use parallel_work::{
+    ProtocolHash,
+    sealing::{self, Sealed, TAG_BYTES},
+};
 use supported_profile::{Profile, relation::*};
 use zeroize::Zeroizing;
 
@@ -16,8 +18,6 @@ use zeroize::Zeroizing;
 pub const RECORD_BYTES: usize = 1 << 20;
 const MAGIC: &[u8; 4] = b"FPC4";
 const MAXIMUM_ROLE_BYTES: usize = 1024;
-/// Each record is sealed with an AES-GCM tag of this many bytes.
-const TAG_BYTES: usize = 16;
 
 // The checkpoint names its profile, whose statement header it carries, and
 // either no recipient key hashes or one for each participant.
@@ -196,7 +196,8 @@ impl Export {
     pub fn complete(&self) -> bool {
         self.next == record_count(&self.relation)
     }
-    pub fn seal(&mut self, prover: &mut Prover, key: &[u8; 32]) -> Result<Vec<u8>, Error> {
+    /// Seals the next record under a fresh key.
+    pub fn seal(&mut self, prover: &mut Prover) -> Result<Sealed, Error> {
         let (field, start, count, width) = record_layout(&self.relation, self.next).ok_or(())?;
         if prover.profile != self.header.profile
             || prover.phase != Phase::FirstColumn(self.header.column)
@@ -210,7 +211,7 @@ impl Export {
         {
             return Err(Error::Operation);
         }
-        let mut bytes = Zeroizing::new(Vec::with_capacity(count * width + TAG_BYTES));
+        let mut bytes = Zeroizing::new(Vec::with_capacity(count * width));
         if field == 4 {
             let rows = prover.first.as_mut().ok_or(())?.rows.as_mut().ok_or(())?;
             bytes.extend_from_slice(&rows.export(start, count));
@@ -229,16 +230,9 @@ impl Export {
                 }
             }
         }
-        let cipher = Aes256Gcm::new_from_slice(key).map_err(|_| ())?;
-        cipher
-            .encrypt_in_place(
-                Nonce::from_slice(&[0; 12]),
-                &self.header.associated(self.next),
-                &mut *bytes,
-            )
-            .map_err(|_| ())?;
+        let sealed = sealing::seal(&bytes, &self.header.associated(self.next));
         self.next += 1;
-        Ok(std::mem::take(&mut *bytes))
+        Ok(sealed)
     }
 }
 
@@ -298,15 +292,7 @@ impl Import {
         if bytes.len() != count * width + TAG_BYTES {
             return Err(Error::Operation);
         }
-        let cipher = Aes256Gcm::new_from_slice(key).map_err(|_| ())?;
-        let mut plaintext = Zeroizing::new(bytes.to_vec());
-        cipher
-            .decrypt_in_place(
-                Nonce::from_slice(&[0; 12]),
-                &self.header.associated(self.next),
-                &mut *plaintext,
-            )
-            .map_err(|_| ())?;
+        let plaintext = sealing::open(key, &self.header.associated(self.next), bytes).ok_or(())?;
         for bytes in plaintext.chunks_exact(width) {
             match field {
                 0 => {
