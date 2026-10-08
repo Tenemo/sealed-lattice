@@ -1,3 +1,8 @@
+// The numerical probes decrypt synthetic test ciphertexts and never reach
+// the participant module.
+#[cfg(all(feature = "numerical-probes", target_arch = "wasm32"))]
+compile_error!("The numerical-probes feature decrypts test ciphertexts and never builds for Wasm.");
+
 mod encrypted;
 pub use encrypted::{JOBS, ranking};
 

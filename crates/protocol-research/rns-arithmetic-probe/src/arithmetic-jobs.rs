@@ -74,11 +74,15 @@ const LIFT_POSITIONS: usize = 2048;
 /// The coefficients a job reads of a streamed polynomial at once.
 const STREAMED_COEFFICIENTS: usize = 1024;
 /// The positions whose key words a keyed product's job reads and multiplies
-/// at once; tests take a few blocks of their small degree.
-#[cfg(not(test))]
+/// at once, by which the job's bytes are bounded in every build.
 const KEYED_POSITIONS: usize = 4096;
+/// The positions a keyed product's job takes at once: tests take a few
+/// blocks of their small degree, within the bytes the job is bounded by.
+#[cfg(not(test))]
+const KEYED_BLOCK: usize = KEYED_POSITIONS;
 #[cfg(test)]
-const KEYED_POSITIONS: usize = 4;
+const KEYED_BLOCK: usize = 4;
+const _: () = assert!(KEYED_BLOCK <= KEYED_POSITIONS);
 /// The identity of one key record: a key polynomial's transformed residues
 /// modulo one prime, which the evaluation's working storage holds.
 const EVALUATION_KEY_DOMAIN: &str = "sealed-lattice/evaluation-key-work/v1";
@@ -363,7 +367,7 @@ fn keyed(input: &[u8]) -> Vec<u8> {
     // most 64 of them sum below 2^128 and each position reduces once. A
     // changed record then fails only its identity.
     assert!(gadget_length <= 64);
-    let mut products = vec![0u128; KEYED_POSITIONS.min(degree)];
+    let mut products = vec![0u128; KEYED_BLOCK.min(degree)];
     let mut words = vec![0u8; 8 * products.len()];
     KEPT.with(|kept| {
         let mut kept = kept.borrow_mut();
