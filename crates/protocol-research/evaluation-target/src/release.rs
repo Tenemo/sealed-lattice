@@ -17,7 +17,7 @@ fn encode_release_proof_role(
     participant_identity: ParticipantIdentity,
     poll: [u8; 64],
     runtime: [u8; 64],
-    inventory: [u8; 64],
+    setup_identity: [u8; 64],
     target: [u8; 64],
     position: usize,
 ) -> Result<Vec<u8>, Error> {
@@ -32,7 +32,7 @@ fn encode_release_proof_role(
                 .map_err(|_| Error::Encoding)?,
             CanonicalItem::hash512(poll),
             CanonicalItem::hash512(runtime),
-            CanonicalItem::hash512(inventory),
+            CanonicalItem::hash512(setup_identity),
             CanonicalItem::hash512(target),
             CanonicalItem::unsigned16(position),
         ],
@@ -107,8 +107,8 @@ impl ReleaseContext {
             || records.len() != profile.participants()
             || records[position].header().poll != target.poll().identity()
             || records[position].header().runtime != target.poll().runtime()
-            || constant.inventory() != &setup.identity()
-            || linear.inventory() != &setup.identity()
+            || constant.setup_identity() != &setup.identity()
+            || linear.setup_identity() != &setup.identity()
             || constant.index() != profile.share_constant_polynomial(position)
             || linear.index() != profile.share_linear_polynomial(position)
             || ciphertext.len() != 2 * SYSTEMATIC * release_bytes

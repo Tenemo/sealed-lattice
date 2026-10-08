@@ -63,7 +63,7 @@ pub fn maximum_close_message_bytes(purpose: ClosePurpose, participants: usize) -
         }
     }
 }
-/// The purpose, poll identity and inventory identity open every close message.
+/// The purpose, poll identity and setup identity open every close message.
 fn close_prefix_bytes(purpose: ClosePurpose) -> usize {
     8 + (6 + 4 + purpose.context().len()) + 2 * (6 + 64)
 }
@@ -112,13 +112,13 @@ fn check_participants(participants: usize) -> Result<(), Error> {
 fn encode(
     purpose: ClosePurpose,
     poll: [u8; 64],
-    inventory: [u8; 64],
+    setup_identity: [u8; 64],
     rest: Vec<CanonicalItem>,
 ) -> Result<Vec<u8>, Error> {
     let mut items = vec![
         CanonicalItem::nonempty_ascii(purpose.context()).map_err(|_| Error::Shape)?,
         CanonicalItem::hash512(poll),
-        CanonicalItem::hash512(inventory),
+        CanonicalItem::hash512(setup_identity),
     ];
     items.extend(rest);
     CanonicalTuple::new(1, 1, items)
@@ -235,15 +235,15 @@ pub struct CloseIntentMessage {
     body: Vec<u8>,
     identity: [u8; 64],
     poll: [u8; 64],
-    inventory: [u8; 64],
+    setup_identity: [u8; 64],
     close_time: u64,
 }
 impl CloseIntentMessage {
-    pub fn new(poll: [u8; 64], inventory: [u8; 64], close_time: u64) -> Result<Self, Error> {
+    pub fn new(poll: [u8; 64], setup_identity: [u8; 64], close_time: u64) -> Result<Self, Error> {
         Self::parse(&encode(
             ClosePurpose::Intent,
             poll,
-            inventory,
+            setup_identity,
             vec![CanonicalItem::unsigned64(close_time)],
         )?)
     }
@@ -256,7 +256,7 @@ impl CloseIntentMessage {
             body: body.to_vec(),
             identity: close_message_identity(ClosePurpose::Intent, body)?,
             poll: hash(&items[1])?,
-            inventory: hash(&items[2])?,
+            setup_identity: hash(&items[2])?,
             close_time: u64::from_le_bytes(
                 items[3]
                     .canonical_bytes()
@@ -274,8 +274,8 @@ impl CloseIntentMessage {
     pub fn poll(&self) -> &[u8; 64] {
         &self.poll
     }
-    pub fn inventory(&self) -> &[u8; 64] {
-        &self.inventory
+    pub fn setup_identity(&self) -> &[u8; 64] {
+        &self.setup_identity
     }
     pub fn close_time(&self) -> u64 {
         self.close_time
@@ -289,7 +289,7 @@ pub struct CloseResponseMessage {
     body: Vec<u8>,
     identity: [u8; 64],
     poll: [u8; 64],
-    inventory: [u8; 64],
+    setup_identity: [u8; 64],
     intent: [u8; 64],
     responder: usize,
     listed: Vec<(usize, [u8; 64])>,
@@ -297,7 +297,7 @@ pub struct CloseResponseMessage {
 impl CloseResponseMessage {
     pub fn new(
         poll: [u8; 64],
-        inventory: [u8; 64],
+        setup_identity: [u8; 64],
         intent: [u8; 64],
         responder: usize,
         participants: usize,
@@ -307,7 +307,7 @@ impl CloseResponseMessage {
         let body = encode(
             ClosePurpose::Response,
             poll,
-            inventory,
+            setup_identity,
             vec![
                 CanonicalItem::hash512(intent),
                 CanonicalItem::unsigned16(u16::try_from(responder).map_err(|_| Error::Shape)?),
@@ -323,7 +323,7 @@ impl CloseResponseMessage {
             body: body.to_vec(),
             identity: close_message_identity(ClosePurpose::Response, body)?,
             poll: hash(&items[1])?,
-            inventory: hash(&items[2])?,
+            setup_identity: hash(&items[2])?,
             intent: hash(&items[3])?,
             responder: position(&items[4], participants)?,
             listed: entries(&items[5], participants, MAXIMUM_LISTED_ENVELOPES_PER_SLOT)?,
@@ -338,8 +338,8 @@ impl CloseResponseMessage {
     pub fn poll(&self) -> &[u8; 64] {
         &self.poll
     }
-    pub fn inventory(&self) -> &[u8; 64] {
-        &self.inventory
+    pub fn setup_identity(&self) -> &[u8; 64] {
+        &self.setup_identity
     }
     pub fn intent(&self) -> &[u8; 64] {
         &self.intent
@@ -360,14 +360,14 @@ pub struct CloseProposalMessage {
     body: Vec<u8>,
     identity: [u8; 64],
     poll: [u8; 64],
-    inventory: [u8; 64],
+    setup_identity: [u8; 64],
     intent: [u8; 64],
     responses: Vec<(usize, [u8; 64])>,
 }
 impl CloseProposalMessage {
     pub fn new(
         poll: [u8; 64],
-        inventory: [u8; 64],
+        setup_identity: [u8; 64],
         intent: [u8; 64],
         participants: usize,
         organizer: usize,
@@ -377,7 +377,7 @@ impl CloseProposalMessage {
         let body = encode(
             ClosePurpose::Proposal,
             poll,
-            inventory,
+            setup_identity,
             vec![CanonicalItem::hash512(intent), encode_entries(responses)?],
         )?;
         Self::parse(&body, participants, organizer)
@@ -399,7 +399,7 @@ impl CloseProposalMessage {
             body: body.to_vec(),
             identity: close_message_identity(ClosePurpose::Proposal, body)?,
             poll: hash(&items[1])?,
-            inventory: hash(&items[2])?,
+            setup_identity: hash(&items[2])?,
             intent: hash(&items[3])?,
             responses,
         })
@@ -413,8 +413,8 @@ impl CloseProposalMessage {
     pub fn poll(&self) -> &[u8; 64] {
         &self.poll
     }
-    pub fn inventory(&self) -> &[u8; 64] {
-        &self.inventory
+    pub fn setup_identity(&self) -> &[u8; 64] {
+        &self.setup_identity
     }
     pub fn intent(&self) -> &[u8; 64] {
         &self.intent
@@ -438,7 +438,7 @@ impl Credential {
         owner: &RetainedBallotOwner,
         roster: &OrganizerSignedRoster,
         poll: &[u8; 64],
-        inventory: &[u8; 64],
+        setup_identity: &[u8; 64],
     ) -> Result<(), Error> {
         self.check_ballot_owner(owner)?;
         let records = roster.proposal().records();
@@ -448,7 +448,7 @@ impl Credential {
             || record.header().signing_public != self.signing_public
             || self.completed_body != Some(record.body_digest())
             || poll != owner.poll()
-            || inventory != owner.inventory()
+            || setup_identity != owner.setup_identity()
         {
             return Err(Error::Context);
         }
@@ -499,7 +499,7 @@ impl Credential {
         roster: &OrganizerSignedRoster,
         message: &CloseIntentMessage,
     ) -> Result<[u8; SIGNATURE_BYTES], Error> {
-        self.check_close_owner(owner, roster, message.poll(), message.inventory())?;
+        self.check_close_owner(owner, roster, message.poll(), message.setup_identity())?;
         Self::check_organizer(owner, roster)?;
         self.check_unlocked(SigningPurpose::CloseIntent)?;
         if self.close_intent_signed
@@ -523,7 +523,7 @@ impl Credential {
         message: &CloseIntentMessage,
         signature: &[u8],
     ) -> Result<(), Error> {
-        self.check_close_owner(owner, roster, message.poll(), message.inventory())?;
+        self.check_close_owner(owner, roster, message.poll(), message.setup_identity())?;
         let organizer = &roster.proposal().records()[roster.proposal().organizer_position()];
         if !verify_close_signature(
             &organizer.header().signing_public,
@@ -543,7 +543,7 @@ impl Credential {
         roster: &OrganizerSignedRoster,
         message: &CloseResponseMessage,
     ) -> Result<[u8; SIGNATURE_BYTES], Error> {
-        self.check_close_owner(owner, roster, message.poll(), message.inventory())?;
+        self.check_close_owner(owner, roster, message.poll(), message.setup_identity())?;
         self.check_unlocked(SigningPurpose::CloseResponse)?;
         if self.close_response.is_some() {
             return Err(Error::Consumed);
@@ -569,7 +569,7 @@ impl Credential {
         roster: &OrganizerSignedRoster,
         message: &CloseProposalMessage,
     ) -> Result<[u8; SIGNATURE_BYTES], Error> {
-        self.check_close_owner(owner, roster, message.poll(), message.inventory())?;
+        self.check_close_owner(owner, roster, message.poll(), message.setup_identity())?;
         Self::check_organizer(owner, roster)?;
         self.check_unlocked(SigningPurpose::CloseProposal)?;
         if self.close_proposal_signed {
@@ -597,7 +597,7 @@ impl Credential {
     ) -> Result<(), Error> {
         match message {
             CloseMessage::Intent(message) => {
-                self.check_close_owner(owner, roster, message.poll(), message.inventory())?;
+                self.check_close_owner(owner, roster, message.poll(), message.setup_identity())?;
                 Self::check_organizer(owner, roster)?;
                 if self.close_intent_signed {
                     return Err(Error::Consumed);
@@ -607,7 +607,7 @@ impl Credential {
                 self.close_intent_signed = true;
             }
             CloseMessage::Response(message) => {
-                self.check_close_owner(owner, roster, message.poll(), message.inventory())?;
+                self.check_close_owner(owner, roster, message.poll(), message.setup_identity())?;
                 if self.close_response.is_some() {
                     return Err(Error::Consumed);
                 }
@@ -620,7 +620,7 @@ impl Credential {
                 self.close_response = Some(*message.identity());
             }
             CloseMessage::Proposal(message) => {
-                self.check_close_owner(owner, roster, message.poll(), message.inventory())?;
+                self.check_close_owner(owner, roster, message.poll(), message.setup_identity())?;
                 Self::check_organizer(owner, roster)?;
                 if self.close_proposal_signed {
                     return Err(Error::Consumed);

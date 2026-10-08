@@ -36,7 +36,7 @@ const keys = (count: number, first: number) =>
 const context: RecordContext = {
     poll: filled(64, 1),
     runtime: filled(64, 2),
-    inventory: filled(64, 3),
+    setupIdentity: filled(64, 3),
     position: 2,
 };
 const ballotTime = 1_790_000_000_000n;
@@ -52,7 +52,7 @@ const envelopeFor = (
     const fields = concatenate(
         encodeText('LBE2'),
         records.poll,
-        records.inventory,
+        records.setupIdentity,
         unsigned16(records.position),
         unsigned64(time),
         unsigned64(BigInt(bodyLength)),
@@ -211,7 +211,7 @@ describe('participant ballot state', () => {
                 ),
             }),
         );
-        // The retained envelope names this poll, setup inventory, author,
+        // The retained envelope names this poll, setup identity, author,
         // ballot time and body length.
         const length = bounds.minimumBodyBytes;
         for (const envelope of [
@@ -227,7 +227,7 @@ describe('participant ballot state', () => {
                 bounds.envelopeBytes,
                 {
                     ...context,
-                    inventory: filled(64, 7),
+                    setupIdentity: filled(64, 7),
                 },
                 length,
             ),

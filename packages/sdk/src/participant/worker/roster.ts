@@ -608,7 +608,7 @@ export const reverifyRoster = async (
 // The profile the retained roster names: its participant count from the
 // retained proposal and its option count from the poll the module verified.
 // The retained root, proposal, retained roster, setup reference and setup
-// inventory must meet its bounds. The participant's position is its
+// certificate must meet its bounds. The participant's position is its
 // registration's in the retained proposal.
 export const retainedProfile = async (
     context: ParticipantContext,
@@ -631,7 +631,7 @@ export const retainedProfile = async (
             .filter((reference) => reference.kind === kind)
             .reduce((total, reference) => total + reference.length, 0);
     const setupReference = retainedLength(dataKind.setupReference);
-    const setupInventory = retainedLength(dataKind.setupInventory);
+    const setupCertificate = retainedLength(dataKind.setupCertificate);
     if (
         profile === undefined ||
         proposal.length !== profile.proposalBytes ||
@@ -641,8 +641,8 @@ export const retainedProfile = async (
             rootBound({ ...context, profile }, root.head.generation) ||
         (setupReference !== 0 &&
             setupReference !== profile.root.setupReferenceBytes) ||
-        (setupInventory !== 0 &&
-            setupInventory !== profile.root.setupInventoryBytes)
+        (setupCertificate !== 0 &&
+            setupCertificate !== profile.root.setupCertificateBytes)
     )
         throw new Error(
             'The retained roster does not name a supported profile.',

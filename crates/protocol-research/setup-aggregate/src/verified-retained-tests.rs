@@ -44,7 +44,7 @@ fn retained_coefficients_match_both_boundaries_in_every_modulus() {
                 reader.push(ordinal * chunk, bytes).unwrap();
             }
             let key = reader.finish().unwrap();
-            assert_eq!(key.inventory(), &[19; 64]);
+            assert_eq!(key.setup_identity(), &[19; 64]);
             assert_eq!(key.index(), index);
             assert_eq!(key.coefficients().len(), profile.family_degree(family));
             for (position, coefficient) in key.coefficients().iter().enumerate() {

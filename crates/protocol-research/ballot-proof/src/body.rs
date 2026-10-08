@@ -370,7 +370,7 @@ impl SignedBallotVerifier {
         let envelope = authentication.envelope();
         if header.len() != ballot_body::HEADER_BYTES
             || envelope.poll() != &poll.identity()
-            || envelope.inventory() != &setup.identity()
+            || envelope.setup_identity() != &setup.identity()
         {
             return Err(Error::Context);
         }

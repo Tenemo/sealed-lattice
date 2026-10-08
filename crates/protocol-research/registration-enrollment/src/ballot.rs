@@ -68,7 +68,7 @@ impl BallotWork {
             &input[offset..offset + SIGNATURE_BYTES],
         )?);
         offset += SIGNATURE_BYTES;
-        let inventory = input[offset..offset + 64].try_into().unwrap();
+        let setup_identity = input[offset..offset + 64].try_into().unwrap();
         offset += 64;
         let retained = &input[offset..];
         let (reference, tag) = retained.split_at(
@@ -77,9 +77,14 @@ impl BallotWork {
                 .checked_sub(RETAINED_TAG_BYTES)
                 .ok_or(Error::Shape)?,
         );
-        let owner =
-            credential.retain_setup_ballot_owner(&poll, proposal, inventory, reference, tag)?;
-        let inputs = RetainedSetupInputs::parse(proposal.profile(), reference, inventory)
+        let owner = credential.retain_setup_ballot_owner(
+            &poll,
+            proposal,
+            setup_identity,
+            reference,
+            tag,
+        )?;
+        let inputs = RetainedSetupInputs::parse(proposal.profile(), reference, setup_identity)
             .map_err(|_| Error::Context)?;
         let context = BallotComputationContext::from_retained(poll, &owner, &inputs)
             .map_err(|_| Error::Context)?;
@@ -192,7 +197,7 @@ impl BallotWork {
                 }
                 let envelope = BallotEnvelope::decode(self.inputs.profile(), input)?;
                 if envelope.poll() != self.owner.poll()
-                    || envelope.inventory() != self.owner.inventory()
+                    || envelope.setup_identity() != self.owner.setup_identity()
                     || envelope.position() != self.owner.position()
                 {
                     return Err(Error::Context);

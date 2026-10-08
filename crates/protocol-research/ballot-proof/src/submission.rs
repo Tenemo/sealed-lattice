@@ -104,7 +104,7 @@ pub fn authenticate_envelope(
 
 fn check_setup(body: &VerifiedBallotBody, setup: &VerifiedSetupAggregate) -> Result<usize, Error> {
     let relation = body.relation();
-    if relation.inventory() != &setup.identity()
+    if relation.setup_identity() != &setup.identity()
         || relation.poll() != &setup.roster().proposal().records()[0].header().poll
         || relation.position() >= setup.profile().participants()
     {
@@ -119,7 +119,7 @@ pub fn verify_submission(
 ) -> Result<VerifiedBallotSubmission, Error> {
     let position = check_setup(&body, setup)?;
     let envelope = &authentication.envelope;
-    if envelope.inventory() != &setup.identity()
+    if envelope.setup_identity() != &setup.identity()
         || envelope.poll() != body.relation().poll()
         || envelope.position() != position
         || envelope.body_length() != body.length()

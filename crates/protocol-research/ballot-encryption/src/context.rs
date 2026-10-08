@@ -10,7 +10,7 @@ pub struct Error;
 pub struct BallotComputationContext {
     poll: Arc<VerifiedPoll>,
     profile: Profile,
-    inventory: [u8; 64],
+    setup_identity: [u8; 64],
     position: usize,
     participant_identity: ParticipantIdentity,
 }
@@ -23,7 +23,7 @@ impl BallotComputationContext {
         let profile = inputs.profile();
         if owner.poll() != &poll.identity()
             || owner.runtime() != &poll.runtime()
-            || owner.inventory() != inputs.inventory()
+            || owner.setup_identity() != inputs.setup_identity()
             || owner.position() >= profile.participants()
             || profile.options() != poll.manifest().option_count()
         {
@@ -32,7 +32,7 @@ impl BallotComputationContext {
         Ok(Self {
             poll,
             profile,
-            inventory: *owner.inventory(),
+            setup_identity: *owner.setup_identity(),
             position: owner.position(),
             participant_identity: owner.participant_identity(),
         })
@@ -43,8 +43,8 @@ impl BallotComputationContext {
     pub fn profile(&self) -> Profile {
         self.profile
     }
-    pub fn inventory(&self) -> &[u8; 64] {
-        &self.inventory
+    pub fn setup_identity(&self) -> &[u8; 64] {
+        &self.setup_identity
     }
     pub fn position(&self) -> usize {
         self.position

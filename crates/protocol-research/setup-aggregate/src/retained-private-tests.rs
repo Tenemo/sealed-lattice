@@ -33,7 +33,7 @@ fn retained_inputs_check_complete_identity_and_canonical_values() {
     let mut reader = inputs.read_polynomial(key_index).unwrap();
     push_all(&mut reader, &values);
     let key = reader.finish().unwrap();
-    assert_eq!(key.inventory(), &[9; 64]);
+    assert_eq!(key.setup_identity(), &[9; 64]);
     assert_eq!(key.index(), key_index);
     assert!(
         key.coefficients()
@@ -93,7 +93,7 @@ fn provisional_and_final_reference_grammars_do_not_alias() {
     );
     let inputs =
         RetainedSetupInputs::parse_with_magic(b"SPI1", profile(), &provisional, [9; 64]).unwrap();
-    assert_eq!(inputs.inventory(), &[9; 64]);
+    assert_eq!(inputs.setup_identity(), &[9; 64]);
     assert!(
         encode_reference(
             b"SPI1",

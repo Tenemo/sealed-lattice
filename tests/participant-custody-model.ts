@@ -153,7 +153,7 @@ export const compileParticipantCustodyCensus = (profile: SupportedProfile) => {
     const setupReferenceBytes =
         4n + 64n + 64n * BigInt(body.polynomials.length) + 64n;
     const selectionReferenceBytes = setupReferenceBytes;
-    const setupInventoryBytes = wire.certificateBytes;
+    const setupCertificateBytes = wire.certificateBytes;
     const emptyPreparationBytes = 4n + 3n * 4n;
     const maximumSelectionSlotBytes =
         1n + wire.selectionBodyBytes + wire.signatureBytes;
@@ -174,7 +174,7 @@ export const compileParticipantCustodyCensus = (profile: SupportedProfile) => {
         enrollment.maximumRecords -
         chunks(enrollment.maximumSourceCapsuleBytes) +
         chunks(setupReferenceBytes) +
-        chunks(setupInventoryBytes);
+        chunks(setupCertificateBytes);
     const ballot = compileParticipantBallotCustody(profile);
     const close = compileParticipantCloseCustody(profile);
     const targetSigning = compileTargetSigningStateCensus();
@@ -232,7 +232,7 @@ export const compileParticipantCustodyCensus = (profile: SupportedProfile) => {
         enrollment.maximumRootBytes +
         maximumRootBytes +
         setupReferenceBytes +
-        setupInventoryBytes +
+        setupCertificateBytes +
         maximumPublicBodyCiphertextBytes +
         checkpoint.ciphertextBytes +
         maximumSigningPlaintextBytes +
@@ -255,7 +255,7 @@ export const compileParticipantCustodyCensus = (profile: SupportedProfile) => {
         maximumEnrollmentRootRecords,
         maximumRootRecords,
         setupReferenceBytes,
-        setupInventoryBytes,
+        setupCertificateBytes,
         maximumPreparationRootBytes,
         maximumPreparedRootBytes,
         maximumRootBytes,

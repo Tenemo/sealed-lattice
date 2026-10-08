@@ -31,7 +31,7 @@ pub fn body_lengths(profile: Profile) -> RangeInclusive<usize> {
 pub struct ReleaseEnvelope {
     bytes: Vec<u8>,
     poll: [u8; 64],
-    inventory: [u8; 64],
+    setup_identity: [u8; 64],
     target: [u8; 64],
     position: usize,
     length: usize,
@@ -41,7 +41,7 @@ impl ReleaseEnvelope {
     pub fn new(
         profile: Profile,
         poll: [u8; 64],
-        inventory: [u8; 64],
+        setup_identity: [u8; 64],
         target: [u8; 64],
         position: usize,
         length: usize,
@@ -52,7 +52,7 @@ impl ReleaseEnvelope {
         }
         let mut bytes = Vec::from(b"LRE1".as_slice());
         bytes.extend(poll);
-        bytes.extend(inventory);
+        bytes.extend(setup_identity);
         bytes.extend(target);
         bytes.extend((position as u16).to_le_bytes());
         bytes.extend((length as u64).to_le_bytes());
@@ -60,7 +60,7 @@ impl ReleaseEnvelope {
         Ok(Self {
             bytes,
             poll,
-            inventory,
+            setup_identity,
             target,
             position,
             length,
@@ -89,8 +89,8 @@ impl ReleaseEnvelope {
     pub fn poll(&self) -> &[u8; 64] {
         &self.poll
     }
-    pub fn inventory(&self) -> &[u8; 64] {
-        &self.inventory
+    pub fn setup_identity(&self) -> &[u8; 64] {
+        &self.setup_identity
     }
     pub fn target(&self) -> &[u8; 64] {
         &self.target
@@ -182,7 +182,7 @@ impl Credential {
         }
         if self.target_lock.as_ref() != Some(envelope.target())
             || envelope.poll() != owner.poll()
-            || envelope.inventory() != owner.inventory()
+            || envelope.setup_identity() != owner.setup_identity()
             || envelope.position() != owner.position()
             || record.header().signing_public != self.signing_public
             || self.completed_body != Some(record.body_digest())

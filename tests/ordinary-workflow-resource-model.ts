@@ -239,7 +239,7 @@ export const compileOrdinaryWorkflowResources = (
         registration.maximumSourceCapsuleBytes +
         custody.maximumPreparedRootBytes +
         custody.setupReferenceBytes +
-        custody.setupInventoryBytes;
+        custody.setupCertificateBytes;
     const closeCustody =
         preparedBase +
         n * ballotCustody.maximumEncryptedBodyBytes +

@@ -186,7 +186,7 @@ describe('participant release state', () => {
         const context = {
             poll: filled(64, 1),
             runtime: filled(64, 2),
-            inventory: filled(64, 3),
+            setupIdentity: filled(64, 3),
             position: 2,
         };
         const digest = filled(64, 8);

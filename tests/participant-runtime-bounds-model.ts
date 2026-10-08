@@ -84,7 +84,7 @@ export const compileParticipantRuntimeProfile = (
             maximumRecords: number(custody.maximumRootRecords),
             maximumRootBytes: number(custody.maximumRootBytes),
             setupReferenceBytes: number(custody.setupReferenceBytes),
-            setupInventoryBytes: number(custody.setupInventoryBytes),
+            setupCertificateBytes: number(custody.setupCertificateBytes),
             retainedRosterBytes: number(
                 compileRosterProposalCensus(participantCount)
                     .retainedRosterBytes,
@@ -209,7 +209,7 @@ export const compileParticipantRuntimeLimits = (): ParticipantLimits => {
             ),
             maximumRootBytes: largest.root.maximumRootBytes,
             maximumSetupReferenceBytes: largest.root.setupReferenceBytes,
-            maximumSetupInventoryBytes: largest.root.setupInventoryBytes,
+            maximumSetupCertificateBytes: largest.root.setupCertificateBytes,
             maximumRetainedRosterBytes: largest.root.retainedRosterBytes,
         },
     };

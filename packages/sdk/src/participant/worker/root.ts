@@ -80,7 +80,7 @@ export const dataKind = {
     proposalSignature: 8,
     setupReference: 9,
     // The setup certificate the setup was verified against.
-    setupInventory: 10,
+    setupCertificate: 10,
     // This participant's roster verification, keyed to its credential.
     retainedRoster: 11,
     // This participant's verification of its own registration, keyed to its
@@ -169,7 +169,7 @@ export const encodeManifest = (
 // Checks the canonical reference inventory: ascending kinds, contiguous
 // chunks of at most one mebibyte, only the last chunk of a kind shorter, and
 // the complete records that the generation requires. The profile's exact
-// proposal, retained roster, setup reference and setup inventory lengths are
+// proposal, retained roster, setup reference and setup certificate lengths are
 // checked once it is known.
 const checkReferences = (
     references: readonly RecordReference[],
@@ -219,7 +219,7 @@ const checkReferences = (
         generation >= rootGeneration.setupRetained !==
             lengths[dataKind.setupReference] > 0 ||
         generation >= rootGeneration.setupRetained !==
-            lengths[dataKind.setupInventory] > 0
+            lengths[dataKind.setupCertificate] > 0
     )
         throw new Error('Participant records do not match the generation.');
 };

@@ -54,12 +54,12 @@ export type ParticipantLimits = Readonly<{
         // the proposal, its signature, the retained roster and the retained
         // registration.
         maximumEnrollmentRootBytes: number;
-        // A later root, its setup reference, its setup inventory and the
+        // A later root, its setup reference, its setup certificate and the
         // retained roster before the roster names the profile: the largest
         // of any supported profile.
         maximumRootBytes: number;
         maximumSetupReferenceBytes: number;
-        maximumSetupInventoryBytes: number;
+        maximumSetupCertificateBytes: number;
         maximumRetainedRosterBytes: number;
     }>;
 }>;
@@ -76,8 +76,8 @@ export type ParticipantProfile = Readonly<{
         maximumRecords: number;
         maximumRootBytes: number;
         setupReferenceBytes: number;
-        // The confirmation inventory the setup was verified against.
-        setupInventoryBytes: number;
+        // The setup certificate the setup was verified against.
+        setupCertificateBytes: number;
         // The participant's roster verification, keyed to its credential.
         retainedRosterBytes: number;
     }>;
@@ -301,12 +301,12 @@ const readModuleProfile = (
 type ModuleProfile = NonNullable<ReturnType<typeof readModuleProfile>>;
 
 // The data record kinds' largest lengths, in manifest order, with the
-// proposal at its cap and the given setup reference, inventory and retained
+// proposal at its cap and the given setup reference, setup certificate and retained
 // roster.
 const dataKindMaximums = (
     registration: ParticipantLimits['registration'],
     setupReferenceBytes: number,
-    setupInventoryBytes: number,
+    setupCertificateBytes: number,
     retainedRosterBytes: number,
 ) => [
     registration.publicKeyBytes,
@@ -319,14 +319,14 @@ const dataKindMaximums = (
     registration.maximumProposalBytes,
     registration.signatureBytes,
     setupReferenceBytes,
-    setupInventoryBytes,
+    setupCertificateBytes,
     retainedRosterBytes,
     registration.retainedRegistrationBytes,
     registration.maximumSourceCapsuleBytes,
 ];
 
 // The largest enrollment root: every record but the setup reference and
-// inventory, which it lacks, and the organizer's proposal intent.
+// certificate, which it lacks, and the organizer's proposal intent.
 const enrollmentRootBytes = (
     registration: ParticipantLimits['registration'],
     retainedRosterBytes: number,
@@ -560,13 +560,13 @@ const releaseBounds = (moduleLimits: ModuleLimits, profile: ModuleProfile) => {
     };
 };
 
-// Marker, inventory identity, one digest per aggregate polynomial, and the
+// Marker, setup identity, one digest per aggregate polynomial, and the
 // credential-keyed tag that the ballot step checks before parsing.
 const setupReferenceBytes = (profile: ModuleProfile) =>
     4 + identityBytes * (profile.polynomials.length + 2);
 
-// The count and every participant's confirmation packet.
-const setupInventoryBytes = (profile: ModuleProfile) =>
+// The setup certificate.
+const setupCertificateBytes = (profile: ModuleProfile) =>
     profile.certificateBytes;
 
 // Assembles one profile's bounds from the module's sizes and the retained
@@ -592,7 +592,7 @@ const profileBounds = (
     const target = targetBounds(moduleLimits);
     const release = releaseBounds(moduleLimits, profile);
     const setupReference = setupReferenceBytes(profile);
-    const setupInventory = setupInventoryBytes(profile);
+    const setupCertificate = setupCertificateBytes(profile);
     const preparation = {
         ...moduleLimits.preparation,
         selectionBodyBytes: profile.selectionBodyBytes,
@@ -661,7 +661,7 @@ const profileBounds = (
             maximumRecords: limits.root.maximumRecords,
             maximumRootBytes,
             setupReferenceBytes: setupReference,
-            setupInventoryBytes: setupInventory,
+            setupCertificateBytes: setupCertificate,
             retainedRosterBytes: profile.retainedRosterBytes,
         },
         contribution: {
@@ -677,7 +677,7 @@ const profileBounds = (
                 ) +
                 maximumRootBytes +
                 setupReference +
-                setupInventory +
+                setupCertificate +
                 publicCiphertextBytes +
                 checkpointCiphertextBytes +
                 signingBytes,
@@ -714,7 +714,7 @@ export const readParticipantLimits = (
     if (largest === undefined)
         throw new Error('The participant module lacks its largest profile.');
     const maximumSetupReferenceBytes = setupReferenceBytes(largest);
-    const maximumSetupInventoryBytes = setupInventoryBytes(largest);
+    const maximumSetupCertificateBytes = setupCertificateBytes(largest);
     const maximumRetainedRosterBytes = largest.retainedRosterBytes;
     const enrollment: ParticipantLimits = {
         participants,
@@ -724,7 +724,7 @@ export const readParticipantLimits = (
             maximumRecords: dataKindMaximums(
                 { ...registration, maximumSourceCapsuleBytes: 0 },
                 maximumSetupReferenceBytes,
-                maximumSetupInventoryBytes,
+                maximumSetupCertificateBytes,
                 maximumRetainedRosterBytes,
             ).reduce((total, bytes) => total + chunks(bytes), 0),
             maximumEnrollmentRootBytes: enrollmentRootBytes(
@@ -733,7 +733,7 @@ export const readParticipantLimits = (
             ),
             maximumRootBytes: 0,
             maximumSetupReferenceBytes,
-            maximumSetupInventoryBytes,
+            maximumSetupCertificateBytes,
             maximumRetainedRosterBytes,
         },
     };
@@ -764,6 +764,6 @@ export const participantDataKindMaximums = (limits: ParticipantLimits) =>
     dataKindMaximums(
         limits.registration,
         limits.root.maximumSetupReferenceBytes,
-        limits.root.maximumSetupInventoryBytes,
+        limits.root.maximumSetupCertificateBytes,
         limits.root.maximumRetainedRosterBytes,
     );

@@ -69,7 +69,7 @@ impl FinalityWork {
         if target.classified().is_none()
             || owner.poll() != &target.poll().identity()
             || owner.runtime() != &target.poll().runtime()
-            || owner.inventory() != &target.setup().identity()
+            || owner.setup_identity() != &target.setup().identity()
             || owner.position() >= count
         {
             return Err(Error::Context);

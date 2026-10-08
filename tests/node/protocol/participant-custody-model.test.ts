@@ -240,7 +240,9 @@ describe('shared participant custody', () => {
                     endorsementSlot,
                 );
                 expect(current.selectionReferenceBytes).toBe(reference);
-                expect(current.setupInventoryBytes).toBe(wire.certificateBytes);
+                expect(current.setupCertificateBytes).toBe(
+                    wire.certificateBytes,
+                );
                 expect(current.maximumPreparationRootBytes).toBe(earlyRoot);
                 expect(current.maximumPreparedRootBytes).toBe(lateRoot);
                 expect(current.maximumRootBytes).toBe(

@@ -81,7 +81,7 @@ export const encodeBallotState = (generation: number, state: BallotState) =>
     );
 
 // The envelope's context fields at their offsets: the poll, the setup
-// inventory, the author's position, the ballot time and the body length.
+// identity, the author's position, the ballot time and the body length.
 export const ballotEnvelopeMatches = (
     envelope: Uint8Array,
     context: RecordContext,
@@ -90,7 +90,7 @@ export const ballotEnvelopeMatches = (
 ) =>
     equalBytes(envelope.subarray(0, 4), envelopeMarker) &&
     equalBytes(envelope.subarray(4, 68), context.poll) &&
-    equalBytes(envelope.subarray(68, 132), context.inventory) &&
+    equalBytes(envelope.subarray(68, 132), context.setupIdentity) &&
     readUnsigned16(envelope, 132) === context.position &&
     (ballotTime === undefined ||
         readUnsigned64(envelope, 134) === ballotTime) &&
@@ -189,7 +189,7 @@ export const ballotRecordAssociatedData = (
         encodeText('sealed-lattice/participant-ballot-record/v2'),
         context.poll,
         context.runtime,
-        context.inventory,
+        context.setupIdentity,
         unsigned16(context.position),
         unsigned16(index),
         unsigned32(length),

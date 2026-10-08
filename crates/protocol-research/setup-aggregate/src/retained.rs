@@ -9,20 +9,20 @@ use supported_profile::Profile;
 /// Immutable coefficients read from exactly one owning aggregate reference.
 /// This value is public key material, not participant signing or release authority.
 pub struct VerifiedAggregatePolynomial {
-    inventory: [u8; 64],
+    setup_identity: [u8; 64],
     index: usize,
     coefficients: Vec<BigInt>,
 }
 /// Private-operation input recovered from an authenticated local reference.
 /// This type cannot create a public setup or verification capability.
 pub struct RetainedAggregatePolynomial {
-    inventory: [u8; 64],
+    setup_identity: [u8; 64],
     index: usize,
     coefficients: Vec<BigInt>,
 }
 impl RetainedAggregatePolynomial {
-    pub fn inventory(&self) -> &[u8; 64] {
-        &self.inventory
+    pub fn setup_identity(&self) -> &[u8; 64] {
+        &self.setup_identity
     }
     pub fn index(&self) -> usize {
         self.index
@@ -40,7 +40,7 @@ impl RetainedAggregatePolynomial {
 /// checks that key before parsing, so an arbitrary copy supplies no premise.
 pub struct RetainedSetupInputs {
     profile: Profile,
-    inventory: [u8; 64],
+    setup_identity: [u8; 64],
     polynomials: Vec<AggregatePolynomial>,
 }
 pub(crate) fn encode_reference(
@@ -76,24 +76,24 @@ impl RetainedSetupInputs {
             setup.polynomials(),
         )
     }
-    /// The profile is the one of the setup that owns the expected inventory.
+    /// The profile is the one of the setup that owns the expected setup identity.
     pub fn parse(
         profile: Profile,
         bytes: &[u8],
-        expected_inventory: [u8; 64],
+        expected_setup_identity: [u8; 64],
     ) -> Result<Self, Refusal> {
-        Self::parse_with_magic(b"SAV1", profile, bytes, expected_inventory)
+        Self::parse_with_magic(b"SAV1", profile, bytes, expected_setup_identity)
     }
     pub(crate) fn parse_with_magic(
         magic: &[u8; 4],
         profile: Profile,
         bytes: &[u8],
-        expected_inventory: [u8; 64],
+        expected_setup_identity: [u8; 64],
     ) -> Result<Self, Refusal> {
         let indices = profile.contribution_body_polynomials();
         if bytes.len() != 4 + 64 + 64 * indices.len()
             || &bytes[..4] != magic
-            || bytes[4..68] != expected_inventory
+            || bytes[4..68] != expected_setup_identity
         {
             return Err(Refusal::Context);
         }
@@ -108,12 +108,12 @@ impl RetainedSetupInputs {
             .collect();
         Ok(Self {
             profile,
-            inventory: expected_inventory,
+            setup_identity: expected_setup_identity,
             polynomials,
         })
     }
-    pub fn inventory(&self) -> &[u8; 64] {
-        &self.inventory
+    pub fn setup_identity(&self) -> &[u8; 64] {
+        &self.setup_identity
     }
     pub fn profile(&self) -> Profile {
         self.profile
@@ -129,7 +129,7 @@ impl RetainedSetupInputs {
             .ok_or(Refusal::Order)?
             .clone();
         Ok(RetainedPolynomialReader {
-            reader: AggregatePolynomialReader::new(self.profile, self.inventory, expected)?,
+            reader: AggregatePolynomialReader::new(self.profile, self.setup_identity, expected)?,
         })
     }
 }
@@ -145,8 +145,8 @@ impl RetainedPolynomialReader {
     }
 }
 impl VerifiedAggregatePolynomial {
-    pub fn inventory(&self) -> &[u8; 64] {
-        &self.inventory
+    pub fn setup_identity(&self) -> &[u8; 64] {
+        &self.setup_identity
     }
     pub fn index(&self) -> usize {
         self.index
@@ -158,7 +158,7 @@ impl VerifiedAggregatePolynomial {
 
 /// No coefficient access is available before the complete byte identity matches.
 pub struct AggregatePolynomialReader {
-    inventory: [u8; 64],
+    setup_identity: [u8; 64],
     expected: AggregatePolynomial,
     decoder: PolynomialAdder,
     hash: IdentityHasher,
@@ -169,7 +169,7 @@ pub struct AggregatePolynomialReader {
 impl AggregatePolynomialReader {
     pub(crate) fn new(
         profile: Profile,
-        inventory: [u8; 64],
+        setup_identity: [u8; 64],
         expected: AggregatePolynomial,
     ) -> Result<Self, Refusal> {
         let family = contribution_family(profile, expected.index()).ok_or(Refusal::Order)?;
@@ -179,7 +179,7 @@ impl AggregatePolynomialReader {
         let hash = IdentityHasher::new(PUBLIC_POLYNOMIAL_DOMAIN, &[], expected.bytes())
             .map_err(|_| Refusal::Context)?;
         Ok(Self {
-            inventory,
+            setup_identity,
             expected,
             decoder: PolynomialAdder::new(profile, family),
             hash,
@@ -221,7 +221,7 @@ impl AggregatePolynomialReader {
     pub fn finish(self) -> Result<VerifiedAggregatePolynomial, Refusal> {
         let retained = self.finish_retained()?;
         Ok(VerifiedAggregatePolynomial {
-            inventory: retained.inventory,
+            setup_identity: retained.setup_identity,
             index: retained.index,
             coefficients: retained.coefficients,
         })
@@ -235,7 +235,7 @@ impl AggregatePolynomialReader {
             return Err(Refusal::PreviousAggregate);
         }
         Ok(RetainedAggregatePolynomial {
-            inventory: self.inventory,
+            setup_identity: self.setup_identity,
             index: self.expected.index(),
             coefficients: self.coefficients,
         })

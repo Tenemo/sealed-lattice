@@ -283,7 +283,7 @@ describe('participant close state', () => {
         const context = {
             poll: filled(64, 1),
             runtime: filled(64, 2),
-            inventory: filled(64, 3),
+            setupIdentity: filled(64, 3),
             position: 1,
         };
         const records = closeRecordInventory(

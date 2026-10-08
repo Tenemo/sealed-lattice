@@ -88,7 +88,7 @@ impl CloseWork {
         let proposal = setup.roster().proposal();
         if owner.poll() != &poll.identity()
             || owner.runtime() != &poll.runtime()
-            || owner.inventory() != &setup.identity()
+            || owner.setup_identity() != &setup.identity()
             || owner.position() >= proposal.records().len()
         {
             return Err(Error::Context);
@@ -134,7 +134,9 @@ impl CloseWork {
         let message =
             registration_credentials::target_signing::TargetMessage::parse(body, self.count())?;
         let intent = self.intent.as_ref().ok_or(Error::Context)?;
-        if message.poll() != self.owner.poll() || message.inventory() != self.owner.inventory() {
+        if message.poll() != self.owner.poll()
+            || message.setup_identity() != self.owner.setup_identity()
+        {
             return Err(Error::Context);
         }
         Ok(crate::finality_work::classified_ballot_inclusion(

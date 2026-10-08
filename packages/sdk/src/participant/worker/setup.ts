@@ -982,10 +982,11 @@ const retainedReference = (context: PublicProfileContext) => {
 
 export type VerifiedSetup = Readonly<{
     reference: Uint8Array;
-    inventory: Uint8Array;
+    certificate: Uint8Array;
 }>;
 
-const referenceInventory = (reference: Uint8Array) => reference.subarray(4, 68);
+const referenceSetupIdentity = (reference: Uint8Array) =>
+    reference.subarray(4, 68);
 
 const certifyRetainedSelection = (
     session: ParticipantSession,
@@ -1027,10 +1028,14 @@ export const verifySetup = async (
         throw new Error('No confirmed roster awaits setup activation.');
     await verifySetupRoster(session, relay);
     const certificate = await readSetupCertificate(session.context, relay);
-    const inventory = certificate.bytes;
+    const certificateBytes = certificate.bytes;
     const selection =
-        certifyRetainedSelection(session, inventory) ??
-        (await verifyCertificateInputs(session.context, relay, inventory));
+        certifyRetainedSelection(session, certificateBytes) ??
+        (await verifyCertificateInputs(
+            session.context,
+            relay,
+            certificateBytes,
+        ));
     // The complete certificate determines the semantic setup identity. Its
     // correlated manifest and every chunk have exact named readback before
     // the participant may retire its preparation state.
@@ -1041,13 +1046,13 @@ export const verifySetup = async (
             'setup-certificate',
             delivery,
         );
-        await publication.addBytes('certificate.bin', inventory);
+        await publication.addBytes('certificate.bin', certificateBytes);
         await publication.finish();
     }
     const reference = retainedReference(session.context);
-    if (!equalBytes(referenceInventory(reference), selection.identity))
+    if (!equalBytes(referenceSetupIdentity(reference), selection.identity))
         throw new Error('The retained setup names another selection.');
-    return { reference, inventory };
+    return { reference, certificate: certificateBytes };
 };
 
 export const ensureFinalAggregate = async (
@@ -1064,7 +1069,7 @@ export const ensureFinalAggregate = async (
     const certificate = await readDataKind(
         session.context,
         session.root.manifest,
-        dataKind.setupInventory,
+        dataKind.setupCertificate,
     );
     await verifyCertificateInputs(session.context, relay, certificate, true);
     if (
@@ -1090,7 +1095,7 @@ export const restoreSetup = async (
     const { context, root } = session;
     authenticateCertificate(
         context,
-        await readDataKind(context, root.manifest, dataKind.setupInventory),
+        await readDataKind(context, root.manifest, dataKind.setupCertificate),
         true,
     );
     const reference = await readDataKind(
@@ -1213,8 +1218,8 @@ export const verifyPublicSetup = async (
     });
 };
 
-export const retainedSetupInventory = async (session: ParticipantSession) =>
-    referenceInventory(
+export const retainedSetupIdentity = async (session: ParticipantSession) =>
+    referenceSetupIdentity(
         await readDataKind(
             session.context,
             session.root.manifest,
@@ -1229,7 +1234,7 @@ export const retainSetup = async (
     const { context, root } = session;
     const added = [
         { kind: dataKind.setupReference, bytes: verified.reference },
-        { kind: dataKind.setupInventory, bytes: verified.inventory },
+        { kind: dataKind.setupCertificate, bytes: verified.certificate },
     ];
     const retainedKeys = root.manifest.dataKeys.slice(0, 64);
     const retainedReferences = root.manifest.references.filter(

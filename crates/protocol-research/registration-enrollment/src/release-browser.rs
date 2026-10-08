@@ -104,7 +104,7 @@ fn command(session: &mut Session, operation: u32, input: &[u8]) -> Result<Vec<u8
             if context.position() != owner.position()
                 || envelope.position() != owner.position()
                 || envelope.poll() != owner.poll()
-                || envelope.inventory() != owner.inventory()
+                || envelope.setup_identity() != owner.setup_identity()
                 || envelope.target() != context.certificate().target().identity()
             {
                 return Err(Error::Context);

@@ -36,7 +36,7 @@ impl ReleaseContext {
             .map_err(|_| Error::Encoding)?;
         let target = self.certificate().target();
         if envelope.poll() != &target.poll().identity()
-            || envelope.inventory() != &target.setup().identity()
+            || envelope.setup_identity() != &target.setup().identity()
             || envelope.target() != target.identity()
             || envelope.position() != self.position()
         {

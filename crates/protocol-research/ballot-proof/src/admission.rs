@@ -51,7 +51,7 @@ fn fixed_input_identities(profile: Profile) -> Result<[[u8; 64]; 3], Refusal> {
 pub struct VerifiedBallotRelation {
     statement: [u8; 64],
     poll: [u8; 64],
-    inventory: [u8; 64],
+    setup_identity: [u8; 64],
     position: usize,
 }
 impl VerifiedBallotRelation {
@@ -61,8 +61,8 @@ impl VerifiedBallotRelation {
     pub fn poll(&self) -> &[u8; 64] {
         &self.poll
     }
-    pub fn inventory(&self) -> &[u8; 64] {
-        &self.inventory
+    pub fn setup_identity(&self) -> &[u8; 64] {
+        &self.setup_identity
     }
     pub fn position(&self) -> usize {
         self.position
@@ -228,7 +228,7 @@ impl BallotRelationVerifier {
         Ok(VerifiedBallotRelation {
             statement: self.statement,
             poll: self.expected_header[4..68].try_into().unwrap(),
-            inventory: self.expected_header[68..132].try_into().unwrap(),
+            setup_identity: self.expected_header[68..132].try_into().unwrap(),
             position: u16::from_le_bytes(self.expected_header[132..134].try_into().unwrap())
                 as usize,
         })

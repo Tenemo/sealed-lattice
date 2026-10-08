@@ -59,18 +59,18 @@ pub fn setup_input(profile: Profile) -> (Family, usize, usize) {
         fhe_key_polynomial(profile),
     )
 }
-/// The statement header: its magic, the poll and inventory identities, the
+/// The statement header: its magic, the poll and setup identities, the
 /// roster position, the option count and the result length.
 pub fn header(
     poll: &[u8; 64],
-    inventory: &[u8; 64],
+    setup_identity: &[u8; 64],
     position: usize,
     options: usize,
     top_count: usize,
 ) -> Result<Vec<u8>, Error> {
     let mut header = HEADER_MAGIC.to_vec();
     header.extend(poll);
-    header.extend(inventory);
+    header.extend(setup_identity);
     header.extend(
         u16::try_from(position)
             .map_err(|_| Error::Shape)?
@@ -119,7 +119,7 @@ impl PublicStatement {
         let context = &witness.context;
         let header = header(
             &context.poll().identity(),
-            context.inventory(),
+            context.setup_identity(),
             context.position(),
             context.poll().manifest().option_count(),
             usize::from(context.poll().top_count()),

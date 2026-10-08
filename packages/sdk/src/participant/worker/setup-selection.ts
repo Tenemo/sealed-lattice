@@ -74,7 +74,7 @@ const originalSelectedOffers = (
         count !== session.context.profile.setupContributorCount ||
         entries.length !== 8 + count * 66
     )
-        throw new Error('The retained selection has another inventory.');
+        throw new Error('The retained selection has another shape.');
     return Array.from({ length: count }, (_, ordinal) => {
         const offset = 8 + ordinal * 66;
         const position = readUnsigned16(entries, offset);

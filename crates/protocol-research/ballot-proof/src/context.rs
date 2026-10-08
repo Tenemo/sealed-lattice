@@ -40,7 +40,7 @@ pub fn private_proof_role(
         context.participant_identity(),
         context.poll().identity(),
         context.poll().runtime(),
-        *context.inventory(),
+        *context.setup_identity(),
         context.position(),
     )
 }
@@ -48,7 +48,7 @@ fn encode_role(
     participant_identity: ParticipantIdentity,
     poll: [u8; 64],
     runtime: [u8; 64],
-    inventory: [u8; 64],
+    setup_identity: [u8; 64],
     position: usize,
 ) -> Result<Vec<u8>, Error> {
     let position = u16::try_from(position).map_err(|_| Error)?;
@@ -61,7 +61,7 @@ fn encode_role(
                 .map_err(|_| Error)?,
             CanonicalItem::hash512(poll),
             CanonicalItem::hash512(runtime),
-            CanonicalItem::hash512(inventory),
+            CanonicalItem::hash512(setup_identity),
             CanonicalItem::unsigned16(position),
         ],
     )

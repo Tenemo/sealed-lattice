@@ -146,11 +146,11 @@ impl CloseContext {
             .header()
             .signing_public)
     }
-    fn inventory(&self) -> [u8; 64] {
+    fn setup_identity(&self) -> [u8; 64] {
         self.setup.identity()
     }
     pub fn intent(&self, close_time: u64) -> Result<CloseIntentMessage, Error> {
-        CloseIntentMessage::new(self.poll.identity(), self.inventory(), close_time)
+        CloseIntentMessage::new(self.poll.identity(), self.setup_identity(), close_time)
             .map_err(|_| Error::Shape)
     }
     pub fn authenticate_intent(
@@ -159,7 +159,9 @@ impl CloseContext {
         signature: &[u8],
     ) -> Result<AuthenticatedCloseIntent, Error> {
         let message = CloseIntentMessage::parse(body).map_err(|_| Error::Shape)?;
-        if *message.poll() != self.poll.identity() || *message.inventory() != self.inventory() {
+        if *message.poll() != self.poll.identity()
+            || *message.setup_identity() != self.setup_identity()
+        {
             return Err(Error::Context);
         }
         if !verify_close_signature(
@@ -216,7 +218,7 @@ impl CloseContext {
         );
         CloseResponseMessage::new(
             self.poll.identity(),
-            self.inventory(),
+            self.setup_identity(),
             *intent.message.identity(),
             responder,
             self.participant_count(),
@@ -238,7 +240,7 @@ impl CloseContext {
         let message = CloseResponseMessage::parse(body, self.participant_count())
             .map_err(|_| Error::Shape)?;
         if *message.poll() != self.poll.identity()
-            || *message.inventory() != self.inventory()
+            || *message.setup_identity() != self.setup_identity()
             || message.intent() != intent.message.identity()
         {
             return Err(Error::Context);
@@ -324,7 +326,7 @@ impl CloseContext {
         entries.sort_unstable();
         CloseProposalMessage::new(
             self.poll.identity(),
-            self.inventory(),
+            self.setup_identity(),
             *intent.message.identity(),
             self.participant_count(),
             self.organizer(),
@@ -339,7 +341,7 @@ impl CloseContext {
         responses: &[AuthenticatedCloseResponse],
     ) -> Result<Selection, Error> {
         if *proposal.poll() != self.poll.identity()
-            || *proposal.inventory() != self.inventory()
+            || *proposal.setup_identity() != self.setup_identity()
             || proposal.intent() != intent.message.identity()
         {
             return Err(Error::Context);

@@ -6,12 +6,12 @@ import type { ParticipantStore } from './storage.js';
 // own fresh AES-256-GCM key with the zero nonce.
 
 // What a private record after setup verification is bound to besides its
-// coordinates: the poll, the runtime, the setup inventory and the
+// coordinates: the poll, the runtime, the setup identity and the
 // participant.
 export type RecordContext = Readonly<{
     poll: Uint8Array;
     runtime: Uint8Array;
-    inventory: Uint8Array;
+    setupIdentity: Uint8Array;
     position: number;
 }>;
 
@@ -20,11 +20,11 @@ const tagBytes = 16;
 
 export const recordContext = (
     session: ParticipantSession,
-    inventory: Uint8Array,
+    setupIdentity: Uint8Array,
 ): RecordContext => ({
     poll: session.root.manifest.poll,
     runtime: session.context.runtime,
-    inventory,
+    setupIdentity,
     position: session.records.position,
 });
 

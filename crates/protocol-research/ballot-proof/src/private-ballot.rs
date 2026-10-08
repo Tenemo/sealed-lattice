@@ -67,7 +67,7 @@ fn envelope(
     BallotEnvelope::new(
         profile,
         context.poll().identity(),
-        *context.inventory(),
+        *context.setup_identity(),
         context.position(),
         ballot_time,
         bytes.len(),
@@ -152,7 +152,7 @@ pub fn verify(
     }
     let statement = &header[12..];
     if statement[4..68] != context.poll().identity()
-        || statement[68..132] != *context.inventory()
+        || statement[68..132] != *context.setup_identity()
         || u16::from_le_bytes(statement[132..134].try_into().unwrap()) as usize
             != context.position()
         || statement[134] as usize != context.poll().manifest().option_count()
@@ -164,7 +164,7 @@ pub fn verify(
     let mut offset = ballot_body::HEADER_BYTES;
     let (_, common, index) = setup_input(profile);
     if key.index() != index
-        || key.inventory() != context.inventory()
+        || key.setup_identity() != context.setup_identity()
         || key.coefficients().len() != profile.family_degree(Family::Fhe)
     {
         return Err(Error::Context);

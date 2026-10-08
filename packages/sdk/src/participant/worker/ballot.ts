@@ -48,7 +48,7 @@ import {
     deliverFinalAggregate,
     ensureFinalAggregate,
     readFinalAggregate,
-    retainedSetupInventory,
+    retainedSetupIdentity,
 } from './setup.js';
 import { snapshotParticipant } from './storage.js';
 
@@ -240,7 +240,7 @@ export const beginBallot = async (
         throw new StorageFailure('The origin lacks room for a ballot.');
     const records = recordContext(
         participant,
-        await retainedSetupInventory(participant),
+        await retainedSetupIdentity(participant),
     );
     const session: BallotSession = {
         participant,
@@ -281,7 +281,7 @@ export const resumeBallot = async (
     const { context } = participant;
     const records = recordContext(
         participant,
-        await retainedSetupInventory(participant),
+        await retainedSetupIdentity(participant),
     );
     const state = retainedBallotState(participant, records);
     const snapshot = await snapshotParticipant(context.database);
@@ -293,7 +293,7 @@ export const resumeBallot = async (
 // Ballot and close authority binds the original member to its verified setup.
 export const ballotWorkInput = async (
     participant: ParticipantSession,
-    inventory: Uint8Array,
+    setupIdentity: Uint8Array,
 ) => {
     const { context } = participant;
     const { manifest } = participant.root;
@@ -318,7 +318,7 @@ export const ballotWorkInput = async (
         unsigned32(definition.length),
         definition,
         definitionSignature,
-        inventory,
+        setupIdentity,
         reference,
     );
 };
@@ -410,7 +410,7 @@ const startBallotWork = async (session: BallotSession) => {
         context,
         ballotOperation.begin,
         0,
-        await ballotWorkInput(participant, session.records.inventory),
+        await ballotWorkInput(participant, session.records.setupIdentity),
     );
     const index = module.participant_ballot_key_index() >>> 0;
     ballotCommand(context, ballotOperation.beginKey, index);

@@ -90,7 +90,7 @@ const fixture = async (author = 1) => {
     const records = {
         poll: new Uint8Array(64).fill(2),
         runtime: new Uint8Array(64).fill(3),
-        inventory: new Uint8Array(64).fill(4),
+        setupIdentity: new Uint8Array(64).fill(4),
         position: 0,
     };
     const event = {
@@ -258,18 +258,18 @@ describe('held ballot custody reads', () => {
         await expect(reader!(() => undefined)).rejects.toThrow();
     });
 
-    it('refuses a substituted record, another inventory and a missing held envelope', async () => {
+    it('refuses a substituted record, another setup identity and a missing held envelope', async () => {
         const fixed = await fixture();
         const reader = await heldBallotBody(fixed.session, 1, fixed.identity);
         await write(fixed.database, (store) =>
             store.put(new Blob([new Uint8Array(fixed.ciphertexts[2])]), [0, 1]),
         );
         await expect(reader!(() => undefined)).rejects.toThrow();
-        fixed.records.inventory[0] ^= 1;
+        fixed.records.setupIdentity[0] ^= 1;
         await expect(
             heldBallotBody(fixed.session, 1, fixed.identity),
         ).rejects.toThrow();
-        fixed.records.inventory[0] ^= 1;
+        fixed.records.setupIdentity[0] ^= 1;
         await write(fixed.database, (store) => store.delete([0, 0]));
         await expect(
             heldBallotBody(fixed.session, 1, fixed.identity),

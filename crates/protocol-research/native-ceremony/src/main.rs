@@ -650,7 +650,7 @@ fn main() {
     let outsider_owner =
         close::owner_of(&enrollments[outsider].credential, &poll, &setup, outsider);
     assert_eq!(outsider_owner.position(), outsider);
-    assert_eq!(outsider_owner.inventory(), &setup.identity());
+    assert_eq!(outsider_owner.setup_identity(), &setup.identity());
     assert_eq!(
         registration_enrollment::ballot::BallotWork::new(
             &enrollments[outsider].credential,
@@ -1056,7 +1056,7 @@ fn main() {
         let mut modified_header = [0; registration_credentials::ballot_body::HEADER_BYTES];
         source.read_exact(&mut modified_header).unwrap();
         // The statement position follows the body header's magic, proof
-        // length, statement magic, poll and inventory.
+        // length, statement magic, poll and setup identity.
         let position = 12 + 4 + 64 + 64;
         modified_header[position..position + 2].copy_from_slice(&(author as u16).to_le_bytes());
         let mut destination = public_output::PublicOutput::create(&invalid_proof_path).unwrap();

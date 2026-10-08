@@ -23,7 +23,7 @@ const RETAINED_SETUP_TAG_LABEL: &[u8] = b"sealed-lattice/retained-setup-referenc
 pub struct RetainedBallotOwner {
     poll: [u8; 64],
     runtime: [u8; 64],
-    inventory: [u8; 64],
+    setup_identity: [u8; 64],
     position: usize,
     owner_body: [u8; 64],
     signing_public: [u8; SIGNING_PUBLIC_KEY_BYTES],
@@ -41,8 +41,8 @@ impl RetainedBallotOwner {
     pub fn runtime(&self) -> &[u8; 64] {
         &self.runtime
     }
-    pub fn inventory(&self) -> &[u8; 64] {
-        &self.inventory
+    pub fn setup_identity(&self) -> &[u8; 64] {
+        &self.setup_identity
     }
     pub fn position(&self) -> usize {
         self.position
@@ -60,7 +60,7 @@ impl BallotEnvelope {
     pub fn new(
         profile: Profile,
         poll: [u8; 64],
-        inventory: [u8; 64],
+        setup_identity: [u8; 64],
         position: usize,
         ballot_time: u64,
         body_length: usize,
@@ -74,7 +74,7 @@ impl BallotEnvelope {
         let mut bytes = [0; ENVELOPE_BYTES];
         bytes[..4].copy_from_slice(b"LBE2");
         bytes[4..68].copy_from_slice(&poll);
-        bytes[68..132].copy_from_slice(&inventory);
+        bytes[68..132].copy_from_slice(&setup_identity);
         bytes[132..134].copy_from_slice(&(position as u16).to_le_bytes());
         bytes[134..142].copy_from_slice(&ballot_time.to_le_bytes());
         bytes[142..150].copy_from_slice(&(body_length as u64).to_le_bytes());
@@ -102,7 +102,7 @@ impl BallotEnvelope {
     pub fn poll(&self) -> &[u8; 64] {
         self.bytes[4..68].try_into().unwrap()
     }
-    pub fn inventory(&self) -> &[u8; 64] {
+    pub fn setup_identity(&self) -> &[u8; 64] {
         self.bytes[68..132].try_into().unwrap()
     }
     pub fn position(&self) -> usize {
@@ -190,19 +190,19 @@ impl Credential {
         &self,
         poll: &VerifiedPoll,
         context: &RetainedContributionContext,
-        inventory: [u8; 64],
+        setup_identity: [u8; 64],
         reference: &[u8],
         tag: &[u8],
     ) -> Result<RetainedBallotOwner, Error> {
         self.check_owner_context(poll, context)?;
         self.check_retained_setup_tag(poll, reference, tag)?;
-        if reference.get(4..68) != Some(inventory.as_slice()) {
+        if reference.get(4..68) != Some(setup_identity.as_slice()) {
             return Err(Error::Context);
         }
         Ok(RetainedBallotOwner {
             poll: poll.identity(),
             runtime: poll.runtime(),
-            inventory,
+            setup_identity,
             position: context.position,
             owner_body: context.owner_body,
             signing_public: self.signing_public,
@@ -216,7 +216,7 @@ impl Credential {
         if self.completed_body != Some(owner.owner_body)
             || self.signing_public != owner.signing_public
             || envelope.poll() != owner.poll()
-            || envelope.inventory() != owner.inventory()
+            || envelope.setup_identity() != owner.setup_identity()
             || envelope.position() != owner.position()
         {
             return Err(Error::Context);
@@ -235,7 +235,7 @@ impl Credential {
         if self.completed_body != Some(owner.owner_body)
             || self.signing_public != owner.signing_public
             || envelope.poll() != owner.poll()
-            || envelope.inventory() != owner.inventory()
+            || envelope.setup_identity() != owner.setup_identity()
             || envelope.position() != owner.position()
         {
             return Err(Error::Context);
@@ -288,14 +288,16 @@ impl Credential {
 
 pub fn verify_ballot_signature(
     roster: &OrganizerSignedRoster,
-    expected_inventory: &[u8; 64],
+    expected_setup_identity: &[u8; 64],
     envelope: &BallotEnvelope,
     signature: &[u8],
 ) -> bool {
     let Some(record) = roster.proposal().records().get(envelope.position()) else {
         return false;
     };
-    if envelope.poll() != &record.header().poll || envelope.inventory() != expected_inventory {
+    if envelope.poll() != &record.header().poll
+        || envelope.setup_identity() != expected_setup_identity
+    {
         return false;
     }
     let Ok(signature) = <[u8; SIGNATURE_BYTES]>::try_from(signature) else {

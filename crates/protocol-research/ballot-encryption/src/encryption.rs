@@ -305,7 +305,7 @@ impl LinkedBallotWitness {
     ) -> Result<Self, Refusal> {
         let profile = context.profile();
         if fhe_key.index() != fhe_key_polynomial(profile)
-            || fhe_key.inventory() != context.inventory()
+            || fhe_key.setup_identity() != context.setup_identity()
         {
             return Err(Refusal::Context);
         }

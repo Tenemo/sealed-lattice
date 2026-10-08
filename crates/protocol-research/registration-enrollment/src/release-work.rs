@@ -22,7 +22,7 @@ impl ReleaseWork {
         if owner.position() != context.position()
             || owner.poll() != &target.poll().identity()
             || owner.runtime() != &target.poll().runtime()
-            || owner.inventory() != &target.setup().identity()
+            || owner.setup_identity() != &target.setup().identity()
         {
             return Err(Error::Context);
         }

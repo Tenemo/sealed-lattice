@@ -50,7 +50,7 @@ import type { CandidateView, PublicRelay } from './relay.js';
 import { ballotPhase, closePhase, rootGeneration } from './root-generation.js';
 import { commitRoot, dataRecordInventory } from './root.js';
 import type { ParticipantProfile } from './runtime-bounds.js';
-import { retainedSetupInventory } from './setup.js';
+import { retainedSetupIdentity } from './setup.js';
 import { encodeSignedPacket } from './signed-packet.js';
 import { snapshotParticipant } from './storage.js';
 
@@ -217,7 +217,7 @@ export const resumeClose = async (
         throw new Error('No close log is retained.');
     const records = recordContext(
         participant,
-        await retainedSetupInventory(participant),
+        await retainedSetupIdentity(participant),
     );
     const state = decodeCloseState(
         context.profile,
@@ -688,7 +688,7 @@ const startCloseWork = async (session: CloseSession) => {
         context,
         closeOperation.begin,
         0,
-        await ballotWorkInput(participant, session.records.inventory),
+        await ballotWorkInput(participant, session.records.setupIdentity),
     );
     if (session.ballot !== undefined)
         closeCommand(
@@ -727,7 +727,7 @@ export const restoreCompletedClose = async (session: CloseSession) => {
         context,
         closeOperation.begin,
         0,
-        await ballotWorkInput(participant, session.records.inventory),
+        await ballotWorkInput(participant, session.records.setupIdentity),
     );
     if (session.ballot !== undefined)
         closeCommand(

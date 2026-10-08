@@ -32,7 +32,7 @@ pub fn minimum_turnout(participants: usize) -> usize {
 pub struct TargetMessage {
     body: Vec<u8>,
     poll: [u8; 64],
-    inventory: [u8; 64],
+    setup_identity: [u8; 64],
     proposal: [u8; 64],
     identity: [u8; 64],
     participants: usize,
@@ -120,7 +120,7 @@ impl TargetMessage {
                 .canonical_bytes()
                 .try_into()
                 .map_err(|_| Error::Shape)?,
-            inventory: items[2]
+            setup_identity: items[2]
                 .canonical_bytes()
                 .try_into()
                 .map_err(|_| Error::Shape)?,
@@ -148,8 +148,8 @@ impl TargetMessage {
     pub fn proposal(&self) -> &[u8; 64] {
         &self.proposal
     }
-    pub fn inventory(&self) -> &[u8; 64] {
-        &self.inventory
+    pub fn setup_identity(&self) -> &[u8; 64] {
+        &self.setup_identity
     }
     pub fn participants(&self) -> usize {
         self.participants
@@ -216,7 +216,7 @@ impl Credential {
         let record = records.get(owner.position()).ok_or(Error::Context)?;
         if records.len() != message.participants
             || message.poll() != owner.poll()
-            || message.inventory() != owner.inventory()
+            || message.setup_identity() != owner.setup_identity()
             || record.header().signing_public != self.signing_public
             || self.completed_body != Some(record.body_digest())
             || self

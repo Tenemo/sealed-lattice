@@ -163,7 +163,7 @@ export const releaseRecordAssociatedData = (
         encodeText('sealed-lattice/participant-release-record/v2'),
         context.poll,
         context.runtime,
-        context.inventory,
+        context.setupIdentity,
         unsigned16(context.position),
         targetDigest,
         unsigned16(index),
