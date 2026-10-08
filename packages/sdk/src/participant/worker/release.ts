@@ -187,6 +187,23 @@ const releaseCommand = (
     );
 };
 
+// The completion verifier's operations, as its command numbers them.
+const completionOperation = {
+    beginVotes: 0,
+    insertVote: 1,
+    certify: 2,
+    // A release share's two public operands, the constant then the linear
+    // polynomial, each delivered in chunks.
+    beginShareConstant: 3,
+    pushOperand: 4,
+    finishOperand: 5,
+    authenticateRelease: 6,
+    beginReleaseBody: 7,
+    pushReleaseBody: 8,
+    finishRelease: 9,
+    result: 10,
+} as const;
+
 const tryCompletionCommand = (
     context: PublicProfileContext,
     operation: number,
@@ -230,7 +247,9 @@ export const certifyTarget = async (
     relay: PublicRelay,
     restored: boolean,
 ) => {
-    const [count, threshold] = words(completionCommand(context, 0));
+    const [count, threshold] = words(
+        completionCommand(context, completionOperation.beginVotes),
+    );
     let accepted = 0;
     let refused = false;
     const pending = new Map(
@@ -271,7 +290,12 @@ export const certifyTarget = async (
                 readUnsigned16(vote, 0) !== position
             )
                 continue;
-            const inserted = tryCompletionCommand(context, 1, 0, vote);
+            const inserted = tryCompletionCommand(
+                context,
+                completionOperation.insertVote,
+                0,
+                vote,
+            );
             if (inserted === undefined) refused = true;
             else {
                 accepted = words(inserted)[1];
@@ -280,7 +304,10 @@ export const certifyTarget = async (
             }
         }
     }
-    const certified = tryCompletionCommand(context, 2);
+    const certified = tryCompletionCommand(
+        context,
+        completionOperation.certify,
+    );
     if (certified === undefined) {
         if (restored && refused) await discardEvaluation(context);
         throw new PublicInputFailure('The target votes are incomplete.');
@@ -296,18 +323,34 @@ const establishReleaseContext = async (
 ) => {
     const stream = (index: number) =>
         readFinalAggregate(context, index, (offset, bytes) => {
-            if (tryCompletionCommand(context, 4, offset, bytes) === undefined)
+            if (
+                tryCompletionCommand(
+                    context,
+                    completionOperation.pushOperand,
+                    offset,
+                    bytes,
+                ) === undefined
+            )
                 throw new PublicInputFailure('A release key was refused.');
         });
     // Finishing a polynomial checks its bytes against the retained setup
     // reference.
     const finish = () => {
-        const output = tryCompletionCommand(context, 5);
+        const output = tryCompletionCommand(
+            context,
+            completionOperation.finishOperand,
+        );
         if (output === undefined)
             throw new PublicInputFailure('A release key was refused.');
         return output;
     };
-    const constant = words(completionCommand(context, 3, position))[0];
+    const constant = words(
+        completionCommand(
+            context,
+            completionOperation.beginShareConstant,
+            position,
+        ),
+    )[0];
     await deliverFinalAggregate(context, async () => {
         await stream(constant);
         await stream(words(finish())[0]);
@@ -673,7 +716,9 @@ export const combineReleaseShares = async (
 ) => {
     const { profile } = context;
     const bounds = profile.release;
-    let result = encrypted ? undefined : tryCompletionCommand(context, 10);
+    let result = encrypted
+        ? undefined
+        : tryCompletionCommand(context, completionOperation.result);
     const pending = new Map(
         Array.from(
             { length: profile.participantCount },
@@ -706,7 +751,12 @@ export const combineReleaseShares = async (
                 throw error;
             }
             await establishReleaseContext(context, position);
-            const authenticated = tryCompletionCommand(context, 6, 0, packet);
+            const authenticated = tryCompletionCommand(
+                context,
+                completionOperation.authenticateRelease,
+                0,
+                packet,
+            );
             if (authenticated === undefined) continue;
             let header: Uint8Array = new Uint8Array();
             let accepted = true;
@@ -727,23 +777,37 @@ export const combineReleaseShares = async (
                             rest = rest.subarray(taken.length);
                             if (header.length < bounds.bodyHeaderBytes) return;
                             accepted &&=
-                                tryCompletionCommand(context, 7, 0, header) !==
-                                undefined;
+                                tryCompletionCommand(
+                                    context,
+                                    completionOperation.beginReleaseBody,
+                                    0,
+                                    header,
+                                ) !== undefined;
                         }
                         if (rest.length > 0 && accepted)
                             accepted =
-                                tryCompletionCommand(context, 8, 0, rest) !==
-                                undefined;
+                                tryCompletionCommand(
+                                    context,
+                                    completionOperation.pushReleaseBody,
+                                    0,
+                                    rest,
+                                ) !== undefined;
                     },
                 );
             } catch (error) {
                 if (!(error instanceof PublicInputFailure)) throw error;
                 accepted = false;
             }
-            if (!accepted || tryCompletionCommand(context, 9) === undefined)
+            if (
+                !accepted ||
+                tryCompletionCommand(
+                    context,
+                    completionOperation.finishRelease,
+                ) === undefined
+            )
                 continue;
             pending.delete(position);
-            result = tryCompletionCommand(context, 10);
+            result = tryCompletionCommand(context, completionOperation.result);
             if (result !== undefined) break;
         }
     }

@@ -185,6 +185,25 @@ const readBody = async (
     return held(consume);
 };
 
+// The close barrier verifier's operations, as its close command numbers
+// them.
+const barrierOperation = {
+    begin: 1,
+    intent: 2,
+    envelope: 3,
+    // A usable slot's body, named by its envelope identity and transferred
+    // in chunks.
+    beginBody: 4,
+    pushBody: 5,
+    finishBody: 6,
+    response: 7,
+    // The usable-slot bodies a proposal still needs, before its signature is
+    // checked.
+    requiredBodies: 8,
+    proposal: 9,
+    discardBody: 10,
+} as const;
+
 const barrierCommand = (
     context: PublicProfileContext,
     operation: number,
@@ -297,7 +316,12 @@ const verifyUsableBody = async (
             yield { candidate, name: 'body.bin' };
     };
     for await (const source of sources()) {
-        requireBarrier(context, 4, identity, 'A usable body was refused.');
+        requireBarrier(
+            context,
+            barrierOperation.beginBody,
+            identity,
+            'A usable body was refused.',
+        );
         try {
             await readBody(
                 records,
@@ -308,17 +332,18 @@ const verifyUsableBody = async (
                 (bytes) => {
                     requireBarrier(
                         context,
-                        5,
+                        barrierOperation.pushBody,
                         bytes,
                         'A usable body was refused.',
                     );
                 },
             );
-            if (barrierCommand(context, 6)) return source;
+            if (barrierCommand(context, barrierOperation.finishBody))
+                return source;
         } catch (error) {
             if (!(error instanceof PublicInputFailure)) throw error;
         }
-        barrierCommand(context, 10);
+        barrierCommand(context, barrierOperation.discardBody);
     }
     throw new PublicInputFailure('A usable body was refused.');
 };
@@ -339,11 +364,11 @@ const verifyCloseBarrier = async (
         relay,
         closeProposalCandidateKey,
         async (publication) => {
-            if (!barrierCommand(context, 1))
+            if (!barrierCommand(context, barrierOperation.begin))
                 throw new Error('The close verifier has no verified setup.');
             requireBarrier(
                 context,
-                2,
+                barrierOperation.intent,
                 await readCandidateFile(
                     relay,
                     publication,
@@ -396,7 +421,7 @@ const verifyCloseBarrier = async (
                     );
                     requireBarrier(
                         context,
-                        3,
+                        barrierOperation.envelope,
                         submission,
                         'A listed envelope was refused.',
                     );
@@ -404,7 +429,7 @@ const verifyCloseBarrier = async (
                 }
                 requireBarrier(
                     context,
-                    7,
+                    barrierOperation.response,
                     response,
                     'A close response was refused.',
                 );
@@ -413,7 +438,7 @@ const verifyCloseBarrier = async (
             // needs are all of them.
             requireBarrier(
                 context,
-                8,
+                barrierOperation.requiredBodies,
                 proposal,
                 'The close proposal was refused.',
             );
@@ -444,7 +469,7 @@ const verifyCloseBarrier = async (
             }
             requireBarrier(
                 context,
-                9,
+                barrierOperation.proposal,
                 proposal,
                 'The close barrier was refused.',
             );
@@ -541,6 +566,31 @@ const classifyBallot = async (
     return classification === 1;
 };
 
+// The evaluation's operations, as its command numbers them.
+const evaluationOperation = {
+    begin: 0,
+    takeClassification: 1,
+    start: 2,
+    requirements: 10,
+    nextKey: 11,
+    // Incoming bytes of a key, ballot input or stored value.
+    pushInput: 12,
+    finishInput: 13,
+    beginBallotInput: 14,
+    execute: 15,
+    readValue: 16,
+    readBack: 17,
+    reload: 18,
+    finish: 19,
+    keyRecord: 21,
+    takeKeyRecord: 22,
+    sharedKeyRecords: 23,
+} as const;
+
+// The steps of restoring a retained evaluated target: begin a copy of its
+// length, push its bytes, and finish.
+const evaluationRestore = { begin: 0, push: 1, finish: 2 } as const;
+
 const tryEvaluationCommand = (
     context: PublicProfileContext,
     operation: number,
@@ -583,10 +633,20 @@ const deliverEvaluationInput = async (
     reason: string,
 ) => {
     await produce((bytes) => {
-        if (tryEvaluationCommand(context, 12, 0, bytes) === undefined)
+        if (
+            tryEvaluationCommand(
+                context,
+                evaluationOperation.pushInput,
+                0,
+                bytes,
+            ) === undefined
+        )
             throw new PublicInputFailure(reason);
     });
-    if (tryEvaluationCommand(context, 13) === undefined)
+    if (
+        tryEvaluationCommand(context, evaluationOperation.finishInput) ===
+        undefined
+    )
         throw new PublicInputFailure(reason);
 };
 
@@ -729,7 +789,8 @@ const restoreEvaluationCopy = async (context: ProfileContext) => {
     // The module bounds the copy's length before any of it is read, and its
     // last step ends the copy it began whether or not the copy restores.
     const { kernel } = context;
-    let restored = kernel.restore_evaluation(0, length) === 0;
+    let restored =
+        kernel.restore_evaluation(evaluationRestore.begin, length) === 0;
     if (restored) {
         let terminal = false;
         try {
@@ -757,7 +818,11 @@ const restoreEvaluationCopy = async (context: ProfileContext) => {
                 }
                 const chunk = new Uint8Array(buffer);
                 sessionInput(context, chunk);
-                restored = kernel.restore_evaluation(1, chunk.length) === 0;
+                restored =
+                    kernel.restore_evaluation(
+                        evaluationRestore.push,
+                        chunk.length,
+                    ) === 0;
             }
         } catch (error) {
             terminal =
@@ -768,7 +833,9 @@ const restoreEvaluationCopy = async (context: ProfileContext) => {
             // Finish consumes an incomplete copy too. Terminally failed
             // instances cannot be entered again, including for cleanup.
             if (!terminal)
-                restored = kernel.restore_evaluation(2, 0) === 0 && restored;
+                restored =
+                    kernel.restore_evaluation(evaluationRestore.finish, 0) ===
+                        0 && restored;
         }
     }
     if (!restored) await discardEvaluation(context);
@@ -885,9 +952,15 @@ const evaluate = async (
         const storeKeyRecords = async (ordinal: number) => {
             const records: Uint8Array[] = [];
             for (
-                let output = evaluationCommand(context, 22);
+                let output = evaluationCommand(
+                    context,
+                    evaluationOperation.takeKeyRecord,
+                );
                 output.length > 0;
-                output = evaluationCommand(context, 22)
+                output = evaluationCommand(
+                    context,
+                    evaluationOperation.takeKeyRecord,
+                )
             )
                 records.push(output);
             await writeEvaluationStorage(storage, (store) => {
@@ -900,12 +973,14 @@ const evaluate = async (
         };
         // The values spilled and not yet retired, whose chunks storage holds.
         const spilled = new Set<number>();
-        evaluationCommand(context, 2);
+        evaluationCommand(context, evaluationOperation.start);
         while (
             kernel.evaluation_target_body_length() === 0 &&
             kernel.evaluation_target_finished() !== 1
         ) {
-            const required = words(evaluationCommand(context, 10));
+            const required = words(
+                evaluationCommand(context, evaluationOperation.requirements),
+            );
             const [, loaded, keyCount, spillCount, reloadCount, author] =
                 required;
             if (required.length !== 7 + spillCount + reloadCount)
@@ -916,7 +991,7 @@ const evaluate = async (
                     for (const chunk of chunks(node)) {
                         const bytes = evaluationCommand(
                             context,
-                            16,
+                            evaluationOperation.readValue,
                             node,
                             concatenate(
                                 unsigned32(chunk.offset),
@@ -936,17 +1011,19 @@ const evaluate = async (
                         ]);
                     }
                 });
-                await deliverStored(17, node);
+                await deliverStored(evaluationOperation.readBack, node);
             }
             for (const node of required.slice(7 + spillCount))
-                await deliverStored(18, node);
+                await deliverStored(evaluationOperation.reload, node);
             // A new cache replaces the earlier cache's records.
             if (loaded === 0 && keyCount > 0)
                 await writeEvaluationStorage(storage, (store) =>
                     store.delete(IDBKeyRange.bound(['key'], ['key', []])),
                 );
             for (let ordinal = loaded; ordinal < keyCount; ordinal++) {
-                const [index] = words(evaluationCommand(context, 11));
+                const [index] = words(
+                    evaluationCommand(context, evaluationOperation.nextKey),
+                );
                 if (index !== unusedWord)
                     await deliverFinalAggregate(context, () =>
                         deliverEvaluationInput(
@@ -963,7 +1040,13 @@ const evaluate = async (
                 await storeKeyRecords(ordinal);
             }
             if (author !== unusedWord) {
-                const [length] = words(evaluationCommand(context, 14, author));
+                const [length] = words(
+                    evaluationCommand(
+                        context,
+                        evaluationOperation.beginBallotInput,
+                        author,
+                    ),
+                );
                 const slot = usable.get(author);
                 if (length > 0 && slot === undefined)
                     throw new Error('The evaluation needs an unusable ballot.');
@@ -988,7 +1071,9 @@ const evaluate = async (
             // helper's job the step awaits runs.
             const ahead = new Map<string, Promise<Uint8Array[]>>();
             for (;;) {
-                const [status, ...rest] = words(evaluationCommand(context, 15));
+                const [status, ...rest] = words(
+                    evaluationCommand(context, evaluationOperation.execute),
+                );
                 if (status === 0) {
                     // Only a value spilled earlier leaves records to delete.
                     const retired = rest.filter((node) => spilled.delete(node));
@@ -1060,7 +1145,7 @@ const evaluate = async (
                     if (
                         tryEvaluationCommand(
                             context,
-                            23,
+                            evaluationOperation.sharedKeyRecords,
                             handle,
                             concatenate(
                                 ...[first, count, prime, length].map((value) =>
@@ -1077,7 +1162,7 @@ const evaluate = async (
                         if (
                             tryEvaluationCommand(
                                 context,
-                                21,
+                                evaluationOperation.keyRecord,
                                 first + index,
                                 concatenate(unsigned32(prime), record),
                             ) === undefined
@@ -1088,7 +1173,7 @@ const evaluate = async (
             }
         }
         if (kernel.evaluation_target_body_length() === 0)
-            evaluationCommand(context, 19);
+            evaluationCommand(context, evaluationOperation.finish);
         await writeEvaluationStorage(storage, (store) => store.clear());
     } finally {
         storage.close();
@@ -1190,7 +1275,7 @@ export const evaluateClosedTarget = async (
 ) => {
     const { context } = records;
     const usable = await verifyCloseBarrier(records, relay);
-    evaluationCommand(context, 0);
+    evaluationCommand(context, evaluationOperation.begin);
     let validBallots = 0;
     for (let author = 0; author < context.profile.participantCount; author++) {
         const slot = usable.get(author);
@@ -1200,7 +1285,7 @@ export const evaluateClosedTarget = async (
         )
             validBallots++;
         // Each slot takes the classification just made, or none.
-        evaluationCommand(context, 1);
+        evaluationCommand(context, evaluationOperation.takeClassification);
     }
     return {
         body: await evaluate(records, relay, usable),
