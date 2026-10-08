@@ -286,6 +286,32 @@ const haltingClient = (worker: Buffer, generation: number): HaltingClient => {
 const participantNamespace = 'research-cohort';
 const participantDatabase = participantDatabaseName(participantNamespace);
 
+// A page script that runs an asynchronous body against one of the page's
+// IndexedDB databases and then closes it. The body sees the open `database`
+// and the `result` and `completion` helpers, which settle a request and a
+// transaction, so a throw anywhere in it rejects the evaluation instead of
+// leaving it waiting.
+const databaseScript = (name: string, body: string) => `(async () => {
+    const database = await new Promise((resolve, reject) => {
+        const opening = indexedDB.open(${JSON.stringify(name)});
+        opening.onerror = () => reject(opening.error);
+        opening.onsuccess = () => resolve(opening.result);
+    });
+    const result = (request) => new Promise((resolve, reject) => {
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+    });
+    const completion = (transaction) => new Promise((resolve, reject) => {
+        transaction.oncomplete = () => resolve();
+        transaction.onabort = () => reject(transaction.error ?? new Error('The transaction aborted.'));
+    });
+    try {
+${body}
+    } finally {
+        database.close();
+    }
+})()`;
+
 // An honest participant's page runs every operation through the SDK's
 // participant API, which carries the packaged worker; the relay serves it
 // beside the packaged module. The page also runs the SDK's
@@ -1797,27 +1823,22 @@ await runWithLocalRunLog(
             const headGeneration = async (position: number, copy?: string) =>
                 Number(
                     await inBrowser(position, copy, (chrome) =>
-                        chrome.evaluate(`new Promise((resolve, reject) => {
-    const opening = indexedDB.open(${JSON.stringify(participantDatabase)});
-    opening.onerror = () => reject(opening.error);
-    opening.onsuccess = () => {
-        const database = opening.result;
-        const reading = database.transaction('head').objectStore('head').get(0);
-        reading.onsuccess = () => { database.close(); resolve(reading.result?.generation ?? 0); };
-        reading.onerror = () => { database.close(); reject(reading.error); };
-    };
-})`),
+                        chrome.evaluate(
+                            databaseScript(
+                                participantDatabase,
+                                `return (await result(database.transaction('head').objectStore('head').get(0)))?.generation ?? 0;`,
+                            ),
+                        ),
                     ),
                 );
             const retainedHead = async (position: number, copy?: string) =>
                 inBrowser(position, copy, (chrome) =>
-                    chrome.evaluate(`new Promise((resolve,reject) => {
-    const opening=indexedDB.open(${JSON.stringify(participantDatabase)});
-    opening.onerror=()=>reject(opening.error);
-    opening.onsuccess=()=>{ const database=opening.result; const reading=database.transaction('head').objectStore('head').get(0);
-        reading.onsuccess=()=>{database.close();resolve(reading.result);};
-        reading.onerror=()=>{database.close();reject(reading.error);}; };
-})`),
+                    chrome.evaluate(
+                        databaseScript(
+                            participantDatabase,
+                            `return await result(database.transaction('head').objectStore('head').get(0));`,
+                        ),
+                    ),
                 ) as Promise<{
                     generation: number;
                     hash: string;
@@ -1828,16 +1849,12 @@ await runWithLocalRunLog(
             const storedRecords = async (position: number, store: string) =>
                 Number(
                     await inBrowser(position, undefined, (chrome) =>
-                        chrome.evaluate(`new Promise((resolve, reject) => {
-    const opening = indexedDB.open(${JSON.stringify(participantDatabase)});
-    opening.onerror = () => reject(opening.error);
-    opening.onsuccess = () => {
-        const database = opening.result;
-        const counting = database.transaction(${JSON.stringify(store)}).objectStore(${JSON.stringify(store)}).count();
-        counting.onsuccess = () => { database.close(); resolve(counting.result); };
-        counting.onerror = () => { database.close(); reject(counting.error); };
-    };
-})`),
+                        chrome.evaluate(
+                            databaseScript(
+                                participantDatabase,
+                                `return await result(database.transaction(${JSON.stringify(store)}).objectStore(${JSON.stringify(store)}).count());`,
+                            ),
+                        ),
                     ),
                 );
             // Ends a participant's browser as a crash would. Its committed
@@ -2084,25 +2101,19 @@ await runWithLocalRunLog(
                         position,
                         copy,
                         (chrome) =>
-                            chrome.evaluate(`new Promise((resolve, reject) => {
-    const opening = indexedDB.open(${JSON.stringify(participantDatabase)});
-    opening.onerror = () => reject(opening.error);
-    opening.onsuccess = () => {
-        const database = opening.result;
-        const fail = (error) => { database.close(); reject(error); };
-        const deleting = database.transaction(${JSON.stringify(store)}, 'readwrite');
-        const reading = deleting.objectStore(${JSON.stringify(store)}).openCursor(null, 'prev');
-        let key;
-        reading.onerror = () => fail(reading.error);
-        reading.onsuccess = () => {
-            if (reading.result === null) return fail(new Error('No record to lose.'));
-            key = reading.result.key;
-            reading.result.delete();
-        };
-        deleting.oncomplete = () => { database.close(); resolve(key); };
-        deleting.onabort = () => fail(deleting.error);
-    };
-})`),
+                            chrome.evaluate(
+                                databaseScript(
+                                    participantDatabase,
+                                    `const deleting = database.transaction(${JSON.stringify(store)}, 'readwrite');
+const deleted = completion(deleting);
+const cursor = await result(deleting.objectStore(${JSON.stringify(store)}).openCursor(null, 'prev'));
+if (cursor === null) throw new Error('No record to lose.');
+const key = cursor.key;
+cursor.delete();
+await deleted;
+return key;`,
+                                ),
+                            ),
                     );
                     const publicationAttempts =
                         relay!.publicationAttempts[position];
@@ -4632,21 +4643,18 @@ await runWithLocalRunLog(
             const selectedProofFaults: Record<string, unknown>[] = [];
             const setupCacheSnapshot = async (position: number) =>
                 (await inBrowser(position, undefined, (chrome) =>
-                    chrome.evaluate(`new Promise((resolve, reject) => {
-                const opening = indexedDB.open(${JSON.stringify(namespacedName(setupCacheName, participantNamespace))});
-                opening.onerror = () => reject(opening.error);
-                opening.onsuccess = () => {
-                    const database = opening.result;
-                    if (!database.objectStoreNames.contains('aggregate')) { database.close(); reject(new Error('No aggregate cache exists.')); return; }
-                    const reading = database.transaction('aggregate').objectStore('aggregate').getAllKeys();
-                    reading.onerror = () => { database.close(); reject(reading.error); };
-                    reading.onsuccess = () => {
-                        const keys = reading.result;
-                        const ordinals = [...new Set(keys.filter(key => Array.isArray(key) && key.length === 3).map(key => key[0]))].sort();
-                        database.close(); resolve({records: keys.length, ordinals});
-                    };
-                };
-            })`),
+                    chrome.evaluate(
+                        databaseScript(
+                            namespacedName(
+                                setupCacheName,
+                                participantNamespace,
+                            ),
+                            `if (!database.objectStoreNames.contains('aggregate')) throw new Error('No aggregate cache exists.');
+const keys = await result(database.transaction('aggregate').objectStore('aggregate').getAllKeys());
+const ordinals = [...new Set(keys.filter((key) => Array.isArray(key) && key.length === 3).map((key) => key[0]))].sort();
+return { records: keys.length, ordinals };`,
+                        ),
+                    ),
                 )) as { records: number; ordinals: number[] };
             if (mode === 'preparation') {
                 const proofName = finalOffer + 'proof.bin';
@@ -5178,7 +5186,7 @@ await runWithLocalRunLog(
                         generation,
                     );
                     if (generation === 15)
-                        await loseState(position, 'cast-ballot', 'cast-ballot');
+                        await loseState(position, 'ballot', 'cast-ballot');
                 }
                 assert.equal(
                     (
@@ -6497,26 +6505,21 @@ await runWithLocalRunLog(
             // participant root. A damaged credential-keyed target must be
             // discarded and recomputed from the actual close inputs.
             await inBrowser(voteProbe, undefined, (chrome) =>
-                chrome.evaluate(`new Promise((resolve, reject) => {
-    const opening = indexedDB.open(${JSON.stringify(namespacedName(evaluatedTargetName, participantNamespace))});
-    opening.onerror = () => reject(opening.error);
-    opening.onsuccess = () => {
-        const database = opening.result;
-        const reading = database.transaction('target').objectStore('target').get(0);
-        reading.onerror = () => { database.close(); reject(reading.error); };
-        reading.onsuccess = () => {
-            const stored = reading.result;
-            if (!(stored instanceof Blob) || stored.size === 0) { database.close(); reject(new Error('No evaluated target cache.')); return; }
-            stored.slice(-1).arrayBuffer().then((buffer) => {
-                const tail = new Uint8Array(buffer); tail[0] ^= 1;
-                const writing = database.transaction('target', 'readwrite');
-                writing.objectStore('target').put(new Blob([stored.slice(0, -1), tail]), 0);
-                writing.oncomplete = () => { database.close(); resolve(undefined); };
-                writing.onabort = () => { database.close(); reject(writing.error); };
-            }).catch((error) => { database.close(); reject(error); });
-        };
-    };
-})`),
+                chrome.evaluate(
+                    databaseScript(
+                        namespacedName(
+                            evaluatedTargetName,
+                            participantNamespace,
+                        ),
+                        `const stored = await result(database.transaction('target').objectStore('target').get(0));
+if (!(stored instanceof Blob) || stored.size === 0) throw new Error('No evaluated target cache.');
+const tail = new Uint8Array(await stored.slice(-1).arrayBuffer());
+tail[0] ^= 1;
+const writing = database.transaction('target', 'readwrite');
+writing.objectStore('target').put(new Blob([stored.slice(0, -1), tail]), 0);
+await completion(writing);`,
+                    ),
+                ),
             );
             deliveredRecords[voteProbe].clear();
             const recomputed = await run(voteProbe, 'compute-result');
@@ -6537,28 +6540,20 @@ await runWithLocalRunLog(
             const stoppedPosition = probes[0];
             const flipDataRecord = async () =>
                 inBrowser(stoppedPosition, undefined, (chrome) =>
-                    chrome.evaluate(`new Promise((resolve, reject) => {
-    const opening = indexedDB.open(${JSON.stringify(participantDatabase)});
-    opening.onerror = () => reject(opening.error);
-    opening.onsuccess = () => {
-        const database = opening.result;
-        const fail = (error) => { database.close(); reject(error); };
-        const reading = database.transaction('data').objectStore('data').openCursor();
-        reading.onerror = () => fail(reading.error);
-        reading.onsuccess = () => {
-            if (reading.result === null) return fail(new Error('No data record.'));
-            const { key, value } = reading.result;
-            value.arrayBuffer().then((buffer) => {
-                const bytes = new Uint8Array(buffer);
-                bytes[0] ^= 1;
-                const writing = database.transaction('data', 'readwrite');
-                writing.oncomplete = () => { database.close(); resolve(key); };
-                writing.onabort = () => fail(writing.error);
-                writing.objectStore('data').put(new Blob([bytes]), key);
-            }, fail);
-        };
-    };
-})`),
+                    chrome.evaluate(
+                        databaseScript(
+                            participantDatabase,
+                            `const cursor = await result(database.transaction('data').objectStore('data').openCursor());
+if (cursor === null) throw new Error('No data record.');
+const { key, value } = cursor;
+const bytes = new Uint8Array(await value.arrayBuffer());
+bytes[0] ^= 1;
+const writing = database.transaction('data', 'readwrite');
+writing.objectStore('data').put(new Blob([bytes]), key);
+await completion(writing);
+return key;`,
+                        ),
+                    ),
                 );
             const alteredRecord = await flipDataRecord();
             assert.deepEqual(await request(stoppedPosition, 'status'), {

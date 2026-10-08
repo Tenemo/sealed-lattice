@@ -343,17 +343,23 @@ export const launchChromeParticipant = async (
                 };
                 if (targetInfo.type === 'worker') workerSessions.add(sessionId);
             } else if (message.method === 'Target.detachedFromTarget') {
-                // A detached worker answers none of its requests.
+                // A detached worker or page answers none of its requests.
                 const detached = String(
                     (message.params as { sessionId?: string } | undefined)
                         ?.sessionId,
                 );
-                workerSessions.delete(detached);
+                const worker = workerSessions.delete(detached);
                 heapUsages.delete(detached);
                 for (const [id, request] of pending)
                     if (request.sessionId === detached) {
                         pending.delete(id);
-                        request.reject(new Error('The worker detached.'));
+                        request.reject(
+                            new Error(
+                                worker
+                                    ? 'The worker detached.'
+                                    : 'The participant page detached.',
+                            ),
+                        );
                     }
             } else if (message.method === 'Tracing.dataCollected')
                 tracing?.events.push(
