@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import type { PublicProfileContext } from '#packages/sdk/src/participant/worker/context.js';
+import type { PublicProfileContext } from '#packages/sdk/src/participant/worker/module/context.js';
 import {
     classifyFailure,
     InvalidRequest,
@@ -10,8 +10,8 @@ import {
     ResourceFailure,
     StorageFailure,
     UnrecognizedState,
-} from '#packages/sdk/src/participant/worker/failures.js';
-import { authenticateSelection } from '#packages/sdk/src/participant/worker/setup.js';
+} from '#packages/sdk/src/participant/worker/shared/failures.js';
+import { authenticateSelection } from '#packages/sdk/src/participant/worker/stages/setup/setup.js';
 
 describe('participant failures', () => {
     it('name what a pending participant waits for by the failure that ended its operation', () => {

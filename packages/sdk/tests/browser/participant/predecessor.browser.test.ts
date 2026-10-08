@@ -3,8 +3,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
     type ParticipantStoredRecord,
     validateParticipantPredecessor,
-} from '#packages/sdk/src/participant/worker/predecessor.js';
-import { commitParticipantState } from '#packages/sdk/src/participant/worker/state-transaction.js';
+} from '#packages/sdk/src/participant/worker/storage/predecessor.js';
+import { commitParticipantState } from '#packages/sdk/src/participant/worker/storage/state-transaction.js';
 
 const stores = ['head', 'root', 'key', 'stopped', 'data', 'sealed'];
 const databases: IDBDatabase[] = [];

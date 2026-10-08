@@ -11,7 +11,9 @@ describe('complete first-oracle proof checkpoint', () => {
         const read = (file: string) =>
             readFile(new URL('../../../' + file, import.meta.url), 'utf8');
         const [worker, bridge, transcript, checkpoint] = await Promise.all([
-            read('packages/sdk/src/participant/worker/contribution.ts'),
+            read(
+                'packages/sdk/src/participant/worker/stages/contribution/contribution.ts',
+            ),
             read('crates/protocol-research/word-proof/src/bridge.rs'),
             read('crates/protocol-research/word-proof/src/transcript.rs'),
             read('crates/protocol-research/word-proof/src/first-checkpoint.rs'),

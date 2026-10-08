@@ -1,15 +1,15 @@
 import binaryen from 'binaryen';
 import { describe, expect, it } from 'vitest';
 
-import {
-    ModuleFailure,
-    ResourceFailure,
-} from '#packages/sdk/src/participant/worker/failures.js';
-import type { ParallelHelpers } from '#packages/sdk/src/participant/worker/parallel-helpers.js';
+import type { ParallelHelpers } from '#packages/sdk/src/participant/worker/module/parallel-helpers.js';
 import {
     instantiateParticipantModule,
     moduleFunctions,
-} from '#packages/sdk/src/participant/worker/participant-module.js';
+} from '#packages/sdk/src/participant/worker/module/participant-module.js';
+import {
+    ModuleFailure,
+    ResourceFailure,
+} from '#packages/sdk/src/participant/worker/shared/failures.js';
 
 // A stand-in participant module that exports every function the worker
 // calls. One export traps, one reports an exhausted memory bound through the

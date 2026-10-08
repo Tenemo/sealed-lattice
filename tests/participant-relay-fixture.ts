@@ -5,7 +5,7 @@ import {
     encodeCandidateManifest,
     encodeCandidatePage,
     encodeCandidateReceipt,
-} from '#packages/sdk/src/participant/worker/candidate-codec.js';
+} from '#packages/sdk/src/participant/worker/relay/candidate-codec.js';
 
 // In-memory transport only: it never authenticates a protocol record. Tests
 // may alter these public bytes independently of the owning verifier.

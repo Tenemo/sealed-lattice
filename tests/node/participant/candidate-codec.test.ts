@@ -9,7 +9,7 @@ import {
     encodeCandidateReceipt,
     isCandidateFileName,
     isCandidateKey,
-} from '#packages/sdk/src/participant/worker/candidate-codec.js';
+} from '#packages/sdk/src/participant/worker/relay/candidate-codec.js';
 
 describe('bounded candidate transport framing', () => {
     it('matches an independently encoded correlated manifest, including an empty file', () => {

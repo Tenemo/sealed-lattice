@@ -1,15 +1,25 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import type { ParticipantProfileContext } from '#packages/sdk/src/participant/worker/context.js';
-import { StorageFailure } from '#packages/sdk/src/participant/worker/failures.js';
+import type { ParticipantProfileContext } from '#packages/sdk/src/participant/worker/module/context.js';
 import {
     custodyIdentity,
     custodyPurpose,
-} from '#packages/sdk/src/participant/worker/identity.js';
-import { noParallelHelpers } from '#packages/sdk/src/participant/worker/parallel-helpers.js';
-import { instantiateParticipantModule } from '#packages/sdk/src/participant/worker/participant-module.js';
-import type { ParticipantStoredRecord } from '#packages/sdk/src/participant/worker/predecessor.js';
-import { sealRecord } from '#packages/sdk/src/participant/worker/private-records.js';
+} from '#packages/sdk/src/participant/worker/module/custody-identity.js';
+import { noParallelHelpers } from '#packages/sdk/src/participant/worker/module/parallel-helpers.js';
+import { instantiateParticipantModule } from '#packages/sdk/src/participant/worker/module/participant-module.js';
+import {
+    readParticipantLimits,
+    readParticipantProfile,
+} from '#packages/sdk/src/participant/worker/module/runtime-bounds.js';
+import { StorageFailure } from '#packages/sdk/src/participant/worker/shared/failures.js';
+import {
+    openParticipantDatabase,
+    readParticipantValue,
+    snapshotParticipant,
+} from '#packages/sdk/src/participant/worker/storage/database.js';
+import type { ParticipantStore } from '#packages/sdk/src/participant/worker/storage/database.js';
+import type { ParticipantStoredRecord } from '#packages/sdk/src/participant/worker/storage/predecessor.js';
+import { sealRecord } from '#packages/sdk/src/participant/worker/storage/private-records.js';
 import {
     commitRoot,
     createRootKey,
@@ -17,22 +27,12 @@ import {
     openRoot,
     rootAssociatedData,
     sealRoot,
-} from '#packages/sdk/src/participant/worker/root.js';
+} from '#packages/sdk/src/participant/worker/storage/root.js';
 import type {
     AuthenticatedRoot,
     ParticipantManifest,
     RootTransition,
-} from '#packages/sdk/src/participant/worker/root.js';
-import {
-    readParticipantLimits,
-    readParticipantProfile,
-} from '#packages/sdk/src/participant/worker/runtime-bounds.js';
-import {
-    openParticipantDatabase,
-    readParticipantValue,
-    snapshotParticipant,
-} from '#packages/sdk/src/participant/worker/storage.js';
-import type { ParticipantStore } from '#packages/sdk/src/participant/worker/storage.js';
+} from '#packages/sdk/src/participant/worker/storage/root.js';
 
 const compiledModule = await WebAssembly.compile(
     await (

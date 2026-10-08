@@ -1,19 +1,19 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import type { ParticipantProfileContext } from '#packages/sdk/src/participant/worker/context.js';
+import type { ParticipantProfileContext } from '#packages/sdk/src/participant/worker/module/context.js';
+import { chunkBytes } from '#packages/sdk/src/participant/worker/module/runtime-bounds.js';
 import {
     ModuleFailure,
     ResourceFailure,
-} from '#packages/sdk/src/participant/worker/failures.js';
-import { chunkBytes } from '#packages/sdk/src/participant/worker/runtime-bounds.js';
-import {
-    evaluatedTargetName,
-    namespacedName,
-} from '#packages/sdk/src/participant/worker/storage.js';
+} from '#packages/sdk/src/participant/worker/shared/failures.js';
 import {
     restoreEvaluation,
     retainEvaluation,
-} from '#packages/sdk/src/participant/worker/target.js';
+} from '#packages/sdk/src/participant/worker/stages/target-vote/target.js';
+import {
+    evaluatedTargetName,
+    namespacedName,
+} from '#packages/sdk/src/participant/worker/storage/database.js';
 
 const databases: IDBDatabase[] = [];
 const names: string[] = [];

@@ -3,19 +3,19 @@ import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 
 import {
-    ballotRecordInventory,
-    decodeBallotState,
-    encodeBallotState,
-} from '#packages/sdk/src/participant/worker/ballot-state.js';
-import type { BallotState } from '#packages/sdk/src/participant/worker/ballot-state.js';
-import {
     concatenate,
     encodeText,
     unsigned16,
     unsigned64,
-} from '#packages/sdk/src/participant/worker/bytes.js';
-import type { RecordContext } from '#packages/sdk/src/participant/worker/private-records.js';
-import { ballotPhase } from '#packages/sdk/src/participant/worker/root-generation.js';
+} from '#packages/sdk/src/participant/worker/shared/bytes.js';
+import {
+    ballotRecordInventory,
+    decodeBallotState,
+    encodeBallotState,
+} from '#packages/sdk/src/participant/worker/stages/ballot/ballot-state.js';
+import type { BallotState } from '#packages/sdk/src/participant/worker/stages/ballot/ballot-state.js';
+import type { RecordContext } from '#packages/sdk/src/participant/worker/storage/private-records.js';
+import { ballotPhase } from '#packages/sdk/src/participant/worker/storage/root-generation.js';
 import { compileParticipantBallotCustody } from '#tests/participant-ballot-custody-model.js';
 import { compileParticipantRuntimeProfile } from '#tests/participant-runtime-bounds-model.js';
 import { deriveSupportedProfile } from '#tests/supported-profile-model.js';

@@ -1,33 +1,33 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import type { ParticipantContext } from '#packages/sdk/src/participant/worker/module/context.js';
+import {
+    custodyIdentity,
+    custodyPurpose,
+} from '#packages/sdk/src/participant/worker/module/custody-identity.js';
+import { noParallelHelpers } from '#packages/sdk/src/participant/worker/module/parallel-helpers.js';
+import { instantiateParticipantModule } from '#packages/sdk/src/participant/worker/module/participant-module.js';
+import { readParticipantLimits } from '#packages/sdk/src/participant/worker/module/runtime-bounds.js';
 import {
     encodeText,
     hexadecimal,
-} from '#packages/sdk/src/participant/worker/bytes.js';
-import type { ParticipantContext } from '#packages/sdk/src/participant/worker/context.js';
-import { createEnrollment } from '#packages/sdk/src/participant/worker/enrollment.js';
+} from '#packages/sdk/src/participant/worker/shared/bytes.js';
 import {
     ModuleFailure,
     ResourceFailure,
     StorageFailure,
-} from '#packages/sdk/src/participant/worker/failures.js';
-import {
-    custodyIdentity,
-    custodyPurpose,
-} from '#packages/sdk/src/participant/worker/identity.js';
-import { noParallelHelpers } from '#packages/sdk/src/participant/worker/parallel-helpers.js';
-import { instantiateParticipantModule } from '#packages/sdk/src/participant/worker/participant-module.js';
-import {
-    openRoot,
-    rootAssociatedData,
-} from '#packages/sdk/src/participant/worker/root.js';
-import { readParticipantLimits } from '#packages/sdk/src/participant/worker/runtime-bounds.js';
+} from '#packages/sdk/src/participant/worker/shared/failures.js';
+import { createEnrollment } from '#packages/sdk/src/participant/worker/stages/enrollment/enrollment.js';
 import {
     isParticipantHead,
     isRootKey,
     openParticipantDatabase,
     snapshotParticipant,
-} from '#packages/sdk/src/participant/worker/storage.js';
+} from '#packages/sdk/src/participant/worker/storage/database.js';
+import {
+    openRoot,
+    rootAssociatedData,
+} from '#packages/sdk/src/participant/worker/storage/root.js';
 
 const databases: IDBDatabase[] = [];
 const compiledModule = await WebAssembly.compile(

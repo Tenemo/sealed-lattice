@@ -3,8 +3,8 @@ import { describe, expect, it } from 'vitest';
 import {
     operationSeedBytes,
     seededRandomness,
-} from '#packages/sdk/src/participant/worker/participant-module.js';
-import type { ParticipantModule } from '#packages/sdk/src/participant/worker/participant-module.js';
+} from '#packages/sdk/src/participant/worker/module/participant-module.js';
+import type { ParticipantModule } from '#packages/sdk/src/participant/worker/module/participant-module.js';
 
 // A module memory whose randomness state accepts one seed and reports the
 // bytes each of its two streams served.

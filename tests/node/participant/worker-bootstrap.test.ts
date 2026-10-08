@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { participantRuntimeLabel } from '#packages/sdk/src/participant/worker/identity.js';
+import { participantRuntimeLabel } from '#packages/sdk/src/participant/worker/module/custody-identity.js';
 import type { WorkerResult } from '#packages/sdk/src/participant/worker/worker.js';
 
 const downstream = vi.hoisted(() => ({
@@ -10,19 +10,19 @@ const downstream = vi.hoisted(() => ({
     database: vi.fn(),
 }));
 vi.mock(
-    '#packages/sdk/src/participant/worker/parallel-helpers.js',
+    '#packages/sdk/src/participant/worker/module/parallel-helpers.js',
     async (original) => ({
         ...(await original<
-            typeof import('#packages/sdk/src/participant/worker/parallel-helpers.js')
+            typeof import('#packages/sdk/src/participant/worker/module/parallel-helpers.js')
         >()),
         startParallelHelpers: downstream.helpers,
     }),
 );
 vi.mock(
-    '#packages/sdk/src/participant/worker/storage.js',
+    '#packages/sdk/src/participant/worker/storage/database.js',
     async (original) => ({
         ...(await original<
-            typeof import('#packages/sdk/src/participant/worker/storage.js')
+            typeof import('#packages/sdk/src/participant/worker/storage/database.js')
         >()),
         openParticipantDatabase: downstream.database,
     }),

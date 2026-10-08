@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { encodeCandidateManifest } from '#packages/sdk/src/participant/worker/candidate-codec.js';
+import { encodeCandidateManifest } from '#packages/sdk/src/participant/worker/relay/candidate-codec.js';
 import { compileClearPreparationResources } from '#tests/clear-preparation-resource-model.js';
 import { compileContributionBodyCensus } from '#tests/contribution-body-model.js';
 import { compileSetupSelectionWireCensus } from '#tests/setup-selection-wire-model.js';

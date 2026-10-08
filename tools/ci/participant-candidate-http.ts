@@ -7,7 +7,7 @@ import {
     encodeCandidateReceipt,
     isCandidateId,
     isCandidateKey,
-} from '#packages/sdk/src/participant/worker/candidate-codec.js';
+} from '#packages/sdk/src/participant/worker/relay/candidate-codec.js';
 import type {
     participantRelayStore,
     StoredParticipantCandidate,

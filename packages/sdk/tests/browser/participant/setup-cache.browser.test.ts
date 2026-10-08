@@ -1,19 +1,19 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { deliverBallotKey } from '#packages/sdk/src/participant/worker/ballot.js';
-import type { PublicProfileContext } from '#packages/sdk/src/participant/worker/context.js';
+import type { PublicProfileContext } from '#packages/sdk/src/participant/worker/module/context.js';
 import {
     ModuleFailure,
     PublicInputFailure,
-} from '#packages/sdk/src/participant/worker/failures.js';
+} from '#packages/sdk/src/participant/worker/shared/failures.js';
+import { deliverBallotKey } from '#packages/sdk/src/participant/worker/stages/ballot/ballot.js';
 import {
     deliverFinalAggregate,
     readFinalAggregate,
-} from '#packages/sdk/src/participant/worker/setup.js';
+} from '#packages/sdk/src/participant/worker/stages/setup/setup.js';
 import {
     namespacedName,
     setupCacheName,
-} from '#packages/sdk/src/participant/worker/storage.js';
+} from '#packages/sdk/src/participant/worker/storage/database.js';
 
 const databases: IDBDatabase[] = [];
 const names: string[] = [];

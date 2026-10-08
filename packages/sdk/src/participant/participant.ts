@@ -1,20 +1,20 @@
-import type {
-    IncompleteOperation,
-    ParticipantPendingCause,
-    ParticipantRefusalReason,
-} from './worker/operation-status.js';
 import {
     affordedHelpers,
     allStartedInTime,
     helperRole,
-} from './worker/parallel-helpers.js';
-import { participantNamespacePattern } from './worker/storage.js';
+} from './worker/module/parallel-helpers.js';
+import type {
+    IncompleteOperation,
+    ParticipantPendingCause,
+    ParticipantRefusalReason,
+} from './worker/shared/operation-status.js';
+import { participantNamespacePattern } from './worker/storage/database.js';
 import type { WorkerResult } from './worker/worker.js';
 
 export type {
     ParticipantPendingCause,
     ParticipantRefusalReason,
-} from './worker/operation-status.js';
+} from './worker/shared/operation-status.js';
 
 // The application page's side of the participant runtime. The SDK carries the
 // packaged worker's source, so no server can alter it, and runs every request

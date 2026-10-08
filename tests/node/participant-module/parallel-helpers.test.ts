@@ -8,34 +8,34 @@ import binaryen from 'binaryen';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
-    concatenate,
-    unsigned16,
-    unsigned32,
-} from '#packages/sdk/src/participant/worker/bytes.js';
-import { ResourceFailure } from '#packages/sdk/src/participant/worker/failures.js';
-import {
     custodyIdentity,
     custodyPurpose,
-} from '#packages/sdk/src/participant/worker/identity.js';
+} from '#packages/sdk/src/participant/worker/module/custody-identity.js';
 import {
     helperStartMilliseconds,
     noParallelHelpers,
     startParallelHelpers,
-} from '#packages/sdk/src/participant/worker/parallel-helpers.js';
-import type { ParallelHelpers } from '#packages/sdk/src/participant/worker/parallel-helpers.js';
+} from '#packages/sdk/src/participant/worker/module/parallel-helpers.js';
+import type { ParallelHelpers } from '#packages/sdk/src/participant/worker/module/parallel-helpers.js';
 import {
     instantiateParticipantModule,
     readModuleMemory,
     writeInput,
-} from '#packages/sdk/src/participant/worker/participant-module.js';
-import { dataKind } from '#packages/sdk/src/participant/worker/root.js';
+} from '#packages/sdk/src/participant/worker/module/participant-module.js';
+import { readParticipantLimits } from '#packages/sdk/src/participant/worker/module/runtime-bounds.js';
+import {
+    concatenate,
+    unsigned16,
+    unsigned32,
+} from '#packages/sdk/src/participant/worker/shared/bytes.js';
+import { ResourceFailure } from '#packages/sdk/src/participant/worker/shared/failures.js';
 import {
     registrationFile,
     registrationCandidateKey,
     streamRegistrations,
     verifiedRosterUsernames,
-} from '#packages/sdk/src/participant/worker/roster.js';
-import { readParticipantLimits } from '#packages/sdk/src/participant/worker/runtime-bounds.js';
+} from '#packages/sdk/src/participant/worker/stages/roster/roster.js';
+import { dataKind } from '#packages/sdk/src/participant/worker/storage/root.js';
 import { participantRelayFixture } from '#tests/participant-relay-fixture.js';
 
 // The packaged participant module and worker, whose helper role runs on
@@ -1272,9 +1272,9 @@ describe('participant module memory', () => {
                 '--input-type=module',
                 '--eval',
                 [
-                    `const { instantiateParticipantModule } = await import(${source('participant-module.ts')});`,
-                    `const { ResourceFailure } = await import(${source('failures.ts')});`,
-                    `const { noParallelHelpers } = await import(${source('parallel-helpers.ts')});`,
+                    `const { instantiateParticipantModule } = await import(${source('module/participant-module.ts')});`,
+                    `const { ResourceFailure } = await import(${source('shared/failures.ts')});`,
+                    `const { noParallelHelpers } = await import(${source('module/parallel-helpers.ts')});`,
                     `const bytes = await (await import('node:fs/promises')).readFile(${JSON.stringify(fileURLToPath(new URL('participant.wasm', distribution)))});`,
                     'const { module } = await instantiateParticipantModule(await WebAssembly.compile(bytes), noParallelHelpers);',
                     'const failureOf = (call) => { try { call(); } catch (error) { return error; } };',

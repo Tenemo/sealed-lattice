@@ -8,14 +8,14 @@ import {
     candidateChunkBytes,
     decodeCandidateManifest,
     encodeCandidateManifest,
-} from '#packages/sdk/src/participant/worker/candidate-codec.js';
-import { guardDelivery } from '#packages/sdk/src/participant/worker/delivery.js';
-import { PublicInputFailure } from '#packages/sdk/src/participant/worker/failures.js';
+} from '#packages/sdk/src/participant/worker/relay/candidate-codec.js';
 import {
     createCandidatePublication,
     findCandidate,
     readCandidateFile,
-} from '#packages/sdk/src/participant/worker/relay.js';
+} from '#packages/sdk/src/participant/worker/relay/relay.js';
+import { PublicInputFailure } from '#packages/sdk/src/participant/worker/shared/failures.js';
+import { guardDelivery } from '#packages/sdk/src/participant/worker/storage/delivery.js';
 import { serveParticipantCandidates } from '#tools/ci/participant-candidate-http.js';
 import { participantCandidateView } from '#tools/ci/participant-candidate-view.js';
 import type { ViewedParticipantRecord } from '#tools/ci/participant-candidate-view.js';

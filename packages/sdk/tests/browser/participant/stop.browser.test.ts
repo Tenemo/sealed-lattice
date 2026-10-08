@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { stopParticipant } from '#packages/sdk/src/participant/worker/stop.js';
+import { stopParticipant } from '#packages/sdk/src/participant/worker/storage/stop.js';
 
 const databases: IDBDatabase[] = [];
 const names: string[] = [];

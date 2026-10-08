@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import type { ParticipantStage } from '#packages/sdk/src/participant/worker/operation-availability.js';
-import { isOperationAvailable } from '#packages/sdk/src/participant/worker/operation-availability.js';
+import type { ParticipantStage } from '#packages/sdk/src/participant/worker/runtime/operation-availability.js';
+import { isOperationAvailable } from '#packages/sdk/src/participant/worker/runtime/operation-availability.js';
 
 // Every generation a completed participant root can hold.
 const generations = [

@@ -15,7 +15,7 @@ import {
 } from './compiled-inputs.js';
 import { rustCompilerCommit, rustToolchain } from './rust-toolchain.js';
 
-import { participantRuntimeLabel } from '#packages/sdk/src/participant/worker/identity.js';
+import { participantRuntimeLabel } from '#packages/sdk/src/participant/worker/module/custody-identity.js';
 
 const repositoryRoot = fileURLToPath(new URL('../../', import.meta.url));
 const workspace = path.join(repositoryRoot, 'crates', 'protocol-research');

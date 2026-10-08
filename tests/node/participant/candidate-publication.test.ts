@@ -1,8 +1,8 @@
 import { afterEach, expect, it, vi } from 'vitest';
 
-import { encodeCandidatePage } from '#packages/sdk/src/participant/worker/candidate-codec.js';
-import { guardDelivery } from '#packages/sdk/src/participant/worker/delivery.js';
-import { createCandidatePublication } from '#packages/sdk/src/participant/worker/relay.js';
+import { encodeCandidatePage } from '#packages/sdk/src/participant/worker/relay/candidate-codec.js';
+import { createCandidatePublication } from '#packages/sdk/src/participant/worker/relay/relay.js';
+import { guardDelivery } from '#packages/sdk/src/participant/worker/storage/delivery.js';
 import { participantRelayFixture } from '#tests/participant-relay-fixture.js';
 
 afterEach(() => vi.unstubAllGlobals());

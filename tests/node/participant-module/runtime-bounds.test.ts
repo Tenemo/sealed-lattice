@@ -2,18 +2,18 @@ import { readFile } from 'node:fs/promises';
 
 import { describe, expect, it } from 'vitest';
 
-import { ModuleFailure } from '#packages/sdk/src/participant/worker/failures.js';
-import { noParallelHelpers } from '#packages/sdk/src/participant/worker/parallel-helpers.js';
+import { noParallelHelpers } from '#packages/sdk/src/participant/worker/module/parallel-helpers.js';
 import {
     instantiateParticipantModule,
     requireInputCapacities,
-} from '#packages/sdk/src/participant/worker/participant-module.js';
+} from '#packages/sdk/src/participant/worker/module/participant-module.js';
 import {
     chunkBytes,
     readParticipantLimits,
     readParticipantProfile,
-} from '#packages/sdk/src/participant/worker/runtime-bounds.js';
-import { largestBufferInputBytes } from '#packages/sdk/src/participant/worker/target.js';
+} from '#packages/sdk/src/participant/worker/module/runtime-bounds.js';
+import { ModuleFailure } from '#packages/sdk/src/participant/worker/shared/failures.js';
+import { largestBufferInputBytes } from '#packages/sdk/src/participant/worker/stages/target-vote/target.js';
 import {
     compileParticipantRuntimeLimits,
     compileParticipantRuntimeProfile,

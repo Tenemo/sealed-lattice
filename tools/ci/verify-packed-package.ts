@@ -26,8 +26,8 @@ import {
     type PackageManagerRunner,
 } from './package-manager-runner.js';
 
-import { helperFunctions } from '#packages/sdk/src/participant/worker/parallel-helpers.js';
-import { moduleFunctions } from '#packages/sdk/src/participant/worker/participant-module.js';
+import { helperFunctions } from '#packages/sdk/src/participant/worker/module/parallel-helpers.js';
+import { moduleFunctions } from '#packages/sdk/src/participant/worker/module/participant-module.js';
 
 const repositoryRoot = fileURLToPath(new URL('../../', import.meta.url));
 const expectedPackageFiles = [

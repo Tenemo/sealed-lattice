@@ -20,26 +20,26 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { build } from 'tsdown';
 
 import type { ParticipantRequest } from '#packages/sdk/src/participant/participant.js';
-import { tupleFields } from '#packages/sdk/src/participant/worker/bytes.js';
+import { chunkBytes } from '#packages/sdk/src/participant/worker/module/runtime-bounds.js';
 import {
     decodeCandidateManifest,
     decodeCandidatePage,
     decodeCandidateReceipt,
     encodeCandidateManifest,
-} from '#packages/sdk/src/participant/worker/candidate-codec.js';
-import { completedClosePhase } from '#packages/sdk/src/participant/worker/close-state.js';
+} from '#packages/sdk/src/participant/worker/relay/candidate-codec.js';
+import { tupleFields } from '#packages/sdk/src/participant/worker/shared/bytes.js';
+import { completedClosePhase } from '#packages/sdk/src/participant/worker/stages/close/close-state.js';
 import {
     closureBodyFile,
     closureSubmissionFile,
-} from '#packages/sdk/src/participant/worker/close.js';
-import { targetPhase } from '#packages/sdk/src/participant/worker/root-generation.js';
-import { chunkBytes } from '#packages/sdk/src/participant/worker/runtime-bounds.js';
+} from '#packages/sdk/src/participant/worker/stages/close/close.js';
 import {
     evaluatedTargetName,
     namespacedName,
     participantDatabaseName,
     setupCacheName,
-} from '#packages/sdk/src/participant/worker/storage.js';
+} from '#packages/sdk/src/participant/worker/storage/database.js';
+import { targetPhase } from '#packages/sdk/src/participant/worker/storage/root-generation.js';
 import type { WorkerResult } from '#packages/sdk/src/participant/worker/worker.js';
 import { compileOperationProofDraws } from '#tests/operation-seed-model.js';
 import { compileParticipantRuntimeProfile } from '#tests/participant-runtime-bounds-model.js';

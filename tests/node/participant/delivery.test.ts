@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { guardDelivery } from '#packages/sdk/src/participant/worker/delivery.js';
+import { guardDelivery } from '#packages/sdk/src/participant/worker/storage/delivery.js';
 
 // Transport and ordering controls of a completed message's delivery. Record
 // and root authentication belong to the inspection, which the browser test

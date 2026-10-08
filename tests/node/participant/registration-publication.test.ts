@@ -2,26 +2,26 @@ import { createHash } from 'node:crypto';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { hexadecimal } from '#packages/sdk/src/participant/worker/bytes.js';
-import { decodeCandidateManifest } from '#packages/sdk/src/participant/worker/candidate-codec.js';
-import type { ParticipantContext } from '#packages/sdk/src/participant/worker/context.js';
-import type { RestoredEnrollment } from '#packages/sdk/src/participant/worker/enrollment.js';
-import { custodyPurpose } from '#packages/sdk/src/participant/worker/identity.js';
-import { publishRegistrationRecords } from '#packages/sdk/src/participant/worker/registration-publication.js';
+import type { ParticipantContext } from '#packages/sdk/src/participant/worker/module/context.js';
+import { custodyPurpose } from '#packages/sdk/src/participant/worker/module/custody-identity.js';
+import { chunkBytes } from '#packages/sdk/src/participant/worker/module/runtime-bounds.js';
+import { decodeCandidateManifest } from '#packages/sdk/src/participant/worker/relay/candidate-codec.js';
+import { hexadecimal } from '#packages/sdk/src/participant/worker/shared/bytes.js';
+import type { RestoredEnrollment } from '#packages/sdk/src/participant/worker/stages/enrollment/enrollment.js';
+import { publishRegistrationRecords } from '#packages/sdk/src/participant/worker/stages/roster/registration-publication.js';
+import { participantStores } from '#packages/sdk/src/participant/worker/storage/database.js';
+import type { ParticipantStore } from '#packages/sdk/src/participant/worker/storage/database.js';
 import {
     createRootKey,
     dataKind,
     encodeManifest,
     rootAssociatedData,
     sealRoot,
-} from '#packages/sdk/src/participant/worker/root.js';
+} from '#packages/sdk/src/participant/worker/storage/root.js';
 import type {
     AuthenticatedRoot,
     RecordReference,
-} from '#packages/sdk/src/participant/worker/root.js';
-import { chunkBytes } from '#packages/sdk/src/participant/worker/runtime-bounds.js';
-import { participantStores } from '#packages/sdk/src/participant/worker/storage.js';
-import type { ParticipantStore } from '#packages/sdk/src/participant/worker/storage.js';
+} from '#packages/sdk/src/participant/worker/storage/root.js';
 import { participantRelayFixture } from '#tests/participant-relay-fixture.js';
 
 const local = vi.hoisted(() => ({
@@ -30,20 +30,20 @@ const local = vi.hoisted(() => ({
     identity: vi.fn(),
 }));
 vi.mock(
-    '#packages/sdk/src/participant/worker/storage.js',
+    '#packages/sdk/src/participant/worker/storage/database.js',
     async (original) => ({
         ...(await original<
-            typeof import('#packages/sdk/src/participant/worker/storage.js')
+            typeof import('#packages/sdk/src/participant/worker/storage/database.js')
         >()),
         readParticipantValue: local.read,
         snapshotParticipant: local.snapshot,
     }),
 );
 vi.mock(
-    '#packages/sdk/src/participant/worker/identity.js',
+    '#packages/sdk/src/participant/worker/module/custody-identity.js',
     async (original) => ({
         ...(await original<
-            typeof import('#packages/sdk/src/participant/worker/identity.js')
+            typeof import('#packages/sdk/src/participant/worker/module/custody-identity.js')
         >()),
         custodyIdentity: local.identity,
     }),

@@ -5,8 +5,8 @@ import { describe, expect, it } from 'vitest';
 import {
     decodeContributionState,
     encodeContributionState,
-} from '#packages/sdk/src/participant/worker/contribution.js';
-import type { ContributionState } from '#packages/sdk/src/participant/worker/contribution.js';
+} from '#packages/sdk/src/participant/worker/stages/contribution/contribution.js';
+import type { ContributionState } from '#packages/sdk/src/participant/worker/stages/contribution/contribution.js';
 import { compileParticipantRuntimeProfile } from '#tests/participant-runtime-bounds-model.js';
 
 // The SHA-256 digest of stored bytes, which pins their exact format.

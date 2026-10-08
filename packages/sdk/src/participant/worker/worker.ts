@@ -1,17 +1,48 @@
+import { errorMessage, isEligibleContributor } from './module/context.js';
+import type {
+    ParticipantContext,
+    ParticipantProfileContext,
+} from './module/context.js';
+import { participantRuntimeLabel } from './module/custody-identity.js';
 import {
-    beginBallot,
-    completeBallot,
-    parseBallotScores,
-    publishBallot,
-    resumeBallot,
-} from './ballot.js';
+    helperRole,
+    listenAsHelper,
+    startParallelHelpers,
+} from './module/parallel-helpers.js';
+import type { ParallelHelpers } from './module/parallel-helpers.js';
+import {
+    instantiateParticipantModule,
+    requireInputCapacities,
+} from './module/participant-module.js';
+import type { ParticipantModule } from './module/participant-module.js';
+import { readParticipantLimits } from './module/runtime-bounds.js';
+import type { PublicRelay } from './relay/relay.js';
+import { readBounded } from './relay/relay.js';
+import { isOperationAvailable } from './runtime/operation-availability.js';
 import {
     concatenate,
     encodeText,
     equalBytes,
     fromHexadecimal,
     hexadecimal,
-} from './bytes.js';
+} from './shared/bytes.js';
+import {
+    classifyFailure,
+    InvalidRequest,
+    pendingCause,
+    PublicInputFailure,
+} from './shared/failures.js';
+import type {
+    IncompleteOperation,
+    ParticipantRefusalReason,
+} from './shared/operation-status.js';
+import {
+    beginBallot,
+    completeBallot,
+    parseBallotScores,
+    publishBallot,
+    resumeBallot,
+} from './stages/ballot/ballot.js';
 import {
     advanceClose,
     closeEvents,
@@ -20,12 +51,7 @@ import {
     parseCloseParameters,
     publishClose,
     resumeClose,
-} from './close.js';
-import { errorMessage, isEligibleContributor } from './context.js';
-import type {
-    ParticipantContext,
-    ParticipantProfileContext,
-} from './context.js';
+} from './stages/close/close.js';
 import {
     beginContribution,
     confirmRoster,
@@ -36,51 +62,24 @@ import {
     restoreCheckpoint,
     resumeParticipant,
     signContribution,
-} from './contribution.js';
-import { createEnrollment, restoreEnrollment } from './enrollment.js';
-import type { EnrollmentRequest, RestoredEnrollment } from './enrollment.js';
-import {
-    classifyFailure,
-    InvalidRequest,
-    pendingCause,
-    PublicInputFailure,
-} from './failures.js';
-import { participantRuntimeLabel } from './identity.js';
-import { isOperationAvailable } from './operation-availability.js';
+} from './stages/contribution/contribution.js';
 import type {
-    IncompleteOperation,
-    ParticipantRefusalReason,
-} from './operation-status.js';
-import { verifyPublishedOutcome } from './outcome-verifier.js';
+    EnrollmentRequest,
+    RestoredEnrollment,
+} from './stages/enrollment/enrollment.js';
 import {
-    helperRole,
-    listenAsHelper,
-    startParallelHelpers,
-} from './parallel-helpers.js';
-import type { ParallelHelpers } from './parallel-helpers.js';
-import {
-    instantiateParticipantModule,
-    requireInputCapacities,
-} from './participant-module.js';
-import type { ParticipantModule } from './participant-module.js';
-import { publishRegistrationRecords } from './registration-publication.js';
-import { readBounded } from './relay.js';
-import type { PublicRelay } from './relay.js';
-import { decodeReleaseState } from './release-state.js';
+    createEnrollment,
+    restoreEnrollment,
+} from './stages/enrollment/enrollment.js';
+import { verifyPublishedOutcome } from './stages/outcome-verifier.js';
+import { decodeReleaseState } from './stages/release/release-state.js';
 import {
     advanceRelease,
     computeResult,
     publishRelease,
     resumeRelease,
-} from './release.js';
-import {
-    ballotPhase,
-    releasePhase,
-    rootGeneration,
-    targetPhase,
-} from './root-generation.js';
-import { authenticateRoot } from './root.js';
-import type { AuthenticatedRoot } from './root.js';
+} from './stages/release/release.js';
+import { publishRegistrationRecords } from './stages/roster/registration-publication.js';
 import {
     acceptRoster,
     parseRegistrationBodyDigests,
@@ -88,26 +87,37 @@ import {
     retainedProfile,
     reverifyRoster,
     signRoster,
-} from './roster.js';
-import { readParticipantLimits } from './runtime-bounds.js';
-import { endorseSetup, selectSetup } from './setup-selection.js';
-import { restoreSetup, retainSetup, verifySetup } from './setup.js';
-import { stopParticipant } from './stop.js';
+} from './stages/roster/roster.js';
+import { endorseSetup, selectSetup } from './stages/setup/setup-selection.js';
 import {
-    deleteWorkingStorage,
-    namespacedName,
-    openParticipantDatabase,
-    participantNamespacePattern,
-    storedRuntime,
-} from './storage.js';
-import { decodeTargetState } from './target-state.js';
+    restoreSetup,
+    retainSetup,
+    verifySetup,
+} from './stages/setup/setup.js';
+import { decodeTargetState } from './stages/target-vote/target-state.js';
 import {
     certifiedBallotInclusion,
     EvaluationRetained,
     largestBufferInputBytes,
     publishTarget,
     signTarget,
-} from './target.js';
+} from './stages/target-vote/target.js';
+import {
+    deleteWorkingStorage,
+    namespacedName,
+    openParticipantDatabase,
+    participantNamespacePattern,
+    storedRuntime,
+} from './storage/database.js';
+import {
+    ballotPhase,
+    releasePhase,
+    rootGeneration,
+    targetPhase,
+} from './storage/root-generation.js';
+import type { AuthenticatedRoot } from './storage/root.js';
+import { authenticateRoot } from './storage/root.js';
+import { stopParticipant } from './storage/stop.js';
 
 // The application's SDK supplies the namespace of the participant's local
 // state, the relay's base URL, the module's URL and the identities its build

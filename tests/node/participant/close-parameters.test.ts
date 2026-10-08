@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { parseCloseParameters } from '#packages/sdk/src/participant/worker/close.js';
+import { parseCloseParameters } from '#packages/sdk/src/participant/worker/stages/close/close.js';
 
 describe('close parameters', () => {
     it('carry the close time a request supplies', () => {

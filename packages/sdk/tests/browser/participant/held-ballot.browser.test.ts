@@ -1,29 +1,29 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { ballotRecordAssociatedData } from '#packages/sdk/src/participant/worker/ballot-state.js';
-import type { BallotSession } from '#packages/sdk/src/participant/worker/ballot.js';
+import {
+    custodyIdentity,
+    custodyPurpose,
+} from '#packages/sdk/src/participant/worker/module/custody-identity.js';
+import { noParallelHelpers } from '#packages/sdk/src/participant/worker/module/parallel-helpers.js';
+import { instantiateParticipantModule } from '#packages/sdk/src/participant/worker/module/participant-module.js';
+import {
+    readParticipantLimits,
+    readParticipantProfile,
+} from '#packages/sdk/src/participant/worker/module/runtime-bounds.js';
+import { ballotRecordAssociatedData } from '#packages/sdk/src/participant/worker/stages/ballot/ballot-state.js';
+import type { BallotSession } from '#packages/sdk/src/participant/worker/stages/ballot/ballot.js';
 import {
     closeEventKind,
     closeRecordAssociatedData,
     collectingCloseState,
-} from '#packages/sdk/src/participant/worker/close-state.js';
-import { heldBallotBody } from '#packages/sdk/src/participant/worker/close.js';
-import type { CloseSession } from '#packages/sdk/src/participant/worker/close.js';
-import {
-    custodyIdentity,
-    custodyPurpose,
-} from '#packages/sdk/src/participant/worker/identity.js';
-import { noParallelHelpers } from '#packages/sdk/src/participant/worker/parallel-helpers.js';
-import { instantiateParticipantModule } from '#packages/sdk/src/participant/worker/participant-module.js';
-import { sealRecord } from '#packages/sdk/src/participant/worker/private-records.js';
-import {
-    readParticipantLimits,
-    readParticipantProfile,
-} from '#packages/sdk/src/participant/worker/runtime-bounds.js';
+} from '#packages/sdk/src/participant/worker/stages/close/close-state.js';
+import { heldBallotBody } from '#packages/sdk/src/participant/worker/stages/close/close.js';
+import type { CloseSession } from '#packages/sdk/src/participant/worker/stages/close/close.js';
 import {
     openParticipantDatabase,
     participantDatabaseName,
-} from '#packages/sdk/src/participant/worker/storage.js';
+} from '#packages/sdk/src/participant/worker/storage/database.js';
+import { sealRecord } from '#packages/sdk/src/participant/worker/storage/private-records.js';
 
 const opened: IDBDatabase[] = [];
 const names: string[] = [];

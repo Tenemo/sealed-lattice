@@ -1,43 +1,43 @@
 import {
+    custodyIdentities,
+    custodyIdentity,
+    custodyPurpose,
+} from '#packages/sdk/src/participant/worker/module/custody-identity.js';
+import { noParallelHelpers } from '#packages/sdk/src/participant/worker/module/parallel-helpers.js';
+import { instantiateParticipantModule } from '#packages/sdk/src/participant/worker/module/participant-module.js';
+import { readParticipantLimits } from '#packages/sdk/src/participant/worker/module/runtime-bounds.js';
+import {
     equalBytes,
     fromHexadecimal,
     hexadecimal,
-} from '#packages/sdk/src/participant/worker/bytes.js';
-import { proofLength } from '#packages/sdk/src/participant/worker/contribution-proof.js';
+} from '#packages/sdk/src/participant/worker/shared/bytes.js';
+import { proofLength } from '#packages/sdk/src/participant/worker/stages/contribution/contribution-proof.js';
 import {
     contributionRecords,
     encodeContributionState,
     resumeContribution,
-} from '#packages/sdk/src/participant/worker/contribution.js';
-import { restoreEnrollment } from '#packages/sdk/src/participant/worker/enrollment.js';
-import {
-    custodyIdentities,
-    custodyIdentity,
-    custodyPurpose,
-} from '#packages/sdk/src/participant/worker/identity.js';
-import { noParallelHelpers } from '#packages/sdk/src/participant/worker/parallel-helpers.js';
-import { instantiateParticipantModule } from '#packages/sdk/src/participant/worker/participant-module.js';
-import { validateParticipantPredecessor } from '#packages/sdk/src/participant/worker/predecessor.js';
-import { encodePreparationState } from '#packages/sdk/src/participant/worker/preparation-state.js';
-import {
-    openRecord,
-    sealRecord,
-} from '#packages/sdk/src/participant/worker/private-records.js';
-import {
-    authenticateRoot,
-    commitRoot,
-    dataRecordInventory,
-    rootAssociatedData,
-} from '#packages/sdk/src/participant/worker/root.js';
-import { retainedProfile } from '#packages/sdk/src/participant/worker/roster.js';
-import { readParticipantLimits } from '#packages/sdk/src/participant/worker/runtime-bounds.js';
-import { commitParticipantState } from '#packages/sdk/src/participant/worker/state-transaction.js';
+} from '#packages/sdk/src/participant/worker/stages/contribution/contribution.js';
+import { encodePreparationState } from '#packages/sdk/src/participant/worker/stages/contribution/preparation-state.js';
+import { restoreEnrollment } from '#packages/sdk/src/participant/worker/stages/enrollment/enrollment.js';
+import { retainedProfile } from '#packages/sdk/src/participant/worker/stages/roster/roster.js';
 import {
     openParticipantDatabase,
     participantRecordStores,
     participantStores,
     readParticipantValue,
-} from '#packages/sdk/src/participant/worker/storage.js';
+} from '#packages/sdk/src/participant/worker/storage/database.js';
+import { validateParticipantPredecessor } from '#packages/sdk/src/participant/worker/storage/predecessor.js';
+import {
+    openRecord,
+    sealRecord,
+} from '#packages/sdk/src/participant/worker/storage/private-records.js';
+import {
+    authenticateRoot,
+    commitRoot,
+    dataRecordInventory,
+    rootAssociatedData,
+} from '#packages/sdk/src/participant/worker/storage/root.js';
+import { commitParticipantState } from '#packages/sdk/src/participant/worker/storage/state-transaction.js';
 
 type ParticipantPaddingMutation = Readonly<{
     namespace: string;

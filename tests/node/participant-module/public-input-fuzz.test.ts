@@ -3,13 +3,7 @@ import { readFile } from 'node:fs/promises';
 
 import { describe, expect, it } from 'vitest';
 
-import {
-    concatenate,
-    encodeText,
-    unsigned16,
-    unsigned32,
-} from '#packages/sdk/src/participant/worker/bytes.js';
-import { noParallelHelpers } from '#packages/sdk/src/participant/worker/parallel-helpers.js';
+import { noParallelHelpers } from '#packages/sdk/src/participant/worker/module/parallel-helpers.js';
 import {
     instantiateParticipantModule,
     readModuleMemory,
@@ -17,13 +11,19 @@ import {
     writeInput,
     writeOwnRegistrationInput,
     writeSetupInput,
-} from '#packages/sdk/src/participant/worker/participant-module.js';
-import type { ParticipantModule } from '#packages/sdk/src/participant/worker/participant-module.js';
-import { dataKind } from '#packages/sdk/src/participant/worker/root.js';
+} from '#packages/sdk/src/participant/worker/module/participant-module.js';
+import type { ParticipantModule } from '#packages/sdk/src/participant/worker/module/participant-module.js';
 import {
     chunkBytes,
     readParticipantLimits,
-} from '#packages/sdk/src/participant/worker/runtime-bounds.js';
+} from '#packages/sdk/src/participant/worker/module/runtime-bounds.js';
+import {
+    concatenate,
+    encodeText,
+    unsigned16,
+    unsigned32,
+} from '#packages/sdk/src/participant/worker/shared/bytes.js';
+import { dataKind } from '#packages/sdk/src/participant/worker/storage/root.js';
 
 // The packaged participant module, fed public input that no honest relay or
 // participant produces. A command must refuse such input and return: a trap

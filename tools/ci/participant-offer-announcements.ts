@@ -2,7 +2,7 @@ import { mkdir, open, stat } from 'node:fs/promises';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import path from 'node:path';
 
-import { offerDiscoveryPageEntries } from '#packages/sdk/src/participant/worker/relay.js';
+import { offerDiscoveryPageEntries } from '#packages/sdk/src/participant/worker/relay/relay.js';
 
 const identityBytes = 64;
 

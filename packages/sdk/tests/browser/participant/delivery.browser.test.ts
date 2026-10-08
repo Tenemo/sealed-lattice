@@ -1,20 +1,20 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
-    guardDelivery,
-    inspectRetainedAuthority,
-} from '#packages/sdk/src/participant/worker/delivery.js';
-import type { RetainedAuthority } from '#packages/sdk/src/participant/worker/delivery.js';
-import {
-    createRootKey,
-    sealRoot,
-} from '#packages/sdk/src/participant/worker/root.js';
-import {
     openParticipantDatabase,
     participantDatabaseName,
     snapshotParticipant,
-} from '#packages/sdk/src/participant/worker/storage.js';
-import type { ParticipantStore } from '#packages/sdk/src/participant/worker/storage.js';
+} from '#packages/sdk/src/participant/worker/storage/database.js';
+import type { ParticipantStore } from '#packages/sdk/src/participant/worker/storage/database.js';
+import {
+    guardDelivery,
+    inspectRetainedAuthority,
+} from '#packages/sdk/src/participant/worker/storage/delivery.js';
+import type { RetainedAuthority } from '#packages/sdk/src/participant/worker/storage/delivery.js';
+import {
+    createRootKey,
+    sealRoot,
+} from '#packages/sdk/src/participant/worker/storage/root.js';
 
 const databases: IDBDatabase[] = [];
 const namespaces: string[] = [];

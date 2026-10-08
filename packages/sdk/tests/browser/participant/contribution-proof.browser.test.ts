@@ -4,15 +4,15 @@ import {
     createProofWriter,
     proofLength,
     readProof,
-} from '#packages/sdk/src/participant/worker/contribution-proof.js';
-import {
-    openRecord,
-    sealRecord,
-} from '#packages/sdk/src/participant/worker/private-records.js';
+} from '#packages/sdk/src/participant/worker/stages/contribution/contribution-proof.js';
 import {
     openParticipantDatabase,
     readParticipantValue,
-} from '#packages/sdk/src/participant/worker/storage.js';
+} from '#packages/sdk/src/participant/worker/storage/database.js';
+import {
+    openRecord,
+    sealRecord,
+} from '#packages/sdk/src/participant/worker/storage/private-records.js';
 
 // Synthetic proof bytes isolate private storage framing and transport. Real
 // AES-GCM and IndexedDB are exercised; no fixture asserts proof acceptance.

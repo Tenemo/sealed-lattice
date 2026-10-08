@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import type {
     ParticipantLimits,
     ParticipantProfile,
-} from '#packages/sdk/src/participant/worker/runtime-bounds.js';
+} from '#packages/sdk/src/participant/worker/module/runtime-bounds.js';
 import { compileBallotBodyCensus } from '#tests/ballot-body-model.js';
 import { compileCloseWireCensus } from '#tests/close-wire-model.js';
 import { compileContributionBodyCensus } from '#tests/contribution-body-model.js';

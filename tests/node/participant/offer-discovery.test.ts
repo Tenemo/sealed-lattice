@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest';
 
-import { PublicInputFailure } from '#packages/sdk/src/participant/worker/failures.js';
-import { discoverContributionOffers } from '#packages/sdk/src/participant/worker/offer-discovery.js';
+import { discoverContributionOffers } from '#packages/sdk/src/participant/worker/relay/offer-discovery.js';
+import { PublicInputFailure } from '#packages/sdk/src/participant/worker/shared/failures.js';
 
 const identity = (marker: number) => new Uint8Array(64).fill(marker);
 

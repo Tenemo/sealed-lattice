@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { unusedSigningPurposes } from '#packages/sdk/src/participant/worker/enrollment.js';
-import { encodePreparationState } from '#packages/sdk/src/participant/worker/preparation-state.js';
+import { encodePreparationState } from '#packages/sdk/src/participant/worker/stages/contribution/preparation-state.js';
+import { unusedSigningPurposes } from '#packages/sdk/src/participant/worker/stages/enrollment/enrollment.js';
 
 // The unused-purpose mask at each generation a completed root can hold,
 // written from the module's purpose positions (roster proposal 0, offer 1,

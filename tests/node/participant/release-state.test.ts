@@ -2,20 +2,20 @@ import { createHash } from 'node:crypto';
 
 import { describe, expect, it } from 'vitest';
 
-import { completedClosePhase } from '#packages/sdk/src/participant/worker/close-state.js';
+import { completedClosePhase } from '#packages/sdk/src/participant/worker/stages/close/close-state.js';
 import {
     decodeReleaseState,
     encodeReleaseState,
     releaseRecordInventory,
     releaseRecordLengths,
-} from '#packages/sdk/src/participant/worker/release-state.js';
-import type { ReleaseState } from '#packages/sdk/src/participant/worker/release-state.js';
+} from '#packages/sdk/src/participant/worker/stages/release/release-state.js';
+import type { ReleaseState } from '#packages/sdk/src/participant/worker/stages/release/release-state.js';
+import { ballotInclusions } from '#packages/sdk/src/participant/worker/stages/target-vote/target-state.js';
+import type { BallotInclusion } from '#packages/sdk/src/participant/worker/stages/target-vote/target-state.js';
 import {
     releasePhase,
     targetPhase,
-} from '#packages/sdk/src/participant/worker/root-generation.js';
-import { ballotInclusions } from '#packages/sdk/src/participant/worker/target-state.js';
-import type { BallotInclusion } from '#packages/sdk/src/participant/worker/target-state.js';
+} from '#packages/sdk/src/participant/worker/storage/root-generation.js';
 import { compileParticipantReleaseCustody } from '#tests/participant-release-custody-model.js';
 import { compileParticipantRuntimeProfile } from '#tests/participant-runtime-bounds-model.js';
 import { deriveSupportedProfile } from '#tests/supported-profile-model.js';

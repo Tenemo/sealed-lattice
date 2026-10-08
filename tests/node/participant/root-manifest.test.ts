@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 
 import { describe, expect, it } from 'vitest';
 
-import { encodeManifest } from '#packages/sdk/src/participant/worker/root.js';
+import { encodeManifest } from '#packages/sdk/src/participant/worker/storage/root.js';
 
 // The SHA-256 digest of stored bytes, which pins their exact format.
 const storedDigest = (bytes: Uint8Array) =>

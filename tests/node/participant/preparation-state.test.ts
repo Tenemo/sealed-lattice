@@ -5,19 +5,19 @@ import { describe, expect, it } from 'vitest';
 import {
     decodeContributionState,
     encodeContributionState,
-} from '#packages/sdk/src/participant/worker/contribution.js';
-import type { ContributionState } from '#packages/sdk/src/participant/worker/contribution.js';
+} from '#packages/sdk/src/participant/worker/stages/contribution/contribution.js';
+import type { ContributionState } from '#packages/sdk/src/participant/worker/stages/contribution/contribution.js';
 import {
     decodePreparationState,
     encodePreparationState,
     unusedPreparationPurposes,
-} from '#packages/sdk/src/participant/worker/preparation-state.js';
+} from '#packages/sdk/src/participant/worker/stages/contribution/preparation-state.js';
 import type {
     PreparationEndorsement,
     PreparationSignature,
     PreparationState,
-} from '#packages/sdk/src/participant/worker/preparation-state.js';
-import { encodeManifest } from '#packages/sdk/src/participant/worker/root.js';
+} from '#packages/sdk/src/participant/worker/stages/contribution/preparation-state.js';
+import { encodeManifest } from '#packages/sdk/src/participant/worker/storage/root.js';
 import { compileParticipantRuntimeProfile } from '#tests/participant-runtime-bounds-model.js';
 
 // The SHA-256 digest of stored bytes, which pins their exact format.

@@ -9,11 +9,11 @@ import {
     collectingCloseState,
     decodeCloseState,
     encodeCloseState,
-} from '#packages/sdk/src/participant/worker/close-state.js';
+} from '#packages/sdk/src/participant/worker/stages/close/close-state.js';
 import type {
     CloseEvent,
     CloseState,
-} from '#packages/sdk/src/participant/worker/close-state.js';
+} from '#packages/sdk/src/participant/worker/stages/close/close-state.js';
 import { compileParticipantRuntimeProfile } from '#tests/participant-runtime-bounds-model.js';
 
 // The SHA-256 digest of stored bytes, which pins their exact format.
