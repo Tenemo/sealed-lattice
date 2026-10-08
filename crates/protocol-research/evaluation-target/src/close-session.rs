@@ -19,6 +19,21 @@ use std::sync::Arc;
 
 /// The input buffer's length; the host never writes more.
 pub const CLOSE_INPUT_BYTES: usize = 1 << 20;
+protocol_foundations::operation_codes! {
+    /// The public close commands, which yield the close barrier.
+    enum BarrierOperation {
+        Begin = 1,
+        Intent = 2,
+        Envelope = 3,
+        BeginBody = 4,
+        PushBody = 5,
+        FinishBody = 6,
+        Response = 7,
+        RequiredBodies = 8,
+        Proposal = 9,
+        DiscardBody = 10,
+    }
+}
 /// A refused close operation.
 #[derive(Debug)]
 pub struct Refused;
@@ -74,7 +89,8 @@ impl CloseSession {
         operation: u32,
         length: usize,
     ) -> Result<(), Refused> {
-        if operation == 1 {
+        let operation = BarrierOperation::from_code(operation).ok_or(Refused)?;
+        if operation == BarrierOperation::Begin {
             if length != 0 {
                 return Err(Refused);
             }
@@ -93,7 +109,7 @@ impl CloseSession {
         let count = context.participant_count();
         let bytes = self.input.get(..length).ok_or(Refused)?;
         match operation {
-            2 => {
+            BarrierOperation::Intent => {
                 if self.intent.is_some() {
                     return Err(Refused);
                 }
@@ -109,7 +125,7 @@ impl CloseSession {
             }
             // A listed envelope and its signature. The stored responses list
             // at most two envelopes for each slot.
-            3 => {
+            BarrierOperation::Envelope => {
                 if self.envelopes.len() >= MAXIMUM_LISTED_ENVELOPES_PER_SLOT * count * count
                     || bytes.len() != ENVELOPE_BYTES + SIGNATURE_BYTES
                 {
@@ -132,7 +148,7 @@ impl CloseSession {
             }
             // Begins the complete body of an authenticated envelope, named by
             // its identity.
-            4 => {
+            BarrierOperation::BeginBody => {
                 if self.pending_body.is_some() || self.bodies.len() >= count {
                     return Err(Refused);
                 }
@@ -145,7 +161,7 @@ impl CloseSession {
                     BallotBodyAuthentication::new(authentication.clone()).map_err(|_| Refused)?,
                 );
             }
-            5 => {
+            BarrierOperation::PushBody => {
                 if self
                     .pending_body
                     .as_mut()
@@ -157,7 +173,7 @@ impl CloseSession {
                     return Err(Refused);
                 }
             }
-            6 => {
+            BarrierOperation::FinishBody => {
                 if !bytes.is_empty() {
                     return Err(Refused);
                 }
@@ -176,7 +192,7 @@ impl CloseSession {
                     self.bodies.push(body);
                 }
             }
-            7 => {
+            BarrierOperation::Response => {
                 if self.responses.len() >= count {
                     return Err(Refused);
                 }
@@ -204,7 +220,7 @@ impl CloseSession {
             }
             // The usable-slot bodies a proposal still needs, before its
             // signature is checked. This creates no barrier.
-            8 => {
+            BarrierOperation::RequiredBodies => {
                 let (body, _) = packet(
                     bytes,
                     maximum_close_message_bytes(ClosePurpose::Proposal, count),
@@ -229,7 +245,7 @@ impl CloseSession {
                     .flat_map(|(_, identity)| identity)
                     .collect();
             }
-            9 => {
+            BarrierOperation::Proposal => {
                 let (body, signature) = packet(
                     bytes,
                     maximum_close_message_bytes(ClosePurpose::Proposal, count),
@@ -246,13 +262,13 @@ impl CloseSession {
                         .map_err(|_| Refused)?,
                 );
             }
-            10 => {
+            BarrierOperation::DiscardBody => {
                 if !bytes.is_empty() {
                     return Err(Refused);
                 }
                 self.pending_body = None;
             }
-            _ => return Err(Refused),
+            BarrierOperation::Begin => return Err(Refused),
         }
         Ok(())
     }

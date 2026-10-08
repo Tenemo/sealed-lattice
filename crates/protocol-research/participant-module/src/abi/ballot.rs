@@ -1,6 +1,7 @@
 //! Ballots: the participant's own ballot and the classification of each
 //! published ballot.
 use super::{SESSION, Session};
+use crate::ballot::BallotOperation;
 use ballot_proof::{
     CHUNK_LIMIT, body::BallotBodyClassification, classification_session::ClassificationSession,
 };
@@ -20,7 +21,10 @@ pub extern "C" fn participant_ballot_command(
         }
         let input = Zeroizing::new(session.input[..length].to_vec());
         session.input[..length].zeroize();
-        if operation == 0 {
+        let Some(operation) = BallotOperation::from_code(operation) else {
+            return 1;
+        };
+        if operation == BallotOperation::Begin {
             if argument != 0 || session.ballot.is_some() {
                 return 1;
             }
@@ -55,7 +59,7 @@ pub extern "C" fn participant_ballot_command(
         };
         // A ballot is created only from the undrawn randomness of the seed
         // its root retains.
-        if operation == 4
+        if operation == BallotOperation::Create
             && !super::operation_random::ready(crate::operation_random::Purpose::Ballot)
         {
             return 1;

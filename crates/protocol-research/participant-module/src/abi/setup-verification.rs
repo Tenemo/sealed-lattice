@@ -1,8 +1,11 @@
 //! The public setup verification, whose verified setup the later stages
 //! read.
 use protocol_foundations::{
-    Credential, poll::VerifiedPoll, roster_authentication::AuthenticatedRosterProposal,
-    roster_input::RosterInputVerifier, setup_selection::SelectionProposal,
+    Credential,
+    poll::VerifiedPoll,
+    roster_authentication::AuthenticatedRosterProposal,
+    roster_input::{RecordStep, RosterInputVerifier},
+    setup_selection::SelectionProposal,
 };
 use setup_aggregate::{
     CHUNK_BYTES,
@@ -62,7 +65,10 @@ pub extern "C" fn setup_roster_begin(length: usize) -> u32 {
 }
 #[unsafe(no_mangle)]
 pub extern "C" fn setup_roster_record(operation: u32, position: usize, length: usize) -> u32 {
-    step(|setup| setup.roster_record(operation, position, length))
+    step(|setup| {
+        let record = RecordStep::from_code(operation).ok_or(Refused)?;
+        setup.roster_record(record, position, length)
+    })
 }
 #[unsafe(no_mangle)]
 pub extern "C" fn setup_roster_finish(length: usize) -> u32 {

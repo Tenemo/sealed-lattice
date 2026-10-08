@@ -85,7 +85,7 @@ const evaluationOperation = {
 
 // The steps of restoring a retained evaluated target: begin a copy of its
 // length, push its bytes, and finish.
-const evaluationRestore = { begin: 0, push: 1, finish: 2 } as const;
+const evaluationRestoreStep = { begin: 0, push: 1, finish: 2 } as const;
 
 const tryEvaluationCommand = (
     context: PublicProfileContext,
@@ -282,7 +282,7 @@ const restoreEvaluationCopy = async (context: ParticipantProfileContext) => {
     // last step ends the copy it began whether or not the copy restores.
     const { module } = context;
     let restored =
-        module.restore_evaluation(evaluationRestore.begin, length) === 0;
+        module.restore_evaluation(evaluationRestoreStep.begin, length) === 0;
     if (restored) {
         let terminal = false;
         try {
@@ -312,7 +312,7 @@ const restoreEvaluationCopy = async (context: ParticipantProfileContext) => {
                 writeModuleInput(context, chunk);
                 restored =
                     module.restore_evaluation(
-                        evaluationRestore.push,
+                        evaluationRestoreStep.push,
                         chunk.length,
                     ) === 0;
             }
@@ -326,8 +326,10 @@ const restoreEvaluationCopy = async (context: ParticipantProfileContext) => {
             // instances cannot be entered again, including for cleanup.
             if (!terminal)
                 restored =
-                    module.restore_evaluation(evaluationRestore.finish, 0) ===
-                        0 && restored;
+                    module.restore_evaluation(
+                        evaluationRestoreStep.finish,
+                        0,
+                    ) === 0 && restored;
         }
     }
     if (!restored) await discardEvaluation(context);

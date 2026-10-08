@@ -7,7 +7,10 @@ use evaluation_target::close::{
     AuthenticatedCloseIntent, AuthenticatedCloseResponse, CloseContext, ClosedSlot,
     Error as CloseError, VerifiedCloseBarrier,
 };
-use participant_module::{Enrollment, close_work::CloseWork};
+use participant_module::{
+    Enrollment,
+    close_work::{CloseOperation, CloseWork},
+};
 use protocol_foundations::{
     Credential, Error, RETAINED_TAG_BYTES, SIGNATURE_BYTES,
     ballot_authentication::{BallotEnvelope, RetainedBallotOwner},
@@ -148,12 +151,19 @@ pub fn deliver(
     submission: &Submission,
     hashed: &mut usize,
 ) {
-    work.command(credential, 3, 0, &control(submission))
-        .unwrap();
+    work.command(
+        credential,
+        CloseOperation::BeginHeldBody,
+        0,
+        &control(submission),
+    )
+    .unwrap();
     *hashed += read_chunks(&submission.body, |bytes| {
-        work.command(credential, 4, 0, bytes).unwrap();
+        work.command(credential, CloseOperation::PushHeldBody, 0, bytes)
+            .unwrap();
     });
-    work.command(credential, 5, 0, &[]).unwrap();
+    work.command(credential, CloseOperation::FinishHeldBody, 0, &[])
+        .unwrap();
     work.events.push(Event::Held(Box::new(submission.clone())));
 }
 /// Replays a participant's close log into a fresh state, which must accept
@@ -173,23 +183,33 @@ pub fn replay(
         match event {
             Event::Held(submission) => deliver(&mut fresh, credential, submission, &mut hashed),
             Event::Lock(intent) => {
-                fresh.command(credential, 2, 0, intent).unwrap();
+                fresh
+                    .command(credential, CloseOperation::LockIntent, 0, intent)
+                    .unwrap();
             }
             Event::Response(input) => {
-                fresh.command(credential, 7, 0, input).unwrap();
+                fresh
+                    .command(credential, CloseOperation::AdmitResponse, 0, input)
+                    .unwrap();
             }
         }
     }
-    let body = fresh.command(credential, 6, 0, &[]).unwrap();
+    let body = fresh
+        .command(credential, CloseOperation::PrepareResponse, 0, &[])
+        .unwrap();
     assert_eq!(body, split(response).0);
     if let Some(proposal) = proposal {
         assert!(matches!(
             sign(&mut fresh, credential, &body),
             Err(Error::Consumed)
         ));
-        fresh.command(credential, 7, 0, response).unwrap();
+        fresh
+            .command(credential, CloseOperation::AdmitResponse, 0, response)
+            .unwrap();
         assert_eq!(
-            fresh.command(credential, 9, 0, &[]).unwrap(),
+            fresh
+                .command(credential, CloseOperation::PrepareProposal, 0, &[])
+                .unwrap(),
             split(proposal).0
         );
     }
@@ -201,7 +221,7 @@ pub fn sign(
     body: &[u8],
 ) -> Result<Vec<u8>, Error> {
     let input = [body, crate::random::<32>().as_slice()].concat();
-    work.command(credential, 8, 0, &input)
+    work.command(credential, CloseOperation::Sign, 0, &input)
 }
 pub fn now_milliseconds() -> u64 {
     std::time::SystemTime::now()
@@ -218,7 +238,7 @@ pub fn open(
     let body = works[0]
         .command(
             &mut enrollments[0].credential,
-            1,
+            CloseOperation::PrepareIntent,
             0,
             &close_time.to_le_bytes(),
         )
@@ -229,8 +249,13 @@ pub fn open(
         .iter_mut()
         .zip(enrollments.iter_mut().map(|(_, enrollment)| enrollment))
     {
-        work.command(&mut enrollment.credential, 2, 0, &intent)
-            .unwrap();
+        work.command(
+            &mut enrollment.credential,
+            CloseOperation::LockIntent,
+            0,
+            &intent,
+        )
+        .unwrap();
         work.events.retain(|event| match event {
             Event::Held(submission) => submission.envelope.ballot_time() <= close_time,
             _ => true,
@@ -249,10 +274,14 @@ pub fn respond(
     for submission in held {
         deliver(work, credential, submission, hashed);
     }
-    let body = work.command(credential, 6, 0, &[]).unwrap();
+    let body = work
+        .command(credential, CloseOperation::PrepareResponse, 0, &[])
+        .unwrap();
     let signature = sign(work, credential, &body).unwrap();
     // One response per participant.
-    let again = work.command(credential, 6, 0, &[]).unwrap();
+    let again = work
+        .command(credential, CloseOperation::PrepareResponse, 0, &[])
+        .unwrap();
     assert!(matches!(
         sign(work, credential, &again),
         Err(Error::Consumed)
@@ -309,24 +338,32 @@ fn gather(
                 input.extend(control(submission));
             }
         }
-        work.command(credential, 7, 0, &input).unwrap();
+        work.command(credential, CloseOperation::AdmitResponse, 0, &input)
+            .unwrap();
         work.events.push(Event::Response(input));
     }
 }
 /// The organizer's own response, once `q-1` other responses are ready, and
 /// its proposal. It needs only the bodies of usable slots, which it holds.
 fn conclude(work: &mut CloseWork, credential: &mut Credential) -> (Vec<u8>, Vec<u8>) {
-    let body = work.command(credential, 6, 0, &[]).unwrap();
+    let body = work
+        .command(credential, CloseOperation::PrepareResponse, 0, &[])
+        .unwrap();
     let signature = sign(work, credential, &body).unwrap();
     let own = packet(&body, &signature);
     // One response per participant.
-    let again = work.command(credential, 6, 0, &[]).unwrap();
+    let again = work
+        .command(credential, CloseOperation::PrepareResponse, 0, &[])
+        .unwrap();
     assert!(matches!(
         sign(work, credential, &again),
         Err(Error::Consumed)
     ));
-    work.command(credential, 7, 0, &own).unwrap();
-    let body = work.command(credential, 9, 0, &[]).unwrap();
+    work.command(credential, CloseOperation::AdmitResponse, 0, &own)
+        .unwrap();
+    let body = work
+        .command(credential, CloseOperation::PrepareProposal, 0, &[])
+        .unwrap();
     let signature = sign(work, credential, &body).unwrap();
     (own, packet(&body, &signature))
 }
@@ -498,7 +535,7 @@ pub fn run(
         assert!(matches!(
             works[position].command(
                 &mut enrollments[position].credential,
-                3,
+                CloseOperation::BeginHeldBody,
                 0,
                 &control(&forged.late)
             ),
@@ -510,7 +547,7 @@ pub fn run(
     let body = other
         .command(
             &mut enrollments[1].credential,
-            1,
+            CloseOperation::PrepareIntent,
             0,
             &close_time.to_le_bytes(),
         )
@@ -525,7 +562,7 @@ pub fn run(
     let later = repeated
         .command(
             &mut enrollments[0].credential,
-            1,
+            CloseOperation::PrepareIntent,
             0,
             &(close_time + 5).to_le_bytes(),
         )
@@ -555,7 +592,7 @@ pub fn run(
         refused
             .command(
                 &mut enrollments[first_honest].credential,
-                2,
+                CloseOperation::LockIntent,
                 0,
                 &packet(unsigned.body(), &intent_signature)
             )
@@ -592,7 +629,7 @@ pub fn run(
             assert!(matches!(
                 works[position].command(
                     &mut enrollments[position].credential,
-                    3,
+                    CloseOperation::BeginHeldBody,
                     0,
                     &control(&forged.late)
                 ),
@@ -635,14 +672,24 @@ pub fn run(
         );
     }
     assert!(matches!(
-        works[0].command(&mut enrollments[0].credential, 6, 0, &[]),
+        works[0].command(
+            &mut enrollments[0].credential,
+            CloseOperation::PrepareResponse,
+            0,
+            &[]
+        ),
         Err(Error::Context)
     ));
     // A voter's response must list its own on-time ballot.
     let voter = scenario.omitted.unwrap_or(*scenario.voters.last().unwrap());
     let mut incomplete = close_work(&enrollments[voter], &poll, &setup, voter);
     incomplete
-        .command(&mut enrollments[voter].credential, 2, 0, &intent_packet)
+        .command(
+            &mut enrollments[voter].credential,
+            CloseOperation::LockIntent,
+            0,
+            &intent_packet,
+        )
         .unwrap();
     for submission in common
         .iter()
@@ -656,7 +703,12 @@ pub fn run(
         );
     }
     let body = incomplete
-        .command(&mut enrollments[voter].credential, 6, 0, &[])
+        .command(
+            &mut enrollments[voter].credential,
+            CloseOperation::PrepareResponse,
+            0,
+            &[],
+        )
         .unwrap();
     assert!(matches!(
         sign(&mut incomplete, &mut enrollments[voter].credential, &body),
@@ -720,7 +772,7 @@ pub fn run(
             works[0]
                 .command(
                     &mut enrollments[0].credential,
-                    7,
+                    CloseOperation::AdmitResponse,
                     0,
                     &packet(late_listing.body(), &late_signature)
                 )
@@ -832,7 +884,12 @@ pub fn run(
     // Only the organizer takes responses. Delivery adds at most two envelopes
     // to a slot, and the intent lock discards and then refuses late ones.
     assert!(matches!(
-        works[1].command(&mut enrollments[1].credential, 7, 0, arrivals[0]),
+        works[1].command(
+            &mut enrollments[1].credential,
+            CloseOperation::AdmitResponse,
+            0,
+            arrivals[0]
+        ),
         Err(Error::Context)
     ));
     let mut probe = close_work(&enrollments[0], &poll, &setup, 0);
@@ -847,16 +904,31 @@ pub fn run(
             );
         }
         assert!(matches!(
-            probe.command(&mut enrollments[0].credential, 3, 0, &control(&forged.b)),
+            probe.command(
+                &mut enrollments[0].credential,
+                CloseOperation::BeginHeldBody,
+                0,
+                &control(&forged.b)
+            ),
             Err(Error::Consumed)
         ));
     }
     probe
-        .command(&mut enrollments[0].credential, 2, 0, &intent_packet)
+        .command(
+            &mut enrollments[0].credential,
+            CloseOperation::LockIntent,
+            0,
+            &intent_packet,
+        )
         .unwrap();
     if let Some(forged) = &forged {
         assert!(matches!(
-            probe.command(&mut enrollments[0].credential, 3, 0, &control(&forged.late)),
+            probe.command(
+                &mut enrollments[0].credential,
+                CloseOperation::BeginHeldBody,
+                0,
+                &control(&forged.late)
+            ),
             Err(Error::Context)
         ));
         deliver(
@@ -880,22 +952,47 @@ pub fn run(
     // The complete valid body may arrive before transport reports failure.
     // Cancellation must not install it or block its later genuine delivery.
     probe
-        .command(&mut enrollments[0].credential, 3, 0, &control(known))
+        .command(
+            &mut enrollments[0].credential,
+            CloseOperation::BeginHeldBody,
+            0,
+            &control(known),
+        )
         .unwrap();
     hashed += read_chunks(&known.body, |bytes| {
         probe
-            .command(&mut enrollments[0].credential, 4, 0, bytes)
+            .command(
+                &mut enrollments[0].credential,
+                CloseOperation::PushHeldBody,
+                0,
+                bytes,
+            )
             .unwrap();
     });
     assert!(matches!(
-        probe.command(&mut enrollments[0].credential, 12, 0, &[0]),
+        probe.command(
+            &mut enrollments[0].credential,
+            CloseOperation::DiscardHeldBody,
+            0,
+            &[0]
+        ),
         Err(Error::Shape)
     ));
     probe
-        .command(&mut enrollments[0].credential, 12, 0, &[])
+        .command(
+            &mut enrollments[0].credential,
+            CloseOperation::DiscardHeldBody,
+            0,
+            &[],
+        )
         .unwrap();
     assert!(matches!(
-        probe.command(&mut enrollments[0].credential, 5, 0, &[]),
+        probe.command(
+            &mut enrollments[0].credential,
+            CloseOperation::FinishHeldBody,
+            0,
+            &[]
+        ),
         Err(Error::Context)
     ));
     deliver(
@@ -905,12 +1002,22 @@ pub fn run(
         &mut hashed,
     );
     probe
-        .command(&mut enrollments[0].credential, 12, 0, &[])
+        .command(
+            &mut enrollments[0].credential,
+            CloseOperation::DiscardHeldBody,
+            0,
+            &[],
+        )
         .unwrap();
     // An input that changes nothing is refused, so no log of accepted inputs
     // records it.
     assert!(matches!(
-        probe.command(&mut enrollments[0].credential, 3, 0, &control(known)),
+        probe.command(
+            &mut enrollments[0].credential,
+            CloseOperation::BeginHeldBody,
+            0,
+            &control(known)
+        ),
         Err(Error::Consumed)
     ));
     let missing: Vec<u8> = common[1..]
@@ -927,7 +1034,7 @@ pub fn run(
         assert!(matches!(
             probe.command(
                 &mut enrollments[0].credential,
-                7,
+                CloseOperation::AdmitResponse,
                 0,
                 &[arrivals[0].as_slice(), &missing, &control(extra)].concat()
             ),
@@ -937,18 +1044,28 @@ pub fn run(
     probe
         .command(
             &mut enrollments[0].credential,
-            7,
+            CloseOperation::AdmitResponse,
             0,
             &[arrivals[0].as_slice(), &missing].concat(),
         )
         .unwrap();
     assert!(matches!(
-        probe.command(&mut enrollments[0].credential, 7, 0, arrivals[0]),
+        probe.command(
+            &mut enrollments[0].credential,
+            CloseOperation::AdmitResponse,
+            0,
+            arrivals[0]
+        ),
         Err(Error::Consumed)
     ));
     let mut lacking = close_work(&enrollments[0], &poll, &setup, 0);
     lacking
-        .command(&mut enrollments[0].credential, 2, 0, &intent_packet)
+        .command(
+            &mut enrollments[0].credential,
+            CloseOperation::LockIntent,
+            0,
+            &intent_packet,
+        )
         .unwrap();
     gather(
         &mut lacking,
@@ -961,7 +1078,12 @@ pub fn run(
     all_wanted.extend(omitted);
     assert_eq!(
         lacking
-            .command(&mut enrollments[0].credential, 13, 0, &[])
+            .command(
+                &mut enrollments[0].credential,
+                CloseOperation::WantedBodies,
+                0,
+                &[]
+            )
             .unwrap(),
         wanted_bytes(&all_wanted)
     );
@@ -972,7 +1094,7 @@ pub fn run(
             lacking
                 .command(
                     &mut enrollments[0].credential,
-                    14,
+                    CloseOperation::EnvelopeIdentity,
                     0,
                     submission.envelope.bytes()
                 )
@@ -984,10 +1106,18 @@ pub fn run(
     malformed[0] ^= 1;
     assert!(
         lacking
-            .command(&mut enrollments[0].credential, 14, 0, &malformed)
+            .command(
+                &mut enrollments[0].credential,
+                CloseOperation::EnvelopeIdentity,
+                0,
+                &malformed
+            )
             .is_err()
     );
-    for operation in [6, 9] {
+    for operation in [
+        CloseOperation::PrepareResponse,
+        CloseOperation::PrepareProposal,
+    ] {
         assert!(matches!(
             lacking.command(&mut enrollments[0].credential, operation, 0, &[]),
             Err(Error::Context)
@@ -1012,7 +1142,12 @@ pub fn run(
     let omitted_wanted: Vec<&Submission> = omitted.into_iter().collect();
     assert_eq!(
         works[0]
-            .command(&mut enrollments[0].credential, 13, 0, &[])
+            .command(
+                &mut enrollments[0].credential,
+                CloseOperation::WantedBodies,
+                0,
+                &[]
+            )
             .unwrap(),
         wanted_bytes(&omitted_wanted)
     );
@@ -1032,7 +1167,12 @@ pub fn run(
         );
     }
     let again = works[0]
-        .command(&mut enrollments[0].credential, 9, 0, &[])
+        .command(
+            &mut enrollments[0].credential,
+            CloseOperation::PrepareProposal,
+            0,
+            &[],
+        )
         .unwrap();
     assert!(matches!(
         sign(&mut works[0], &mut enrollments[0].credential, &again),

@@ -17,7 +17,10 @@ use std::{
     sync::Arc,
 };
 use supported_profile::{Profile, relation::setup_relation};
-use word_proof::{bridge::Prover, transcript};
+use word_proof::{
+    bridge::{Prover, ProverStep},
+    transcript,
+};
 
 struct PublicOutput {
     profile: Profile,
@@ -165,15 +168,23 @@ pub fn generate(
     let mut unused = Vec::new();
     loop {
         match prover.phase_code() {
-            3..=6 | 8..=9 => prover.advance(7, 0, &[], &mut unused).unwrap(),
+            3..=6 | 8..=9 => prover
+                .advance(ProverStep::Step, 0, &[], &mut unused)
+                .unwrap(),
             7 => {
                 for index in 0..profile.setup_polynomials() {
-                    prover.advance(8, index, &[], &mut unused).unwrap();
+                    prover
+                        .advance(ProverStep::BeginPolynomial, index, &[], &mut unused)
+                        .unwrap();
                     let bytes = polynomial_bytes(roster, directory, index);
                     for chunk in bytes.chunks(1 << 20) {
-                        prover.advance(9, 0, chunk, &mut unused).unwrap();
+                        prover
+                            .advance(ProverStep::PushPolynomial, 0, chunk, &mut unused)
+                            .unwrap();
                     }
-                    prover.advance(10, 0, &[], &mut unused).unwrap();
+                    prover
+                        .advance(ProverStep::FinishPolynomial, 0, &[], &mut unused)
+                        .unwrap();
                 }
             }
             10 => break,
@@ -184,7 +195,9 @@ pub fn generate(
     let mut file = crate::public_output::PublicOutput::create(&proof_path).unwrap();
     while prover.phase_code() != 11 {
         let mut bytes = Vec::new();
-        prover.advance(11, 0, &[], &mut bytes).unwrap();
+        prover
+            .advance(ProverStep::NextOutput, 0, &[], &mut bytes)
+            .unwrap();
         assert!(bytes.len() <= 1 << 20);
         file.write_all(&bytes).unwrap();
     }

@@ -1,4 +1,5 @@
 use super::*;
+use crate::bridge::ProverStep;
 
 // A setup witness of the relation: zero words, and each sparse
 // support's least positions of its stride.
@@ -16,7 +17,9 @@ fn columns(relation: &Relation) -> Vec<Vec<u16>> {
     columns
 }
 fn step(prover: &mut Prover) {
-    prover.advance(7, 0, &[], &mut Vec::new()).unwrap();
+    prover
+        .advance(ProverStep::Step, 0, &[], &mut Vec::new())
+        .unwrap();
 }
 // The first oracle's root once the prover commits its remaining columns.
 fn first_root(mut prover: Prover) -> [u8; 64] {

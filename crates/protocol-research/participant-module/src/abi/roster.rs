@@ -2,8 +2,9 @@
 //! participant's confirmation.
 use super::{SESSION, Session, original_context};
 use protocol_foundations::{
-    SIGNATURE_BYTES, roster_authentication::authenticate_roster_proposal,
-    roster_input::RosterInputVerifier,
+    SIGNATURE_BYTES,
+    roster_authentication::authenticate_roster_proposal,
+    roster_input::{RecordStep, RosterInputVerifier},
 };
 use std::sync::Arc;
 use zeroize::Zeroize;
@@ -100,20 +101,10 @@ pub extern "C" fn roster_record(operation: u32, position: usize, length: usize) 
         let Some(bytes) = input.get(..length) else {
             return 1;
         };
-        let Some(roster) = roster.as_mut() else {
+        let (Some(roster), Some(step)) = (roster.as_mut(), RecordStep::from_code(operation)) else {
             return 1;
         };
-        u32::from(
-            match operation {
-                0 => roster.begin_record(bytes),
-                1 => roster.push_key(position, bytes),
-                2 if length == 0 => roster.finish_key(position),
-                4 if length == 0 => roster.finish_record(position),
-                5 if length == 0 => roster.discard_record(position),
-                _ => return 1,
-            }
-            .is_err(),
-        )
+        u32::from(roster.record_step(step, position, bytes).is_err())
     })
 }
 #[unsafe(no_mangle)]

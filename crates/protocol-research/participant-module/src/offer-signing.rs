@@ -117,27 +117,4 @@ impl OfferSigning {
     pub fn offer(&self) -> Option<(&OfferEnvelope, &[u8; SIGNATURE_BYTES])> {
         Some((self.envelope.as_ref()?, self.signature.as_ref()?))
     }
-    pub fn restore(
-        &mut self,
-        credential: &mut Credential,
-        envelope: &[u8],
-        signature: &[u8],
-    ) -> Result<(), Error> {
-        if self.failed
-            || self.signature.is_some()
-            || self
-                .envelope
-                .as_ref()
-                .is_none_or(|held| held.bytes() != envelope)
-        {
-            return Err(Error::Context);
-        }
-        credential.restore_offer(
-            self.context.as_ref().ok_or(Error::Consumed)?,
-            self.envelope.as_ref().ok_or(Error::Consumed)?,
-            signature,
-        )?;
-        self.signature = Some(signature.try_into().map_err(|_| Error::Shape)?);
-        Ok(())
-    }
 }

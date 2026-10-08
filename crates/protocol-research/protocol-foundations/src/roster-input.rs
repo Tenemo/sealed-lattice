@@ -17,6 +17,17 @@ pub fn open_record_limit() -> usize {
     parallel_work::helpers().max(1)
 }
 
+crate::operation_codes! {
+    /// The steps of one registration record in a roster verification.
+    pub enum RecordStep {
+        Begin = 0,
+        Key = 1,
+        KeyFinish = 2,
+        Finish = 4,
+        Discard = 5,
+    }
+}
+
 enum Record {
     Unread,
     Open(RegistrationSession),
@@ -99,6 +110,23 @@ impl RosterInputVerifier {
     }
     pub fn poll(&self) -> &VerifiedPoll {
         &self.poll
+    }
+    /// Runs one step of the record at a position; only a record's begin and
+    /// its key take bytes.
+    pub fn record_step(
+        &mut self,
+        step: RecordStep,
+        position: usize,
+        bytes: &[u8],
+    ) -> Result<(), Error> {
+        match step {
+            RecordStep::Begin => self.begin_record(bytes),
+            RecordStep::Key => self.push_key(position, bytes),
+            RecordStep::KeyFinish if bytes.is_empty() => self.finish_key(position),
+            RecordStep::Finish if bytes.is_empty() => self.finish_record(position),
+            RecordStep::Discard if bytes.is_empty() => self.discard_record(position),
+            RecordStep::KeyFinish | RecordStep::Finish | RecordStep::Discard => Err(Error::Shape),
+        }
     }
     /// Opens a candidate under the original requested body identity. The
     /// control is position, body identity, header length, header and signature;

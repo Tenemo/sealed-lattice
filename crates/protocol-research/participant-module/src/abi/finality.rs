@@ -18,12 +18,21 @@ fn field<'a>(bytes: &mut &'a [u8], maximum: usize) -> Result<&'a [u8], Error> {
     Ok(value)
 }
 
+protocol_foundations::operation_codes! {
+    /// The participant's finality commands.
+    enum FinalityOperation {
+        Begin = 0,
+        SignVote = 1,
+        RestoreSignedTarget = 2,
+        CertifiedBallotInclusion = 3,
+    }
+}
 fn command(session: &mut Session, operation: u32, input: &[u8]) -> Result<Vec<u8>, Error> {
     let close = session.close.as_ref().ok_or(Error::Context)?;
-    match operation {
+    match FinalityOperation::from_code(operation) {
         // Returns the ballot status code (0 not cast, 1 late, 2 included,
         // 3 omitted) followed by the target body to persist before signing.
-        0 => {
+        Some(FinalityOperation::Begin) => {
             if session.finality.is_some() || !input.is_empty() {
                 return Err(Error::Consumed);
             }
@@ -35,7 +44,7 @@ fn command(session: &mut Session, operation: u32, input: &[u8]) -> Result<Vec<u8
             session.finality = Some(work);
             Ok(output)
         }
-        1 => {
+        Some(FinalityOperation::SignVote) => {
             if !(1..=MAXIMUM_TARGET_BODY_BYTES).contains(&input.len()) {
                 return Err(Error::Shape);
             }
@@ -44,7 +53,7 @@ fn command(session: &mut Session, operation: u32, input: &[u8]) -> Result<Vec<u8
             work.sign(&mut enrollment.credential, input)
                 .map(|vote| vote.encode())
         }
-        2 => {
+        Some(FinalityOperation::RestoreSignedTarget) => {
             if session.finality.is_some() {
                 return Err(Error::Consumed);
             }
@@ -60,7 +69,7 @@ fn command(session: &mut Session, operation: u32, input: &[u8]) -> Result<Vec<u8
         // The own ballot's status code in the target this instance
         // certified, for a participant that signed no target of its own.
         // Only the certificate verifier supplies the target.
-        3 => {
+        Some(FinalityOperation::CertifiedBallotInclusion) => {
             if !input.is_empty() {
                 return Err(Error::Shape);
             }
@@ -70,7 +79,7 @@ fn command(session: &mut Session, operation: u32, input: &[u8]) -> Result<Vec<u8
                 .released_ballot_inclusion(&enrollment.credential, certificate.target().body())
                 .map(|status| vec![status.code()])
         }
-        _ => Err(Error::Shape),
+        None => Err(Error::Shape),
     }
 }
 

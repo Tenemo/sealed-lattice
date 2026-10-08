@@ -1,6 +1,7 @@
 //! The close: the participant's close messages and the public close
 //! verification that yields the close barrier.
 use super::{SESSION, Session};
+use crate::close_work::CloseOperation;
 use evaluation_target::{
     close::VerifiedCloseBarrier,
     close_session::{CLOSE_INPUT_BYTES, CloseSession},
@@ -17,7 +18,10 @@ pub extern "C" fn participant_close_command(operation: u32, argument: usize, len
         }
         let input = Zeroizing::new(session.input[..length].to_vec());
         session.input[..length].zeroize();
-        if operation == 0 {
+        let Some(operation) = CloseOperation::from_code(operation) else {
+            return 1;
+        };
+        if operation == CloseOperation::Begin {
             if argument != 0 || session.close.is_some() || session.ballot.is_some() {
                 return 1;
             }

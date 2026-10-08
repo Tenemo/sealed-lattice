@@ -12,7 +12,7 @@ use protocol_foundations::{
     poll::VerifiedPoll,
     roster::MAXIMUM_PROPOSAL_BYTES,
     roster_authentication::{AuthenticatedRosterProposal, authenticate_roster_proposal},
-    roster_input::RosterInputVerifier,
+    roster_input::{RecordStep, RosterInputVerifier},
     setup_selection::{
         AuthenticatedSelectionCertificate, AuthenticatedSelectionEndorsement,
         AuthenticatedSelectionProposal, MAXIMUM_SELECTION_BYTES, SelectionProposal,
@@ -165,7 +165,7 @@ impl SetupSession {
     }
     pub fn roster_record(
         &mut self,
-        operation: u32,
+        step: RecordStep,
         position: usize,
         length: usize,
     ) -> Result<(), Refused> {
@@ -184,15 +184,7 @@ impl SetupSession {
         let Some(roster) = roster.as_mut() else {
             return Err(Refused);
         };
-        let result = match operation {
-            0 => roster.begin_record(bytes),
-            1 => roster.push_key(position, bytes),
-            2 if length == 0 => roster.finish_key(position),
-            4 if length == 0 => roster.finish_record(position),
-            5 if length == 0 => roster.discard_record(position),
-            _ => return Err(Refused),
-        };
-        refused(result.is_err())
+        refused(roster.record_step(step, position, bytes).is_err())
     }
     pub fn finish_roster(&mut self, length: usize) -> Result<(), Refused> {
         if self.proposal.is_some() {

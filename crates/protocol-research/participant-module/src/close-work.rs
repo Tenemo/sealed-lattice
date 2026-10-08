@@ -17,6 +17,27 @@ use protocol_foundations::{
 use setup_aggregate::verified::VerifiedSetupAggregate;
 use std::sync::Arc;
 
+protocol_foundations::operation_codes! {
+    /// The close commands; the participant session begins the close work,
+    /// and the work runs every other command.
+    pub enum CloseOperation {
+        Begin = 0,
+        PrepareIntent = 1,
+        LockIntent = 2,
+        BeginHeldBody = 3,
+        PushHeldBody = 4,
+        FinishHeldBody = 5,
+        PrepareResponse = 6,
+        AdmitResponse = 7,
+        Sign = 8,
+        PrepareProposal = 9,
+        RestoreMessage = 10,
+        RestoreBallotSigning = 11,
+        DiscardHeldBody = 12,
+        WantedBodies = 13,
+        EnvelopeIdentity = 14,
+    }
+}
 enum Prepared {
     Intent(CloseIntentMessage),
     Response(CloseResponseMessage),
@@ -191,388 +212,410 @@ impl CloseWork {
     pub fn command(
         &mut self,
         credential: &mut Credential,
-        operation: u32,
+        operation: CloseOperation,
         argument: usize,
         input: &[u8],
     ) -> Result<Vec<u8>, Error> {
-        if input.len() > 1 << 20 || (operation != 10 && argument != 0) {
+        if input.len() > 1 << 20 || (operation != CloseOperation::RestoreMessage && argument != 0) {
             return Err(Error::Shape);
         }
-        let ready = self.prepared.is_none() && self.pending.is_none();
         match operation {
-            // The organizer's close intent. Input is the close time.
-            1 => {
-                if !ready || self.intent.is_some() {
-                    return Err(Error::Consumed);
-                }
-                let time = u64::from_le_bytes(input.try_into().map_err(|_| Error::Shape)?);
-                let message = self.context.intent(time).map_err(|_| Error::Context)?;
-                let body = message.body().to_vec();
-                self.prepared = Some(Prepared::Intent(message));
-                Ok(body)
+            CloseOperation::Begin => Err(Error::Shape),
+            CloseOperation::PrepareIntent => self.prepare_intent(input),
+            CloseOperation::LockIntent => self.lock_intent(credential, input),
+            CloseOperation::BeginHeldBody => self.begin_held_body(input),
+            CloseOperation::PushHeldBody => self.push_held_body(input),
+            CloseOperation::FinishHeldBody => self.finish_held_body(input),
+            CloseOperation::PrepareResponse => self.prepare_response(input),
+            CloseOperation::AdmitResponse => self.admit_response(input),
+            CloseOperation::Sign => self.sign(credential, input),
+            CloseOperation::PrepareProposal => self.prepare_proposal(input),
+            CloseOperation::RestoreMessage => self.restore_message(credential, argument, input),
+            CloseOperation::RestoreBallotSigning => self.restore_ballot_signing(credential, input),
+            CloseOperation::DiscardHeldBody => self.discard_held_body(input),
+            CloseOperation::WantedBodies => self.wanted_bodies(input),
+            CloseOperation::EnvelopeIdentity => self.envelope_identity(input),
+        }
+    }
+    // Whether no prepared message or tentative body is outstanding.
+    fn ready(&self) -> bool {
+        self.prepared.is_none() && self.pending.is_none()
+    }
+    /// The organizer's close intent. Input is the close time.
+    fn prepare_intent(&mut self, input: &[u8]) -> Result<Vec<u8>, Error> {
+        if !self.ready() || self.intent.is_some() {
+            return Err(Error::Consumed);
+        }
+        let time = u64::from_le_bytes(input.try_into().map_err(|_| Error::Shape)?);
+        let message = self.context.intent(time).map_err(|_| Error::Context)?;
+        let body = message.body().to_vec();
+        self.prepared = Some(Prepared::Intent(message));
+        Ok(body)
+    }
+    /// Authenticates and locks the first close intent. The root persists
+    /// that lock before any response is prepared. Held bodies and known
+    /// envelopes timed after the close time can never be listed or
+    /// needed, so the lock discards them and frees their slots.
+    fn lock_intent(&mut self, credential: &mut Credential, input: &[u8]) -> Result<Vec<u8>, Error> {
+        if !self.ready() || self.intent.is_some() {
+            return Err(Error::Consumed);
+        }
+        let (body, signature) = packet(
+            input,
+            maximum_close_message_bytes(ClosePurpose::Intent, self.count()),
+        )?;
+        let intent = self
+            .context
+            .authenticate_intent(body, signature)
+            .map_err(|_| Error::Crypto)?;
+        credential.lock_close_intent(&self.owner, self.roster(), intent.message(), signature)?;
+        let close_time = intent.message().close_time();
+        self.held
+            .retain(|body| body.authentication().envelope().ballot_time() <= close_time);
+        self.envelopes
+            .retain(|value| value.envelope().ballot_time() <= close_time);
+        self.intent = Some(intent);
+        Ok(Vec::new())
+    }
+    /// A held envelope and its complete body, including this
+    /// participant's own ballot. A response lists at most two envelopes
+    /// for one slot, so a third body for a slot, which only a corrupt
+    /// author can sign, is refused before it is transferred, as is a
+    /// body timed after a locked close time or a new envelope for a
+    /// slot with two known ones.
+    fn begin_held_body(&mut self, input: &[u8]) -> Result<Vec<u8>, Error> {
+        if !self.ready() || input.len() != ENVELOPE_BYTES + SIGNATURE_BYTES {
+            return Err(Error::Shape);
+        }
+        let authentication = authenticate_envelope(
+            self.context.setup(),
+            &input[..ENVELOPE_BYTES],
+            &input[ENVELOPE_BYTES..],
+        )
+        .map_err(|_| Error::Crypto)?;
+        self.admit(&authentication)?;
+        let envelope = authentication.envelope();
+        let slot = self
+            .held
+            .iter()
+            .filter(|value| value.authentication().envelope().position() == envelope.position());
+        if slot.clone().count() >= MAXIMUM_LISTED_ENVELOPES_PER_SLOT
+            || slot
+                .into_iter()
+                .any(|value| value.authentication().envelope().identity() == envelope.identity())
+        {
+            return Err(Error::Consumed);
+        }
+        self.pending =
+            Some(BallotBodyAuthentication::new(authentication).map_err(|_| Error::Shape)?);
+        Ok(Vec::new())
+    }
+    fn push_held_body(&mut self, input: &[u8]) -> Result<Vec<u8>, Error> {
+        if self
+            .pending
+            .as_mut()
+            .ok_or(Error::Context)?
+            .push(input)
+            .is_err()
+        {
+            self.pending = None;
+            return Err(Error::Crypto);
+        }
+        Ok(Vec::new())
+    }
+    fn finish_held_body(&mut self, input: &[u8]) -> Result<Vec<u8>, Error> {
+        if !input.is_empty() {
+            return Err(Error::Shape);
+        }
+        let body = self
+            .pending
+            .take()
+            .ok_or(Error::Context)?
+            .finish()
+            .map_err(|_| Error::Crypto)?;
+        self.remember(body.authentication());
+        self.held.push(body);
+        Ok(Vec::new())
+    }
+    /// This participant's response under the honest listing rule. Any
+    /// other participant responds without waiting; the organizer only
+    /// once `q-1` other responses are ready, so every response it has
+    /// not yet authenticated is unnecessary to its proposal.
+    fn prepare_response(&mut self, input: &[u8]) -> Result<Vec<u8>, Error> {
+        if !self.ready() || !input.is_empty() {
+            return Err(Error::Consumed);
+        }
+        let intent = self.intent.as_ref().ok_or(Error::Context)?;
+        if self.is_organizer()
+            && self
+                .responses
+                .iter()
+                .filter(|response| {
+                    response.message().responder() != self.owner.position()
+                        && self.context.organizer_ready(
+                            intent,
+                            &self.envelopes,
+                            &self.held,
+                            response,
+                        )
+                })
+                .count()
+                < close_quorum(self.count()) - 1
+        {
+            return Err(Error::Context);
+        }
+        let message = self
+            .context
+            .response(intent, self.owner.position(), &self.envelopes, &self.held)
+            .map_err(|_| Error::Context)?;
+        let body = message.body().to_vec();
+        self.prepared = Some(Prepared::Response(message));
+        Ok(body)
+    }
+    /// A response to the locked intent, for the organizer's proposal,
+    /// followed by each envelope it lists that the organizer does not
+    /// know, with its signature. Only the first response of a responder
+    /// is retained, and its envelopes join the known set only once it
+    /// authenticates; a later one is refused.
+    fn admit_response(&mut self, input: &[u8]) -> Result<Vec<u8>, Error> {
+        if !self.ready() {
+            return Err(Error::Consumed);
+        }
+        if !self.is_organizer() {
+            return Err(Error::Context);
+        }
+        let intent = self.intent.as_ref().ok_or(Error::Context)?;
+        let maximum = maximum_close_message_bytes(ClosePurpose::Response, self.count());
+        let (leading, rest) = leading_packet(input, maximum)?;
+        let (body, signature) = packet(leading, maximum)?;
+        let submission = ENVELOPE_BYTES + SIGNATURE_BYTES;
+        if !rest.len().is_multiple_of(submission) {
+            return Err(Error::Shape);
+        }
+        let message = CloseResponseMessage::parse(body, self.count())?;
+        if self
+            .responses
+            .iter()
+            .any(|value| value.message().responder() == message.responder())
+        {
+            return Err(Error::Consumed);
+        }
+        let mut supplied: Vec<AuthenticatedBallotEnvelope> = Vec::new();
+        for bytes in rest.chunks_exact(submission) {
+            let authentication = authenticate_envelope(
+                self.context.setup(),
+                &bytes[..ENVELOPE_BYTES],
+                &bytes[ENVELOPE_BYTES..],
+            )
+            .map_err(|_| Error::Crypto)?;
+            let identity = authentication.envelope().identity();
+            if self.known(&identity)
+                || supplied
+                    .iter()
+                    .any(|value| value.envelope().identity() == identity)
+                || !message
+                    .listed()
+                    .iter()
+                    .any(|(_, listed)| *listed == identity)
+            {
+                return Err(Error::Context);
             }
-            // Authenticates and locks the first close intent. The root persists
-            // that lock before any response is prepared. Held bodies and known
-            // envelopes timed after the close time can never be listed or
-            // needed, so the lock discards them and frees their slots.
-            2 => {
-                if !ready || self.intent.is_some() {
-                    return Err(Error::Consumed);
-                }
+            supplied.push(authentication);
+        }
+        let available: Vec<_> = self.envelopes.iter().chain(&supplied).cloned().collect();
+        let response = self
+            .context
+            .authenticate_response(intent, body, signature, &available)
+            .map_err(|_| Error::Crypto)?;
+        for authentication in &supplied {
+            self.remember(authentication);
+        }
+        self.responses.push(response);
+        Ok(Vec::new())
+    }
+    /// Signing is reachable only after the root commits this exact
+    /// body. One request consumes the prepared body; the
+    /// credential consumes its purpose before signing.
+    fn sign(&mut self, credential: &mut Credential, input: &[u8]) -> Result<Vec<u8>, Error> {
+        if input != self.prepared.as_ref().ok_or(Error::Context)?.body() {
+            return Err(Error::Context);
+        }
+        let prepared = self.prepared.take().ok_or(Error::Context)?;
+        let roster = self.context.setup().roster();
+        let signature = match &prepared {
+            Prepared::Intent(message) => {
+                credential.sign_close_intent(&self.owner, roster, message)?
+            }
+            Prepared::Response(message) => {
+                credential.sign_close_response(&self.owner, roster, message)?
+            }
+            Prepared::Proposal(message) => {
+                credential.sign_close_proposal(&self.owner, roster, message)?
+            }
+        };
+        Ok(signature.to_vec())
+    }
+    /// The organizer's proposal: its own response and the first `q-1`
+    /// other authenticated responses to its intent, in arrival order,
+    /// that keep every usable slot's body held.
+    fn prepare_proposal(&mut self, input: &[u8]) -> Result<Vec<u8>, Error> {
+        if !self.ready() || !input.is_empty() {
+            return Err(Error::Consumed);
+        }
+        let organizer = self.owner.position();
+        let own = self
+            .responses
+            .iter()
+            .find(|response| response.message().responder() == organizer)
+            .ok_or(Error::Context)?;
+        // A response joins only while every usable slot of the
+        // selection has a held body, so a response listing a body no
+        // one supplies cannot stall the proposal.
+        let holds = |selection: &[&AuthenticatedCloseResponse]| {
+            usable_entries(self.count(), selection)
+                .iter()
+                .all(|(_, identity)| {
+                    self.held
+                        .iter()
+                        .any(|value| value.authentication().envelope().identity() == *identity)
+                })
+        };
+        let mut selected = vec![own];
+        if !holds(&selected) {
+            return Err(Error::Context);
+        }
+        for response in &self.responses {
+            if selected.len() == close_quorum(self.count()) {
+                break;
+            }
+            if response.message().responder() == organizer {
+                continue;
+            }
+            selected.push(response);
+            if !holds(&selected) {
+                selected.pop();
+            }
+        }
+        let selected: Vec<_> = selected.into_iter().cloned().collect();
+        let intent = self.intent.as_ref().ok_or(Error::Context)?;
+        let message = self
+            .context
+            .proposal(intent, &selected)
+            .map_err(|_| Error::Context)?;
+        let body = message.body().to_vec();
+        self.prepared = Some(Prepared::Proposal(message));
+        Ok(body)
+    }
+    /// Restores a completed close message: 0 intent, 1 response,
+    /// 2 proposal. A response requires its intent to be locked first.
+    fn restore_message(
+        &mut self,
+        credential: &mut Credential,
+        argument: usize,
+        input: &[u8],
+    ) -> Result<Vec<u8>, Error> {
+        if !self.ready() {
+            return Err(Error::Consumed);
+        }
+        let count = self.count();
+        let organizer = self.context.organizer();
+        let roster = self.context.setup().roster();
+        match argument {
+            0 => {
                 let (body, signature) = packet(
                     input,
-                    maximum_close_message_bytes(ClosePurpose::Intent, self.count()),
+                    maximum_close_message_bytes(ClosePurpose::Intent, count),
                 )?;
-                let intent = self
-                    .context
-                    .authenticate_intent(body, signature)
-                    .map_err(|_| Error::Crypto)?;
-                credential.lock_close_intent(
+                let message = CloseIntentMessage::parse(body)?;
+                credential.restore_close_message(
                     &self.owner,
-                    self.roster(),
-                    intent.message(),
+                    roster,
+                    CloseMessage::Intent(&message),
                     signature,
-                )?;
-                let close_time = intent.message().close_time();
-                self.held
-                    .retain(|body| body.authentication().envelope().ballot_time() <= close_time);
-                self.envelopes
-                    .retain(|value| value.envelope().ballot_time() <= close_time);
-                self.intent = Some(intent);
-                Ok(Vec::new())
-            }
-            // A held envelope and its complete body, including this
-            // participant's own ballot. A response lists at most two envelopes
-            // for one slot, so a third body for a slot, which only a corrupt
-            // author can sign, is refused before it is transferred, as is a
-            // body timed after a locked close time or a new envelope for a
-            // slot with two known ones.
-            3 => {
-                if !ready || input.len() != ENVELOPE_BYTES + SIGNATURE_BYTES {
-                    return Err(Error::Shape);
-                }
-                let authentication = authenticate_envelope(
-                    self.context.setup(),
-                    &input[..ENVELOPE_BYTES],
-                    &input[ENVELOPE_BYTES..],
                 )
-                .map_err(|_| Error::Crypto)?;
-                self.admit(&authentication)?;
-                let envelope = authentication.envelope();
-                let slot = self.held.iter().filter(|value| {
-                    value.authentication().envelope().position() == envelope.position()
-                });
-                if slot.clone().count() >= MAXIMUM_LISTED_ENVELOPES_PER_SLOT
-                    || slot.into_iter().any(|value| {
-                        value.authentication().envelope().identity() == envelope.identity()
-                    })
-                {
-                    return Err(Error::Consumed);
-                }
-                self.pending =
-                    Some(BallotBodyAuthentication::new(authentication).map_err(|_| Error::Shape)?);
-                Ok(Vec::new())
             }
-            4 => {
-                if self
-                    .pending
-                    .as_mut()
-                    .ok_or(Error::Context)?
-                    .push(input)
-                    .is_err()
-                {
-                    self.pending = None;
-                    return Err(Error::Crypto);
-                }
-                Ok(Vec::new())
-            }
-            5 => {
-                if !input.is_empty() {
-                    return Err(Error::Shape);
-                }
-                let body = self
-                    .pending
-                    .take()
-                    .ok_or(Error::Context)?
-                    .finish()
-                    .map_err(|_| Error::Crypto)?;
-                self.remember(body.authentication());
-                self.held.push(body);
-                Ok(Vec::new())
-            }
-            // This participant's response under the honest listing rule. Any
-            // other participant responds without waiting; the organizer only
-            // once `q-1` other responses are ready, so every response it has
-            // not yet authenticated is unnecessary to its proposal.
-            6 => {
-                if !ready || !input.is_empty() {
-                    return Err(Error::Consumed);
-                }
-                let intent = self.intent.as_ref().ok_or(Error::Context)?;
-                if self.is_organizer()
-                    && self
-                        .responses
-                        .iter()
-                        .filter(|response| {
-                            response.message().responder() != self.owner.position()
-                                && self.context.organizer_ready(
-                                    intent,
-                                    &self.envelopes,
-                                    &self.held,
-                                    response,
-                                )
-                        })
-                        .count()
-                        < close_quorum(self.count()) - 1
-                {
-                    return Err(Error::Context);
-                }
-                let message = self
-                    .context
-                    .response(intent, self.owner.position(), &self.envelopes, &self.held)
-                    .map_err(|_| Error::Context)?;
-                let body = message.body().to_vec();
-                self.prepared = Some(Prepared::Response(message));
-                Ok(body)
-            }
-            // A response to the locked intent, for the organizer's proposal,
-            // followed by each envelope it lists that the organizer does not
-            // know, with its signature. Only the first response of a responder
-            // is retained, and its envelopes join the known set only once it
-            // authenticates; a later one is refused.
-            7 => {
-                if !ready {
-                    return Err(Error::Consumed);
-                }
-                if !self.is_organizer() {
-                    return Err(Error::Context);
-                }
-                let intent = self.intent.as_ref().ok_or(Error::Context)?;
-                let maximum = maximum_close_message_bytes(ClosePurpose::Response, self.count());
-                let (leading, rest) = leading_packet(input, maximum)?;
-                let (body, signature) = packet(leading, maximum)?;
-                let submission = ENVELOPE_BYTES + SIGNATURE_BYTES;
-                if !rest.len().is_multiple_of(submission) {
-                    return Err(Error::Shape);
-                }
-                let message = CloseResponseMessage::parse(body, self.count())?;
-                if self
-                    .responses
-                    .iter()
-                    .any(|value| value.message().responder() == message.responder())
-                {
-                    return Err(Error::Consumed);
-                }
-                let mut supplied: Vec<AuthenticatedBallotEnvelope> = Vec::new();
-                for bytes in rest.chunks_exact(submission) {
-                    let authentication = authenticate_envelope(
-                        self.context.setup(),
-                        &bytes[..ENVELOPE_BYTES],
-                        &bytes[ENVELOPE_BYTES..],
-                    )
-                    .map_err(|_| Error::Crypto)?;
-                    let identity = authentication.envelope().identity();
-                    if self.known(&identity)
-                        || supplied
-                            .iter()
-                            .any(|value| value.envelope().identity() == identity)
-                        || !message
-                            .listed()
-                            .iter()
-                            .any(|(_, listed)| *listed == identity)
-                    {
-                        return Err(Error::Context);
-                    }
-                    supplied.push(authentication);
-                }
-                let available: Vec<_> = self.envelopes.iter().chain(&supplied).cloned().collect();
-                let response = self
-                    .context
-                    .authenticate_response(intent, body, signature, &available)
-                    .map_err(|_| Error::Crypto)?;
-                for authentication in &supplied {
-                    self.remember(authentication);
-                }
-                self.responses.push(response);
-                Ok(Vec::new())
-            }
-            // Signing is reachable only after the root commits this exact
-            // body. One request consumes the prepared body; the
-            // credential consumes its purpose before signing.
-            8 => {
-                if input != self.prepared.as_ref().ok_or(Error::Context)?.body() {
-                    return Err(Error::Context);
-                }
-                let prepared = self.prepared.take().ok_or(Error::Context)?;
-                let roster = self.context.setup().roster();
-                let signature = match &prepared {
-                    Prepared::Intent(message) => {
-                        credential.sign_close_intent(&self.owner, roster, message)?
-                    }
-                    Prepared::Response(message) => {
-                        credential.sign_close_response(&self.owner, roster, message)?
-                    }
-                    Prepared::Proposal(message) => {
-                        credential.sign_close_proposal(&self.owner, roster, message)?
-                    }
-                };
-                Ok(signature.to_vec())
-            }
-            // The organizer's proposal: its own response and the first `q-1`
-            // other authenticated responses to its intent, in arrival order,
-            // that keep every usable slot's body held.
-            9 => {
-                if !ready || !input.is_empty() {
-                    return Err(Error::Consumed);
-                }
-                let organizer = self.owner.position();
-                let own = self
-                    .responses
-                    .iter()
-                    .find(|response| response.message().responder() == organizer)
-                    .ok_or(Error::Context)?;
-                // A response joins only while every usable slot of the
-                // selection has a held body, so a response listing a body no
-                // one supplies cannot stall the proposal.
-                let holds = |selection: &[&AuthenticatedCloseResponse]| {
-                    usable_entries(self.count(), selection)
-                        .iter()
-                        .all(|(_, identity)| {
-                            self.held.iter().any(|value| {
-                                value.authentication().envelope().identity() == *identity
-                            })
-                        })
-                };
-                let mut selected = vec![own];
-                if !holds(&selected) {
-                    return Err(Error::Context);
-                }
-                for response in &self.responses {
-                    if selected.len() == close_quorum(self.count()) {
-                        break;
-                    }
-                    if response.message().responder() == organizer {
-                        continue;
-                    }
-                    selected.push(response);
-                    if !holds(&selected) {
-                        selected.pop();
-                    }
-                }
-                let selected: Vec<_> = selected.into_iter().cloned().collect();
-                let intent = self.intent.as_ref().ok_or(Error::Context)?;
-                let message = self
-                    .context
-                    .proposal(intent, &selected)
-                    .map_err(|_| Error::Context)?;
-                let body = message.body().to_vec();
-                self.prepared = Some(Prepared::Proposal(message));
-                Ok(body)
-            }
-            // Restores a completed close message: 0 intent, 1 response,
-            // 2 proposal. A response requires its intent to be locked first.
-            10 => {
-                if !ready {
-                    return Err(Error::Consumed);
-                }
-                let count = self.count();
-                let organizer = self.context.organizer();
-                let roster = self.context.setup().roster();
-                match argument {
-                    0 => {
-                        let (body, signature) = packet(
-                            input,
-                            maximum_close_message_bytes(ClosePurpose::Intent, count),
-                        )?;
-                        let message = CloseIntentMessage::parse(body)?;
-                        credential.restore_close_message(
-                            &self.owner,
-                            roster,
-                            CloseMessage::Intent(&message),
-                            signature,
-                        )
-                    }
-                    1 => {
-                        let (body, signature) = packet(
-                            input,
-                            maximum_close_message_bytes(ClosePurpose::Response, count),
-                        )?;
-                        let message = CloseResponseMessage::parse(body, count)?;
-                        credential.restore_close_message(
-                            &self.owner,
-                            roster,
-                            CloseMessage::Response(&message),
-                            signature,
-                        )
-                    }
-                    2 => {
-                        let (body, signature) = packet(
-                            input,
-                            maximum_close_message_bytes(ClosePurpose::Proposal, count),
-                        )?;
-                        let message = CloseProposalMessage::parse(body, count, organizer)?;
-                        credential.restore_close_message(
-                            &self.owner,
-                            roster,
-                            CloseMessage::Proposal(&message),
-                            signature,
-                        )
-                    }
-                    _ => Err(Error::Shape),
-                }?;
-                Ok(Vec::new())
-            }
-            // Restores the spent ballot purpose before close work. This
-            // requires the original completed local envelope and signature.
-            11 => {
-                if input.len() != ENVELOPE_BYTES + SIGNATURE_BYTES {
-                    return Err(Error::Shape);
-                }
-                let envelope = BallotEnvelope::decode(
-                    self.context.setup().profile(),
-                    &input[..ENVELOPE_BYTES],
+            1 => {
+                let (body, signature) = packet(
+                    input,
+                    maximum_close_message_bytes(ClosePurpose::Response, count),
                 )?;
-                credential.restore_retained_ballot_signing(
+                let message = CloseResponseMessage::parse(body, count)?;
+                credential.restore_close_message(
                     &self.owner,
-                    &envelope,
-                    &input[ENVELOPE_BYTES..],
+                    roster,
+                    CloseMessage::Response(&message),
+                    signature,
+                )
+            }
+            2 => {
+                let (body, signature) = packet(
+                    input,
+                    maximum_close_message_bytes(ClosePurpose::Proposal, count),
                 )?;
-                Ok(Vec::new())
+                let message = CloseProposalMessage::parse(body, count, organizer)?;
+                credential.restore_close_message(
+                    &self.owner,
+                    roster,
+                    CloseMessage::Proposal(&message),
+                    signature,
+                )
             }
-            // A failed transport discards its tentative body without
-            // accepting even a complete prefix or changing held records.
-            12 => {
-                if !input.is_empty() {
-                    return Err(Error::Shape);
-                }
-                self.pending = None;
-                Ok(Vec::new())
-            }
-            // The bodies the organizer still needs, as consecutive two-byte
-            // author positions and envelope identities: at most one per slot,
-            // each listed by an authenticated response.
-            13 => {
-                if !input.is_empty() || !self.is_organizer() {
-                    return Err(Error::Shape);
-                }
-                let intent = self.intent.as_ref().ok_or(Error::Context)?;
-                Ok(self
-                    .context
-                    .organizer_wanted(intent, &self.envelopes, &self.held, &self.responses)
-                    .into_iter()
-                    .flat_map(|(author, identity)| {
-                        (author as u16).to_le_bytes().into_iter().chain(identity)
-                    })
-                    .collect())
-            }
-            // The submission identity of an envelope of this poll's profile,
-            // which listings and wanted bodies name. It changes no state.
-            14 => Ok(
-                BallotEnvelope::decode(self.context.setup().profile(), input)?
-                    .identity()
-                    .to_vec(),
-            ),
             _ => Err(Error::Shape),
+        }?;
+        Ok(Vec::new())
+    }
+    /// Restores the spent ballot purpose before close work. This
+    /// requires the original completed local envelope and signature.
+    fn restore_ballot_signing(
+        &mut self,
+        credential: &mut Credential,
+        input: &[u8],
+    ) -> Result<Vec<u8>, Error> {
+        if input.len() != ENVELOPE_BYTES + SIGNATURE_BYTES {
+            return Err(Error::Shape);
         }
+        let envelope =
+            BallotEnvelope::decode(self.context.setup().profile(), &input[..ENVELOPE_BYTES])?;
+        credential.restore_retained_ballot_signing(
+            &self.owner,
+            &envelope,
+            &input[ENVELOPE_BYTES..],
+        )?;
+        Ok(Vec::new())
+    }
+    /// A failed transport discards its tentative body without
+    /// accepting even a complete prefix or changing held records.
+    fn discard_held_body(&mut self, input: &[u8]) -> Result<Vec<u8>, Error> {
+        if !input.is_empty() {
+            return Err(Error::Shape);
+        }
+        self.pending = None;
+        Ok(Vec::new())
+    }
+    /// The bodies the organizer still needs, as consecutive two-byte
+    /// author positions and envelope identities: at most one per slot,
+    /// each listed by an authenticated response.
+    fn wanted_bodies(&self, input: &[u8]) -> Result<Vec<u8>, Error> {
+        if !input.is_empty() || !self.is_organizer() {
+            return Err(Error::Shape);
+        }
+        let intent = self.intent.as_ref().ok_or(Error::Context)?;
+        Ok(self
+            .context
+            .organizer_wanted(intent, &self.envelopes, &self.held, &self.responses)
+            .into_iter()
+            .flat_map(|(author, identity)| {
+                (author as u16).to_le_bytes().into_iter().chain(identity)
+            })
+            .collect())
+    }
+    /// The submission identity of an envelope of this poll's profile,
+    /// which listings and wanted bodies name. It changes no state.
+    fn envelope_identity(&self, input: &[u8]) -> Result<Vec<u8>, Error> {
+        Ok(
+            BallotEnvelope::decode(self.context.setup().profile(), input)?
+                .identity()
+                .to_vec(),
+        )
     }
 }

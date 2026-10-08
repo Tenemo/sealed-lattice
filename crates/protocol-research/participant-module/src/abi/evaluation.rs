@@ -30,9 +30,17 @@ pub extern "C" fn retain_evaluation() -> u32 {
     })
 }
 
+protocol_foundations::operation_codes! {
+    /// The steps of restoring a retained evaluated target.
+    enum EvaluationRestoreStep {
+        Begin = 0,
+        Push = 1,
+        Finish = 2,
+    }
+}
 fn restore_evaluation_step(state: &mut Session, operation: u32, length: usize) -> Option<()> {
-    match operation {
-        0 => {
+    match EvaluationRestoreStep::from_code(operation)? {
+        EvaluationRestoreStep::Begin => {
             let (_, setup) = super::setup_verification::verified_setup()?;
             let maximum = 8
                 + protocol_foundations::target_signing::MAXIMUM_TARGET_BODY_BYTES
@@ -42,13 +50,13 @@ fn restore_evaluation_step(state: &mut Session, operation: u32, length: usize) -
             (state.evaluation.is_none() && length <= maximum).then_some(())?;
             state.evaluation = Some((length, Vec::with_capacity(length)));
         }
-        1 => {
+        EvaluationRestoreStep::Push => {
             let bytes = state.input.get(..length)?;
             let (expected, copy) = state.evaluation.as_mut()?;
             (length <= *expected - copy.len()).then_some(())?;
             copy.extend(bytes);
         }
-        2 => {
+        EvaluationRestoreStep::Finish => {
             let (expected, copy) = state.evaluation.take()?;
             (length == 0 && copy.len() == expected).then_some(())?;
             let (poll, setup) = super::setup_verification::verified_setup()?;
@@ -63,14 +71,13 @@ fn restore_evaluation_step(state: &mut Session, operation: u32, length: usize) -
                 .with(|session| session.borrow_mut().restore_target(target))
                 .then_some(())?;
         }
-        _ => return None,
     }
     Some(())
 }
 /// Restores the target this participant evaluated from its retained copy,
-/// which the host streams in: operation zero begins a copy of the given
-/// length, one appends that many input bytes and two restores the complete
-/// copy for this instance's verified poll and setup.
+/// which the host streams in: its begin step starts a copy of the given
+/// length, a push appends that many input bytes and its finish restores the
+/// complete copy for this instance's verified poll and setup.
 #[unsafe(no_mangle)]
 pub extern "C" fn restore_evaluation(operation: u32, length: usize) -> u32 {
     SESSION.with(|state| {

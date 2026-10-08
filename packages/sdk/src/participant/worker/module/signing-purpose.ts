@@ -1,6 +1,6 @@
 // The participant module's one-shot signing purposes by their bit positions
-// in a restored credential's unused-purpose mask. The module's purposes carry
-// the same explicit positions, which its tests pin.
+// in a restored credential's unused-purpose mask, under the names and
+// positions of the module's own purposes.
 export const signingPurpose = {
     rosterProposal: 0,
     offer: 1,

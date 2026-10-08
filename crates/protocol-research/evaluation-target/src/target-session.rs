@@ -15,6 +15,27 @@ use protocol_foundations::{
 use setup_aggregate::verified::VerifiedSetupAggregate;
 use std::sync::Arc;
 
+protocol_foundations::operation_codes! {
+    /// The evaluation target's commands.
+    enum EvaluationOperation {
+        Begin = 0,
+        TakeClassification = 1,
+        Start = 2,
+        Requirements = 10,
+        NextKey = 11,
+        PushInput = 12,
+        FinishInput = 13,
+        BeginBallotInput = 14,
+        Execute = 15,
+        ReadValue = 16,
+        ReadBack = 17,
+        Reload = 18,
+        Finish = 19,
+        KeyRecord = 21,
+        TakeKeyRecord = 22,
+        SharedKeyRecords = 23,
+    }
+}
 /// The input buffer's length; the host never writes more.
 pub const EVALUATION_INPUT_BYTES: usize = 1 << 20;
 // A key record after its prime fits the input buffer.
@@ -230,15 +251,20 @@ impl TargetSession {
         if length > EVALUATION_INPUT_BYTES {
             return Err(Error::Encoding);
         }
+        let operation = EvaluationOperation::from_code(operation);
         self.output.clear();
         if self.target.is_some() {
             return Err(Error::Context);
         }
-        if ![12, 13].contains(&operation) && self.incoming.is_some() {
+        if !matches!(
+            operation,
+            Some(EvaluationOperation::PushInput | EvaluationOperation::FinishInput)
+        ) && self.incoming.is_some()
+        {
             return Err(Error::Incomplete);
         }
         match operation {
-            0 => {
+            Some(EvaluationOperation::Begin) => {
                 if argument != 0 || length != 0 || self.context.is_some() || self.session.is_some()
                 {
                     return Err(Error::Context);
@@ -248,7 +274,7 @@ impl TargetSession {
                 inputs.release_ballot_inputs();
                 Ok(())
             }
-            1 => {
+            Some(EvaluationOperation::TakeClassification) => {
                 if argument != 0 || length != 0 || self.session.is_some() {
                     return Err(Error::Context);
                 }
@@ -259,7 +285,7 @@ impl TargetSession {
                 self.classifications.push(inputs.take_classification());
                 Ok(())
             }
-            2 => {
+            Some(EvaluationOperation::Start) => {
                 if argument != 0 || length != 0 || self.session.is_some() {
                     return Err(Error::Context);
                 }
@@ -286,7 +312,7 @@ impl TargetSession {
                 }
                 Ok(())
             }
-            10 => {
+            Some(EvaluationOperation::Requirements) => {
                 if argument != 0 || length != 0 {
                     return Err(Error::Encoding);
                 }
@@ -313,7 +339,7 @@ impl TargetSession {
                 }
                 Ok(())
             }
-            11 => {
+            Some(EvaluationOperation::NextKey) => {
                 if argument != 0 || length != 0 {
                     return Err(Error::Encoding);
                 }
@@ -366,7 +392,7 @@ impl TargetSession {
                 }
                 Ok(())
             }
-            12 => {
+            Some(EvaluationOperation::PushInput) => {
                 if argument != 0 {
                     return Err(Error::Encoding);
                 }
@@ -376,13 +402,13 @@ impl TargetSession {
                 }
                 result
             }
-            13 => {
+            Some(EvaluationOperation::FinishInput) => {
                 if argument != 0 || length != 0 {
                     return Err(Error::Encoding);
                 }
                 self.finish_incoming()
             }
-            14 => {
+            Some(EvaluationOperation::BeginBallotInput) => {
                 if length != 0 {
                     return Err(Error::Encoding);
                 }
@@ -420,7 +446,7 @@ impl TargetSession {
                 }
                 Ok(())
             }
-            15 => {
+            Some(EvaluationOperation::Execute) => {
                 if argument != 0 || length != 0 {
                     return Err(Error::Encoding);
                 }
@@ -459,7 +485,7 @@ impl TargetSession {
                 }
                 Ok(())
             }
-            16 => {
+            Some(EvaluationOperation::ReadValue) => {
                 if length != 8 {
                     return Err(Error::Encoding);
                 }
@@ -485,13 +511,13 @@ impl TargetSession {
                 self.output = output;
                 Ok(())
             }
-            17 | 18 => {
+            Some(EvaluationOperation::ReadBack | EvaluationOperation::Reload) => {
                 if length != 0 {
                     return Err(Error::Encoding);
                 }
                 let engine = self.engine()?;
                 let required = engine.requirements().map_err(|_| Error::Arithmetic)?;
-                let read = if operation == 17 {
+                let read = if operation == Some(EvaluationOperation::ReadBack) {
                     if !required.spills.contains(&argument) {
                         return Err(Error::Storage);
                     }
@@ -506,7 +532,7 @@ impl TargetSession {
                 let bytes = stored_value_bytes(engine.profile());
                 self.begin(bytes, Payload::Stored(read))
             }
-            19 => {
+            Some(EvaluationOperation::Finish) => {
                 if argument != 0 || length != 0 || !self.engine()?.finished() {
                     return Err(Error::Incomplete);
                 }
@@ -515,7 +541,7 @@ impl TargetSession {
                 ));
                 Ok(())
             }
-            21 => {
+            Some(EvaluationOperation::KeyRecord) => {
                 // The request's next key record of the ordinal, after its
                 // prime.
                 if length != 4 + KEY_RECORD_BYTES {
@@ -530,7 +556,7 @@ impl TargetSession {
                     .key_record(argument, prime, record)
                     .map_err(|_| Error::Storage)
             }
-            23 => {
+            Some(EvaluationOperation::SharedKeyRecords) => {
                 // The request's key records, which the host shared itself
                 // one after another: their handle, and the request's first
                 // ordinal, count and prime and the records' length.
@@ -556,7 +582,7 @@ impl TargetSession {
                     )
                     .map_err(|_| Error::Storage)
             }
-            22 => {
+            Some(EvaluationOperation::TakeKeyRecord) => {
                 // The last loaded key's next record for the host to store,
                 // after its prime, or nothing once every record is stored.
                 if argument != 0 || length != 0 {
@@ -568,7 +594,7 @@ impl TargetSession {
                 }
                 Ok(())
             }
-            _ => Err(Error::Encoding),
+            None => Err(Error::Encoding),
         }
     }
 }

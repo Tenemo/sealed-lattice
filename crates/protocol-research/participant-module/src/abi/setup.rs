@@ -16,12 +16,24 @@ pub extern "C" fn setup_roster_begin_retained(begin: usize, length: usize) -> u3
     0
 }
 
+protocol_foundations::operation_codes! {
+    /// The participant's selection signing commands.
+    enum SelectionOperation {
+        UnsignedBody = 0,
+        SignProposal = 1,
+        Endorse = 2,
+        RestoreProposal = 3,
+        RestoreEndorsement = 4,
+        EndorsementBody = 5,
+    }
+}
 fn selection_operation(
     state: &mut Session,
     operation: u32,
     length: usize,
 ) -> Result<(), protocol_foundations::Error> {
     use protocol_foundations::{Error, setup_selection};
+    let operation = SelectionOperation::from_code(operation);
     if length > state.input.len() {
         return Err(Error::Shape);
     }
@@ -33,7 +45,7 @@ fn selection_operation(
         return Err(Error::Context);
     }
     match operation {
-        0 => {
+        Some(SelectionOperation::UnsignedBody) => {
             if !input.is_empty() {
                 return Err(Error::Shape);
             }
@@ -45,7 +57,7 @@ fn selection_operation(
             state.contribution_output = selection.body().to_vec();
             state.unsigned_selection = Some(selection);
         }
-        1 => {
+        Some(SelectionOperation::SignProposal) => {
             if !input.is_empty() {
                 return Err(Error::Shape);
             }
@@ -58,13 +70,13 @@ fn selection_operation(
                 .sign_selection_proposal(&roster, selection)?;
             state.contribution_output = emitted_packet(selection.body(), &signature);
         }
-        2 | 5 => {
+        Some(SelectionOperation::Endorse | SelectionOperation::EndorsementBody) => {
             let inputs = super::setup_verification::selection_inputs().ok_or(Error::Context)?;
             if inputs.roster().proposal().identity_bytes() != context.identity() {
                 return Err(Error::Context);
             }
             let selection = inputs.selection().selection();
-            state.contribution_output = if operation == 2 {
+            state.contribution_output = if operation == Some(SelectionOperation::Endorse) {
                 if !input.is_empty() {
                     return Err(Error::Shape);
                 }
@@ -81,7 +93,7 @@ fn selection_operation(
                 setup_selection::endorsement_body(selection.identity(), context.position())?
             };
         }
-        3 => {
+        Some(SelectionOperation::RestoreProposal) => {
             let (body, signature) = signed_packet(&input).ok_or(Error::Shape)?;
             let proposal = setup_selection::authenticate_selection(roster, body, signature)?;
             state
@@ -91,7 +103,7 @@ fn selection_operation(
                 .credential
                 .restore_selection_proposal(&proposal)?;
         }
-        4 => {
+        Some(SelectionOperation::RestoreEndorsement) => {
             let prefix = input.get(..4).ok_or(Error::Shape)?;
             let length = u32::from_le_bytes(prefix.try_into().unwrap()) as usize;
             if length > setup_selection::MAXIMUM_SELECTION_BYTES
@@ -116,7 +128,7 @@ fn selection_operation(
                 .credential
                 .restore_selection_endorsement(&roster, &endorsement)?;
         }
-        _ => return Err(Error::Shape),
+        None => return Err(Error::Shape),
     }
     Ok(())
 }

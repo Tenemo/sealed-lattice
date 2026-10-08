@@ -510,6 +510,16 @@ const readVerifiedPoll = (context: ParticipantContext): VerifiedPoll => {
     return { question, options, topCount };
 };
 
+// The steps of the verification of the participant's own registration; its
+// retained step takes an earlier visit's retained copy.
+const ownRegistrationStep = {
+    begin: 0,
+    key: 1,
+    keyFinish: 2,
+    finish: 4,
+    retained: 5,
+} as const;
+
 // Verifies the retained registration through the module's own registration
 // verifier, or restores that verification from its retained copy in place of
 // the record, restores the original keys and checks the retained poll
@@ -528,13 +538,13 @@ export const restoreEnrollment = async (
     const definition = await read(dataKind.pollDefinition);
     const definitionSignature = await read(dataKind.pollSignature);
     const pollContext = concatenate(manifest.poll, runtime);
-    const own = (operation: number, bytes: Uint8Array = new Uint8Array()) => {
+    const own = (step: number, bytes: Uint8Array = new Uint8Array()) => {
         ownRegistrationInput(context, bytes);
-        if (module.own_registration_command(operation, bytes.length) !== 0)
+        if (module.own_registration_command(step, bytes.length) !== 0)
             throw new Error('The original registration verification refused.');
     };
     own(
-        0,
+        ownRegistrationStep.begin,
         concatenate(
             pollContext,
             unsigned32(definition.length),
@@ -547,8 +557,11 @@ export const restoreEnrollment = async (
     );
     const publicKey = await read(dataKind.publicKey);
     for (let offset = 0; offset < publicKey.length; offset += chunkBytes)
-        own(1, publicKey.subarray(offset, offset + chunkBytes));
-    own(2);
+        own(
+            ownRegistrationStep.key,
+            publicKey.subarray(offset, offset + chunkBytes),
+        );
+    own(ownRegistrationStep.keyFinish);
     let registrationBodyDigest: Uint8Array;
     // From the roster transition on, the root retains the module's
     // verification of the participant's own registration, keyed to its
@@ -557,10 +570,10 @@ export const restoreEnrollment = async (
         // The module checks the copy's tag once the capsules open the
         // credential it is keyed to.
         const retained = await read(dataKind.retainedRegistration);
-        own(5, retained);
+        own(ownRegistrationStep.retained, retained);
         registrationBodyDigest = retained.slice(0, 64);
     } else {
-        own(4);
+        own(ownRegistrationStep.finish);
         registrationBodyDigest = readModuleMemory(
             module,
             module.own_registration_body_digest_pointer(),

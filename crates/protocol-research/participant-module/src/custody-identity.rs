@@ -12,20 +12,31 @@ use protocol_foundations::{
 /// The bytes one absorb call reads from the host.
 pub const INPUT_BYTES: usize = 1 << 16;
 
-/// The closed set of purposes the host may request, each under its own
-/// domain. The target, envelope and close-response purposes yield the
-/// certified target's, a ballot envelope's and a close response body's own
-/// identities.
-fn domain(purpose: u32) -> Option<&'static str> {
-    Some(match purpose {
-        0 => "sealed-lattice/participant-root/v1",
-        1 => "sealed-lattice/participant-record/v1",
-        2 => "sealed-lattice/enrollment-input/v1",
-        3 => TARGET_IDENTITY_DOMAIN,
-        4 => ENVELOPE_IDENTITY_DOMAIN,
-        5 => ClosePurpose::Response.context(),
-        _ => return None,
-    })
+protocol_foundations::operation_codes! {
+    /// The closed set of purposes the host may request, each under its own
+    /// domain. The target, envelope and close-response purposes yield the
+    /// certified target's, a ballot envelope's and a close response body's
+    /// own identities.
+    enum CustodyPurpose {
+        Root = 0,
+        Record = 1,
+        EnrollmentInput = 2,
+        Target = 3,
+        Envelope = 4,
+        CloseResponse = 5,
+    }
+}
+impl CustodyPurpose {
+    fn domain(self) -> &'static str {
+        match self {
+            Self::Root => "sealed-lattice/participant-root/v1",
+            Self::Record => "sealed-lattice/participant-record/v1",
+            Self::EnrollmentInput => "sealed-lattice/enrollment-input/v1",
+            Self::Target => TARGET_IDENTITY_DOMAIN,
+            Self::Envelope => ENVELOPE_IDENTITY_DOMAIN,
+            Self::CloseResponse => ClosePurpose::Response.context(),
+        }
+    }
 }
 
 pub struct State {
@@ -47,8 +58,9 @@ impl State {
     pub fn begin(&mut self, purpose: u32, length: usize) -> Result<(), Error> {
         self.output = [0; 64];
         self.hash = None;
-        let hash = IdentityHasher::local(domain(purpose).ok_or(Error::Shape)?, &[], length)
-            .map_err(|_| Error::Shape)?;
+        let purpose = CustodyPurpose::from_code(purpose).ok_or(Error::Shape)?;
+        let hash =
+            IdentityHasher::local(purpose.domain(), &[], length).map_err(|_| Error::Shape)?;
         self.hash = Some(hash);
         Ok(())
     }

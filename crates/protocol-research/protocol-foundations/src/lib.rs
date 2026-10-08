@@ -55,6 +55,35 @@ pub const RETAINED_TAG_BYTES: usize = 64;
 /// The jobs this crate defines.
 pub static JOBS: [&parallel_work::Job; 1] = [&registration::session::REGISTRATION];
 
+/// Declares the choices a participant module call takes by the codes the
+/// host sends for them, such as a command's operations, with the decoding of
+/// a code. The worker's table of the same name holds the same names and
+/// codes.
+#[macro_export]
+macro_rules! operation_codes {
+    (
+        $(#[$attribute:meta])*
+        $visibility:vis enum $name:ident {
+            $($(#[$variant_attribute:meta])* $variant:ident = $code:literal,)+
+        }
+    ) => {
+        $(#[$attribute])*
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        $visibility enum $name {
+            $($(#[$variant_attribute])* $variant,)+
+        }
+        impl $name {
+            /// The operation that a host code names.
+            $visibility fn from_code(code: u32) -> Option<Self> {
+                match code {
+                    $($code => Some(Self::$variant),)+
+                    _ => None,
+                }
+            }
+        }
+    };
+}
+
 #[derive(Debug)]
 pub enum Error {
     Shape,

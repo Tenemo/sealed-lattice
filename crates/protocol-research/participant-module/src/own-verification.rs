@@ -8,6 +8,17 @@ use protocol_foundations::{
 use std::sync::Arc;
 
 const MAXIMUM_HEADER_BYTES: usize = 4096;
+protocol_foundations::operation_codes! {
+    /// The steps of the verification of the participant's own registration;
+    /// its retained step takes an earlier visit's retained copy.
+    enum OwnRegistrationStep {
+        Begin = 0,
+        Key = 1,
+        KeyFinish = 2,
+        Finish = 4,
+        Retained = 5,
+    }
+}
 pub(crate) const CONTROL_BYTES: usize =
     128 + 4 + MAXIMUM_POLL_BYTES + SIGNATURE_BYTES + 4 + MAXIMUM_HEADER_BYTES + SIGNATURE_BYTES;
 pub(crate) struct State {
@@ -72,10 +83,13 @@ impl State {
         Ok(())
     }
     pub(crate) fn command(&mut self, operation: u32, length: usize) -> Result<(), Error> {
-        if length > self.input.len() || (operation != 0 && length > CHUNK_LIMIT) {
+        let operation = OwnRegistrationStep::from_code(operation);
+        if length > self.input.len()
+            || (operation != Some(OwnRegistrationStep::Begin) && length > CHUNK_LIMIT)
+        {
             return Err(Error::Shape);
         }
-        if operation == 0 {
+        if operation == Some(OwnRegistrationStep::Begin) {
             // Only a refused begin leaves another begin open.
             if self.poll.is_some() {
                 return Err(Error::Consumed);
@@ -87,18 +101,20 @@ impl State {
             return Err(Error::Consumed);
         }
         match operation {
-            1 => self
+            Some(OwnRegistrationStep::Key) => self
                 .pending
                 .as_mut()
                 .ok_or(Error::Consumed)?
                 .push_key(&self.input[..length]),
-            2 if length == 0 => self.pending.as_mut().ok_or(Error::Consumed)?.finish_key(),
-            4 if length == 0 => {
+            Some(OwnRegistrationStep::KeyFinish) if length == 0 => {
+                self.pending.as_mut().ok_or(Error::Consumed)?.finish_key()
+            }
+            Some(OwnRegistrationStep::Finish) if length == 0 => {
                 let verified = self.pending.take().ok_or(Error::Consumed)?.finish()?;
                 self.verified = Some(Arc::new(verified));
                 Ok(())
             }
-            5 if length == RETAINED_REGISTRATION_BYTES => {
+            Some(OwnRegistrationStep::Retained) if length == RETAINED_REGISTRATION_BYTES => {
                 if self.pending.is_none() || self.retained.is_some() {
                     return Err(Error::Consumed);
                 }

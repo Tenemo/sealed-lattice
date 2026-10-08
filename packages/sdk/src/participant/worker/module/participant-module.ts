@@ -378,16 +378,22 @@ export const writeSetupInput = (
 // first stream and its proof stream, which serve the operation's draws
 // within the module; a release has only the proof stream.
 export const operationSeedBytes = 64;
-const operationPurpose = { contribution: 0, ballot: 4, release: 5 } as const;
+// The randomness commands: each operation's seed installation, and the
+// discarding of the installed streams.
+const randomOperation = {
+    contribution: 0,
+    discard: 3,
+    ballot: 4,
+    release: 5,
+} as const;
 const proofStream = 1;
-const discardOperationSeed = 3;
 
 // Installs an operation's retained seed, whose streams then serve every
 // draw of the operation and refuse any other. The seed must be discarded
 // once the operation stops drawing.
 export const seededRandomness = (
     module: ParticipantModule,
-    purpose: keyof typeof operationPurpose,
+    purpose: Exclude<keyof typeof randomOperation, 'discard'>,
     seed: Uint8Array,
 ) => {
     if (seed.length !== operationSeedBytes)
@@ -400,7 +406,7 @@ export const seededRandomness = (
     );
     if (
         module.operation_random_command(
-            operationPurpose[purpose],
+            randomOperation[purpose],
             operationSeedBytes,
         ) !== 0
     )
@@ -413,7 +419,7 @@ export const seededRandomness = (
         // The bytes the proof stream served.
         proofDrawn: () => drawn(proofStream),
         discard: () => {
-            module.operation_random_command(discardOperationSeed, 0);
+            module.operation_random_command(randomOperation.discard, 0);
         },
     };
 };

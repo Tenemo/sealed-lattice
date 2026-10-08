@@ -32,17 +32,28 @@ fn verify_body(
     verifier.finish().map_err(|_| Error::Crypto)
 }
 
+protocol_foundations::operation_codes! {
+    /// The participant's release commands.
+    enum ReleaseOperation {
+        Create = 0,
+        BodySlice = 1,
+        BeginImport = 2,
+        PushImport = 3,
+        FinishImport = 4,
+        Sign = 5,
+    }
+}
 fn command(session: &mut Session, operation: u32, input: &[u8]) -> Result<Vec<u8>, Error> {
     let close = session.close.as_ref().ok_or(Error::Context)?;
     let owner = close.owner();
     let setup = close.setup();
     let profile = setup.profile();
     let roster = setup.roster();
-    match operation {
+    match ReleaseOperation::from_code(operation) {
         // The worker commits the target and the release seed before this
         // call and installs the seed's undrawn randomness. Only the public
         // verifier can supply the context.
-        0 => {
+        Some(ReleaseOperation::Create) => {
             if session.release.is_some() {
                 return Err(Error::Consumed);
             }
@@ -75,7 +86,7 @@ fn command(session: &mut Session, operation: u32, input: &[u8]) -> Result<Vec<u8
             });
             Ok(output)
         }
-        1 => {
+        Some(ReleaseOperation::BodySlice) => {
             if input.len() != 8 {
                 return Err(Error::Shape);
             }
@@ -93,7 +104,7 @@ fn command(session: &mut Session, operation: u32, input: &[u8]) -> Result<Vec<u8
         }
         // A retained unsigned body must again pass the owning proof verifier
         // under the actual certificate before a signature can be evaluated.
-        2 => {
+        Some(ReleaseOperation::BeginImport) => {
             if session.release.is_some() {
                 return Err(Error::Consumed);
             }
@@ -123,7 +134,7 @@ fn command(session: &mut Session, operation: u32, input: &[u8]) -> Result<Vec<u8
             });
             Ok(Vec::new())
         }
-        3 => {
+        Some(ReleaseOperation::PushImport) => {
             let state = session.release.as_mut().ok_or(Error::Context)?;
             if state.import_closed
                 || state.verified.is_some()
@@ -137,7 +148,7 @@ fn command(session: &mut Session, operation: u32, input: &[u8]) -> Result<Vec<u8
             state.body.extend(input);
             Ok(Vec::new())
         }
-        4 => {
+        Some(ReleaseOperation::FinishImport) => {
             if !input.is_empty() {
                 return Err(Error::Shape);
             }
@@ -159,7 +170,7 @@ fn command(session: &mut Session, operation: u32, input: &[u8]) -> Result<Vec<u8
             state.verified = Some(verified);
             Ok(state.envelope.bytes().to_vec())
         }
-        5 => {
+        Some(ReleaseOperation::Sign) => {
             let state = session.release.as_ref().ok_or(Error::Context)?;
             let verified = state.verified.as_ref().ok_or(Error::Context)?;
             if input.len() != RELEASE_ENVELOPE_BYTES
@@ -176,7 +187,7 @@ fn command(session: &mut Session, operation: u32, input: &[u8]) -> Result<Vec<u8
             packet.extend(signature);
             Ok(packet)
         }
-        _ => Err(Error::Shape),
+        None => Err(Error::Shape),
     }
 }
 

@@ -2,7 +2,7 @@
 //! and refuses each step whose predecessor it does not hold.
 use super::{Refused, SETUP_INPUT_BYTES, SetupSession};
 use crate::CHUNK_BYTES;
-use protocol_foundations::Credential;
+use protocol_foundations::{Credential, roster_input::RecordStep};
 
 #[test]
 fn holds_nothing_before_its_roster_verifies() {
@@ -35,11 +35,14 @@ fn refuses_each_step_without_its_predecessor() {
     for length in [0, 64, SETUP_INPUT_BYTES + 1] {
         assert!(matches!(session.begin_roster_input(length), Err(Refused)));
     }
-    for operation in [0, 1, 2, 3, 4, 5, 6] {
-        assert!(matches!(
-            session.roster_record(operation, 0, 0),
-            Err(Refused)
-        ));
+    for step in [
+        RecordStep::Begin,
+        RecordStep::Key,
+        RecordStep::KeyFinish,
+        RecordStep::Finish,
+        RecordStep::Discard,
+    ] {
+        assert!(matches!(session.roster_record(step, 0, 0), Err(Refused)));
     }
     assert!(matches!(session.finish_roster(0), Err(Refused)));
     assert!(matches!(session.begin_offer(0), Err(Refused)));

@@ -1,10 +1,21 @@
 //! The contribution: its offer signing, its proof and checkpoints, and the
 //! retained proposal it names.
-use super::{SESSION, Session, emitted_packet, original_context, signed_packet};
+use super::{SESSION, Session, emitted_packet, original_context};
 use contribution_prover::contribution_session::{CONTRIBUTION_INPUT_BYTES, ContributionSession};
 use protocol_foundations::roster::RetainedContributionContext;
 use std::cell::RefCell;
 use zeroize::{Zeroize, Zeroizing};
+protocol_foundations::operation_codes! {
+    /// The offer signing commands.
+    enum OfferSigningOperation {
+        BeginBody = 1,
+        Polynomial = 2,
+        Proof = 3,
+        FinishBody = 4,
+        SignOffer = 5,
+        BodyHeader = 8,
+    }
+}
 fn offer_operation(
     state: &mut Session,
     operation: u32,
@@ -12,14 +23,20 @@ fn offer_operation(
     length: usize,
 ) -> Result<(), protocol_foundations::Error> {
     use protocol_foundations::Error;
-    if length > state.input.len() || (!matches!(operation, 2 | 3) && argument != 0) {
+    let operation = OfferSigningOperation::from_code(operation);
+    if length > state.input.len()
+        || (!matches!(
+            operation,
+            Some(OfferSigningOperation::Polynomial | OfferSigningOperation::Proof)
+        ) && argument != 0)
+    {
         return Err(Error::Shape);
     }
     let input = Zeroizing::new(state.input[..length].to_vec());
     state.input[..length].zeroize();
     let context = original_context(state)?;
     match operation {
-        1 | 8 => {
+        Some(OfferSigningOperation::BeginBody | OfferSigningOperation::BodyHeader) => {
             if input.len() != 10
                 || usize::from(u16::from_le_bytes(input[..2].try_into().unwrap()))
                     != context.position()
@@ -33,28 +50,26 @@ fn offer_operation(
             let header = enrollment
                 .contribution_header(context.profile(), proof_length)
                 .map_err(|_| Error::Context)?;
-            if operation == 1 {
+            if operation == Some(OfferSigningOperation::BeginBody) {
                 state
                     .offer
                     .begin_body(&enrollment.credential, context, &header)?;
             }
             state.contribution_output = header.to_vec();
         }
-        2 => {
+        Some(OfferSigningOperation::Polynomial) => {
             if !(5..=4 + (1 << 20)).contains(&input.len()) {
                 return Err(Error::Shape);
             }
             let offset = u32::from_le_bytes(input[..4].try_into().unwrap()) as usize;
             state.offer.polynomial(argument, offset, &input[4..])?;
         }
-        3 => state.offer.proof(argument, &input)?,
-        4 | 6 => {
+        Some(OfferSigningOperation::Proof) => state.offer.proof(argument, &input)?,
+        Some(OfferSigningOperation::FinishBody) => {
             if !input.is_empty() {
                 return Err(Error::Shape);
             }
-            if operation == 4 {
-                state.offer.finish_body()?;
-            }
+            state.offer.finish_body()?;
             state.contribution_output = state
                 .offer
                 .envelope()
@@ -62,7 +77,7 @@ fn offer_operation(
                 .bytes()
                 .to_vec();
         }
-        5 => {
+        Some(OfferSigningOperation::SignOffer) => {
             if !input.is_empty() {
                 return Err(Error::Shape);
             }
@@ -71,12 +86,7 @@ fn offer_operation(
             let (envelope, signature) = state.offer.offer().ok_or(Error::Consumed)?;
             state.contribution_output = emitted_packet(envelope.bytes(), signature);
         }
-        7 => {
-            let (envelope, signature) = signed_packet(&input).ok_or(Error::Shape)?;
-            let credential = &mut state.enrollment.as_mut().ok_or(Error::Context)?.credential;
-            state.offer.restore(credential, envelope, signature)?;
-        }
-        _ => return Err(Error::Shape),
+        None => return Err(Error::Shape),
     }
     Ok(())
 }

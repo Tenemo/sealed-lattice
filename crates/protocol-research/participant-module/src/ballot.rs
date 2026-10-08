@@ -26,6 +26,24 @@ pub fn retained_setup_reference(
     Ok(reference)
 }
 
+protocol_foundations::operation_codes! {
+    /// The ballot commands; the participant session begins the ballot
+    /// work, and the work runs every other command.
+    pub enum BallotOperation {
+        Begin = 0,
+        BeginKey = 1,
+        PushKey = 2,
+        FinishKey = 3,
+        Create = 4,
+        BeginImport = 5,
+        PushImport = 6,
+        FinishImport = 7,
+        Sign = 8,
+        Envelope = 10,
+        BodySlice = 11,
+        Signature = 12,
+    }
+}
 /// Volatile private operations beneath the authenticated parent's ballot phases.
 /// No operation loads a public setup capability from saved records.
 pub struct BallotWork {
@@ -106,7 +124,7 @@ impl BallotWork {
     pub fn command(
         &mut self,
         credential: &mut Credential,
-        operation: u32,
+        operation: BallotOperation,
         argument: usize,
         input: &[u8],
     ) -> Result<Vec<u8>, Error> {
@@ -118,7 +136,19 @@ impl BallotWork {
         // worker must refetch in a fresh private session under the same root.
         // Ballot creation refuses its scores before consuming the attempt, so
         // that refusal leaves the delivered keys usable.
-        if result.is_err() && matches!(operation, 1..=7) && (operation != 4 || self.consumed) {
+        if result.is_err()
+            && matches!(
+                operation,
+                BallotOperation::BeginKey
+                    | BallotOperation::PushKey
+                    | BallotOperation::FinishKey
+                    | BallotOperation::Create
+                    | BallotOperation::BeginImport
+                    | BallotOperation::PushImport
+                    | BallotOperation::FinishImport
+            )
+            && (operation != BallotOperation::Create || self.consumed)
+        {
             self.failed = true;
         }
         result
@@ -126,7 +156,7 @@ impl BallotWork {
     fn command_inner(
         &mut self,
         credential: &mut Credential,
-        operation: u32,
+        operation: BallotOperation,
         argument: usize,
         input: &[u8],
     ) -> Result<Vec<u8>, Error> {
@@ -134,7 +164,7 @@ impl BallotWork {
             return Err(Error::Shape);
         }
         match operation {
-            1 => {
+            BallotOperation::BeginKey => {
                 if !input.is_empty()
                     || self.consumed
                     || self.reader.is_some()
@@ -150,7 +180,7 @@ impl BallotWork {
                 );
                 self.key_offset = 0;
             }
-            2 => {
+            BallotOperation::PushKey => {
                 if argument != self.key_offset {
                     return Err(Error::Shape);
                 }
@@ -161,7 +191,7 @@ impl BallotWork {
                     .map_err(|_| Error::Crypto)?;
                 self.key_offset += input.len();
             }
-            3 => {
+            BallotOperation::FinishKey => {
                 if argument != 0 || !input.is_empty() {
                     return Err(Error::Shape);
                 }
@@ -169,7 +199,7 @@ impl BallotWork {
                 self.key = Some(reader.finish().map_err(|_| Error::Crypto)?);
             }
             // Input is the ballot time fixed by the attempt lock, then the scores.
-            4 => {
+            BallotOperation::Create => {
                 if argument != 0 || self.consumed || self.key.is_none() || self.reader.is_some() {
                     return Err(Error::Consumed);
                 }
@@ -191,7 +221,7 @@ impl BallotWork {
                 self.body = body;
                 self.envelope = Some(envelope);
             }
-            5 => {
+            BallotOperation::BeginImport => {
                 if argument != 0 || self.consumed || self.key.is_none() || self.reader.is_some() {
                     return Err(Error::Consumed);
                 }
@@ -206,7 +236,7 @@ impl BallotWork {
                 self.body = Vec::with_capacity(envelope.body_length());
                 self.pending = Some(envelope);
             }
-            6 => {
+            BallotOperation::PushImport => {
                 let expected = self.pending.as_ref().ok_or(Error::Consumed)?;
                 if input.is_empty()
                     || argument != self.body.len()
@@ -216,7 +246,7 @@ impl BallotWork {
                 }
                 self.body.extend(input);
             }
-            7 => {
+            BallotOperation::FinishImport => {
                 if argument != 0 || !input.is_empty() {
                     return Err(Error::Shape);
                 }
@@ -234,7 +264,7 @@ impl BallotWork {
                 }
                 self.envelope = Some(checked);
             }
-            8 => {
+            BallotOperation::Sign => {
                 if argument != 0 || input.len() != ENVELOPE_BYTES || self.signature.is_some() {
                     return Err(Error::Consumed);
                 }
@@ -245,7 +275,7 @@ impl BallotWork {
                 self.signature =
                     Some(credential.sign_retained_ballot_envelope(&self.owner, envelope)?);
             }
-            10 => {
+            BallotOperation::Envelope => {
                 if argument != 0 || !input.is_empty() {
                     return Err(Error::Shape);
                 }
@@ -256,7 +286,7 @@ impl BallotWork {
                     .bytes()
                     .to_vec());
             }
-            11 => {
+            BallotOperation::BodySlice => {
                 if input.len() != 4 || self.envelope.is_none() {
                     return Err(Error::Consumed);
                 }
@@ -270,13 +300,13 @@ impl BallotWork {
                 }
                 return Ok(self.body[argument..argument + length].to_vec());
             }
-            12 => {
+            BallotOperation::Signature => {
                 if argument != 0 || !input.is_empty() {
                     return Err(Error::Shape);
                 }
                 return Ok(self.signature.as_ref().ok_or(Error::Consumed)?.to_vec());
             }
-            _ => return Err(Error::Shape),
+            BallotOperation::Begin => return Err(Error::Shape),
         }
         Ok(Vec::new())
     }

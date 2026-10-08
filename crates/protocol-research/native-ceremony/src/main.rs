@@ -12,7 +12,7 @@ mod scenario;
 mod selected_setup_completion;
 mod selection;
 use aggregate::{ballot_key, final_keys, polynomial_bytes};
-use participant_module::{Enrollment, finality_work::OwnBallotInclusion};
+use participant_module::{Enrollment, ballot::BallotOperation, finality_work::OwnBallotInclusion};
 use participants::OriginalEnrollments;
 use protocol_foundations::{
     RETAINED_TAG_BYTES, SIGNATURE_BYTES,
@@ -119,22 +119,29 @@ impl BallotInputs<'_> {
         let mut work =
             participant_module::ballot::BallotWork::new(credential, &proposal, &control).unwrap();
         let index = ballot_key(profile);
-        work.command(credential, 1, index, &[]).unwrap();
+        work.command(credential, BallotOperation::BeginKey, index, &[])
+            .unwrap();
         stream_key(self.final_keys, profile, index, |offset, bytes| {
-            work.command(credential, 2, offset, bytes).unwrap();
+            work.command(credential, BallotOperation::PushKey, offset, bytes)
+                .unwrap();
         });
-        work.command(credential, 3, 0, &[]).unwrap();
+        work.command(credential, BallotOperation::FinishKey, 0, &[])
+            .unwrap();
         let ballot_time = close::now_milliseconds();
         work.command(
             credential,
-            4,
+            BallotOperation::Create,
             0,
             &[ballot_time.to_le_bytes().as_slice(), scores].concat(),
         )
         .unwrap();
-        let envelope =
-            BallotEnvelope::decode(profile, &work.command(credential, 10, 0, &[]).unwrap())
-                .unwrap();
+        let envelope = BallotEnvelope::decode(
+            profile,
+            &work
+                .command(credential, BallotOperation::Envelope, 0, &[])
+                .unwrap(),
+        )
+        .unwrap();
         assert_eq!(envelope.ballot_time(), ballot_time);
         let path = ballot_body_path(self.directory, self.scenario, position);
         let mut body = public_output::PublicOutput::create(&path).unwrap();
@@ -142,7 +149,12 @@ impl BallotInputs<'_> {
             let length = ((1 << 20).min(envelope.body_length() - offset)) as u32;
             body.write_all(
                 &work
-                    .command(credential, 11, offset, &length.to_le_bytes())
+                    .command(
+                        credential,
+                        BallotOperation::BodySlice,
+                        offset,
+                        &length.to_le_bytes(),
+                    )
                     .unwrap(),
             )
             .unwrap();
@@ -150,9 +162,10 @@ impl BallotInputs<'_> {
         body.finish().unwrap();
         let coins = random::<32>();
         let signing = [envelope.bytes().as_slice(), coins.as_slice()].concat();
-        work.command(credential, 8, 0, &signing).unwrap();
+        work.command(credential, BallotOperation::Sign, 0, &signing)
+            .unwrap();
         let signature: [u8; SIGNATURE_BYTES] = work
-            .command(credential, 12, 0, &[])
+            .command(credential, BallotOperation::Signature, 0, &[])
             .unwrap()
             .try_into()
             .unwrap();
@@ -667,8 +680,13 @@ fn main() {
     )
     .unwrap();
     assert!(
-        work.command(&mut enrollments[0].credential, 10, 0, &[])
-            .is_err()
+        work.command(
+            &mut enrollments[0].credential,
+            BallotOperation::Envelope,
+            0,
+            &[]
+        )
+        .is_err()
     );
     // Only the FHE aggregate is a delivered ballot key.
     assert!(
@@ -680,7 +698,7 @@ fn main() {
         .unwrap()
         .command(
             &mut enrollments[0].credential,
-            1,
+            BallotOperation::BeginKey,
             profile.share_constant_polynomial(0),
             &[]
         )
@@ -696,14 +714,29 @@ fn main() {
         key.coefficients(),
         aggregate::read_key(&setup, index, &final_keys).coefficients()
     );
-    work.command(&mut enrollments[0].credential, 1, index, &[])
-        .unwrap();
+    work.command(
+        &mut enrollments[0].credential,
+        BallotOperation::BeginKey,
+        index,
+        &[],
+    )
+    .unwrap();
     stream_key(&final_keys, profile, index, |offset, bytes| {
-        work.command(&mut enrollments[0].credential, 2, offset, bytes)
-            .unwrap();
-    });
-    work.command(&mut enrollments[0].credential, 3, 0, &[])
+        work.command(
+            &mut enrollments[0].credential,
+            BallotOperation::PushKey,
+            offset,
+            bytes,
+        )
         .unwrap();
+    });
+    work.command(
+        &mut enrollments[0].credential,
+        BallotOperation::FinishKey,
+        0,
+        &[],
+    )
+    .unwrap();
     // A repeated key poisons its private session, so isolate that hostile
     // delivery from the original session's later score checks.
     {
@@ -714,19 +747,39 @@ fn main() {
         )
         .unwrap();
         repeated
-            .command(&mut enrollments[0].credential, 1, fhe_key, &[])
+            .command(
+                &mut enrollments[0].credential,
+                BallotOperation::BeginKey,
+                fhe_key,
+                &[],
+            )
             .unwrap();
         stream_key(&final_keys, profile, fhe_key, |offset, bytes| {
             repeated
-                .command(&mut enrollments[0].credential, 2, offset, bytes)
+                .command(
+                    &mut enrollments[0].credential,
+                    BallotOperation::PushKey,
+                    offset,
+                    bytes,
+                )
                 .unwrap();
         });
         repeated
-            .command(&mut enrollments[0].credential, 3, 0, &[])
+            .command(
+                &mut enrollments[0].credential,
+                BallotOperation::FinishKey,
+                0,
+                &[],
+            )
             .unwrap();
         assert!(
             repeated
-                .command(&mut enrollments[0].credential, 1, fhe_key, &[])
+                .command(
+                    &mut enrollments[0].credential,
+                    BallotOperation::BeginKey,
+                    fhe_key,
+                    &[]
+                )
                 .is_err()
         );
         let timed_scores = [
@@ -735,7 +788,12 @@ fn main() {
         ]
         .concat();
         assert!(matches!(
-            repeated.command(&mut enrollments[0].credential, 4, 0, &timed_scores),
+            repeated.command(
+                &mut enrollments[0].credential,
+                BallotOperation::Create,
+                0,
+                &timed_scores
+            ),
             Err(protocol_foundations::Error::Consumed)
         ));
     }
@@ -760,14 +818,29 @@ fn main() {
     inputs.push(valid[..options.min(7)].to_vec());
     for input in inputs {
         assert!(matches!(
-            work.command(&mut enrollments[0].credential, 4, 0, &input),
+            work.command(
+                &mut enrollments[0].credential,
+                BallotOperation::Create,
+                0,
+                &input
+            ),
             Err(protocol_foundations::Error::Shape)
         ));
     }
-    work.command(&mut enrollments[0].credential, 4, 0, &timed(&valid))
-        .unwrap();
+    work.command(
+        &mut enrollments[0].credential,
+        BallotOperation::Create,
+        0,
+        &timed(&valid),
+    )
+    .unwrap();
     let encoded = work
-        .command(&mut enrollments[0].credential, 10, 0, &[])
+        .command(
+            &mut enrollments[0].credential,
+            BallotOperation::Envelope,
+            0,
+            &[],
+        )
         .unwrap();
     let computed_envelope = BallotEnvelope::decode(profile, &encoded).unwrap();
     let ballot_directory = output.join("ballot");
@@ -781,7 +854,7 @@ fn main() {
                 &work
                     .command(
                         &mut enrollments[0].credential,
-                        11,
+                        BallotOperation::BodySlice,
                         offset,
                         &length.to_le_bytes(),
                     )
@@ -831,19 +904,39 @@ fn main() {
     let coins = random::<32>();
     let signing = [envelope.bytes().as_slice(), coins.as_slice()].concat();
     assert!(
-        work.command(&mut enrollments[1].credential, 8, 0, &signing)
-            .is_err()
+        work.command(
+            &mut enrollments[1].credential,
+            BallotOperation::Sign,
+            0,
+            &signing
+        )
+        .is_err()
     );
-    work.command(&mut enrollments[0].credential, 8, 0, &signing)
-        .unwrap();
+    work.command(
+        &mut enrollments[0].credential,
+        BallotOperation::Sign,
+        0,
+        &signing,
+    )
+    .unwrap();
     let signature: [u8; SIGNATURE_BYTES] = work
-        .command(&mut enrollments[0].credential, 12, 0, &[])
+        .command(
+            &mut enrollments[0].credential,
+            BallotOperation::Signature,
+            0,
+            &[],
+        )
         .unwrap()
         .try_into()
         .unwrap();
     assert!(
-        work.command(&mut enrollments[0].credential, 8, 0, &signing)
-            .is_err()
+        work.command(
+            &mut enrollments[0].credential,
+            BallotOperation::Sign,
+            0,
+            &signing
+        )
+        .is_err()
     );
     let original = setup.roster().proposal().records()[0].as_ref();
     let restore_credential = || {
@@ -869,18 +962,33 @@ fn main() {
         .unwrap();
         let index = fhe_key;
         restored_work
-            .command(&mut restored_credential, 1, index, &[])
+            .command(
+                &mut restored_credential,
+                BallotOperation::BeginKey,
+                index,
+                &[],
+            )
             .unwrap();
         stream_key(&final_keys, profile, index, |offset, bytes| {
             restored_work
-                .command(&mut restored_credential, 2, offset, bytes)
+                .command(
+                    &mut restored_credential,
+                    BallotOperation::PushKey,
+                    offset,
+                    bytes,
+                )
                 .unwrap();
         });
         restored_work
-            .command(&mut restored_credential, 3, 0, &[])
+            .command(&mut restored_credential, BallotOperation::FinishKey, 0, &[])
             .unwrap();
         restored_work
-            .command(&mut restored_credential, 5, 0, envelope.bytes())
+            .command(
+                &mut restored_credential,
+                BallotOperation::BeginImport,
+                0,
+                envelope.bytes(),
+            )
             .unwrap();
         let mut file = File::open(&body_path).unwrap();
         let mut buffer = vec![0; 1 << 20];
@@ -894,36 +1002,34 @@ fn main() {
                 buffer[0] ^= 1;
             }
             restored_work
-                .command(&mut restored_credential, 6, offset, &buffer[..length])
+                .command(
+                    &mut restored_credential,
+                    BallotOperation::PushImport,
+                    offset,
+                    &buffer[..length],
+                )
                 .unwrap();
             offset += length;
         }
-        let verified = restored_work.command(&mut restored_credential, 7, 0, &[]);
+        let verified = restored_work.command(
+            &mut restored_credential,
+            BallotOperation::FinishImport,
+            0,
+            &[],
+        );
         if changed_body {
             assert!(verified.is_err());
-            assert!(
-                restored_work
-                    .command(&mut restored_credential, 8, 0, &signing)
-                    .is_err()
-            );
         } else {
             verified.unwrap();
-            let packet = [envelope.bytes().as_slice(), signature.as_slice()].concat();
-            restored_work
-                .command(&mut restored_credential, 9, 0, &packet)
-                .unwrap();
-            assert_eq!(
-                restored_work
-                    .command(&mut restored_credential, 12, 0, &[])
-                    .unwrap(),
-                signature
-            );
-            assert!(
-                restored_work
-                    .command(&mut restored_credential, 8, 0, &signing)
-                    .is_err()
-            );
         }
+        // The restored credential signs no ballot: a changed body stops the
+        // work, and the verified body's credential keeps its ballot purpose
+        // locked.
+        assert!(
+            restored_work
+                .command(&mut restored_credential, BallotOperation::Sign, 0, &signing)
+                .is_err()
+        );
     }
     let restored_owner = close::owner_of(&restored, &poll, &setup, 0);
     let mut changed_envelope = *envelope.bytes();

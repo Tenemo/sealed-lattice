@@ -167,7 +167,7 @@ const checkpointOperation = {
     finish: 6,
 } as const;
 
-const signingOperation = {
+const offerSigningOperation = {
     beginBody: 1,
     polynomial: 2,
     proof: 3,
@@ -1074,7 +1074,7 @@ export const continueContribution = async (session: ContributionSession) => {
         const length = await writer.finish();
         header = signing(
             context,
-            signingOperation.bodyHeader,
+            offerSigningOperation.bodyHeader,
             concatenate(unsigned16(state.position), unsigned64(BigInt(length))),
         );
         if (proofLength(bounds, header) !== length)
@@ -1140,7 +1140,11 @@ const bodyOffer = async (session: ContributionSession) => {
         unsigned64(BigInt(proofLength(profile.contribution, state.header))),
     );
     try {
-        const header = signing(context, signingOperation.beginBody, control);
+        const header = signing(
+            context,
+            offerSigningOperation.beginBody,
+            control,
+        );
         if (!equalBytes(header, state.header))
             throw new Error('The original source opening changed.');
     } finally {
@@ -1155,7 +1159,7 @@ const bodyOffer = async (session: ContributionSession) => {
             try {
                 signing(
                     context,
-                    signingOperation.polynomial,
+                    offerSigningOperation.polynomial,
                     input,
                     polynomial.expandedIndex,
                 );
@@ -1165,9 +1169,9 @@ const bodyOffer = async (session: ContributionSession) => {
             }
         }
     await readRetainedProof(session, (offset, bytes) => {
-        signing(context, signingOperation.proof, bytes, offset);
+        signing(context, offerSigningOperation.proof, bytes, offset);
     });
-    return signing(context, signingOperation.finishBody);
+    return signing(context, offerSigningOperation.finishBody);
 };
 
 const storedOffer = async (
@@ -1206,7 +1210,7 @@ export const signContribution = async (
     if (!equalBytes(envelope, body))
         throw new Error('The locked offer changed.');
     const signed = decodeSignedPacket(
-        signing(context, signingOperation.signOffer),
+        signing(context, offerSigningOperation.signOffer),
         profile.registration.signatureBytes,
     );
     if (signed === undefined)

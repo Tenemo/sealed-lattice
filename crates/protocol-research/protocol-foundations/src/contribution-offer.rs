@@ -1,5 +1,5 @@
 use crate::{
-    Credential, Error, SIGNATURE_BYTES, SigningPurpose, contribution_body,
+    Credential, Error, SIGNATURE_BYTES, contribution_body,
     foundation::{CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple},
     identity::identity,
     roster::{RetainedContributionContext, RosterProposal},
@@ -222,32 +222,5 @@ impl Credential {
         }
         self.offer_signed = Some(envelope.identity());
         self.sign_deterministically(&envelope.identity(), OFFER_PURPOSE.as_bytes())
-    }
-    pub fn restore_offer(
-        &mut self,
-        context: &RetainedContributionContext,
-        envelope: &OfferEnvelope,
-        signature: &[u8],
-    ) -> Result<(), Error> {
-        self.check_confirmed_context(context)?;
-        if self.preparation_retired
-            || envelope.roster_identity() != context.identity()
-            || envelope.position() != context.position()
-        {
-            return Err(Error::Context);
-        }
-        let signature = signature.try_into().map_err(|_| Error::Shape)?;
-        let key =
-            ml_dsa_65::PublicKey::try_from_bytes(self.signing_public).map_err(|_| Error::Shape)?;
-        if !key.verify(&envelope.identity(), &signature, OFFER_PURPOSE.as_bytes()) {
-            return Err(Error::Crypto);
-        }
-        let identity = envelope.identity();
-        if self.offer_signed.is_some_and(|old| old != identity) {
-            return Err(Error::Consumed);
-        }
-        self.offer_signed = Some(identity);
-        self.locked_purposes |= SigningPurpose::Offer.mask();
-        Ok(())
     }
 }

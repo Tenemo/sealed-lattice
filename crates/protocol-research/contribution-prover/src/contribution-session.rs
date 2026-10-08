@@ -16,7 +16,7 @@ use setup_witness::{
 use std::sync::Arc;
 use supported_profile::{DEGREE, Profile, relation::setup_relation, share_modulus};
 use word_proof::{
-    bridge::{Prover, first_checkpoint},
+    bridge::{Prover, ProverStep, first_checkpoint},
     transcript::context_stream,
 };
 use zeroize::Zeroize;
@@ -32,6 +32,42 @@ const _: () = assert!(
 /// A refused contribution step.
 #[derive(Debug)]
 pub struct Refused;
+protocol_foundations::operation_codes! {
+    /// The contribution proof's commands.
+    enum ProverOperation {
+        Generate = 2,
+        Step = 7,
+        BeginPolynomial = 8,
+        PushPolynomial = 9,
+        FinishPolynomial = 10,
+        NextOutput = 11,
+        ConsumePredecessor = 14,
+    }
+}
+impl ProverOperation {
+    // The prover step that the command runs, when it runs one.
+    fn prover_step(self) -> Option<ProverStep> {
+        match self {
+            Self::Step => Some(ProverStep::Step),
+            Self::BeginPolynomial => Some(ProverStep::BeginPolynomial),
+            Self::PushPolynomial => Some(ProverStep::PushPolynomial),
+            Self::FinishPolynomial => Some(ProverStep::FinishPolynomial),
+            Self::NextOutput => Some(ProverStep::NextOutput),
+            Self::Generate | Self::ConsumePredecessor => None,
+        }
+    }
+}
+protocol_foundations::operation_codes! {
+    /// The contribution checkpoint's commands.
+    enum CheckpointOperation {
+        ExportHeader = 1,
+        Seal = 2,
+        Complete = 3,
+        Import = 4,
+        Open = 5,
+        Finish = 6,
+    }
+}
 /// The host's receipt of one chunk of a public setup object at an
 /// offset: object zero is the statement header and object i + 1 setup
 /// polynomial i.
@@ -258,7 +294,7 @@ impl Work {
         let proof = self.proof.as_mut().ok_or(())?;
         let mut unused_output = Vec::new();
         proof
-            .advance(8, index, &[], &mut unused_output)
+            .advance(ProverStep::BeginPolynomial, index, &[], &mut unused_output)
             .map_err(|_| ())?;
         if let Some(recipient) = (0..self.input_hashes.len())
             .find(|recipient| profile.recipient_key_polynomial(*recipient) == index)
@@ -270,11 +306,11 @@ impl Work {
             };
             for bytes in key.chunks(CHUNK) {
                 proof
-                    .advance(9, 0, bytes, &mut unused_output)
+                    .advance(ProverStep::PushPolynomial, 0, bytes, &mut unused_output)
                     .map_err(|_| ())?;
             }
             return proof
-                .advance(10, 0, &[], &mut unused_output)
+                .advance(ProverStep::FinishPolynomial, 0, &[], &mut unused_output)
                 .map_err(|_| ());
         }
         for chunk in common_records(profile, index)
@@ -282,11 +318,11 @@ impl Work {
             .chunks(CHUNK)
         {
             proof
-                .advance(9, 0, chunk, &mut unused_output)
+                .advance(ProverStep::PushPolynomial, 0, chunk, &mut unused_output)
                 .map_err(|_| ())?;
         }
         proof
-            .advance(10, 0, &[], &mut unused_output)
+            .advance(ProverStep::FinishPolynomial, 0, &[], &mut unused_output)
             .map_err(|_| ())
     }
     fn phase(&self) -> u32 {
@@ -373,7 +409,8 @@ impl ContributionSession {
         length: usize,
         retained: &RetainedContributionContext,
     ) -> Result<(), Refused> {
-        if self.stopped || (operation != 4 && position != 0) {
+        let operation = CheckpointOperation::from_code(operation);
+        if self.stopped || (operation != Some(CheckpointOperation::Import) && position != 0) {
             return Err(Refused);
         }
         // The previous output may hold a checkpoint record's key.
@@ -391,7 +428,11 @@ impl ContributionSession {
         let result = (|| {
             let bytes = input.get(..length).ok_or(())?;
             match operation {
-                1 if length == 0 && checkpoint_export.is_none() && checkpoint_import.is_none() => {
+                Some(CheckpointOperation::ExportHeader)
+                    if length == 0
+                        && checkpoint_export.is_none()
+                        && checkpoint_import.is_none() =>
+                {
                     let work = work.as_mut().ok_or(())?;
                     let export = first_checkpoint::Export::begin_with_inputs(
                         work.proof.as_mut().ok_or(())?,
@@ -402,7 +443,7 @@ impl ContributionSession {
                     *checkpoint_export = Some(export);
                 }
                 // The record follows the fresh key it is sealed under.
-                2 if length == 0 => {
+                Some(CheckpointOperation::Seal) if length == 0 => {
                     let proof = work
                         .as_mut()
                         .and_then(|work| work.proof.as_mut())
@@ -414,15 +455,16 @@ impl ContributionSession {
                         .map_err(|_| ())?;
                     *output = [sealed.key.as_slice(), &sealed.bytes].concat();
                 }
-                3 if length == 0 => {
+                Some(CheckpointOperation::Complete) if length == 0 => {
                     if !checkpoint_export.as_ref().ok_or(())?.complete() {
                         return Err(());
                     }
                     *checkpoint_export = None;
                 }
-                4 if work.is_none()
-                    && checkpoint_export.is_none()
-                    && checkpoint_import.is_none() =>
+                Some(CheckpointOperation::Import)
+                    if work.is_none()
+                        && checkpoint_export.is_none()
+                        && checkpoint_import.is_none() =>
                 {
                     let import =
                         crate::import_checkpoint(retained, position, bytes).map_err(|_| ())?;
@@ -430,11 +472,12 @@ impl ContributionSession {
                     *checkpoint_import = Some(import);
                     *restore_keys = vec![None; participants];
                 }
-                5 if (sealing::KEY_BYTES + sealing::TAG_BYTES
-                    ..=sealing::KEY_BYTES
-                        + first_checkpoint::RECORD_BYTES
-                        + sealing::TAG_BYTES)
-                    .contains(&length) =>
+                Some(CheckpointOperation::Open)
+                    if (sealing::KEY_BYTES + sealing::TAG_BYTES
+                        ..=sealing::KEY_BYTES
+                            + first_checkpoint::RECORD_BYTES
+                            + sealing::TAG_BYTES)
+                        .contains(&length) =>
                 {
                     let key = zeroize::Zeroizing::new(
                         <[u8; sealing::KEY_BYTES]>::try_from(&bytes[..sealing::KEY_BYTES]).unwrap(),
@@ -445,7 +488,7 @@ impl ContributionSession {
                         .open(&key, &bytes[sealing::KEY_BYTES..])
                         .map_err(|_| ())?;
                 }
-                6 if length == 0 => {
+                Some(CheckpointOperation::Finish) if length == 0 => {
                     if !checkpoint_import.as_ref().ok_or(())?.complete()
                         || restore_keys.iter().any(Option::is_none)
                     {
@@ -467,7 +510,10 @@ impl ContributionSession {
         let consumed = length.min(input.len());
         input[..consumed].zeroize();
         if result.is_err()
-            && (operation == 5 || (operation == 6 && work.is_none() && checkpoint_import.is_none()))
+            && (operation == Some(CheckpointOperation::Open)
+                || (operation == Some(CheckpointOperation::Finish)
+                    && work.is_none()
+                    && checkpoint_import.is_none()))
         {
             *checkpoint_import = None;
             restore_keys.clear();
@@ -502,7 +548,10 @@ impl ContributionSession {
         if self.checkpoint_export.is_some() || self.checkpoint_import.is_some() {
             return Err(Refused);
         }
-        if !matches!(operation, 2 | 7..=11 | 14) || length > CHUNK {
+        let Some(operation) = ProverOperation::from_code(operation) else {
+            return Err(Refused);
+        };
+        if length > CHUNK {
             return Err(Refused);
         }
         self.output.clear();
@@ -520,15 +569,18 @@ impl ContributionSession {
             let bytes = input.get(..length).ok_or(())?;
             let work = work.as_mut().ok_or(())?;
             match operation {
-                2 if length == 0 && argument == 0 => work.generate(),
-                14 if length == 0 => work.consume_predecessor(argument),
-                7..=11 => work
-                    .proof
-                    .as_mut()
-                    .ok_or(())?
-                    .advance(operation, argument, bytes, output)
-                    .map_err(|_| ()),
-                _ => Err(()),
+                ProverOperation::Generate if length == 0 && argument == 0 => work.generate(),
+                ProverOperation::ConsumePredecessor if length == 0 => {
+                    work.consume_predecessor(argument)
+                }
+                operation => {
+                    let step = operation.prover_step().ok_or(())?;
+                    work.proof
+                        .as_mut()
+                        .ok_or(())?
+                        .advance(step, argument, bytes, output)
+                        .map_err(|_| ())
+                }
             }
         })();
         if result.is_err() {

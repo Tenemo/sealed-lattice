@@ -8,6 +8,23 @@ use crate::{
 use setup_aggregate::{AggregatePolynomialReader, VerifiedAggregatePolynomial};
 use std::sync::Arc;
 
+protocol_foundations::operation_codes! {
+    /// The completion commands: the votes that certify the target, each
+    /// release share's operands and body, and the result.
+    enum CompletionOperation {
+        BeginVotes = 0,
+        InsertVote = 1,
+        Certify = 2,
+        BeginShareConstant = 3,
+        PushOperand = 4,
+        FinishOperand = 5,
+        AuthenticateRelease = 6,
+        BeginReleaseBody = 7,
+        PushReleaseBody = 8,
+        FinishRelease = 9,
+        Result = 10,
+    }
+}
 /// The input buffer's length; the host never writes more.
 pub const COMPLETION_INPUT_BYTES: usize = 1 << 20;
 enum Terminal {
@@ -74,12 +91,18 @@ impl CompletionSession {
         argument: usize,
         length: usize,
     ) -> Result<(), Error> {
-        if length > COMPLETION_INPUT_BYTES || (!matches!(operation, 3 | 4) && argument != 0) {
+        let operation = CompletionOperation::from_code(operation);
+        if length > COMPLETION_INPUT_BYTES
+            || (!matches!(
+                operation,
+                Some(CompletionOperation::BeginShareConstant | CompletionOperation::PushOperand)
+            ) && argument != 0)
+        {
             return Err(Error::Encoding);
         }
         self.output.clear();
         match operation {
-            0 => {
+            Some(CompletionOperation::BeginVotes) => {
                 if length != 0 || self.votes.is_some() {
                     return Err(Error::Context);
                 }
@@ -90,7 +113,7 @@ impl CompletionSession {
                 self.word(collector.threshold());
                 self.votes = Some(collector);
             }
-            1 => {
+            Some(CompletionOperation::InsertVote) => {
                 let votes = self.votes.as_mut().ok_or(Error::Incomplete)?;
                 let inserted = votes
                     .insert(&self.input[..length])
@@ -99,7 +122,7 @@ impl CompletionSession {
                 self.word(usize::from(inserted));
                 self.word(count);
             }
-            2 => {
+            Some(CompletionOperation::Certify) => {
                 if length != 0 || self.certificate.is_some() {
                     return Err(Error::Context);
                 }
@@ -117,7 +140,7 @@ impl CompletionSession {
                 self.certificate = Some(certificate);
                 self.word(usize::from(encrypted));
             }
-            3 => {
+            Some(CompletionOperation::BeginShareConstant) => {
                 if length != 0 {
                     return Err(Error::Encoding);
                 }
@@ -145,7 +168,7 @@ impl CompletionSession {
                 self.body = None;
                 self.word(index);
             }
-            4 => {
+            Some(CompletionOperation::PushOperand) => {
                 self.operand
                     .as_mut()
                     .ok_or(Error::Incomplete)?
@@ -153,7 +176,7 @@ impl CompletionSession {
                     .push(argument, &self.input[..length])
                     .map_err(|_| Error::Encoding)?;
             }
-            5 => {
+            Some(CompletionOperation::FinishOperand) => {
                 if length != 0 {
                     return Err(Error::Encoding);
                 }
@@ -180,7 +203,7 @@ impl CompletionSession {
                     self.word(index);
                 }
             }
-            6 => {
+            Some(CompletionOperation::AuthenticateRelease) => {
                 if self.authentication.is_some() {
                     return Err(Error::Context);
                 }
@@ -192,7 +215,7 @@ impl CompletionSession {
                 self.word(authentication.envelope().body_length());
                 self.authentication = Some(authentication);
             }
-            7 => {
+            Some(CompletionOperation::BeginReleaseBody) => {
                 if self.body.is_some() || self.authentication.is_none() {
                     return Err(Error::Context);
                 }
@@ -201,13 +224,13 @@ impl CompletionSession {
                     &self.input[..length],
                 )?);
             }
-            8 => {
+            Some(CompletionOperation::PushReleaseBody) => {
                 self.body
                     .as_mut()
                     .ok_or(Error::Incomplete)?
                     .push(&self.input[..length])?;
             }
-            9 => {
+            Some(CompletionOperation::FinishRelease) => {
                 if length != 0 {
                     return Err(Error::Encoding);
                 }
@@ -222,7 +245,7 @@ impl CompletionSession {
                 self.context = None;
                 self.word(usize::from(inserted));
             }
-            10 => {
+            Some(CompletionOperation::Result) => {
                 if length != 0 {
                     return Err(Error::Encoding);
                 }
@@ -251,7 +274,7 @@ impl CompletionSession {
                     }
                 }
             }
-            _ => return Err(Error::Encoding),
+            None => return Err(Error::Encoding),
         }
         Ok(())
     }

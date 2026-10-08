@@ -31,6 +31,17 @@ enum Phase {
     Output,
     Done,
 }
+/// A step that the prover's driver runs: one unit of the proof's work, one
+/// setup polynomial's begin, chunk or finish in the polynomial phase, or
+/// the proof's next output.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProverStep {
+    Step,
+    BeginPolynomial,
+    PushPolynomial,
+    FinishPolynomial,
+    NextOutput,
+}
 pub struct Prover {
     profile: Profile,
     relation: Relation,
@@ -95,26 +106,27 @@ impl Prover {
         prover.transcript = Some(transcript);
         Ok(prover)
     }
+    /// Runs one prover step: only a polynomial's begin takes an argument, its
+    /// index, and only its chunks take bytes.
     pub fn advance(
         &mut self,
-        operation: u32,
+        step: ProverStep,
         argument: usize,
         bytes: &[u8],
         output: &mut Vec<u8>,
     ) -> Result<(), Error> {
         if bytes.len() > CHUNK
-            || (operation != 8 && argument != 0)
-            || (operation != 9 && !bytes.is_empty())
+            || (step != ProverStep::BeginPolynomial && argument != 0)
+            || (step != ProverStep::PushPolynomial && !bytes.is_empty())
         {
             return Err(Error::Operation);
         }
-        match operation {
-            7 => self.step(),
-            8 => self.begin_polynomial(argument),
-            9 => self.push_polynomial(bytes),
-            10 => self.finish_polynomial(),
-            11 => self.next_output(output),
-            _ => Err(()),
+        match step {
+            ProverStep::Step => self.step(),
+            ProverStep::BeginPolynomial => self.begin_polynomial(argument),
+            ProverStep::PushPolynomial => self.push_polynomial(bytes),
+            ProverStep::FinishPolynomial => self.finish_polynomial(),
+            ProverStep::NextOutput => self.next_output(output),
         }
         .map_err(|_| Error::Operation)
     }

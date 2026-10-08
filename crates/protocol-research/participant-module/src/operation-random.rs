@@ -20,6 +20,16 @@ use zeroize::{Zeroize, Zeroizing};
 
 const SEED_BYTES: usize = 64;
 
+protocol_foundations::operation_codes! {
+    /// The randomness commands: each operation's seed installation, and the
+    /// discarding of the installed streams.
+    enum RandomOperation {
+        Contribution = 0,
+        Discard = 3,
+        Ballot = 4,
+        Release = 5,
+    }
+}
 /// The operations whose randomness a retained seed supplies.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Purpose {
@@ -94,42 +104,37 @@ impl Default for State {
     }
 }
 impl State {
-    /// Operations zero, four and five install the seed in the input for a
-    /// contribution, a ballot or a release, and three discards the streams.
-    /// Every call clears the input.
+    /// Installs the seed in the input for a contribution, a ballot or a
+    /// release, or discards the streams. Every call clears the input.
     pub(crate) fn command(&mut self, operation: u32, length: usize) -> Result<(), ()> {
         let result = self.command_inner(operation, length);
         self.input.zeroize();
         result
     }
     fn command_inner(&mut self, operation: u32, length: usize) -> Result<(), ()> {
-        match operation {
-            0 | 4 | 5 => {
-                if self.streams.is_some() || length != SEED_BYTES {
-                    return Err(());
-                }
-                let purpose = match operation {
-                    0 => Purpose::Contribution,
-                    4 => Purpose::Ballot,
-                    _ => Purpose::Release,
-                };
-                let seed = &self.input;
-                self.streams = Some(Streams {
-                    purpose,
-                    readers: purpose
-                        .domains()
-                        .map(|domain| domain.map(|domain| stream(domain, seed))),
-                });
-                self.drawn = [0; 2];
-            }
-            3 => {
+        let purpose = match RandomOperation::from_code(operation).ok_or(())? {
+            RandomOperation::Contribution => Purpose::Contribution,
+            RandomOperation::Ballot => Purpose::Ballot,
+            RandomOperation::Release => Purpose::Release,
+            RandomOperation::Discard => {
                 if length != 0 {
                     return Err(());
                 }
                 self.streams = None;
+                return Ok(());
             }
-            _ => return Err(()),
+        };
+        if self.streams.is_some() || length != SEED_BYTES {
+            return Err(());
         }
+        let seed = &self.input;
+        self.streams = Some(Streams {
+            purpose,
+            readers: purpose
+                .domains()
+                .map(|domain| domain.map(|domain| stream(domain, seed))),
+        });
+        self.drawn = [0; 2];
         Ok(())
     }
     /// Serves a draw of the installed operation: its first stream serves the
