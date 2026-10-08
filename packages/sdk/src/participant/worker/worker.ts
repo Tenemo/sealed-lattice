@@ -12,7 +12,6 @@ import {
     fromHexadecimal,
     hexadecimal,
 } from './bytes.js';
-import { completedClosePhase } from './close-state.js';
 import {
     advanceClose,
     closeEvents,
@@ -47,6 +46,7 @@ import {
     PublicInputFailure,
 } from './failures.js';
 import { participantRuntimeLabel } from './identity.js';
+import { isOperationAvailable } from './operation-availability.js';
 import type {
     IncompleteOperation,
     ParticipantRefusalReason,
@@ -361,6 +361,18 @@ const execute = async (
             throw new Error('The participant profile is not known.');
         return profiled;
     };
+    const available = isOperationAvailable(command.operation, {
+        generation: root.head.generation,
+        isOrganizer: enrollment.isOrganizer,
+        hasProfile: profiled !== undefined,
+        isEligibleContributor:
+            profiled !== undefined && isEligibleContributor(profiled),
+        spentTargetVote:
+            root.head.generation >= releasePhase.locked &&
+            root.manifest.suffixes.target?.length === 0,
+    });
+    if (available === undefined) return refused('invalid request');
+    if (!available) return refused('unavailable operation');
     switch (command.operation) {
         case 'status':
             break;
@@ -418,22 +430,12 @@ const execute = async (
             break;
         }
         case 'confirm': {
-            if (
-                root.head.generation !== rootGeneration.rosterSigned &&
-                root.head.generation !== rootGeneration.preparation
-            )
-                return refused('unavailable operation');
             const session = await resumeParticipant(profileContext(), root);
             await confirmRoster(session);
             root = session.root;
             break;
         }
         case 'contribute': {
-            if (
-                root.head.generation !== rootGeneration.preparation ||
-                !isEligibleContributor(profileContext())
-            )
-                return refused('unavailable operation');
             let session = await resumeParticipant(profileContext(), root);
             if (session.state === undefined || session.state.phase === 4) {
                 const proposal = await reverifyRoster(
@@ -468,32 +470,19 @@ const execute = async (
             break;
         }
         case 'select-setup': {
-            if (
-                root.head.generation !== rootGeneration.preparation ||
-                !enrollment.isOrganizer
-            )
-                return refused('unavailable operation');
             const session = await resumeParticipant(profileContext(), root);
             await selectSetup(session, relay);
             root = session.root;
             break;
         }
         case 'endorse-setup': {
-            if (root.head.generation !== rootGeneration.preparation)
-                return refused('unavailable operation');
             const session = await resumeParticipant(profileContext(), root);
             await endorseSetup(session, relay);
             root = session.root;
             break;
         }
         case 'verify-setup': {
-            // Any original member may activate the uniquely certified setup.
-            if (
-                profiled === undefined ||
-                root.head.generation !== rootGeneration.preparation
-            )
-                return refused('unavailable operation');
-            const session = await resumeParticipant(profiled, root);
+            const session = await resumeParticipant(profileContext(), root);
             root = await retainSetup(
                 session,
                 await verifySetup(session, relay),
@@ -514,15 +503,13 @@ const execute = async (
             // A retained attempt continues only with its locked scores, and a
             // signed ballot is only delivered again, also after an intent.
             const generation = root.head.generation;
-            if (
-                profiled === undefined ||
-                generation < rootGeneration.setupRetained
-            )
-                return refused('unavailable operation');
             const scores =
                 parameters.scores === undefined
                     ? undefined
-                    : parseBallotScores(profiled.profile, parameters.scores);
+                    : parseBallotScores(
+                          profileContext().profile,
+                          parameters.scores,
+                      );
             if (
                 (parameters.scores !== undefined && scores === undefined) ||
                 (generation === rootGeneration.setupRetained &&
@@ -561,11 +548,6 @@ const execute = async (
             // Only the organizer opens the close, and only before an intent
             // and with no ballot attempt pending.
             const generation = root.head.generation;
-            if (
-                profiled === undefined ||
-                generation < rootGeneration.setupRetained
-            )
-                return refused('unavailable operation');
             const request = parseCloseParameters(parameters);
             if (
                 request === undefined ||
@@ -598,16 +580,8 @@ const execute = async (
             };
         }
         case 'sign-target': {
-            // Target signing follows the completed close; a signed vote is
-            // only delivered again. A release that followed the completed
-            // close spent the target purpose without a vote.
+            // A signed vote is only delivered again.
             const generation = root.head.generation;
-            if (
-                generation < completedClosePhase(enrollment.isOrganizer) ||
-                (generation >= releasePhase.locked &&
-                    root.manifest.suffixes.target?.length === 0)
-            )
-                return refused('unavailable operation');
             const participant = await resumeParticipant(profileContext(), root);
             const session = await resumeClose(
                 participant,
@@ -626,16 +600,9 @@ const execute = async (
             };
         }
         case 'release': {
-            // Release follows this participant's signed target, or its
-            // completed close when it signed no target and a certificate
-            // already exists; a pending target vote cannot be
-            // bypassed. A signed release is only delivered again.
+            // A release without a target of its own needs an existing
+            // certificate. A signed release is only delivered again.
             const generation = root.head.generation;
-            if (
-                generation !== completedClosePhase(enrollment.isOrganizer) &&
-                generation < targetPhase.signed
-            )
-                return refused('unavailable operation');
             const participant = await resumeParticipant(profileContext(), root);
             const session = await resumeRelease(
                 await resumeClose(participant, enrollment.isOrganizer),
@@ -675,11 +642,6 @@ const execute = async (
         case 'compute-result': {
             // Any participant past its close combines the published release
             // shares in its own module; the result is not published.
-            if (
-                root.head.generation <
-                completedClosePhase(enrollment.isOrganizer)
-            )
-                return refused('unavailable operation');
             const participant = await resumeParticipant(profileContext(), root);
             const session = await resumeClose(
                 participant,

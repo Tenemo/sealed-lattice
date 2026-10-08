@@ -34,6 +34,26 @@ const maximumHelpers = 8;
  * when the worker starts it.
  */
 export const helperStartMilliseconds = 10_000;
+
+// Whether every helper answers that it started before the start deadline.
+export const allStartedInTime = async (
+    answers: readonly Promise<boolean>[],
+) => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new Promise<boolean>((resolve) => {
+        timer = setTimeout(() => {
+            resolve(false);
+        }, helperStartMilliseconds);
+    });
+    try {
+        return await Promise.race([
+            Promise.all(answers).then((started) => started.every(Boolean)),
+            deadline,
+        ]);
+    } finally {
+        clearTimeout(timer);
+    }
+};
 // The jobs the module may hold tickets for at once, which also bounds each
 // queue.
 const maximumTickets = 4096;
@@ -443,13 +463,7 @@ export const startParallelHelpers = async (
     }
     const layout = controlLayout(count);
     const control = new SharedArrayBuffer(4 * layout.words);
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const deadline = new Promise<readonly boolean[]>((resolve) => {
-        timer = setTimeout(() => {
-            resolve([false]);
-        }, helperStartMilliseconds);
-    });
-    const answers = Promise.all(
+    const started = await allStartedInTime(
         ports.map(
             (port, index) =>
                 new Promise<boolean>((resolve) => {
@@ -472,11 +486,9 @@ export const startParallelHelpers = async (
                 }),
         ),
     );
-    const started = await Promise.race([answers, deadline]);
-    clearTimeout(timer);
     for (const port of ports) port.close();
     const host = createHost(count, new Int32Array(control), arena, layout);
-    if (started.every(Boolean)) return host;
+    if (started) return host;
     host.stop();
     return noParallelHelpers;
 };

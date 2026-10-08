@@ -5,8 +5,8 @@ import type {
 } from './worker/operation-status.js';
 import {
     affordedHelpers,
+    allStartedInTime,
     helperRole,
-    helperStartMilliseconds,
 } from './worker/parallel-helpers.js';
 import { participantNamespacePattern } from './worker/storage.js';
 import type { WorkerResult } from './worker/worker.js';
@@ -219,40 +219,30 @@ const openHelpers = async (url: string) => {
     if (count === 0) return { workers: [], ports: [] };
     const workers: Worker[] = [];
     const ports: MessagePort[] = [];
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const deadline = new Promise<readonly boolean[]>((resolve) => {
-        timer = setTimeout(() => {
-            resolve([false]);
-        }, helperStartMilliseconds);
-    });
-    const listening = await Promise.race([
-        Promise.all(
-            Array.from(
-                { length: count },
-                () =>
-                    new Promise<boolean>((resolve) => {
-                        const worker = new Worker(url, { type: 'module' });
-                        const channel = new MessageChannel();
-                        workers.push(worker);
-                        ports.push(channel.port2);
-                        worker.onmessage = () => {
-                            resolve(true);
-                        };
-                        worker.onerror = () => {
-                            resolve(false);
-                        };
-                        worker.postMessage(helperRole, [channel.port1]);
-                    }),
-            ),
+    const listening = await allStartedInTime(
+        Array.from(
+            { length: count },
+            () =>
+                new Promise<boolean>((resolve) => {
+                    const worker = new Worker(url, { type: 'module' });
+                    const channel = new MessageChannel();
+                    workers.push(worker);
+                    ports.push(channel.port2);
+                    worker.onmessage = () => {
+                        resolve(true);
+                    };
+                    worker.onerror = () => {
+                        resolve(false);
+                    };
+                    worker.postMessage(helperRole, [channel.port1]);
+                }),
         ),
-        deadline,
-    ]);
-    clearTimeout(timer);
+    );
     for (const worker of workers) {
         worker.onmessage = null;
         worker.onerror = null;
     }
-    if (!listening.every(Boolean)) {
+    if (!listening) {
         for (const worker of workers) worker.terminate();
         for (const port of ports) port.close();
         return { workers: [], ports: [] };
