@@ -1,3 +1,4 @@
+import { ballotPhase } from './ballot-state.js';
 import {
     beginBallot,
     completeBallot,
@@ -71,6 +72,7 @@ import {
     publishRelease,
     resumeRelease,
 } from './release.js';
+import { rootGeneration } from './root-generation.js';
 import { authenticateRoot } from './root.js';
 import type { AuthenticatedRoot } from './root.js';
 import {
@@ -227,9 +229,9 @@ const bytes = (value: unknown) => {
 // own.
 const ballotState = (root: AuthenticatedRoot) => {
     const { generation } = root.head;
-    if (generation < 12) return undefined;
-    if (generation === 12) return 'open';
-    if (generation < 17) return 'in progress';
+    if (generation < rootGeneration.setupRetained) return undefined;
+    if (generation === rootGeneration.setupRetained) return 'open';
+    if (generation < ballotPhase.signed) return 'in progress';
     return (root.manifest.suffixes.ballot?.length ?? 0) > 0
         ? 'signed'
         : 'could not vote';
@@ -350,7 +352,7 @@ const execute = async (
     // The retained roster names the profile from generation two on; every
     // operation past the roster runs only at such a generation.
     const profiled =
-        root.head.generation >= 2
+        root.head.generation >= rootGeneration.rosterLocked
             ? await retainedProfile(context, root, enrollment)
             : undefined;
     // What an operation reports beside the participant's summary.
@@ -364,13 +366,13 @@ const execute = async (
         case 'status':
             break;
         case 'publish':
-            if (root.head.generation === 4)
+            if (root.head.generation === rootGeneration.preparation)
                 await resumeParticipant(profileContext(), root);
             await publishRegistrationRecords(context, relay, root, enrollment);
             break;
         case 'propose-roster': {
             const recordIds = parseRecordIds(parameters.recordIds);
-            if (root.head.generation === 2) {
+            if (root.head.generation === rootGeneration.rosterLocked) {
                 const proposal = await reverifyRoster(
                     context,
                     relay,
@@ -409,7 +411,10 @@ const execute = async (
             break;
         }
         case 'confirm': {
-            if (root.head.generation !== 3 && root.head.generation !== 4)
+            if (
+                root.head.generation !== rootGeneration.rosterSigned &&
+                root.head.generation !== rootGeneration.preparation
+            )
                 return refused('unavailable');
             const session = await resumeParticipant(profileContext(), root);
             await confirmRoster(session);
@@ -418,7 +423,7 @@ const execute = async (
         }
         case 'contribute': {
             if (
-                root.head.generation !== 4 ||
+                root.head.generation !== rootGeneration.preparation ||
                 !isEligibleContributor(profileContext())
             )
                 return refused('unavailable');
@@ -456,7 +461,10 @@ const execute = async (
             break;
         }
         case 'select-setup': {
-            if (root.head.generation !== 4 || !enrollment.isOrganizer)
+            if (
+                root.head.generation !== rootGeneration.preparation ||
+                !enrollment.isOrganizer
+            )
                 return refused('unavailable');
             const session = await resumeParticipant(profileContext(), root);
             await selectSetup(session, relay);
@@ -464,7 +472,8 @@ const execute = async (
             break;
         }
         case 'endorse-setup': {
-            if (root.head.generation !== 4) return refused('unavailable');
+            if (root.head.generation !== rootGeneration.preparation)
+                return refused('unavailable');
             const session = await resumeParticipant(profileContext(), root);
             await endorseSetup(session, relay);
             root = session.root;
@@ -472,7 +481,10 @@ const execute = async (
         }
         case 'verify-setup': {
             // Any original member may activate the uniquely certified setup.
-            if (profiled === undefined || root.head.generation !== 4)
+            if (
+                profiled === undefined ||
+                root.head.generation !== rootGeneration.preparation
+            )
                 return refused('unavailable');
             const session = await resumeParticipant(profiled, root);
             root = await retainSetup(
@@ -495,7 +507,10 @@ const execute = async (
             // A retained attempt continues only with its locked scores, and a
             // signed ballot is only delivered again, also after an intent.
             const generation = root.head.generation;
-            if (profiled === undefined || generation < 12)
+            if (
+                profiled === undefined ||
+                generation < rootGeneration.setupRetained
+            )
                 return refused('unavailable');
             const scores =
                 parameters.scores === undefined
@@ -503,14 +518,18 @@ const execute = async (
                     : parseBallotScores(profiled.profile, parameters.scores);
             if (
                 (parameters.scores !== undefined && scores === undefined) ||
-                (generation === 12 && scores === undefined)
+                (generation === rootGeneration.setupRetained &&
+                    scores === undefined)
             )
                 return refused('invalid request');
-            if (generation >= 17 && scores !== undefined)
+            if (generation >= ballotPhase.signed && scores !== undefined)
                 return refused('unavailable');
             const participant = await resumeParticipant(profileContext(), root);
             let session;
-            if (scores !== undefined && generation === 12)
+            if (
+                scores !== undefined &&
+                generation === rootGeneration.setupRetained
+            )
                 session = await beginBallot(participant, scores);
             else {
                 session = await resumeBallot(participant);
@@ -534,7 +553,10 @@ const execute = async (
             // Only the organizer opens the close, and only before an intent
             // and with no ballot attempt pending.
             const generation = root.head.generation;
-            if (profiled === undefined || generation < 12)
+            if (
+                profiled === undefined ||
+                generation < rootGeneration.setupRetained
+            )
                 return refused('unavailable');
             const request = parseCloseRequest(parameters);
             if (
@@ -544,8 +566,8 @@ const execute = async (
                 return refused('invalid request');
             if (
                 request.closeTime !== undefined &&
-                generation !== 12 &&
-                generation !== 17
+                generation !== rootGeneration.setupRetained &&
+                generation !== ballotPhase.signed
             )
                 return refused('unavailable');
             const participant = await resumeParticipant(profileContext(), root);
@@ -686,7 +708,7 @@ const execute = async (
                 root,
                 enrollment,
                 profiled ??
-                    (root.head.generation >= 2
+                    (root.head.generation >= rootGeneration.rosterLocked
                         ? await retainedProfile(context, root, enrollment)
                         : undefined),
             ),

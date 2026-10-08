@@ -31,6 +31,7 @@ import {
     streamCandidateFile,
 } from './public.js';
 import type { CandidateView, PublicRelay } from './public.js';
+import { rootGeneration } from './root-generation.js';
 import {
     addedReferences,
     commitRoot,
@@ -1024,7 +1025,7 @@ export const verifySetup = async (
     session: ParticipantSession,
     relay: PublicRelay,
 ): Promise<VerifiedSetup> => {
-    if (session.root.head.generation !== 4)
+    if (session.root.head.generation !== rootGeneration.preparation)
         throw new Error('No confirmed roster awaits setup activation.');
     await verifySetupRoster(session, relay);
     const certificate = await readSetupCertificate(session.context, relay);
@@ -1055,7 +1056,7 @@ export const ensureFinalAggregate = async (
     session: ParticipantSession,
     relay: PublicRelay,
 ) => {
-    if (session.root.head.generation < 12)
+    if (session.root.head.generation < rootGeneration.setupRetained)
         throw new Error('No setup reference is retained.');
     if (await holdsFinalAggregate(session.context)) return false;
     // A cache loss can also occur after certification in this same visit.
@@ -1231,7 +1232,7 @@ export const retainSetup = async (
         (reference) => reference.kind !== dataKind.sourceCapsule,
     );
     const retained = await commitRoot(context, root, {
-        generation: 12,
+        generation: rootGeneration.setupRetained,
         manifest: {
             ...root.manifest,
             dataKeys: retainedKeys,

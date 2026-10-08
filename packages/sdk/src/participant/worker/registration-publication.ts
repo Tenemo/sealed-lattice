@@ -4,6 +4,7 @@ import { openDelivery } from './delivery.js';
 import type { RestoredEnrollment } from './enrollment.js';
 import { createCandidatePublication } from './public.js';
 import type { PublicRelay } from './public.js';
+import { rootGeneration } from './root-generation.js';
 import { dataKind, readDataRecord } from './root.js';
 import type { AuthenticatedRoot } from './root.js';
 import { registrationFile, registrationCandidateKey } from './roster.js';
@@ -39,7 +40,7 @@ export const publishRegistrationRecords = async (
                 [dataKind.pollSignature, 'signature.bin'],
             ],
         ]);
-        if (root.head.generation >= 3)
+        if (root.head.generation >= rootGeneration.rosterSigned)
             groups.push([
                 'roster',
                 [

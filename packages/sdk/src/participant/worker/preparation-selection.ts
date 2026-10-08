@@ -19,6 +19,7 @@ import {
     readOfferAnnouncements,
 } from './public.js';
 import type { PublicRelay } from './public.js';
+import { rootGeneration } from './root-generation.js';
 import {
     authenticateSelection,
     endorsementCandidateKey,
@@ -120,7 +121,7 @@ export const selectSetup = async (
     session: ParticipantSession,
     relay: PublicRelay,
 ) => {
-    if (session.root.head.generation !== 4)
+    if (session.root.head.generation !== rootGeneration.preparation)
         throw new Error('No confirmed roster permits setup selection.');
     await verifySetupRoster(session, relay);
     let retained = session.preparation.selection;
@@ -202,7 +203,7 @@ export const endorseSetup = async (
     relay: PublicRelay,
     publishedSelection?: SignedPacket,
 ) => {
-    if (session.root.head.generation !== 4)
+    if (session.root.head.generation !== rootGeneration.preparation)
         throw new Error('No confirmed roster permits setup endorsement.');
     await verifySetupRoster(session, relay);
     let retained = session.preparation.endorsement;

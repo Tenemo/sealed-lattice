@@ -21,6 +21,7 @@ import { readKernel } from './kernel.js';
 import type { ParticipantRefusalReason } from './outcome.js';
 import { validateParticipantPredecessor } from './predecessor.js';
 import { unusedPreparationPurposes } from './preparation-state.js';
+import { rootGeneration } from './root-generation.js';
 import {
     authenticateRoot,
     chunkBytes,
@@ -197,9 +198,14 @@ export const createEnrollment = async (
             encodeText('INI2'),
             custodyIdentity(kernel, custodyPurpose.enrollmentInput, input),
         );
-        const intent = await sealRoot(key, 0, associatedData, intentPlaintext);
+        const intent = await sealRoot(
+            key,
+            rootGeneration.enrollmentIntent,
+            associatedData,
+            intentPlaintext,
+        );
         const intentHead = {
-            generation: 0,
+            generation: rootGeneration.enrollmentIntent,
             hash: hexadecimal(
                 custodyIdentity(kernel, custodyPurpose.root, intent),
             ),
@@ -338,10 +344,15 @@ export const createEnrollment = async (
             throw new Error('The enrollment root exceeds its bound.');
         // The initial key seals the intent and the completed root under their
         // distinct generation nonces.
-        const sealed = await sealRoot(key, 1, associatedData, plaintext);
+        const sealed = await sealRoot(
+            key,
+            rootGeneration.registered,
+            associatedData,
+            plaintext,
+        );
         plaintext.fill(0);
         const head = {
-            generation: 1,
+            generation: rootGeneration.registered,
             hash: hexadecimal(
                 custodyIdentity(kernel, custodyPurpose.root, sealed),
             ),
@@ -376,7 +387,10 @@ export const createEnrollment = async (
         enrollmentIncomplete = false;
         for (const record of records) record.bytes.fill(0);
         const root = await authenticateRoot(context);
-        if (root.head.generation !== 1 || root.head.hash !== head.hash)
+        if (
+            root.head.generation !== rootGeneration.registered ||
+            root.head.hash !== head.hash
+        )
             throw new Error('Enrollment readback failed.');
         return root;
     } catch (error) {
@@ -412,10 +426,6 @@ export type RestoredEnrollment = Readonly<{
     definition: Uint8Array;
     definitionSignature: Uint8Array;
 }>;
-
-// From the roster transition on, the root retains the module's verification
-// of the participant's own registration, keyed to its credential.
-const retainedRegistrationGeneration = 2;
 
 // The credential keys the module's verification of the participant's own
 // registration, so that later visits restore it instead of reading and
@@ -502,7 +512,10 @@ export const restoreEnrollment = async (
         own(1, publicKey.subarray(offset, offset + chunkBytes));
     own(2);
     let bodyDigest: Uint8Array;
-    if (root.head.generation >= retainedRegistrationGeneration) {
+    // From the roster transition on, the root retains the module's
+    // verification of the participant's own registration, keyed to its
+    // credential.
+    if (root.head.generation >= rootGeneration.rosterLocked) {
         // The module checks the copy's tag once the capsules open the
         // credential it is keyed to.
         const retained = await read(dataKind.retainedRegistration);

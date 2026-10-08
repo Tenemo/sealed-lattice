@@ -40,6 +40,7 @@ import {
     readCandidateFile,
 } from './public.js';
 import type { PublicRelay } from './public.js';
+import { rootGeneration } from './root-generation.js';
 import {
     authenticateRecords,
     chunkBytes,
@@ -515,7 +516,8 @@ const commitContribution = async (
     const { context, root } = session;
     const profile = context.profile;
     const predecessor =
-        root.head.generation >= 4 && session.state !== undefined
+        root.head.generation >= rootGeneration.preparation &&
+        session.state !== undefined
             ? contributionInventory(profile, session.state, session.records)
             : [];
     const listed = new Set(
@@ -537,7 +539,7 @@ const commitContribution = async (
               )
             : [];
     session.root = await commitRoot(context, root, {
-        generation: 4,
+        generation: rootGeneration.preparation,
         manifest: {
             ...root.manifest,
             suffixes: {
@@ -785,7 +787,7 @@ export const beginContribution = async (
 ): Promise<ContributionSession> => {
     const { context, root } = session;
     if (
-        root.head.generation !== 4 ||
+        root.head.generation !== rootGeneration.preparation ||
         session.state !== undefined ||
         context.position >= context.profile.eligibleContributorCount
     )
@@ -917,8 +919,8 @@ export const restoreCheckpoint = async (
 ) => {
     const { context, state } = session;
     const { kernel, profile } = context;
-    const generation = session.state.phase;
-    if (generation !== 5 && generation !== 6)
+    const phase = session.state.phase;
+    if (phase !== 5 && phase !== 6)
         throw new Error('No contribution checkpoint is retained.');
     if (
         checkpoint(
@@ -999,10 +1001,10 @@ export const continueContribution = async (session: ContributionSession) => {
     const { context } = session;
     const { profile } = context;
     const bounds = profile.contribution;
-    const generation = session.state.phase;
-    if (generation !== 5 && generation !== 6)
+    const phase = session.state.phase;
+    if (phase !== 5 && phase !== 6)
         throw new Error('No contribution checkpoint is retained.');
-    if (generation === 5)
+    if (phase === 5)
         await commitContribution(session, {
             phase: 6,
             state: {
@@ -1291,13 +1293,19 @@ export const resumeParticipant = async (
 ): Promise<ParticipantSession> => {
     const { generation } = root.head;
     const suffix = root.manifest.suffixes.preparation;
-    if (generation < 3 || (generation === 3) !== (suffix === undefined))
+    if (
+        generation < rootGeneration.rosterSigned ||
+        (generation === rootGeneration.rosterSigned) !== (suffix === undefined)
+    )
         throw new Error('No accepted roster is retained.');
     const preparation =
         suffix === undefined
             ? {}
             : decodePreparationState(suffix, context.profile);
-    if (generation >= 12 && Object.keys(preparation).length !== 0)
+    if (
+        generation >= rootGeneration.setupRetained &&
+        Object.keys(preparation).length !== 0
+    )
         throw new Error('Retired preparation authority is still present.');
     const state =
         preparation.contribution === undefined
@@ -1322,7 +1330,10 @@ export const resumeParticipant = async (
         throw new Error('The verified proposal moved this participant.');
     const proposal =
         verified?.identity ?? (await retainProposal(context, root));
-    if (generation >= 4 && context.kernel.confirm_roster() !== 0)
+    if (
+        generation >= rootGeneration.preparation &&
+        context.kernel.confirm_roster() !== 0
+    )
         throw new Error('The original confirmed roster could not be restored.');
     const session: ParticipantSession = {
         context,
@@ -1336,7 +1347,7 @@ export const resumeParticipant = async (
         },
         ...(state === undefined ? {} : { state }),
     };
-    if (generation < 12)
+    if (generation < rootGeneration.setupRetained)
         await authenticateRecords(context, root, [
             ...dataRecordInventory(root.manifest),
             ...contributionRecords(session),
@@ -1360,13 +1371,13 @@ export const commitPreparation = async (
     update: Pick<PreparationState, 'selection' | 'endorsement'>,
 ) => {
     if (
-        session.root.head.generation !== 3 &&
-        session.root.head.generation !== 4
+        session.root.head.generation !== rootGeneration.rosterSigned &&
+        session.root.head.generation !== rootGeneration.preparation
     )
         throw new Error('Preparation is already retired.');
     const preparation = { ...session.preparation, ...update };
     session.root = await commitRoot(session.context, session.root, {
-        generation: 4,
+        generation: rootGeneration.preparation,
         manifest: {
             ...session.root.manifest,
             suffixes: { preparation: encodePreparationState(preparation) },
@@ -1381,7 +1392,7 @@ export const commitPreparation = async (
 
 // The human confirms the displayed, verified roster before any setup work.
 export const confirmRoster = async (session: ParticipantSession) => {
-    if (session.root.head.generation === 3)
+    if (session.root.head.generation === rootGeneration.rosterSigned)
         await commitPreparation(session, {});
     if (session.context.kernel.confirm_roster() !== 0)
         throw new Error('The credential refused the confirmed roster.');

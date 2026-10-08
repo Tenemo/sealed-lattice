@@ -11,6 +11,7 @@ import {
 import type { ParticipantStoredRecord } from './predecessor.js';
 import { recordKeyBytes, sealedLength } from './records.js';
 import type { RecordContext } from './records.js';
+import { rootGeneration } from './root-generation.js';
 
 // The close log beneath the authenticated root. It retains every close input
 // the participant's state machine accepted, in arrival order, so restoration
@@ -206,7 +207,7 @@ export const decodeCloseState = (
     const { close, registration } = profile;
     const phase = phaseOf(generation, organizer);
     if (
-        generation < 12 ||
+        generation < rootGeneration.setupRetained ||
         (!organizer &&
             (phase === closePhase.intent || phase === closePhase.proposed)) ||
         bytes.length > close.maximumStateBytes ||

@@ -26,6 +26,7 @@ import {
     streamCandidateFile,
 } from './public.js';
 import type { PublicRelay } from './public.js';
+import { rootGeneration } from './root-generation.js';
 import {
     addedReferences,
     commitRoot,
@@ -377,7 +378,11 @@ export const proposeRoster = async (
     enrollment: RestoredEnrollment,
     recordIds: readonly string[],
 ): Promise<RetainedRoster | undefined> => {
-    if (!enrollment.isOrganizer || root.head.generation !== 1) return undefined;
+    if (
+        !enrollment.isOrganizer ||
+        root.head.generation !== rootGeneration.registered
+    )
+        return undefined;
     const proposal = await verifyProposalInputs(
         context,
         relay,
@@ -395,7 +400,7 @@ export const proposeRoster = async (
         },
     ];
     const locked = await commitRoot(context, root, {
-        generation: 2,
+        generation: rootGeneration.rosterLocked,
         manifest: {
             ...root.manifest,
             references: addedReferences(
@@ -418,7 +423,7 @@ export const signRoster = async (
     root: AuthenticatedRoot,
     proposal: VerifiedProposal,
 ): Promise<AuthenticatedRoot> => {
-    if (root.head.generation !== 2)
+    if (root.head.generation !== rootGeneration.rosterLocked)
         throw new Error('No locked roster proposal exists.');
     const { kernel, limits } = context;
     const signing = proposal.identity.slice();
@@ -440,7 +445,7 @@ export const signRoster = async (
         throw new Error('The proposal signature did not verify.');
     const manifest = root.manifest;
     return commitRoot(context, root, {
-        generation: 3,
+        generation: rootGeneration.rosterSigned,
         manifest: {
             ...manifest,
             references: addedReferences(context, manifest.references, [
@@ -461,7 +466,11 @@ export const acceptRoster = async (
     enrollment: RestoredEnrollment,
     recordIds: readonly string[],
 ): Promise<RetainedRoster | undefined> => {
-    if (enrollment.isOrganizer || root.head.generation !== 1) return undefined;
+    if (
+        enrollment.isOrganizer ||
+        root.head.generation !== rootGeneration.registered
+    )
+        return undefined;
     const proposal = await verifyProposalInputs(
         context,
         relay,
@@ -506,7 +515,7 @@ export const acceptRoster = async (
     ];
     return {
         root: await commitRoot(context, root, {
-            generation: 3,
+            generation: rootGeneration.rosterSigned,
             manifest: {
                 ...root.manifest,
                 references: addedReferences(
@@ -560,7 +569,7 @@ export const reverifyRoster = async (
     );
     if (!equalBytes(proposal.body, stored))
         throw new Error('The retained proposal differs from its records.');
-    if (root.head.generation >= 3) {
+    if (root.head.generation >= rootGeneration.rosterSigned) {
         const signature = await readDataKind(
             context,
             root.manifest,

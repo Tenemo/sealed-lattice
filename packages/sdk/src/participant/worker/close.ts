@@ -1,3 +1,4 @@
+import { ballotPhase } from './ballot-state.js';
 import {
     ballotCandidateKey,
     ballotWorkInput,
@@ -46,6 +47,7 @@ import {
 import type { CandidateView, PublicRelay } from './public.js';
 import { openRecord, recordContext, sealRecord } from './records.js';
 import type { RecordContext } from './records.js';
+import { rootGeneration } from './root-generation.js';
 import { commitRoot, dataRecordInventory } from './root.js';
 import { snapshotParticipant } from './storage.js';
 
@@ -185,7 +187,10 @@ export const resumeClose = async (
 ): Promise<CloseSession> => {
     const { context, root } = participant;
     const bytes = root.manifest.suffixes.close;
-    if (root.head.generation < 12 || bytes === undefined)
+    if (
+        root.head.generation < rootGeneration.setupRetained ||
+        bytes === undefined
+    )
         throw new Error('No close log is retained.');
     const records = await recordContext(participant);
     const state = decodeCloseState(
@@ -1230,7 +1235,9 @@ export const advanceClose = async (
                 await deliverBallot(session, relay, author);
     }
     // A locked ballot attempt completes before any intent is locked.
-    const unlocked = generation() === 12 || generation() === 17;
+    const unlocked =
+        generation() === rootGeneration.setupRetained ||
+        generation() === ballotPhase.signed;
     if (session.organizer) {
         if (
             generation() === closePhase.intent ||

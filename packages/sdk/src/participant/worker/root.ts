@@ -17,6 +17,11 @@ import {
 } from './identity.js';
 import type { ParticipantStoredRecord } from './predecessor.js';
 import { validateParticipantPredecessor } from './predecessor.js';
+import {
+    isRootGeneration,
+    lastRootGeneration,
+    rootGeneration,
+} from './root-generation.js';
 import { commitParticipantState } from './state-transaction.js';
 import {
     isParticipantHead,
@@ -37,12 +42,12 @@ import type { ParticipantHead } from './storage.js';
 // signing, then release.
 export const chunkBytes = 1 << 20;
 const referenceBytes = 73;
-export const requiresFheKeySources = (generation: number) => generation < 12;
+export const requiresFheKeySources = (generation: number) =>
+    generation < rootGeneration.setupRetained;
 const dataKeyBytes = (generation: number) =>
     requiresFheKeySources(generation) ? 96 : 64;
 const prefixBytes = (generation: number) =>
     4 + dataKeyBytes(generation) + 64 + 4;
-const lastGeneration = 29;
 const suffixStarts = {
     preparation: 4,
     ballot: 12,
@@ -133,14 +138,7 @@ export const encodeManifest = (
     manifest: ParticipantManifest,
     generation: number,
 ) => {
-    if (
-        !Number.isSafeInteger(generation) ||
-        generation < 1 ||
-        generation > lastGeneration ||
-        generation === 16 ||
-        generation === 28 ||
-        (generation > 4 && generation < 12)
-    )
+    if (!isRootGeneration(generation))
         throw new Error('Invalid participant root generation.');
     const suffixes = presentSuffixes(generation).map((name) => {
         const bytes = manifest.suffixes[name];
@@ -205,14 +203,20 @@ const checkReferences = (
             lengths[dataKind.sourceCapsule] > 0 ||
         lengths[dataKind.pollDefinition] === 0 ||
         !exact(dataKind.pollSignature, registration.signatureBytes) ||
-        generation >= 2 !== lengths[dataKind.proposal] > 0 ||
-        generation >= 2 !== lengths[dataKind.retainedRoster] > 0 ||
+        generation >= rootGeneration.rosterLocked !==
+            lengths[dataKind.proposal] > 0 ||
+        generation >= rootGeneration.rosterLocked !==
+            lengths[dataKind.retainedRoster] > 0 ||
         !exact(
             dataKind.proposalSignature,
-            generation >= 3 ? registration.signatureBytes : 0,
+            generation >= rootGeneration.rosterSigned
+                ? registration.signatureBytes
+                : 0,
         ) ||
-        generation >= 12 !== lengths[dataKind.setupReference] > 0 ||
-        generation >= 12 !== lengths[dataKind.setupInventory] > 0
+        generation >= rootGeneration.setupRetained !==
+            lengths[dataKind.setupReference] > 0 ||
+        generation >= rootGeneration.setupRetained !==
+            lengths[dataKind.setupInventory] > 0
     )
         throw new Error('Participant records do not match the generation.');
 };
@@ -223,12 +227,7 @@ const decodeManifest = (
     limits: ParticipantLimits,
 ): ParticipantManifest => {
     if (
-        !Number.isSafeInteger(generation) ||
-        generation < 1 ||
-        generation > lastGeneration ||
-        generation === 16 ||
-        generation === 28 ||
-        (generation > 4 && generation < 12) ||
+        !isRootGeneration(generation) ||
         bytes.length < prefixBytes(generation) ||
         !equalBytes(bytes.subarray(0, 4), encodeText('ERM9'))
     )
@@ -357,8 +356,8 @@ export const authenticateRoot = async (
         !isRootKey(snapshot.key) ||
         !(snapshot.root instanceof Uint8Array) ||
         !isParticipantHead(snapshot.head) ||
-        snapshot.head.generation < 1 ||
-        snapshot.head.generation > lastGeneration ||
+        snapshot.head.generation < rootGeneration.registered ||
+        snapshot.head.generation > lastRootGeneration ||
         snapshot.head.runtime !== hexadecimal(runtime) ||
         snapshot.root.length >
             provisionalRootBound(limits, snapshot.head.generation) ||
