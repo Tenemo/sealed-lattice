@@ -17,16 +17,16 @@ import {
     unsigned64,
 } from './bytes.js';
 import { closeRecordInventory, decodeCloseState } from './close-state.js';
-import { describe, sessionInput } from './context.js';
-import type { ProfileContext } from './context.js';
+import { sessionInput } from './context.js';
+import type {
+    ProfileContext,
+    PublicContext,
+    PublicProfileContext,
+} from './context.js';
 import { contributionRecords } from './contribution.js';
 import type { ParticipantSession } from './contribution.js';
 import { openDelivery } from './delivery.js';
-import {
-    PublicInputFailure,
-    ResourceFailure,
-    StoragePending,
-} from './failures.js';
+import { PublicInputFailure, StoragePending } from './failures.js';
 import { operationSeedBytes, readKernel, seededRandomness } from './kernel.js';
 import type { ParticipantStoredRecord } from './predecessor.js';
 import { createCandidatePublication } from './public.js';
@@ -312,8 +312,8 @@ export const ballotWorkInput = async (
     );
 };
 
-const ballotCommand = (
-    context: ProfileContext,
+const tryBallotCommand = (
+    context: PublicContext,
     operation: number,
     argument = 0,
     input: Uint8Array = new Uint8Array(),
@@ -324,15 +324,49 @@ const ballotCommand = (
         kernel.participant_ballot_command(operation, argument, input.length) !==
         0
     )
-        throw new Error(
-            'The ballot module refused operation ' + String(operation) + '.',
-        );
+        return undefined;
     return readKernel(
         kernel,
         kernel.contribution_output_pointer(),
         kernel.contribution_output_length(),
     );
 };
+
+const ballotCommand = (
+    context: ProfileContext,
+    operation: number,
+    argument = 0,
+    input: Uint8Array = new Uint8Array(),
+) => {
+    const output = tryBallotCommand(context, operation, argument, input);
+    if (output === undefined)
+        throw new Error(
+            'The ballot module refused operation ' + String(operation) + '.',
+        );
+    return output;
+};
+
+// Delivers the FHE key of the body polynomial at the index from the final
+// public aggregate. A refused chunk or finish is not the key the retained
+// setup reference names, so it leaves the participant pending and discards
+// the cache; any other failure keeps its own outcome.
+export const deliverBallotKey = (
+    context: PublicProfileContext,
+    index: number,
+) =>
+    deliverFinalAggregate(context, async () => {
+        const deliver = (operation: number, offset = 0, bytes?: Uint8Array) => {
+            if (
+                tryBallotCommand(context, operation, offset, bytes) ===
+                undefined
+            )
+                throw new PublicInputFailure('A ballot key was refused.');
+        };
+        await readFinalAggregate(context, index, (offset, bytes) => {
+            deliver(2, offset, bytes);
+        });
+        deliver(3);
+    });
 
 // Starts the module's ballot work from the retained poll, opening and setup
 // reference, and delivers the FHE key from the final public aggregate.
@@ -350,23 +384,7 @@ const startBallotWork = async (session: BallotSession) => {
     );
     const index = kernel.participant_ballot_key_index() >>> 0;
     ballotCommand(context, 1, index);
-    try {
-        await deliverFinalAggregate(context, async () => {
-            await readFinalAggregate(context, index, (offset, bytes) => {
-                ballotCommand(context, 2, offset, bytes);
-            });
-            ballotCommand(context, 3);
-        });
-    } catch (error) {
-        if (
-            error instanceof PublicInputFailure ||
-            error instanceof ResourceFailure
-        )
-            throw error;
-        throw new PublicInputFailure(
-            'A ballot key was refused: ' + describe(error),
-        );
-    }
+    await deliverBallotKey(context, index);
 };
 
 // Creates the ballot from the locked scores and ballot time. Its encryption

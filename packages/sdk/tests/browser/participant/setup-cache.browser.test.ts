@@ -1,7 +1,11 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { deliverBallotKey } from '#packages/sdk/src/participant/worker/ballot.js';
 import type { PublicProfileContext } from '#packages/sdk/src/participant/worker/context.js';
-import { PublicInputFailure } from '#packages/sdk/src/participant/worker/failures.js';
+import {
+    ModuleFailure,
+    PublicInputFailure,
+} from '#packages/sdk/src/participant/worker/failures.js';
 import {
     deliverFinalAggregate,
     readFinalAggregate,
@@ -145,5 +149,85 @@ describe('bounded public aggregate cache reads', () => {
         expect(await result(transaction.objectStore('aggregate').count())).toBe(
             0,
         );
+    });
+});
+
+// A stand-in for the module's ballot key commands: it records each call and
+// answers as told. No key is verified here.
+const withBallotKernel = (
+    context: PublicProfileContext,
+    answer: (operation: number, offset: number) => number,
+) => {
+    const calls: number[][] = [];
+    const kernel = {
+        ...context.kernel,
+        memory: new WebAssembly.Memory({ initial: 1 }),
+        input_pointer: () => 0,
+        input_capacity: () => 64,
+        contribution_output_pointer: () => 0,
+        contribution_output_length: () => 0,
+        participant_ballot_command: (
+            operation: number,
+            offset: number,
+            length: number,
+        ) => {
+            calls.push([operation, offset, length]);
+            return answer(operation, offset);
+        },
+    };
+    return {
+        calls,
+        context: { ...context, kernel } as unknown as PublicProfileContext,
+    };
+};
+const cachedChunks = async (database: IDBDatabase) =>
+    result(
+        database
+            .transaction('aggregate', 'readonly')
+            .objectStore('aggregate')
+            .count(),
+    );
+
+describe('ballot key delivery', () => {
+    it('streams every cached chunk of the key and finishes it, keeping the cache', async () => {
+        const fixed = await fixture();
+        const { calls, context } = withBallotKernel(fixed.context, () => 0);
+        await deliverBallotKey(context, 7);
+        expect(calls).toEqual([
+            [2, 0, 6],
+            [2, 6, 6],
+            [2, 12, 3],
+            [3, 0, 0],
+        ]);
+        expect(await cachedChunks(fixed.database)).toBe(4);
+    });
+
+    it('leaves a refused chunk or finish pending on public input and discards the cache', async () => {
+        const refusals: ((operation: number, offset: number) => boolean)[] = [
+            (operation, offset) => operation === 2 && offset === 6,
+            (operation) => operation === 3,
+        ];
+        for (const refused of refusals) {
+            const fixed = await fixture();
+            const { context } = withBallotKernel(
+                fixed.context,
+                (operation, offset) => (refused(operation, offset) ? 1 : 0),
+            );
+            await expect(deliverBallotKey(context, 7)).rejects.toThrow(
+                new PublicInputFailure('A ballot key was refused.'),
+            );
+            expect(await cachedChunks(fixed.database)).toBe(0);
+        }
+    });
+
+    it('keeps a module failure a module failure instead of public input, and discards the cache', async () => {
+        const fixed = await fixture();
+        const failure = new ModuleFailure('The participant module failed.');
+        const { context } = withBallotKernel(fixed.context, (operation) => {
+            if (operation === 3) throw failure;
+            return 0;
+        });
+        await expect(deliverBallotKey(context, 7)).rejects.toBe(failure);
+        expect(await cachedChunks(fixed.database)).toBe(0);
     });
 });
