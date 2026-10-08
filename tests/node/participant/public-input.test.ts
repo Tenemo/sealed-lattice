@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { foregroundVisitMilliseconds } from '#packages/sdk/src/participant/worker/bounds.js';
+import { PublicInputFailure } from '#packages/sdk/src/participant/worker/failures.js';
 import {
     readBounded,
     streamBounded,
@@ -38,7 +40,52 @@ const response = (
     return { body, cancel, fetch };
 };
 
+// A relay that serves one byte each time the reader asks, the delay after
+// the request, and errors the body once the request is aborted, as a
+// fetch does.
+const paced = (count: number, delay: number) => {
+    const fetch = vi.fn((_url: string, init?: RequestInit) => {
+        let served = 0;
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const body = new ReadableStream<Uint8Array>(
+            {
+                start(controller) {
+                    init?.signal?.addEventListener('abort', () => {
+                        clearTimeout(timer);
+                        controller.error(init.signal?.reason);
+                    });
+                },
+                pull(controller) {
+                    if (served === count) {
+                        controller.close();
+                        return;
+                    }
+                    return new Promise<void>((resolve) => {
+                        timer = setTimeout(() => {
+                            served++;
+                            controller.enqueue(Uint8Array.of(served));
+                            resolve();
+                        }, delay);
+                    });
+                },
+            },
+            { highWaterMark: 0 },
+        );
+        return Promise.resolve(new Response(body));
+    });
+    vi.stubGlobal('fetch', fetch);
+};
+const fakeClock = () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] });
+};
+const outcome = (reading: Promise<number>) =>
+    reading.then(
+        (length) => length,
+        (error: unknown) => error,
+    );
+
 afterEach(() => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
 });
@@ -165,5 +212,58 @@ describe('bounded public byte collection', () => {
         released.resolve();
         expect(await reading).toBe(pageBytes + 7);
         expect(lengths).toEqual([pageBytes, 3, 4]);
+    });
+});
+
+describe('public record waits', () => {
+    it('ends a record whose relay sends each byte just within the minute once its waits reach the foreground visit limit', async () => {
+        fakeClock();
+        paced(pageBytes, 59_000);
+        let accepted = 0;
+        let ended = false;
+        const reading = outcome(
+            streamBounded(relay.base + 'record.bin', pageBytes, (bytes) => {
+                accepted += bytes.length;
+            }),
+        );
+        void reading.then(() => {
+            ended = true;
+        });
+        await vi.advanceTimersByTimeAsync(foregroundVisitMilliseconds - 1);
+        expect(ended).toBe(false);
+        expect(accepted).toBe(15);
+        await vi.advanceTimersByTimeAsync(1);
+        expect(ended).toBe(true);
+        const error = await reading;
+        expect(error).toBeInstanceOf(PublicInputFailure);
+        expect((error as Error).message).toMatch(
+            /^A public record was interrupted: /u,
+        );
+        expect(accepted).toBe(15);
+    });
+
+    it('counts only the waits on the relay against the foreground visit limit, not the consumer work between them', async () => {
+        fakeClock();
+        paced(14, 59_000);
+        let accepted = 0;
+        const reading = outcome(
+            streamBounded(relay.base + 'record.bin', 14, async () => {
+                accepted++;
+                await new Promise((resolve) => setTimeout(resolve, 60_000));
+            }),
+        );
+        await vi.advanceTimersByTimeAsync(14 * (59_000 + 60_000));
+        expect(await reading).toBe(14);
+        expect(accepted).toBe(14);
+    });
+
+    it('ends a record whose relay sends nothing for a minute', async () => {
+        fakeClock();
+        paced(2, 61_000);
+        const reading = outcome(
+            streamBounded(relay.base + 'record.bin', 2, () => undefined),
+        );
+        await vi.advanceTimersByTimeAsync(60_000);
+        expect(await reading).toBeInstanceOf(PublicInputFailure);
     });
 });

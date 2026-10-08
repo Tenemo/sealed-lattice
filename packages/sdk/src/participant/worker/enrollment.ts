@@ -1,4 +1,7 @@
-import { participantDataKindMaximums } from './bounds.js';
+import {
+    foregroundVisitMilliseconds,
+    participantDataKindMaximums,
+} from './bounds.js';
 import {
     concatenate,
     encodeText,
@@ -71,10 +74,6 @@ export type EnrollmentRequest = Readonly<
           username: string;
       }
 >;
-
-// Validation of the empty namespace and of the intent is bounded by the
-// foreground visit limit.
-const validationMilliseconds = 15 * 60 * 1000;
 
 // A lone surrogate cannot be encoded without replacement, which would change
 // the text that the poll or the credential binds.
@@ -237,7 +236,7 @@ export const createEnrollment = async (
         await commitParticipantState({
             database,
             stores: participantStores,
-            timeoutMilliseconds: validationMilliseconds,
+            timeoutMilliseconds: foregroundVisitMilliseconds,
             validate: async (reader) => {
                 for (const store of participantStores)
                     if ((await reader.count(store)) !== 0)
@@ -384,7 +383,7 @@ export const createEnrollment = async (
         await commitParticipantState({
             database,
             stores: participantStores,
-            timeoutMilliseconds: validationMilliseconds,
+            timeoutMilliseconds: foregroundVisitMilliseconds,
             validate: (reader) =>
                 validateParticipantPredecessor(reader, {
                     head: intentHead,

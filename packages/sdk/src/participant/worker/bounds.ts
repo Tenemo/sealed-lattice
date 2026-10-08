@@ -8,6 +8,10 @@ import type { ParticipantKernel } from './kernel.js';
 
 type Range = Readonly<{ minimum: number; maximum: number }>;
 
+// The foreground visit limit bounds every wait the worker cannot otherwise
+// end: a state validation, and the waits for one public record's bytes.
+export const foregroundVisitMilliseconds = 15 * 60 * 1000;
+
 // A retained or published record holds at most one mebibyte, and a sealed
 // record adds its AES-GCM tag.
 const chunkBytes = 1 << 20;

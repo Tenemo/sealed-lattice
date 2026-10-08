@@ -1,4 +1,7 @@
-import { participantDataKindMaximums } from './bounds.js';
+import {
+    foregroundVisitMilliseconds,
+    participantDataKindMaximums,
+} from './bounds.js';
 import type { ParticipantLimits } from './bounds.js';
 import {
     concatenate,
@@ -331,9 +334,6 @@ export const openRoot = async (
         ),
     );
 
-// Validation of a predecessor is bounded by the foreground visit limit.
-const validationMilliseconds = 15 * 60 * 1000;
-
 export type AuthenticatedRoot = Readonly<{
     head: ParticipantHead;
     plaintext: Uint8Array;
@@ -453,7 +453,7 @@ export const authenticateRecords = (
     commitParticipantState({
         database: context.database,
         stores: participantStores,
-        timeoutMilliseconds: validationMilliseconds,
+        timeoutMilliseconds: foregroundVisitMilliseconds,
         validate: (reader) =>
             validateParticipantPredecessor(reader, {
                 head: root.head,
@@ -570,7 +570,7 @@ export const commitRoot = async (
         await commitParticipantState({
             database,
             stores: participantStores,
-            timeoutMilliseconds: validationMilliseconds,
+            timeoutMilliseconds: foregroundVisitMilliseconds,
             validate,
             write: (transaction) => {
                 transaction.objectStore('key').put(key, 0);
@@ -592,7 +592,7 @@ export const commitRoot = async (
         await commitParticipantState({
             database,
             stores: participantStores,
-            timeoutMilliseconds: validationMilliseconds,
+            timeoutMilliseconds: foregroundVisitMilliseconds,
             validate: (reader) => validate(reader, true),
             write: () => undefined,
         });

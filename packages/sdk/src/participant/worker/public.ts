@@ -1,3 +1,4 @@
+import { foregroundVisitMilliseconds } from './bounds.js';
 import {
     equalBytes,
     hexadecimal,
@@ -23,8 +24,9 @@ import type { Delivery } from './delivery.js';
 import { PublicInputFailure } from './failures.js';
 
 // Public records come from an untrusted relay. Every read has an exact upper
-// bound checked before the bytes are kept, and every failure leaves the
-// participant pending. Owning verifiers decide acceptance.
+// bound checked before the bytes are kept and ends however the relay paces
+// its bytes, and every failure leaves the participant pending. Owning
+// verifiers decide acceptance.
 export const transferChunkBytes = 1 << 20;
 const networkMilliseconds = 60_000;
 
@@ -34,16 +36,24 @@ export type PublicRelay = Readonly<{
     base: string;
 }>;
 
-const withDeadline = async <Value>(
-    controller: AbortController,
-    operation: () => Promise<Value>,
-): Promise<Value> => {
-    const timer = setTimeout(() => controller.abort(), networkMilliseconds);
-    try {
-        return await operation();
-    } finally {
-        clearTimeout(timer);
-    }
+// Runs one request's waits on the relay: none outlasts a minute, and
+// together they never outlast the foreground visit limit. The consumer's own
+// work between them is not counted.
+const relayWaits = (controller: AbortController) => {
+    let waited = 0;
+    return async <Value>(operation: () => Promise<Value>): Promise<Value> => {
+        const started = performance.now();
+        const timer = setTimeout(
+            () => controller.abort(),
+            Math.min(networkMilliseconds, foregroundVisitMilliseconds - waited),
+        );
+        try {
+            return await operation();
+        } finally {
+            clearTimeout(timer);
+            waited += performance.now() - started;
+        }
+    };
 };
 
 // Streams one resource in chunks of at most one mebibyte and returns its
@@ -57,9 +67,10 @@ export const streamBounded = async (
     if (!Number.isSafeInteger(maximum) || maximum < 0)
         throw new PublicInputFailure('A public record has an invalid bound.');
     const controller = new AbortController();
+    const wait = relayWaits(controller);
     let response: Response;
     try {
-        response = await withDeadline(controller, () =>
+        response = await wait(() =>
             fetch(url, {
                 signal: controller.signal,
                 cache: 'no-store',
@@ -84,7 +95,7 @@ export const streamBounded = async (
         for (;;) {
             let next: ReadableStreamReadResult<Uint8Array>;
             try {
-                next = await withDeadline(controller, () => reader.read());
+                next = await wait(() => reader.read());
             } catch (error) {
                 throw new PublicInputFailure(
                     'A public record was interrupted: ' + describe(error),
@@ -540,7 +551,7 @@ const postPublic = async (url: string, bytes: Uint8Array) => {
     const controller = new AbortController();
     let response: Response;
     try {
-        response = await withDeadline(controller, () =>
+        response = await relayWaits(controller)(() =>
             fetch(url, {
                 method: 'POST',
                 body: new Blob([new Uint8Array(bytes)]),
