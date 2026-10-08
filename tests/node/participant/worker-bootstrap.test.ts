@@ -128,7 +128,7 @@ describe.each(['status', 'verify-outcome'] as const)(
             const result = await runWorker(operation, moduleBytes);
             expect(result).toMatchObject({
                 status: 'pending',
-                reason: stopped,
+                detail: stopped,
             });
             expect(calls).toEqual(['digest', 'digest', 'compile', 'helpers']);
             expect(hashing).toHaveBeenCalledTimes(2);
@@ -166,7 +166,7 @@ describe.each(['status', 'verify-outcome'] as const)(
             ).toMatchObject({
                 status: 'pending',
                 cause: 'public input',
-                reason: 'The participant module changed.',
+                detail: 'The participant module changed.',
             });
             expect(hashing).toHaveBeenCalledOnce();
             expect(compiling).not.toHaveBeenCalled();
@@ -182,7 +182,7 @@ describe.each(['status', 'verify-outcome'] as const)(
             ).toMatchObject({
                 status: 'pending',
                 cause: 'public input',
-                reason: 'A public record exceeds its bound.',
+                detail: 'A public record exceeds its bound.',
             });
             expect(hashing).not.toHaveBeenCalled();
             expect(compiling).not.toHaveBeenCalled();
@@ -199,7 +199,7 @@ describe.each(['status', 'verify-outcome'] as const)(
                 }),
             ).toMatchObject({
                 status: 'pending',
-                reason: 'Malformed hexadecimal bytes.',
+                detail: 'Malformed hexadecimal bytes.',
             });
             expect(compiling).not.toHaveBeenCalled();
             expect(downstream.helpers).not.toHaveBeenCalled();

@@ -215,7 +215,7 @@ describe('participant API', () => {
                         await participant.run({ operation: 'status' }),
                     ).toEqual({
                         status: 'stopped',
-                        reason: 'Missing or inconsistent participant authority.',
+                        detail: 'Missing or inconsistent participant authority.',
                         stopPersistence: 'confirmed',
                     });
                 expect((await storeCounts(name)).stopped).toBe(1);

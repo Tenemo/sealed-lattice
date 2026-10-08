@@ -762,14 +762,14 @@ const generatedOfferIdentity = async (directory: string, position: number) => {
 };
 
 // The record families a relay view replaces with another poll's, each with
-// the refusal of the first of them a result visit reads. A result visit
+// the details of the first of them a result visit reads. A result visit
 // restores the verified setup and the evaluated target, so it reads no
 // contribution or close record.
 const foreignFamilies = [
     {
         family: 'registrations',
         pattern: /^registration\//u,
-        reason: (
+        details: (
             recordIds: readonly string[],
             foreignRecordIds: readonly string[],
         ) =>
@@ -784,22 +784,22 @@ const foreignFamilies = [
     {
         family: 'contributions',
         pattern: /^contribution-\d+\//u,
-        reason: undefined,
+        details: undefined,
     },
     {
         family: 'close records',
         pattern: /^close\//u,
-        reason: undefined,
+        details: undefined,
     },
     {
         family: 'target votes',
         pattern: /^completion\/target-vote-\d+\.bin$/u,
-        reason: () => ['The target votes are incomplete.'],
+        details: () => ['The target votes are incomplete.'],
     },
     {
         family: 'release shares',
         pattern: /^completion\/release-(?:envelope-)?\d+\.bin$/u,
-        reason: () => ['The release shares are incomplete.'],
+        details: () => ['The release shares are incomplete.'],
     },
 ] as const;
 
@@ -907,7 +907,7 @@ await runWithLocalRunLog(
             pages: number;
             before: number;
             generation: number;
-            reason: string;
+            detail: string;
         }>[] = [];
         let relay: Relay | undefined;
         let sampling = true;
@@ -1851,7 +1851,7 @@ await runWithLocalRunLog(
                     assert.ok(
                         result.status === 'pending' &&
                             result.cause === 'resource' &&
-                            result.reason.includes(
+                            result.detail.includes(
                                 'exhausted its memory bound',
                             ),
                         `${operation} at position ${String(position)} under memory pressure: ${JSON.stringify(result)}`,
@@ -1862,7 +1862,7 @@ await runWithLocalRunLog(
                         pages: pressurePages,
                         before,
                         generation: await headGeneration(position),
-                        reason: result.reason,
+                        detail: result.detail,
                     };
                     memoryPressures.push(details);
                     log.writeEvent({
@@ -1978,7 +1978,7 @@ await runWithLocalRunLog(
                         assert.deepEqual(refused, {
                             status: 'stopped',
                             stopPersistence: 'confirmed',
-                            reason:
+                            detail:
                                 mutation === 'missing'
                                     ? 'Participant data inventory changed.'
                                     : 'A participant data record changed.',
@@ -1998,7 +1998,7 @@ await runWithLocalRunLog(
                         assert.deepEqual(stopped, {
                             status: 'stopped',
                             stopPersistence: 'confirmed',
-                            reason: 'Missing or inconsistent participant authority.',
+                            detail: 'Missing or inconsistent participant authority.',
                         });
                         const replacement = await request(
                             position,
@@ -2056,7 +2056,7 @@ await runWithLocalRunLog(
                 record: unknown;
                 operation: string;
                 generation: number;
-                reason: string;
+                detail: string;
             }[] = [];
             const loseState = async (
                 position: number,
@@ -2105,7 +2105,7 @@ await runWithLocalRunLog(
                         await request(position, 'status', {}, copy),
                         {
                             status: 'stopped',
-                            reason: 'Missing or inconsistent participant authority.',
+                            detail: 'Missing or inconsistent participant authority.',
                             stopPersistence: 'confirmed',
                         },
                     );
@@ -2121,7 +2121,7 @@ await runWithLocalRunLog(
                         record,
                         operation,
                         generation,
-                        reason: result.reason,
+                        detail: result.detail,
                         ...(noPublications ? { publicationAttempts: 0 } : {}),
                     };
                     stateLosses.push(loss);
@@ -2885,7 +2885,7 @@ await runWithLocalRunLog(
                     assert.deepEqual(pending, {
                         status: 'pending',
                         cause: 'public input',
-                        reason: 'Too few complete eligible contribution offers are available.',
+                        detail: 'Too few complete eligible contribution offers are available.',
                     });
                     assert.deepEqual(
                         await retainedHead(0),
@@ -3137,7 +3137,7 @@ await runWithLocalRunLog(
                         await browsers.crash(copyBrowser(copy));
                         assert.deepEqual(await request(1, 'status', {}, copy), {
                             status: 'stopped',
-                            reason: 'Missing or inconsistent participant authority.',
+                            detail: 'Missing or inconsistent participant authority.',
                             stopPersistence: 'confirmed',
                         });
                         assert.equal(relay.publicationAttempts[1], attempts);
@@ -3444,7 +3444,7 @@ await runWithLocalRunLog(
             const probe = async (
                 position: number,
                 forgeries: ReadonlyMap<string, ViewedRecord>,
-                reason: string | readonly string[],
+                detail: string | readonly string[],
             ) => {
                 deliveredRecords[position].clear();
                 candidateReads[position].clear();
@@ -3453,13 +3453,13 @@ await runWithLocalRunLog(
                 try {
                     const result = await request(position, 'result');
                     assert.ok(result.status === 'pending');
-                    const reasons =
-                        typeof reason === 'string' ? [reason] : reason;
-                    assert.ok(reasons.includes(result.reason), result.reason);
+                    const details =
+                        typeof detail === 'string' ? [detail] : detail;
+                    assert.ok(details.includes(result.detail), result.detail);
                     assert.deepEqual(result, {
                         status: 'pending',
                         cause: 'public input',
-                        reason: result.reason,
+                        detail: result.detail,
                     });
                     if (
                         [...forgeries.values()].some(
@@ -3472,7 +3472,7 @@ await runWithLocalRunLog(
                             ),
                             'The refused operation did not read its forged inputs.',
                         );
-                    return result.reason;
+                    return result.detail;
                 } finally {
                     views[position].clear();
                 }
@@ -4088,7 +4088,7 @@ await runWithLocalRunLog(
                     family: string;
                     served: number;
                     hidden: number;
-                    reason?: string;
+                    detail?: string;
                 }[] = [];
                 for (const [member, records, recordIds, other, identifiers] of [
                     [
@@ -4114,7 +4114,11 @@ await runWithLocalRunLog(
                         secondIdentifiers,
                     ],
                 ] as const) {
-                    for (const { family, pattern, reason } of foreignFamilies) {
+                    for (const {
+                        family,
+                        pattern,
+                        details,
+                    } of foreignFamilies) {
                         const { view, served } = await foreignRecordView(
                             other,
                             records,
@@ -4125,25 +4129,25 @@ await runWithLocalRunLog(
                             served > 0,
                             `The other roster has no ${family}.`,
                         );
-                        let refusal: string | undefined;
-                        if (reason === undefined)
+                        let detail: string | undefined;
+                        if (details === undefined)
                             assert.deepEqual(
                                 (await probeUnread(member.origin, view))
                                     .identifiers,
                                 identifiers,
                             );
                         else
-                            refusal = await probe(
+                            detail = await probe(
                                 member.origin,
                                 view,
-                                reason(recordIds, other.recordIds),
+                                details(recordIds, other.recordIds),
                             );
                         crossRosterProbes.push({
                             origin: member.origin,
                             family,
                             served,
                             hidden: view.size - served,
-                            reason: refusal,
+                            detail,
                         });
                     }
                     assert.deepEqual(
@@ -4154,7 +4158,7 @@ await runWithLocalRunLog(
                 // Both rosters retain signed-envelope-before-body ordering.
                 const rostersScope = [
                     "A corrupt organizer's private state is copied after its registration, and the copy proposes a second roster of the same poll to other registrants under its own path of the organizer's origin, where the relay serves that roster's records. Both rosters, whose only corrupt member is the organizer, complete roster agreement, setup contribution and verification, signed ballots, close responses, target votes, release shares and the combined result in parallel in the maintained participant runtime in external Chrome.",
-                    `Relay views that serve one roster's ${prose(foreignFamilies.filter(({ reason }) => reason !== undefined).map(({ family }) => family))} under the other roster's names leave a member of each roster pending, and with the relay's own records it reaches its roster's outcome; its ${prose(foreignFamilies.filter(({ reason }) => reason === undefined).map(({ family }) => family))}, which a result visit that restores the verified setup and the evaluated target does not read, leave that member its roster's outcome.`,
+                    `Relay views that serve one roster's ${prose(foreignFamilies.filter(({ details }) => details !== undefined).map(({ family }) => family))} under the other roster's names leave a member of each roster pending, and with the relay's own records it reaches its roster's outcome; its ${prose(foreignFamilies.filter(({ details }) => details === undefined).map(({ family }) => family))}, which a result visit that restores the verified setup and the evaluated target does not read, leave that member its roster's outcome.`,
                 ].join(' ');
                 await writeFile(
                     path.join(log.runDirectoryPath, 'result.json'),
@@ -4256,7 +4260,7 @@ await runWithLocalRunLog(
                 {
                     status: 'pending',
                     cause: 'public input',
-                    reason: 'The proposal omits this participant.',
+                    detail: 'The proposal omits this participant.',
                 },
             );
             const leftOutStatus = await run(leftOut, 'status');
@@ -4428,7 +4432,7 @@ await runWithLocalRunLog(
                         assert.deepEqual(rejected, {
                             status: 'stopped',
                             stopPersistence: 'confirmed',
-                            reason:
+                            detail:
                                 kind === 'nonzero'
                                     ? 'The private proof padding is nonzero.'
                                     : 'The contribution records changed.',
@@ -4777,7 +4781,7 @@ await runWithLocalRunLog(
                     assert.deepEqual(pending, {
                         status: 'pending',
                         cause: 'public input',
-                        reason:
+                        detail:
                             changed === undefined
                                 ? 'A public record is unavailable.'
                                 : 'Published manifest readback differs.',
@@ -6216,7 +6220,7 @@ await runWithLocalRunLog(
             const ballotForgeries: {
                 forgery: string;
                 forgeries: ReadonlyMap<string, ViewedRecord>;
-                reason: string;
+                detail: string;
             }[] = [];
             const forgedAuthor = countedBallots.find(
                 (position) => position !== voteProbe,
@@ -6268,7 +6272,7 @@ await runWithLocalRunLog(
                             [ballotName('body.bin'), alteredBody],
                             [forwardedBody, alteredBody],
                         ]),
-                        reason: 'No valid complete candidate is available: close-proposal',
+                        detail: 'No valid complete candidate is available: close-proposal',
                     },
                     {
                         forgery: 'withheld body',
@@ -6276,14 +6280,14 @@ await runWithLocalRunLog(
                             [ballotName('body.bin'), undefined],
                             [forwardedBody, undefined],
                         ]),
-                        reason: 'No valid complete candidate is available: close-proposal',
+                        detail: 'No valid complete candidate is available: close-proposal',
                     },
                     {
                         forgery: 'replaced submission',
                         forgeries: new Map<string, ViewedRecord>([
                             [forwardedSubmission, replacingSubmission],
                         ]),
-                        reason: 'No valid complete candidate is available: close-proposal',
+                        detail: 'No valid complete candidate is available: close-proposal',
                     },
                     {
                         forgery: 'altered signature',
@@ -6296,7 +6300,7 @@ await runWithLocalRunLog(
                                 ]),
                             ],
                         ]),
-                        reason: 'No valid complete candidate is available: close-proposal',
+                        detail: 'No valid complete candidate is available: close-proposal',
                     },
                 );
             }
@@ -6308,7 +6312,7 @@ await runWithLocalRunLog(
                 family: string;
                 served: number;
                 hidden: number;
-                reason?: string;
+                detail?: string;
             }[] = [];
             const unreadOutcomes: {
                 family: string;
@@ -6318,7 +6322,7 @@ await runWithLocalRunLog(
             const probeForeignPoll = async (position: number) => {
                 if (foreign === undefined) return;
                 assert.notEqual(foreign.poll, organizer.poll);
-                for (const { family, pattern, reason } of foreignFamilies) {
+                for (const { family, pattern, details } of foreignFamilies) {
                     // Only an encrypted target's result reads release shares,
                     // and only a result run of the other poll released any.
                     if (family === 'release shares' && noResult) continue;
@@ -6330,24 +6334,24 @@ await runWithLocalRunLog(
                     );
                     if (family === 'release shares' && served === 0) continue;
                     assert.ok(served > 0, `The foreign poll has no ${family}.`);
-                    let refusal: string | undefined;
-                    if (reason === undefined) {
+                    let detail: string | undefined;
+                    if (details === undefined) {
                         const { encrypted, identifiers } = await probeUnread(
                             position,
                             view,
                         );
                         unreadOutcomes.push({ family, encrypted, identifiers });
                     } else
-                        refusal = await probe(
+                        detail = await probe(
                             position,
                             view,
-                            reason(recordIds, foreign.recordIds),
+                            details(recordIds, foreign.recordIds),
                         );
                     foreignProbes.push({
                         family,
                         served,
                         hidden: view.size - served,
-                        reason: refusal,
+                        detail,
                     });
                 }
             };
@@ -6369,8 +6373,8 @@ await runWithLocalRunLog(
                                     candidateReads[position].has(id),
                                     'The verifier did not encounter the replayed target candidate.',
                                 );
-                            for (const { forgeries, reason } of ballotForgeries)
-                                await probe(position, forgeries, reason);
+                            for (const { forgeries, detail } of ballotForgeries)
+                                await probe(position, forgeries, detail);
                             await probe(
                                 position,
                                 registrationForgeries,
@@ -6485,13 +6489,13 @@ await runWithLocalRunLog(
             const alteredRecord = await flipDataRecord();
             assert.deepEqual(await request(stoppedPosition, 'status'), {
                 status: 'stopped',
-                reason: 'A participant data record changed.',
+                detail: 'A participant data record changed.',
                 stopPersistence: 'confirmed',
             });
             assert.deepEqual(await flipDataRecord(), alteredRecord);
             assert.deepEqual(await request(stoppedPosition, 'status'), {
                 status: 'stopped',
-                reason: 'Missing or inconsistent participant authority.',
+                detail: 'Missing or inconsistent participant authority.',
                 stopPersistence: 'confirmed',
             });
             // The stopped participant, and the registrant left out of the
@@ -6568,7 +6572,7 @@ await runWithLocalRunLog(
                 ...(foreign === undefined
                     ? []
                     : [
-                          `Relay views that serve another poll's ${prose(foreignProbes.filter(({ reason }) => reason !== undefined).map(({ family }) => family))} under this poll's names leave a participant pending, and its ${prose(unreadOutcomes.map(({ family }) => family))}, which a result visit that restores the verified setup and the evaluated target does not read, leave that visit the same outcome.`,
+                          `Relay views that serve another poll's ${prose(foreignProbes.filter(({ detail }) => detail !== undefined).map(({ family }) => family))} under this poll's names leave a participant pending, and its ${prose(unreadOutcomes.map(({ family }) => family))}, which a result visit that restores the verified setup and the evaluated target does not read, leave that visit the same outcome.`,
                       ]),
                 "Once its altered retained state stops a participant, that participant and the registrant left out of the roster each verify the same outcome with the standalone verifier from the poll's identity and the relay's public records alone.",
             ].join(' ');
@@ -6631,11 +6635,11 @@ await runWithLocalRunLog(
                                               ({
                                                   forgery,
                                                   forgeries,
-                                                  reason,
+                                                  detail,
                                               }) => ({
                                                   forgery,
                                                   paths: [...forgeries.keys()],
-                                                  reason,
+                                                  detail,
                                               }),
                                           ),
                                       },

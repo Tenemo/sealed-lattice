@@ -148,13 +148,13 @@ export type ParticipantSummary = Readonly<{
 /**
  * A refused request changed nothing, and its reason says why; a pending one
  * waits for public input, storage or a device resource such as memory, or
- * follows a module or worker failure, as its cause names and its reason
+ * follows a module or worker failure, as its cause names and its detail
  * describes, and a later operation continues from the participant's last
- * committed state; a stopped participant never acts again. Enrollment that
- * ends after its intent is retained but before its secrets are retained
- * stops, since that intent cannot resume private generation. A participant
- * that another runtime created is refused, naming that runtime, so the
- * application can open it with the SDK of that runtime.
+ * committed state; a stopped participant never acts again, as its detail
+ * describes. Enrollment that ends after its intent is retained but before
+ * its secrets are retained stops, since that intent cannot resume private
+ * generation. A participant that another runtime created is refused, naming
+ * that runtime, so the application can open it with the SDK of that runtime.
  */
 export type ParticipantResult = Readonly<
     | {
@@ -166,10 +166,10 @@ export type ParticipantResult = Readonly<
           reason: Exclude<ParticipantRefusalReason, 'another runtime'>;
       }
     | { status: 'refused'; reason: 'another runtime'; runtime: string }
-    | { status: 'pending'; cause: ParticipantPendingCause; reason: string }
+    | { status: 'pending'; cause: ParticipantPendingCause; detail: string }
     | {
           status: 'stopped';
-          reason: string;
+          detail: string;
           stopPersistence: 'confirmed' | 'unconfirmed';
       }
 >;
@@ -196,7 +196,7 @@ export type OutcomeVerificationOptions = Readonly<{
  * certified no-result target. A refused request changed nothing, and its
  * reason says why; a pending one waits for public records that verify, or
  * ended on a device resource or a module or worker failure, as its cause
- * names and its reason describes.
+ * names and its detail describes.
  */
 export type OutcomeVerification = Readonly<
     | {
@@ -215,7 +215,7 @@ export type OutcomeVerification = Readonly<
               'unsupported browser' | 'invalid request'
           >;
       }
-    | { status: 'pending'; cause: ParticipantPendingCause; reason: string }
+    | { status: 'pending'; cause: ParticipantPendingCause; detail: string }
 >;
 
 // Starts the helpers this context affords from the worker source and waits
@@ -292,7 +292,7 @@ const runWorkerOnce = async (
             finish({
                 status: 'pending',
                 cause: 'worker',
-                reason: event.message || 'The participant worker failed.',
+                detail: event.message || 'The participant worker failed.',
             });
         };
         // The worker would wait for a failed helper's jobs, so the operation
@@ -302,7 +302,7 @@ const runWorkerOnce = async (
                 finish({
                     status: 'pending',
                     cause: 'worker',
-                    reason: event.message || 'A participant helper failed.',
+                    detail: event.message || 'A participant helper failed.',
                 });
             };
         worker.postMessage(command, helpers.ports);
@@ -335,7 +335,7 @@ const runWorker = async (
             return {
                 status: 'pending',
                 cause: 'worker',
-                reason: 'The participant worker evaluated again.',
+                detail: 'The participant worker evaluated again.',
             } as const;
         return (
             result.status === 'completed'

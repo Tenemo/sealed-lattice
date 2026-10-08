@@ -82,8 +82,8 @@ The participant module checks the question and option labels and refuses an inva
 | --- | --- | --- |
 | `completed` | `details` | The operation finished; `details` reports the participant's retained progress. |
 | `refused` | `reason`, and `runtime` for `another runtime` | Nothing changed. |
-| `pending` | `cause`, `reason` | The operation could not finish yet; `reason` describes why. A later operation continues from the participant's last committed state. |
-| `stopped` | `reason`, `stopPersistence` | Missing or inconsistent local state ended the participant for good. `stopPersistence` is `confirmed` when the browser durably recorded the stop and `unconfirmed` otherwise. |
+| `pending` | `cause`, `detail` | The operation could not finish yet; `detail` describes why. A later operation continues from the participant's last committed state. |
+| `stopped` | `detail`, `stopPersistence` | Missing or inconsistent local state ended the participant for good; `detail` describes it. `stopPersistence` is `confirmed` when the browser durably recorded the stop and `unconfirmed` otherwise. |
 
 A refusal's `reason` is one of:
 
@@ -113,7 +113,7 @@ Completed operations report the verified poll's `question`, ordered `options` wi
 
 ### Outcome verification
 
-`verifyOutcome({ poll, relay })` verifies a poll's outcome from the relay without participant state, so a participant whose state stopped, or any page that holds the poll's identity and the relay's URL, can check the result. A fresh worker that holds no credential or randomness reads the published records and runs every owning verifier from the signed poll definition and roster through the setup, the close records and the certified target to its release shares; its public working storage, the IndexedDB databases `sealed-lattice-setup/verification.<poll>` and `sealed-lattice-public-evaluation/verification.<poll>`, is deleted when it ends. It returns `completed` with whether the certified target carries an `encrypted` result and the result's ordered option `identifiers`, none for a certified no-result target; `refused` for an `unsupported browser` or an `invalid request`; or `pending` with a `cause` and a described `reason` when the published records do not verify yet or the device, the module or the worker failed.
+`verifyOutcome({ poll, relay })` verifies a poll's outcome from the relay without participant state, so a participant whose state stopped, or any page that holds the poll's identity and the relay's URL, can check the result. A fresh worker that holds no credential or randomness reads the published records and runs every owning verifier from the signed poll definition and roster through the setup, the close records and the certified target to its release shares; its public working storage, the IndexedDB databases `sealed-lattice-setup/verification.<poll>` and `sealed-lattice-public-evaluation/verification.<poll>`, is deleted when it ends. It returns `completed` with whether the certified target carries an `encrypted` result and the result's ordered option `identifiers`, none for a certified no-result target; `refused` for an `unsupported browser` or an `invalid request`; or `pending` with a `cause` and a `detail` when the published records do not verify yet or the device, the module or the worker failed.
 
 ### Relay
 

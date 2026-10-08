@@ -139,10 +139,10 @@ export type WorkerResult = Readonly<
           reason: Exclude<ParticipantRefusalReason, 'another runtime'>;
       }
     | { status: 'refused'; reason: 'another runtime'; runtime: string }
-    | { status: 'pending'; cause: ParticipantPendingCause; reason: string }
+    | { status: 'pending'; cause: ParticipantPendingCause; detail: string }
     | {
           status: 'stopped';
-          reason: string;
+          detail: string;
           stopPersistence: 'confirmed' | 'unconfirmed';
       }
     | { status: 'evaluated'; memory: OperationMemory }
@@ -869,7 +869,7 @@ const run = async (
                     const stopPersistence = await stopParticipant(opened);
                     return {
                         status: 'stopped',
-                        reason:
+                        detail:
                             error instanceof Error
                                 ? error.message
                                 : String(error),
@@ -888,7 +888,7 @@ const run = async (
         return {
             status: 'pending',
             cause: pendingCause(error),
-            reason: error instanceof Error ? error.message : String(error),
+            detail: error instanceof Error ? error.message : String(error),
         };
     } finally {
         helpers?.stop();
@@ -989,7 +989,7 @@ const runVerification = async (
         return {
             status: 'pending',
             cause: pendingCause(error),
-            reason: error instanceof Error ? error.message : String(error),
+            detail: error instanceof Error ? error.message : String(error),
         };
     } finally {
         helpers?.stop();
@@ -1018,7 +1018,7 @@ self.onmessage = (
             self.postMessage({
                 status: 'pending',
                 cause: pendingCause(error),
-                reason: error instanceof Error ? error.message : String(error),
+                detail: error instanceof Error ? error.message : String(error),
             }),
     );
 };
