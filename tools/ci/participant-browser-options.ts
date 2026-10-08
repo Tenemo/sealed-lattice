@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { parseArgs } from 'node:util';
 
 import { deriveSupportedProfile } from '#tests/supported-profile-model.js';
 
@@ -106,6 +107,67 @@ export const scheduleParticipantDepartures = (
     return { departures, selectedPositions };
 };
 
+// The runner's options: each switch, and each option with its value, and
+// what it selects.
+const browserOptions = {
+    profile: {
+        usage: "Record every operation's CPU samples and summarize them beside the run.",
+    },
+    'memory-pressure': {
+        usage: 'In a plain run, the second contributor first contributes with each WebAssembly memory capped below its need.',
+    },
+    sequential: {
+        usage: "In a plain run, run one participant's browser at a time and report the ordinary workflow's visit bounds.",
+    },
+    scalar: {
+        usage: 'Serve the origins without cross-origin isolation, so every operation uses one scalar worker.',
+    },
+    'setup-departure': {
+        usage: 'The fixed early-departure case: four participants, or seven for two departures, and two options.',
+    },
+    'unselected-checkpoint': {
+        usage: 'The fixed case that activates setup while an eligible contribution stays at its checkpoint.',
+    },
+    'publication-faults': {
+        usage: 'In a plain run, put empty, corrupted and refused publications before the genuine ones.',
+    },
+    'selection-fork': {
+        usage: 'The fixed case in which the corrupt organizer signs competing selections.',
+    },
+    recovery: {
+        usage: "In a plain run, crash the organizer's browser at four durable cuts and record each recovery.",
+    },
+    departures: {
+        usage: "In a concurrent plain run, lose the profile's tolerated members for good, from the roster to the target vote.",
+    },
+    'foreign-poll': {
+        value: '<run directory>',
+        usage: "Serve one participant another passed cohort's records of this profile as this poll's.",
+    },
+    'base-port': {
+        value: '<port>',
+        usage: 'Start the origins at this port instead of 43600.',
+    },
+    'top-count': {
+        value: '<count>',
+        usage: 'Request this many ranked options, from one through the option count.',
+    },
+} as const satisfies Record<
+    string,
+    Readonly<{ value?: string; usage: string }>
+>;
+
+export const participantBrowserUsage = [
+    'Usage: pnpm run research:participant -- [<participants> <options>] [no-result | empty | rosters | plain | preparation] [option...]',
+    '',
+    'Without counts, a run has three participants and two options, or four participants for a fixed setup case. Without a mode, it closes with a result.',
+    '',
+    ...Object.entries(browserOptions).map(
+        ([name, option]) =>
+            `  --${name}${'value' in option ? '=' + option.value : ''}\n      ${option.usage}`,
+    ),
+].join('\n');
+
 // These select a development cohort, not supported-phone qualification.
 export const selectParticipantBrowserOptions = (
     commandLineArguments: readonly string[],
@@ -113,51 +175,38 @@ export const selectParticipantBrowserOptions = (
     const argumentsList = commandLineArguments.filter(
         (value) => value !== '--',
     );
-    const counts: string[] = [];
+    const parsed = parseArgs({
+        args: argumentsList,
+        options: Object.fromEntries(
+            Object.entries(browserOptions).map(([name, option]) => [
+                name,
+                { type: 'value' in option ? 'string' : 'boolean' },
+            ]),
+        ),
+        allowPositionals: true,
+        strict: true,
+        tokens: true,
+    });
+    const selected = new Set<string>();
+    for (const token of parsed.tokens)
+        if (token.kind === 'option') {
+            assert.ok(
+                !selected.has(token.name),
+                'A browser option was selected more than once: --' + token.name,
+            );
+            selected.add(token.name);
+        }
+    const counts = [...parsed.positionals];
     const switches = new Set<string>();
     const values = new Map<string, string>();
-    const flags = new Set([
-        '--profile',
-        '--memory-pressure',
-        '--sequential',
-        '--scalar',
-        '--setup-departure',
-        '--unselected-checkpoint',
-        '--publication-faults',
-        '--selection-fork',
-        '--recovery',
-        '--departures',
-    ]);
-    const valuedOptions = new Set([
-        '--foreign-poll',
-        '--base-port',
-        '--top-count',
-    ]);
-    for (const argument of argumentsList) {
-        if (!argument.startsWith('--')) {
-            counts.push(argument);
-            continue;
-        }
-        const separator = argument.indexOf('=');
-        const name = separator === -1 ? argument : argument.slice(0, separator);
-        assert.ok(
-            !switches.has(name) && !values.has(name),
-            'A browser option was selected more than once: ' + name,
-        );
-        if (flags.has(name) && separator === -1) switches.add(name);
-        else {
-            assert.ok(
-                valuedOptions.has(name) && separator !== -1,
-                'Unknown browser option or missing value: ' + argument,
-            );
-            const value = argument.slice(separator + 1);
+    for (const [name, value] of Object.entries(parsed.values))
+        if (typeof value === 'string') {
             assert.ok(
                 value.trim(),
-                'A browser option has an empty value: ' + name,
+                'A browser option has an empty value: --' + name,
             );
-            values.set(name, value);
-        }
-    }
+            values.set('--' + name, value);
+        } else if (value === true) switches.add('--' + name);
     const mode =
         (
             ['no-result', 'empty', 'rosters', 'plain', 'preparation'] as const

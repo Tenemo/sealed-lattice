@@ -54,6 +54,7 @@ import {
 } from '#tools/ci/local-run-log.js';
 import {
     scheduleParticipantDepartures,
+    participantBrowserUsage,
     selectParticipantBrowserOptions,
 } from '#tools/ci/participant-browser-options.js';
 import type { ParticipantDepartureBoundary } from '#tools/ci/participant-browser-options.js';
@@ -145,6 +146,10 @@ import { redactDiagnosticText } from '#tools/ci/run-log-diagnostics.js';
 // --departures has a plain run lose the profile's f tolerated members for
 // good, spread from the roster's publication to the target vote, so the
 // remaining n - f complete every later quorum and the result alone.
+if (process.argv.includes('--help')) {
+    console.log(participantBrowserUsage);
+    process.exit(0);
+}
 const {
     participantCount,
     optionCount,

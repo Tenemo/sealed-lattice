@@ -218,6 +218,10 @@ describe('participant browser cohort selection', () => {
                 expect(options.mode).toBe(mode);
                 expect(options.scalar).toBe(true);
             }
+        // A value may also follow its option as the next argument.
+        expect(
+            selectParticipantBrowserOptions(['4', '3', '--top-count', '2']),
+        ).toMatchObject({ participantCount: 4, optionCount: 3, topCount: 2 });
     });
 
     it('refuses malformed, duplicate and out-of-profile selections before browser work', () => {
