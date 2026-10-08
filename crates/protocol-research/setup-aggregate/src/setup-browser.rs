@@ -1,8 +1,8 @@
+use crate::offer_verifier::{ContributionOfferVerifier, VerifiedContributionOffer};
 use crate::{
     CHUNK_BYTES,
     verified::{SetupAggregator, VerifiedSelectionInputs, VerifiedSetupAggregate, build_selection},
 };
-use opened_contribution::{ContributionOfferVerifier, VerifiedContributionOffer};
 use registration_credentials::{
     Credential, SIGNATURE_BYTES,
     contribution_body::BODY_HEADER_BYTES,

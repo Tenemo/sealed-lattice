@@ -10,7 +10,8 @@ crate-type = ["rlib"]
 [dependencies]
 num-bigint = "=0.5.1"
 
-opened-contribution = { path = "../opened-contribution" }
 parallel-work = { path = "../parallel-work" }
 registration-credentials = { path = "../registration-credentials" }
+setup-witness = { path = "../setup-witness" }
 supported-profile = { path = "../supported-profile" }
+word-verifier = { path = "../word-verifier" }

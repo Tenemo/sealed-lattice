@@ -1,5 +1,5 @@
+use crate::offer_verifier::{ContributionOfferVerifier, VerifiedContributionOffer};
 use crate::{CHUNK_BYTES, PolynomialAdder, RetainedSetupInputs};
-use opened_contribution::{ContributionOfferVerifier, VerifiedContributionOffer};
 use parallel_work::PendingDigest;
 use registration_credentials::{
     Credential, RETAINED_TAG_BYTES,

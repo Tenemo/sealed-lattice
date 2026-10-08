@@ -5,7 +5,6 @@ use ballot_proof::{
     submission::{BallotBodyAuthentication, authenticate_envelope},
 };
 use evaluation_target::target::{ClassifiedClosedInventory, Error, PublicInputs, WorkingStore};
-use opened_contribution::ContributionOfferVerifier;
 use registration_credentials::{
     SIGNATURE_BYTES,
     ballot_authentication::ENVELOPE_BYTES,
@@ -24,6 +23,7 @@ use registration_credentials::{
 use rns_arithmetic_probe::ranking::{
     Ciphertext, KEY_RECORD_BYTES, stored_bytes, stored_value_bytes,
 };
+use setup_aggregate::offer_verifier::ContributionOfferVerifier;
 use setup_aggregate::{CHUNK_BYTES, contribution_family, verified::SetupAggregator};
 use std::{
     collections::{BTreeMap, BTreeSet},

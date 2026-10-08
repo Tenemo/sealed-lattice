@@ -1,6 +1,8 @@
 use num_bigint::{BigInt, Sign};
 use supported_profile::{Family, Profile};
 
+#[path = "offer-verifier.rs"]
+pub mod offer_verifier;
 mod retained;
 #[cfg(target_arch = "wasm32")]
 #[path = "setup-browser.rs"]

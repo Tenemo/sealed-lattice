@@ -8,7 +8,6 @@ members = [
     "word-verifier",
     "setup-stream-kernel",
     "setup-aggregate",
-    "opened-contribution",
     "ballot-encryption",
     "ballot-proof",
     "evaluation-target",

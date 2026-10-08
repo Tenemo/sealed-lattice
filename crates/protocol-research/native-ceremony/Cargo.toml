@@ -13,7 +13,6 @@ registration-credentials = { path = "../registration-credentials" }
 setup-witness = { path = "../setup-witness" }
 word-proof = { path = "../word-proof" }
 setup-aggregate = { path = "../setup-aggregate" }
-opened-contribution = { path = "../opened-contribution" }
 ballot-encryption = { path = "../ballot-encryption" }
 ballot-proof = { path = "../ballot-proof" }
 evaluation-target = { path = "../evaluation-target" }

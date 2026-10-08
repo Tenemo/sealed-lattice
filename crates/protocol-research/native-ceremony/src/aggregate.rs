@@ -1,9 +1,9 @@
 use ballot_proof::statement::setup_input;
-use opened_contribution::{ContributionOfferVerifier, VerifiedContributionOffer};
 use registration_credentials::{
     contribution_offer::AuthenticatedContributionOffer, poll::VerifiedPoll,
     setup_selection::AuthenticatedSelectionProposal,
 };
+use setup_aggregate::offer_verifier::{ContributionOfferVerifier, VerifiedContributionOffer};
 use setup_aggregate::{
     CHUNK_BYTES, VerifiedAggregatePolynomial, contribution_family,
     verified::{SetupAggregator, VerifiedSelectionInputs, VerifiedSetupAggregate},
@@ -71,7 +71,7 @@ pub fn verify_source_refusals(
             if offset + count == length {
                 assert!(matches!(
                     result,
-                    Err(opened_contribution::Refusal::Commitment)
+                    Err(setup_aggregate::offer_verifier::Refusal::Commitment)
                 ));
             } else {
                 result.unwrap();

@@ -174,7 +174,6 @@ dependencies = [
  "fips204",
  "linked-release-proof",
  "num-bigint",
- "opened-contribution",
  "parallel-work",
  "registration-credentials",
  "rns-arithmetic-probe",
@@ -276,7 +275,6 @@ dependencies = [
  "getrandom",
  "num-bigint",
  "num-traits",
- "opened-contribution",
  "parallel-work",
  "registration-credentials",
  "registration-enrollment",
@@ -321,16 +319,6 @@ name = "opaque-debug"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c08d65885ee38876c4f86fa503fb49d7b507c2b62552df7c70b2fce627e06381"
-
-[[package]]
-name = "opened-contribution"
-version = "0.0.0"
-dependencies = [
- "parallel-work",
- "registration-credentials",
- "setup-witness",
- "word-verifier",
-]
 
 [[package]]
 name = "parallel-work"
@@ -439,10 +427,11 @@ name = "setup-aggregate"
 version = "0.0.0"
 dependencies = [
  "num-bigint",
- "opened-contribution",
  "parallel-work",
  "registration-credentials",
+ "setup-witness",
  "supported-profile",
+ "word-verifier",
 ]
 
 [[package]]
