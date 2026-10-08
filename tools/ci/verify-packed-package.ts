@@ -18,10 +18,7 @@ import {
     checkParticipantModule,
     participantRuntimeIdentity,
 } from './build-participant-module.js';
-import {
-    runCommandAndCaptureOutput,
-    type CommandInvocation,
-} from './command-runner.js';
+import { runCheckedCommand, type CommandInvocation } from './command-runner.js';
 import { runWithLocalRunLog, type ActiveLocalRunLog } from './local-run-log.js';
 import {
     resolvePackageManagerRunner,
@@ -94,23 +91,10 @@ const parsePackMetadata = (output: string): PackMetadata => {
     };
 };
 
-const runCommand = async (
+const runCommand = (
     runLog: ActiveLocalRunLog,
     invocation: CommandInvocation,
-): Promise<string> => {
-    const result = await runCommandAndCaptureOutput(invocation, { runLog });
-    if (result.exitCode !== 0 || result.terminationSignal !== null) {
-        const output = [result.stdout.trim(), result.stderr.trim()]
-            .filter(Boolean)
-            .join('\n');
-        throw new Error(
-            `${invocation.description} failed${
-                output.length === 0 ? '.' : `:\n${output}`
-            }`,
-        );
-    }
-    return result.stdout;
-};
+): Promise<string> => runCheckedCommand(invocation, { runLog });
 
 const runPackageManager = (
     runLog: ActiveLocalRunLog,

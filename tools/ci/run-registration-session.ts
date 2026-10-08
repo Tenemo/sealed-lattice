@@ -11,6 +11,10 @@ import { acquireProtocolResearchLock } from '#tools/ci/protocol-research-lock.js
 import { registrationSessionTest } from '#tools/ci/protocol-research-registry.js';
 import { runGuardedFixture } from '#tools/ci/run-guarded-fixture.js';
 import {
+    rustToolchain,
+    workspaceCargoEnvironment,
+} from '#tools/ci/rust-toolchain.js';
+import {
     executeFixtureCommand,
     fixtureProcessMemoryLimit,
     readFixtureCompiler,
@@ -50,16 +54,9 @@ export const runRegistrationSession = async () => {
                 root,
             );
             try {
-                const environment: NodeJS.ProcessEnv = {
-                    ...process.env,
-                    CARGO_INCREMENTAL: '0',
-                    RUSTFLAGS: '',
-                    CARGO_ENCODED_RUSTFLAGS: '',
-                    CARGO_TARGET_DIR: path.join(
-                        root,
-                        'crates/protocol-research/target',
-                    ),
-                };
+                const environment = workspaceCargoEnvironment(
+                    path.join(root, 'crates/protocol-research'),
+                );
                 delete environment.SEALED_LATTICE_SIMULATED_HELPERS;
                 const context = { root, log, environment };
                 const compiler = await readFixtureCompiler(context);
@@ -72,7 +69,7 @@ export const runRegistrationSession = async () => {
                     'tools/ci/fixture-sources.ts',
                 ]);
                 const args = [
-                    '+1.95.0',
+                    rustToolchain,
                     'test',
                     '--release',
                     '--offline',

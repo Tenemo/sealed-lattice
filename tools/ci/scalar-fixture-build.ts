@@ -7,21 +7,22 @@ import path from 'node:path';
 import binaryen from 'binaryen';
 
 import { participantLinearMemoryBytes } from '#tools/ci/build-participant-module.js';
-import { runCommandAndCaptureOutput } from '#tools/ci/command-runner.js';
+import { runCheckedCommand } from '#tools/ci/command-runner.js';
 import type { ActiveLocalRunLog } from '#tools/ci/local-run-log.js';
+import { rustCompilerCommit, rustToolchain } from '#tools/ci/rust-toolchain.js';
 
 export type FixtureBuildContext = Readonly<{
     root: string;
     log: ActiveLocalRunLog;
     environment: NodeJS.ProcessEnv;
 }>;
-export const executeFixtureCommand = async (
+export const executeFixtureCommand = (
     context: FixtureBuildContext,
     command: string,
     args: string[],
     name: string,
-) => {
-    const result = await runCommandAndCaptureOutput(
+) =>
+    runCheckedCommand(
         {
             command,
             args,
@@ -39,18 +40,14 @@ export const executeFixtureCommand = async (
             signal: AbortSignal.timeout(600_000),
         },
     );
-    assert.equal(result.exitCode, 0, name);
-    assert.equal(result.terminationSignal, null, name);
-    return result.stdout;
-};
 export const readFixtureCompiler = async (context: FixtureBuildContext) => {
     const compiler = await executeFixtureCommand(
         context,
         'rustc',
-        ['+1.95.0', '-Vv'],
+        [rustToolchain, '-Vv'],
         'compiler',
     );
-    assert.ok(compiler.includes('commit-hash: ' + compilerCommit));
+    assert.ok(compiler.includes('commit-hash: ' + rustCompilerCommit));
     return compiler;
 };
 export const scalarFixtureBuildFlags = (repository: string, cargo: string) => [
@@ -64,7 +61,6 @@ export const scalarFixtureBuildFlags = (repository: string, cargo: string) => [
     'link-arg=--max-memory=' + String(participantLinearMemoryBytes),
 ];
 export const fixtureProcessMemoryLimit = 1_073_741_824;
-const compilerCommit = '59807616e1fa2540724bfbac14d7976d7e4a3860';
 const allowedImports = new Set([
     'helpers',
     'share',
@@ -161,7 +157,7 @@ export const buildScalarFixtureModule = async (
         },
         'cargo',
         [
-            '+1.95.0',
+            rustToolchain,
             'rustc',
             '--offline',
             '--locked',

@@ -29,6 +29,10 @@ import { runWithLocalRunLog } from '#tools/ci/local-run-log.js';
 import { acquireProtocolResearchLock } from '#tools/ci/protocol-research-lock.js';
 import { runGuardedFixture } from '#tools/ci/run-guarded-fixture.js';
 import {
+    rustToolchain,
+    workspaceCargoEnvironment,
+} from '#tools/ci/rust-toolchain.js';
+import {
     buildScalarFixtureModule,
     executeFixtureCommand,
     fixtureProcessMemoryLimit,
@@ -50,6 +54,7 @@ const sourcesForHost = [
     'tools/ci/native-operation-guard.ts',
     'tools/ci/scalar-fixture-build.ts',
     'tools/ci/compiled-inputs.ts',
+    'tools/ci/rust-toolchain.ts',
     'tools/ci/bounded-output-worker.mjs',
     'tools/ci/process-gates.mjs',
     ...boundedBrowserSources,
@@ -125,12 +130,8 @@ export const runFheKeySourceScreen = async (
                     { flag: 'wx' },
                 );
                 const environment: NodeJS.ProcessEnv = {
-                    ...process.env,
-                    RUSTFLAGS: '',
-                    CARGO_ENCODED_RUSTFLAGS: '',
-                    CARGO_INCREMENTAL: '0',
+                    ...workspaceCargoEnvironment(workspace),
                     SOURCE_DATE_EPOCH: '0',
-                    CARGO_TARGET_DIR: path.join(workspace, 'target'),
                 };
                 delete environment.SEALED_LATTICE_SIMULATED_HELPERS;
                 const context = { root, log, environment };
@@ -176,14 +177,21 @@ export const runFheKeySourceScreen = async (
                     await executeFixtureCommand(
                         context,
                         'cargo',
-                        ['+1.95.0', 'fmt', '-p', packageName, '--', '--check'],
+                        [
+                            rustToolchain,
+                            'fmt',
+                            '-p',
+                            packageName,
+                            '--',
+                            '--check',
+                        ],
                         'format',
                     );
                     await executeFixtureCommand(
                         context,
                         'cargo',
                         [
-                            '+1.95.0',
+                            rustToolchain,
                             'clippy',
                             '--offline',
                             '--locked',
@@ -202,7 +210,7 @@ export const runFheKeySourceScreen = async (
                         context,
                         'cargo',
                         [
-                            '+1.95.0',
+                            rustToolchain,
                             'test',
                             '--offline',
                             '--locked',
@@ -219,7 +227,7 @@ export const runFheKeySourceScreen = async (
                         context,
                         'cargo',
                         [
-                            '+1.95.0',
+                            rustToolchain,
                             'build',
                             '--offline',
                             '--locked',

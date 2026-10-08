@@ -35,6 +35,11 @@ import { selectProtocolResearchCase } from '#tools/ci/protocol-research-registry
 import { deriveResearchScenario } from '#tools/ci/protocol-research-scenario.js';
 import { runFheKeySourceScreen } from '#tools/ci/run-fhe-key-source-screen.js';
 import { runRegistrationSession } from '#tools/ci/run-registration-session.js';
+import {
+    rustCompilerCommit,
+    rustToolchain,
+    workspaceCargoEnvironment,
+} from '#tools/ci/rust-toolchain.js';
 
 type NativeResult = {
     kind: string;
@@ -156,11 +161,7 @@ await runWithLocalRunLog(
         try {
             const inherited: NodeJS.ProcessEnv = { ...process.env };
             delete inherited[simulatedHelpersVariable];
-            const environment: NodeJS.ProcessEnv = {
-                ...inherited,
-                RUSTFLAGS: '',
-                CARGO_TARGET_DIR: path.join(workspace, 'target'),
-            };
+            const environment = workspaceCargoEnvironment(workspace, inherited);
             const withSimulatedHelpers = (count: number): NodeJS.ProcessEnv =>
                 count === 0
                     ? environment
@@ -242,13 +243,10 @@ await runWithLocalRunLog(
             };
             const compiler = await execute(
                 'rustc',
-                ['+1.95.0', '-Vv'],
+                [rustToolchain, '-Vv'],
                 'compiler',
             );
-            assert.match(
-                compiler,
-                /commit-hash: 59807616e1fa2540724bfbac14d7976d7e4a3860/u,
-            );
+            assert.ok(compiler.includes('commit-hash: ' + rustCompilerCommit));
             // The research crates implement every supported profile; the
             // native ceremony runs the selected one.
             const profile = deriveSupportedProfile(
@@ -380,13 +378,13 @@ await runWithLocalRunLog(
             // Every workspace member.
             await execute(
                 'cargo',
-                ['+1.95.0', 'fmt', '--all', '--', '--check'],
+                [rustToolchain, 'fmt', '--all', '--', '--check'],
                 'format',
             );
             await execute(
                 'cargo',
                 [
-                    '+1.95.0',
+                    rustToolchain,
                     'clippy',
                     '--offline',
                     '--locked',
@@ -404,7 +402,7 @@ await runWithLocalRunLog(
             await execute(
                 'cargo',
                 [
-                    '+1.95.0',
+                    rustToolchain,
                     'clippy',
                     '--offline',
                     '--locked',
@@ -425,7 +423,7 @@ await runWithLocalRunLog(
             await execute(
                 'cargo',
                 [
-                    '+1.95.0',
+                    rustToolchain,
                     'clippy',
                     '--offline',
                     '--locked',
@@ -448,7 +446,7 @@ await runWithLocalRunLog(
             await execute(
                 'cargo',
                 [
-                    '+1.95.0',
+                    rustToolchain,
                     'check',
                     '--offline',
                     '--locked',
@@ -464,7 +462,7 @@ await runWithLocalRunLog(
             // profile-derived roles, alone and then with every job on a
             // simulated helper.
             const unitTests = [
-                '+1.95.0',
+                rustToolchain,
                 'test',
                 '--offline',
                 '--locked',
@@ -513,7 +511,7 @@ await runWithLocalRunLog(
             await execute(
                 'cargo',
                 [
-                    '+1.95.0',
+                    rustToolchain,
                     'build',
                     '--offline',
                     '--locked',

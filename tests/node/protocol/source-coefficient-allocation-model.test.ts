@@ -428,6 +428,7 @@ describe('source coefficient allocation comparison', () => {
             profile,
             manifest,
             builder,
+            toolchain,
             reduction,
             gaussian,
             arithmetic,
@@ -436,6 +437,7 @@ describe('source coefficient allocation comparison', () => {
             read('crates/protocol-research/supported-profile/src/lib.rs'),
             read('crates/protocol-research/setup-witness/Cargo.toml'),
             read('tools/ci/build-participant-module.ts'),
+            read('tools/ci/rust-toolchain.ts'),
             read('crates/protocol-research/setup-witness/src/reduction.rs'),
             read('crates/protocol-research/setup-witness/src/gaussian.rs'),
             read(
@@ -448,9 +450,10 @@ describe('source coefficient allocation comparison', () => {
         expect(source).toContain('BigUint::new(words)');
         expect(profile).toContain('pub const FHE_LIMB_BITS: usize = 96;');
         expect(manifest).toContain('num-bigint = "=0.5.1"');
-        expect(builder).toContain(
-            "const compilerCommit = '59807616e1fa2540724bfbac14d7976d7e4a3860';",
+        expect(toolchain).toContain(
+            "export const rustCompilerCommit = '59807616e1fa2540724bfbac14d7976d7e4a3860';",
         );
+        expect(builder).toContain('commit-hash: ${rustCompilerCommit}');
         expect(builder).toContain("'wasm32-unknown-unknown'");
         expect(profile).toContain(
             'pub const FHE_SECRET_SUPPORT: usize = 1_024;',

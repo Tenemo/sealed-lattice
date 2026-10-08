@@ -1,4 +1,3 @@
-import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
@@ -7,6 +6,7 @@ import {
     type CommandInvocation,
 } from './command-runner.js';
 import { runWithLocalRunLog, type ActiveLocalRunLog } from './local-run-log.js';
+import { rustToolchain, workspaceCargoEnvironment } from './rust-toolchain.js';
 
 const usage =
     'Usage: run-rust-fast-tests.ts [<test name, module name, or Rust file filter>].';
@@ -21,16 +21,10 @@ export const rustWorkspaceCommand = (
     args: readonly string[],
     logFileSlug: string,
 ): CommandInvocation => ({
-    args: ['+1.95.0', ...args],
+    args: [rustToolchain, ...args],
     command: 'cargo',
     description,
-    env: {
-        ...process.env,
-        CARGO_INCREMENTAL: '0',
-        CARGO_TARGET_DIR: path.join(workspace, 'target'),
-        RUSTFLAGS: '',
-        RUST_BACKTRACE: '1',
-    },
+    env: { ...workspaceCargoEnvironment(workspace), RUST_BACKTRACE: '1' },
     logFileSlug,
     workingDirectoryPath: workspace,
 });

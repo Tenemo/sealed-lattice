@@ -135,48 +135,6 @@ export const createPackageManagerCommand = (
     };
 };
 
-export const runPackageManagerAndCaptureOutput = (
-    runner: PackageManagerRunner,
-    commandArguments: readonly string[],
-    workingDirectoryPath: string,
-    input: { readonly environment?: NodeJS.ProcessEnv } = {},
-): string => {
-    const commandArgumentsWithPrefix = [
-        ...runner.commandArgumentsPrefix,
-        ...commandArguments,
-    ];
-    const result = spawnSync(runner.command, commandArgumentsWithPrefix, {
-        cwd: workingDirectoryPath,
-        encoding: 'utf8',
-        env: input.environment ?? process.env,
-        maxBuffer: 100 * 1024 * 1024,
-        windowsHide: true,
-    });
-    const description = [runner.command, ...commandArgumentsWithPrefix].join(
-        ' ',
-    );
-    if (result.error !== undefined) {
-        throw new Error(
-            `Failed to start ${description}: ${result.error.message}`,
-        );
-    }
-    if (result.signal !== null) {
-        throw new Error(`${description} terminated by ${result.signal}.`);
-    }
-    if (result.status !== 0) {
-        const output = [result.stdout, result.stderr]
-            .map((value) => value?.trim())
-            .filter(Boolean)
-            .join('\n');
-        throw new Error(
-            `${description} exited with ${String(result.status)}.${
-                output.length === 0 ? '' : `\n${output}`
-            }`,
-        );
-    }
-    return result.stdout ?? '';
-};
-
 export const killProcessTree = (
     childProcess: KillableChildProcess,
     input: {
@@ -576,6 +534,29 @@ export const runCommandAndCaptureOutput = async (
         signal: input.signal,
     });
     return { exitCode, stderr, stdout, terminationSignal };
+};
+
+// Runs a command and returns its standard output, refusing every outcome but
+// a zero exit. The refusal carries the captured output unless the command
+// already echoed it.
+export const runCheckedCommand = async (
+    invocation: CommandInvocation,
+    input: Parameters<typeof runCommandAndCaptureOutput>[1] = {},
+): Promise<string> => {
+    const result = await runCommandAndCaptureOutput(invocation, input);
+    if (result.exitCode === 0 && result.terminationSignal === null)
+        return result.stdout;
+    const output =
+        input.echoOutput === true
+            ? ''
+            : [result.stdout.trim(), result.stderr.trim()]
+                  .filter(Boolean)
+                  .join('\n');
+    throw new Error(
+        `${invocation.description} failed${
+            output.length === 0 ? '.' : `:\n${output}`
+        }`,
+    );
 };
 
 export const runCommandsInSeries = async (

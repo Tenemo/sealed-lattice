@@ -12,7 +12,7 @@ import { freemem } from 'node:os';
 import path from 'node:path';
 
 import {
-    runCommandAndCaptureOutput,
+    runCheckedCommand,
     runCommandsInSeries,
 } from '#tools/ci/command-runner.js';
 import {
@@ -23,6 +23,10 @@ import { guardProcessTreeMemory } from '#tools/ci/process-tree-memory.js';
 import { acquireProtocolResearchLock } from '#tools/ci/protocol-research-lock.js';
 import { selectPublicCompletionCase } from '#tools/ci/protocol-research-registry.js';
 import { deriveResearchScenario } from '#tools/ci/protocol-research-scenario.js';
+import {
+    rustToolchain,
+    workspaceCargoEnvironment,
+} from '#tools/ci/rust-toolchain.js';
 
 // A passed research run. The ceremony directory among its artifacts holds
 // the public setup, close and completion records the reader verifies.
@@ -204,17 +208,9 @@ await runWithLocalRunLog(
             // The reader runs the binary at the workspace's own target
             // directory, so an inherited one cannot substitute a stale build.
             const workspace = path.resolve('crates/protocol-research'),
-                environment = {
-                    ...process.env,
-                    CARGO_TARGET_DIR: path.join(workspace, 'target'),
-                    RUSTFLAGS: '',
-                };
-            const execute = async (
-                command: string,
-                args: string[],
-                name: string,
-            ) => {
-                const result = await runCommandAndCaptureOutput(
+                environment = workspaceCargoEnvironment(workspace);
+            const execute = (command: string, args: string[], name: string) =>
+                runCheckedCommand(
                     {
                         command,
                         args,
@@ -229,13 +225,10 @@ await runWithLocalRunLog(
                         signal: AbortSignal.timeout(900000),
                     },
                 );
-                assert.equal(result.exitCode, 0, name);
-                return result;
-            };
             await execute(
                 'cargo',
                 [
-                    '+1.95.0',
+                    rustToolchain,
                     'clippy',
                     '--offline',
                     '--locked',
@@ -251,7 +244,7 @@ await runWithLocalRunLog(
             await execute(
                 'cargo',
                 [
-                    '+1.95.0',
+                    rustToolchain,
                     'build',
                     '--offline',
                     '--locked',

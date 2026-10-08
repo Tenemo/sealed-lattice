@@ -3,11 +3,14 @@ import { readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { runPackageManagerAndCaptureOutput } from './command-runner.js';
-import { resolvePackageManagerRunner } from './package-manager-runner.js';
+import {
+    createPackageManagerCommand,
+    runCheckedCommand,
+} from './command-runner.js';
 
 import { participantRuntimeIdentity } from '#tools/ci/build-participant-module.js';
 import { runWithLocalRunLog } from '#tools/ci/local-run-log.js';
+import type { ActiveLocalRunLog } from '#tools/ci/local-run-log.js';
 
 const repositoryRoot = fileURLToPath(new URL('../../', import.meta.url));
 const generatedArtifactRelativePaths = [
@@ -30,17 +33,6 @@ const collectGeneratedArtifactHashes = async (): Promise<readonly string[]> =>
         ),
     );
 
-const runPackageCommand = (argumentsList: readonly string[]): void => {
-    const output = runPackageManagerAndCaptureOutput(
-        resolvePackageManagerRunner(),
-        argumentsList,
-        repositoryRoot,
-    );
-    if (output.length > 0) {
-        process.stdout.write(output);
-    }
-};
-
 // The participant module build's own target directory. The repeated build
 // starts without it, so cargo recompiles the module instead of reusing the
 // cached one.
@@ -49,11 +41,24 @@ const participantModuleTargetPath = path.resolve(
     'target/participant-module',
 );
 
-export const verifyBuildReproducibility = async (): Promise<void> => {
+const verifyBuildReproducibility = async (
+    log: ActiveLocalRunLog,
+): Promise<void> => {
     const before = await collectGeneratedArtifactHashes();
 
     await rm(participantModuleTargetPath, { recursive: true, force: true });
-    runPackageCommand(['--filter', 'sealed-lattice', 'run', 'build']);
+    await runCheckedCommand(
+        {
+            ...createPackageManagerCommand('Repeated SDK build', [
+                '--filter',
+                'sealed-lattice',
+                'run',
+                'build',
+            ]),
+            workingDirectoryPath: repositoryRoot,
+        },
+        { runLog: log, echoOutput: true },
+    );
 
     const after = await collectGeneratedArtifactHashes();
     const changedRelativePaths = generatedArtifactRelativePaths.filter(
@@ -78,7 +83,7 @@ if (import.meta.main) {
             lanes: ['Exact package reproduction and source identity'],
         },
         async (log) => {
-            await verifyBuildReproducibility();
+            await verifyBuildReproducibility(log);
             const directory = path.join(repositoryRoot, 'packages/sdk/dist');
             const manifest = await readFile(
                 path.join(directory, 'participant-source-manifest.json'),

@@ -13,6 +13,7 @@ import {
     compiledRustSources,
     requireCheckoutBytes,
 } from './compiled-inputs.js';
+import { rustCompilerCommit, rustToolchain } from './rust-toolchain.js';
 
 import { participantRuntimeLabel } from '#packages/sdk/src/participant/worker/identity.js';
 
@@ -21,7 +22,6 @@ const workspace = path.join(repositoryRoot, 'crates', 'protocol-research');
 // The participant module's linear memory never exceeds the absolute bound.
 export const participantLinearMemoryBytes = 671_088_640;
 const rustflagSeparator = '\x1f';
-const compilerCommit = '59807616e1fa2540724bfbac14d7976d7e4a3860';
 
 // The imports the participant module may declare, by module and name.
 const allowedImports = [
@@ -54,6 +54,7 @@ const buildDefinitions = [
     'tools/ci/build-participant-module.ts',
     'tools/ci/build-sdk-package.ts',
     'tools/ci/compiled-inputs.ts',
+    'tools/ci/rust-toolchain.ts',
     'tools/ci/sdk-package-tsdown.config.ts',
     'tsconfig.base.json',
 ];
@@ -146,8 +147,8 @@ export const buildParticipantModule = async (
             'CARGO_ENCODED_RUSTFLAGS must be unset for the participant module build.',
         );
     const { RUSTFLAGS: _ignored, ...inherited } = process.env;
-    const version = run('rustc', ['+1.95.0', '-Vv'], inherited, true);
-    if (!version.includes(`commit-hash: ${compilerCommit}`))
+    const version = run('rustc', [rustToolchain, '-Vv'], inherited, true);
+    if (!version.includes(`commit-hash: ${rustCompilerCommit}`))
         throw new Error('The participant module needs Rust 1.95.0.');
     const compiler = version
         .split(/\r?\n/u)
@@ -176,7 +177,7 @@ export const buildParticipantModule = async (
     run(
         'cargo',
         [
-            '+1.95.0',
+            rustToolchain,
             'build',
             '--offline',
             '--locked',
