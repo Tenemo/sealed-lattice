@@ -22,6 +22,7 @@ import { custodyIdentity, custodyPurpose } from './identity.js';
 import {
     operationSeedBytes,
     readModuleMemory,
+    readParticipantOutput,
     seededRandomness,
     writeBufferInput,
 } from './participant-module.js';
@@ -183,11 +184,7 @@ const releaseCommand = (
         throw new Error(
             'The release work refused operation ' + String(operation) + '.',
         );
-    return readModuleMemory(
-        module,
-        module.contribution_output_pointer(),
-        module.contribution_output_length(),
-    );
+    return readParticipantOutput(module);
 };
 
 // The completion verifier's operations, as its command numbers them.

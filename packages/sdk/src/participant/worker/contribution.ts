@@ -24,6 +24,7 @@ import { custodyIdentity, custodyPurpose } from './identity.js';
 import {
     operationSeedBytes,
     readModuleMemory,
+    readParticipantOutput,
     seededRandomness,
     writeProofInput,
 } from './participant-module.js';
@@ -598,11 +599,7 @@ const signing = (
         ) !== 0
     )
         throw new Error('The contribution signer refused an operation.');
-    return readModuleMemory(
-        context.module,
-        context.module.contribution_output_pointer(),
-        context.module.contribution_output_length(),
-    );
+    return readParticipantOutput(context.module);
 };
 
 // Runs prover commands with the randomness of one generation or

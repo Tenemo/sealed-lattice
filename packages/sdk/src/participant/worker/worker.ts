@@ -48,7 +48,7 @@ import {
 } from './failures.js';
 import { participantRuntimeLabel } from './identity.js';
 import type {
-    ParticipantPendingCause,
+    IncompleteOperation,
     ParticipantRefusalReason,
 } from './operation-status.js';
 import { verifyPublishedOutcome } from './outcome-verifier.js';
@@ -93,7 +93,6 @@ import { readParticipantLimits } from './runtime-bounds.js';
 import { endorseSetup, selectSetup } from './setup-selection.js';
 import { restoreSetup, retainSetup, verifySetup } from './setup.js';
 import { stopParticipant } from './stop.js';
-import type { StopPersistence } from './stop.js';
 import {
     deleteWorkingStorage,
     namespacedName,
@@ -136,21 +135,13 @@ type WorkerCommand = Readonly<{
 // says why, and a participant that another runtime created is refused with
 // that runtime's identity, which its head names. A pending result names what
 // the participant waits for.
-export type WorkerResult = Readonly<
-    | { status: 'completed'; details: Readonly<Record<string, unknown>> }
-    | {
-          status: 'refused';
-          reason: Exclude<ParticipantRefusalReason, 'another runtime'>;
-      }
-    | { status: 'refused'; reason: 'another runtime'; runtime: string }
-    | { status: 'pending'; cause: ParticipantPendingCause; detail: string }
-    | {
-          status: 'stopped';
-          detail: string;
-          stopPersistence: StopPersistence;
-      }
-    | { status: 'evaluated'; memory: OperationMemory }
->;
+export type WorkerResult =
+    | Readonly<{
+          status: 'completed';
+          details: Readonly<Record<string, unknown>>;
+      }>
+    | IncompleteOperation
+    | Readonly<{ status: 'evaluated'; memory: OperationMemory }>;
 
 const maximumModuleBytes = 8_388_608;
 

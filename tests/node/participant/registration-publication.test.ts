@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { hexadecimal } from '#packages/sdk/src/participant/worker/bytes.js';
+import { decodeCandidateManifest } from '#packages/sdk/src/participant/worker/candidate-codec.js';
 import type { ParticipantContext } from '#packages/sdk/src/participant/worker/context.js';
 import type { RestoredEnrollment } from '#packages/sdk/src/participant/worker/enrollment.js';
 import { custodyPurpose } from '#packages/sdk/src/participant/worker/identity.js';
@@ -213,8 +214,20 @@ const fixture = async (
         send,
         corrupt,
         prefix,
+        transport,
     };
 };
+
+// The file names of each manifest the relay recorded under a key.
+const publishedFiles = (
+    transport: ReturnType<typeof participantRelayFixture>,
+    key: string,
+) =>
+    (transport.lists.get(key) ?? []).map((id) =>
+        decodeCandidateManifest(transport.manifests.get(id)!).files.map(
+            ({ name }) => name,
+        ),
+    );
 
 describe('bounded registration publication', () => {
     it('publishes the complete recipient key in bounded records after a complete first pass', async () => {
@@ -264,6 +277,24 @@ describe('bounded registration publication', () => {
                     ? ['proposal.bin', 'proposal-signature.bin']
                     : []),
             ]);
+            expect(
+                publishedFiles(
+                    state.transport,
+                    'registration/' + '03'.repeat(64),
+                ),
+            ).toEqual([
+                [
+                    'polynomial-01.bin',
+                    'registration-header.bin',
+                    'signature.bin',
+                ],
+            ]);
+            expect(publishedFiles(state.transport, 'poll')).toEqual([
+                ['definition.bin', 'signature.bin'],
+            ]);
+            expect(publishedFiles(state.transport, 'roster')).toEqual(
+                generation === 3 ? [['proposal.bin', 'signature.bin']] : [],
+            );
         },
     );
 

@@ -38,7 +38,7 @@ import type { ParticipantSession } from './contribution.js';
 import { openDelivery } from './delivery.js';
 import { PublicInputFailure } from './failures.js';
 import { custodyIdentity, custodyPurpose } from './identity.js';
-import { readModuleMemory } from './participant-module.js';
+import { readParticipantOutput } from './participant-module.js';
 import { openRecord, recordContext, sealRecord } from './private-records.js';
 import type { RecordContext } from './private-records.js';
 import {
@@ -167,11 +167,7 @@ const tryCloseCommand = (
         0
     )
         return undefined;
-    return readModuleMemory(
-        module,
-        module.contribution_output_pointer(),
-        module.contribution_output_length(),
-    );
+    return readParticipantOutput(module);
 };
 
 const closeCommand = (

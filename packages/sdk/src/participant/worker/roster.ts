@@ -17,7 +17,10 @@ import type {
 import { retainRegistration } from './enrollment.js';
 import type { RestoredEnrollment } from './enrollment.js';
 import { InvalidRequest, PublicInputFailure } from './failures.js';
-import { readModuleMemory } from './participant-module.js';
+import {
+    readModuleMemory,
+    readParticipantOutput,
+} from './participant-module.js';
 import type { ParticipantModule } from './participant-module.js';
 import {
     findCandidate,
@@ -228,11 +231,7 @@ export type VerifiedProposal = Readonly<{
 export const verifiedRosterUsernames = (module: ParticipantModule) => {
     if (module.roster_usernames() !== 0)
         throw new Error('The roster verifier holds no proposal.');
-    const bytes = readModuleMemory(
-        module,
-        module.contribution_output_pointer(),
-        module.contribution_output_length(),
-    );
+    const bytes = readParticipantOutput(module);
     const decoder = new TextDecoder('utf-8', { fatal: true });
     const usernames: string[] = [];
     for (let offset = 0; offset < bytes.length;) {
@@ -370,11 +369,7 @@ const retainRoster = (context: ParticipantContext) => {
     const { module } = context;
     if (module.retain_roster() !== 0)
         throw new Error('The credential refused the verified roster.');
-    return readModuleMemory(
-        module,
-        module.contribution_output_pointer(),
-        module.contribution_output_length(),
-    );
+    return readParticipantOutput(module);
 };
 
 const verifySignature = (

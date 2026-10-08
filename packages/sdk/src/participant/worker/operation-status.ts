@@ -1,3 +1,5 @@
+import type { StopPersistence } from './stop.js';
+
 /**
  * Why a refused request changed nothing: the browser lacks a required
  * capability; the request is malformed or asks for something its parameters
@@ -26,3 +28,20 @@ export type ParticipantRefusalReason =
  */
 export type ParticipantPendingCause =
     'public input' | 'storage' | 'resource' | 'module' | 'worker';
+
+// An operation that did not complete: a refusal that changed nothing, one of
+// a participant that another runtime created, naming that runtime, a pending
+// participant and a stopped one.
+export type IncompleteOperation = Readonly<
+    | {
+          status: 'refused';
+          reason: Exclude<ParticipantRefusalReason, 'another runtime'>;
+      }
+    | { status: 'refused'; reason: 'another runtime'; runtime: string }
+    | { status: 'pending'; cause: ParticipantPendingCause; detail: string }
+    | {
+          status: 'stopped';
+          detail: string;
+          stopPersistence: StopPersistence;
+      }
+>;

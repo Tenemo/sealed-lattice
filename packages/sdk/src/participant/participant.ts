@@ -1,4 +1,5 @@
 import type {
+    IncompleteOperation,
     ParticipantPendingCause,
     ParticipantRefusalReason,
 } from './worker/operation-status.js';
@@ -7,7 +8,6 @@ import {
     helperRole,
     helperStartMilliseconds,
 } from './worker/parallel-helpers.js';
-import type { StopPersistence } from './worker/stop.js';
 import { participantNamespacePattern } from './worker/storage.js';
 import type { WorkerResult } from './worker/worker.js';
 
@@ -159,23 +159,12 @@ export type ParticipantSummary = Readonly<{
  * generation. A participant that another runtime created is refused, naming
  * that runtime, so the application can open it with the SDK of that runtime.
  */
-export type ParticipantResponse = Readonly<
-    | {
+export type ParticipantResponse =
+    | Readonly<{
           status: 'completed';
           details: ParticipantSummary & Readonly<Record<string, unknown>>;
-      }
-    | {
-          status: 'refused';
-          reason: Exclude<ParticipantRefusalReason, 'another runtime'>;
-      }
-    | { status: 'refused'; reason: 'another runtime'; runtime: string }
-    | { status: 'pending'; cause: ParticipantPendingCause; detail: string }
-    | {
-          status: 'stopped';
-          detail: string;
-          stopPersistence: StopPersistence;
-      }
->;
+      }>
+    | IncompleteOperation;
 
 export type Participant = Readonly<{
     run: (request: ParticipantRequest) => Promise<ParticipantResponse>;

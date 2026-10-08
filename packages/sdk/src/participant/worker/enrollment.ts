@@ -21,7 +21,10 @@ import {
     custodyPurpose,
 } from './identity.js';
 import type { ParticipantRefusalReason } from './operation-status.js';
-import { readModuleMemory } from './participant-module.js';
+import {
+    readModuleMemory,
+    readParticipantOutput,
+} from './participant-module.js';
 import { validateParticipantPredecessor } from './predecessor.js';
 import { unusedPreparationPurposes } from './preparation-state.js';
 import {
@@ -477,11 +480,7 @@ export const retainRegistration = (context: ParticipantContext) => {
     const { module } = context;
     if (module.retain_registration() !== 0)
         throw new Error('The credential refused the verified registration.');
-    return readModuleMemory(
-        module,
-        module.contribution_output_pointer(),
-        module.contribution_output_length(),
-    );
+    return readParticipantOutput(module);
 };
 
 // The result length, question and options the module writes for the poll it
@@ -490,11 +489,7 @@ const readVerifiedPoll = (context: ParticipantContext): VerifiedPoll => {
     const { module } = context;
     if (module.own_registration_poll() !== 0)
         throw new Error('The module verified no poll.');
-    const bytes = readModuleMemory(
-        module,
-        module.contribution_output_pointer(),
-        module.contribution_output_length(),
-    );
+    const bytes = readParticipantOutput(module);
     const decoder = new TextDecoder('utf-8', { fatal: true });
     let offset = 0;
     const take = (length: number) => {

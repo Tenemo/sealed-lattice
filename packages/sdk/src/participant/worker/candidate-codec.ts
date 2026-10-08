@@ -185,31 +185,50 @@ export const encodeCandidatePage = (page: CandidatePage) => {
     return concatenate(header, ...page.ids.map(fromHexadecimal));
 };
 
-export const decodeCandidatePage = (bytes: Uint8Array): CandidatePage => {
-    if (
-        bytes.length < 12 ||
-        bytes.length > 12 + candidatePageEntries * candidateIdentifierBytes
-    )
+// A discovery page holds the list's total length and its count, then up to
+// its entry limit of fixed-length entries from the requested offset.
+export const decodeDiscoveryPage = (
+    bytes: Uint8Array,
+    entryBytes: number,
+    entryLimit: number,
+) => {
+    if (bytes.length < 12 || bytes.length > 12 + entryLimit * entryBytes)
         throw malformed();
     const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
     const total = view.getBigUint64(0, true);
     const count = view.getUint32(8, true);
     if (
         total > BigInt(Number.MAX_SAFE_INTEGER) ||
-        count > candidatePageEntries ||
+        count > entryLimit ||
         BigInt(count) > total ||
-        bytes.length !== 12 + count * candidateIdentifierBytes
+        bytes.length !== 12 + count * entryBytes
     )
         throw malformed();
     return {
         total: Number(total),
-        ids: Array.from({ length: count }, (_unused, index) =>
-            hexadecimal(
-                bytes.subarray(
-                    12 + index * candidateIdentifierBytes,
-                    12 + (index + 1) * candidateIdentifierBytes,
-                ),
+        entries: Array.from({ length: count }, (_unused, index) =>
+            bytes.subarray(
+                12 + index * entryBytes,
+                12 + (index + 1) * entryBytes,
             ),
         ),
     };
+};
+
+// Whether a page read from the offset holds every entry it can: its entry
+// limit, or every entry that remains.
+export const fillsDiscoveryPage = (
+    count: number,
+    total: number,
+    offset: number,
+    entryLimit: number,
+) => count === Math.min(entryLimit, Math.max(0, total - offset));
+
+export const decodeCandidatePage = (bytes: Uint8Array): CandidatePage => {
+    const { total, entries } = decodeDiscoveryPage(
+        bytes,
+        candidateIdentifierBytes,
+        candidatePageEntries,
+    );
+    return { total, ids: entries.map((entry) => hexadecimal(entry)) };
 };

@@ -12,7 +12,10 @@ import type { ParticipantSession } from './contribution.js';
 import { openDelivery } from './delivery.js';
 import { PublicInputFailure } from './failures.js';
 import { discoverContributionOffers } from './offer-discovery.js';
-import { readModuleMemory, writeSetupInput } from './participant-module.js';
+import {
+    readParticipantOutput,
+    writeSetupInput,
+} from './participant-module.js';
 import type { PreparationEndorsement } from './preparation-state.js';
 import { createCandidatePublication, readOfferAnnouncements } from './relay.js';
 import type { PublicRelay } from './relay.js';
@@ -49,11 +52,7 @@ const selectionCommand = (
     writeModuleInput(context, input);
     if (context.module.selection_signing_command(operation, input.length) !== 0)
         throw new Error('The original preparation signer refused.');
-    return readModuleMemory(
-        context.module,
-        context.module.contribution_output_pointer(),
-        context.module.contribution_output_length(),
-    );
+    return readParticipantOutput(context.module);
 };
 
 // Only transport destinations are recovered from an authenticated original
@@ -221,11 +220,7 @@ export const endorseSetup = async (
             throw new Error(
                 'The credential refused the verified selection inputs.',
             );
-        const reference = readModuleMemory(
-            module,
-            module.contribution_output_pointer(),
-            module.contribution_output_length(),
-        );
+        const reference = readParticipantOutput(module);
         if (reference.length !== profile.preparation.selectionReferenceBytes)
             throw new Error(
                 'The retained selection inputs have another length.',

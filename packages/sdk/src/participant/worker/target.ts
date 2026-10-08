@@ -37,7 +37,11 @@ import {
     PublicInputFailure,
     ResourceFailure,
 } from './failures.js';
-import { readModuleMemory, writeBufferInput } from './participant-module.js';
+import {
+    readModuleMemory,
+    readParticipantOutput,
+    writeBufferInput,
+} from './participant-module.js';
 import type { ParticipantModule } from './participant-module.js';
 import {
     createCandidatePublication,
@@ -1207,11 +1211,7 @@ const finalityCommand = (
         throw new Error(
             'The finality work refused operation ' + String(operation) + '.',
         );
-    return readModuleMemory(
-        module,
-        module.contribution_output_pointer(),
-        module.contribution_output_length(),
-    );
+    return readParticipantOutput(module);
 };
 
 // The own ballot's status in the target this instance certified, which the

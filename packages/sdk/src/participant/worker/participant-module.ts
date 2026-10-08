@@ -417,6 +417,14 @@ export const seededRandomness = (
     };
 };
 
+// The output the last participant command left.
+export const readParticipantOutput = (module: ParticipantModule) =>
+    readModuleMemory(
+        module,
+        module.contribution_output_pointer(),
+        module.contribution_output_length(),
+    );
+
 export const writeProofInput = (module: ParticipantModule, bytes: Uint8Array) =>
     writeModuleMemory(
         module,

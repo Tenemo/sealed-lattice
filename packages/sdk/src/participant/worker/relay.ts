@@ -1,9 +1,4 @@
-import {
-    equalBytes,
-    hexadecimal,
-    readUnsigned32,
-    readUnsigned64,
-} from './bytes.js';
+import { equalBytes, hexadecimal } from './bytes.js';
 import {
     candidateChunkBytes,
     candidateIdentifierBytes,
@@ -12,7 +7,9 @@ import {
     decodeCandidateManifest,
     decodeCandidatePage,
     decodeCandidateReceipt,
+    decodeDiscoveryPage,
     encodeCandidateManifest,
+    fillsDiscoveryPage,
     isCandidateId,
     isCandidateKey,
     type CandidateFile,
@@ -200,6 +197,19 @@ const publicCandidate = (relay: PublicRelay, id: string): CandidateView => {
     };
 };
 
+// One page of a key's candidate discovery list, from the offset.
+const readCandidatePage = async (
+    relay: PublicRelay,
+    key: string,
+    offset: number,
+) =>
+    decodeCandidatePage(
+        await readBounded(
+            relay.base + 'candidates/' + key + '?offset=' + String(offset),
+            12 + candidatePageEntries * candidateIdentifierBytes,
+        ),
+    );
+
 // Freeze a finite discovery prefix for this operation. Yield each locator before
 // fetching its manifest, so a malformed candidate cannot monopolize a round
 // of a caller's fair scan across authors. A later operation sees later appends.
@@ -210,16 +220,7 @@ export async function* readCandidates(relay: PublicRelay, key: string) {
     for (;;) {
         let page;
         try {
-            page = decodeCandidatePage(
-                await readBounded(
-                    relay.base +
-                        'candidates/' +
-                        key +
-                        '?offset=' +
-                        String(offset),
-                    12 + candidatePageEntries * candidateIdentifierBytes,
-                ),
-            );
+            page = await readCandidatePage(relay, key, offset);
         } catch (error) {
             if (
                 error instanceof PublicInputFailure ||
@@ -231,8 +232,12 @@ export async function* readCandidates(relay: PublicRelay, key: string) {
         end ??= page.total;
         if (
             page.total < end ||
-            page.ids.length !==
-                Math.min(candidatePageEntries, Math.max(0, page.total - offset))
+            !fillsDiscoveryPage(
+                page.ids.length,
+                page.total,
+                offset,
+                candidatePageEntries,
+            )
         )
             return;
         for (const id of page.ids.slice(0, end - offset))
@@ -511,17 +516,7 @@ export const createCandidatePublication = (
                     );
                 let page;
                 try {
-                    page = decodeCandidatePage(
-                        await readBounded(
-                            relay.base +
-                                'candidates/' +
-                                key +
-                                '?offset=' +
-                                String(receipt.index),
-                            12 +
-                                candidatePageEntries * candidateIdentifierBytes,
-                        ),
-                    );
+                    page = await readCandidatePage(relay, key, receipt.index);
                 } catch (error) {
                     if (error instanceof RangeError)
                         throw new PublicInputFailure(
@@ -532,11 +527,12 @@ export const createCandidatePublication = (
                 if (
                     page.ids[0] !== receipt.id ||
                     page.total <= receipt.index ||
-                    page.ids.length !==
-                        Math.min(
-                            candidatePageEntries,
-                            page.total - receipt.index,
-                        )
+                    !fillsDiscoveryPage(
+                        page.ids.length,
+                        page.total,
+                        receipt.index,
+                        candidatePageEntries,
+                    )
                 )
                     throw new PublicInputFailure(
                         'Published candidate discovery readback differs.',
@@ -595,25 +591,24 @@ export const readOfferAnnouncements = async (
         relay.base + 'offers/' + String(position) + '?offset=' + String(offset),
         12 + offerDiscoveryPageEntries * 64,
     );
-    if (bytes.length < 12)
-        throw new PublicInputFailure('The offer discovery page is truncated.');
-    const total = readUnsigned64(bytes, 0);
-    const count = readUnsigned32(bytes, 8);
+    let page;
+    try {
+        page = decodeDiscoveryPage(bytes, 64, offerDiscoveryPageEntries);
+    } catch (error) {
+        if (error instanceof RangeError)
+            throw new PublicInputFailure(
+                'The offer discovery page is malformed.',
+            );
+        throw error;
+    }
     if (
-        total > BigInt(Number.MAX_SAFE_INTEGER) ||
-        count > offerDiscoveryPageEntries ||
-        bytes.length !== 12 + count * 64 ||
-        count !==
-            Math.min(
-                offerDiscoveryPageEntries,
-                Math.max(0, Number(total) - offset),
-            )
+        !fillsDiscoveryPage(
+            page.entries.length,
+            page.total,
+            offset,
+            offerDiscoveryPageEntries,
+        )
     )
         throw new PublicInputFailure('The offer discovery page is malformed.');
-    return {
-        total: Number(total),
-        identities: Array.from({ length: count }, (_, index) =>
-            bytes.slice(12 + index * 64, 12 + (index + 1) * 64),
-        ),
-    };
+    return { total: page.total, identities: page.entries };
 };

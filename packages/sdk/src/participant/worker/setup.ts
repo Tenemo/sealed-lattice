@@ -20,7 +20,11 @@ import {
     PublicInputFailure,
     ResourceFailure,
 } from './failures.js';
-import { readModuleMemory, writeSetupInput } from './participant-module.js';
+import {
+    readModuleMemory,
+    readParticipantOutput,
+    writeSetupInput,
+} from './participant-module.js';
 import { encodePreparationState } from './preparation-state.js';
 import {
     createCandidatePublication,
@@ -960,11 +964,7 @@ const verifyCertificateInputs = async (
 const retainedReference = (context: PublicProfileContext) => {
     if (context.module.retain_setup() !== 0)
         throw new Error('The credential refused the verified setup.');
-    const reference = readModuleMemory(
-        context.module,
-        context.module.contribution_output_pointer(),
-        context.module.contribution_output_length(),
-    );
+    const reference = readParticipantOutput(context.module);
     if (reference.length !== context.profile.root.setupReferenceBytes)
         throw new Error('The setup reference has another length.');
     return reference;

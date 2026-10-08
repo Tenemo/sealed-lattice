@@ -29,7 +29,7 @@ import { openDelivery } from './delivery.js';
 import { PublicInputFailure, StorageFailure } from './failures.js';
 import {
     operationSeedBytes,
-    readModuleMemory,
+    readParticipantOutput,
     seededRandomness,
 } from './participant-module.js';
 import type { ParticipantStoredRecord } from './predecessor.js';
@@ -356,11 +356,7 @@ const tryBallotCommand = (
         0
     )
         return undefined;
-    return readModuleMemory(
-        module,
-        module.contribution_output_pointer(),
-        module.contribution_output_length(),
-    );
+    return readParticipantOutput(module);
 };
 
 const ballotCommand = (
