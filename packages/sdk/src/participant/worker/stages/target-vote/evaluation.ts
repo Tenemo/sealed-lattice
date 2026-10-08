@@ -24,7 +24,10 @@ import {
     requestResult,
     transactionCompletion,
 } from '../../storage/database.js';
-import { deliverFinalAggregate, readFinalAggregate } from '../setup/setup.js';
+import {
+    deliverFinalAggregate,
+    readFinalAggregate,
+} from '../setup/setup-cache.js';
 
 import {
     CloseRecordSource,

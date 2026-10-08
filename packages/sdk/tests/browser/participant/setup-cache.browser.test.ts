@@ -9,7 +9,7 @@ import { deliverBallotKey } from '#packages/sdk/src/participant/worker/stages/ba
 import {
     deliverFinalAggregate,
     readFinalAggregate,
-} from '#packages/sdk/src/participant/worker/stages/setup/setup.js';
+} from '#packages/sdk/src/participant/worker/stages/setup/setup-cache.js';
 import {
     namespacedName,
     setupCacheName,

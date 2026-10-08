@@ -25,7 +25,10 @@ import {
     responseListing,
 } from '../close/close-records.js';
 import type { heldBallotBody } from '../close/close.js';
-import { deliverFinalAggregate, readFinalAggregate } from '../setup/setup.js';
+import {
+    deliverFinalAggregate,
+    readFinalAggregate,
+} from '../setup/setup-cache.js';
 
 // The close barrier verifier. From the public close records, and the copies
 // of them that a participant's close log holds, it authenticates the

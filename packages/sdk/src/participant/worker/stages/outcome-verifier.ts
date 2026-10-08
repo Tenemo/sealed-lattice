@@ -1,8 +1,11 @@
 import type { PublicContext } from '../module/context.js';
 import type { PublicRelay } from '../relay/relay.js';
 
-import { certifyTarget, combineReleaseShares } from './release/release.js';
-import { verifyPublicSetup } from './setup/setup.js';
+import {
+    certifyTarget,
+    combineReleaseShares,
+} from './release/release-verification.js';
+import { verifyPublicSetup } from './setup/setup-verification.js';
 import { publicCloseRecords } from './target-vote/close-barrier.js';
 import { evaluateClosedTarget } from './target-vote/evaluation.js';
 

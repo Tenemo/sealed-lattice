@@ -35,10 +35,9 @@ import {
     readSelection,
     setupOutput,
     verifyOffer,
-    verifySelectionInputs,
-    verifySetupRoster,
-} from './setup.js';
-import type { SelectedOffer } from './setup.js';
+} from './setup-verification.js';
+import type { SelectedOffer } from './setup-verification.js';
+import { verifySelectionInputs, verifySetupRoster } from './setup.js';
 
 // The original preparation signer's operations, as the module numbers them.
 const selectionOperation = {

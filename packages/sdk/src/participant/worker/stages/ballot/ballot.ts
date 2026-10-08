@@ -42,10 +42,9 @@ import {
 import type { ParticipantSession } from '../contribution/contribution.js';
 import {
     deliverFinalAggregate,
-    ensureFinalAggregate,
     readFinalAggregate,
-    retainedRecordContext,
-} from '../setup/setup.js';
+} from '../setup/setup-cache.js';
+import { ensureFinalAggregate, retainedRecordContext } from '../setup/setup.js';
 
 import type { BallotState } from './ballot-state.js';
 import {
