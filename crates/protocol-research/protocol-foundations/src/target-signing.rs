@@ -47,7 +47,7 @@ impl TargetMessage {
         // Classification codes: 0 absent, 1 invalid, 2 accepted, 3 conflicting.
         let limits = CanonicalDecodeLimits {
             maximum_tuple_byte_length: MAXIMUM_TARGET_BODY_BYTES,
-            maximum_item_count: 9,
+            maximum_item_count: 7,
             maximum_item_byte_length: MAXIMUM_TARGET_BODY_BYTES,
             maximum_nesting_depth: 0,
             ..CanonicalDecodeLimits::default()
@@ -55,7 +55,7 @@ impl TargetMessage {
         let tuple = CanonicalTuple::decode(body, &limits).map_err(|_| Error::Shape)?;
         if tuple.schema_identifier != 1
             || tuple.schema_version != 1
-            || ![6, 9].contains(&tuple.items.len())
+            || ![6, 7].contains(&tuple.items.len())
         {
             return Err(Error::Shape);
         }
@@ -88,21 +88,8 @@ impl TargetMessage {
         let evaluated = accepted >= minimum_turnout(participants);
         match branch {
             0 if items.len() == 6 && !evaluated => {}
-            1 if items.len() == 9 && evaluated => {
-                if items[6..8]
-                    .iter()
-                    .any(|item| item.item_type() != CanonicalItemType::Hash512)
-                    || items[8].item_type() != CanonicalItemType::Unsigned64
-                {
-                    return Err(Error::Shape);
-                }
-                if u64::from_le_bytes(
-                    items[8]
-                        .canonical_bytes()
-                        .try_into()
-                        .map_err(|_| Error::Shape)?,
-                ) == 0
-                {
+            1 if items.len() == 7 && evaluated => {
+                if items[6].item_type() != CanonicalItemType::Hash512 {
                     return Err(Error::Shape);
                 }
             }

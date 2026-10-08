@@ -1,4 +1,3 @@
-use encrypted_ranking::ranking::program_identity;
 use supported_profile::{DEGREE, Profile};
 
 /// The comparison polynomial is evaluated in blocks of this many powers.
@@ -7,7 +6,6 @@ const COMPARISON_BLOCK_WIDTH: usize = 16;
 #[derive(Debug, PartialEq, Eq)]
 pub enum Error {
     UnsupportedTopCount,
-    Encoding,
 }
 
 struct Instruction {
@@ -145,7 +143,6 @@ impl Builder {
 /// own the complete source classifications, setup and ciphertext bindings.
 pub struct RankingProgram {
     bytes: Vec<u8>,
-    identity: [u8; 64],
 }
 impl RankingProgram {
     /// The encrypted ranking of the profile's accepted ballots: their sum,
@@ -194,15 +191,12 @@ impl RankingProgram {
             2 + top_count as u32
         };
         let result = builder.append(5, &[sum], constant);
-        let bytes = builder.encode(result);
-        let identity = program_identity(&bytes).map_err(|_| Error::Encoding)?;
-        Ok(Self { bytes, identity })
+        Ok(Self {
+            bytes: builder.encode(result),
+        })
     }
     pub fn bytes(&self) -> &[u8] {
         &self.bytes
-    }
-    pub fn identity(&self) -> &[u8; 64] {
-        &self.identity
     }
 }
 

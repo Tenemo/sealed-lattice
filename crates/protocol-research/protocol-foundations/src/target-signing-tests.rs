@@ -19,11 +19,7 @@ fn body(participants: usize, accepted: usize, evaluated: bool) -> Vec<u8> {
         CanonicalItem::unsigned16(u16::from(evaluated)),
     ];
     if evaluated {
-        items.extend([
-            CanonicalItem::hash512([4; 64]),
-            CanonicalItem::hash512([5; 64]),
-            CanonicalItem::unsigned64(3276800),
-        ]);
+        items.push(CanonicalItem::hash512([4; 64]));
     }
     CanonicalTuple::new(1, 1, items).encode().unwrap()
 }

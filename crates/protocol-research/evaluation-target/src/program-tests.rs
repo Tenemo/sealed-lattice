@@ -1,5 +1,5 @@
 use super::*;
-use encrypted_ranking::ranking::{Engine, MAXIMUM_INSTRUCTIONS};
+use encrypted_ranking::ranking::{Engine, MAXIMUM_INSTRUCTIONS, program_identity};
 use num_bigint::BigUint;
 
 fn completion() -> Profile {
@@ -11,8 +11,8 @@ fn requested_prefixes_preserve_the_reference_schedule_and_complete_ordering() {
     let complete = RankingProgram::for_profile(completion(), 10).unwrap();
     // Pinned identity of the independently emitted pre-extension schedule.
     assert_eq!(
-        complete
-            .identity()
+        program_identity(complete.bytes())
+            .unwrap()
             .iter()
             .map(|byte| format!("{byte:02x}"))
             .collect::<String>(),

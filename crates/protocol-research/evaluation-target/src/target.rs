@@ -180,7 +180,6 @@ impl ClassifiedClosedInventory {
         }
         Ok(EvaluationSession {
             inventory: self,
-            program,
             engine,
         })
     }
@@ -303,41 +302,43 @@ impl ClassifiedClosedInventory {
 
 pub struct EvaluationSession {
     pub(crate) inventory: ClassifiedClosedInventory,
-    pub(crate) program: Option<RankingProgram>,
     pub(crate) engine: Option<Engine>,
 }
 impl EvaluationSession {
+    /// Completes the target body: the no-result branch, or the result branch
+    /// and the identity of its final ciphertext, whose framing also fixes its
+    /// length. The program is not a field, since the profile and the poll's
+    /// result length determine it.
     pub(crate) fn finish(self) -> Result<VerifiedEvaluationTarget, Error> {
-        let Self {
-            inventory,
-            program,
-            engine,
-        } = self;
+        let Self { inventory, engine } = self;
         let mut fields = inventory.target_fields()?;
-        let ciphertext = match (program, engine) {
-            (None, None) => {
+        let ciphertext = match engine {
+            None => {
                 fields.push(CanonicalItem::unsigned16(0));
                 None
             }
-            (Some(program), Some(engine)) => {
+            Some(engine) => {
                 let ciphertext = engine.final_switch().map_err(|_| Error::Arithmetic)?;
-                let identity = hash_foundation_tuple_512(
-                    "sealed-lattice/evaluation-ciphertext/v1",
-                    &[CanonicalItem::variable_bytes(&ciphertext).map_err(|_| Error::Encoding)?],
-                )
-                .map_err(|_| Error::Encoding)?;
                 fields.extend([
                     CanonicalItem::unsigned16(1),
-                    CanonicalItem::hash512(*program.identity()),
-                    CanonicalItem::hash512(identity.into_bytes()),
-                    CanonicalItem::unsigned64(ciphertext.len() as u64),
+                    CanonicalItem::hash512(ciphertext_identity(&ciphertext)?),
                 ]);
                 Some(ciphertext)
             }
-            _ => return Err(Error::Context),
         };
         VerifiedEvaluationTarget::finish(inventory, fields, ciphertext)
     }
+}
+
+const CIPHERTEXT_IDENTITY_DOMAIN: &str = "sealed-lattice/evaluation-ciphertext/v1";
+
+fn ciphertext_identity(ciphertext: &[u8]) -> Result<[u8; 64], Error> {
+    Ok(hash_foundation_tuple_512(
+        CIPHERTEXT_IDENTITY_DOMAIN,
+        &[CanonicalItem::variable_bytes(ciphertext).map_err(|_| Error::Encoding)?],
+    )
+    .map_err(|_| Error::Encoding)?
+    .into_bytes())
 }
 
 fn exact_bytes(mut reader: Box<dyn Read + '_>, length: usize) -> Result<Vec<u8>, Error> {
@@ -498,7 +499,7 @@ impl VerifiedEvaluationTarget {
         let identity = target_identity(body, setup.profile().participants())?;
         let limits = CanonicalDecodeLimits {
             maximum_tuple_byte_length: MAXIMUM_TARGET_BODY_BYTES,
-            maximum_item_count: 9,
+            maximum_item_count: 7,
             maximum_item_byte_length: MAXIMUM_TARGET_BODY_BYTES,
             maximum_nesting_depth: 0,
             ..CanonicalDecodeLimits::default()
@@ -518,19 +519,11 @@ impl VerifiedEvaluationTarget {
         }
         let evaluated = match items.len() {
             6 => false,
-            9 => true,
+            7 => true,
             _ => return Err(Error::Encoding),
         };
         let ciphertext = if evaluated {
-            let expected = hash_foundation_tuple_512(
-                "sealed-lattice/evaluation-ciphertext/v1",
-                &[CanonicalItem::variable_bytes(ciphertext).map_err(|_| Error::Encoding)?],
-            )
-            .map_err(|_| Error::Encoding)?
-            .into_bytes();
-            if hash(7) != Some(expected.as_slice())
-                || items[8].canonical_bytes() != (ciphertext.len() as u64).to_le_bytes()
-            {
+            if hash(6) != Some(ciphertext_identity(ciphertext)?.as_slice()) {
                 return Err(Error::Context);
             }
             Some(ciphertext.to_vec())
