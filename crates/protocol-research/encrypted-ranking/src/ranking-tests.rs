@@ -1,8 +1,7 @@
 use super::{
     super::{prime_count_bounds, primes, shared},
     Ciphertext, DEGREE, Engine, Instruction, MEMORY_BYTES, Profile, Progress, Refusal, capacity,
-    evictions, helper_memory_bytes, helpers_reserved_bytes, peak_values, program_identity,
-    stored_bytes, value_bytes,
+    evictions, helper_memory_bytes, helpers_reserved_bytes, peak_values, stored_bytes, value_bytes,
 };
 use parallel_work::JOB_MEMORY_BYTES;
 use std::collections::BTreeSet;
@@ -180,7 +179,7 @@ fn a_readback_repeats_the_resident_value_and_keys_its_reload() {
     ] {
         program.extend(instruction.iter().flat_map(|word| word.to_le_bytes()));
     }
-    let mut engine = Engine::new(profile, &program, program_identity(&program).unwrap()).unwrap();
+    let mut engine = Engine::new(profile, &program).unwrap();
     // The smallest instance bound that holds an addition's two inputs
     // and its output.
     let arithmetic = shared(profile, DEGREE);

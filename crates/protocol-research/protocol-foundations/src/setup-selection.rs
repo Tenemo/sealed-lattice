@@ -255,13 +255,25 @@ pub fn authenticate_endorsement(
     if packet.len() != ENDORSEMENT_BYTES {
         return Err(Error::Shape);
     }
-    let position = u16::from_le_bytes(packet[..2].try_into().unwrap()) as usize;
     if selection.roster_identity() != roster.proposal().identity_bytes()
         || packet[2..66] != selection.identity()
     {
         return Err(Error::Context);
     }
-    let signature = packet[66..].try_into().unwrap();
+    endorsement(
+        roster,
+        selection,
+        u16::from_le_bytes(packet[..2].try_into().unwrap()) as usize,
+        packet[66..].try_into().unwrap(),
+    )
+}
+/// A member's endorsement of a selection of the roster's.
+fn endorsement(
+    roster: &AuthenticatedRosterProposal,
+    selection: &SelectionProposal,
+    position: usize,
+    signature: [u8; SIGNATURE_BYTES],
+) -> Result<AuthenticatedSelectionEndorsement, Error> {
     verify(
         roster.proposal(),
         position,
@@ -348,17 +360,17 @@ pub fn authenticate_certificate(
         &bytes[8..8 + length],
         &bytes[8 + length..8 + length + SIGNATURE_BYTES],
     )?;
-    let mut endorsements = Vec::new();
-    for entry in bytes[8 + length + SIGNATURE_BYTES..].chunks_exact(2 + SIGNATURE_BYTES) {
-        let mut packet = Vec::from(&entry[..2]);
-        packet.extend(proposal.selection.identity());
-        packet.extend(&entry[2..]);
-        endorsements.push(authenticate_endorsement(
-            &roster,
-            &proposal.selection,
-            &packet,
-        )?);
-    }
+    let endorsements = bytes[8 + length + SIGNATURE_BYTES..]
+        .chunks_exact(2 + SIGNATURE_BYTES)
+        .map(|entry| {
+            endorsement(
+                &roster,
+                &proposal.selection,
+                u16::from_le_bytes(entry[..2].try_into().unwrap()) as usize,
+                entry[2..].try_into().unwrap(),
+            )
+        })
+        .collect::<Result<Vec<_>, _>>()?;
     if encode_certificate(&proposal, &endorsements)?.as_slice() != bytes {
         return Err(Error::Shape);
     }

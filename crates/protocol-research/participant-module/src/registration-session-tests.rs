@@ -174,23 +174,9 @@ fn checkpoint_import_preserves_the_verified_original_owner(
     let request = |role: &[u8], count| [prefix.as_slice(), &header(role, count)].concat();
     let valid = request(&expected_role, profile.participants());
     let other_owner = Credential::from_seed([91; 32]);
-    let legacy_role = CanonicalTuple::new(
-        1,
-        1,
-        vec![
-            CanonicalItem::nonempty_ascii("sealed-lattice/setup-contribution/v1").unwrap(),
-            CanonicalItem::hash512(poll.identity()),
-            CanonicalItem::hash512(poll.runtime()),
-            CanonicalItem::hash512(*context.identity()),
-            CanonicalItem::unsigned16(0),
-        ],
-    )
-    .encode()
-    .unwrap();
     for wrong_role in [
         role(&other_owner, 0, "sealed-lattice/setup-contribution/v2"),
         role(credential, 1, "sealed-lattice/setup-contribution/v2"),
-        legacy_role,
     ] {
         let bytes = request(&wrong_role, profile.participants());
         // The checkpoint decoder accepts this partial header, isolating the

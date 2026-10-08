@@ -100,8 +100,7 @@ pub fn probe(profile: Profile, top_count: usize) -> Result<String, Refusal> {
         return Err(Refusal::Program);
     }
     let bytes = program(profile, top_count);
-    let program = super::program_identity(&bytes)?;
-    let mut engine = Engine::new(profile, &bytes, program)?;
+    let mut engine = Engine::new(profile, &bytes)?;
     let secret = engine.arithmetic.small(&super::super::secret(
         DEGREE,
         profile.setup_contributors(),
@@ -197,7 +196,7 @@ pub fn probe(profile: Profile, top_count: usize) -> Result<String, Refusal> {
         "{{\"participants\":{participants},\"options\":{options},\"topCount\":{top_count},\"degree\":{DEGREE},\"optionPositions\":{:?},\"inputIdentity\":\"{}\",\"programIdentity\":\"{}\",\"ciphertextIdentity\":\"{}\"}}",
         &order[..top_count],
         to_hex(&identity(PROBE_INPUT_DOMAIN, &inputs).map_err(|_| Refusal::Identity)?),
-        to_hex(&program),
+        to_hex(&super::program_identity(&bytes)?),
         to_hex(
             &ciphertext_identity
                 .finish()

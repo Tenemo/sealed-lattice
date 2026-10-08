@@ -13,7 +13,6 @@ pub mod relation;
 const TABLE: &[u8] = include_bytes!("../profiles.bin");
 const MAGIC: &[u8; 4] = b"SPT1";
 const RECORD_BYTES: usize = 30;
-const PARAMETER_MAGIC: &[u8; 4] = b"SCP1";
 const STATEMENT_MAGIC: &[u8; 4] = b"SCO2";
 
 /// Ring degree of the FHE and share-encryption polynomials.
@@ -390,17 +389,6 @@ impl Profile {
         self.options.next_power_of_two()
     }
 
-    /// The suite parameter object: its magic, then the FHE, share and
-    /// auxiliary moduli.
-    pub fn parameters(self) -> Vec<u8> {
-        [
-            PARAMETER_MAGIC.as_slice(),
-            &self.ciphertext.to_bytes(),
-            share_modulus(),
-            auxiliary_modulus(),
-        ]
-        .concat()
-    }
     pub fn family_modulus(self, family: Family) -> Vec<u8> {
         match family {
             Family::Fhe => self.ciphertext.to_bytes(),

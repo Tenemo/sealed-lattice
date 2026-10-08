@@ -74,7 +74,7 @@ fn every_profile_and_requested_result_length_has_an_executable_program() {
         let profile = Profile::new(participants, options).unwrap();
         for top_count in [1, options] {
             let program = RankingProgram::for_profile(profile, top_count).unwrap();
-            assert!(Engine::new(profile, program.bytes(), *program.identity()).is_ok());
+            assert!(Engine::new(profile, program.bytes()).is_ok());
         }
         // A program admits only its own profile.
         let program = RankingProgram::for_profile(profile, 1).unwrap();
@@ -88,7 +88,7 @@ fn every_profile_and_requested_result_length_has_an_executable_program() {
             [(participants, other_options), (other_participants, options)]
         {
             let other = Profile::new(participants, options).unwrap();
-            assert!(Engine::new(other, program.bytes(), *program.identity()).is_err());
+            assert!(Engine::new(other, program.bytes()).is_err());
         }
     }
 }
@@ -102,7 +102,7 @@ fn every_profile_and_requested_result_length_has_an_executable_program() {
 fn a_polynomial_arriving_in_pieces_decodes_as_it_does_whole() {
     let profile = Profile::new(3, 2).unwrap();
     let program = RankingProgram::for_profile(profile, 1).unwrap();
-    let engine = Engine::new(profile, program.bytes(), *program.identity()).unwrap();
+    let engine = Engine::new(profile, program.bytes()).unwrap();
     let width = engine.coefficient_bytes();
     let mut bytes = vec![0; DEGREE * width];
     let mut seed = 0x9e37_79b9_7f4a_7c15_u64;
@@ -216,12 +216,12 @@ fn mixed_or_noncanonical_rank_parameters_refuse_after_rehashing() {
     for parameter in [original + 10, 0, 100, u32::MAX] {
         let mut changed = program.bytes().to_vec();
         changed[parameter_offset..parameter_offset + 4].copy_from_slice(&parameter.to_le_bytes());
-        assert!(Engine::new(completion(), &changed, program_identity(&changed).unwrap()).is_err());
+        assert!(Engine::new(completion(), &changed).is_err());
     }
     for constant in [2u32, 12, u32::MAX] {
         let mut changed = program.bytes().to_vec();
         let offset = changed.len() - 4;
         changed[offset..].copy_from_slice(&constant.to_le_bytes());
-        assert!(Engine::new(completion(), &changed, program_identity(&changed).unwrap()).is_err());
+        assert!(Engine::new(completion(), &changed).is_err());
     }
 }

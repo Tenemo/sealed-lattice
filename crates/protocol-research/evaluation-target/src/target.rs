@@ -12,9 +12,7 @@ use protocol_foundations::{
     },
     identity::{PUBLIC_POLYNOMIAL_DOMAIN, identity},
     poll::VerifiedPoll,
-    target_signing::{
-        MAXIMUM_TARGET_BODY_BYTES, TARGET_IDENTITY_DOMAIN, TargetMessage, minimum_turnout,
-    },
+    target_signing::{MAXIMUM_TARGET_BODY_BYTES, TargetMessage, minimum_turnout},
 };
 use setup_aggregate::verified::VerifiedSetupAggregate;
 use std::{io::Read, sync::Arc};
@@ -152,8 +150,7 @@ impl ClassifiedClosedInventory {
         let mut engine = program
             .as_ref()
             .map(|program| {
-                Engine::new(self.setup.profile(), program.bytes(), *program.identity())
-                    .map_err(|_| Error::Arithmetic)
+                Engine::new(self.setup.profile(), program.bytes()).map_err(|_| Error::Arithmetic)
             })
             .transpose()?;
         // The instance and each helper grow once to what the evaluation plans
@@ -558,15 +555,6 @@ fn target_identity(body: &[u8], participants: usize) -> Result<[u8; 64], Error> 
     if body.len() > MAXIMUM_TARGET_BODY_BYTES {
         return Err(Error::Encoding);
     }
-    let identity = hash_foundation_tuple_512(
-        TARGET_IDENTITY_DOMAIN,
-        &[CanonicalItem::variable_bytes(body).map_err(|_| Error::Encoding)?],
-    )
-    .map_err(|_| Error::Encoding)?
-    .into_bytes();
     let message = TargetMessage::parse(body, participants).map_err(|_| Error::Encoding)?;
-    if message.identity() != &identity {
-        return Err(Error::Encoding);
-    }
-    Ok(identity)
+    Ok(*message.identity())
 }

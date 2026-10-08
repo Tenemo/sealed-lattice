@@ -43,15 +43,16 @@ fn completion_parameters_rebuild_the_independent_moduli() {
         (BigUint::from(1u8) << 128usize) - (BigUint::from(133u8) << 64usize) + 1u8;
     let share: BigUint = proof_field * (119u32 * (1 << 23) + 1);
     let auxiliary: BigUint = (BigUint::from(257u32 * 101) << 20usize) + 1u8;
-    let mut expected = b"SCP1".to_vec();
-    for (value, length) in [(&fhe, 108), (&share, 20), (&auxiliary, 5)] {
+    for (family, value, length) in [
+        (Family::Fhe, &fhe, 108),
+        (Family::Sharing, &share, 20),
+        (Family::Auxiliary, &auxiliary, 5),
+    ] {
         let mut bytes = value.to_bytes_le();
         assert!(bytes.len() <= length);
         bytes.resize(length, 0);
-        expected.extend(bytes);
+        assert_eq!(profile.family_modulus(family), bytes);
     }
-    assert_eq!(profile.parameters(), expected);
-    assert_eq!(profile.parameters().len(), 137);
     assert_eq!(integer(share_modulus()), share);
     assert_eq!(integer(auxiliary_modulus()), auxiliary);
 }

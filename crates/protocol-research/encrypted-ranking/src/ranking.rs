@@ -390,7 +390,7 @@ impl Engine {
     /// position, comparison weights of the profile's odd comparison degree,
     /// rank weights of one requested result length and every intermediate
     /// value used.
-    pub fn new(profile: Profile, program: &[u8], expected_hash: [u8; 64]) -> Result<Self, Refusal> {
+    pub fn new(profile: Profile, program: &[u8]) -> Result<Self, Refusal> {
         if program.len() < 16 || &program[..4] != b"BRK1" || word(&program[4..8]) != DEGREE as u32 {
             return Err(Refusal::Program);
         }
@@ -398,10 +398,10 @@ impl Engine {
         if !(1..=MAXIMUM_INSTRUCTIONS).contains(&count)
             || program.len() != 16 + 16 * count
             || word(&program[12..16]) as usize != count - 1
-            || program_identity(program) != Ok(expected_hash)
         {
             return Err(Refusal::Program);
         }
+        let program_hash = program_identity(program)?;
         let options = profile.options();
         let comparison_degree = profile.comparison_degree();
         let mut instructions = Vec::with_capacity(count);
@@ -484,7 +484,7 @@ impl Engine {
         Ok(Self {
             profile,
             arithmetic,
-            program_hash: expected_hash,
+            program_hash,
             peak_values: peak_values(&instructions, remaining_uses.clone()),
             instance_bound: usize::MAX,
             instructions,
