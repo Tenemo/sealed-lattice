@@ -49,7 +49,8 @@ import {
 } from './relay.js';
 import type { CandidateView, PublicRelay } from './relay.js';
 import { targetPhase } from './root-generation.js';
-import { chunkBytes, commitRoot, dataRecordInventory } from './root.js';
+import { commitRoot, dataRecordInventory } from './root.js';
+import { chunkBytes } from './runtime-bounds.js';
 import { deliverFinalAggregate, readFinalAggregate } from './setup.js';
 import {
     awaitLater,

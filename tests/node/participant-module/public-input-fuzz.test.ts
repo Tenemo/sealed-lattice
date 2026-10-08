@@ -19,11 +19,11 @@ import {
     writeSetupInput,
 } from '#packages/sdk/src/participant/worker/participant-module.js';
 import type { ParticipantModule } from '#packages/sdk/src/participant/worker/participant-module.js';
+import { dataKind } from '#packages/sdk/src/participant/worker/root.js';
 import {
     chunkBytes,
-    dataKind,
-} from '#packages/sdk/src/participant/worker/root.js';
-import { readParticipantLimits } from '#packages/sdk/src/participant/worker/runtime-bounds.js';
+    readParticipantLimits,
+} from '#packages/sdk/src/participant/worker/runtime-bounds.js';
 
 // The packaged participant module, fed public input that no honest relay or
 // participant produces. A command must refuse such input and return: a trap

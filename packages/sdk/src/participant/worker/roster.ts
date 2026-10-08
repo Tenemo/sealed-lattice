@@ -36,7 +36,7 @@ import {
 } from './root.js';
 import type { AuthenticatedRoot } from './root.js';
 import type { ParticipantLimits } from './runtime-bounds.js';
-import { readParticipantProfile } from './runtime-bounds.js';
+import { readParticipantProfile, tagBytes } from './runtime-bounds.js';
 
 // Registration record files as each participant publishes them, named by the
 // registration body digest.
@@ -637,7 +637,7 @@ export const retainedProfile = async (
         proposal.length !== profile.proposalBytes ||
         retainedLength(dataKind.retainedRoster) !==
             profile.root.retainedRosterBytes ||
-        root.plaintext.length + 16 >
+        root.plaintext.length + tagBytes >
             rootBound({ ...context, profile }, root.head.generation) ||
         (setupReference !== 0 &&
             setupReference !== profile.root.setupReferenceBytes) ||

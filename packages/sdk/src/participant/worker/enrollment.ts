@@ -33,7 +33,6 @@ import {
 } from './root-generation.js';
 import {
     authenticateRoot,
-    chunkBytes,
     createRootKey,
     dataKind,
     encodeManifest,
@@ -44,8 +43,10 @@ import {
 } from './root.js';
 import type { AuthenticatedRoot, RecordReference } from './root.js';
 import {
+    chunkBytes,
     foregroundVisitMilliseconds,
     participantDataKindMaximums,
+    tagBytes,
 } from './runtime-bounds.js';
 import { purposeBit, signingPurpose } from './signing-purpose.js';
 import { commitParticipantState } from './state-transaction.js';
@@ -379,7 +380,10 @@ export const createEnrollment = async (
             1,
         );
         dataKeys.fill(0);
-        if (plaintext.length + 16 > limits.root.maximumEnrollmentRootBytes)
+        if (
+            plaintext.length + tagBytes >
+            limits.root.maximumEnrollmentRootBytes
+        )
             throw new Error('The enrollment root exceeds its bound.');
         // The initial key seals the intent and the completed root under their
         // distinct generation nonces.

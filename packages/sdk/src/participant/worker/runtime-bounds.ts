@@ -13,11 +13,12 @@ type Range = Readonly<{ minimum: number; maximum: number }>;
 export const foregroundVisitMilliseconds = 15 * 60 * 1000;
 
 // A retained or published record holds at most one mebibyte, and a sealed
-// record adds its AES-GCM tag.
-const chunkBytes = 1 << 20;
-const tagBytes = 16;
-const keyBytes = 32;
-const identityBytes = 64;
+// record adds its AES-GCM tag. Each private record has its own key, and every
+// record and root is named by its 64-byte identity.
+export const chunkBytes = 1 << 20;
+export const tagBytes = 16;
+export const recordKeyBytes = 32;
+export const identityBytes = 64;
 const chunks = (bytes: number) => Math.ceil(bytes / chunkBytes);
 const maximum = (...values: number[]) => Math.max(...values);
 
@@ -28,7 +29,8 @@ const maximum = (...values: number[]) => Math.max(...values);
 // roots retire that key and its capsule and use a shorter actual prefix.
 const rootPrefixBytes = 4 + 96 + 64 + 4;
 const preparedRootPrefixBytes = 4 + 64 + 64 + 4;
-const rootReferenceBytes = 1 + 4 + 4 + identityBytes;
+// A root reference: its kind, ordinal, length and identity.
+export const rootReferenceBytes = 1 + 4 + 4 + identityBytes;
 const suffixLengthBytes = 4;
 
 export type ParticipantLimits = Readonly<{
@@ -366,9 +368,9 @@ const enrollmentPayloadBytes = (
 // signing record, and the seed of an interrupted generation or
 // continuation.
 const contributionPrefixBytes = 4 + 1 + 2 + 16;
-const publicEntryBytes = 2 + 4 + 4 + keyBytes + identityBytes;
-const privateEntryBytes = keyBytes + identityBytes;
-const signingEntryBytes = 2 + 4 + keyBytes + identityBytes;
+export const publicEntryBytes = 2 + 4 + 4 + recordKeyBytes + identityBytes;
+export const privateEntryBytes = recordKeyBytes + identityBytes;
+export const signingEntryBytes = 2 + 4 + recordKeyBytes + identityBytes;
 const signingRecords = 2;
 
 const contributionBounds = (
@@ -447,7 +449,7 @@ const ballotBounds = (
     );
     const attempt =
         ballotPrefixBytes + limits.options.maximum + ballotTimeBytes;
-    const retainedBody = keyBytes * bodyRecords + ballot.envelopeBytes;
+    const retainedBody = recordKeyBytes * bodyRecords + ballot.envelopeBytes;
     const signedStateBytes =
         ballotPrefixBytes +
         retainedBody +
@@ -474,7 +476,8 @@ const ballotBounds = (
 // record: a held body has its envelope and body records, and a response the
 // organizer takes one record.
 const closePrefixBytes = 4 + 4;
-const eventBytes = (records: number) => 1 + 2 + 4 + 4 + keyBytes * records;
+const eventBytes = (records: number) =>
+    1 + 2 + 4 + 4 + recordKeyBytes * records;
 
 const closeBounds = (
     moduleLimits: ModuleLimits,
@@ -547,7 +550,7 @@ const releaseBounds = (moduleLimits: ModuleLimits, profile: ModuleProfile) => {
     );
     const attempt =
         4 + 1 + 1 + 2 + 4 + 2 + moduleLimits.target.maximumBodyBytes;
-    const retainedBody = keyBytes * bodyRecords + release.envelopeBytes;
+    const retainedBody = recordKeyBytes * bodyRecords + release.envelopeBytes;
     return {
         ...release,
         minimumBodyBytes: profile.minimumReleaseBodyBytes,

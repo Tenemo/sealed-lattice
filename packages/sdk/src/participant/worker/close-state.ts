@@ -8,10 +8,11 @@ import {
     unsigned32,
 } from './bytes.js';
 import type { ParticipantStoredRecord } from './predecessor.js';
-import { recordKeyBytes, sealedLength } from './private-records.js';
+import { sealedLength } from './private-records.js';
 import type { RecordContext } from './private-records.js';
 import { closePhase, rootGeneration } from './root-generation.js';
 import type { ParticipantProfile } from './runtime-bounds.js';
+import { recordKeyBytes } from './runtime-bounds.js';
 
 // The close log beneath the authenticated root. It retains every close input
 // the participant's state machine accepted, in arrival order, so restoration

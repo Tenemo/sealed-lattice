@@ -11,10 +11,11 @@ import {
 } from './bytes.js';
 import { operationSeedBytes } from './participant-module.js';
 import type { ParticipantStoredRecord } from './predecessor.js';
-import { recordKeyBytes, sealedLength } from './private-records.js';
+import { sealedLength } from './private-records.js';
 import type { RecordContext } from './private-records.js';
 import { ballotPhase, isRootGeneration } from './root-generation.js';
 import type { ParticipantProfile } from './runtime-bounds.js';
+import { recordKeyBytes } from './runtime-bounds.js';
 
 // A participant's ballot beneath its authenticated root. Generation 13 locks
 // the attempt's scores and ballot time; generation 14 adds the seed of all
@@ -80,21 +81,48 @@ export const encodeBallotState = (generation: number, state: BallotState) =>
         state.signature,
     );
 
-// The envelope's context fields at their offsets: the poll, the setup
-// identity, the author's position, the ballot time and the body length.
+// The envelope's fields after its marker: the poll, the setup identity, the
+// author's position, the ballot time and the body length.
+export const ballotEnvelopeOffset = {
+    poll: 4,
+    setupIdentity: 68,
+    author: 132,
+    ballotTime: 134,
+    bodyLength: 142,
+} as const;
+
+// Whether the envelope's context fields name this record context.
 export const ballotEnvelopeMatches = (
     envelope: Uint8Array,
     context: RecordContext,
     bodyLength: number,
     ballotTime?: bigint,
 ) =>
-    equalBytes(envelope.subarray(0, 4), envelopeMarker) &&
-    equalBytes(envelope.subarray(4, 68), context.poll) &&
-    equalBytes(envelope.subarray(68, 132), context.setupIdentity) &&
-    readUnsigned16(envelope, 132) === context.position &&
+    equalBytes(
+        envelope.subarray(0, ballotEnvelopeOffset.poll),
+        envelopeMarker,
+    ) &&
+    equalBytes(
+        envelope.subarray(
+            ballotEnvelopeOffset.poll,
+            ballotEnvelopeOffset.setupIdentity,
+        ),
+        context.poll,
+    ) &&
+    equalBytes(
+        envelope.subarray(
+            ballotEnvelopeOffset.setupIdentity,
+            ballotEnvelopeOffset.author,
+        ),
+        context.setupIdentity,
+    ) &&
+    readUnsigned16(envelope, ballotEnvelopeOffset.author) ===
+        context.position &&
     (ballotTime === undefined ||
-        readUnsigned64(envelope, 134) === ballotTime) &&
-    readUnsigned64(envelope, 142) === BigInt(bodyLength);
+        readUnsigned64(envelope, ballotEnvelopeOffset.ballotTime) ===
+            ballotTime) &&
+    readUnsigned64(envelope, ballotEnvelopeOffset.bodyLength) ===
+        BigInt(bodyLength);
 
 // Decodes the ballot suffix under the phase its root generation supplies;
 // each phase has exactly one shape.

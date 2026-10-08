@@ -1,5 +1,5 @@
 import { encodeText, equalBytes, readUnsigned64 } from './bytes.js';
-import { chunkBytes } from './root.js';
+import { chunkBytes } from './runtime-bounds.js';
 import type { ParticipantProfile } from './runtime-bounds.js';
 
 export type ProofBounds = Pick<

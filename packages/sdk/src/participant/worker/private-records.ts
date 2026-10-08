@@ -1,4 +1,5 @@
 import type { ParticipantSession } from './contribution.js';
+import { recordKeyBytes, tagBytes } from './runtime-bounds.js';
 import { readParticipantValue } from './storage.js';
 import type { ParticipantStore } from './storage.js';
 
@@ -14,9 +15,6 @@ export type RecordContext = Readonly<{
     setupIdentity: Uint8Array;
     position: number;
 }>;
-
-export const recordKeyBytes = 32;
-const tagBytes = 16;
 
 export const recordContext = (
     session: ParticipantSession,

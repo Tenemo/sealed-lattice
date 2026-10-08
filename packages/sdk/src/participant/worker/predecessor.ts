@@ -23,6 +23,9 @@ export type ParticipantStoredRecord = Readonly<{
 // predecessor check reads and authenticates at once.
 const checkedRecords = 64;
 const checkedBytes = 8_388_608;
+// No listed record may be longer: every record the worker retains is at most
+// one chunk and its tag.
+const maximumListedRecordBytes = 1_572_864;
 
 // The identities the caller derives for a sealed root and a stored record.
 export type ParticipantIdentities = Readonly<{
@@ -83,7 +86,7 @@ export async function validateParticipantPredecessor(
             keys.has(identity) ||
             !Number.isSafeInteger(record.byteLength) ||
             record.byteLength <= 0 ||
-            record.byteLength > 1_572_864 ||
+            record.byteLength > maximumListedRecordBytes ||
             (record.identity === undefined) ===
                 (record.encryption === undefined) ||
             (record.identity !== undefined && record.identity.length !== 64) ||

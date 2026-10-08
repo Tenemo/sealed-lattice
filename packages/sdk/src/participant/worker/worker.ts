@@ -22,7 +22,7 @@ import {
     publishClose,
     resumeClose,
 } from './close.js';
-import { isEligibleContributor } from './context.js';
+import { errorMessage, isEligibleContributor } from './context.js';
 import type {
     ParticipantContext,
     ParticipantProfileContext,
@@ -905,7 +905,7 @@ const run = async (
         return {
             status: 'pending',
             cause: pendingCause(error),
-            detail: error instanceof Error ? error.message : String(error),
+            detail: errorMessage(error),
         };
     } finally {
         helpers?.stop();
@@ -1006,7 +1006,7 @@ const runVerification = async (
         return {
             status: 'pending',
             cause: pendingCause(error),
-            detail: error instanceof Error ? error.message : String(error),
+            detail: errorMessage(error),
         };
     } finally {
         helpers?.stop();
@@ -1035,7 +1035,7 @@ self.onmessage = (
             self.postMessage({
                 status: 'pending',
                 cause: pendingCause(error),
-                detail: error instanceof Error ? error.message : String(error),
+                detail: errorMessage(error),
             }),
     );
 };

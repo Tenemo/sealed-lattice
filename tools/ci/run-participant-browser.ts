@@ -33,7 +33,7 @@ import {
     closureSubmissionFile,
 } from '#packages/sdk/src/participant/worker/close.js';
 import { targetPhase } from '#packages/sdk/src/participant/worker/root-generation.js';
-import { chunkBytes } from '#packages/sdk/src/participant/worker/root.js';
+import { chunkBytes } from '#packages/sdk/src/participant/worker/runtime-bounds.js';
 import {
     evaluatedTargetName,
     namespacedName,

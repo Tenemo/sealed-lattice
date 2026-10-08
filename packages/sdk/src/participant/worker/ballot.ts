@@ -1,5 +1,6 @@
 import {
     ballotEnvelopeMatches,
+    ballotEnvelopeOffset,
     ballotRecordAssociatedData,
     ballotRecordInventory,
     ballotRecordLength,
@@ -447,7 +448,9 @@ const retainBallot = async (session: BallotSession) => {
     const { context } = session.participant;
     const { envelopeBytes, recordBytes } = context.profile.ballot;
     const envelope = createBallot(session);
-    const bodyLength = Number(readUnsigned64(envelope, 142));
+    const bodyLength = Number(
+        readUnsigned64(envelope, ballotEnvelopeOffset.bodyLength),
+    );
     if (
         envelope.length !== envelopeBytes ||
         !ballotEnvelopeMatches(

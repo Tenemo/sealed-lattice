@@ -1,3 +1,4 @@
+import { ballotEnvelopeOffset } from './ballot-state.js';
 import {
     ballotCandidateKey,
     ballotWorkInput,
@@ -50,6 +51,7 @@ import type { CandidateView, PublicRelay } from './relay.js';
 import { ballotPhase, closePhase, rootGeneration } from './root-generation.js';
 import { commitRoot, dataRecordInventory } from './root.js';
 import type { ParticipantProfile } from './runtime-bounds.js';
+import { identityBytes } from './runtime-bounds.js';
 import { retainedSetupIdentity } from './setup.js';
 import { encodeSignedPacket } from './signed-packet.js';
 import { snapshotParticipant } from './storage.js';
@@ -61,12 +63,7 @@ import { snapshotParticipant } from './storage.js';
 // root together; a refused public input changes nothing and leaves the
 // participant where it was.
 
-const identityBytes = 64;
 const listedEntryBytes = 2 + identityBytes;
-// The envelope's author position, ballot time and body length.
-const envelopeAuthorOffset = 132;
-const envelopeTimeOffset = 134;
-const envelopeLengthOffset = 142;
 // A response body ends with its responder and its listing: an unsigned item
 // of six header bytes and two value bytes, then a byte-string item of six
 // header bytes and a four-byte inner length before the entries.
@@ -388,7 +385,7 @@ export const isListedSubmission = (
     identity: Uint8Array,
 ) =>
     submission.length === context.profile.close.submissionBytes &&
-    readUnsigned16(submission, envelopeAuthorOffset) === author &&
+    readUnsigned16(submission, ballotEnvelopeOffset.author) === author &&
     equalBytes(custodyEnvelopeIdentity(context, submission), identity);
 
 // Whether bytes frame one response packet of the profile.
@@ -478,10 +475,11 @@ export const heldBallotBody = async (
         if (event.kind !== closeEventKind.held) continue;
         const submission = await openCloseRecord(session, event, 0);
         const matches =
-            readUnsigned16(submission, envelopeAuthorOffset) === author &&
+            readUnsigned16(submission, ballotEnvelopeOffset.author) ===
+                author &&
             equalBytes(custodyEnvelopeIdentity(context, submission), identity);
         if (
-            readUnsigned64(submission, envelopeLengthOffset) !==
+            readUnsigned64(submission, ballotEnvelopeOffset.bodyLength) !==
             BigInt(event.length)
         )
             throw new Error('A held body changed its length.');
@@ -514,9 +512,9 @@ const learnSubmission = (
     if (identity === undefined)
         throw new Error('An accepted envelope has no identity.');
     session.submissions.set(serial, {
-        author: readUnsigned16(envelope, envelopeAuthorOffset),
+        author: readUnsigned16(envelope, ballotEnvelopeOffset.author),
         identity,
-        ballotTime: readUnsigned64(envelope, envelopeTimeOffset),
+        ballotTime: readUnsigned64(envelope, ballotEnvelopeOffset.ballotTime),
     });
     session.known.add(hexadecimal(identity));
 };
@@ -635,7 +633,7 @@ const replayEvent = async (session: CloseSession, event: CloseEvent) => {
         case closeEventKind.held: {
             const submission = await openCloseRecord(session, event, 0);
             if (
-                readUnsigned64(submission, envelopeLengthOffset) !==
+                readUnsigned64(submission, ballotEnvelopeOffset.bodyLength) !==
                 BigInt(event.length)
             )
                 throw new Error('A held body changed its length.');
@@ -863,7 +861,9 @@ const deliverBody = async (
         ) === undefined
     )
         return false;
-    const length = Number(readUnsigned64(submission, envelopeLengthOffset));
+    const length = Number(
+        readUnsigned64(submission, ballotEnvelopeOffset.bodyLength),
+    );
     const { recordBytes, minimumBodyBytes, maximumBodyBytes } = profile.ballot;
     const event = {
         kind: closeEventKind.held,
@@ -957,7 +957,7 @@ const deliverBallot = async (
         );
         if (
             submission === undefined ||
-            readUnsigned16(submission, envelopeAuthorOffset) !== author
+            readUnsigned16(submission, ballotEnvelopeOffset.author) !== author
         )
             continue;
         await deliverBody(session, relay, submission, candidate, 'body.bin');
@@ -1463,7 +1463,7 @@ const publishClosure = async (
         const submission = submissions.get(hexadecimal(identity))!;
         await publication.addRetainedFile(
             closureBodyFile(identity),
-            Number(readUnsigned64(submission, envelopeLengthOffset)),
+            Number(readUnsigned64(submission, ballotEnvelopeOffset.bodyLength)),
             async (accept) => {
                 await held(accept);
             },
@@ -1511,7 +1511,7 @@ const forwardListedBodies = async (
             throw new Error('The response lists an envelope not held.');
         await publication.addRetainedFile(
             closureBodyFile(identity),
-            Number(readUnsigned64(submission, envelopeLengthOffset)),
+            Number(readUnsigned64(submission, ballotEnvelopeOffset.bodyLength)),
             async (accept) => {
                 await held(accept);
             },

@@ -8,8 +8,8 @@ import {
     instantiateParticipantModule,
     requireInputCapacities,
 } from '#packages/sdk/src/participant/worker/participant-module.js';
-import { chunkBytes } from '#packages/sdk/src/participant/worker/root.js';
 import {
+    chunkBytes,
     readParticipantLimits,
     readParticipantProfile,
 } from '#packages/sdk/src/participant/worker/runtime-bounds.js';

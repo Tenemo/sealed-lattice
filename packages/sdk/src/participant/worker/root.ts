@@ -23,8 +23,11 @@ import {
 } from './root-generation.js';
 import type { ParticipantLimits } from './runtime-bounds.js';
 import {
+    chunkBytes,
     foregroundVisitMilliseconds,
     participantDataKindMaximums,
+    rootReferenceBytes,
+    tagBytes,
 } from './runtime-bounds.js';
 import { commitParticipantState } from './state-transaction.js';
 import {
@@ -43,8 +46,6 @@ import type { ParticipantHead } from './storage.js';
 // length-prefixed suffixes follow in a fixed order, each present from its
 // first generation: preparation, then ballot and close together, then target
 // signing, then release.
-export const chunkBytes = 1 << 20;
-const referenceBytes = 73;
 export const requiresFheKeySources = (generation: number) =>
     generation < rootGeneration.setupRetained;
 const dataKeyBytes = (generation: number) =>
@@ -128,7 +129,7 @@ export const rootBound = (context: ParticipantContext, generation: number) => {
 };
 
 const encodeReference = (reference: RecordReference) => {
-    const bytes = new Uint8Array(referenceBytes);
+    const bytes = new Uint8Array(rootReferenceBytes);
     const view = new DataView(bytes.buffer);
     view.setUint8(0, reference.kind);
     view.setUint32(1, reference.offset, true);
@@ -240,26 +241,26 @@ const decodeManifest = (
     const count = readUnsigned32(bytes, prefix - 4);
     if (
         count > limits.root.maximumRecords ||
-        bytes.length < prefix + referenceBytes * count
+        bytes.length < prefix + rootReferenceBytes * count
     )
         throw new Error('Invalid participant record inventory.');
     const references: RecordReference[] = [];
     for (let index = 0; index < count; index++) {
-        const start = prefix + referenceBytes * index;
+        const start = prefix + rootReferenceBytes * index;
         const view = new DataView(
             bytes.buffer,
             bytes.byteOffset + start,
-            referenceBytes,
+            rootReferenceBytes,
         );
         references.push({
             kind: view.getUint8(0),
             offset: view.getUint32(1, true),
             length: view.getUint32(5, true),
-            hash: bytes.slice(start + 9, start + referenceBytes),
+            hash: bytes.slice(start + 9, start + rootReferenceBytes),
         });
     }
     checkReferences(references, generation, limits);
-    let offset = prefix + referenceBytes * count;
+    let offset = prefix + rootReferenceBytes * count;
     const suffixes: Partial<Record<ManifestSuffix, Uint8Array>> = {};
     for (const name of presentSuffixes(generation)) {
         if (bytes.length - offset < 4)
@@ -521,7 +522,7 @@ export const commitRoot = async (
         transition.manifest,
         transition.generation,
     );
-    if (plaintext.length + 16 > rootBound(context, transition.generation))
+    if (plaintext.length + tagBytes > rootBound(context, transition.generation))
         throw new Error('The participant root exceeds its bound.');
     const key = await createRootKey();
     const sealed = await sealRoot(

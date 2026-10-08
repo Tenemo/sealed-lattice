@@ -5,7 +5,7 @@ import {
     ModuleFailure,
     ResourceFailure,
 } from '#packages/sdk/src/participant/worker/failures.js';
-import { chunkBytes } from '#packages/sdk/src/participant/worker/root.js';
+import { chunkBytes } from '#packages/sdk/src/participant/worker/runtime-bounds.js';
 import {
     evaluatedTargetName,
     namespacedName,

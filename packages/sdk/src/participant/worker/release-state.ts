@@ -10,7 +10,7 @@ import {
 import { completedClosePhase } from './close-state.js';
 import { operationSeedBytes } from './participant-module.js';
 import type { ParticipantStoredRecord } from './predecessor.js';
-import { recordKeyBytes, sealedLength } from './private-records.js';
+import { sealedLength } from './private-records.js';
 import type { RecordContext } from './private-records.js';
 import {
     isRootGeneration,
@@ -18,6 +18,7 @@ import {
     targetPhase,
 } from './root-generation.js';
 import type { ParticipantProfile } from './runtime-bounds.js';
+import { recordKeyBytes } from './runtime-bounds.js';
 import { ballotInclusions } from './target-state.js';
 import type { BallotInclusion } from './target-state.js';
 

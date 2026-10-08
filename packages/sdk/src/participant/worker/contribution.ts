@@ -35,7 +35,6 @@ import {
 } from './preparation-state.js';
 import {
     openSealedRecord,
-    recordKeyBytes,
     sealRecord,
     sealedLength,
 } from './private-records.js';
@@ -49,7 +48,6 @@ import type { PublicRelay } from './relay.js';
 import { rootGeneration } from './root-generation.js';
 import {
     authenticateRecords,
-    chunkBytes,
     commitRoot,
     dataKind,
     dataRecordInventory,
@@ -63,6 +61,14 @@ import {
 } from './roster.js';
 import type { VerifiedProposal } from './roster.js';
 import type { ParticipantProfile } from './runtime-bounds.js';
+import {
+    chunkBytes,
+    identityBytes,
+    privateEntryBytes,
+    publicEntryBytes,
+    recordKeyBytes,
+    signingEntryBytes,
+} from './runtime-bounds.js';
 import { decodeSignedPacket } from './signed-packet.js';
 import type { SignedPacket } from './signed-packet.js';
 import {
@@ -126,11 +132,6 @@ export const isContributionSession = (
     session: ParticipantSession,
 ): session is ContributionSession => session.state !== undefined;
 
-const publicEntryBytes = 2 + 4 + 4 + 32 + 64;
-const privateEntryBytes = 32 + 64;
-const signingEntryBytes = 2 + 4 + 32 + 64;
-
-const identityBytes = 64;
 // The sealed checkpoint bytes one write stores while the next are sealed.
 const checkpointWriteBytes = 4 << 20;
 

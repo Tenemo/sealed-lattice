@@ -8,7 +8,6 @@ import type { RestoredEnrollment } from '#packages/sdk/src/participant/worker/en
 import { custodyPurpose } from '#packages/sdk/src/participant/worker/identity.js';
 import { publishRegistrationRecords } from '#packages/sdk/src/participant/worker/registration-publication.js';
 import {
-    chunkBytes,
     createRootKey,
     dataKind,
     encodeManifest,
@@ -19,6 +18,7 @@ import type {
     AuthenticatedRoot,
     RecordReference,
 } from '#packages/sdk/src/participant/worker/root.js';
+import { chunkBytes } from '#packages/sdk/src/participant/worker/runtime-bounds.js';
 import { participantStores } from '#packages/sdk/src/participant/worker/storage.js';
 import type { ParticipantStore } from '#packages/sdk/src/participant/worker/storage.js';
 import { participantRelayFixture } from '#tests/participant-relay-fixture.js';
