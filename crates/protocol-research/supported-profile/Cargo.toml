@@ -1,12 +1,11 @@
 [package]
 name = "supported-profile"
-version = "0.0.0"
-edition = "2024"
-publish = false
-autobins = false
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
 
 [lib]
 crate-type = ["rlib"]
 
 [dev-dependencies]
-num-bigint = "=0.5.1"
+num-bigint.workspace = true

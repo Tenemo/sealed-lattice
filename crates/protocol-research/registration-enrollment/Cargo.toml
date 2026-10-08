@@ -1,10 +1,8 @@
 [package]
 name = "registration-enrollment"
-version = "0.0.0"
-edition = "2024"
-publish = false
-autobins = false
-
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
 
 [lib]
 crate-type = ["rlib", "cdylib"]
@@ -14,16 +12,16 @@ crate-type = ["rlib", "cdylib"]
 invalid-ballot = ["ballot-proof/invalid-ballot"]
 
 [dependencies]
-aes-gcm = { version = "=0.10.3", default-features = false, features = ["aes", "alloc", "zeroize"] }
-aes = { version = "=0.8.4", features = ["zeroize"] }
+aes-gcm = { workspace = true, features = ["aes", "alloc", "zeroize"] }
+aes = { workspace = true, features = ["zeroize"] }
 registration-credentials = { path = "../registration-credentials" }
 contribution-prover = { path = "../contribution-prover" }
 setup-witness = { path = "../setup-witness", features = ["custody"] }
 supported-profile = { path = "../supported-profile" }
-num-bigint = "=0.5.1"
+num-bigint.workspace = true
 # The contribution randomness streams hold secret sponge states.
-sha3 = { version = "=0.10.9", features = ["zeroize"] }
-zeroize = "=1.8.2"
+sha3 = { workspace = true, features = ["zeroize"] }
+zeroize.workspace = true
 ballot-proof = { path = "../ballot-proof" }
 ballot-encryption = { path = "../ballot-encryption" }
 setup-aggregate = { path = "../setup-aggregate" }
@@ -35,4 +33,4 @@ rns-arithmetic-probe = { path = "../rns-arithmetic-probe" }
 setup-stream-kernel = { path = "../setup-stream-kernel" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-getrandom = "=0.3.3"
+getrandom.workspace = true

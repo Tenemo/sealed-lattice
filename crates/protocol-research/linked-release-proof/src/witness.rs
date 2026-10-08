@@ -1,6 +1,5 @@
 use crate::{
     convolution::{multiply_digits, signed_digit},
-    parameters::*,
     statement::{
         self, DECODING_CARRY, DECODING_ERROR, DECODING_QUOTIENT, FIRST_RELEASE_CARRY, KEY_CARRY,
         KEY_ERROR, KEY_QUOTIENT, NOISE, PublicStatement, RELEASE_QUOTIENT, SHARE,
@@ -10,6 +9,7 @@ use num_bigint::{BigInt, Sign};
 use num_traits::{Signed, ToPrimitive};
 use supported_profile::{
     Profile, RECIPIENT_SECRET_SUPPORT, RELEASE_DECODING_LIMB_BITS, RELEASE_LIMB_BITS, SHARE_SCALE,
+    relation::*,
 };
 use zeroize::Zeroizing;
 

@@ -1,12 +1,12 @@
 use crate::{
     field::{self, Element, MODULUS, Transform, ZERO, base},
     jobs::{self, BaseValues, SecondValues},
-    parameters::*,
     rows::RowShards,
     tree::Tree,
 };
 use parallel_work::{Job, Part, Pipeline, Shared, Ticket, share, submit};
 use std::collections::VecDeque;
+use supported_profile::relation::*;
 use zeroize::{Zeroize, Zeroizing};
 
 pub fn random_base(count: usize) -> Vec<u128> {

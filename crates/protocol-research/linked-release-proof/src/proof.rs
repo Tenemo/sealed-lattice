@@ -1,4 +1,5 @@
-use crate::{PreparedRelease, parameters::*, statement::PublicStatement};
+use crate::{PreparedRelease, statement::PublicStatement};
+use supported_profile::relation::*;
 use word_proof::{one_shot::OneShotProof, oracles::Witness};
 
 /// Proves a prepared release, returning its public statement and proof.

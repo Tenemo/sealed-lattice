@@ -6,12 +6,12 @@ use crate::{
     field::{self, Element, MODULUS, Transform, ZERO, base},
     linear::LinearOracle,
     oracles::{self, FirstOracle, SecondOracle, Witness},
-    parameters::*,
     rows,
     sums::{self, Sums},
     transcript::challenge,
 };
 use parallel_work::{Job, Part, Shared, StreamedRecords, gather, share, submit};
+use supported_profile::relation::*;
 use zeroize::Zeroizing;
 
 /// Adds the terms of committed columns that only their own zero products

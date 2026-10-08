@@ -426,6 +426,7 @@ describe('source coefficient allocation comparison', () => {
         const [
             source,
             profile,
+            workspaceManifest,
             manifest,
             builder,
             toolchain,
@@ -435,6 +436,7 @@ describe('source coefficient allocation comparison', () => {
         ] = await Promise.all([
             read('crates/protocol-research/setup-witness/src/lib.rs'),
             read('crates/protocol-research/supported-profile/src/lib.rs'),
+            read('crates/protocol-research/Cargo.toml'),
             read('crates/protocol-research/setup-witness/Cargo.toml'),
             read('tools/ci/build-participant-module.ts'),
             read('tools/ci/rust-toolchain.ts'),
@@ -449,7 +451,8 @@ describe('source coefficient allocation comparison', () => {
         );
         expect(source).toContain('BigUint::new(words)');
         expect(profile).toContain('pub const FHE_LIMB_BITS: usize = 96;');
-        expect(manifest).toContain('num-bigint = "=0.5.1"');
+        expect(workspaceManifest).toContain('num-bigint = "=0.5.1"');
+        expect(manifest).toContain('num-bigint.workspace = true');
         expect(toolchain).toContain(
             "export const rustCompilerCommit = '59807616e1fa2540724bfbac14d7976d7e4a3860';",
         );

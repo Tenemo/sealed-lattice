@@ -76,14 +76,6 @@ pub fn authenticate(
     *hashed += read_chunks(&submission.body, |bytes| body.push(bytes).unwrap());
     body.finish().unwrap()
 }
-pub fn owner(
-    enrollment: &Enrollment,
-    poll: &VerifiedPoll,
-    setup: &VerifiedSetupAggregate,
-    position: usize,
-) -> RetainedBallotOwner {
-    owner_of(&enrollment.credential, poll, setup, position)
-}
 /// Every original participant's owner comes from its credential-authenticated
 /// reference to the certified selected setup.
 pub fn owner_of(
@@ -141,7 +133,7 @@ pub fn close_work(
 ) -> LoggedWork {
     LoggedWork {
         work: CloseWork::new(
-            owner(enrollment, poll, setup, position),
+            owner_of(&enrollment.credential, poll, setup, position),
             poll.clone(),
             setup.clone(),
         )
@@ -391,10 +383,6 @@ pub struct Equivocator {
     pub forks: [Credential; 3],
     pub restored: Credential,
 }
-/// Every original participant's enrollment.
-pub struct Participants<'a> {
-    pub enrollments: &'a mut crate::OriginalEnrollments,
-}
 /// Credentials restored from sealed capsules. The organizer's restored
 /// credential stays locked and only replays its completed messages.
 pub struct Restored {
@@ -414,13 +402,12 @@ pub fn run(
     output: &Path,
     poll: Arc<VerifiedPoll>,
     setup: Arc<VerifiedSetupAggregate>,
-    participants: Participants,
+    enrollments: &mut crate::OriginalEnrollments,
     submissions: &[Option<Submission>],
     restored: Restored,
     scenario: &Scenario,
 ) -> (VerifiedCloseBarrier, Option<Credential>) {
     let began = Instant::now();
-    let Participants { enrollments } = participants;
     let profile = scenario.profile();
     let count = enrollments.len();
     assert_eq!(count, profile.participants());
@@ -576,7 +563,7 @@ pub fn run(
     );
     // No attempt starts after the close intent, by either signing path.
     if let Some(&nonvoter) = scenario.nonvoters.first() {
-        let owner = owner(&enrollments[nonvoter], &poll, &setup, nonvoter);
+        let owner = owner_of(&enrollments[nonvoter].credential, &poll, &setup, nonvoter);
         assert!(matches!(
             enrollments[nonvoter]
                 .credential

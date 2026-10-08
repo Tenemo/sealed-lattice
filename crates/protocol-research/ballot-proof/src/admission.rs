@@ -1,6 +1,5 @@
 use crate::{
     CHUNK_LIMIT, Refusal, Verifier,
-    parameters::BALLOT_HEADER_BYTES,
     statement::{self, polynomial_bytes, setup_input},
     verifier,
 };
@@ -10,7 +9,7 @@ use registration_credentials::{
 };
 use setup_aggregate::verified::VerifiedSetupAggregate;
 use std::cell::RefCell;
-use supported_profile::Profile;
+use supported_profile::{Profile, relation::BALLOT_HEADER_BYTES};
 
 thread_local! {
     /// Each profile's fixed-input identities: FHE common, then the two

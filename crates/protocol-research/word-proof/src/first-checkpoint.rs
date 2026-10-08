@@ -2,14 +2,13 @@ use super::{Error, Phase, Prover};
 use crate::{
     field::{self, Element, MODULUS},
     oracles::{FirstOracle, Witness},
-    parameters::*,
     rows::RowShards,
     transcript::Transcript,
     tree::{SALT_SEED_BYTES, Tree},
 };
 use aes_gcm::{Aes256Gcm, KeyInit, Nonce, aead::AeadInPlace};
 use parallel_work::ProtocolHash;
-use supported_profile::Profile;
+use supported_profile::{Profile, relation::*};
 use zeroize::Zeroizing;
 
 /// The most plaintext bytes one record seals, the chunk bound of the

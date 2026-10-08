@@ -1,22 +1,20 @@
 [package]
 name = "word-proof"
-version = "0.0.0"
-edition = "2024"
-publish = false
-autobins = false
-
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
 
 [dependencies]
-sha3 = { version = "=0.10.9", features = ["zeroize"] }
-aes-gcm = { version = "=0.10.3", default-features = false, features = ["aes", "alloc", "zeroize"] }
-aes = { version = "=0.8.4", features = ["zeroize"] }
-zeroize = "=1.8.2"
+sha3 = { workspace = true, features = ["zeroize"] }
+aes-gcm = { workspace = true, features = ["aes", "alloc", "zeroize"] }
+aes = { workspace = true, features = ["zeroize"] }
+zeroize.workspace = true
 parallel-work = { path = "../parallel-work" }
 setup-stream-kernel = { path = "../setup-stream-kernel" }
 supported-profile = { path = "../supported-profile" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-getrandom = "=0.3.3"
+getrandom.workspace = true
 
 [features]
 # Test aids for the crates that prove with this engine: a replayed seed in

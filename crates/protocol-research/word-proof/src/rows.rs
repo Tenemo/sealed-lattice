@@ -10,7 +10,6 @@
 use crate::{
     field::{self, Element, Transform, ZERO, base},
     oracles::coset,
-    parameters::*,
     tree::{self, Tree},
 };
 use parallel_work::ProtocolHash;
@@ -19,6 +18,7 @@ use std::{
     cell::RefCell,
     collections::{BTreeMap, VecDeque},
 };
+use supported_profile::relation::*;
 use zeroize::Zeroizing;
 
 /// Opens a shard's rows from their salts.

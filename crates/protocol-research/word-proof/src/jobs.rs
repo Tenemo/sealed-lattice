@@ -10,10 +10,10 @@ use crate::{
         coset, extension_values_selected, masked_base_coefficients, masked_base_polynomial,
         masked_extension_coefficients_of,
     },
-    parameters::*,
     rows, sums, tree,
 };
 use parallel_work::{Job, StreamedRecords, gather};
+use supported_profile::relation::*;
 use zeroize::Zeroizing;
 
 /// A first-oracle base column's values at queried positions.

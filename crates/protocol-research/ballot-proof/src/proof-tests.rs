@@ -1,9 +1,6 @@
 use super::*;
-use crate::{
-    CHUNK_LIMIT, HEADER_LENGTH, parameters::ballot_relation, statement::tests::synthetic_ballot,
-    verifier,
-};
-use supported_profile::Profile;
+use crate::{CHUNK_LIMIT, HEADER_LENGTH, statement::tests::synthetic_ballot, verifier};
+use supported_profile::{Profile, relation::ballot_relation};
 
 fn verify(profile: Profile, role: &[u8], statement: &PublicStatement, proof: &[u8]) -> bool {
     let Ok(mut verifier) = verifier(profile, role, statement.digest(), &proof[..HEADER_LENGTH])

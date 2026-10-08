@@ -1,16 +1,15 @@
 [package]
 name = "registration-credentials"
-version = "0.0.0"
-edition = "2024"
-publish = false
-autobins = false
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
 
 [dependencies]
-aes-gcm = { version = "=0.10.3", default-features = false, features = ["aes", "alloc", "zeroize"] }
-aes = { version = "=0.8.4", features = ["zeroize"] }
-fips204 = { version = "=0.4.6", default-features = false, features = ["ml-dsa-65"] }
+aes-gcm = { workspace = true, features = ["aes", "alloc", "zeroize"] }
+aes = { workspace = true, features = ["zeroize"] }
+fips204 = { workspace = true, features = ["ml-dsa-65"] }
 parallel-work = { path = "../parallel-work" }
-sha3 = "=0.10.9"
+sha3.workspace = true
 unicode-normalization = "=0.1.25"
-zeroize = "=1.8.2"
+zeroize.workspace = true
 supported-profile = { path = "../supported-profile" }

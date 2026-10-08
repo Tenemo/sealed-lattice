@@ -1,10 +1,8 @@
 [package]
 name = "contribution-prover"
-version = "0.0.0"
-edition = "2024"
-publish = false
-autobins = false
-
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
 
 [lib]
 crate-type = ["rlib"]
@@ -15,6 +13,6 @@ registration-credentials = { path = "../registration-credentials" }
 setup-witness = { path = "../setup-witness" }
 supported-profile = { path = "../supported-profile" }
 word-proof = { path = "../word-proof" }
-num-bigint = "=0.5.1"
-num-traits = "=0.2.19"
-zeroize = "=1.8.2"
+num-bigint.workspace = true
+num-traits.workspace = true
+zeroize.workspace = true

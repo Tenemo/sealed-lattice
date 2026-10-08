@@ -19,6 +19,21 @@ members = [
 ]
 resolver = "3"
 
+[workspace.package]
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace.dependencies]
+aes = "=0.8.4"
+aes-gcm = { version = "=0.10.3", default-features = false }
+fips204 = { version = "=0.4.6", default-features = false }
+getrandom = "=0.3.3"
+num-bigint = "=0.5.1"
+num-traits = "=0.2.19"
+sha3 = "=0.10.9"
+zeroize = "=1.8.2"
+
 [profile.test]
 opt-level = 3
 overflow-checks = true

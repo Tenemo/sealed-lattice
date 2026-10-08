@@ -1,12 +1,12 @@
 use crate::{
     field::{self, Element, MODULUS, ONE, Transform, ZERO, base},
-    parameters::*,
     rows::{self, RowShards},
     sums::{self, ShardSums},
     tree::Tree,
 };
 use parallel_work::{Job, Part, Shared, Ticket, share, submit};
 use std::collections::VecDeque;
+use supported_profile::relation::*;
 use zeroize::{Zeroize, Zeroizing};
 
 // The jobs of the masked affine sum's values on the domain. A product's

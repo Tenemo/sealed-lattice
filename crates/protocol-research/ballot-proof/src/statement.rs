@@ -1,4 +1,3 @@
-use crate::parameters::*;
 use ballot_encryption::{
     encryption::{EncryptionWitness, LinkedBallotWitness, fhe_key_polynomial},
     packing::PackingMatrix,
@@ -8,16 +7,16 @@ use parallel_work::ProtocolHash;
 use parallel_work::{HashStream, Sponge};
 use setup_stream_kernel::PolynomialStream;
 pub use setup_stream_kernel::SetupStatementOutput as StatementOutput;
+use supported_profile::{
+    AUXILIARY_DEGREE, AUXILIARY_PLAINTEXT_MODULUS, FHE_LIMB_BITS, Family, PLAINTEXT_MODULUS,
+    Profile, SETUP_ERROR_BITS, WORD_BITS, auxiliary_modulus, relation::*,
+};
 use word_proof::{
     affine::{Operator, PublicColumn, Term},
     field::{self, Element, MODULUS, ONE, ZERO},
 };
 
 use std::collections::BTreeMap;
-use supported_profile::{
-    AUXILIARY_DEGREE, AUXILIARY_PLAINTEXT_MODULUS, FHE_LIMB_BITS, Family, PLAINTEXT_MODULUS,
-    Profile, SETUP_ERROR_BITS, WORD_BITS, auxiliary_modulus,
-};
 
 #[derive(Debug)]
 pub enum Error {

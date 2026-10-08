@@ -6,7 +6,6 @@ pub mod body;
 mod body_browser;
 pub mod columns;
 pub mod context;
-pub mod parameters;
 #[path = "private-ballot.rs"]
 pub mod private_ballot;
 pub mod proof;

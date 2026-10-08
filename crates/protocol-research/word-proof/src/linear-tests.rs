@@ -4,9 +4,9 @@ use crate::{
     field::{self, Element, MODULUS, Transform, ZERO},
     linear_oracle::{AffineValues, Public},
     oracles::{coset, extension_values},
-    parameters::*,
 };
 use parallel_work::share;
+use supported_profile::relation::*;
 use zeroize::Zeroizing;
 
 fn element(seed: usize) -> Element {

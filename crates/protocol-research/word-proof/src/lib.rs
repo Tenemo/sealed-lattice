@@ -19,7 +19,6 @@ mod linear_tests;
 #[path = "one-shot.rs"]
 pub mod one_shot;
 pub mod oracles;
-pub mod parameters;
 pub mod random;
 pub mod rows;
 pub mod sums;

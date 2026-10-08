@@ -1,8 +1,5 @@
 use crate::certification::VerifiedTargetCertificate;
-use linked_release_proof::{
-    parameters::{RELEASE_HEADER_BYTES, SYSTEMATIC},
-    statement::{self, PublicStatement},
-};
+use linked_release_proof::statement::{self, PublicStatement};
 use num_bigint::{BigInt, Sign};
 use registration_credentials::foundation::participant_identity::{
     ParticipantIdentity, derive_participant_identity,
@@ -10,7 +7,10 @@ use registration_credentials::foundation::participant_identity::{
 use registration_credentials::foundation::{CanonicalItem, CanonicalTuple};
 use setup_aggregate::VerifiedAggregatePolynomial;
 use std::sync::Arc;
-use supported_profile::{Profile, relation::release_coefficient_bytes};
+use supported_profile::{
+    Profile,
+    relation::{RELEASE_HEADER_BYTES, SYSTEMATIC, release_coefficient_bytes},
+};
 
 /// Canonical public role bytes; this encoding alone grants no release authority.
 fn encode_release_proof_role(

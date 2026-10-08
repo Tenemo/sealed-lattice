@@ -5,10 +5,10 @@ use crate::{
     fri::{self, Fri},
     linear_oracle::LinearOracle,
     oracles::{FirstOracle, SecondOracle, Witness},
-    parameters::*,
     transcript::{self, Transcript},
 };
 use std::io::Write;
+use supported_profile::relation::*;
 
 /// A proof of one statement that holds every oracle in memory, for the
 /// relations whose witness fits a single call.

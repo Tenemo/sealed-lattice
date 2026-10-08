@@ -1225,9 +1225,7 @@ fn main() {
         &output,
         poll,
         setup,
-        close::Participants {
-            enrollments: &mut enrollments,
-        },
+        &mut enrollments,
         &submissions,
         restored,
         &scenario,

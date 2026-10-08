@@ -1,13 +1,11 @@
-use crate::{
-    field::{Element, MODULUS, ZERO},
-    parameters::*,
-};
+use crate::field::{Element, MODULUS, ZERO};
 use parallel_work::ProtocolHash;
 use parallel_work::{HashStream, Sponge};
 use sha3::{
     Shake256,
     digest::{ExtendableOutput, Update, XofReader},
 };
+use supported_profile::relation::*;
 
 pub fn part(state: &mut ProtocolHash, bytes: &[u8]) {
     state.update((bytes.len() as u32).to_le_bytes());

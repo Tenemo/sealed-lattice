@@ -1,8 +1,8 @@
 [package]
 name = "ballot-proof"
-version = "0.0.0"
-edition = "2024"
-publish = false
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
 
 [lib]
 crate-type = ["rlib"]
@@ -16,9 +16,9 @@ ballot-encryption = { path = "../ballot-encryption" }
 setup-aggregate = { path = "../setup-aggregate" }
 registration-credentials = { path = "../registration-credentials" }
 setup-stream-kernel = { path = "../setup-stream-kernel" }
-num-bigint = "=0.5.1"
+num-bigint.workspace = true
 setup-witness = { path = "../setup-witness" }
-zeroize = "=1.8.2"
+zeroize.workspace = true
 parallel-work = { path = "../parallel-work" }
 supported-profile = { path = "../supported-profile" }
 word-proof = { path = "../word-proof" }

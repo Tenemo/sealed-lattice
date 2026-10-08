@@ -1,9 +1,9 @@
 use crate::{
     field::{self, Element, Transform, base},
-    parameters::*,
     transcript::{Transcript, challenge},
     tree::Tree,
 };
+use supported_profile::relation::*;
 use zeroize::{Zeroize, Zeroizing};
 
 pub struct Layer {

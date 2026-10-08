@@ -2,9 +2,9 @@ use crate::{
     field::{self, Element, ONE, ZERO},
     linear_oracle::{AffineValues, LinearOracle, Public},
     oracles::{FirstOracle, SecondOracle, Witness},
-    parameters::*,
 };
 use parallel_work::share;
+use supported_profile::relation::*;
 use zeroize::Zeroizing;
 
 /// A public polynomial of an affine operator: its values sit at every
