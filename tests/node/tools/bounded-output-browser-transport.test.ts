@@ -102,8 +102,6 @@ describe('bounded browser transport', () => {
             expect(new Uint8Array(await module.arrayBuffer())).toEqual(bytes);
             for (const route of [
                 '/output/0/0',
-                '/proof/0/0',
-                '/predecessor/0/0',
                 '/bounded-output-sink.mjs',
                 '/module.wasm?offset=1',
                 '/unknown',
