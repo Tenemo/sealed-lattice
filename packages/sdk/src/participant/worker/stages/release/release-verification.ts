@@ -8,7 +8,7 @@ import {
     readCandidateFile,
     scanCandidatesFairly,
     streamCandidateFile,
-} from '../../relay/relay.js';
+} from '../../relay/candidates.js';
 import type { PublicRelay } from '../../relay/relay.js';
 import {
     concatenate,

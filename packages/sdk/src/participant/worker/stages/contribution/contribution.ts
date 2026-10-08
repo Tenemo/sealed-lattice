@@ -20,13 +20,10 @@ import {
     recordKeyBytes,
     signingEntryBytes,
 } from '../../module/runtime-bounds.js';
+import { findCandidate, readCandidateFile } from '../../relay/candidates.js';
+import { publishOfferAnnouncement } from '../../relay/offer-discovery.js';
+import { createCandidatePublication } from '../../relay/publication.js';
 import type { PublicRelay } from '../../relay/relay.js';
-import {
-    createCandidatePublication,
-    findCandidate,
-    publishOfferAnnouncement,
-    readCandidateFile,
-} from '../../relay/relay.js';
 import {
     concatenate,
     encodeText,

@@ -3,13 +3,14 @@ import {
     readModuleMemory,
     writeBufferInput,
 } from '../../module/participant-module.js';
-import type { CandidateView, PublicRelay } from '../../relay/relay.js';
+import type { CandidateView } from '../../relay/candidates.js';
 import {
     findCandidate,
     readCandidateFile,
     readCandidates,
     streamCandidateFile,
-} from '../../relay/relay.js';
+} from '../../relay/candidates.js';
+import type { PublicRelay } from '../../relay/relay.js';
 import { concatenate, equalBytes, hexadecimal } from '../../shared/bytes.js';
 import { PublicInputFailure } from '../../shared/failures.js';
 import { ballotCandidateKey } from '../ballot/ballot.js';

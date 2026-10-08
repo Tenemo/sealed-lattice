@@ -1,5 +1,59 @@
 import { PublicInputFailure } from '../shared/failures.js';
 
+import { decodeDiscoveryPage, fillsDiscoveryPage } from './candidate-codec.js';
+import { postPublic, readBounded } from './relay.js';
+import type { PublicRelay } from './relay.js';
+
+// Discovery is an append-only list of untrusted body identities. Nobody can
+// erase an earlier announcement, and no announcement occupies a selected slot
+// until its signed body has passed the complete owning verifier.
+export const offerDiscoveryPageEntries = 64;
+
+export const publishOfferAnnouncement = (
+    relay: PublicRelay,
+    position: number,
+    bodyIdentity: Uint8Array,
+) => {
+    if (bodyIdentity.length !== 64)
+        throw new Error('An offer announcement must name one body identity.');
+    return postPublic(relay.base + 'offers/' + String(position), bodyIdentity);
+};
+
+export const readOfferAnnouncements = async (
+    relay: PublicRelay,
+    position: number,
+    offset: number,
+) => {
+    if (!Number.isSafeInteger(offset) || offset < 0)
+        throw new PublicInputFailure(
+            'The offer discovery cursor exceeds its bound.',
+        );
+    const bytes = await readBounded(
+        relay.base + 'offers/' + String(position) + '?offset=' + String(offset),
+        12 + offerDiscoveryPageEntries * 64,
+    );
+    let page;
+    try {
+        page = decodeDiscoveryPage(bytes, 64, offerDiscoveryPageEntries);
+    } catch (error) {
+        if (error instanceof RangeError)
+            throw new PublicInputFailure(
+                'The offer discovery page is malformed.',
+            );
+        throw error;
+    }
+    if (
+        !fillsDiscoveryPage(
+            page.entries.length,
+            page.total,
+            offset,
+            offerDiscoveryPageEntries,
+        )
+    )
+        throw new PublicInputFailure('The offer discovery page is malformed.');
+    return { total: page.total, identities: page.entries };
+};
+
 type OfferCandidate = Readonly<{
     position: number;
     identity: Uint8Array;

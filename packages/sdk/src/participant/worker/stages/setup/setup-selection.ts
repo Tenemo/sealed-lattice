@@ -3,11 +3,11 @@ import {
     readParticipantOutput,
     writeSetupInput,
 } from '../../module/participant-module.js';
-import { discoverContributionOffers } from '../../relay/offer-discovery.js';
 import {
-    createCandidatePublication,
+    discoverContributionOffers,
     readOfferAnnouncements,
-} from '../../relay/relay.js';
+} from '../../relay/offer-discovery.js';
+import { createCandidatePublication } from '../../relay/publication.js';
 import type { PublicRelay } from '../../relay/relay.js';
 import {
     concatenate,

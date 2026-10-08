@@ -7,7 +7,7 @@ import {
     writeSetupInput,
 } from '../../module/participant-module.js';
 import { readParticipantProfile } from '../../module/runtime-bounds.js';
-import type { CandidateView, PublicRelay } from '../../relay/relay.js';
+import type { CandidateView } from '../../relay/candidates.js';
 import {
     candidateLists,
     findCandidate,
@@ -15,7 +15,8 @@ import {
     readCandidates,
     scanCandidatesFairly,
     streamCandidateFile,
-} from '../../relay/relay.js';
+} from '../../relay/candidates.js';
+import type { PublicRelay } from '../../relay/relay.js';
 import {
     concatenate,
     equalBytes,

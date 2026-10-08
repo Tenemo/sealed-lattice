@@ -4,8 +4,8 @@ import {
     readModuleMemory,
     readParticipantOutput,
 } from '../../module/participant-module.js';
+import { createCandidatePublication } from '../../relay/publication.js';
 import type { PublicRelay } from '../../relay/relay.js';
-import { createCandidatePublication } from '../../relay/relay.js';
 import { equalBytes } from '../../shared/bytes.js';
 import { PublicInputFailure } from '../../shared/failures.js';
 import { openDelivery } from '../../storage/delivery.js';

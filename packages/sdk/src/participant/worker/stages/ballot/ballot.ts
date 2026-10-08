@@ -10,7 +10,7 @@ import {
     seededRandomness,
 } from '../../module/participant-module.js';
 import type { ParticipantProfile } from '../../module/runtime-bounds.js';
-import { createCandidatePublication } from '../../relay/relay.js';
+import { createCandidatePublication } from '../../relay/publication.js';
 import type { PublicRelay } from '../../relay/relay.js';
 import {
     concatenate,

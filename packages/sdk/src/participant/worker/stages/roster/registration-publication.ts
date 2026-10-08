@@ -1,5 +1,5 @@
 import type { ParticipantContext } from '../../module/context.js';
-import { createCandidatePublication } from '../../relay/relay.js';
+import { createCandidatePublication } from '../../relay/publication.js';
 import type { PublicRelay } from '../../relay/relay.js';
 import { hexadecimal } from '../../shared/bytes.js';
 import { openDelivery } from '../../storage/delivery.js';

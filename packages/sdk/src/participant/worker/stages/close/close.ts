@@ -2,15 +2,16 @@ import { writeModuleInput } from '../../module/context.js';
 import type { ParticipantProfileContext } from '../../module/context.js';
 import { readParticipantOutput } from '../../module/participant-module.js';
 import type { ParticipantProfile } from '../../module/runtime-bounds.js';
-import type { CandidateView, PublicRelay } from '../../relay/relay.js';
+import type { CandidateView } from '../../relay/candidates.js';
 import {
     candidateLists,
-    createCandidatePublication,
     readCandidateFile,
     readCandidates,
     scanCandidatesFairly,
     streamCandidateFile,
-} from '../../relay/relay.js';
+} from '../../relay/candidates.js';
+import { createCandidatePublication } from '../../relay/publication.js';
+import type { PublicRelay } from '../../relay/relay.js';
 import {
     concatenate,
     equalBytes,

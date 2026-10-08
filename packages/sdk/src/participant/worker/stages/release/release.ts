@@ -9,7 +9,7 @@ import {
     readParticipantOutput,
     seededRandomness,
 } from '../../module/participant-module.js';
-import { createCandidatePublication } from '../../relay/relay.js';
+import { createCandidatePublication } from '../../relay/publication.js';
 import type { PublicRelay } from '../../relay/relay.js';
 import {
     concatenate,

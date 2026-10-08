@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { scanCandidatesFairly } from '#packages/sdk/src/participant/worker/relay/relay.js';
+import { scanCandidatesFairly } from '#packages/sdk/src/participant/worker/relay/candidates.js';
 
 // Discovery lists of named candidates by author position, in position order.
 const lists = (entries: Record<number, readonly string[]>) =>

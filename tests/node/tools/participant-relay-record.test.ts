@@ -10,10 +10,10 @@ import {
     encodeCandidateManifest,
 } from '#packages/sdk/src/participant/worker/relay/candidate-codec.js';
 import {
-    createCandidatePublication,
     findCandidate,
     readCandidateFile,
-} from '#packages/sdk/src/participant/worker/relay/relay.js';
+} from '#packages/sdk/src/participant/worker/relay/candidates.js';
+import { createCandidatePublication } from '#packages/sdk/src/participant/worker/relay/publication.js';
 import { PublicInputFailure } from '#packages/sdk/src/participant/worker/shared/failures.js';
 import { guardDelivery } from '#packages/sdk/src/participant/worker/storage/delivery.js';
 import { serveParticipantCandidates } from '#tools/ci/participant-candidate-http.js';
