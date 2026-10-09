@@ -2,12 +2,18 @@ name: research
 
 on:
     pull_request:
+        # The runner, the models and SDK worker sources it imports, and the
+        # files that install and build them.
         paths:
             - .github/actions/**
             - .github/workflows/research.yml
+            - .nvmrc
             - crates/protocol-research/**
             - package.json
+            - packages/sdk/package.json
+            - packages/sdk/src/participant/worker/**
             - pnpm-lock.yaml
+            - pnpm-workspace.yaml
             - tests/*.ts
             - tools/ci/**
     push:
@@ -16,9 +22,13 @@ on:
         paths:
             - .github/actions/**
             - .github/workflows/research.yml
+            - .nvmrc
             - crates/protocol-research/**
             - package.json
+            - packages/sdk/package.json
+            - packages/sdk/src/participant/worker/**
             - pnpm-lock.yaml
+            - pnpm-workspace.yaml
             - tests/*.ts
             - tools/ci/**
     workflow_dispatch:
