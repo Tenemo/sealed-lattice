@@ -52,30 +52,28 @@ fn expected_coefficients(profile: Profile, order: &[usize], top_count: usize) ->
 
 /// Input p below the option count less one encrypts the rank powers of
 /// exponent p + 1; every other input encrypts zero and only enters the sum.
+/// Each input loads just before its use, so the program holds at most three
+/// values at once and never spills.
 fn program(profile: Profile, top_count: usize) -> Vec<u8> {
     let (participants, options) = (profile.participants(), profile.options());
-    let mut instructions = Vec::<[u32; 4]>::new();
-    for position in 0..participants {
-        instructions.push([0, u32::MAX, u32::MAX, position as u32]);
-    }
+    let mut instructions = vec![[0, u32::MAX, u32::MAX, (participants - 1) as u32]];
     let family = if top_count == options { 0 } else { top_count };
-    let mut sum = (participants - 1) as u32;
+    let mut sum = 0;
     for position in options - 1..participants - 1 {
-        let next = instructions.len() as u32;
-        instructions.push([1, sum, position as u32, 0]);
-        sum = next;
+        instructions.push([0, u32::MAX, u32::MAX, position as u32]);
+        instructions.push([1, sum, instructions.len() as u32 - 1, 0]);
+        sum = instructions.len() as u32 - 1;
     }
     for exponent in 1..options {
-        let weighted = instructions.len() as u32;
+        instructions.push([0, u32::MAX, u32::MAX, (exponent - 1) as u32]);
         instructions.push([
             4,
-            (exponent - 1) as u32,
+            instructions.len() as u32 - 1,
             u32::MAX,
             (options * family + exponent) as u32,
         ]);
-        let next = instructions.len() as u32;
-        instructions.push([1, sum, weighted, 0]);
-        sum = next;
+        instructions.push([1, sum, instructions.len() as u32 - 1, 0]);
+        sum = instructions.len() as u32 - 1;
     }
     instructions.push([5, sum, u32::MAX, 2 + family as u32]);
     let mut bytes = b"BRK1".to_vec();
