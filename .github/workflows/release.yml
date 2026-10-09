@@ -100,7 +100,7 @@ jobs:
               id: package
               env:
                   RELEASE_VERSION: ${{ steps.version.outputs.version }}
-              run: pnpm exec tsx ./tools/ci/verify-packed-package.ts --out "${RUNNER_TEMP}/verified-sealed-lattice-${RELEASE_VERSION}.tgz"
+              run: pnpm run smoke:pack:npm:built -- --out "${RUNNER_TEMP}/verified-sealed-lattice-${RELEASE_VERSION}.tgz"
 
             - name: Upload verification diagnostics
               if: ${{ always() }}

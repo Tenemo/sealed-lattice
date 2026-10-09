@@ -190,9 +190,8 @@ const buildLanes = (): {
             lane('Build workspace packages', 'build', ['run', 'build']),
             lane('Type-check workspace', 'tsc', ['run', 'tsc']),
             lane('Smoke npm package', 'smoke-pack-npm', [
-                'exec',
-                'tsx',
-                './tools/ci/verify-packed-package.ts',
+                'run',
+                'smoke:pack:npm:built',
             ]),
         ],
         parallel: [

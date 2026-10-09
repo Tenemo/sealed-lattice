@@ -33,7 +33,7 @@ jobs:
             - name: Verify reproducible build output
               run: pnpm run build:verify-reproducible
             - name: Smoke-test the packed npm package
-              run: pnpm exec tsx ./tools/ci/verify-packed-package.ts
+              run: pnpm run smoke:pack:npm:built
             - name: Lint workspace
               run: pnpm run lint
             - name: Type-check workspace
