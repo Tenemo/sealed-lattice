@@ -1,9 +1,9 @@
 use evaluation_target::release::ReleaseContext;
-use linked_release_proof::{proof::prove, statement::PublicStatement};
+use linked_release_proof::{ReleaseInputs, derive_bound, proof::prove, statement::PublicStatement};
 use protocol_foundations::{
     Credential, Error, ballot_authentication::RetainedBallotOwner, target_signing::TargetMessage,
 };
-use setup_witness::registration::RegistrationKey;
+use setup_witness::{contribution::common_share_polynomial, registration::RegistrationKey};
 use std::sync::Arc;
 use word_proof::one_shot::OneShotProof;
 
@@ -44,17 +44,26 @@ impl ReleaseWork {
         let setup = target.setup();
         let message = TargetMessage::parse(target.body(), setup.profile().participants())?;
         credential.begin_release(&self.owner, setup.roster(), &message)?;
-        let prepared = key
-            .prepare_release(
-                self.context.profile(),
-                *self.context.header(),
-                self.context.encrypted_constant().to_vec(),
-                self.context.encrypted_linear().to_vec(),
-                self.context.target_linear().to_vec(),
-            )
-            .map_err(|_| Error::Crypto)?;
-        let role = self.context.proof_role().map_err(|_| Error::Context)?;
-        let (statement, proof) = prove(&role, prepared);
+        // The key lends its secret only to the release's preparation and
+        // proof, which leave it with the public statement and proof alone.
+        let (statement, proof) = key
+            .lend_secret(|secret| {
+                let inputs = ReleaseInputs::new(
+                    self.context.profile(),
+                    common_share_polynomial(),
+                    key.public_key().to_vec(),
+                    self.context.encrypted_constant().to_vec(),
+                    self.context.encrypted_linear().to_vec(),
+                    self.context.target_linear().to_vec(),
+                    secret,
+                )
+                .map_err(|_| Error::Crypto)?;
+                let prepared =
+                    derive_bound(inputs, *self.context.header()).map_err(|_| Error::Crypto)?;
+                let role = self.context.proof_role().map_err(|_| Error::Context)?;
+                Ok(prove(&role, prepared))
+            })
+            .map_err(|_| Error::Crypto)??;
         let expected = self
             .context
             .statement(&statement.polynomials[5])

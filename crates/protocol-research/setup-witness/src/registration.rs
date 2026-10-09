@@ -1,5 +1,5 @@
 use super::*;
-use supported_profile::{RECIPIENT_SECRET_SUPPORT, relation::RELEASE_HEADER_BYTES, share_modulus};
+use supported_profile::{RECIPIENT_SECRET_SUPPORT, share_modulus};
 
 #[derive(Debug)]
 pub enum Error {
@@ -62,30 +62,20 @@ impl RegistrationKey {
     pub fn public_key(&self) -> &[BigInt] {
         &self.public
     }
-    /// Internal prover input preparation. Application-facing release is gated
-    /// by the enrollment layer's verified certificate and durable action root;
-    /// the private key is never exported through the worker interface.
-    pub fn prepare_release(
+    /// Lends the secret key, widened to the release prover's integers, to
+    /// `use_secret` once the key passes its retained-key check. The copy
+    /// zeroizes when dropped, and the release returns only its public
+    /// statement and proof. Application-facing release is gated by the
+    /// enrollment layer's verified certificate and durable action root; the
+    /// private key is never exported through the worker interface.
+    pub fn lend_secret<R>(
         &self,
-        profile: Profile,
-        header: [u8; RELEASE_HEADER_BYTES],
-        encrypted_constant: Vec<BigInt>,
-        encrypted_linear: Vec<BigInt>,
-        target_linear: Vec<BigInt>,
-    ) -> Result<linked_release_proof::PreparedRelease, Error> {
-        let common = contribution::common_share_polynomial();
-        let secret = Zeroizing::new(self.secret.iter().copied().map(i128::from).collect());
-        let inputs = linked_release_proof::ReleaseInputs::new(
-            profile,
-            common,
-            self.public.clone(),
-            encrypted_constant,
-            encrypted_linear,
-            target_linear,
-            secret,
-        )
-        .map_err(|_| Error::InvalidState)?;
-        linked_release_proof::derive_bound(inputs, header).map_err(|_| Error::InvalidState)
+        use_secret: impl FnOnce(Zeroizing<Vec<i128>>) -> R,
+    ) -> Result<R, Error> {
+        self.validate_retained()?;
+        Ok(use_secret(Zeroizing::new(
+            self.secret.iter().copied().map(i128::from).collect(),
+        )))
     }
     fn validate_retained(&self) -> Result<(), Error> {
         let public_modulus = integer(share_modulus());

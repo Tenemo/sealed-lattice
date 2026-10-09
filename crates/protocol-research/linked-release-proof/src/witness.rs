@@ -378,12 +378,5 @@ fn derive_inner(
 }
 
 #[cfg(test)]
-#[path = "../../setup-witness/src/common-polynomial.rs"]
-mod common_polynomial;
-#[cfg(test)]
-#[path = "../../setup-witness/src/gaussian.rs"]
-mod gaussian;
-
-#[cfg(test)]
 #[path = "witness-tests.rs"]
 pub(crate) mod tests;

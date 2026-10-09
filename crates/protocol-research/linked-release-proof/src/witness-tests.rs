@@ -19,7 +19,7 @@ impl Random {
     fn error(&mut self) -> i128 {
         let mut bytes = [0; 20];
         self.fill(&mut bytes);
-        gaussian::sample(&bytes)
+        setup_witness::gaussian::sample(&bytes)
     }
 }
 
@@ -28,12 +28,7 @@ impl Random {
 pub(crate) fn synthetic_release(profile: Profile) -> (PreparedRelease, Vec<BigInt>) {
     let mut random = Random::new();
     let modulus = statement::share_modulus();
-    let common = common_polynomial::public_polynomial(
-        "common-share",
-        SYSTEMATIC,
-        &modulus,
-        supported_profile::fixed_common_sample_bits(),
-    );
+    let common = setup_witness::contribution::common_share_polynomial();
     let secret = random.sparse(RECIPIENT_SECRET_SUPPORT);
     let digits = (8 * supported_profile::share_modulus().len()).div_ceil(RELEASE_LIMB_BITS);
     let private = Zeroizing::new(vec![secret.to_vec()]);
