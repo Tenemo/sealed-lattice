@@ -285,7 +285,6 @@ dependencies = [
  "contribution-prover",
  "encrypted-ranking",
  "evaluation-target",
- "getrandom",
  "num-bigint",
  "num-traits",
  "parallel-work",

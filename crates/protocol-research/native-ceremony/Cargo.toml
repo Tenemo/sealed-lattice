@@ -19,5 +19,4 @@ encrypted-ranking = { path = "../encrypted-ranking" }
 supported-profile = { path = "../supported-profile" }
 num-bigint.workspace = true
 num-traits.workspace = true
-getrandom.workspace = true
 zeroize.workspace = true

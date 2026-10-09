@@ -89,6 +89,18 @@ const workerTables = (texts: readonly string[]) =>
         ),
     );
 
+// The single match of a pattern across the texts.
+const onlyMatch = (texts: readonly string[], pattern: RegExp) => {
+    const matches = texts.flatMap((text) => [...text.matchAll(pattern)]);
+    expect(matches, pattern.source).toHaveLength(1);
+    return matches[0];
+};
+
+const camelCase = (name: string) =>
+    name
+        .toLowerCase()
+        .replace(/_(\w)/g, (_, letter: string) => letter.toUpperCase());
+
 describe('participant module operation codes', () => {
     it('gives every worker code table the names and codes of its module enum', async () => {
         const moduleTexts = await sourceTexts(
@@ -112,5 +124,43 @@ describe('participant module operation codes', () => {
                 operations.get(name) ?? moduleEnumCodes(moduleTexts, name),
             );
         }
+    });
+
+    it('stages every enrollment record under the worker data kind of its name', async () => {
+        const moduleTexts = await sourceTexts(
+            new URL('crates/protocol-research/', repositoryRoot),
+            '.rs',
+        );
+        const workerTexts = await sourceTexts(
+            new URL('packages/sdk/src/participant/worker/', repositoryRoot),
+            '.ts',
+        );
+        const moduleKinds = Object.fromEntries(
+            [
+                ...onlyMatch(
+                    moduleTexts,
+                    /pub mod data_kind \{([^}]*)\}/g,
+                )[1].matchAll(/pub const (\w+): u32 = (\d+);/g),
+            ].map((match) => [camelCase(match[1]), Number(match[2])]),
+        );
+        const workerKinds = bodyCodes(
+            onlyMatch(
+                workerTexts,
+                /^export const dataKind = \{([^}]*)\} as const;/gm,
+            )[1],
+            /^(\w+): (\d+)$/,
+        );
+        expect(Object.keys(moduleKinds).length).toBeGreaterThan(0);
+        for (const [name, kind] of Object.entries(moduleKinds))
+            expect(workerKinds[name], name).toBe(kind);
+        // The worker routes the staged capsule keys by their own kind, which
+        // no record shares.
+        const stagedDataKeys = Number(
+            onlyMatch(workerTexts, /const stagedDataKeys = (\d+);/g)[1],
+        );
+        expect(
+            Number(onlyMatch(moduleTexts, /const DATA_KEYS: u32 = (\d+);/g)[1]),
+        ).toBe(stagedDataKeys);
+        expect(Object.values(workerKinds)).not.toContain(stagedDataKeys);
     });
 });

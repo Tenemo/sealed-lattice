@@ -302,21 +302,20 @@ pub fn run(
     }
     let alternative = if endorsements.len() > quorum {
         Some(encode_certificate(&proposal, &endorsements[endorsements.len() - quorum..]).unwrap())
-    } else if let Some((position, mut credential)) = alternate_endorser {
-        // Only the declared corrupt participant forks its own signing state.
-        // The same q positions carry another valid signature realization.
-        let packet = credential
-            .endorse_selection(&roster, proposal.selection(), position)
-            .unwrap();
-        let mut alternative = endorsements[..quorum].to_vec();
-        let slot = alternative
-            .iter()
-            .position(|endorsement| endorsement.position() == position)
-            .unwrap();
-        alternative[slot] =
-            authenticate_endorsement(&roster, proposal.selection(), &packet).unwrap();
-        Some(encode_certificate(&proposal, &alternative).unwrap())
     } else {
+        if let Some((position, mut credential)) = alternate_endorser {
+            // Only the declared corrupt participant forks its own signing
+            // state, which replays its deterministic endorsement, so the
+            // same q positions carry no other certificate.
+            let packet = credential
+                .endorse_selection(&roster, proposal.selection(), position)
+                .unwrap();
+            let original = endorsements
+                .iter()
+                .find(|endorsement| endorsement.position() == position)
+                .unwrap();
+            assert_eq!(packet, original.packet());
+        }
         None
     };
     if let Some(alternative) = alternative {

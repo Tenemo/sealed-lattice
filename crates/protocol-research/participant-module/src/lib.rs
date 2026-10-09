@@ -131,6 +131,19 @@ pub fn key_associated(body_digest: [u8; 64]) -> Vec<u8> {
 /// the sources'.
 pub type DataKeys = Zeroizing<[u8; 96]>;
 
+/// The kinds of the records an enrollment stages, each of which the worker
+/// retains under the participant root's data kind of the same name.
+pub mod data_kind {
+    pub const PUBLIC_KEY: u32 = 0;
+    pub const HEADER: u32 = 1;
+    pub const SIGNATURE: u32 = 2;
+    pub const RECIPIENT_CAPSULE: u32 = 3;
+    pub const SIGNING_CAPSULE: u32 = 4;
+    pub const POLL_DEFINITION: u32 = 5;
+    pub const POLL_SIGNATURE: u32 = 6;
+    pub const SOURCE_CAPSULE: u32 = 11;
+}
+
 impl Enrollment {
     pub fn create_organizer(
         draft: protocol_foundations::poll::PollDraft,
@@ -178,7 +191,7 @@ impl Enrollment {
         let mut key = RegistrationKey::new();
         let public = key.public_key_bytes();
         let key_hash = ProtocolHash::digest(&public);
-        let mut key_output = RecordWriter::new(0, &mut output);
+        let mut key_output = RecordWriter::new(data_kind::PUBLIC_KEY, &mut output);
         key_output.write_all(&public).unwrap();
         key_output.flush().unwrap();
         drop(key_output);
@@ -202,11 +215,14 @@ impl Enrollment {
             .map_err(|_| Error::State)?;
         let sealed_credential = credential.seal_complete().map_err(|_| Error::State)?;
         for (kind, bytes) in [
-            (1, header.as_slice()),
-            (2, signature.as_slice()),
-            (3, sealed_key.bytes.as_slice()),
-            (4, sealed_credential.bytes.as_slice()),
-            (11, sealed_sources.bytes.as_slice()),
+            (data_kind::HEADER, header.as_slice()),
+            (data_kind::SIGNATURE, signature.as_slice()),
+            (data_kind::RECIPIENT_CAPSULE, sealed_key.bytes.as_slice()),
+            (
+                data_kind::SIGNING_CAPSULE,
+                sealed_credential.bytes.as_slice(),
+            ),
+            (data_kind::SOURCE_CAPSULE, sealed_sources.bytes.as_slice()),
         ] {
             output(kind, 0, bytes);
         }

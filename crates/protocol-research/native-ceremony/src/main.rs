@@ -12,7 +12,9 @@ mod scenario;
 mod selected_setup_completion;
 mod selection;
 use aggregate::{ballot_key, final_keys, polynomial_bytes};
-use participant_module::{Enrollment, ballot::BallotOperation, finality_work::OwnBallotInclusion};
+use participant_module::{
+    Enrollment, ballot::BallotOperation, data_kind, finality_work::OwnBallotInclusion,
+};
 use participants::OriginalEnrollments;
 use protocol_foundations::{
     RETAINED_TAG_BYTES, SIGNATURE_BYTES,
@@ -45,11 +47,6 @@ fn write(path: impl AsRef<Path>, bytes: &[u8]) {
     let mut output = public_output::PublicOutput::create(path).unwrap();
     output.write_all(bytes).unwrap();
     output.finish().unwrap();
-}
-fn random<const N: usize>() -> Zeroizing<[u8; N]> {
-    let mut bytes = Zeroizing::new([0; N]);
-    getrandom::fill(&mut *bytes).unwrap();
-    bytes
 }
 /// The public body file of each ballot source. The wrong-position source
 /// reuses position zero's body.
@@ -160,9 +157,7 @@ impl BallotInputs<'_> {
             .unwrap();
         }
         body.finish().unwrap();
-        let coins = random::<32>();
-        let signing = [envelope.bytes().as_slice(), coins.as_slice()].concat();
-        work.command(credential, BallotOperation::Sign, 0, &signing)
+        work.command(credential, BallotOperation::Sign, 0, envelope.bytes())
             .unwrap();
         let signature: [u8; SIGNATURE_BYTES] = work
             .command(credential, BallotOperation::Signature, 0, &[])
@@ -218,20 +213,34 @@ impl<'a> EnrollmentOutput<'a> {
         }
     }
     fn emit(&mut self, kind: u32, offset: usize, bytes: &[u8]) {
-        if kind < 3 {
-            let kind = kind as usize;
-            if kind >= 1 {
-                self.controls[kind - 1].extend(bytes);
-            }
-            assert_eq!(offset, self.offsets[kind]);
-            self.files[kind].write_all(bytes).unwrap();
-            self.offsets[kind] += bytes.len();
+        let file = match kind {
+            data_kind::PUBLIC_KEY => 0,
+            data_kind::HEADER => 1,
+            data_kind::SIGNATURE => 2,
+            _ => return,
+        };
+        if file >= 1 {
+            self.controls[file - 1].extend(bytes);
         }
+        assert_eq!(offset, self.offsets[file]);
+        self.files[file].write_all(bytes).unwrap();
+        self.offsets[file] += bytes.len();
     }
     fn finish(self) {
         for file in self.files {
             file.finish().unwrap();
         }
+    }
+}
+/// The position of an enrollment capsule's record in the order the
+/// restoration reads the capsules: the recipient key's, the credential's and
+/// the sources'.
+fn capsule_index(kind: u32) -> Option<usize> {
+    match kind {
+        data_kind::RECIPIENT_CAPSULE => Some(0),
+        data_kind::SIGNING_CAPSULE => Some(1),
+        data_kind::SOURCE_CAPSULE => Some(2),
+        _ => None,
     }
 }
 /// Arguments: the new output directory, the runtime identity file, the
@@ -304,16 +313,11 @@ fn main() {
     let (packet, organizer, organizer_keys) =
         Enrollment::create_organizer(draft, runtime, b"Organizer", |kind, offset, bytes| {
             organizer_output.emit(kind, offset, bytes);
-            if let Some(capsule) = match kind {
-                3 => Some(0),
-                4 => Some(1),
-                13 => Some(2),
-                _ => None,
-            } {
+            if let Some(capsule) = capsule_index(kind) {
                 assert_eq!(offset, enrollment_capsules[0][capsule].len());
                 enrollment_capsules[0][capsule].extend(bytes);
             }
-            if kind == 4 {
+            if kind == data_kind::SIGNING_CAPSULE {
                 assert_eq!(offset, signing_capsule.len());
                 signing_capsule.extend(bytes);
             }
@@ -346,16 +350,11 @@ fn main() {
             format!("Participant {position}").as_bytes(),
             |kind, offset, bytes| {
                 record_output.emit(kind, offset, bytes);
-                if let Some(capsule) = match kind {
-                    3 => Some(0),
-                    4 => Some(1),
-                    13 => Some(2),
-                    _ => None,
-                } {
+                if let Some(capsule) = capsule_index(kind) {
                     assert_eq!(offset, enrollment_capsules[position][capsule].len());
                     enrollment_capsules[position][capsule].extend(bytes);
                 }
-                if retained_corrupt_signer && kind == 4 {
+                if retained_corrupt_signer && kind == data_kind::SIGNING_CAPSULE {
                     assert_eq!(offset, corrupt_signing_capsule.len());
                     corrupt_signing_capsule.extend(bytes);
                 }
@@ -901,14 +900,12 @@ fn main() {
             .sign_retained_ballot_envelope(&owner, &envelope)
             .is_err()
     );
-    let coins = random::<32>();
-    let signing = [envelope.bytes().as_slice(), coins.as_slice()].concat();
     assert!(
         work.command(
             &mut enrollments[1].credential,
             BallotOperation::Sign,
             0,
-            &signing
+            envelope.bytes()
         )
         .is_err()
     );
@@ -916,7 +913,7 @@ fn main() {
         &mut enrollments[0].credential,
         BallotOperation::Sign,
         0,
-        &signing,
+        envelope.bytes(),
     )
     .unwrap();
     let signature: [u8; SIGNATURE_BYTES] = work
@@ -934,7 +931,7 @@ fn main() {
             &mut enrollments[0].credential,
             BallotOperation::Sign,
             0,
-            &signing
+            envelope.bytes()
         )
         .is_err()
     );
@@ -1027,7 +1024,12 @@ fn main() {
         // locked.
         assert!(
             restored_work
-                .command(&mut restored_credential, BallotOperation::Sign, 0, &signing)
+                .command(
+                    &mut restored_credential,
+                    BallotOperation::Sign,
+                    0,
+                    envelope.bytes(),
+                )
                 .is_err()
         );
     }

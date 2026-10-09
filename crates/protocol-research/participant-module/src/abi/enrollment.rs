@@ -1,7 +1,7 @@
 //! Enrollment: the organizer's poll, each role's credential and the restore
 //! of a retained credential.
 use super::SESSION;
-use crate::Enrollment;
+use crate::{Enrollment, data_kind};
 use protocol_foundations::SIGNATURE_BYTES;
 use protocol_foundations::foundation::{
     MAXIMUM_USERNAME_INGRESS_BYTES, RegistrationHeader, normalize_username,
@@ -164,8 +164,8 @@ pub extern "C" fn prepare_organizer(length: usize) -> u32 {
         else {
             return 1;
         };
-        staged_output(5, 0, &poll.body);
-        staged_output(6, 0, &poll.signature);
+        staged_output(data_kind::POLL_DEFINITION, 0, &poll.body);
+        staged_output(data_kind::POLL_SIGNATURE, 0, &poll.signature);
         staged_output(DATA_KEYS, 0, &*data_keys);
         state.poll_identity = poll.identity;
         state.enrollment = Some(enrollment);

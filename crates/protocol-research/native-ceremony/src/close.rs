@@ -214,14 +214,13 @@ pub fn replay(
         );
     }
 }
-/// Signs the prepared body after the root would have committed it and coins.
+/// Signs the prepared body after the root would have committed it.
 pub fn sign(
     work: &mut CloseWork,
     credential: &mut Credential,
     body: &[u8],
 ) -> Result<Vec<u8>, Error> {
-    let input = [body, crate::random::<32>().as_slice()].concat();
-    work.command(credential, CloseOperation::Sign, 0, &input)
+    work.command(credential, CloseOperation::Sign, 0, body)
 }
 pub fn now_milliseconds() -> u64 {
     std::time::SystemTime::now()
