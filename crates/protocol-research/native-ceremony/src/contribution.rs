@@ -143,7 +143,7 @@ pub fn generate(
     }
     generator.begin_shares(&mut output).unwrap();
     for (recipient, record) in roster.proposal().records().iter().enumerate() {
-        let values = recipient_key_values(record).unwrap();
+        let values = recipient_key_values(record);
         generator.share(recipient, &values, &mut output).unwrap();
     }
     generator.finish().unwrap();

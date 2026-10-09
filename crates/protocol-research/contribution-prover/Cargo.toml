@@ -14,5 +14,4 @@ setup-witness = { path = "../setup-witness" }
 supported-profile = { path = "../supported-profile" }
 word-proof = { path = "../word-proof" }
 num-bigint.workspace = true
-num-traits.workspace = true
 zeroize.workspace = true

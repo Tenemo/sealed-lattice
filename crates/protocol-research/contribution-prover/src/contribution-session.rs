@@ -1,7 +1,6 @@
 //! The participant's contribution proof: its generation from the verified
 //! proposal, its proof rounds and its sealed checkpoints.
 use num_bigint::{BigInt, Sign};
-use num_traits::Zero;
 use parallel_work::ProtocolHash;
 use parallel_work::{HashStream, Sponge, sealing};
 use protocol_foundations::{
@@ -14,7 +13,7 @@ use setup_witness::{
 };
 
 use std::sync::Arc;
-use supported_profile::{DEGREE, Profile, relation::setup_relation, share_modulus};
+use supported_profile::{Profile, relation::setup_relation, share_modulus};
 use word_proof::{
     bridge::{Prover, ProverStep, first_checkpoint},
     transcript::context_stream,
@@ -261,7 +260,7 @@ impl Work {
         if !self.shares_started || self.proof.is_some() {
             return Err(());
         }
-        let values = recipient_key_values(record).map_err(|_| ())?;
+        let values = recipient_key_values(record);
         self.generator
             .as_mut()
             .ok_or(())?
@@ -318,29 +317,22 @@ impl Work {
         }
     }
 }
-/// The share coefficients of a roster member's recipient key, once the key
-/// matches the hash its header commits and each coefficient is canonical: a
-/// sign byte of zero or one before a magnitude within half the share modulus,
-/// nonzero when negative.
-pub fn recipient_key_values(record: &VerifiedRegistration) -> Result<Vec<BigInt>, Refused> {
-    let key = record.public_key();
-    if ProtocolHash::digest(key) != record.header().recipient_key_hash {
-        return Err(Refused);
-    }
-    let half = BigInt::from_bytes_le(Sign::Plus, share_modulus()) >> 1usize;
-    let mut values = Vec::with_capacity(DEGREE);
-    for coefficient in key.chunks_exact(1 + share_modulus().len()) {
-        let magnitude = BigInt::from_bytes_le(Sign::Plus, &coefficient[1..]);
-        if coefficient[0] > 1 || magnitude > half || (coefficient[0] == 1 && magnitude.is_zero()) {
-            return Err(Refused);
-        }
-        values.push(if coefficient[0] == 1 {
-            -magnitude
-        } else {
-            magnitude
-        });
-    }
-    Ok(values)
+/// The share coefficients of a roster member's recipient key, whose committed
+/// hash and canonical coefficients its registration's verifier checked: a
+/// sign byte of zero or one before a magnitude within half the share modulus.
+pub fn recipient_key_values(record: &VerifiedRegistration) -> Vec<BigInt> {
+    record
+        .public_key()
+        .chunks_exact(1 + share_modulus().len())
+        .map(|coefficient| {
+            let magnitude = BigInt::from_bytes_le(Sign::Plus, &coefficient[1..]);
+            if coefficient[0] == 1 {
+                -magnitude
+            } else {
+                magnitude
+            }
+        })
+        .collect()
 }
 /// The participant's contribution proof, from the verified proposal or
 /// from an imported checkpoint. A failed proof step, a checkpoint record that

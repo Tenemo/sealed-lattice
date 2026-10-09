@@ -106,7 +106,6 @@ name = "contribution-prover"
 version = "0.0.0"
 dependencies = [
  "num-bigint",
- "num-traits",
  "parallel-work",
  "protocol-foundations",
  "setup-witness",
