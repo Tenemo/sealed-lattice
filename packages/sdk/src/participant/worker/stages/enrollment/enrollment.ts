@@ -42,16 +42,18 @@ import {
     rootGeneration,
     targetPhase,
 } from '../../storage/root-generation.js';
+import {
+    createRootKey,
+    rootAssociatedData,
+    sealRoot,
+} from '../../storage/root-sealing.js';
 import type { AuthenticatedRoot, RecordReference } from '../../storage/root.js';
 import {
     authenticateRoot,
-    createRootKey,
     dataKind,
     encodeManifest,
     readDataKind,
     requiresFheKeySources,
-    rootAssociatedData,
-    sealRoot,
 } from '../../storage/root.js';
 import { commitParticipantState } from '../../storage/state-transaction.js';
 import { unusedPreparationPurposes } from '../contribution/preparation-state.js';

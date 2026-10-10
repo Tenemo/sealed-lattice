@@ -13,10 +13,12 @@ import { participantStores } from '#packages/sdk/src/participant/worker/storage/
 import type { ParticipantStore } from '#packages/sdk/src/participant/worker/storage/database.js';
 import {
     createRootKey,
-    dataKind,
-    encodeManifest,
     rootAssociatedData,
     sealRoot,
+} from '#packages/sdk/src/participant/worker/storage/root-sealing.js';
+import {
+    dataKind,
+    encodeManifest,
 } from '#packages/sdk/src/participant/worker/storage/root.js';
 import type {
     AuthenticatedRoot,

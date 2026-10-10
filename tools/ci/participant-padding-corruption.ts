@@ -31,11 +31,11 @@ import {
     openRecord,
     sealRecord,
 } from '#packages/sdk/src/participant/worker/storage/private-records.js';
+import { rootAssociatedData } from '#packages/sdk/src/participant/worker/storage/root-sealing.js';
 import {
     authenticateRoot,
     commitRoot,
     dataRecordInventory,
-    rootAssociatedData,
 } from '#packages/sdk/src/participant/worker/storage/root.js';
 import { commitParticipantState } from '#packages/sdk/src/participant/worker/storage/state-transaction.js';
 

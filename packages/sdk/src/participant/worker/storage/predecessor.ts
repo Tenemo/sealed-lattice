@@ -1,3 +1,12 @@
+import {
+    identityBytes,
+    recordKeyBytes,
+    tagBytes,
+} from '../module/runtime-bounds.js';
+import { equalBytes, hexadecimal } from '../shared/bytes.js';
+
+import { openSealedRecord } from './private-records.js';
+import { openRoot } from './root-sealing.js';
 import type { ParticipantTransactionReader } from './state-transaction.js';
 
 // A required record is authenticated either by the key the worker sealed it
@@ -55,13 +64,6 @@ export async function validateParticipantPredecessor(
         identities: ParticipantIdentities;
     }>,
 ): Promise<void> {
-    const equal = (left: Uint8Array, right: Uint8Array) =>
-        left.length === right.length &&
-        left.every((value, index) => value === right[index]);
-    const hexadecimal = (bytes: Uint8Array) =>
-        Array.from(bytes, (value) => value.toString(16).padStart(2, '0')).join(
-            '',
-        );
     // The root nonce is the generation as a 96-bit big-endian counter, so it
     // never repeats under one root key.
     if (
@@ -89,10 +91,11 @@ export async function validateParticipantPredecessor(
             record.byteLength > maximumListedRecordBytes ||
             (record.identity === undefined) ===
                 (record.encryption === undefined) ||
-            (record.identity !== undefined && record.identity.length !== 64) ||
+            (record.identity !== undefined &&
+                record.identity.length !== identityBytes) ||
             (record.encryption !== undefined &&
-                (record.encryption.key.length !== 32 ||
-                    record.byteLength <= 16)) ||
+                (record.encryption.key.length !== recordKeyBytes ||
+                    record.byteLength <= tagBytes)) ||
             (encryptionKey !== undefined && encryptionKeys.has(encryptionKey))
         )
             throw new Error('Invalid predecessor record description.');
@@ -146,24 +149,14 @@ export async function validateParticipantPredecessor(
         hexadecimal(await expected.identities.root(root)) !== expected.head.hash
     )
         throw new Error('Participant predecessor authority changed.');
-    const nonce = new Uint8Array(12);
-    new DataView(nonce.buffer).setBigUint64(
-        4,
-        BigInt(expected.head.generation),
-    );
-    const manifest = new Uint8Array(
-        await crypto.subtle.decrypt(
-            {
-                name: 'AES-GCM',
-                iv: nonce,
-                additionalData: new Uint8Array(expected.rootContext),
-            },
-            key,
-            new Uint8Array(root),
-        ),
+    const manifest = await openRoot(
+        key,
+        expected.head.generation,
+        expected.rootContext,
+        root,
     );
     try {
-        if (!equal(manifest, expected.manifest))
+        if (!equalBytes(manifest, expected.manifest))
             throw new Error('Participant predecessor plaintext changed.');
     } finally {
         manifest.fill(0);
@@ -175,31 +168,17 @@ export async function validateParticipantPredecessor(
         const bytes = new Uint8Array(await blob.arrayBuffer());
         try {
             const { encryption, identity } = record;
-            if (encryption !== undefined) {
-                const recordKey = await crypto.subtle.importKey(
-                    'raw',
-                    new Uint8Array(encryption.key),
-                    'AES-GCM',
-                    false,
-                    ['decrypt'],
-                );
-                const plaintext = new Uint8Array(
-                    await crypto.subtle.decrypt(
-                        {
-                            name: 'AES-GCM',
-                            iv: new Uint8Array(12),
-                            additionalData: new Uint8Array(
-                                encryption.additionalData,
-                            ),
-                        },
-                        recordKey,
+            if (encryption !== undefined)
+                (
+                    await openSealedRecord(
+                        encryption.key,
+                        encryption.additionalData,
                         bytes,
-                    ),
-                );
-                plaintext.fill(0);
-            } else if (
+                    )
+                ).fill(0);
+            else if (
                 identity === undefined ||
-                !equal(await expected.identities.record(bytes), identity)
+                !equalBytes(await expected.identities.record(bytes), identity)
             )
                 throw new Error('Predecessor record bytes changed.');
         } finally {

@@ -9,7 +9,7 @@ import {
     snapshotParticipant,
 } from './database.js';
 import type { ParticipantHead, ParticipantStore } from './database.js';
-import { openRoot, rootAssociatedData } from './root.js';
+import { openRoot, rootAssociatedData } from './root-sealing.js';
 import type { AuthenticatedRoot } from './root.js';
 
 // Delivery of a completed message's retained, already signed parts. The

@@ -14,7 +14,7 @@ import type { RetainedAuthority } from '#packages/sdk/src/participant/worker/sto
 import {
     createRootKey,
     sealRoot,
-} from '#packages/sdk/src/participant/worker/storage/root.js';
+} from '#packages/sdk/src/participant/worker/storage/root-sealing.js';
 
 const databases: IDBDatabase[] = [];
 const namespaces: string[] = [];

@@ -27,7 +27,7 @@ import {
 import {
     openRoot,
     rootAssociatedData,
-} from '#packages/sdk/src/participant/worker/storage/root.js';
+} from '#packages/sdk/src/participant/worker/storage/root-sealing.js';
 
 const databases: IDBDatabase[] = [];
 const compiledModule = await WebAssembly.compile(

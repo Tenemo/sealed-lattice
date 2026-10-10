@@ -21,12 +21,14 @@ import type { ParticipantStore } from '#packages/sdk/src/participant/worker/stor
 import type { ParticipantStoredRecord } from '#packages/sdk/src/participant/worker/storage/predecessor.js';
 import { sealRecord } from '#packages/sdk/src/participant/worker/storage/private-records.js';
 import {
-    commitRoot,
     createRootKey,
-    encodeManifest,
     openRoot,
     rootAssociatedData,
     sealRoot,
+} from '#packages/sdk/src/participant/worker/storage/root-sealing.js';
+import {
+    commitRoot,
+    encodeManifest,
 } from '#packages/sdk/src/participant/worker/storage/root.js';
 import type {
     AuthenticatedRoot,
