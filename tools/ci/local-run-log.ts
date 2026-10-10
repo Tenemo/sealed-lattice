@@ -49,6 +49,7 @@ type LocalRunLogInput = {
     readonly environment?: NodeJS.ProcessEnv;
     readonly lanes: readonly string[];
     readonly now?: Date;
+    readonly repositoryDirectoryPath?: string;
     readonly resourceSampleIntervalMilliseconds?: number;
     readonly rootDirectoryPath?: string;
     readonly scriptName: string;
@@ -56,6 +57,7 @@ type LocalRunLogInput = {
 
 type RepositorySnapshot = {
     readonly commitHash: string;
+    readonly statusLines: readonly string[];
     readonly treeDirty: boolean;
 };
 
@@ -84,6 +86,8 @@ const repositoryRootDirectoryPath = path.resolve(
     '..',
 );
 const defaultResourceSampleIntervalMilliseconds = 15_000;
+const workingTreeDiffByteLimit = 16 * 1024 * 1024;
+const workingTreeChangesFileName = 'working-tree.diff';
 
 // A run's binary artifacts, such as protocol records, proofs, relay state and
 // runtime modules, lie outside its diagnostics, under `temp/run-artifacts/`
@@ -154,32 +158,89 @@ const pathExists = async (filePath: string): Promise<boolean> => {
 const currentProcessExitCode = (): number =>
     typeof process.exitCode === 'number' ? process.exitCode : 0;
 
-const readRepositorySnapshot = (): RepositorySnapshot => ({
-    commitHash: execFileSync(
+const readRepositorySnapshot = (
+    repositoryDirectoryPath: string,
+): RepositorySnapshot => {
+    const statusLines = execFileSync(
         'git',
-        ['rev-parse', '--verify', 'HEAD^{commit}'],
+        [
+            'status',
+            '--porcelain=v1',
+            '--untracked-files=normal',
+            '--ignore-submodules=none',
+        ],
         {
-            cwd: repositoryRootDirectoryPath,
+            cwd: repositoryDirectoryPath,
             encoding: 'utf8',
             windowsHide: true,
         },
-    ).trim(),
-    treeDirty:
-        execFileSync(
+    )
+        .split(/\r?\n/u)
+        .filter((line) => line.length > 0);
+    return {
+        commitHash: execFileSync(
             'git',
-            [
-                'status',
-                '--porcelain=v1',
-                '--untracked-files=normal',
-                '--ignore-submodules=none',
-            ],
+            ['rev-parse', '--verify', 'HEAD^{commit}'],
             {
-                cwd: repositoryRootDirectoryPath,
+                cwd: repositoryDirectoryPath,
                 encoding: 'utf8',
                 windowsHide: true,
             },
-        ).length > 0,
-});
+        ).trim(),
+        statusLines,
+        treeDirty: statusLines.length > 0,
+    };
+};
+
+// A dirty tree's changes against its commit, so a run's sources can be
+// reconstructed: the tracked changes as a patch, and untracked files by name
+// alone, never by contents.
+const writeWorkingTreeChanges = async (
+    runDirectoryPath: string,
+    repositoryDirectoryPath: string,
+    snapshot: RepositorySnapshot,
+): Promise<void> => {
+    const untracked = snapshot.statusLines
+        .filter((line) => line.startsWith('?? '))
+        .map((line) => line.slice(3));
+    let trackedChanges: string;
+    try {
+        trackedChanges = execFileSync(
+            'git',
+            ['diff', 'HEAD', '--no-color', '--no-ext-diff', '--no-textconv'],
+            {
+                cwd: repositoryDirectoryPath,
+                encoding: 'utf8',
+                maxBuffer: workingTreeDiffByteLimit,
+                windowsHide: true,
+            },
+        );
+    } catch (error) {
+        if (
+            !(error instanceof Error) ||
+            !('code' in error) ||
+            error.code !== 'ENOBUFS'
+        )
+            throw error;
+        trackedChanges = `# The tracked changes exceed ${String(workingTreeDiffByteLimit)} bytes and are not recorded.\n`;
+    }
+    await writeFile(
+        path.join(runDirectoryPath, workingTreeChangesFileName),
+        [
+            `# Changes against ${snapshot.commitHash} when the run started.`,
+            ...(untracked.length === 0
+                ? []
+                : [
+                      '# Untracked files, whose contents are not recorded:',
+                      ...untracked.map((name) => `#   ${name}`),
+                  ]),
+            ...trackedChanges
+                .split(/\r?\n/u)
+                .map((line) => redactDiagnosticText(line)),
+        ].join('\n'),
+        { encoding: 'utf8', flag: 'wx' },
+    );
+};
 
 const safeSlug = (value: string): string =>
     value
@@ -414,6 +475,11 @@ class LocalRunLog implements ActiveLocalRunLog {
                     `Script: ${this.#scriptName}`,
                     `Repository commit: ${this.#repositorySnapshot.commitHash}`,
                     `Repository tree dirty: ${String(this.#repositorySnapshot.treeDirty)}`,
+                    ...(this.#repositorySnapshot.treeDirty
+                        ? [
+                              `Working-tree changes: ${path.join(this.runDirectoryPath, workingTreeChangesFileName)}`,
+                          ]
+                        : []),
                     `Started: ${this.#startedAtIso}`,
                     `Finished: ${summary.finishedAtIso}`,
                     `Runtime: ${durationMilliseconds} ms`,
@@ -483,11 +549,20 @@ class LocalRunLog implements ActiveLocalRunLog {
         ) {
             this.#flushOutputRemainders(event.commandId);
             this.#activeCommandIds.delete(event.commandId);
+            // A command stopped for a sibling's failure did not fail itself;
+            // one stopped at its lane's limit did.
+            const terminationReason = event.details?.terminationReason;
+            const exceededLimit =
+                typeof terminationReason === 'object' &&
+                terminationReason !== null &&
+                'classification' in terminationReason &&
+                terminationReason.classification === 'lane-timeout';
             if (
                 event.eventType === 'command-spawn-failed' ||
                 (typeof event.details?.exitCode === 'number' &&
                     event.details.exitCode !== 0 &&
-                    event.details.terminationRequested !== true)
+                    (event.details.terminationRequested !== true ||
+                        exceededLimit))
             ) {
                 this.#failedCommandId ??= event.commandId;
             }
@@ -651,13 +726,20 @@ export const createLocalRunLog = async (
 ): Promise<ActiveLocalRunLog> => {
     const startedAtMilliseconds = performance.now();
     const startedAt = input.now ?? new Date();
-    const repositorySnapshot = readRepositorySnapshot();
+    const repositoryDirectoryPath =
+        input.repositoryDirectoryPath ?? repositoryRootDirectoryPath;
+    const repositorySnapshot = readRepositorySnapshot(repositoryDirectoryPath);
     const runDirectoryPath = await allocateRunDirectory(
-        input.rootDirectoryPath ??
-            path.join(repositoryRootDirectoryPath, 'logs'),
+        input.rootDirectoryPath ?? path.join(repositoryDirectoryPath, 'logs'),
         startedAt,
         input.scriptName,
     );
+    if (repositorySnapshot.treeDirty)
+        await writeWorkingTreeChanges(
+            runDirectoryPath,
+            repositoryDirectoryPath,
+            repositorySnapshot,
+        );
     const environment = input.environment ?? process.env;
     await writeJsonDurably(path.join(runDirectoryPath, 'metadata.json'), {
         architecture: os.arch(),

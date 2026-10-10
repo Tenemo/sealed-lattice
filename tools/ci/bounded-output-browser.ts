@@ -12,17 +12,9 @@ import { launchChromeParticipant } from '#tools/ci/participant-runtime-chrome.js
 import type { ChromeParticipant } from '#tools/ci/participant-runtime-chrome.js';
 import { guardProcessTreeMemory } from '#tools/ci/process-tree-memory.js';
 
-export const boundedBrowserSources = [
-    'tools/ci/bounded-output-browser.ts',
-    'tools/ci/bounded-output-browser-transport.mjs',
-    'tools/ci/bounded-output-browser-worker.mjs',
-    'tools/ci/bounded-output-browser-sink.ts',
-    'tools/ci/bounded-output-sink.mjs',
-    'tools/ci/bounded-output.mjs',
-    'tools/ci/scalar-module.mjs',
-    'tools/ci/fhe-key-source-scalar.mjs',
-    'tools/ci/participant-runtime-chrome.ts',
-];
+// The worker the screen page starts, whose imports the page serves.
+export const boundedBrowserWorker =
+    'tools/ci/bounded-output-browser-worker.mjs';
 
 type OutputTarget = {
     file: string;

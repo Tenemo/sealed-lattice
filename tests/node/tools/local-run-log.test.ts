@@ -60,6 +60,50 @@ const withTemporaryLogRoot = async <Result>(
     }
 };
 
+// A repository with one committed file, outside any other repository.
+const withTemporaryRepository = async <Result>(
+    action: (repositoryDirectoryPath: string) => Promise<Result>,
+): Promise<Result> => {
+    const repositoryDirectoryPath = await mkdtemp(
+        path.join(os.tmpdir(), 'sealed-lattice-local-run-repository-'),
+    );
+    try {
+        const git = (commandArguments: readonly string[]) => {
+            const result = spawnSync(
+                'git',
+                [
+                    '-c',
+                    'user.name=Run log test',
+                    '-c',
+                    'user.email=run-log-test@example.com',
+                    '-c',
+                    'commit.gpgsign=false',
+                    '-c',
+                    'core.autocrlf=false',
+                    ...commandArguments,
+                ],
+                {
+                    cwd: repositoryDirectoryPath,
+                    encoding: 'utf8',
+                    windowsHide: true,
+                },
+            );
+            if (result.status !== 0)
+                throw new Error(`Git command failed: ${result.stderr}`);
+        };
+        git(['init', '--quiet']);
+        await writeFile(
+            path.join(repositoryDirectoryPath, 'tracked.txt'),
+            'committed line\n',
+        );
+        git(['add', 'tracked.txt']);
+        git(['commit', '--quiet', '--message', 'Add the tracked file']);
+        return await action(repositoryDirectoryPath);
+    } finally {
+        await rm(repositoryDirectoryPath, { force: true, recursive: true });
+    }
+};
+
 const readJsonLines = async (
     filePath: string,
 ): Promise<Record<string, unknown>[]> =>
@@ -694,4 +738,106 @@ describe('local run logs', () => {
                 )?.details,
             ).toMatchObject({ count: 1, paths: ['proof.bin'], unmoved: [] });
         }));
+
+    it('gives each run that starts at the same moment its own directory', () =>
+        withTemporaryLogRoot(async (rootDirectoryPath) => {
+            const now = new Date('2026-10-10T12:00:00.000Z');
+            const logs = [];
+            for (let index = 0; index < 3; index += 1) {
+                logs.push(
+                    await createLocalRunLog({
+                        commandLineArguments: [],
+                        lanes: ['sample'],
+                        now,
+                        rootDirectoryPath,
+                        scriptName: 'same moment',
+                    }),
+                );
+            }
+            for (const log of logs) await log.finish({ exitCode: 0 });
+
+            expect(
+                logs.map((log) => path.basename(log.runDirectoryPath)),
+            ).toEqual([
+                '2026-10-10T12-00-00.000Z-same-moment',
+                '2026-10-10T12-00-00.000Z-same-moment-2',
+                '2026-10-10T12-00-00.000Z-same-moment-3',
+            ]);
+            for (const log of logs) {
+                const metadata = JSON.parse(
+                    await readFile(
+                        path.join(log.runDirectoryPath, 'metadata.json'),
+                        'utf8',
+                    ),
+                ) as Record<string, unknown>;
+                expect(metadata.runDirectoryPath).toBe(log.runDirectoryPath);
+            }
+        }));
+
+    it('records the tracked changes and untracked names of a dirty tree, never untracked contents', () =>
+        withTemporaryRepository(async (repositoryDirectoryPath) => {
+            await writeFile(
+                path.join(repositoryDirectoryPath, 'tracked.txt'),
+                'changed line\n',
+            );
+            await writeFile(
+                path.join(repositoryDirectoryPath, 'untracked-notes.txt'),
+                'untracked contents\n',
+            );
+            await withTemporaryLogRoot(async (rootDirectoryPath) => {
+                const log = await createLocalRunLog({
+                    commandLineArguments: [],
+                    lanes: ['sample'],
+                    repositoryDirectoryPath,
+                    rootDirectoryPath,
+                    scriptName: 'dirty tree',
+                });
+                await log.finish({ exitCode: 0 });
+
+                const changes = await readFile(
+                    path.join(log.runDirectoryPath, 'working-tree.diff'),
+                    'utf8',
+                );
+                expect(changes).toContain('-committed line');
+                expect(changes).toContain('+changed line');
+                expect(changes).toContain('#   untracked-notes.txt');
+                expect(changes).not.toContain('untracked contents');
+                const summary = JSON.parse(
+                    await readFile(
+                        path.join(log.runDirectoryPath, 'summary.json'),
+                        'utf8',
+                    ),
+                ) as Record<string, unknown>;
+                expect(summary.repositoryTreeDirty).toBe(true);
+                expect(changes).toContain(
+                    `# Changes against ${String(summary.repositoryCommitHash)} when the run started.`,
+                );
+                await expect(
+                    readFile(
+                        path.join(log.runDirectoryPath, 'diagnostics.txt'),
+                        'utf8',
+                    ),
+                ).resolves.toContain('Working-tree changes: ');
+            });
+        }));
+
+    it('records no working-tree changes for a clean tree', () =>
+        withTemporaryRepository(async (repositoryDirectoryPath) =>
+            withTemporaryLogRoot(async (rootDirectoryPath) => {
+                const log = await createLocalRunLog({
+                    commandLineArguments: [],
+                    lanes: ['sample'],
+                    repositoryDirectoryPath,
+                    rootDirectoryPath,
+                    scriptName: 'clean tree',
+                });
+                await log.finish({ exitCode: 0 });
+
+                await expect(
+                    access(
+                        path.join(log.runDirectoryPath, 'working-tree.diff'),
+                    ),
+                ).rejects.toMatchObject({ code: 'ENOENT' });
+            }),
+        ));
 });

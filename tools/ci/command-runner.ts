@@ -96,6 +96,10 @@ type CommandTerminationReasonDiagnostic =
           classification: 'sibling-abort';
           initiator: string;
       }>
+    | Readonly<{
+          classification: 'lane-timeout';
+          limitMilliseconds: number;
+      }>
     | ReturnType<typeof serializeErrorDiagnostic>;
 
 const serializeCommandTerminationReason = (
@@ -110,6 +114,15 @@ const serializeCommandTerminationReason = (
             return {
                 classification: 'sibling-abort',
                 initiator: redactDiagnosticText(reasonRecord.initiator),
+            };
+        }
+        if (
+            reasonRecord.classification === 'lane-timeout' &&
+            typeof reasonRecord.limitMilliseconds === 'number'
+        ) {
+            return {
+                classification: 'lane-timeout',
+                limitMilliseconds: reasonRecord.limitMilliseconds,
             };
         }
     }

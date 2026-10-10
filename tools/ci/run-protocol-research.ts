@@ -28,6 +28,7 @@ import {
     runCommandsInSeries,
 } from '#tools/ci/command-runner.js';
 import { snapshotResearchSources } from '#tools/ci/fixture-sources.js';
+import { importClosure } from '#tools/ci/import-closure.js';
 import { runWithLocalRunLog } from '#tools/ci/local-run-log.js';
 import { guardProcessTreeMemory } from '#tools/ci/process-tree-memory.js';
 import { acquireProtocolResearchLock } from '#tools/ci/protocol-research-lock.js';
@@ -362,17 +363,19 @@ await runWithLocalRunLog(
                 ) + '\n',
                 { flag: 'wx' },
             );
-            const sources = await snapshotResearchSources(log, root, [
-                'tools/ci/fixture-sources.ts',
-            ]);
+            // The research crates and every repository file the runner
+            // imports.
+            const sources = await snapshotResearchSources(
+                log,
+                root,
+                await importClosure(
+                    ['tools/ci/run-protocol-research.ts'],
+                    root,
+                ),
+            );
             await writeFile(
                 path.join(log.runDirectoryPath, 'source-manifest.json'),
                 JSON.stringify({ compiler, sources }, null, 2) + '\n',
-                { flag: 'wx' },
-            );
-            await writeFile(
-                path.join(log.runDirectoryPath, 'runner.ts'),
-                await readFile(import.meta.filename),
                 { flag: 'wx' },
             );
             // Every workspace member.

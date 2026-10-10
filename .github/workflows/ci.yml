@@ -15,10 +15,10 @@ concurrency:
     cancel-in-progress: true
 
 jobs:
-    routine:
-        name: static, Node, and browser
+    check:
+        name: Desktop check
         runs-on: ubuntu-24.04
-        timeout-minutes: 135
+        timeout-minutes: 60
         steps:
             - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
               with:
@@ -27,63 +27,24 @@ jobs:
             - uses: ./.github/actions/participant-toolchain
             - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
               with:
-                  workspaces: crates/protocol-research -> ../../target/participant-module
-            - name: Build workspace packages
-              run: pnpm run build
-            - name: Verify reproducible build output
-              run: pnpm run build:verify-reproducible
-            - name: Smoke-test the packed npm package
-              run: pnpm run smoke:pack:npm:built
-            - name: Lint workspace
-              run: pnpm run lint
-            - name: Type-check workspace
-              run: pnpm run tsc
-            - name: Scan for unused code
-              run: pnpm exec knip
-            - name: Run Node tests against the built workspace
-              timeout-minutes: 90
-              run: pnpm run test:node:built
+                  workspaces: |
+                      crates/protocol-research -> ../../target/participant-module
+                      crates/protocol-research
             - name: Install Chromium
               run: pnpm exec playwright install --with-deps chromium
-            - name: Run Chromium tests against the built workspace
-              timeout-minutes: 55
-              run: pnpm run test:browser:built
-            - name: Upload routine diagnostics
+            # The local check graph with its lane limits, annotations and step
+            # summary: build, type check, packed-package smoke test, lint,
+            # Rust, unused-code scan, Node tests and Chromium tests.
+            - name: Run the desktop check
+              run: pnpm run check:desktop
+            - name: Verify reproducible build output
+              run: pnpm run build:verify-reproducible
+            - name: Upload check diagnostics
               if: ${{ failure() }}
               uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
               with:
                   if-no-files-found: warn
-                  name: routine-logs-${{ github.run_id }}-${{ github.run_attempt }}
-                  path: logs
-
-    rust-fast:
-        name: rust fast
-        runs-on: ubuntu-24.04
-        timeout-minutes: 135
-        steps:
-            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
-              with:
-                  persist-credentials: false
-            - uses: ./.github/actions/bootstrap-pnpm
-            - uses: ./.github/actions/participant-toolchain
-            - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
-              with:
-                  workspaces: crates/protocol-research
-            - run: cargo +1.95.0 fmt --manifest-path crates/protocol-research/Cargo.toml --all -- --check
-            - run: cargo +1.95.0 clippy --manifest-path crates/protocol-research/Cargo.toml --offline --locked --no-default-features --workspace --all-targets -- -D warnings
-            - run: cargo +1.95.0 clippy --manifest-path crates/protocol-research/Cargo.toml --offline --locked -p participant-module --lib --target wasm32-unknown-unknown -- -D warnings
-            - run: cargo +1.95.0 clippy --manifest-path crates/protocol-research/Cargo.toml --offline --locked -p participant-module --lib --target wasm32-unknown-unknown --features invalid-ballot -- -D warnings
-            - run: cargo +1.95.0 clippy --manifest-path crates/protocol-research/Cargo.toml --offline --locked --no-default-features -p encrypted-ranking --features numerical-probes --all-targets -- -D warnings
-            - run: cargo +1.95.0 clippy --manifest-path crates/protocol-research/Cargo.toml --offline --locked --no-default-features -p setup-witness --features key-source-screen --all-targets -- -D warnings
-            - name: Run fast Rust tests
-              timeout-minutes: 110
-              run: pnpm run test:rust:fast
-            - name: Upload Rust diagnostics
-              if: ${{ failure() }}
-              uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-              with:
-                  if-no-files-found: warn
-                  name: rust-fast-logs-${{ github.run_id }}-${{ github.run_attempt }}
+                  name: check-logs-${{ github.run_id }}-${{ github.run_attempt }}
                   path: logs
 
     verify:
@@ -91,11 +52,10 @@ jobs:
         runs-on: ubuntu-24.04
         timeout-minutes: 5
         needs:
-            - routine
-            - rust-fast
+            - check
         if: ${{ always() }}
         steps:
             - name: Refuse failed or unexpected job states
-              if: ${{ needs.routine.result != 'success' || needs.rust-fast.result != 'success' }}
+              if: ${{ needs.check.result != 'success' }}
               run: exit 1
             - run: echo "Verify jobs passed."

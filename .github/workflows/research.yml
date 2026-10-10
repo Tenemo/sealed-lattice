@@ -42,9 +42,9 @@ concurrency:
 
 jobs:
     research:
-        name: protocol research ${{ matrix.case }}
+        name: Protocol research ${{ matrix.case }}
         runs-on: ubuntu-24.04
-        timeout-minutes: 90
+        timeout-minutes: 60
         strategy:
             fail-fast: false
             # Every case first runs the pinned build check, and the native

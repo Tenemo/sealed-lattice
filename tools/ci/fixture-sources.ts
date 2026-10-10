@@ -44,6 +44,34 @@ const snapshotFixtureFiles = async (
     return sources;
 };
 
+// Copies repository files into the run's sources once each. A file that
+// another step of the run already copied there must hold the same bytes.
+export const snapshotRunSources = async (
+    log: ActiveLocalRunLog,
+    root: string,
+    files: readonly string[],
+): Promise<void> => {
+    for (const file of files) {
+        const bytes = await readFile(path.join(root, file));
+        const destination = path.join(log.runDirectoryPath, 'sources', file);
+        await mkdir(path.dirname(destination), { recursive: true });
+        try {
+            await writeFile(destination, bytes, { flag: 'wx' });
+        } catch (error) {
+            if (
+                !(error instanceof Error) ||
+                !('code' in error) ||
+                error.code !== 'EEXIST'
+            )
+                throw error;
+            assert.ok(
+                bytes.equals(await readFile(destination)),
+                'A run source changed between its snapshots: ' + file,
+            );
+        }
+    }
+};
+
 // The pre-build archive also contains uncompiled files; only the compiler's
 // recorded closure below can admit shared inputs to a later consuming run.
 export const snapshotResearchSources = async (

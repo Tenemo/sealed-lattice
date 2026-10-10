@@ -5,7 +5,7 @@ import path from 'node:path';
 
 import { compileFheKeySourceScreenResources } from '#tests/fhe-key-source-resource-model.js';
 import {
-    boundedBrowserSources,
+    boundedBrowserWorker,
     runFheKeySourceInChrome,
 } from '#tools/ci/bounded-output-browser.js';
 import { participantLinearMemoryBytes } from '#tools/ci/build-participant-module.js';
@@ -25,6 +25,7 @@ import {
     fileDigest,
     snapshotResearchSources,
 } from '#tools/ci/fixture-sources.js';
+import { importClosure } from '#tools/ci/import-closure.js';
 import { runWithLocalRunLog } from '#tools/ci/local-run-log.js';
 import { acquireProtocolResearchLock } from '#tools/ci/protocol-research-lock.js';
 import { runGuardedFixture } from '#tools/ci/run-guarded-fixture.js';
@@ -44,20 +45,12 @@ const screenKind = 'fhe-key-source';
 const packageName = 'setup-witness';
 const binaryName = 'screen-fhe-key-source';
 const features = ['--features', 'key-source-screen'];
-const sourcesForHost = [
-    'tools/ci/run-fhe-key-source-screen.ts',
-    'tools/ci/fhe-key-source-report.ts',
-    'tests/fhe-key-source-resource-model.ts',
-    'tools/ci/fixture-sources.ts',
-    'tools/ci/protocol-research-registry.ts',
-    'tools/ci/run-guarded-fixture.ts',
-    'tools/ci/native-operation-guard.ts',
-    'tools/ci/scalar-fixture-build.ts',
-    'tools/ci/compiled-inputs.ts',
-    'tools/ci/rust-toolchain.ts',
+// The research runner that starts the screen, the worker thread the screen
+// starts and the browser worker it serves, which only their paths reach.
+const hostEntries = [
+    'tools/ci/run-protocol-research.ts',
     'tools/ci/bounded-output-worker.mjs',
-    'tools/ci/process-gates.mjs',
-    ...boundedBrowserSources,
+    boundedBrowserWorker,
 ];
 
 export const runFheKeySourceScreen = async (
@@ -157,6 +150,7 @@ export const runFheKeySourceScreen = async (
                         ) + '\n',
                         { flag: 'wx' },
                     );
+                const sourcesForHost = await importClosure(hostEntries, root);
                 const snapshot = await snapshotResearchSources(
                     log,
                     root,

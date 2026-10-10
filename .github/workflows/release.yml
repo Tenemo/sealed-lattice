@@ -23,9 +23,9 @@ concurrency:
 
 jobs:
     verify:
-        name: verify source and package
+        name: Verify source and package
         runs-on: ubuntu-24.04
-        timeout-minutes: 120
+        timeout-minutes: 60
         outputs:
             tag: ${{ steps.version.outputs.tag }}
             version: ${{ steps.version.outputs.version }}
@@ -111,7 +111,7 @@ jobs:
                   path: logs
 
     push:
-        name: push release commit and tag
+        name: Push release commit and tag
         needs: verify
         runs-on: ubuntu-24.04
         timeout-minutes: 10
@@ -164,12 +164,12 @@ jobs:
                   echo "sha=$(git rev-parse HEAD)" >> "${GITHUB_OUTPUT}"
 
     package:
-        name: build exact tag package
+        name: Build exact tag package
         needs:
             - verify
             - push
         runs-on: ubuntu-24.04
-        timeout-minutes: 60
+        timeout-minutes: 30
         outputs:
             integrity: ${{ steps.package.outputs.integrity }}
         steps:
@@ -223,7 +223,7 @@ jobs:
                   path: logs
 
     publish-npm:
-        name: publish npm package
+        name: Publish npm package
         needs:
             - verify
             - package
@@ -277,7 +277,7 @@ jobs:
               run: npm publish "${PACKAGE_TARBALL_PATH}" --access public --ignore-scripts --provenance --tag latest
 
     create-release:
-        name: create GitHub release
+        name: Create GitHub release
         needs:
             - verify
             - push

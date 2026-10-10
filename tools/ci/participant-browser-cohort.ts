@@ -21,6 +21,8 @@ import { compileOperationProofDraws } from '#tests/operation-seed-model.js';
 import { compileParticipantRuntimeProfile } from '#tests/participant-runtime-bounds-model.js';
 import { deriveSupportedProfile } from '#tests/supported-profile-model.js';
 import { sampleFileAllocation } from '#tools/ci/file-allocation.js';
+import { snapshotRunSources } from '#tools/ci/fixture-sources.js';
+import { importClosure } from '#tools/ci/import-closure.js';
 import type { ActiveLocalRunLog } from '#tools/ci/local-run-log.js';
 import {
     scheduleParticipantDepartures,
@@ -378,38 +380,16 @@ export const openParticipantCohort = async (
     const proofDraws = compileOperationProofDraws(
         deriveSupportedProfile(participantCount, optionCount),
     );
-    for (const file of [
-        'tools/ci/run-participant-browser.ts',
-        'tools/ci/participant-browser-cohort.ts',
-        'tools/ci/participant-browser-relay.ts',
-        'tools/ci/participant-browser-public-records.ts',
-        'tools/ci/participant-browser-roster-completion.ts',
-        'tools/ci/participant-browser-single-roster.ts',
-        'tools/ci/participant-browser-two-rosters.ts',
-        'tools/ci/participant-browser-fault-schedule.ts',
-        'tools/ci/participant-browser-options.ts',
-        'tools/ci/participant-workflow-measurements.ts',
-        'tests/setup-selection-model.ts',
-        'tests/threshold-completion-model.ts',
-        'tools/ci/participant-padding-halt.ts',
-        'tools/ci/participant-relay-record.ts',
-        'tools/ci/participant-offer-announcements.ts',
-        ...(mode === 'preparation' || unselectedCheckpoint
-            ? [
-                  'tools/ci/participant-padding-corruption.ts',
-                  'tools/ci/participant-preparation-storage.ts',
-              ]
-            : []),
-    ]) {
-        const runnerSnapshot = path.join(log.runDirectoryPath, 'sources', file);
-        await mkdir(path.dirname(runnerSnapshot), { recursive: true });
-        await writeFile(runnerSnapshot, await readFile(file), {
-            flag: 'wx',
-        });
-    }
     const { runtime, invalidBallotClient } = await assembleParticipantRuntime(
         log,
         invalidAuthor !== undefined,
+    );
+    // The runner's own sources, every repository file it imports, beside the
+    // runtime sources the assembly recorded.
+    await snapshotRunSources(
+        log,
+        root,
+        await importClosure(['tools/ci/run-participant-browser.ts'], root),
     );
     const paddingClients =
         mode === 'preparation'
