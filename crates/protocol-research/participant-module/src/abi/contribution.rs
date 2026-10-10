@@ -1,6 +1,7 @@
 //! The contribution: its offer signing, its proof and checkpoints, and the
 //! retained proposal it names.
-use super::{SESSION, Session, emitted_packet, original_context};
+use super::{SESSION, Session, original_context};
+use crate::signed_packet;
 use contribution_prover::contribution_session::{CONTRIBUTION_INPUT_BYTES, ContributionSession};
 use protocol_foundations::roster::RetainedContributionContext;
 use std::cell::RefCell;
@@ -84,7 +85,7 @@ fn offer_operation(
             let credential = &mut state.enrollment.as_mut().ok_or(Error::Context)?.credential;
             state.offer.sign(credential)?;
             let (envelope, signature) = state.offer.offer().ok_or(Error::Consumed)?;
-            state.contribution_output = emitted_packet(envelope.bytes(), signature);
+            state.contribution_output = signed_packet::encode(envelope.bytes(), signature);
         }
         None => return Err(Error::Shape),
     }

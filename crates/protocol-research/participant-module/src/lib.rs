@@ -13,6 +13,9 @@ pub mod ballot;
 pub mod close_work;
 #[path = "custody-identity.rs"]
 pub mod custody_identity;
+#[cfg(any(target_arch = "wasm32", test))]
+#[path = "enrollment-input.rs"]
+mod enrollment_input;
 #[path = "fhe-sources.rs"]
 mod fhe_sources;
 #[path = "finality-work.rs"]
@@ -40,6 +43,9 @@ mod registration_fixture;
 mod registration_session_tests;
 #[path = "release-work.rs"]
 pub mod release_work;
+#[cfg(any(target_arch = "wasm32", test))]
+#[path = "signed-packet.rs"]
+mod signed_packet;
 
 #[cfg(target_arch = "wasm32")]
 mod abi;

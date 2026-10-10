@@ -72,7 +72,7 @@ struct Session {
     ballot: Option<crate::ballot::BallotWork>,
     close: Option<crate::close_work::CloseWork>,
     finality: Option<crate::finality_work::FinalityWork>,
-    release: Option<release::ReleaseState>,
+    release: Option<crate::release_work::ReleaseBody>,
     // A retained evaluated target the host streams in, and its length.
     evaluation: Option<(usize, Vec<u8>)>,
 }
@@ -112,23 +112,6 @@ pub extern "C" fn input_capacity() -> usize {
 #[unsafe(no_mangle)]
 pub extern "C" fn poll_identity_pointer() -> usize {
     SESSION.with(|state| state.borrow().poll_identity.as_ptr() as usize)
-}
-
-fn signed_packet(bytes: &[u8]) -> Option<(&[u8], &[u8])> {
-    let length = u32::from_le_bytes(bytes.get(..4)?.try_into().ok()?) as usize;
-    if length > protocol_foundations::setup_selection::MAXIMUM_SELECTION_BYTES
-        || bytes.len() != 4 + length + SIGNATURE_BYTES
-    {
-        return None;
-    }
-    Some((&bytes[4..4 + length], &bytes[4 + length..]))
-}
-
-fn emitted_packet(body: &[u8], signature: &[u8]) -> Vec<u8> {
-    let mut output = Vec::from((body.len() as u32).to_le_bytes());
-    output.extend(body);
-    output.extend(signature);
-    output
 }
 
 fn original_context(

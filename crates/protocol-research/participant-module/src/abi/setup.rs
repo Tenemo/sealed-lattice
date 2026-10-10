@@ -1,8 +1,7 @@
 //! The setup: the participant's selection signatures, the retained selection
 //! inputs and setup, and the retirement of the contribution sources.
-use super::{SESSION, Session, emitted_packet, original_context, signed_packet};
-use crate::offer_signing::OfferSigning;
-use protocol_foundations::SIGNATURE_BYTES;
+use super::{SESSION, Session, original_context};
+use crate::{offer_signing::OfferSigning, signed_packet};
 use zeroize::{Zeroize, Zeroizing};
 
 protocol_foundations::operation_codes! {
@@ -57,7 +56,7 @@ fn selection_operation(
                 .ok_or(Error::Context)?
                 .credential
                 .sign_selection_proposal(&roster, selection)?;
-            state.contribution_output = emitted_packet(selection.body(), &signature);
+            state.contribution_output = signed_packet::encode(selection.body(), &signature);
         }
         Some(SelectionOperation::Endorse | SelectionOperation::EndorsementBody) => {
             let inputs = super::setup_verification::selection_inputs().ok_or(Error::Context)?;
@@ -83,7 +82,7 @@ fn selection_operation(
             };
         }
         Some(SelectionOperation::RestoreProposal) => {
-            let (body, signature) = signed_packet(&input).ok_or(Error::Shape)?;
+            let (body, signature) = signed_packet::selection(&input).ok_or(Error::Shape)?;
             let proposal = setup_selection::authenticate_selection(roster, body, signature)?;
             state
                 .enrollment
@@ -93,22 +92,14 @@ fn selection_operation(
                 .restore_selection_proposal(&proposal)?;
         }
         Some(SelectionOperation::RestoreEndorsement) => {
-            let prefix = input.get(..4).ok_or(Error::Shape)?;
-            let length = u32::from_le_bytes(prefix.try_into().unwrap()) as usize;
-            if length > setup_selection::MAXIMUM_SELECTION_BYTES
-                || input.len() != 4 + length + SIGNATURE_BYTES + setup_selection::ENDORSEMENT_BYTES
-            {
-                return Err(Error::Shape);
-            }
-            let proposal = setup_selection::authenticate_selection(
-                roster.clone(),
-                &input[4..4 + length],
-                &input[4 + length..4 + length + SIGNATURE_BYTES],
-            )?;
+            let (body, signature, endorsement) =
+                signed_packet::endorsed_selection(&input).ok_or(Error::Shape)?;
+            let proposal =
+                setup_selection::authenticate_selection(roster.clone(), body, signature)?;
             let endorsement = setup_selection::authenticate_endorsement(
                 &roster,
                 proposal.selection(),
-                &input[4 + length + SIGNATURE_BYTES..],
+                endorsement,
             )?;
             state
                 .enrollment

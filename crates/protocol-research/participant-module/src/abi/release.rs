@@ -1,36 +1,11 @@
 use super::{SESSION, Session};
-use evaluation_target::release_body::{ReleaseBodyVerifier, VerifiedReleaseBody};
+use crate::release_work::{ReleaseBody, ReleaseWork};
 use protocol_foundations::{
     Error,
-    release_signing::{
-        RELEASE_BODY_HEADER_BYTES, RELEASE_ENVELOPE_BYTES, ReleaseEnvelope, body_header,
-    },
+    release_signing::{ReleaseEnvelope, body_header},
     target_signing::TargetMessage,
 };
 use zeroize::{Zeroize, Zeroizing};
-
-/// The largest slice of a release body that one call reads, imports or
-/// verifies.
-const RELEASE_CHUNK_BYTES: usize = 1 << 20;
-
-pub(super) struct ReleaseState {
-    body: Vec<u8>,
-    envelope: ReleaseEnvelope,
-    verified: Option<VerifiedReleaseBody>,
-    import_closed: bool,
-}
-
-fn verify_body(
-    context: std::sync::Arc<evaluation_target::release::ReleaseContext>,
-    body: &[u8],
-) -> Result<VerifiedReleaseBody, Error> {
-    let header = body.get(..RELEASE_BODY_HEADER_BYTES).ok_or(Error::Shape)?;
-    let mut verifier = ReleaseBodyVerifier::new(context, header).map_err(|_| Error::Crypto)?;
-    for chunk in body[RELEASE_BODY_HEADER_BYTES..].chunks(RELEASE_CHUNK_BYTES) {
-        verifier.push(chunk).map_err(|_| Error::Crypto)?;
-    }
-    verifier.finish().map_err(|_| Error::Crypto)
-}
 
 protocol_foundations::operation_codes! {
     /// The participant's release commands.
@@ -64,7 +39,7 @@ fn command(session: &mut Session, operation: u32, input: &[u8]) -> Result<Vec<u8
             if !super::operation_random::ready(crate::operation_random::Purpose::Release) {
                 return Err(Error::Context);
             }
-            let work = crate::release_work::ReleaseWork::new(owner, context)?;
+            let work = ReleaseWork::new(owner, context)?;
             let enrollment = session.enrollment.as_mut().ok_or(Error::Context)?;
             let (context, statement, proof) =
                 work.prove(&enrollment.key, &mut enrollment.credential)?;
@@ -75,15 +50,9 @@ fn command(session: &mut Session, operation: u32, input: &[u8]) -> Result<Vec<u8
             body.extend(&statement.polynomials[5]);
             body.extend(proof_bytes);
             drop(statement);
-            let verified = verify_body(context, &body)?;
-            let envelope = verified.envelope();
-            let output = envelope.bytes().to_vec();
-            session.release = Some(ReleaseState {
-                body,
-                envelope,
-                verified: Some(verified),
-                import_closed: false,
-            });
+            let release = ReleaseBody::generated(context, body)?;
+            let output = release.envelope().bytes().to_vec();
+            session.release = Some(release);
             Ok(output)
         }
         Some(ReleaseOperation::BodySlice) => {
@@ -92,15 +61,8 @@ fn command(session: &mut Session, operation: u32, input: &[u8]) -> Result<Vec<u8
             }
             let offset = u32::from_le_bytes(input[..4].try_into().unwrap()) as usize;
             let length = u32::from_le_bytes(input[4..].try_into().unwrap()) as usize;
-            let state = session.release.as_ref().ok_or(Error::Context)?;
-            if state.verified.is_none() || length == 0 || length > RELEASE_CHUNK_BYTES {
-                return Err(Error::Context);
-            }
-            state
-                .body
-                .get(offset..offset.checked_add(length).ok_or(Error::Shape)?)
-                .map(|value| value.to_vec())
-                .ok_or(Error::Shape)
+            let release = session.release.as_ref().ok_or(Error::Context)?;
+            Ok(release.slice(offset, length)?.to_vec())
         }
         // A retained unsigned body must again pass the owning proof verifier
         // under the actual certificate before a signature can be evaluated.
@@ -126,64 +88,30 @@ fn command(session: &mut Session, operation: u32, input: &[u8]) -> Result<Vec<u8
             enrollment
                 .credential
                 .begin_release(&owner, roster, &message)?;
-            session.release = Some(ReleaseState {
-                body: Vec::with_capacity(envelope.body_length()),
-                envelope,
-                verified: None,
-                import_closed: false,
-            });
+            session.release = Some(ReleaseBody::importing(envelope));
             Ok(Vec::new())
         }
         Some(ReleaseOperation::PushImport) => {
-            let state = session.release.as_mut().ok_or(Error::Context)?;
-            if state.import_closed
-                || state.verified.is_some()
-                || input.is_empty()
-                || input.len() > RELEASE_CHUNK_BYTES
-                || input.len() > state.envelope.body_length() - state.body.len()
-            {
-                state.import_closed = true;
-                return Err(Error::Shape);
-            }
-            state.body.extend(input);
+            let release = session.release.as_mut().ok_or(Error::Context)?;
+            release.push(input)?;
             Ok(Vec::new())
         }
         Some(ReleaseOperation::FinishImport) => {
             if !input.is_empty() {
                 return Err(Error::Shape);
             }
-            let state = session.release.as_mut().ok_or(Error::Context)?;
-            if state.import_closed
-                || state.verified.is_some()
-                || state.body.len() != state.envelope.body_length()
-            {
-                state.import_closed = true;
-                return Err(Error::Shape);
-            }
-            // Any failed verification permanently closes this volatile import.
-            state.import_closed = true;
-            let context = super::completion::verified_release_context().ok_or(Error::Context)?;
-            let verified = verify_body(context, &state.body)?;
-            if verified.envelope().bytes() != state.envelope.bytes() {
-                return Err(Error::Context);
-            }
-            state.verified = Some(verified);
-            Ok(state.envelope.bytes().to_vec())
+            let release = session.release.as_mut().ok_or(Error::Context)?;
+            release.finish(super::completion::verified_release_context())?;
+            Ok(release.envelope().bytes().to_vec())
         }
         Some(ReleaseOperation::Sign) => {
-            let state = session.release.as_ref().ok_or(Error::Context)?;
-            let verified = state.verified.as_ref().ok_or(Error::Context)?;
-            if input.len() != RELEASE_ENVELOPE_BYTES
-                || input[..RELEASE_ENVELOPE_BYTES] != *verified.envelope().bytes()
-            {
-                return Err(Error::Context);
-            }
+            let release = session.release.as_ref().ok_or(Error::Context)?;
+            let envelope = release.signable(input)?;
             let enrollment = session.enrollment.as_mut().ok_or(Error::Context)?;
-            let signature =
-                enrollment
-                    .credential
-                    .sign_release(&owner, roster, &verified.envelope())?;
-            let mut packet = verified.envelope().bytes().to_vec();
+            let signature = enrollment
+                .credential
+                .sign_release(&owner, roster, &envelope)?;
+            let mut packet = envelope.bytes().to_vec();
             packet.extend(signature);
             Ok(packet)
         }
