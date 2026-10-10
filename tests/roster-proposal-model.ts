@@ -1,0 +1,52 @@
+import { compileRecipientKeyCensus } from '#tests/recipient-key-model.js';
+import {
+    compileRegistrationEnrollmentCensus,
+    participantIdentityAsciiBytes,
+} from '#tests/registration-enrollment-model.js';
+
+export const compileRosterProposalCensus = (participantCount: number) => {
+    if (
+        !Number.isSafeInteger(participantCount) ||
+        participantCount < 3 ||
+        participantCount > 20
+    )
+        throw new RangeError('Unsupported roster size.');
+    const count = BigInt(participantCount);
+    const registration = compileRegistrationEnrollmentCensus();
+    const key = compileRecipientKeyCensus();
+    const bytes = (value: string) => BigInt(Buffer.byteLength(value));
+    const roleBytes =
+        8n +
+        5n * 6n +
+        4n +
+        bytes('sealed-lattice/setup-contribution/v3') +
+        4n +
+        participantIdentityAsciiBytes +
+        2n * 64n +
+        2n;
+    const proposalBytes =
+        8n +
+        3n * 6n +
+        4n +
+        bytes('sealed-lattice/roster-proposal/v2') +
+        64n +
+        4n +
+        4n +
+        count * 64n;
+    return {
+        participantCount,
+        roleBytes,
+        proposalBytes,
+        retainedRecipientKeyBytes: count * key.publicKeyBytes,
+        retainedRecordPayloadBytes:
+            count *
+            (key.publicKeyBytes + registration.maximumHeaderBytes + 64n),
+        maximumPublicCorpusBytes:
+            registration.maximumPollDefinitionBytes +
+            registration.signatureBytes +
+            count *
+                (key.publicKeyBytes +
+                    registration.maximumHeaderBytes +
+                    registration.signatureBytes),
+    };
+};

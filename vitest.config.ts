@@ -6,17 +6,7 @@ import { playwright } from '@vitest/browser-playwright';
 import { defineConfig, type UserWorkspaceConfig } from 'vitest/config';
 import type { BrowserInstanceOption } from 'vitest/node';
 
-import {
-    desktopBrowserProofEvidenceSessionDefinitions,
-    manualDesktopBrowserProofEvidenceTestGlobs,
-    ordinaryDesktopBrowserExcludedTestGlobs,
-} from './tools/ci/browser-test-project-selection.js';
-import {
-    manualNodeKernelProofEvidenceTestGlobs,
-    nodeKernelProofEvidenceProjectName,
-} from './tools/ci/node-kernel-proof-evidence-selection.js';
 import { resolveTestDiagnosticPaths } from './tools/ci/test-diagnostic-environment.js';
-import { VitestDiagnosticReporter } from './tools/ci/vitest-diagnostic-reporter.js';
 
 const repoRoot = path.dirname(fileURLToPath(import.meta.url));
 const resolveFromRepoRoot = (...segments: string[]): string =>
@@ -31,38 +21,40 @@ const browserServerHost = '127.0.0.1';
 // 49152+ ephemeral port range Windows reserves; strictPort: false still increments it
 // for concurrent browser lanes and clones.
 const browserServerBasePort = 41000;
-const nodeHookTimeoutMs = 240_000;
-const nodeTestTimeoutMs = 60_000;
-const nodeKernelTestTimeoutMs = 15 * 60_000;
+const nodeHookTimeoutMilliseconds = 240_000;
+const nodeTestTimeoutMilliseconds = 60_000;
+const participantModuleTestTimeoutMilliseconds = 15 * 60_000;
 
-const protocolNodeTestGlobs = [
-    'packages/protocol/tests/node/**/*.test.ts',
+const participantModuleNodeTestGlobs = [
+    'tests/node/participant-module/**/*.test.ts',
 ] as const;
-const kernelNodeTestGlobs = [
-    'packages/wasm/tests/node/**/*.kernel.test.ts',
-    'tests/node/**/*.kernel.test.ts',
+const censusNodeTestGlobs = [
+    'tests/node/tools/documentation-census.test.ts',
 ] as const;
 const nodeTestProjectDefinitions = [
     {
-        exclude: [...protocolNodeTestGlobs, ...kernelNodeTestGlobs],
+        exclude: [...participantModuleNodeTestGlobs, ...censusNodeTestGlobs],
         include: [
             'packages/*/tests/node/**/*.test.ts',
             'tests/node/**/*.test.ts',
         ],
         projectName: 'node',
-        testTimeout: nodeTestTimeoutMs,
+        testTimeout: nodeTestTimeoutMilliseconds,
     },
     {
-        include: protocolNodeTestGlobs,
-        projectName: 'node-protocol',
-        testTimeout: nodeKernelTestTimeoutMs,
+        // Rendering the complete deterministic model census exceeds a fast
+        // unit-test interval, so it keeps the fixture-initialization budget.
+        // It runs beside the other model files rather than after them; only
+        // the participant-module files run serialized, after both.
+        include: censusNodeTestGlobs,
+        projectName: 'node-census',
+        testTimeout: nodeHookTimeoutMilliseconds,
     },
     {
-        exclude: manualNodeKernelProofEvidenceTestGlobs,
         fileParallelism: false,
-        include: kernelNodeTestGlobs,
-        projectName: 'node-kernel-fast',
-        testTimeout: nodeKernelTestTimeoutMs,
+        include: participantModuleNodeTestGlobs,
+        projectName: 'node-participant-module',
+        testTimeout: participantModuleTestTimeoutMilliseconds,
     },
 ] as const;
 
@@ -95,15 +87,6 @@ for (const diagnosticDirectoryPath of [
     }
 }
 
-const browserOptimizedDependencies = [
-    '@noble/hashes/hkdf.js',
-    '@noble/hashes/sha2.js',
-    '@noble/hashes/sha3.js',
-    '@noble/hashes/utils.js',
-    '@noble/post-quantum/ml-dsa.js',
-    '@noble/post-quantum/ml-kem.js',
-] as const;
-
 const rootPrivateAliases = [
     {
         find: '#packages',
@@ -114,8 +97,8 @@ const rootPrivateAliases = [
         replacement: resolveFromRepoRoot('tests'),
     },
     {
-        find: '#test-vectors',
-        replacement: resolveFromRepoRoot('test-vectors'),
+        find: '#tools',
+        replacement: resolveFromRepoRoot('tools'),
     },
 ] as const;
 
@@ -124,20 +107,24 @@ const testResolve = {
     tsconfigPaths: true,
 } as const;
 
+// A run log keeps each project's attachments, including failure screenshots,
+// inside its run directory instead of the default repository-root directory.
+const projectAttachments = (projectName: string) =>
+    testAttachmentDirectoryPath === undefined
+        ? {}
+        : {
+              attachmentsDir: path.join(
+                  testAttachmentDirectoryPath,
+                  projectName,
+              ),
+          };
+
 const desktopBrowserInstances: BrowserInstanceOption[] = [
     {
         browser: 'chromium',
         name: 'chromium-desktop',
     },
 ];
-
-const desktopBrowserProofEvidenceInstances: BrowserInstanceOption[] =
-    desktopBrowserProofEvidenceSessionDefinitions.map(
-        ({ browserEngine, vitestProjectName }) => ({
-            browser: browserEngine,
-            name: vitestProjectName,
-        }),
-    );
 
 type NodeProjectInput = {
     readonly exclude?: readonly string[];
@@ -159,54 +146,44 @@ const makeNodeProject = ({
         name: projectName,
         include: [...include],
         ...(exclude === undefined ? {} : { exclude: [...exclude] }),
-        environment: 'node',
+        ...projectAttachments(projectName),
         ...(nodeDiagnosticReportArguments.length === 0
             ? {}
             : { execArgv: nodeDiagnosticReportArguments }),
         ...(fileParallelism === undefined ? {} : { fileParallelism }),
+        setupFiles: [
+            resolveFromRepoRoot('tools/ci/test-process-exit-diagnostics.ts'),
+        ],
         testTimeout,
-        hookTimeout: nodeHookTimeoutMs,
+        hookTimeout: nodeHookTimeoutMilliseconds,
     },
 });
 
 type BrowserProjectInput = {
-    readonly exclude?: readonly string[];
-    readonly hookTimeout?: number;
     readonly include: readonly string[];
     readonly instances: BrowserInstanceOption[];
     readonly projectName: string;
-    readonly retainFailureTrace?: boolean;
-    readonly testTimeout?: number;
 };
 
 const makeBrowserProject = ({
-    exclude,
-    hookTimeout,
     include,
     instances,
     projectName,
-    retainFailureTrace = false,
-    testTimeout,
 }: BrowserProjectInput): UserWorkspaceConfig => {
     const projectAttachmentDirectoryPath =
         testAttachmentDirectoryPath === undefined
             ? undefined
             : path.join(testAttachmentDirectoryPath, projectName);
     return {
-        optimizeDeps: {
-            include: [...browserOptimizedDependencies],
-        },
         resolve: testResolve,
         test: {
             name: projectName,
             include: [...include],
-            ...(exclude === undefined ? {} : { exclude: [...exclude] }),
-            // Each real-WASM browser file can instantiate a large kernel and
+            ...projectAttachments(projectName),
+            // Each real-WASM browser file can instantiate a large module and
             // create workers. Keep the canonical Chromium lane serialized so
             // concurrent files cannot inflate the measured working set.
             fileParallelism: false,
-            ...(hookTimeout === undefined ? {} : { hookTimeout }),
-            ...(testTimeout === undefined ? {} : { testTimeout }),
             ...(nodeDiagnosticReportArguments.length === 0
                 ? {}
                 : { execArgv: nodeDiagnosticReportArguments }),
@@ -224,17 +201,7 @@ const makeBrowserProject = ({
                 // directory before Vitest can add worker identity. Routine
                 // coverage therefore keeps tracing off. Each manual evidence
                 // command selects one isolated instance.
-                trace:
-                    retainFailureTrace &&
-                    projectAttachmentDirectoryPath !== undefined
-                        ? {
-                              mode: 'retain-on-failure' as const,
-                              tracesDir: path.join(
-                                  projectAttachmentDirectoryPath,
-                                  'traces',
-                              ),
-                          }
-                        : ('off' as const),
+                trace: 'off' as const,
                 ...(projectAttachmentDirectoryPath === undefined
                     ? {}
                     : {
@@ -252,50 +219,24 @@ const makeBrowserProject = ({
 export default defineConfig({
     resolve: testResolve,
     test: {
+        reporters: [
+            'default' as const,
+            ...(process.env.GITHUB_ACTIONS === 'true'
+                ? (['github-actions'] as const)
+                : []),
+            ...(testResultFilePath === undefined ? [] : (['json'] as const)),
+        ],
         ...(testResultFilePath === undefined
-            ? {
-                  reporters: [
-                      'default' as const,
-                      ...(process.env.GITHUB_ACTIONS === 'true'
-                          ? (['github-actions'] as const)
-                          : []),
-                      new VitestDiagnosticReporter(),
-                  ],
-              }
-            : {
-                  outputFile: { json: testResultFilePath },
-                  reporters: [
-                      'default' as const,
-                      ...(process.env.GITHUB_ACTIONS === 'true'
-                          ? (['github-actions'] as const)
-                          : []),
-                      'json' as const,
-                      new VitestDiagnosticReporter(),
-                  ],
-              }),
+            ? {}
+            : { outputFile: { json: testResultFilePath } }),
         projects: [
             ...nodeTestProjectDefinitions.map((projectDefinition) =>
                 makeNodeProject(projectDefinition),
             ),
-            makeNodeProject({
-                fileParallelism: false,
-                include: manualNodeKernelProofEvidenceTestGlobs,
-                projectName: nodeKernelProofEvidenceProjectName,
-                testTimeout: 12 * 60 * 60_000,
-            }),
             makeBrowserProject({
-                exclude: ordinaryDesktopBrowserExcludedTestGlobs,
                 include: desktopBrowserTestGlobs,
                 instances: desktopBrowserInstances,
                 projectName: 'browser-desktop',
-            }),
-            makeBrowserProject({
-                hookTimeout: 30 * 60_000,
-                include: manualDesktopBrowserProofEvidenceTestGlobs,
-                instances: desktopBrowserProofEvidenceInstances,
-                projectName: 'browser-desktop-proof-evidence',
-                retainFailureTrace: true,
-                testTimeout: 12 * 60 * 60_000,
             }),
         ],
     },

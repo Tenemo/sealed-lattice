@@ -1,0 +1,22 @@
+[package]
+name = "native-ceremony"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+parallel-work = { path = "../parallel-work" }
+participant-module = { path = "../participant-module" }
+contribution-prover = { path = "../contribution-prover" }
+protocol-foundations = { path = "../protocol-foundations" }
+setup-witness = { path = "../setup-witness" }
+word-proof = { path = "../word-proof" }
+setup-aggregate = { path = "../setup-aggregate" }
+ballot-encryption = { path = "../ballot-encryption" }
+ballot-proof = { path = "../ballot-proof" }
+evaluation-target = { path = "../evaluation-target" }
+encrypted-ranking = { path = "../encrypted-ranking" }
+supported-profile = { path = "../supported-profile" }
+num-bigint.workspace = true
+num-traits.workspace = true
+zeroize.workspace = true

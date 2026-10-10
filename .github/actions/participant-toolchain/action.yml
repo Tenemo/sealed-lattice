@@ -1,0 +1,14 @@
+name: Participant module toolchain
+description: Install the Rust toolchain that builds, lints and tests the participant module and fetch its locked dependencies
+
+runs:
+    using: composite
+    steps:
+        - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067
+          with:
+              components: clippy, rustfmt
+              toolchain: 1.95.0
+              targets: wasm32-unknown-unknown
+        # The module builds offline from the research workspace's lockfile.
+        - shell: bash
+          run: cargo +1.95.0 fetch --locked --manifest-path crates/protocol-research/Cargo.toml

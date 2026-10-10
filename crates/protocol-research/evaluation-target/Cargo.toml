@@ -1,0 +1,28 @@
+[package]
+name = "evaluation-target"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+autobins = false
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+fips204 = { workspace = true, features = ["ml-dsa-65"] }
+num-bigint.workspace = true
+ballot-proof = { path = "../ballot-proof" }
+protocol-foundations = { path = "../protocol-foundations" }
+setup-aggregate = { path = "../setup-aggregate" }
+setup-witness = { path = "../setup-witness" }
+encrypted-ranking = { path = "../encrypted-ranking" }
+parallel-work = { path = "../parallel-work" }
+linked-release-proof = { path = "../linked-release-proof" }
+supported-profile = { path = "../supported-profile" }
+
+[dev-dependencies]
+ballot-encryption = { path = "../ballot-encryption" }
+
+[[bin]]
+name = "check-target"
+path = "src/bin/check-target.rs"

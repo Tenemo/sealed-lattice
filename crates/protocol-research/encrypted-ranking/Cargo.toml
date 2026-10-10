@@ -1,0 +1,25 @@
+[package]
+name = "encrypted-ranking"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+autobins = false
+
+[lib]
+crate-type = ["rlib"]
+
+[features]
+numerical-probes = []
+
+[dependencies]
+num-bigint.workspace = true
+num-traits.workspace = true
+parallel-work = { path = "../parallel-work" }
+protocol-foundations = { path = "../protocol-foundations" }
+supported-profile = { path = "../supported-profile" }
+zeroize.workspace = true
+
+[[bin]]
+name = "check-requested-output"
+path = "src/bin/check-requested-output.rs"
+required-features = ["numerical-probes"]

@@ -1,0 +1,80 @@
+name: research
+
+on:
+    pull_request:
+        # The runner, the models and SDK worker sources it imports, and the
+        # files that install and build them.
+        paths:
+            - .github/actions/**
+            - .github/workflows/research.yml
+            - .nvmrc
+            - crates/protocol-research/**
+            - package.json
+            - packages/sdk/package.json
+            - packages/sdk/src/participant/worker/**
+            - pnpm-lock.yaml
+            - pnpm-workspace.yaml
+            - tests/*.ts
+            - tools/ci/**
+    push:
+        branches:
+            - master
+        paths:
+            - .github/actions/**
+            - .github/workflows/research.yml
+            - .nvmrc
+            - crates/protocol-research/**
+            - package.json
+            - packages/sdk/package.json
+            - packages/sdk/src/participant/worker/**
+            - pnpm-lock.yaml
+            - pnpm-workspace.yaml
+            - tests/*.ts
+            - tools/ci/**
+    workflow_dispatch:
+
+permissions:
+    contents: read
+
+concurrency:
+    group: ${{ format('research-{0}-{1}', github.workflow, github.ref) }}
+    cancel-in-progress: true
+
+jobs:
+    research:
+        name: protocol research ${{ matrix.case }}
+        runs-on: ubuntu-24.04
+        timeout-minutes: 90
+        strategy:
+            fail-fast: false
+            # Every case first runs the pinned build check, and the native
+            # ceremony cases take the smallest profile of their scenario.
+            matrix:
+                case:
+                    - native-result 3 2
+                    - native-empty 3 2
+                    - native-invalid-only 3 2
+                    - native-setup-departure
+                    - native-selection-fork
+                    - native-requested-output
+        steps:
+            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+              with:
+                  persist-credentials: false
+            - uses: ./.github/actions/bootstrap-pnpm
+            - uses: ./.github/actions/participant-toolchain
+            - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
+              with:
+                  workspaces: crates/protocol-research
+            - name: Run the guarded protocol research case
+              env:
+                  RESEARCH_CASE: ${{ matrix.case }}
+              # The case name and its counts are separate arguments.
+              run: pnpm run research:protocol -- ${RESEARCH_CASE}
+            - name: Upload research diagnostics
+              if: ${{ failure() }}
+              uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+              with:
+                  if-no-files-found: warn
+                  name: research-logs-${{ github.run_id }}-${{ github.run_attempt }}-${{ strategy.job-index }}
+                  path: logs
