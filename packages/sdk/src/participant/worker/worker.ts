@@ -8,6 +8,7 @@ import type { ParallelHelpers } from './module/parallel-helpers.js';
 import type { ParticipantModule } from './module/participant-module.js';
 import { readParticipantLimits } from './module/runtime-bounds.js';
 import type { PublicRelay } from './relay/relay.js';
+import { beginRelayBudget } from './relay/relay.js';
 import {
     deliverModule,
     instantiateForOperation,
@@ -240,6 +241,7 @@ self.onmessage = (
         return;
     }
     const command = event.data;
+    beginRelayBudget();
     void (
         isVerification(command)
             ? runVerification(command, event.ports)

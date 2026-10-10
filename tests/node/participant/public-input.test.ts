@@ -1,9 +1,10 @@
 import { createHash } from 'node:crypto';
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { foregroundVisitMilliseconds } from '#packages/sdk/src/participant/worker/module/runtime-bounds.js';
 import {
+    beginRelayBudget,
     readBounded,
     streamBounded,
 } from '#packages/sdk/src/participant/worker/relay/relay.js';
@@ -83,6 +84,10 @@ const outcome = (reading: Promise<number>) =>
         (length) => length,
         (error: unknown) => error,
     );
+
+beforeEach(() => {
+    beginRelayBudget();
+});
 
 afterEach(() => {
     vi.useRealTimers();
@@ -255,6 +260,41 @@ describe('public record waits', () => {
         await vi.advanceTimersByTimeAsync(14 * (59_000 + 60_000));
         expect(await reading).toBe(14);
         expect(accepted).toBe(14);
+    });
+
+    it("ends a later record once the operation's earlier waits reach the foreground visit limit", async () => {
+        fakeClock();
+        paced(14, 59_000);
+        const first = outcome(
+            streamBounded(relay.base + 'first.bin', 14, () => undefined),
+        );
+        await vi.advanceTimersByTimeAsync(14 * 59_000);
+        expect(await first).toBe(14);
+        let accepted = 0;
+        const second = outcome(
+            streamBounded(relay.base + 'second.bin', 14, (bytes) => {
+                accepted += bytes.length;
+            }),
+        );
+        await vi.advanceTimersByTimeAsync(
+            foregroundVisitMilliseconds - 14 * 59_000,
+        );
+        const error = await second;
+        expect(error).toBeInstanceOf(PublicInputFailure);
+        expect((error as Error).message).toMatch(
+            /^A public record was interrupted: /u,
+        );
+        expect(accepted).toBe(1);
+    });
+
+    it('counts concurrent waits on the relay once', async () => {
+        fakeClock();
+        paced(14, 59_000);
+        const readings = ['first.bin', 'second.bin'].map((name) =>
+            outcome(streamBounded(relay.base + name, 14, () => undefined)),
+        );
+        await vi.advanceTimersByTimeAsync(14 * 59_000);
+        expect(await Promise.all(readings)).toEqual([14, 14]);
     });
 
     it('ends a record whose relay sends nothing for a minute', async () => {

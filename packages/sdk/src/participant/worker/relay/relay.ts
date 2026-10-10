@@ -15,22 +15,50 @@ export type PublicRelay = Readonly<{
     base: string;
 }>;
 
-// Runs one request's waits on the relay: none outlasts a minute, and
-// together they never outlast the foreground visit limit. The consumer's own
-// work between them is not counted.
-const relayWaits = (controller: AbortController) => {
+// The time an operation has waited on the relay: the time at least one of
+// its waits was open, so concurrent waits count once and the consumer's own
+// work between waits is not counted.
+const openRelayBudget = () => {
+    let open = 0;
+    let openedAt = 0;
     let waited = 0;
+    return {
+        remaining: () =>
+            foregroundVisitMilliseconds -
+            waited -
+            (open === 0 ? 0 : performance.now() - openedAt),
+        enter: () => {
+            if (open++ === 0) openedAt = performance.now();
+        },
+        leave: () => {
+            if (--open === 0) waited += performance.now() - openedAt;
+        },
+    };
+};
+let relayBudget = openRelayBudget();
+
+// Begins an operation's relay budget; the worker calls it as each operation
+// starts.
+export const beginRelayBudget = () => {
+    relayBudget = openRelayBudget();
+};
+
+// Runs one request's waits on the relay: none outlasts a minute, and
+// together with the operation's other waits they never outlast the
+// foreground visit limit.
+const relayWaits = (controller: AbortController) => {
+    const budget = relayBudget;
     return async <Value>(operation: () => Promise<Value>): Promise<Value> => {
-        const started = performance.now();
         const timer = setTimeout(
             () => controller.abort(),
-            Math.min(networkMilliseconds, foregroundVisitMilliseconds - waited),
+            Math.max(0, Math.min(networkMilliseconds, budget.remaining())),
         );
+        budget.enter();
         try {
             return await operation();
         } finally {
             clearTimeout(timer);
-            waited += performance.now() - started;
+            budget.leave();
         }
     };
 };

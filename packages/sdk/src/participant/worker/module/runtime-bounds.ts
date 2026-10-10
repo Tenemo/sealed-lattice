@@ -10,7 +10,7 @@ import type { ParticipantModule } from './participant-module.js';
 type Range = Readonly<{ minimum: number; maximum: number }>;
 
 // The foreground visit limit bounds every wait the worker cannot otherwise
-// end: a state validation, and the waits for one public record's bytes.
+// end: a state validation, and an operation's waits on the relay.
 export const foregroundVisitMilliseconds = 15 * 60 * 1000;
 
 // A retained or published record holds at most one mebibyte, and a sealed
