@@ -1,13 +1,13 @@
-import { writeModuleInput } from '../../module/context.js';
 import type { ParticipantProfileContext } from '../../module/context.js';
 import {
     custodyIdentity,
     custodyPurpose,
 } from '../../module/custody-identity.js';
 import {
+    moduleCommand,
     operationSeedBytes,
-    readParticipantOutput,
     seededRandomness,
+    tryModuleCommand,
 } from '../../module/participant-module.js';
 import { createCandidatePublication } from '../../relay/publication.js';
 import type { PublicRelay } from '../../relay/relay.js';
@@ -173,15 +173,7 @@ const releaseCommand = (
     context: ParticipantProfileContext,
     operation: number,
     input: Uint8Array = new Uint8Array(),
-) => {
-    const { module } = context;
-    writeModuleInput(context, input);
-    if (module.participant_release_command(operation, input.length) !== 0)
-        throw new Error(
-            'The release work refused operation ' + String(operation) + '.',
-        );
-    return readParticipantOutput(module);
-};
+) => moduleCommand(context.module, 'release', operation, { input });
 
 const openReleaseRecord = (session: ReleaseSession, index: number) => {
     const { context } = session.close.participant;
@@ -419,14 +411,14 @@ const restoreSignedTarget = (
     context: ParticipantProfileContext,
     signed: TargetState,
 ) => {
-    const { module } = context;
     const { body, vote } = signed;
-    writeModuleInput(context, concatenate(unsigned32(body.length), body, vote));
     if (
-        module.participant_finality_command(
+        tryModuleCommand(
+            context.module,
+            'finality',
             finalityOperation.restoreSignedTarget,
-            4 + body.length + vote.length,
-        ) !== 0
+            { input: concatenate(unsigned32(body.length), body, vote) },
+        ) === undefined
     )
         throw new Error('The signed target can no longer be restored.');
 };

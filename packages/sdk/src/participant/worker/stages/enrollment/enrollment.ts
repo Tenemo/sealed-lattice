@@ -1,8 +1,4 @@
-import {
-    errorMessage,
-    ownRegistrationInput,
-    writeModuleInput,
-} from '../../module/context.js';
+import { errorMessage, writeModuleInput } from '../../module/context.js';
 import type { ParticipantContext } from '../../module/context.js';
 import {
     custodyIdentities,
@@ -10,6 +6,7 @@ import {
     custodyPurpose,
 } from '../../module/custody-identity.js';
 import {
+    moduleCommand,
     readModuleMemory,
     readParticipantOutput,
 } from '../../module/participant-module.js';
@@ -525,9 +522,7 @@ export const restoreEnrollment = async (
     const definitionSignature = await read(dataKind.pollSignature);
     const pollContext = concatenate(manifest.poll, runtime);
     const own = (step: number, bytes: Uint8Array = new Uint8Array()) => {
-        ownRegistrationInput(context, bytes);
-        if (module.own_registration_command(step, bytes.length) !== 0)
-            throw new Error('The original registration verification refused.');
+        moduleCommand(module, 'ownRegistration', step, { input: bytes });
     };
     own(
         ownRegistrationStep.begin,

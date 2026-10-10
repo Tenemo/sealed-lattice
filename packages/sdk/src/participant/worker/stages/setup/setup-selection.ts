@@ -1,5 +1,6 @@
 import { writeModuleInput } from '../../module/context.js';
 import {
+    moduleCommand,
     readParticipantOutput,
     writeSetupInput,
 } from '../../module/participant-module.js';
@@ -53,13 +54,7 @@ const selectionCommand = (
     session: ParticipantSession,
     operation: number,
     input: Uint8Array = new Uint8Array(),
-) => {
-    const { context } = session;
-    writeModuleInput(context, input);
-    if (context.module.selection_signing_command(operation, input.length) !== 0)
-        throw new Error('The original preparation signer refused.');
-    return readParticipantOutput(context.module);
-};
+) => moduleCommand(session.context.module, 'selection', operation, { input });
 
 // Only transport destinations are recovered from an authenticated original
 // signing intent. Rust rebuilds the proposal from complete verified offers and

@@ -5,8 +5,9 @@ import type {
     PublicProfileContext,
 } from '../../module/context.js';
 import {
+    moduleCommand,
     readModuleMemory,
-    writeBufferInput,
+    tryModuleCommand,
 } from '../../module/participant-module.js';
 import { chunkBytes } from '../../module/runtime-bounds.js';
 import type { PublicRelay } from '../../relay/relay.js';
@@ -92,34 +93,19 @@ const tryEvaluationCommand = (
     operation: number,
     argument = 0,
     input: Uint8Array = new Uint8Array(),
-) => {
-    const { module } = context;
-    writeBufferInput(module, 'evaluationTarget', input);
-    if (
-        module.evaluation_target_command(operation, argument, input.length) !==
-        0
-    )
-        return undefined;
-    return readModuleMemory(
-        module,
-        module.evaluation_target_output_pointer(),
-        module.evaluation_target_output_length(),
-    );
-};
+) =>
+    tryModuleCommand(context.module, 'evaluation', operation, {
+        argument,
+        input,
+    });
 
 const evaluationCommand = (
     context: PublicProfileContext,
     operation: number,
     argument = 0,
     input: Uint8Array = new Uint8Array(),
-) => {
-    const output = tryEvaluationCommand(context, operation, argument, input);
-    if (output === undefined)
-        throw new Error(
-            'The evaluation refused operation ' + String(operation) + '.',
-        );
-    return output;
-};
+) =>
+    moduleCommand(context.module, 'evaluation', operation, { argument, input });
 
 // Delivers one incoming evaluation input in chunks and finishes it. A refusal
 // means the bytes are not the ones the engine expects.

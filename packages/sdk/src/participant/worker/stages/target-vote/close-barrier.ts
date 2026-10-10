@@ -1,6 +1,7 @@
 import type { PublicProfileContext } from '../../module/context.js';
 import {
     readModuleMemory,
+    tryModuleCommand,
     writeBufferInput,
 } from '../../module/participant-module.js';
 import type { CandidateView } from '../../relay/candidates.js';
@@ -129,11 +130,9 @@ const barrierCommand = (
     context: PublicProfileContext,
     operation: number,
     input: Uint8Array = new Uint8Array(),
-) => {
-    const { module } = context;
-    writeBufferInput(module, 'close', input);
-    return module.close_command(operation, input.length) === 0;
-};
+) =>
+    tryModuleCommand(context.module, 'closeBarrier', operation, { input }) !==
+    undefined;
 
 const requireBarrier = (
     context: PublicProfileContext,

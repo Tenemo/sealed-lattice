@@ -1,7 +1,7 @@
 import type { PublicProfileContext } from '../../module/context.js';
 import {
-    readModuleMemory,
-    writeBufferInput,
+    moduleCommand,
+    tryModuleCommand,
 } from '../../module/participant-module.js';
 import {
     candidateLists,
@@ -55,31 +55,19 @@ const tryCompletionCommand = (
     operation: number,
     argument = 0,
     input: Uint8Array = new Uint8Array(),
-) => {
-    const { module } = context;
-    writeBufferInput(module, 'completion', input);
-    if (module.completion_command(operation, argument, input.length) !== 0)
-        return undefined;
-    return readModuleMemory(
-        module,
-        module.completion_output_pointer(),
-        module.completion_output_length(),
-    );
-};
+) =>
+    tryModuleCommand(context.module, 'completion', operation, {
+        argument,
+        input,
+    });
 
 const completionCommand = (
     context: PublicProfileContext,
     operation: number,
     argument = 0,
     input: Uint8Array = new Uint8Array(),
-) => {
-    const output = tryCompletionCommand(context, operation, argument, input);
-    if (output === undefined)
-        throw new Error(
-            'The completion refused operation ' + String(operation) + '.',
-        );
-    return output;
-};
+) =>
+    moduleCommand(context.module, 'completion', operation, { argument, input });
 
 // Certifies the target from the published target votes, stopping at the
 // certificate threshold. A missing or refused vote is skipped; too few leave

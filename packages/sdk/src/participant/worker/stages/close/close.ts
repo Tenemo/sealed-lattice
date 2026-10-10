@@ -1,6 +1,8 @@
-import { writeModuleInput } from '../../module/context.js';
 import type { ParticipantProfileContext } from '../../module/context.js';
-import { readParticipantOutput } from '../../module/participant-module.js';
+import {
+    moduleCommand,
+    tryModuleCommand,
+} from '../../module/participant-module.js';
 import type { ParticipantProfile } from '../../module/runtime-bounds.js';
 import { ballotEnvelopeOffset } from '../../module/runtime-bounds.js';
 import type { CandidateView } from '../../relay/candidates.js';
@@ -164,30 +166,14 @@ const tryCloseCommand = (
     operation: number,
     argument = 0,
     input: Uint8Array = new Uint8Array(),
-) => {
-    const { module } = context;
-    writeModuleInput(context, input);
-    if (
-        module.participant_close_command(operation, argument, input.length) !==
-        0
-    )
-        return undefined;
-    return readParticipantOutput(module);
-};
+) => tryModuleCommand(context.module, 'close', operation, { argument, input });
 
 const closeCommand = (
     context: ParticipantProfileContext,
     operation: number,
     argument = 0,
     input: Uint8Array = new Uint8Array(),
-) => {
-    const output = tryCloseCommand(context, operation, argument, input);
-    if (output === undefined)
-        throw new Error(
-            'The close module refused operation ' + String(operation) + '.',
-        );
-    return output;
-};
+) => moduleCommand(context.module, 'close', operation, { argument, input });
 
 const generationOf = (session: CloseSession) =>
     session.participant.root.head.generation;

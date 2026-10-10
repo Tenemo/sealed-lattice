@@ -1,5 +1,5 @@
 import type { ParallelHelpers } from './parallel-helpers.js';
-import { writeInput, writeOwnRegistrationInput } from './participant-module.js';
+import { writeInput } from './participant-module.js';
 import type {
     ModuleHandlers,
     ParticipantModule,
@@ -47,11 +47,6 @@ export const isEligibleContributor = (context: ParticipantProfileContext) =>
 
 export const writeModuleInput = (context: PublicContext, bytes: Uint8Array) =>
     writeInput(context.module, bytes);
-
-export const ownRegistrationInput = (
-    context: ParticipantContext,
-    bytes: Uint8Array,
-) => writeOwnRegistrationInput(context.module, bytes);
 
 export const errorMessage = (error: unknown) =>
     error instanceof Error ? error.message : String(error);

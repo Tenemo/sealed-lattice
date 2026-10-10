@@ -5,10 +5,11 @@ import {
     custodyPurpose,
 } from '../../module/custody-identity.js';
 import {
+    moduleCommand,
     operationSeedBytes,
     readModuleMemory,
-    readParticipantOutput,
     seededRandomness,
+    tryModuleCommand,
     writeProofInput,
 } from '../../module/participant-module.js';
 import type { ParticipantProfile } from '../../module/runtime-bounds.js';
@@ -574,37 +575,28 @@ const proverOutput = (context: ParticipantProfileContext) =>
         context.module.contribution_proof_output_length(),
     );
 
+// Whether the checkpoint accepted the operation.
 const checkpoint = (
     context: ParticipantProfileContext,
     operation: number,
     position = 0,
     bytes: Uint8Array = new Uint8Array(),
-) => {
-    writeProofInput(context.module, bytes);
-    return context.module.contribution_checkpoint_command(
-        operation,
-        position,
-        bytes.length,
-    );
-};
+) =>
+    tryModuleCommand(context.module, 'contributionCheckpoint', operation, {
+        argument: position,
+        input: bytes,
+    }) !== undefined;
 
 const signing = (
     context: ParticipantProfileContext,
     operation: number,
     bytes: Uint8Array = new Uint8Array(),
     argument = 0,
-) => {
-    writeModuleInput(context, bytes);
-    if (
-        context.module.offer_signing_command(
-            operation,
-            argument,
-            bytes.length,
-        ) !== 0
-    )
-        throw new Error('The contribution signer refused an operation.');
-    return readParticipantOutput(context.module);
-};
+) =>
+    moduleCommand(context.module, 'offerSigning', operation, {
+        argument,
+        input: bytes,
+    });
 
 // Runs prover commands with the randomness of one generation or
 // continuation, which the module expands from its retained seed. Only
@@ -699,15 +691,10 @@ const proverRun = (session: ContributionSession, statement: boolean) => {
         argument = 0,
         bytes: Uint8Array = new Uint8Array(),
     ) => {
-        writeProofInput(module, bytes);
-        if (
-            module.contribution_proof_command(
-                operation,
-                argument,
-                bytes.length,
-            ) !== 0
-        )
-            throw new Error('The contribution prover refused an operation.');
+        moduleCommand(module, 'contributionProof', operation, {
+            argument,
+            input: bytes,
+        });
         const earlier = storing;
         void store();
         await earlier;
@@ -820,7 +807,7 @@ export const generateContribution = async (session: ContributionSession) => {
             run.phase() !== proverPhase.firstColumn ||
             module.contribution_checkpoint_records() !==
                 bounds.checkpointLengths.length ||
-            checkpoint(context, checkpointOperation.exportHeader) !== 0
+            !checkpoint(context, checkpointOperation.exportHeader)
         )
             throw new Error('The first-oracle checkpoint is unavailable.');
         header = proverOutput(context);
@@ -838,7 +825,7 @@ export const generateContribution = async (session: ContributionSession) => {
             crypto.getRandomValues(target);
         };
         for (const [index, length] of bounds.checkpointLengths.entries()) {
-            if (checkpoint(context, checkpointOperation.seal) !== 0)
+            if (!checkpoint(context, checkpointOperation.seal))
                 throw new Error('A checkpoint record was refused.');
             const output = proverOutput(context);
             const key = output.slice(0, recordKeyBytes);
@@ -869,7 +856,7 @@ export const generateContribution = async (session: ContributionSession) => {
         }
         await writing;
         await run.flush();
-        if (checkpoint(context, checkpointOperation.complete) !== 0)
+        if (!checkpoint(context, checkpointOperation.complete))
             throw new Error('The checkpoint is incomplete.');
     } finally {
         context.handlers.random = undefined;
@@ -901,7 +888,7 @@ export const restoreCheckpoint = async (
     if (phase !== 5 && phase !== 6)
         throw new Error('No contribution checkpoint is retained.');
     if (
-        checkpoint(
+        !checkpoint(
             context,
             checkpointOperation.import,
             state.position,
@@ -910,7 +897,7 @@ export const restoreCheckpoint = async (
                 session.records.proposal,
                 state.header,
             ),
-        ) !== 0
+        )
     )
         throw new Error('The retained proof context was refused.');
     for (const [index, record] of state.privateRecords.entries()) {
@@ -932,7 +919,7 @@ export const restoreCheckpoint = async (
             throw new Error('A checkpoint record changed.');
         const input = concatenate(record.key, sealed);
         try {
-            if (checkpoint(context, checkpointOperation.open, 0, input) !== 0)
+            if (!checkpoint(context, checkpointOperation.open, 0, input))
                 throw new Error('A checkpoint record was refused.');
         } finally {
             input.fill(0);
@@ -964,7 +951,7 @@ export const restoreCheckpoint = async (
         );
     }
     if (
-        checkpoint(context, checkpointOperation.finish) !== 0 ||
+        !checkpoint(context, checkpointOperation.finish) ||
         module.contribution_proof_phase() !== proverPhase.firstColumn
     )
         throw new Error('The contribution did not resume exactly.');

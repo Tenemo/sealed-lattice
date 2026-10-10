@@ -1,8 +1,7 @@
-import { writeModuleInput } from '../../module/context.js';
 import type { ParticipantProfileContext } from '../../module/context.js';
 import {
+    moduleCommand,
     readModuleMemory,
-    readParticipantOutput,
 } from '../../module/participant-module.js';
 import { createCandidatePublication } from '../../relay/publication.js';
 import type { PublicRelay } from '../../relay/relay.js';
@@ -67,15 +66,7 @@ const finalityCommand = (
     context: ParticipantProfileContext,
     operation: number,
     input: Uint8Array = new Uint8Array(),
-) => {
-    const { module } = context;
-    writeModuleInput(context, input);
-    if (module.participant_finality_command(operation, input.length) !== 0)
-        throw new Error(
-            'The finality work refused operation ' + String(operation) + '.',
-        );
-    return readParticipantOutput(module);
-};
+) => moduleCommand(context.module, 'finality', operation, { input });
 
 // The own ballot's status in the target this instance certified, which the
 // finality work reads for a participant that signed no target of its own.

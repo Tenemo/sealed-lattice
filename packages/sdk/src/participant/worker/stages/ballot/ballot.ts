@@ -1,13 +1,13 @@
-import { writeModuleInput } from '../../module/context.js';
 import type {
     ParticipantProfileContext,
     PublicContext,
     PublicProfileContext,
 } from '../../module/context.js';
 import {
+    moduleCommand,
     operationSeedBytes,
-    readParticipantOutput,
     seededRandomness,
+    tryModuleCommand,
 } from '../../module/participant-module.js';
 import type { ParticipantProfile } from '../../module/runtime-bounds.js';
 import { ballotEnvelopeOffset } from '../../module/runtime-bounds.js';
@@ -339,30 +339,14 @@ const tryBallotCommand = (
     operation: number,
     argument = 0,
     input: Uint8Array = new Uint8Array(),
-) => {
-    const { module } = context;
-    writeModuleInput(context, input);
-    if (
-        module.participant_ballot_command(operation, argument, input.length) !==
-        0
-    )
-        return undefined;
-    return readParticipantOutput(module);
-};
+) => tryModuleCommand(context.module, 'ballot', operation, { argument, input });
 
 const ballotCommand = (
     context: ParticipantProfileContext,
     operation: number,
     argument = 0,
     input: Uint8Array = new Uint8Array(),
-) => {
-    const output = tryBallotCommand(context, operation, argument, input);
-    if (output === undefined)
-        throw new Error(
-            'The ballot module refused operation ' + String(operation) + '.',
-        );
-    return output;
-};
+) => moduleCommand(context.module, 'ballot', operation, { argument, input });
 
 // Delivers the FHE key of the body polynomial at the index from the final
 // public aggregate. A refused chunk or finish is not the key the retained

@@ -473,3 +473,157 @@ export const writeOwnRegistrationInput = (
         bytes,
         module.own_registration_input_capacity(),
     );
+
+// The module's command dispatchers. Each takes its input in one buffer, runs
+// an operation with the operation's argument, when it takes one, and the
+// input length, answers zero when it accepts, and leaves the output its
+// callers read. A refusal names the dispatcher's subject.
+type CommandDispatcher = Readonly<{
+    subject: string;
+    write: (module: ParticipantModule, bytes: Uint8Array) => void;
+    run: (
+        module: ParticipantModule,
+        operation: number,
+        argument: number,
+        length: number,
+    ) => number;
+    read: (module: ParticipantModule) => Uint8Array;
+}>;
+const noOutput = () => new Uint8Array();
+const commandDispatchers = {
+    ballot: {
+        subject: 'ballot module',
+        write: writeInput,
+        run: (module, operation, argument, length) =>
+            module.participant_ballot_command(operation, argument, length),
+        read: readParticipantOutput,
+    },
+    close: {
+        subject: 'close module',
+        write: writeInput,
+        run: (module, operation, argument, length) =>
+            module.participant_close_command(operation, argument, length),
+        read: readParticipantOutput,
+    },
+    finality: {
+        subject: 'finality work',
+        write: writeInput,
+        run: (module, operation, _argument, length) =>
+            module.participant_finality_command(operation, length),
+        read: readParticipantOutput,
+    },
+    release: {
+        subject: 'release work',
+        write: writeInput,
+        run: (module, operation, _argument, length) =>
+            module.participant_release_command(operation, length),
+        read: readParticipantOutput,
+    },
+    selection: {
+        subject: 'original preparation signer',
+        write: writeInput,
+        run: (module, operation, _argument, length) =>
+            module.selection_signing_command(operation, length),
+        read: readParticipantOutput,
+    },
+    offerSigning: {
+        subject: 'contribution signer',
+        write: writeInput,
+        run: (module, operation, argument, length) =>
+            module.offer_signing_command(operation, argument, length),
+        read: readParticipantOutput,
+    },
+    contributionProof: {
+        subject: 'contribution prover',
+        write: writeProofInput,
+        run: (module, operation, argument, length) =>
+            module.contribution_proof_command(operation, argument, length),
+        read: noOutput,
+    },
+    contributionCheckpoint: {
+        subject: 'contribution checkpoint',
+        write: writeProofInput,
+        run: (module, operation, argument, length) =>
+            module.contribution_checkpoint_command(operation, argument, length),
+        read: noOutput,
+    },
+    ownRegistration: {
+        subject: 'original registration verification',
+        write: writeOwnRegistrationInput,
+        run: (module, operation, _argument, length) =>
+            module.own_registration_command(operation, length),
+        read: noOutput,
+    },
+    closeBarrier: {
+        subject: 'close barrier',
+        write: (module, bytes) => {
+            writeBufferInput(module, 'close', bytes);
+        },
+        run: (module, operation, _argument, length) =>
+            module.close_command(operation, length),
+        read: noOutput,
+    },
+    evaluation: {
+        subject: 'evaluation',
+        write: (module, bytes) => {
+            writeBufferInput(module, 'evaluationTarget', bytes);
+        },
+        run: (module, operation, argument, length) =>
+            module.evaluation_target_command(operation, argument, length),
+        read: (module) =>
+            readModuleMemory(
+                module,
+                module.evaluation_target_output_pointer(),
+                module.evaluation_target_output_length(),
+            ),
+    },
+    completion: {
+        subject: 'completion',
+        write: (module, bytes) => {
+            writeBufferInput(module, 'completion', bytes);
+        },
+        run: (module, operation, argument, length) =>
+            module.completion_command(operation, argument, length),
+        read: (module) =>
+            readModuleMemory(
+                module,
+                module.completion_output_pointer(),
+                module.completion_output_length(),
+            ),
+    },
+} as const satisfies Record<string, CommandDispatcher>;
+type CommandOptions = Readonly<{ argument?: number; input?: Uint8Array }>;
+
+// Runs one command: the output it left, or undefined when the module refused
+// it.
+export const tryModuleCommand = (
+    module: ParticipantModule,
+    dispatcher: keyof typeof commandDispatchers,
+    operation: number,
+    { argument = 0, input = new Uint8Array() }: CommandOptions = {},
+) => {
+    const { write, run, read } = commandDispatchers[dispatcher];
+    write(module, input);
+    return run(module, operation, argument, input.length) === 0
+        ? read(module)
+        : undefined;
+};
+
+// Runs one command whose refusal is a local failure.
+export const moduleCommand = (
+    module: ParticipantModule,
+    dispatcher: keyof typeof commandDispatchers,
+    operation: number,
+    options: CommandOptions = {},
+) => {
+    const output = tryModuleCommand(module, dispatcher, operation, options);
+    if (output === undefined)
+        throw new Error(
+            'The ' +
+                commandDispatchers[dispatcher].subject +
+                ' refused operation ' +
+                String(operation) +
+                '.',
+        );
+    return output;
+};
