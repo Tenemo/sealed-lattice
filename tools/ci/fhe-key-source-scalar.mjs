@@ -12,15 +12,13 @@ export const fheKeySourcePhases = {
     13: 'complete',
 };
 
-/** @param {{moduleBytes:Uint8Array,caseIndex:number,expectedBytes:number,emitChunk:(index:number,offset:number,bytes:Uint8Array)=>Promise<import('./bounded-output.mjs').OutputAcknowledgment>,onProgress?:(progress:import('./bounded-output.mjs').OutputProgress)=>void}} input */
+/** @param {{moduleBytes:Uint8Array,expectedBytes:number,emitChunk:(index:number,offset:number,bytes:Uint8Array)=>Promise<import('./bounded-output.mjs').OutputAcknowledgment>,onProgress?:(progress:import('./bounded-output.mjs').OutputProgress)=>void}} input */
 export const runFheKeySourceScreen = async ({
     moduleBytes,
-    caseIndex,
     expectedBytes,
     emitChunk,
     onProgress,
 }) => {
-    if (caseIndex !== 0) throw new Error('Unknown key source screen case.');
     const started = performance.now();
     const instance = await instantiateScalarModule(moduleBytes);
     /** @param {string} name */
@@ -32,10 +30,9 @@ export const runFheKeySourceScreen = async ({
             );
         return /** @type {(...values:number[])=>number} */ (method);
     };
-    const begin = binding('begin');
     const api = {
         memory: /** @type {WebAssembly.Memory} */ (instance.exports.memory),
-        begin: () => begin(caseIndex),
+        begin: binding('begin'),
         phase: binding('phase'),
         step: binding('step'),
         next_output: binding('next_output'),
@@ -53,7 +50,6 @@ export const runFheKeySourceScreen = async ({
     });
     return {
         ...result,
-        caseIndex,
         initializationMilliseconds,
         milliseconds: performance.now() - started,
         phaseLabels: fheKeySourcePhases,

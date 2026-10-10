@@ -12,7 +12,7 @@ import { createBoundedOutputSink } from './bounded-output-sink.mjs';
 import { runFheKeySourceScreen } from './fhe-key-source-scalar.mjs';
 import { withProcessGates } from './process-gates.mjs';
 
-/** @typedef {{module:string,moduleSha512:string,outputFile:string,expectedBytes:number,expectedSha512:string,operation:'fhe-key-source',caseIndex:number}} Configuration */
+/** @typedef {{module:string,moduleSha512:string,outputFile:string,expectedBytes:number,expectedSha512:string,operation:'fhe-key-source'}} Configuration */
 /** @typedef {Awaited<ReturnType<typeof runFheKeySourceScreen>>} GenerationResult */
 /** @typedef {import('./bounded-output.mjs').OutputAcknowledgment} OutputAcknowledgment */
 
@@ -181,7 +181,6 @@ if (isMainThread) {
     try {
         const result = await runFheKeySourceScreen({
             moduleBytes,
-            caseIndex: configuration.caseIndex ?? -1,
             expectedBytes: configuration.expectedBytes,
             onProgress: (progress) =>
                 port.postMessage({ kind: 'progress', progress }),

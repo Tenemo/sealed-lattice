@@ -93,7 +93,6 @@ describe('bounded scalar output transport', () => {
         const chunks: Uint8Array[] = [];
         try {
             const generation = runFheKeySourceScreen({
-                caseIndex: 0,
                 moduleBytes: fixture(),
                 expectedBytes: 13,
                 emitChunk: async (index, offset, bytes) => {
@@ -146,7 +145,7 @@ describe('bounded scalar output transport', () => {
         }
     });
 
-    it('detects a refusal that mutates pending output and refuses an unknown case or proof randomness import', async () => {
+    it('detects a refusal that mutates pending output and refuses a proof randomness import', async () => {
         for (const flaw of ['bytes', 'phase', 'length'] as const) {
             const sink = vi.fn(
                 (index: number, offset: number, bytes: Uint8Array) =>
@@ -154,7 +153,6 @@ describe('bounded scalar output transport', () => {
             );
             await expect(
                 runFheKeySourceScreen({
-                    caseIndex: 0,
                     moduleBytes: fixture(13, 5, flaw),
                     expectedBytes: 13,
                     emitChunk: sink,
@@ -167,15 +165,6 @@ describe('bounded scalar output transport', () => {
         );
         await expect(
             runFheKeySourceScreen({
-                caseIndex: 1,
-                moduleBytes: fixture(),
-                expectedBytes: 13,
-                emitChunk: sink,
-            }),
-        ).rejects.toThrow('Unknown key source screen case');
-        await expect(
-            runFheKeySourceScreen({
-                caseIndex: 0,
                 moduleBytes: fixture(13, 5, 'randomness'),
                 expectedBytes: 13,
                 emitChunk: sink,
@@ -194,7 +183,6 @@ describe('bounded scalar output transport', () => {
             try {
                 await expect(
                     runFheKeySourceScreen({
-                        caseIndex: 0,
                         moduleBytes: fixture(),
                         expectedBytes: 13,
                         emitChunk: () => Promise.resolve(wrong),
@@ -209,7 +197,6 @@ describe('bounded scalar output transport', () => {
         try {
             await expect(
                 runFheKeySourceScreen({
-                    caseIndex: 0,
                     moduleBytes: fixture(),
                     expectedBytes: 13,
                     emitChunk: (index, offset, bytes) =>
@@ -232,7 +219,6 @@ describe('bounded scalar output transport', () => {
         try {
             await expect(
                 runFheKeySourceScreen({
-                    caseIndex: 0,
                     moduleBytes: fixture(),
                     expectedBytes: 13,
                     emitChunk: () => Promise.reject(failure),
@@ -247,7 +233,6 @@ describe('bounded scalar output transport', () => {
         for (const expectedBytes of [12, 14])
             await expect(
                 runFheKeySourceScreen({
-                    caseIndex: 0,
                     moduleBytes: fixture(),
                     expectedBytes,
                     emitChunk,
@@ -255,7 +240,6 @@ describe('bounded scalar output transport', () => {
             ).rejects.toThrow();
         await expect(
             runFheKeySourceScreen({
-                caseIndex: 0,
                 moduleBytes: fixture(13, 1_048_577),
                 expectedBytes: 13,
                 emitChunk,

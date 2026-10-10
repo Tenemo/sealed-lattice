@@ -71,7 +71,6 @@ export const compileFheKeySourceScreenResources = () => {
         referencePhaseBytes,
     ].reduce((maximum, value) => (value > maximum ? value : maximum), 0n);
     return {
-        caseId: 0,
         participantCount,
         optionCount,
         degree,

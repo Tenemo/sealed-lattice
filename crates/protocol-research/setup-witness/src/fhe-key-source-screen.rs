@@ -325,10 +325,10 @@ impl Screen {
 
 thread_local! { static SESSION: RefCell<Option<Screen>> = const { RefCell::new(None) }; }
 #[unsafe(no_mangle)]
-pub extern "C" fn key_source_screen_begin(case: u32) -> u32 {
+pub extern "C" fn key_source_screen_begin() -> u32 {
     SESSION.with(|state| {
         let mut state = state.borrow_mut();
-        if case != 0 || state.is_some() {
+        if state.is_some() {
             return REFUSED;
         }
         *state = Some(Screen::new());

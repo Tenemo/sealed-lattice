@@ -99,7 +99,7 @@ const nativeFixture = async () => {
     await mkdir(source, { recursive: true });
     await mkdir(archive, { recursive: true });
     const fixture = reportFixture();
-    await writeFile(path.join(archive, 'key-source-0.bin'), fixture.bytes);
+    await writeFile(path.join(archive, 'key-source.bin'), fixture.bytes);
     const runtime = Buffer.alloc(64, 19);
     await writeFile(path.join(path.dirname(archive), 'runtime.bin'), runtime);
     const sources = [
@@ -134,7 +134,7 @@ const nativeFixture = async () => {
         compiledInputs: [...sources],
         artifacts: [
             {
-                name: 'key-source-0.bin',
+                name: 'key-source.bin',
                 bytes: fixture.bytes.length,
                 sha512: digest(fixture.bytes),
             },

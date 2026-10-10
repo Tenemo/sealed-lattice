@@ -308,7 +308,7 @@ export const runFheKeySourceScreen = async (
                 const scalar = [];
                 const artifacts = [];
                 const reports = [];
-                const artifactName = 'key-source-' + model.caseId + '.bin';
+                const artifactName = 'key-source.bin';
                 const file = path.join(output, artifactName);
                 if (executable !== undefined) {
                     const result = await runGuardedFixture({
@@ -331,7 +331,7 @@ export const runFheKeySourceScreen = async (
                     native.push(result);
                 } else {
                     assert.ok(source && module);
-                    const expected = source.artifacts[model.caseId];
+                    const [expected] = source.artifacts;
                     let result;
                     if (host === 'browser')
                         result = await runFheKeySourceInChrome({
@@ -348,13 +348,12 @@ export const runFheKeySourceScreen = async (
                     else {
                         const configuration = path.join(
                             log.runDirectoryPath,
-                            'screen-' + model.caseId + '-input.json',
+                            'screen-input.json',
                         );
                         await writeFile(
                             configuration,
                             JSON.stringify({
                                 operation: screenKind,
-                                caseIndex: model.caseId,
                                 module: module.moduleFile,
                                 moduleSha512: module.moduleSha512,
                                 outputFile: file,
@@ -386,7 +385,6 @@ export const runFheKeySourceScreen = async (
                             ? 'browser-' + screenKind + '-screen'
                             : 'scalar-' + screenKind + '-screen',
                     );
-                    assert.equal(result.result.caseIndex, model.caseId);
                     assert.equal(
                         result.result.bytes,
                         Number(model.reportBytes),

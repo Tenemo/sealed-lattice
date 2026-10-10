@@ -200,7 +200,6 @@ export const runFheKeySourceInChrome = async ({
     expectedSha512: string;
 }) => {
     const screenKind = 'fhe-key-source';
-    const caseIndex = 0;
     const phase = 'key-source-screen';
     const output = path.resolve(outputFile);
     assert.ok(
@@ -217,10 +216,7 @@ export const runFheKeySourceInChrome = async ({
         'Insufficient host memory before Chrome execution.',
     );
     await writeFile(
-        path.join(
-            log.runDirectoryPath,
-            'browser-screen-' + caseIndex + '-input-bindings.json',
-        ),
+        path.join(log.runDirectoryPath, 'browser-screen-input-bindings.json'),
         JSON.stringify(
             {
                 moduleSha512,
@@ -228,7 +224,6 @@ export const runFheKeySourceInChrome = async ({
                 relation: screenKind,
                 chunkBytes: browserChunkBytes,
                 outputTarget,
-                caseIndex,
             },
             null,
             2,
@@ -261,7 +256,6 @@ export const runFheKeySourceInChrome = async ({
             details: {
                 phase,
                 relation: screenKind,
-                caseIndex,
                 version: browser.version,
                 launchArguments: browser.launchArguments,
                 processIdentifier: browser.processIdentifier,
@@ -300,7 +294,6 @@ export const runFheKeySourceInChrome = async ({
                     details: {
                         phase,
                         relation: screenKind,
-                        caseIndex,
                         bytes,
                         limit: processMemoryLimit,
                         heaps: browser.heaps(),
@@ -313,7 +306,6 @@ export const runFheKeySourceInChrome = async ({
             abort: fail,
         });
         const configuration = {
-            caseIndex,
             timeoutMilliseconds,
             moduleUrl: serving.origin + '/module.wasm',
             moduleBytes: serving.moduleBytes,
@@ -331,17 +323,14 @@ export const runFheKeySourceInChrome = async ({
         ])) as {
             bytes: number;
             maximumLinearMemoryBytes: number;
-            caseIndex?: number;
         };
         assert.equal(emitted.bytes, expectedBytes);
-        assert.equal(emitted.caseIndex, caseIndex);
         assert.ok(emitted.maximumLinearMemoryBytes <= linearMemoryLimit);
         const artifact = serving.completedOutput();
         assert.equal(await fileDigest(artifact.file), artifact.sha512);
         assert.equal(artifact.sha512, expectedSha512);
         const result: Record<string, unknown> = {
             kind: 'browser-' + screenKind + '-screen',
-            caseIndex,
             ...emitted,
             output: artifact,
         };

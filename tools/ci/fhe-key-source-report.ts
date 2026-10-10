@@ -399,7 +399,7 @@ export const readFheKeySourceNativeSource = async (
         await readNativeSourceMetadata(source, root);
     const archive = path.join(artifactDirectory, 'fhe-key-source');
     assert.equal(path.resolve(String(report.output)), archive);
-    const name = 'key-source-0.bin';
+    const name = 'key-source.bin';
     assert.deepEqual(await readdir(archive), [name]);
     assert.ok(Array.isArray(report.native));
     assert.equal(report.native.length, 1);
