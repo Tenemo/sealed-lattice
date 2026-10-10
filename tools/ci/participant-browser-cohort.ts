@@ -1532,10 +1532,19 @@ return key;`,
             details: { position, operation, ...cut },
         });
     };
-    // Crashes a participant's browser while its operation, in the
-    // generation it durably entered, has reached a point ahead of its
-    // next root, and records that point. The next visit discards what
-    // the operation stored and runs it again from its retained state.
+    // Ends a participant's running operation without a crash inside
+    // one of Chrome's storage writes: the page unloads, which ends the
+    // operation and its storage transactions, and the browser then
+    // closes. A crash there can leave a cut write-ahead log record that
+    // Chrome reuses, so that a later crash makes it delete the store.
+    const stopOperation = async (position: number) => {
+        await inBrowser(position, undefined, (chrome) => chrome.unload());
+        await browsers.close(participantBrowser(position));
+    };
+    // Interrupts a participant's operation once, in the generation it
+    // durably entered, it has reached a point ahead of its next root,
+    // and records that point. The next visit discards what the
+    // operation stored and runs it again from its retained state.
     const interruptWhen = async (
         position: number,
         operation: ParticipantOperation,
@@ -1565,7 +1574,7 @@ return key;`,
             )
                 break;
         }
-        await endBrowser(position);
+        await stopOperation(position);
         await assert.rejects(interrupted);
         assert.equal(
             await headGeneration(position),

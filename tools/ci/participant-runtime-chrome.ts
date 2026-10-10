@@ -73,6 +73,9 @@ export type ChromeParticipant = Readonly<{
     evaluate(expression: string): Promise<unknown>;
     // Reloads an idle page to install a test client without another crash.
     reload(): Promise<void>;
+    // Unloads the page, which ends its workers and their storage
+    // transactions, and leaves the browser on a blank page.
+    unload(): Promise<void>;
     // The JavaScript heaps that the page and its current workers last
     // reported; each that has no request outstanding is asked again. A
     // worker answers only between tasks, so one whose code runs without
@@ -95,6 +98,12 @@ export type ChromeParticipant = Readonly<{
     // the shutdown work a close lets it finish.
     crash(): Promise<void>;
 }>;
+
+// A closing browser first finishes its storage work, which takes longer
+// while other browsers keep the host's processors busy; a terminated one only
+// has to exit.
+const closeMilliseconds = 60_000;
+const terminationMilliseconds = 10_000;
 
 const chromeExecutable = () =>
     process.platform === 'win32'
@@ -243,12 +252,16 @@ export const launchChromeParticipant = async (
             );
         });
     const exited = () => child.exitCode !== null || child.signalCode !== null;
-    const exit = (onDeadline: () => void, message: string) =>
+    const exit = (
+        milliseconds: number,
+        onDeadline: () => void,
+        message: string,
+    ) =>
         new Promise<void>((resolve, reject) => {
             const timer = setTimeout(() => {
                 onDeadline();
                 reject(new Error(message));
-            }, 10_000);
+            }, milliseconds);
             child.once('exit', () => {
                 clearTimeout(timer);
                 resolve();
@@ -262,6 +275,7 @@ export const launchChromeParticipant = async (
         socket?.close();
         if (!exited())
             await exit(
+                closeMilliseconds,
                 () => child.kill(),
                 'Chrome did not close within its deadline.',
             );
@@ -275,6 +289,7 @@ export const launchChromeParticipant = async (
         if (!exited()) {
             const termination = killProcessTree(child, { signal: 'SIGKILL' });
             await exit(
+                terminationMilliseconds,
                 () => undefined,
                 'Chrome did not exit after its termination: ' +
                     JSON.stringify(termination),
@@ -392,7 +407,7 @@ export const launchChromeParticipant = async (
             { autoAttach: true, waitForDebuggerOnStart: false, flatten: true },
             pageSession,
         );
-        const navigate = async () => {
+        const navigate = async (url: string) => {
             let timer: ReturnType<typeof setTimeout> | undefined;
             const loaded = new Promise<void>((resolve, reject) => {
                 onLoad = resolve;
@@ -404,7 +419,7 @@ export const launchChromeParticipant = async (
             try {
                 await Promise.all([
                     loaded,
-                    send('Page.navigate', { url: origin }, pageSession).then(
+                    send('Page.navigate', { url }, pageSession).then(
                         (value) => {
                             if (value.errorText !== undefined)
                                 throw new Error(
@@ -418,7 +433,7 @@ export const launchChromeParticipant = async (
                 onLoad = undefined;
             }
         };
-        await navigate();
+        await navigate(origin);
         const version = String((await send('Browser.getVersion')).product);
         if (child.pid === undefined)
             throw new Error('Chrome has no process identifier.');
@@ -426,7 +441,8 @@ export const launchChromeParticipant = async (
             processIdentifier: child.pid,
             version,
             launchArguments,
-            reload: navigate,
+            reload: () => navigate(origin),
+            unload: () => navigate('about:blank'),
             close,
             crash,
             heaps: () => {
