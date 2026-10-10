@@ -2,6 +2,7 @@ import { writeModuleInput } from '../../module/context.js';
 import type { ParticipantProfileContext } from '../../module/context.js';
 import { readParticipantOutput } from '../../module/participant-module.js';
 import type { ParticipantProfile } from '../../module/runtime-bounds.js';
+import { ballotEnvelopeOffset } from '../../module/runtime-bounds.js';
 import type { CandidateView } from '../../relay/candidates.js';
 import {
     candidateLists,
@@ -36,7 +37,6 @@ import {
     rootGeneration,
 } from '../../storage/root-generation.js';
 import { commitRoot, dataRecordInventory } from '../../storage/root.js';
-import { ballotEnvelopeOffset } from '../ballot/ballot-state.js';
 import type { BallotSession } from '../ballot/ballot.js';
 import {
     ballotCandidateKey,

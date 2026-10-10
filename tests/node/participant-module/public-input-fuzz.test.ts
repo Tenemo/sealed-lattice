@@ -384,7 +384,6 @@ const publicInputCommands: readonly PublicInputCommand[] = [
         name: 'ballot_classification_finish',
         buffer: 'ballotBody',
         parameters: [],
-        query: true,
     },
     {
         name: 'evaluation_target_command',
@@ -489,9 +488,7 @@ describe('participant module public input', () => {
             expect(module.setup_offer_finish()).toBe(1);
             expect(module.setup_selection_finish()).toBe(1);
             expect(module.setup_finish_certificate()).toBe(1);
-            expect(module.setup_selection_count()).toBe(0);
-            expect(module.setup_selection_position(0) >>> 0).toBe(0xffff_ffff);
-            expect(module.setup_selection_body_identity_pointer(0)).toBe(0);
+            expect(module.setup_selection_output()).toBe(1);
         }
         for (const length of [0, 1, 64, 4095]) {
             writeSetupInput(module, organizer.publicKey.subarray(0, length));

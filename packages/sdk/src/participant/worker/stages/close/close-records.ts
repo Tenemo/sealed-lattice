@@ -4,14 +4,16 @@ import {
     custodyPurpose,
 } from '../../module/custody-identity.js';
 import type { ParticipantProfile } from '../../module/runtime-bounds.js';
-import { identityBytes } from '../../module/runtime-bounds.js';
+import {
+    ballotEnvelopeOffset,
+    identityBytes,
+} from '../../module/runtime-bounds.js';
 import {
     equalBytes,
     hexadecimal,
     readUnsigned16,
     readUnsigned32,
 } from '../../shared/bytes.js';
-import { ballotEnvelopeOffset } from '../ballot/ballot-state.js';
 
 // The public close records: their discovery keys and file names, and what
 // a response or proposal packet names. A participant's close work and the

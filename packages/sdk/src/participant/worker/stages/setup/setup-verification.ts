@@ -21,6 +21,7 @@ import {
     concatenate,
     equalBytes,
     readUnsigned16,
+    readUnsigned32,
     tupleFields,
     unsigned32,
 } from '../../shared/bytes.js';
@@ -67,33 +68,38 @@ type SetupSelection = Readonly<{
 const offerKey = (offer: SelectedOffer) =>
     contributionCandidateKey(offer.position, offer.identity);
 
-// These getters describe only a selection already authenticated by Rust.
+// The output describes only a selection already authenticated by Rust: its
+// identity, then each selected position and body identity.
+const selectedOfferBytes = 4 + 64;
 const selectedSetup = (context: PublicProfileContext): SetupSelection => {
     const { module, profile } = context;
-    const count = module.setup_selection_count();
-    const pointer = module.setup_selection_identity_pointer();
-    if (count !== profile.setupContributorCount || pointer === 0)
+    const output =
+        module.setup_selection_output() === 0
+            ? setupOutput(context)
+            : undefined;
+    if (
+        output?.length !==
+        64 + profile.setupContributorCount * selectedOfferBytes
+    )
         throw new PublicInputFailure(
             'No authenticated setup selection is available.',
         );
-    const identity = readModuleMemory(module, pointer, 64);
-    const offers = Array.from({ length: count }, (_, ordinal) => {
-        const position = module.setup_selection_position(ordinal) >>> 0;
-        const bodyIdentityPointer =
-            module.setup_selection_body_identity_pointer(ordinal);
-        if (
-            position >= profile.eligibleContributorCount ||
-            bodyIdentityPointer === 0
-        )
-            throw new PublicInputFailure(
-                'The setup selection has an invalid author.',
-            );
-        return {
-            position,
-            identity: readModuleMemory(module, bodyIdentityPointer, 64),
-        };
-    });
-    return { identity, offers };
+    const offers = Array.from(
+        { length: profile.setupContributorCount },
+        (_, ordinal) => {
+            const offset = 64 + ordinal * selectedOfferBytes;
+            const position = readUnsigned32(output, offset);
+            if (position >= profile.eligibleContributorCount)
+                throw new PublicInputFailure(
+                    'The setup selection has an invalid author.',
+                );
+            return {
+                position,
+                identity: output.slice(offset + 4, offset + selectedOfferBytes),
+            };
+        },
+    );
+    return { identity: output.slice(0, 64), offers };
 };
 
 export const setupOutput = (context: PublicContext) =>

@@ -421,11 +421,8 @@ const beginClassification = async (
     )
         throw new PublicInputFailure('A usable ballot was refused.');
     if (module.ballot_classification_requires_key() === 1) {
-        const index = module.ballot_classification_key_index() >>> 0;
-        if (
-            index === unusedWord ||
-            module.ballot_classification_key_begin(index) !== 0
-        )
+        const index = context.profile.ballot.keyIndex;
+        if (module.ballot_classification_key_begin(index) !== 0)
             throw new Error('The ballot classifier refused its key.');
         await deliverFinalAggregate(context, async () => {
             await readFinalAggregate(context, index, (_offset, bytes) => {
@@ -478,11 +475,10 @@ export const classifyBallot = async (
                 throw new PublicInputFailure('A usable ballot was refused.');
         },
     );
-    const classification =
-        header.length === headerBytes
-            ? module.ballot_classification_finish()
-            : 0;
-    if (classification === 0)
+    if (
+        header.length !== headerBytes ||
+        module.ballot_classification_finish() !== 0
+    )
         throw new PublicInputFailure('A usable ballot changed.');
-    return classification === 1;
+    return module.ballot_classification_is_valid() === 1;
 };

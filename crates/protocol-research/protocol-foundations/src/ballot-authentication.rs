@@ -14,7 +14,16 @@ use fips204::{
 use supported_profile::Profile;
 
 pub const BALLOT_SIGNATURE_CONTEXT: &[u8] = b"sealed-lattice/ballot-envelope/v1";
-pub const ENVELOPE_BYTES: usize = 4 + 64 + 64 + 2 + 8 + 8 + 64;
+/// The envelope's fields after its four-byte marker start at these offsets:
+/// the poll, the setup identity, the author's position, the ballot time, the
+/// body length and the body identity.
+pub const ENVELOPE_POLL_OFFSET: usize = 4;
+pub const ENVELOPE_SETUP_IDENTITY_OFFSET: usize = 68;
+pub const ENVELOPE_POSITION_OFFSET: usize = 132;
+pub const ENVELOPE_BALLOT_TIME_OFFSET: usize = 134;
+pub const ENVELOPE_BODY_LENGTH_OFFSET: usize = 142;
+pub const ENVELOPE_BODY_IDENTITY_OFFSET: usize = 150;
+pub const ENVELOPE_BYTES: usize = ENVELOPE_BODY_IDENTITY_OFFSET + 64;
 pub const ENVELOPE_IDENTITY_DOMAIN: &str = "sealed-lattice/ballot-envelope-identity/v1";
 const RETAINED_SETUP_TAG_LABEL: &[u8] = b"sealed-lattice/retained-setup-reference/v2";
 
@@ -68,50 +77,80 @@ impl BallotEnvelope {
             return Err(Error::Shape);
         }
         let mut bytes = [0; ENVELOPE_BYTES];
-        bytes[..4].copy_from_slice(b"LBE2");
-        bytes[4..68].copy_from_slice(&poll);
-        bytes[68..132].copy_from_slice(&setup_identity);
-        bytes[132..134].copy_from_slice(&(position as u16).to_le_bytes());
-        bytes[134..142].copy_from_slice(&ballot_time.to_le_bytes());
-        bytes[142..150].copy_from_slice(&(body_length as u64).to_le_bytes());
-        bytes[150..].copy_from_slice(&body_identity);
+        bytes[..ENVELOPE_POLL_OFFSET].copy_from_slice(b"LBE2");
+        bytes[ENVELOPE_POLL_OFFSET..ENVELOPE_SETUP_IDENTITY_OFFSET].copy_from_slice(&poll);
+        bytes[ENVELOPE_SETUP_IDENTITY_OFFSET..ENVELOPE_POSITION_OFFSET]
+            .copy_from_slice(&setup_identity);
+        bytes[ENVELOPE_POSITION_OFFSET..ENVELOPE_BALLOT_TIME_OFFSET]
+            .copy_from_slice(&(position as u16).to_le_bytes());
+        bytes[ENVELOPE_BALLOT_TIME_OFFSET..ENVELOPE_BODY_LENGTH_OFFSET]
+            .copy_from_slice(&ballot_time.to_le_bytes());
+        bytes[ENVELOPE_BODY_LENGTH_OFFSET..ENVELOPE_BODY_IDENTITY_OFFSET]
+            .copy_from_slice(&(body_length as u64).to_le_bytes());
+        bytes[ENVELOPE_BODY_IDENTITY_OFFSET..].copy_from_slice(&body_identity);
         Ok(Self { bytes })
     }
     pub fn decode(profile: Profile, bytes: &[u8]) -> Result<Self, Error> {
-        if bytes.len() != ENVELOPE_BYTES || &bytes[..4] != b"LBE2" {
+        if bytes.len() != ENVELOPE_BYTES || &bytes[..ENVELOPE_POLL_OFFSET] != b"LBE2" {
             return Err(Error::Shape);
         }
+        let fields = Self {
+            bytes: bytes.try_into().unwrap(),
+        };
+        let body_length = usize::try_from(u64::from_le_bytes(
+            bytes[ENVELOPE_BODY_LENGTH_OFFSET..ENVELOPE_BODY_IDENTITY_OFFSET]
+                .try_into()
+                .unwrap(),
+        ))
+        .map_err(|_| Error::Shape)?;
         Self::new(
             profile,
-            bytes[4..68].try_into().unwrap(),
-            bytes[68..132].try_into().unwrap(),
-            u16::from_le_bytes(bytes[132..134].try_into().unwrap()) as usize,
-            u64::from_le_bytes(bytes[134..142].try_into().unwrap()),
-            usize::try_from(u64::from_le_bytes(bytes[142..150].try_into().unwrap()))
-                .map_err(|_| Error::Shape)?,
-            bytes[150..].try_into().unwrap(),
+            *fields.poll(),
+            *fields.setup_identity(),
+            fields.position(),
+            fields.ballot_time(),
+            body_length,
+            *fields.body_identity(),
         )
     }
     pub fn bytes(&self) -> &[u8; ENVELOPE_BYTES] {
         &self.bytes
     }
     pub fn poll(&self) -> &[u8; 64] {
-        self.bytes[4..68].try_into().unwrap()
+        self.bytes[ENVELOPE_POLL_OFFSET..ENVELOPE_SETUP_IDENTITY_OFFSET]
+            .try_into()
+            .unwrap()
     }
     pub fn setup_identity(&self) -> &[u8; 64] {
-        self.bytes[68..132].try_into().unwrap()
+        self.bytes[ENVELOPE_SETUP_IDENTITY_OFFSET..ENVELOPE_POSITION_OFFSET]
+            .try_into()
+            .unwrap()
     }
     pub fn position(&self) -> usize {
-        u16::from_le_bytes(self.bytes[132..134].try_into().unwrap()) as usize
+        u16::from_le_bytes(
+            self.bytes[ENVELOPE_POSITION_OFFSET..ENVELOPE_BALLOT_TIME_OFFSET]
+                .try_into()
+                .unwrap(),
+        ) as usize
     }
     pub fn ballot_time(&self) -> u64 {
-        u64::from_le_bytes(self.bytes[134..142].try_into().unwrap())
+        u64::from_le_bytes(
+            self.bytes[ENVELOPE_BALLOT_TIME_OFFSET..ENVELOPE_BODY_LENGTH_OFFSET]
+                .try_into()
+                .unwrap(),
+        )
     }
     pub fn body_length(&self) -> usize {
-        u64::from_le_bytes(self.bytes[142..150].try_into().unwrap()) as usize
+        u64::from_le_bytes(
+            self.bytes[ENVELOPE_BODY_LENGTH_OFFSET..ENVELOPE_BODY_IDENTITY_OFFSET]
+                .try_into()
+                .unwrap(),
+        ) as usize
     }
     pub fn body_identity(&self) -> &[u8; 64] {
-        self.bytes[150..].try_into().unwrap()
+        self.bytes[ENVELOPE_BODY_IDENTITY_OFFSET..]
+            .try_into()
+            .unwrap()
     }
     /// The submission identity. Signatures are carriers, so two signatures on
     /// the same envelope are one submission.

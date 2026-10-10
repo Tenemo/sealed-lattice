@@ -1,6 +1,9 @@
 import { operationSeedBytes } from '../../module/participant-module.js';
 import type { ParticipantProfile } from '../../module/runtime-bounds.js';
-import { recordKeyBytes } from '../../module/runtime-bounds.js';
+import {
+    ballotEnvelopeOffset,
+    recordKeyBytes,
+} from '../../module/runtime-bounds.js';
 import {
     concatenate,
     encodeText,
@@ -83,16 +86,6 @@ export const encodeBallotState = (generation: number, state: BallotState) =>
 
         state.signature,
     );
-
-// The envelope's fields after its marker: the poll, the setup identity, the
-// author's position, the ballot time and the body length.
-export const ballotEnvelopeOffset = {
-    poll: 4,
-    setupIdentity: 68,
-    author: 132,
-    ballotTime: 134,
-    bodyLength: 142,
-} as const;
 
 // Whether the envelope's context fields name this record context.
 export const ballotEnvelopeMatches = (

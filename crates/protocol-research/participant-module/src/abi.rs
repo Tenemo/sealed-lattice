@@ -34,7 +34,7 @@ mod setup_verification;
 
 fn input_bytes() -> usize {
     let retained_setup = supported_profile::Profile::all()
-        .map(setup_aggregate::selection_reference_bytes)
+        .map(setup_aggregate::retained_reference_bytes)
         .max()
         .unwrap();
     let restore = 128

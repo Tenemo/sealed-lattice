@@ -378,46 +378,22 @@ impl SetupSession {
             Err(()) => Err(Refused),
         }
     }
-    pub fn selection_count(&self) -> usize {
-        self.selected
-            .as_ref()
-            .map_or(0, |selection| selection.selection().selected().len())
-    }
-    pub fn selection_position(&self, ordinal: usize) -> Option<usize> {
-        self.selected.as_ref().and_then(|selection| {
-            selection
-                .selection()
-                .selected()
-                .get(ordinal)
-                .map(|entry| entry.0)
-        })
-    }
-    pub fn selection_body_identity(&self, ordinal: usize) -> Option<&[u8; 64]> {
-        self.selected.as_ref().and_then(|selection| {
-            selection
-                .selection()
-                .selected()
-                .get(ordinal)
-                .map(|entry| &entry.1)
-        })
-    }
-    /// Writes the selection's identity to the output, when there is a
-    /// selection.
-    pub fn output_selection_identity(&mut self) -> bool {
-        let Some(identity) = self
-            .selected
-            .as_ref()
-            .map(|selection| selection.selection().identity())
-        else {
-            return false;
-        };
-        self.output = identity.to_vec();
-        true
-    }
-    pub fn aggregate_selection(&mut self) -> Result<(), Refused> {
-        if self.aggregator.is_some() {
-            return Err(Refused);
+    /// Writes the authenticated selection to the output: its identity, then
+    /// each selected offer's position as four bytes and its body identity.
+    pub fn output_selection(&mut self) -> Result<(), Refused> {
+        let selection = self.selected.as_ref().ok_or(Refused)?.selection();
+        let mut output = selection.identity().to_vec();
+        for (position, identity) in selection.selected() {
+            output.extend((*position as u32).to_le_bytes());
+            output.extend(identity);
         }
+        self.output = output;
+        Ok(())
+    }
+    /// Begins the selected aggregation, discarding any earlier unfinished
+    /// progress, which is disposable.
+    pub fn aggregate_selection(&mut self) -> Result<(), Refused> {
+        self.aggregator = None;
         let result = (|| {
             let selected = self.selected.clone().ok_or(())?;
             let offers: Vec<_> = selected

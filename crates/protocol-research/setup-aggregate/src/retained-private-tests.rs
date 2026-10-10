@@ -81,7 +81,7 @@ fn provisional_and_final_reference_grammars_do_not_alias() {
     let provisional = encode_reference(b"SPI1", profile(), [9; 64], &polynomials).unwrap();
     assert_eq!(
         provisional.len() + protocol_foundations::RETAINED_TAG_BYTES,
-        crate::selection_reference_bytes(profile())
+        crate::retained_reference_bytes(profile())
     );
     assert!(RetainedSetupInputs::parse(profile(), &provisional, [9; 64]).is_err());
     assert!(

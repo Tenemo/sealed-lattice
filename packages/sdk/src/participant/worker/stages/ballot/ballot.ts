@@ -10,6 +10,7 @@ import {
     seededRandomness,
 } from '../../module/participant-module.js';
 import type { ParticipantProfile } from '../../module/runtime-bounds.js';
+import { ballotEnvelopeOffset } from '../../module/runtime-bounds.js';
 import { createCandidatePublication } from '../../relay/publication.js';
 import type { PublicRelay } from '../../relay/relay.js';
 import {
@@ -49,7 +50,6 @@ import { ensureFinalAggregate, retainedRecordContext } from '../setup/setup.js';
 import type { BallotState } from './ballot-state.js';
 import {
     ballotEnvelopeMatches,
-    ballotEnvelopeOffset,
     ballotRecordAssociatedData,
     ballotRecordInventory,
     ballotRecordLength,
@@ -393,14 +393,13 @@ export const deliverBallotKey = (
 const startBallotWork = async (session: BallotSession) => {
     const { participant } = session;
     const { context } = participant;
-    const { module } = context;
     ballotCommand(
         context,
         ballotOperation.begin,
         0,
         await ballotWorkInput(participant, session.records.setupIdentity),
     );
-    const index = module.participant_ballot_key_index() >>> 0;
+    const index = context.profile.ballot.keyIndex;
     ballotCommand(context, ballotOperation.beginKey, index);
     await deliverBallotKey(context, index);
 };

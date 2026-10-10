@@ -147,9 +147,16 @@ impl ClassificationSession {
     }
     /// Finishes the ballot's classification, which holds none when it
     /// failed.
-    pub fn finish(&mut self) -> Option<&BallotBodyClassification> {
+    pub fn finish(&mut self) -> Result<(), Refused> {
         self.classification = self.classifier.take().and_then(|value| value.finish().ok());
-        self.classification.as_ref()
+        self.classification.as_ref().map(|_| ()).ok_or(Refused)
+    }
+    /// Whether the finished classification holds a valid ballot.
+    pub fn valid(&self) -> bool {
+        matches!(
+            self.classification,
+            Some(BallotBodyClassification::Valid(_))
+        )
     }
     pub fn take_classification(&mut self) -> Option<BallotBodyClassification> {
         self.classification.take()

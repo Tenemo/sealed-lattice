@@ -110,38 +110,10 @@ pub extern "C" fn setup_selection_build(length: usize) -> u32 {
 pub extern "C" fn setup_selection_begin(length: usize) -> u32 {
     step(|setup| setup.begin_selection(length))
 }
+/// Writes the authenticated selection to the setup output.
 #[unsafe(no_mangle)]
-pub extern "C" fn setup_selection_count() -> usize {
-    SETUP.with(|setup| setup.borrow().selection_count())
-}
-#[unsafe(no_mangle)]
-pub extern "C" fn setup_selection_position(ordinal: usize) -> usize {
-    SETUP.with(|setup| {
-        setup
-            .borrow()
-            .selection_position(ordinal)
-            .unwrap_or(usize::MAX)
-    })
-}
-#[unsafe(no_mangle)]
-pub extern "C" fn setup_selection_body_identity_pointer(ordinal: usize) -> usize {
-    SETUP.with(|setup| {
-        setup
-            .borrow()
-            .selection_body_identity(ordinal)
-            .map_or(0, |identity| identity.as_ptr() as usize)
-    })
-}
-#[unsafe(no_mangle)]
-pub extern "C" fn setup_selection_identity_pointer() -> usize {
-    SETUP.with(|setup| {
-        let mut setup = setup.borrow_mut();
-        if setup.output_selection_identity() {
-            setup.output().as_ptr() as usize
-        } else {
-            0
-        }
-    })
+pub extern "C" fn setup_selection_output() -> u32 {
+    step(SetupSession::output_selection)
 }
 #[unsafe(no_mangle)]
 pub extern "C" fn setup_selection_aggregate() -> u32 {

@@ -32,13 +32,16 @@ import type { ControlLayout, HelperStart } from './parallel-layout.js';
 // run every job itself; a failed job and an exhausted arena end the operation
 // as pending.
 
-// The module's job bounds, which the host enforces again.
-const maximumJobBytes = 8 << 20;
-const maximumJobParts = 4;
-// The helpers an operation starts, as many as the module's memory plan
-// covers: it divides the absolute linear-memory bound between them and the
-// worker.
-const maximumHelpers = 8;
+// The module's job bounds, which the host enforces again, and the helpers
+// an operation starts, as many as the module's memory plan covers: it
+// divides the absolute linear-memory bound between them and the worker. The
+// worker checks these against the bounds the module reports.
+export const parallelJobBounds = {
+    maximumJobBytes: 8 << 20,
+    maximumJobParts: 4,
+    maximumHelpers: 8,
+} as const;
+const { maximumJobBytes, maximumJobParts, maximumHelpers } = parallelJobBounds;
 /**
  * A helper that has not reported whether it started within this many
  * milliseconds counts as not started, first when the page loads it and then

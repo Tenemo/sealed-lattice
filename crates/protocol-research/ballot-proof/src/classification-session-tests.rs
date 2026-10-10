@@ -37,6 +37,7 @@ fn refuses_each_step_without_a_ballot() {
     assert!(matches!(session.push(1, false), Err(Refused)));
     let capacity = session.input().len();
     assert!(matches!(session.push(capacity + 1, false), Err(Refused)));
-    assert!(session.finish().is_none());
+    assert!(matches!(session.finish(), Err(Refused)));
+    assert!(!session.valid());
     assert!(session.take_classification().is_none());
 }

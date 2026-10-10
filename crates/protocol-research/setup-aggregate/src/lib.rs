@@ -14,8 +14,9 @@ pub use retained::{
 
 pub const CHUNK_BYTES: usize = 524_288;
 
-/// The provisional aggregate reference and its original participant's tag.
-pub fn selection_reference_bytes(profile: Profile) -> usize {
+/// A retained aggregate reference, provisional after the selection or
+/// verified after the setup, with its original participant's tag.
+pub fn retained_reference_bytes(profile: Profile) -> usize {
     4 + 64
         + 64 * profile.contribution_body_polynomials().len()
         + protocol_foundations::RETAINED_TAG_BYTES

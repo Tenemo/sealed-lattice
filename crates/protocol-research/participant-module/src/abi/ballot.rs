@@ -74,21 +74,6 @@ pub extern "C" fn participant_ballot_command(
     })
 }
 
-/// The aggregate polynomial a ballot of the retained poll encrypts under at
-/// this ordinal, which ballot creation reads as its key; the maximum value
-/// when no poll is retained or no such key exists.
-#[unsafe(no_mangle)]
-pub extern "C" fn participant_ballot_key_index() -> usize {
-    SESSION.with(|session| {
-        session
-            .borrow()
-            .retained_context
-            .as_ref()
-            .map(|context| ballot_proof::statement::setup_input(context.profile()).2)
-            .unwrap_or(usize::MAX)
-    })
-}
-
 thread_local! {static CLASSIFICATION: RefCell<ClassificationSession> = RefCell::new(ClassificationSession::new());}
 
 pub(super) fn take_classification() -> Option<BallotBodyClassification> {
@@ -117,14 +102,6 @@ pub extern "C" fn ballot_classification_begin(length: usize) -> u32 {
         )
     })
 }
-/// The aggregate polynomial that a ballot classified under the verified
-/// setup reads as its FHE key; the maximum value when no setup is verified.
-#[unsafe(no_mangle)]
-pub extern "C" fn ballot_classification_key_index() -> usize {
-    super::setup_verification::verified_setup()
-        .map(|(_, setup)| ballot_proof::statement::setup_input(setup.profile()).2)
-        .unwrap_or(usize::MAX)
-}
 #[unsafe(no_mangle)]
 pub extern "C" fn ballot_classification_requires_key() -> u32 {
     CLASSIFICATION.with(|session| u32::from(session.borrow().requires_key()))
@@ -145,13 +122,12 @@ pub extern "C" fn ballot_classification_key_chunk(length: usize) -> u32 {
 pub extern "C" fn ballot_classification_chunk(length: usize) -> u32 {
     CLASSIFICATION.with(|session| u32::from(session.borrow_mut().push(length, false).is_err()))
 }
-/// One for a valid ballot, two for an invalid one and zero when the
-/// classification failed.
 #[unsafe(no_mangle)]
 pub extern "C" fn ballot_classification_finish() -> u32 {
-    CLASSIFICATION.with(|session| match session.borrow_mut().finish() {
-        Some(BallotBodyClassification::Valid(_)) => 1,
-        Some(BallotBodyClassification::Invalid(_)) => 2,
-        None => 0,
-    })
+    CLASSIFICATION.with(|session| u32::from(session.borrow_mut().finish().is_err()))
+}
+/// One when the finished classification holds a valid ballot.
+#[unsafe(no_mangle)]
+pub extern "C" fn ballot_classification_is_valid() -> u32 {
+    CLASSIFICATION.with(|session| u32::from(session.borrow().valid()))
 }

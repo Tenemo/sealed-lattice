@@ -62,7 +62,6 @@ export const moduleFunctions = [
     'retain_proposal',
     'retained_proposal_identity_pointer',
     'participant_ballot_command',
-    'participant_ballot_key_index',
     'participant_close_command',
     'participant_finality_command',
     'participant_release_command',
@@ -78,21 +77,19 @@ export const moduleFunctions = [
     'close_command',
     'close_missing_pointer',
     'close_missing_count',
-    // The signed ballot classifier. Finish returns one for a valid body, two
-    // for an invalid one and zero when classification refused.
+    // The signed ballot classifier.
     'ballot_body_input_pointer',
     'ballot_body_input_capacity',
     'ballot_classification_begin',
     // One when the body relation needs its encryption keys.
     'ballot_classification_requires_key',
-    // The aggregate polynomial of the key at an ordinal under the verified
-    // setup, or the maximum value without one.
-    'ballot_classification_key_index',
     'ballot_classification_key_begin',
     'ballot_classification_key_chunk',
     'ballot_classification_key_finish',
     'ballot_classification_chunk',
     'ballot_classification_finish',
+    // One when the finished classification holds a valid body.
+    'ballot_classification_is_valid',
     // The public ranking evaluation.
     'evaluation_target_input_pointer',
     'evaluation_target_input_capacity',
@@ -148,10 +145,9 @@ export const moduleFunctions = [
     'setup_offer_available',
     'setup_selection_build',
     'setup_selection_begin',
-    'setup_selection_count',
-    'setup_selection_position',
-    'setup_selection_body_identity_pointer',
-    'setup_selection_identity_pointer',
+    // Writes the authenticated selection to the setup output: its identity,
+    // then each selected position as four bytes and its body identity.
+    'setup_selection_output',
     'setup_selection_aggregate',
     'setup_begin_selected_offer',
     'setup_begin_selected_offer_verification',

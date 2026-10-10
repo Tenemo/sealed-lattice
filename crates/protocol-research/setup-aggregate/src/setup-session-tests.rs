@@ -14,11 +14,8 @@ fn holds_nothing_before_its_roster_verifies() {
     assert!(session.unsigned_selection().is_none());
     assert!(session.selection_inputs().is_none());
     assert_eq!(session.option_count(), 0);
-    assert_eq!(session.selection_count(), 0);
-    assert!(session.selection_position(0).is_none());
-    assert!(session.selection_body_identity(0).is_none());
     assert_eq!(session.accepted(), 0);
-    assert!(!session.output_selection_identity());
+    assert!(matches!(session.output_selection(), Err(Refused)));
     assert!(session.output().is_empty());
     for length in [0, 63, 64] {
         assert!(!session.offer_available(0, length));

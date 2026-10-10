@@ -1,3 +1,4 @@
+import { parallelJobBounds } from './parallel-helpers.js';
 import { operationSeedBytes, readModuleMemory } from './participant-module.js';
 import type { ParticipantModule } from './participant-module.js';
 
@@ -20,6 +21,18 @@ export const tagBytes = 16;
 export const recordKeyBytes = 32;
 export const identityBytes = 64;
 const chunks = (bytes: number) => Math.ceil(bytes / chunkBytes);
+
+// A ballot envelope's fields after its marker: the poll, the setup
+// identity, the author's position, the ballot time and the body length.
+// The worker reads them to route public records and checks these offsets
+// against the module's.
+export const ballotEnvelopeOffset = {
+    poll: 4,
+    setupIdentity: 68,
+    author: 132,
+    ballotTime: 134,
+    bodyLength: 142,
+} as const;
 const maximum = (...values: number[]) => Math.max(...values);
 
 // The encrypted root manifest: its marker, data keys, poll and record
@@ -123,6 +136,8 @@ export type ParticipantProfile = Readonly<{
         minimumBodyBytes: number;
         maximumBodyBytes: number;
         envelopeBytes: number;
+        // The aggregate polynomial whose FHE key a ballot encrypts under.
+        keyIndex: number;
         requiredStorageBytes: number;
     }>;
     close: Readonly<{
@@ -235,8 +250,31 @@ const readModuleLimits = (module: ParticipantModule) => {
             envelopeBytes: take(),
         },
         polynomialDegree: take(),
+        parallel: {
+            maximumJobBytes: take(),
+            maximumJobParts: take(),
+            maximumHelpers: take(),
+        },
+        ballotEnvelope: {
+            poll: take(),
+            setupIdentity: take(),
+            author: take(),
+            ballotTime: take(),
+            bodyLength: take(),
+        },
     };
     finish();
+    const same = (
+        reported: Readonly<Record<string, number>>,
+        held: Readonly<Record<string, number>>,
+    ) => Object.entries(held).every(([key, value]) => reported[key] === value);
+    if (
+        !same(limits.parallel, parallelJobBounds) ||
+        !same(limits.ballotEnvelope, ballotEnvelopeOffset)
+    )
+        throw new Error(
+            'The participant module reported other job bounds or envelope offsets.',
+        );
     return limits;
 };
 type ModuleLimits = ReturnType<typeof readModuleLimits>;
@@ -275,7 +313,8 @@ const readModuleProfile = (
         storedCoefficientBytes: take(),
         selectionBodyBytes: take(),
         certificateBytes: take(),
-        selectionReferenceBytes: take(),
+        retainedReferenceBytes: take(),
+        ballotKeyIndex: take(),
         checkpointLengths: list(take),
         polynomials: list(() => ({
             expandedIndex: take(),
@@ -445,6 +484,7 @@ const ballotBounds = (
         signedStateBytes,
         minimumBodyBytes: profile.minimumBallotBodyBytes,
         maximumBodyBytes: profile.maximumBallotBodyBytes,
+        keyIndex: profile.ballotKeyIndex,
         sealedBodyBytes:
             profile.maximumBallotBodyBytes + tagBytes * bodyRecords,
     };
@@ -543,15 +583,6 @@ const releaseBounds = (moduleLimits: ModuleLimits, profile: ModuleProfile) => {
     };
 };
 
-// Marker, setup identity, one digest per aggregate polynomial, and the
-// credential-keyed tag that the ballot step checks before parsing.
-const setupReferenceBytes = (profile: ModuleProfile) =>
-    4 + identityBytes * (profile.polynomials.length + 2);
-
-// The setup certificate.
-const setupCertificateBytes = (profile: ModuleProfile) =>
-    profile.certificateBytes;
-
 // Assembles one profile's bounds from the module's sizes and the retained
 // layouts.
 const profileBounds = (
@@ -574,12 +605,15 @@ const profileBounds = (
     );
     const target = targetBounds(moduleLimits);
     const release = releaseBounds(moduleLimits, profile);
-    const setupReference = setupReferenceBytes(profile);
-    const setupCertificate = setupCertificateBytes(profile);
+    // The setup reference has the selection reference's layout: a marker, the
+    // setup identity, one digest per aggregate polynomial and the
+    // credential-keyed tag that the ballot step checks before parsing.
+    const setupReference = profile.retainedReferenceBytes;
+    const setupCertificate = profile.certificateBytes;
     const preparation = {
         ...moduleLimits.preparation,
         selectionBodyBytes: profile.selectionBodyBytes,
-        selectionReferenceBytes: profile.selectionReferenceBytes,
+        selectionReferenceBytes: profile.retainedReferenceBytes,
         certificateBytes: profile.certificateBytes,
     };
     // PRE2 frames three independent slots. Each signing slot retains the locked body,
@@ -688,8 +722,8 @@ export const readParticipantLimits = (
     );
     if (largest === undefined)
         throw new Error('The participant module lacks its largest profile.');
-    const maximumSetupReferenceBytes = setupReferenceBytes(largest);
-    const maximumSetupCertificateBytes = setupCertificateBytes(largest);
+    const maximumSetupReferenceBytes = largest.retainedReferenceBytes;
+    const maximumSetupCertificateBytes = largest.certificateBytes;
     const enrollment: ParticipantLimits = {
         participants,
         options,

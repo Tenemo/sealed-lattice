@@ -2,9 +2,13 @@
 //! enforces. Each value comes from the code that encodes or verifies its
 //! object; the worker adds the layouts of the state it retains itself.
 
+use parallel_work::{MAXIMUM_HELPERS, MAXIMUM_JOB_BYTES, MAXIMUM_JOB_PARTS};
 use protocol_foundations::{
     SEALED_SIGNING_SEED_BYTES, SIGNATURE_BYTES,
-    ballot_authentication::ENVELOPE_BYTES,
+    ballot_authentication::{
+        ENVELOPE_BALLOT_TIME_OFFSET, ENVELOPE_BODY_LENGTH_OFFSET, ENVELOPE_BYTES,
+        ENVELOPE_POLL_OFFSET, ENVELOPE_POSITION_OFFSET, ENVELOPE_SETUP_IDENTITY_OFFSET,
+    },
     ballot_body,
     close_signing::{
         ClosePurpose, MAXIMUM_LISTED_ENVELOPES_PER_SLOT, close_quorum, close_response_bytes,
@@ -30,7 +34,9 @@ fn packet_bytes(body: usize) -> usize {
     4 + body + SIGNATURE_BYTES
 }
 
-/// The bounds every profile shares, in the order the worker reads them.
+/// The bounds every profile shares, in the order the worker reads them. The
+/// parallel job bounds and the ballot envelope's field offsets end it, which
+/// the host also holds and checks against these.
 pub fn limits() -> Vec<u64> {
     let participants = Profile::participant_range();
     let options = Profile::option_range();
@@ -70,6 +76,14 @@ pub fn limits() -> Vec<u64> {
         RELEASE_BODY_HEADER_BYTES,
         RELEASE_ENVELOPE_BYTES,
         DEGREE,
+        MAXIMUM_JOB_BYTES,
+        MAXIMUM_JOB_PARTS,
+        MAXIMUM_HELPERS,
+        ENVELOPE_POLL_OFFSET,
+        ENVELOPE_SETUP_IDENTITY_OFFSET,
+        ENVELOPE_POSITION_OFFSET,
+        ENVELOPE_BALLOT_TIME_OFFSET,
+        ENVELOPE_BODY_LENGTH_OFFSET,
     ]
     .map(|value| value as u64)
     .to_vec()
@@ -111,7 +125,8 @@ pub fn profile_bounds(profile: Profile) -> Vec<u64> {
         setup_selection::selection_body_bytes(profile),
         setup_selection::certificate_bytes(profile, setup_selection::selection_body_bytes(profile))
             .expect("Canonical selection certificate"),
-        setup_aggregate::selection_reference_bytes(profile),
+        setup_aggregate::retained_reference_bytes(profile),
+        ballot_proof::statement::setup_input(profile).2,
         checkpoint_records.len(),
     ];
     bounds.extend(checkpoint_records);
