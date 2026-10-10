@@ -44,14 +44,13 @@ const nodeTestProjectDefinitions = [
     {
         // Rendering the complete deterministic model census exceeds a fast
         // unit-test interval, so it keeps the fixture-initialization budget.
-        // It runs beside the other model files rather than after them; only
-        // the participant-module files run serialized, after both.
+        // The census, the participant-module files and the other model files
+        // all run together.
         include: censusNodeTestGlobs,
         projectName: 'node-census',
         testTimeout: nodeHookTimeoutMilliseconds,
     },
     {
-        fileParallelism: false,
         include: participantModuleNodeTestGlobs,
         projectName: 'node-participant-module',
         testTimeout: participantModuleTestTimeoutMilliseconds,
@@ -128,7 +127,6 @@ const desktopBrowserInstances: BrowserInstanceOption[] = [
 
 type NodeProjectInput = {
     readonly exclude?: readonly string[];
-    readonly fileParallelism?: boolean;
     readonly include: readonly string[];
     readonly projectName: string;
     readonly testTimeout: number;
@@ -136,7 +134,6 @@ type NodeProjectInput = {
 
 const makeNodeProject = ({
     exclude,
-    fileParallelism,
     include,
     projectName,
     testTimeout,
@@ -150,7 +147,6 @@ const makeNodeProject = ({
         ...(nodeDiagnosticReportArguments.length === 0
             ? {}
             : { execArgv: nodeDiagnosticReportArguments }),
-        ...(fileParallelism === undefined ? {} : { fileParallelism }),
         setupFiles: [
             resolveFromRepoRoot('tools/ci/test-process-exit-diagnostics.ts'),
         ],

@@ -1,4 +1,5 @@
 import { appendFileSync } from 'node:fs';
+import { availableParallelism } from 'node:os';
 import { performance } from 'node:perf_hooks';
 import { stripVTControlCharacters } from 'node:util';
 
@@ -57,6 +58,11 @@ type CheckOptions = {
 const desktopBrowserArgument = '--include-desktop-browser';
 const recentOutputLineLimit = 20;
 const minute = 60_000;
+// The parallel lanes leave most of a workstation to interactive work: the
+// Node lane's longest test files, not its worker count, set its length, and
+// the Rust lane finishes well before it. A machine with fewer logical
+// processors keeps the counts the tools would choose themselves.
+const parallelLaneProcessorLimit = 6;
 const statusLabel: Readonly<Record<LaneStatus, string>> = {
     failed: 'FAIL',
     passed: 'PASS',
@@ -228,6 +234,23 @@ class Reporter {
 
 const buildLanes = (includeDesktopBrowser: boolean): CheckGraph => {
     const packageManagerRunner = resolvePackageManagerRunner();
+    const processors = availableParallelism();
+    const nodeTestWorkers = Math.max(
+        1,
+        Math.min(parallelLaneProcessorLimit, processors - 1),
+    );
+    const rustBuildJobs = String(
+        Math.min(parallelLaneProcessorLimit, processors),
+    );
+    const limitRustBuildJobs = (
+        command: CommandInvocation,
+    ): CommandInvocation => ({
+        ...command,
+        env: {
+            ...(command.env ?? process.env),
+            CARGO_BUILD_JOBS: rustBuildJobs,
+        },
+    });
     const lane = (
         name: string,
         logFileSlug: string,
@@ -340,7 +363,7 @@ const buildLanes = (includeDesktopBrowser: boolean): CheckGraph => {
                         ),
                     ),
                     ...rustFastTestCommands(),
-                ],
+                ].map(limitRustBuildJobs),
                 limitMilliseconds: 20 * minute,
                 name: 'Rust (fmt, clippy, fast test)',
             },
@@ -348,7 +371,12 @@ const buildLanes = (includeDesktopBrowser: boolean): CheckGraph => {
             lane(
                 'Node tests',
                 'node',
-                ['run', 'test:node:built', '--', '--maxWorkers', '50%'],
+                [
+                    'run',
+                    'test:node:built',
+                    '--maxWorkers',
+                    String(nodeTestWorkers),
+                ],
                 30,
             ),
         ],
