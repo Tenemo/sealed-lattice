@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { compileClearPreparationLedger } from '#tests/clear-preparation-ledger-model.js';
 import { compilePrivateRandomnessScopes } from '#tests/operation-seed-model.js';
+import { compilePreparationLedger } from '#tests/preparation-ledger-model.js';
 import {
     compileProofHashWork,
     proofHashProfiles,
@@ -235,10 +235,7 @@ describe('security ledger', () => {
                 (1n << 20n) + 1n,
                 (1n << 40n) + 7n,
             ]) {
-                const counts = compileClearPreparationLedger(
-                    profile,
-                    registrations,
-                );
+                const counts = compilePreparationLedger(profile, registrations);
                 for (const row of growth)
                     expect(
                         latticeGroupComparisons(row.group, counts),
@@ -360,11 +357,11 @@ describe('security ledger', () => {
                 string,
                 (
                     registrations: bigint,
-                    counts: ReturnType<typeof compileClearPreparationLedger>,
+                    counts: ReturnType<typeof compilePreparationLedger>,
                 ) => bigint,
                 (
                     registrations: bigint,
-                    counts: ReturnType<typeof compileClearPreparationLedger>,
+                    counts: ReturnType<typeof compilePreparationLedger>,
                     queries: bigint,
                 ) => Rational,
             ])[] = [
@@ -489,7 +486,7 @@ describe('security ledger', () => {
                     expect(term).toBeDefined();
                     const bound = term!.ratioAt(population);
                     for (const registrations of populationsUpTo(population)) {
-                        const counts = compileClearPreparationLedger(
+                        const counts = compilePreparationLedger(
                             profile,
                             registrations,
                         );

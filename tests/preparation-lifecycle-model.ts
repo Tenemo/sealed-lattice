@@ -25,7 +25,7 @@ export type SetupCertificateModel = Readonly<{
 // availability; no reupload is needed. Local-only buffers do not establish it.
 // Record equality models the
 // authenticated original custody premise, not AES or browser persistence.
-export class ClearPreparationLifecycleModel {
+export class PreparationLifecycleModel {
     readonly profile;
     private readonly participants: ParticipantState[];
     private readonly offers = new Set<string>();

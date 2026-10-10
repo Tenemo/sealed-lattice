@@ -8,7 +8,7 @@ import {
 } from '#tests/contribution-body-model.js';
 import { completionProfile } from '#tests/supported-profile-model.js';
 
-describe('complete clear contribution body encoding', () => {
+describe('complete contribution body encoding', () => {
     it('frames one ordinary body identity without an independent whole-body salt', () => {
         for (const length of [0, 1, 76, 1024, 65536]) {
             const body = Buffer.alloc(length, 17);

@@ -6,7 +6,7 @@ import type { SupportedProfile } from '#tests/supported-profile-model.js';
 // Public setup components for one fixed roster. These are maximum bytes,
 // not measured traffic or simultaneous residency. Registration and local
 // journal custody have their own owners; invalid/repeated traffic is unbounded.
-export const compileClearPreparationResources = (profile: SupportedProfile) => {
+export const compilePreparationResources = (profile: SupportedProfile) => {
     const body = compileContributionBodyCensus(profile);
     const wire = compileSetupSelectionWireCensus(profile.participantCount);
     const eligible = BigInt(wire.eligibleCount);

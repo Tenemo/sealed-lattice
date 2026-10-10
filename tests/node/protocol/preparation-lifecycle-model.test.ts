@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { ClearPreparationLifecycleModel } from '#tests/clear-preparation-lifecycle-model.js';
+import { PreparationLifecycleModel } from '#tests/preparation-lifecycle-model.js';
 import { compileSetupSelectionCensus } from '#tests/setup-selection-model.js';
 
 const roster = '31'.repeat(64);
@@ -8,10 +8,7 @@ const offer = (position: number) => ({
     position,
     bodyIdentity: (position + 1).toString(16).padStart(2, '0').repeat(64),
 });
-const completeOffer = (
-    model: ClearPreparationLifecycleModel,
-    position: number,
-) => {
+const completeOffer = (model: PreparationLifecycleModel, position: number) => {
     expect(model.beginOwnOffer(position)).toBe(true);
     for (let phase = 5; phase <= 9; phase++)
         expect(model.advanceOwnOffer(position)).toBe(true);
@@ -19,7 +16,7 @@ const completeOffer = (
     expect(model.publishOffer(offer(position))).toBe(true);
 };
 const endorse = (
-    model: ClearPreparationLifecycleModel,
+    model: PreparationLifecycleModel,
     position: number,
     selected: number[],
 ) => {
@@ -34,7 +31,7 @@ const endorse = (
     expect(model.snapshot(position)).toEqual(signed);
 };
 
-describe('clear preparation lifecycle under original custody', () => {
+describe('preparation lifecycle under original custody', () => {
     it.each(Array.from({ length: 18 }, (_, index) => index + 3))(
         'finishes after eligible honest departures before any setup message at n=%i',
         (participants) => {
@@ -47,7 +44,7 @@ describe('clear preparation lifecycle under original custody', () => {
                 { length: profile.faultBound },
                 (_, index) => profile.faultBound + index,
             );
-            const model = new ClearPreparationLifecycleModel(
+            const model = new PreparationLifecycleModel(
                 participants,
                 roster,
                 corrupt,
@@ -96,7 +93,7 @@ describe('clear preparation lifecycle under original custody', () => {
     it.each([4, 5, 6, 7, 8, 9])(
         'endorses beside original own phase %i and retires it only after published certification',
         (phase) => {
-            const model = new ClearPreparationLifecycleModel(4, roster);
+            const model = new PreparationLifecycleModel(4, roster);
             for (let position = 0; position < 4; position++)
                 expect(model.confirm(position)).toBe(true);
             completeOffer(model, 0);
@@ -136,7 +133,7 @@ describe('clear preparation lifecycle under original custody', () => {
     );
 
     it('accepts a winning certificate after a losing endorsement without granting another endorsement', () => {
-        const model = new ClearPreparationLifecycleModel(4, roster, [0]);
+        const model = new PreparationLifecycleModel(4, roster, [0]);
         for (let position = 0; position < 4; position++)
             model.confirm(position);
         for (const position of [0, 1, 2]) completeOffer(model, position);
@@ -159,7 +156,7 @@ describe('clear preparation lifecycle under original custody', () => {
     it.each(['missing', 'changed', 'extra'] as const)(
         'stops on %s required local state before retiring excluded work',
         (damage) => {
-            const model = new ClearPreparationLifecycleModel(4, roster);
+            const model = new PreparationLifecycleModel(4, roster);
             for (let position = 0; position < 4; position++)
                 model.confirm(position);
             completeOffer(model, 0);
@@ -191,7 +188,7 @@ describe('clear preparation lifecycle under original custody', () => {
     );
 
     it('requires complete selected inputs and exact distinct endorsement carriers', () => {
-        const model = new ClearPreparationLifecycleModel(4, roster);
+        const model = new PreparationLifecycleModel(4, roster);
         for (let position = 0; position < 4; position++)
             model.confirm(position);
         completeOffer(model, 0);
@@ -226,7 +223,7 @@ describe('clear preparation lifecycle under original custody', () => {
         expect(second).toBe(first);
     });
     it('cannot activate from a collector-only body copy before complete dependency publication', () => {
-        const model = new ClearPreparationLifecycleModel(4, roster);
+        const model = new PreparationLifecycleModel(4, roster);
         for (let position = 0; position < 4; position++)
             model.confirm(position);
         for (const position of [0, 1])

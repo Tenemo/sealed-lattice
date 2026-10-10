@@ -246,7 +246,7 @@ export const closeOnlySelectionCounterexample = (participantCount: number) => {
             residue(first + keyFor(selection) * second),
         );
     // The organizer is corrupt. The author and f other honest recipients
-    // hold this complete on-time ballot before the signed close request.
+    // hold this complete on-time ballot before the close intent.
     const honestHolders = Array.from(
         { length: profile.faultBound + 1 },
         (_unused, index) => author + index,
@@ -273,7 +273,7 @@ export const closeOnlySelectionCounterexample = (participantCount: number) => {
     };
 };
 
-type Preparation = 'clear-certified' | 'recoverable-sealed';
+type Preparation = 'certified' | 'recoverable-sealed';
 type Stage = Readonly<{ name: string; prerequisite?: string }>;
 
 // These are candidate protocol-stage paths, including registration and the

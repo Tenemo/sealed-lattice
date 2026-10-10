@@ -798,7 +798,7 @@ export const compileCloseObligationCounterexamples = () => {
 };
 
 // Productive visits observed in the message-level executions, added to the
-// preparation visits of the certified clear setup. Each honest participant
+// preparation visits of the certified setup. Each honest participant
 // performs all work its newest delivery enables. Deliveries and sessions do
 // not define visits: one protocol stage includes its restarts and the
 // organizer's collection across sessions. Each counted visit performs a
@@ -832,10 +832,10 @@ export type CloseVisitCensus = Readonly<{
     maximumVisits: number;
 }>;
 
-// The certified clear setup's stages before setup verification, which the
+// The certified setup's stages before setup verification, which the
 // close stages above begin with.
 const preparationStages = (() => {
-    const names = preparationStagePath('clear-certified', false).map(
+    const names = preparationStagePath('certified', false).map(
         ({ name }) => name,
     );
     const setup = names.indexOf('setup-and-optional-ballot');

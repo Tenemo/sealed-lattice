@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 
-import { compileClearPreparationLedger } from '#tests/clear-preparation-ledger-model.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import {
     compileClassicalReaderOracleBudget,
@@ -8,6 +7,7 @@ import {
     compileSourceDomainOracleBudget,
     shakePermutationGateCharge,
 } from '#tests/oracle-budget-model.js';
+import { compilePreparationLedger } from '#tests/preparation-ledger-model.js';
 import {
     firstOracleResumeHashWork,
     proofHashProfiles,
@@ -540,7 +540,7 @@ export type ReductionOperands = Readonly<{
 
 const reductionOperands = (
     profile: SupportedProfile,
-    ledger: ReturnType<typeof compileClearPreparationLedger>,
+    ledger: ReturnType<typeof compilePreparationLedger>,
     resumeFactor: bigint,
 ): ReductionOperands => ({
     participantCount: profile.participantCount,
@@ -679,17 +679,17 @@ export const unpricedWorkAllowance = (
     experimentGates -
     pricedGates;
 
-// The single-key Ring-LWE comparisons of the FHE instance in the clear
+// The single-key Ring-LWE comparisons of the FHE instance in the
 // preparation ledger. A good-key multi-message comparison over n messages
 // expands into n single-message comparisons, as the ledger requires for a
 // single-message assumption.
 const fheRingLweComparisons = (
-    ledger: ReturnType<typeof compileClearPreparationLedger>,
+    ledger: ReturnType<typeof compilePreparationLedger>,
 ) =>
     ledger.fheSelectedKeyComparisons +
     ledger.fheBallotComparisons * ledger.messagesPerFheBallotComparison;
 
-// The lattice assumption groups of the clear-preparation ledger. Each charges
+// The lattice assumption groups of the preparation ledger. Each charges
 // its own single-message comparisons; circular security of the honest
 // evaluation-key tuple is judged against the FHE instance's floor.
 export type LatticeAssumptionGroup =
@@ -707,7 +707,7 @@ export const latticeAssumptionGroups: readonly LatticeAssumptionGroup[] = [
 
 export const latticeGroupComparisons = (
     group: LatticeAssumptionGroup,
-    ledger: ReturnType<typeof compileClearPreparationLedger>,
+    ledger: ReturnType<typeof compilePreparationLedger>,
 ) => {
     switch (group) {
         case 'FHE Ring-LWE':
@@ -780,7 +780,7 @@ const groupComparisonInputs = (
     profile: SupportedProfile,
     honestRegistrations: bigint,
 ) => {
-    const ledger = compileClearPreparationLedger(profile, honestRegistrations);
+    const ledger = compilePreparationLedger(profile, honestRegistrations);
     return {
         ledger,
         comparisons: latticeGroupComparisons(group, ledger),
@@ -869,7 +869,7 @@ export const compileSecurityMarginScreen = () =>
 // The source-domain requirement of a group's comparisons at a profile and an
 // original honest registration population of one poll, charged at an
 // experiment of the given cost; the decisive experiment decides it. Every
-// lattice comparison of the clear-preparation hybrids runs inside the
+// lattice comparison of the preparation hybrids runs inside the
 // extracting simulator that the registration-source step installs, so each
 // group's reduction pays the same source-domain work.
 export const latticeRequirementAt = (

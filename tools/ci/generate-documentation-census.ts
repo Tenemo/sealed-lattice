@@ -24,11 +24,6 @@ import {
     compileCertificateCustodyCensus,
     fullHolderRequirements,
 } from '#tests/certificate-custody-model.js';
-import {
-    compileClearPreparationLedger,
-    compileClearPreparationPollPopulations,
-} from '#tests/clear-preparation-ledger-model.js';
-import { compileClearPreparationResources } from '#tests/clear-preparation-resource-model.js';
 import { compileCloseResponseCensus } from '#tests/close-response-model.js';
 import { compileCloseWireCensus } from '#tests/close-wire-model.js';
 import {
@@ -81,6 +76,11 @@ import {
     compileParticipantVaultKeyClasses,
 } from '#tests/participant-custody-model.js';
 import { compileParticipantReleaseCustody } from '#tests/participant-release-custody-model.js';
+import {
+    compilePreparationLedger,
+    compilePreparationPollPopulations,
+} from '#tests/preparation-ledger-model.js';
+import { compilePreparationResources } from '#tests/preparation-resource-model.js';
 import { compileProofCompilerChronology } from '#tests/proof-compiler-chronology-model.js';
 import { compileProofFieldReductionCensus } from '#tests/proof-field-reduction-model.js';
 import { compileProofHashDomainCensus } from '#tests/proof-hash-domain-model.js';
@@ -319,7 +319,7 @@ const renderCensusText = (): string => {
         compileContributionGenerationResources(completion);
     const contributionBody = compileContributionBodyCensus(completion);
     const setupAggregate = compileSetupAggregateResources(completion);
-    const clearPreparation = compileClearPreparationResources(completion);
+    const preparationResources = compilePreparationResources(completion);
     const setupRandomness = compileSetupRandomnessCensus(completion);
     const registrationSourceRandomness = compileRegistrationSourceRandomness(
         completion.participantCount,
@@ -346,7 +346,7 @@ const renderCensusText = (): string => {
     const rosterProposals = thresholdProfiles.map((profile) =>
         compileRosterProposalCensus(profile.participantCount),
     );
-    const clearSelectionWires = thresholdProfiles.map((profile) =>
+    const selectionWires = thresholdProfiles.map((profile) =>
         compileSetupSelectionWireCensus(profile.participantCount),
     );
     const commonAgreement = compileCommonAgreementDegreeCensus();
@@ -2399,7 +2399,7 @@ const renderCensusText = (): string => {
         '',
         'W_F bounds complete raw inputs recognized by the fixed grammar, including full statements rather than their identifiers; it is expressed in bits for the conservative substring reference bound and does not bound arbitrary auxiliary oracle inputs. The only fixed hash-label sentinel is the zero initial-state label; absent or malformed predecessors resolve to no context or oracle entry. M_F reuses the source-linked shared-path Merkle and transcript expansion census. The finite-family expression still requires the complete prior oracle history and mapped reducer costs; these operands select no numerical security claim.',
         '',
-        'The following prefix-compiler caps and exponents are historical role-union reference arithmetic. Its conservative algebraic numerator now includes the weighted folding term, but its finite corrupt-role population and whole-experiment composition are not established for clear preparation. The current finite-family argument takes a maximum of the per-role sampled-round bounds above without adding a family union factor. Reference exponents below do not select a new honest-credential scope or claim admission, end-to-end security, or phone qualification.',
+        'The following prefix-compiler caps and exponents are historical role-union reference arithmetic. Its conservative algebraic numerator now includes the weighted folding term, but its finite corrupt-role population and whole-experiment composition are not established for preparation. The current finite-family argument takes a maximum of the per-role sampled-round bounds above without adding a family union factor. Reference exponents below do not select a new honest-credential scope or claim admission, end-to-end security, or supported-phone qualification.',
         '',
         table(
             ['Property', 'Value'],
@@ -2606,7 +2606,7 @@ const renderCensusText = (): string => {
         '',
         '## Browser word-prover resource census',
         '',
-        'The browser experiment streams public inputs, retains their prepared common-polynomial adjoints until the affine pass, and emits one proof record at a time. These conservative allocation allowances describe the experimental live-data schedule. They are not measurements of browser-private memory, authenticated checkpoints, a complete action, or phone qualification.',
+        'The browser experiment streams public inputs, retains their prepared common-polynomial adjoints until the affine pass, and emits one proof record at a time. These conservative allocation allowances describe the experimental live-data schedule. They are not measurements of browser-private memory, authenticated checkpoints, a complete action, or supported-phone qualification.',
         '',
         table(
             ['Property', 'Value'],
@@ -3160,9 +3160,9 @@ const renderCensusText = (): string => {
             ],
         ),
         '',
-        '## Preparation selection and registration binding screen',
+        '## Setup selection and registration binding screen',
         '',
-        'The [selection model](../tests/setup-selection-model.ts) checks the fixed eligible pool, selected subset and quorum intersection. Its close-only counterexample keeps a valid ballot under one setup, enough honest pre-close holders and a closing quorum for another setup: the ciphertext cannot be retargeted. The [candidate analysis](private:clear-preparation-analysis) owns that failure and the pre-ballot certification repair. These counts do not establish a construction or its security loss.',
+        'The [selection model](../tests/setup-selection-model.ts) checks the fixed eligible pool, selected subset and quorum intersection. Its close-only counterexample keeps a valid ballot under one setup, enough honest pre-close holders and a closing quorum for another setup: the ciphertext cannot be retargeted. The [candidate analysis](private:preparation-analysis) owns that failure and the pre-ballot certification repair. These counts do not establish a construction or its security loss.',
         '',
         table(
             [
@@ -3192,20 +3192,18 @@ const renderCensusText = (): string => {
         '',
         table(
             ['Candidate path', 'Participant stages', 'Organizer stages'],
-            (['clear-certified', 'recoverable-sealed'] as const).map(
-                (candidate) => [
-                    candidate,
-                    formatCount(
-                        countStagePath(preparationStagePath(candidate, false)),
-                    ),
-                    formatCount(
-                        countStagePath(preparationStagePath(candidate, true)),
-                    ),
-                ],
-            ),
+            (['certified', 'recoverable-sealed'] as const).map((candidate) => [
+                candidate,
+                formatCount(
+                    countStagePath(preparationStagePath(candidate, false)),
+                ),
+                formatCount(
+                    countStagePath(preparationStagePath(candidate, true)),
+                ),
+            ]),
         ),
         '',
-        'The [registration binding screen](../tests/registration-setup-binding-model.ts) commits separately to each possible FHE encryption-key coordinate. It derives distinct FHE families from both modulus and common-matrix sample width for every roster the poll permits. Only the final roster entry opens; seeds are independent across families. Generated bytes count all candidate coordinates hashed during registration, not their simultaneous residency or upload. Digest and private seed/salt figures are payload subtotals excluding canonical framing, signatures, custody, work and restart amplification. The auxiliary pair is fixed public input with no real participant secret; its separate good-key phase bound is used only in the [candidate proof games](private:clear-preparation-argument). This does not change the existing parameter table or prove the changed simulator.',
+        'The [registration binding screen](../tests/registration-setup-binding-model.ts) commits separately to each possible FHE encryption-key coordinate. It derives distinct FHE families from both modulus and common-matrix sample width for every roster the poll permits. Only the final roster entry opens; seeds are independent across families. Generated bytes count all candidate coordinates hashed during registration, not their simultaneous residency or upload. Digest and private seed/salt figures are payload subtotals excluding canonical framing, signatures, custody, work and restart amplification. The auxiliary pair is fixed public input with no real participant secret; its separate good-key phase bound is used only in the [candidate proof games](private:preparation-argument). This does not change the existing parameter table or prove the changed simulator.',
         '',
         table(
             [
@@ -3531,7 +3529,7 @@ const renderCensusText = (): string => {
         '',
         'For a supplied complete per-key history, the work model separately counts encryption and verification invocations, repeated block computations and the union of block inputs. Its statistical numerators are conditional on the stated secret-key PRP replacement; the AES assumption, full populations and whole-protocol advantage are additional obligations.',
         '',
-        '## Clear setup selection wire and resources',
+        '## Setup selection wire and resources',
         '',
         'Offers authenticate complete ordinary body identities under the original roster and author. Exactly the roster-derived selected count enters the canonical proposal, and exactly the inventory quorum signs its certificate. Different valid signer subsets carry the same semantic setup identity. Whole-body commitments, later opening messages and unanimous confirmation carriers are absent. The independent lifecycle model covers own-work coexistence, one-shot endorsements, original-state restoration and authenticated retirement; it assumes the complete owning proof/signature verifiers and the named published-store retention contract.',
         '',
@@ -3547,7 +3545,7 @@ const renderCensusText = (): string => {
                 'Endorsement packet bytes',
                 'Certificate bytes',
             ],
-            clearSelectionWires.map((wire) =>
+            selectionWires.map((wire) =>
                 [
                     wire.participantCount,
                     wire.eligibleCount,
@@ -3567,132 +3565,144 @@ const renderCensusText = (): string => {
             [
                 [
                     'Maximum eligible body corpus bytes',
-                    formatCount(clearPreparation.maximumEligibleBodyBytes),
+                    formatCount(preparationResources.maximumEligibleBodyBytes),
                 ],
                 [
                     'Maximum selected body corpus bytes',
-                    formatCount(clearPreparation.maximumSelectedBodyBytes),
+                    formatCount(preparationResources.maximumSelectedBodyBytes),
                 ],
                 [
                     'Maximum eligible signed-offer corpus bytes',
-                    formatCount(clearPreparation.maximumEligibleOfferBytes),
+                    formatCount(preparationResources.maximumEligibleOfferBytes),
                 ],
                 [
                     'Maximum certified setup payload bytes',
-                    formatCount(clearPreparation.maximumCertifiedSetupBytes),
+                    formatCount(
+                        preparationResources.maximumCertifiedSetupBytes,
+                    ),
                 ],
                 [
                     'Maximum endorsement packet corpus bytes',
-                    formatCount(clearPreparation.maximumEndorsementPacketBytes),
+                    formatCount(
+                        preparationResources.maximumEndorsementPacketBytes,
+                    ),
                 ],
                 [
                     'Maximum offer proofs',
-                    formatCount(clearPreparation.maximumOfferProofs),
+                    formatCount(preparationResources.maximumOfferProofs),
                 ],
                 [
                     'Maximum untrusted discovery page bytes',
-                    formatCount(clearPreparation.maximumDiscoveryPageBytes),
+                    formatCount(preparationResources.maximumDiscoveryPageBytes),
                 ],
                 [
                     'Maximum generation and continuation seeds',
                     formatCount(
-                        clearPreparation.maximumGenerationAndContinuationSeeds,
+                        preparationResources.maximumGenerationAndContinuationSeeds,
                     ),
                 ],
                 [
                     'Selected proof verifications per fresh reader',
                     formatCount(
-                        clearPreparation.selectedProofVerificationsPerReader,
+                        preparationResources.selectedProofVerificationsPerReader,
                     ),
                 ],
                 [
                     'Fresh selected-offer verification read bytes',
                     formatCount(
-                        clearPreparation.maximumOfferVerificationReadBytes,
+                        preparationResources.maximumOfferVerificationReadBytes,
                     ),
                 ],
                 [
                     'Organizer selected polynomial aggregation reread bytes',
-                    formatCount(clearPreparation.selectedPolynomialRereadBytes),
+                    formatCount(
+                        preparationResources.selectedPolynomialRereadBytes,
+                    ),
                 ],
                 [
                     'Exact proof lookahead bytes',
-                    formatCount(clearPreparation.selectedProofLookaheadBytes),
+                    formatCount(
+                        preparationResources.selectedProofLookaheadBytes,
+                    ),
                 ],
                 [
                     'Proof lookahead transport reservation bytes',
-                    formatCount(clearPreparation.maximumLookaheadIngressBytes),
+                    formatCount(
+                        preparationResources.maximumLookaheadIngressBytes,
+                    ),
                 ],
                 [
                     'Matching retained-input certificate activation read bytes',
                     formatCount(
-                        clearPreparation.maximumMatchingCertificateActivationReadBytes,
+                        preparationResources.maximumMatchingCertificateActivationReadBytes,
                     ),
                 ],
                 [
                     'Fresh certificate activation read bytes',
                     formatCount(
-                        clearPreparation.maximumFreshCertificateActivationReadBytes,
+                        preparationResources.maximumFreshCertificateActivationReadBytes,
                     ),
                 ],
                 [
                     'Clean preparation logical download bytes',
                     formatCount(
-                        clearPreparation.maximumCleanPreparationDownloadBytes,
+                        preparationResources.maximumCleanPreparationDownloadBytes,
                     ),
                 ],
                 [
                     'Clean organizer preparation logical download bytes',
                     formatCount(
-                        clearPreparation.maximumCleanOrganizerPreparationDownloadBytes,
+                        preparationResources.maximumCleanOrganizerPreparationDownloadBytes,
                     ),
                 ],
                 [
                     'Clean preparation participant upload bytes',
                     formatCount(
-                        clearPreparation.maximumCleanParticipantUploadBytes,
+                        preparationResources.maximumCleanParticipantUploadBytes,
                     ),
                 ],
                 [
                     'Clean preparation total upload bytes',
-                    formatCount(clearPreparation.maximumCleanTotalUploadBytes),
+                    formatCount(
+                        preparationResources.maximumCleanTotalUploadBytes,
+                    ),
                 ],
                 [
                     'Transfer planning target bytes',
-                    formatCount(clearPreparation.transferPlanningBytes),
+                    formatCount(preparationResources.transferPlanningBytes),
                 ],
                 [
                     'Preparation download planning margin bytes',
                     formatCount(
-                        clearPreparation.transferPlanningBytes -
-                            clearPreparation.maximumCleanPreparationDownloadBytes,
+                        preparationResources.transferPlanningBytes -
+                            preparationResources.maximumCleanPreparationDownloadBytes,
                     ),
                 ],
                 [
                     'Organizer preparation download planning margin bytes',
                     formatCount(
-                        clearPreparation.transferPlanningBytes -
-                            clearPreparation.maximumCleanOrganizerPreparationDownloadBytes,
+                        preparationResources.transferPlanningBytes -
+                            preparationResources.maximumCleanOrganizerPreparationDownloadBytes,
                     ),
                 ],
                 [
                     'Participant upload planning margin bytes',
                     formatCount(
-                        clearPreparation.transferPlanningBytes -
-                            clearPreparation.maximumCleanParticipantUploadBytes,
+                        preparationResources.transferPlanningBytes -
+                            preparationResources.maximumCleanParticipantUploadBytes,
                     ),
                 ],
                 [
                     'Total upload planning margin bytes',
                     formatCount(
-                        clearPreparation.transferPlanningBytes -
-                            clearPreparation.maximumCleanTotalUploadBytes,
+                        preparationResources.transferPlanningBytes -
+                            preparationResources.maximumCleanTotalUploadBytes,
                     ),
                 ],
                 [
                     'Volatile offer polynomial-identity payload bytes',
                     formatCount(
-                        clearPreparation.volatileOfferPolynomialIdentityBytes,
+                        preparationResources.volatileOfferPolynomialIdentityBytes,
                     ),
                 ],
             ],
@@ -3718,7 +3728,7 @@ const renderCensusText = (): string => {
                 [10, 10],
                 [20, 20],
             ].map(([participants, options]) => {
-                const value = compileClearPreparationResources(
+                const value = compilePreparationResources(
                     deriveSupportedProfile(participants, options),
                 );
                 return [
@@ -3850,17 +3860,17 @@ const renderCensusText = (): string => {
                         value.maximumManifestFiles,
                 ],
                 [
-                    'Standalone reader routing metadata',
+                    'Outcome verifier routing metadata',
                     (value: (typeof workflowResources)[number]) =>
                         value.publicReaderRoutingBytes,
                 ],
                 [
-                    'Fresh standalone reader protocol bytes',
+                    'Fresh outcome verifier protocol bytes',
                     (value: (typeof workflowResources)[number]) =>
                         value.publicReaderProtocolBytes,
                 ],
                 [
-                    'Fresh standalone reader plus one SDK/module delivery',
+                    'Fresh outcome verifier plus one SDK/module delivery',
                     (value: (typeof workflowResources)[number]) =>
                         value.publicReaderColdDeliveryBytes,
                 ],
@@ -3893,7 +3903,7 @@ const renderCensusText = (): string => {
             ]),
         ),
         '',
-        'The standalone reader has no participant custody and streams every usable ballot for barrier authentication, classification and evaluation import before checking the target votes and release shares. Participants with intact close custody read those bodies locally. Roster restoration refetches complete registered headers and recipient keys, recomputing their canonical body identities against its retained verification. Metadata allowances are conservative: held close responses can avoid target reads, and an existing setup certificate avoids assembly reads. These are protocol-read upper bounds, not exact ordinary network traces. The action rows exclude bootstrap; add the actual module for each primary-worker invocation and the SDK for each page load. Cumulative download rows are distinct from the per-action planning target.',
+        'The outcome verifier has no participant custody and streams every usable ballot for barrier authentication, classification and evaluation import before checking the target votes and release shares. Participants with intact close custody read those bodies locally. Roster restoration refetches complete registered headers and recipient keys, recomputing their canonical body identities against its retained verification. Metadata allowances are conservative: held close responses can avoid target reads, and an existing setup certificate avoids assembly reads. These are protocol-read upper bounds, not exact ordinary network traces. The action rows exclude bootstrap; add the actual module for each primary-worker invocation and the SDK for each page load. Cumulative download rows are distinct from the per-action planning target.',
         '',
         table(
             [
@@ -4289,7 +4299,7 @@ const renderCensusText = (): string => {
                     ),
                 ],
                 [
-                    'Required target signatures',
+                    'Required target votes',
                     formatCount(certificateCustody.counterexample.quorum),
                 ],
                 [
@@ -4677,7 +4687,7 @@ const renderCensusText = (): string => {
         '',
         '## Composed security ledger',
         '',
-        'The [clear-preparation argument](private:clear-preparation-ledger) owns the conditional hybrid interfaces. The first tables evaluate fixed-roster-size structural upper bounds at the displayed example original-honest-registration population H, including abandoned and unselected registrations; H is not an admitted population limit. Whole-poll bounds permitting different roster sizes follow separately. Started private preparation and certified rosters have different bounds. Original contribution scopes include failed or unfinished generation before publication; a replay of the same retained intent adds work but no new scope. Primitive comparison counts include the source-family or selected-position guesses where required, but exclude semantic-use error charges and reduction-time operands. The assumption group limits at the end of this section take their proof terms from the proof-compiler gate\x27s theorems; no end-to-end security level is emitted.',
+        'The [preparation argument](private:preparation-ledger) owns the conditional hybrid interfaces. The first tables evaluate fixed-roster-size structural upper bounds at the displayed example original-honest-registration population H, including abandoned and unselected registrations; H is not an admitted population limit. Whole-poll bounds permitting different roster sizes follow separately. Started private preparation and certified rosters have different bounds. Original contribution scopes include failed or unfinished generation before publication; a replay of the same retained intent adds work but no new scope. Primitive comparison counts include the source-family or selected-position guesses where required, but exclude semantic-use error charges and reduction-time operands. The assumption group limits at the end of this section take their proof terms from the proof-compiler gate\x27s theorems; no end-to-end security level is emitted.',
         '',
         table(
             [
@@ -4693,7 +4703,7 @@ const renderCensusText = (): string => {
             ],
             supportedProfiles.profiles.map((row) => {
                 const ledgers = row.map((profile) =>
-                    compileClearPreparationLedger(
+                    compilePreparationLedger(
                         profile,
                         BigInt(profile.participantCount),
                     ),
@@ -4732,7 +4742,7 @@ const renderCensusText = (): string => {
                 'Messages per auxiliary comparison',
             ],
             supportedProfiles.profiles.map((row) => {
-                const value = compileClearPreparationLedger(
+                const value = compilePreparationLedger(
                     row[0],
                     BigInt(row[0].participantCount),
                 );
@@ -4763,7 +4773,7 @@ const renderCensusText = (): string => {
                 'Maximum source-extraction requests',
             ],
             supportedProfiles.profiles.map((row) => {
-                const poll = compileClearPreparationPollPopulations(
+                const poll = compilePreparationPollPopulations(
                     row[0].participantCount,
                     row[0].optionCount,
                     BigInt(row[0].participantCount),
@@ -4792,7 +4802,7 @@ const renderCensusText = (): string => {
                 'Cache gates',
             ],
             supportedProfiles.profiles.map((row) => {
-                const ledger = compileClearPreparationPollPopulations(
+                const ledger = compilePreparationPollPopulations(
                     row[0].participantCount,
                     row[0].optionCount,
                     BigInt(row[0].participantCount),
@@ -4813,7 +4823,7 @@ const renderCensusText = (): string => {
         '',
         '### FHE security margin screen',
         '',
-        'The [margin model](../tests/security-margin-screen-model.ts) tests whether the current FHE comparisons can reach the target with the current parameters. It charges every single-key FHE Ring-LWE comparison of the [clear-preparation ledger](private:clear-preparation-ledger) at one original honest registration per participant, expanding each multi-message ballot comparison over its messages. The withdrawn ledger’s seven assumption groups share the 2^-80 budget equally. Each requirement charges the reduction’s work at the largest complete experiment within 2^80 gates that fills whole permutation slots. The reduction’s work depends on an experiment only through those slots and its query routing grows with their square, so that experiment has the largest reduction ratio; the source cache and the extractions’ fixed work, which do not grow with the experiment, leave every smaller experiment’s ratio below it, as the margin test checks at the population limits. The lattice assumptions hold relative to the ideal SHAKE oracle, so the forwarded column, which adds no work, is the floor for a reduction that never reads or programs the attacker’s queries. The FHE embedding fixes each pivot’s honest coordinate after its registration commitment from extracted corrupt registration coordinates, so it reads and programs the registration-source commitment domain with one commitment shadow per potential sender scope. The source-domain column implements only that domain, forwards every other query and prices the complete reduction except the simulated proofs’ record creation: its query circuits, the replacement wrapper for every programmed honest proof, the classical-reader and resumed-hash conversions of the forwarded honest calls and the forwarded calls themselves, every corrupt registration-source extraction with its coordinate decoding, and the source cache. A call reaches that domain only if its input capacity holds the shortest registration-source input, so it costs at least that input’s permutations, and every source input lies in one dyadic input class; the database terms are the full-domain bound restricted to those calls and that class. The converted honest calls read private streams and proof hashes outside that domain, so the conversions enlarge only the forwarded calls. The background column prices only the query circuits of a reduction that implements the whole function itself, as one without the oracle-relative assumption must, and the shadow column adds its commitment shadows. The reader column applies the classical fixed-input reader conversion that participant code uses. The resumed column applies the larger conversion for setup first-oracle leaf hashes resumed from an authenticated checkpoint, conditional on the original input staying available to the adapter. Those four columns omit every other reduction cost, so they are lower bounds. Each row shows the option count whose source-domain requirement leaves the least further work within its own criterion floor, the largest modulus among equals. The floors are the cheapest core-SVP screens that the [security argument](private:security-ledger) cites; a screen at one modulus bounds the same attack at every smaller supported modulus. Attack costs follow the accepted convention, without quantum random-access memory, so the classical floor over every algorithm of the estimator’s full estimate is the criterion. The quantum model’s sieving speedup assumes that memory, so its floor is a stress test. Neither model counts gates as the convention does. The last column is the further reduction work, in whole log2 gates, that keeps the source-domain requirement within the whole bits of the criterion floor, or none where the priced work alone exceeds them; the simulated proofs’ record creation must fit within it.',
+        'The [margin model](../tests/security-margin-screen-model.ts) tests whether the current FHE comparisons can reach the target with the current parameters. It charges every single-key FHE Ring-LWE comparison of the [preparation ledger](private:preparation-ledger) at one original honest registration per participant, expanding each multi-message ballot comparison over its messages. The withdrawn ledger’s seven assumption groups share the 2^-80 budget equally. Each requirement charges the reduction’s work at the largest complete experiment within 2^80 gates that fills whole permutation slots. The reduction’s work depends on an experiment only through those slots and its query routing grows with their square, so that experiment has the largest reduction ratio; the source cache and the extractions’ fixed work, which do not grow with the experiment, leave every smaller experiment’s ratio below it, as the margin test checks at the population limits. The lattice assumptions hold relative to the ideal SHAKE oracle, so the forwarded column, which adds no work, is the floor for a reduction that never reads or programs the attacker’s queries. The FHE embedding fixes each pivot’s honest coordinate after its registration commitment from extracted corrupt registration coordinates, so it reads and programs the registration-source commitment domain with one commitment shadow per potential sender scope. The source-domain column implements only that domain, forwards every other query and prices the complete reduction except the simulated proofs’ record creation: its query circuits, the replacement wrapper for every programmed honest proof, the classical-reader and resumed-hash conversions of the forwarded honest calls and the forwarded calls themselves, every corrupt registration-source extraction with its coordinate decoding, and the source cache. A call reaches that domain only if its input capacity holds the shortest registration-source input, so it costs at least that input’s permutations, and every source input lies in one dyadic input class; the database terms are the full-domain bound restricted to those calls and that class. The converted honest calls read private streams and proof hashes outside that domain, so the conversions enlarge only the forwarded calls. The background column prices only the query circuits of a reduction that implements the whole function itself, as one without the oracle-relative assumption must, and the shadow column adds its commitment shadows. The reader column applies the classical fixed-input reader conversion that participant code uses. The resumed column applies the larger conversion for setup first-oracle leaf hashes resumed from an authenticated checkpoint, conditional on the original input staying available to the adapter. Those four columns omit every other reduction cost, so they are lower bounds. Each row shows the option count whose source-domain requirement leaves the least further work within its own criterion floor, the largest modulus among equals. The floors are the cheapest core-SVP screens that the [security argument](private:security-ledger) cites; a screen at one modulus bounds the same attack at every smaller supported modulus. Attack costs follow the accepted convention, without quantum random-access memory, so the classical floor over every algorithm of the estimator’s full estimate is the criterion. The quantum model’s sieving speedup assumes that memory, so its floor is a stress test. Neither model counts gates as the convention does. The last column is the further reduction work, in whole log2 gates, that keeps the source-domain requirement within the whole bits of the criterion floor, or none where the priced work alone exceeds them; the simulated proofs’ record creation must fit within it.',
         '',
         table(
             [
@@ -5881,7 +5891,7 @@ const renderCensusText = (): string => {
                           ),
                 ],
                 [
-                    'Omitted voters and corrupt participants refuse target signatures',
+                    'Omitted voters and corrupt participants refuse target votes',
                     `${formatCount(closeResponses.counterexamples.refusalHonestSigners)} honest signers of ${formatCount(closeResponses.counterexamples.refusalQuorum)}, ${formatCount(closeResponses.counterexamples.refusalCertifiedTargets)} certified targets`,
                 ],
                 [

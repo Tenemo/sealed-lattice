@@ -24,7 +24,7 @@ const provingPositions = (
         : participantCount;
 
 // Local producer counts for one roster, including unselected eligible offers.
-// The clear-preparation ledger separately counts original registrations,
+// The preparation ledger separately counts original registrations,
 // stalled exposure scopes and certified continuations. Local counts cannot
 // determine the complete experiment's query count or security population.
 export const compileProofCompilerChronology = (profile: SupportedProfile) => {

@@ -255,7 +255,7 @@ describe('retained target bounded copies', () => {
         }
     });
 
-    it('never re-enters a terminal module and preserves its failure over cache cleanup', async () => {
+    it('never reenters a failed module and preserves its failure over cache cleanup', async () => {
         for (const failure of [
             new ModuleFailure('Module failed.'),
             new ResourceFailure('Bound exhausted.'),

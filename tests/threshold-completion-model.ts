@@ -14,7 +14,7 @@ const requireParticipantCount = (participantCount: number): void => {
 };
 
 // Cuts before work in one permitted asynchronous schedule of the certified
-// clear setup. The closing stage collects the proposal and responses; target
+// setup. The closing stage collects the proposal and responses; target
 // certification permanently closes the inventory, so the required organizer
 // exception lasts through that cut. Published records remain retrievable
 // after their sender leaves.

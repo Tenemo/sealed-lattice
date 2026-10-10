@@ -13,11 +13,11 @@ import { freemem } from 'node:os';
 import path from 'node:path';
 
 import { compileBallotBodyCensus } from '#tests/ballot-body-model.js';
-import { compileClearPreparationResources } from '#tests/clear-preparation-resource-model.js';
 import { compileCloseWireCensus } from '#tests/close-wire-model.js';
 import { compileContributionBodyCensus } from '#tests/contribution-body-model.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import { compileLinkedReleaseWordProofLayout } from '#tests/full-word-proof-layout-model.js';
+import { compilePreparationResources } from '#tests/preparation-resource-model.js';
 import { compileRecipientKeyCensus } from '#tests/recipient-key-model.js';
 import { compileRegistrationEnrollmentCensus } from '#tests/registration-enrollment-model.js';
 import { compileRosterProposalCensus } from '#tests/roster-proposal-model.js';
@@ -256,7 +256,7 @@ await runWithLocalRunLog(
             const participants = BigInt(contribution.participantCount);
             const contributors = BigInt(contribution.setupContributorCount);
             const registration = compileRecipientKeyCensus();
-            const preparation = compileClearPreparationResources(profile);
+            const preparation = compilePreparationResources(profile);
             const roster = compileRosterProposalCensus(Number(participants));
             const close = compileCloseWireCensus(profile);
             const release = compileLinkedReleaseWordProofLayout(profile);
@@ -607,7 +607,7 @@ await runWithLocalRunLog(
                             ),
                             description: requestedOutputCase
                                 ? 'Verify encrypted requested-output coefficients'
-                                : 'Execute original credentials through terminal verification',
+                                : 'Execute original credentials through outcome verification',
                             logFileSlug: 'completion',
                         },
                     ],
@@ -874,10 +874,10 @@ await runWithLocalRunLog(
                             recoveryWork: null,
                         },
                         scope: requestedOutputCase
-                            ? 'Real full-degree BFV coefficient-selection operations on deterministic synthetic ciphertexts encrypting known rank powers. A test-only secret decoder checks every plaintext coefficient against direct interpolation, including all omitted ranks and padding. No participant, ballot proof, certificate, release share or terminal is created.'
+                            ? 'Real full-degree BFV coefficient-selection operations on deterministic synthetic ciphertexts encrypting known rank powers. A test-only secret decoder checks every plaintext coefficient against direct interpolation, including all omitted ranks and padding. No participant, ballot proof, certificate, release share or outcome is created.'
                             : selected.noResult
-                              ? 'Fresh native certified no-result execution using original credentials. No release shares are generated. This is not durable browser participation, security admission or physical qualification.'
-                              : 'Fresh native cryptographic execution using tracked sources and original credentials. Subset controls run after share generation. This is not durable browser participation, security admission or physical qualification.',
+                              ? 'Fresh native certified no-result execution using original credentials. No release shares are generated. This is not durable browser participation, security admission or supported-phone qualification.'
+                              : 'Fresh native cryptographic execution using tracked sources and original credentials. Subset controls run after share generation. This is not durable browser participation, security admission or supported-phone qualification.',
                     },
                     null,
                     2,

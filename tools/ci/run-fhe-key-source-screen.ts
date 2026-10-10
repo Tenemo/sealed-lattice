@@ -448,7 +448,7 @@ export const runFheKeySourceScreen = async (
                                       module: module?.inspected,
                                       scalar,
                                   }),
-                            scope: 'A fixed synthetic FHE source emits its original public coordinate and restores that coordinate into the first contribution gadget. Independent coordinate checks and identical public reports compare native and scalar execution. Other gadget randomness comes from the native operating system or secure scalar host. No proof, registration, participant capability or phone qualification is created.',
+                            scope: 'A fixed synthetic FHE source emits its original public coordinate and restores that coordinate into the first contribution gadget. Independent coordinate checks and identical public reports compare native and scalar execution. Other gadget randomness comes from the native operating system or secure scalar host. No proof, registration, participant capability or supported-phone qualification is created.',
                         },
                         null,
                         2,

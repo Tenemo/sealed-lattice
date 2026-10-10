@@ -1,7 +1,7 @@
 {
     "name": "sealed-lattice",
     "version": "0.1.0",
-    "description": "Browser-first post-quantum-oriented private-score polling helpers.",
+    "description": "Browser-first, fixed-roster, private-score polling research library targeting post-quantum security.",
     "author": "Piotr Piech <piotr@piech.dev>",
     "license": "MPL-2.0",
     "type": "module",

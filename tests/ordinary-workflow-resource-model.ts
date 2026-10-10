@@ -1,12 +1,12 @@
 import { compileBallotBodyCensus } from '#tests/ballot-body-model.js';
 import { compileCandidatePublicationCensus } from '#tests/candidate-publication-model.js';
-import { compileClearPreparationResources } from '#tests/clear-preparation-resource-model.js';
 import { compileCloseWireCensus } from '#tests/close-wire-model.js';
 import { compileContributionBodyCensus } from '#tests/contribution-body-model.js';
 import { compileEvaluationStorage } from '#tests/evaluation-storage-model.js';
 import { compileParticipantBallotCustody } from '#tests/participant-ballot-custody-model.js';
 import { compileParticipantCustodyCensus } from '#tests/participant-custody-model.js';
 import { compileParticipantReleaseCustody } from '#tests/participant-release-custody-model.js';
+import { compilePreparationResources } from '#tests/preparation-resource-model.js';
 import { compileRecipientKeyCensus } from '#tests/recipient-key-model.js';
 import { compileRegistrationEnrollmentCensus } from '#tests/registration-enrollment-model.js';
 import { compileRosterProposalCensus } from '#tests/roster-proposal-model.js';
@@ -40,7 +40,7 @@ export const compileOrdinaryWorkflowResources = (
         throw new RangeError('Missing built runtime artifact bytes.');
     const n = BigInt(profile.participantCount),
         d = BigInt(profile.setupContributorCount);
-    const preparation = compileClearPreparationResources(profile);
+    const preparation = compilePreparationResources(profile);
     const k = BigInt(preparation.eligibleCount),
         q = BigInt(profile.inventoryCertificateThreshold);
     const registration = compileRegistrationEnrollmentCensus(),
@@ -142,7 +142,7 @@ export const compileOrdinaryWorkflowResources = (
         routing('close-proposal') +
         voteRoutingBytes +
         releaseRoutingBytes;
-    // The public reader holds no participant custody. It reads each usable
+    // The outcome verifier holds no participant custody. It reads each usable
     // body for the barrier, classification and evaluation import, then q votes
     // and d complete release shares; it does not fetch a producer's target.
     const publicReaderProtocolBytes =

@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-    compileClearPreparationLedger,
-    compileClearPreparationPollPopulations,
-} from '#tests/clear-preparation-ledger-model.js';
+    compilePreparationLedger,
+    compilePreparationPollPopulations,
+} from '#tests/preparation-ledger-model.js';
 import { deriveSupportedProfile } from '#tests/supported-profile-model.js';
 
 function* subsets(
@@ -20,7 +20,7 @@ function* subsets(
             yield [first, ...rest];
 }
 
-describe('clear-preparation comparison populations', () => {
+describe('preparation comparison populations', () => {
     it('bounds smaller certified forks independently of the maximum roster denominator', () => {
         const honest = Array.from({ length: 10 }, (_, index) => index + 1);
         const confirmations = new Map<number, number>();
@@ -51,11 +51,11 @@ describe('clear-preparation comparison populations', () => {
                     .every((owner) => confirmations.get(owner) === index),
             ).toBe(true);
         }
-        const fixed = compileClearPreparationLedger(
+        const fixed = compilePreparationLedger(
             deriveSupportedProfile(10, 2),
             BigInt(honest.length),
         );
-        const poll = compileClearPreparationPollPopulations(10, 2, 10n);
+        const poll = compilePreparationPollPopulations(10, 2, 10n);
         expect(BigInt(rosters.length)).toBeGreaterThan(
             fixed.maximumCertifiedRosters,
         );
@@ -106,12 +106,12 @@ describe('clear-preparation comparison populations', () => {
                 ...completing.authors,
             ]).size,
         ).toBe(honest.length);
-        const fixed = compileClearPreparationLedger(
+        const fixed = compilePreparationLedger(
             deriveSupportedProfile(4, 2),
             BigInt(honest.length),
             10,
         );
-        const poll = compileClearPreparationPollPopulations(
+        const poll = compilePreparationPollPopulations(
             10,
             2,
             BigInt(honest.length),
@@ -151,7 +151,7 @@ describe('clear-preparation comparison populations', () => {
                     );
                     packed++;
                 }
-                const poll = compileClearPreparationPollPopulations(
+                const poll = compilePreparationPollPopulations(
                     maximum,
                     2,
                     population,
@@ -163,18 +163,10 @@ describe('clear-preparation comparison populations', () => {
                 );
             }
         }
-        expect(() =>
-            compileClearPreparationPollPopulations(2, 2, 1n),
-        ).toThrow();
-        expect(() =>
-            compileClearPreparationPollPopulations(21, 2, 1n),
-        ).toThrow();
-        expect(() =>
-            compileClearPreparationPollPopulations(10, 1, 1n),
-        ).toThrow();
-        expect(() =>
-            compileClearPreparationPollPopulations(10, 2, -1n),
-        ).toThrow();
+        expect(() => compilePreparationPollPopulations(2, 2, 1n)).toThrow();
+        expect(() => compilePreparationPollPopulations(21, 2, 1n)).toThrow();
+        expect(() => compilePreparationPollPopulations(10, 1, 1n)).toThrow();
+        expect(() => compilePreparationPollPopulations(10, 2, -1n)).toThrow();
     });
 
     it('charges every possible selected set before selection, across supported rosters', () => {
@@ -183,7 +175,7 @@ describe('clear-preparation comparison populations', () => {
             const selected = Math.max(corrupt + 1, 2);
             const eligible = selected + corrupt;
             const combinations = [...subsets(eligible, selected)];
-            const row = compileClearPreparationLedger(
+            const row = compilePreparationLedger(
                 deriveSupportedProfile(participants, 2),
                 101n,
             );
@@ -219,7 +211,7 @@ describe('clear-preparation comparison populations', () => {
                 minimumHonest,
                 29,
             ]) {
-                const row = compileClearPreparationLedger(
+                const row = compilePreparationLedger(
                     deriveSupportedProfile(participants, 2),
                     BigInt(population),
                 );
@@ -260,10 +252,7 @@ describe('clear-preparation comparison populations', () => {
         expect(exposed.every(({ roster }) => new Set(roster).size === 4)).toBe(
             true,
         );
-        const row = compileClearPreparationLedger(
-            deriveSupportedProfile(4, 2),
-            6n,
-        );
+        const row = compilePreparationLedger(deriveSupportedProfile(4, 2), 6n);
         expect(row.maximumStartedPreparationRosters).toBe(
             BigInt(exposed.length),
         );
@@ -279,8 +268,8 @@ describe('clear-preparation comparison populations', () => {
 
     it('counts abandoned registrations and every source family without adding proof roles', () => {
         const profile = deriveSupportedProfile(10, 10);
-        const one = compileClearPreparationLedger(profile, 1n);
-        const many = compileClearPreparationLedger(profile, 257n);
+        const one = compilePreparationLedger(profile, 1n);
+        const many = compilePreparationLedger(profile, 257n);
         expect(many.generatedSourceEntries).toBe(
             257n * one.generatedSourceEntries,
         );
@@ -296,7 +285,7 @@ describe('clear-preparation comparison populations', () => {
         expect(many.messagesPerAuxiliaryBallotComparison).toBe(257n);
         expect(one.maximumHonestBallots).toBe(0n);
         expect(one.maximumHonestProofScopes).toBe(1n);
-        expect(() => compileClearPreparationLedger(profile, -1n)).toThrow();
+        expect(() => compilePreparationLedger(profile, -1n)).toThrow();
     });
 
     it('counts private starts before the first published offer and does not count replays twice', () => {
@@ -349,7 +338,7 @@ describe('clear-preparation comparison populations', () => {
         expect(
             [4, 5].every((owner) => confirmations.get(owner) === winning),
         ).toBe(true);
-        const row = compileClearPreparationLedger(
+        const row = compilePreparationLedger(
             deriveSupportedProfile(4, 2),
             BigInt(confirmations.size),
         );
@@ -371,8 +360,8 @@ describe('clear-preparation comparison populations', () => {
 
     it('uses the original poll family inventory when the final roster is smaller', () => {
         const profile = deriveSupportedProfile(4, 10);
-        const smallPoll = compileClearPreparationLedger(profile, 31n, 4);
-        const largePoll = compileClearPreparationLedger(profile, 31n, 20);
+        const smallPoll = compilePreparationLedger(profile, 31n, 4);
+        const largePoll = compilePreparationLedger(profile, 31n, 20);
         expect(largePoll.generatedSourceEntries).toBeGreaterThan(
             smallPoll.generatedSourceEntries,
         );
@@ -383,7 +372,7 @@ describe('clear-preparation comparison populations', () => {
         expect(largePoll.selectedPositionSets).toBe(
             smallPoll.selectedPositionSets,
         );
-        expect(() => compileClearPreparationLedger(profile, 31n, 3)).toThrow();
-        expect(() => compileClearPreparationLedger(profile, 31n, 21)).toThrow();
+        expect(() => compilePreparationLedger(profile, 31n, 3)).toThrow();
+        expect(() => compilePreparationLedger(profile, 31n, 21)).toThrow();
     });
 });

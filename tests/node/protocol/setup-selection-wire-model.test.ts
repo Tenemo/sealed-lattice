@@ -15,7 +15,7 @@ const selected = (count: number) =>
         position,
         bodyIdentity: (position + 1).toString(16).padStart(2, '0').repeat(64),
     }));
-describe('clear setup wire census and semantic identity', () => {
+describe('setup selection wire census and semantic identity', () => {
     it.each([3, 4, 10, 20])(
         'counts canonical selection and exact certificate carriers at n=%i',
         (participants) => {

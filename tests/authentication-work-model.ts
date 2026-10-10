@@ -108,7 +108,7 @@ export const compileCompleteAuthenticationFrameWork = () =>
     completeAuthenticationPurposes.map(authenticationFrameWork);
 
 // Per original honest credential/action in the selected arithmetic profile,
-// assuming current authenticated state and the one-shot locks. Re-evaluating
+// assuming current authenticated state and the one-shot locks. Reevaluating
 // a retained intent still incurs work. The ballot is optional; every
 // participant signs one close response, and the organizer also its close
 // intent and proposal.

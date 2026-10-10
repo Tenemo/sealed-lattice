@@ -7,7 +7,6 @@ import {
     compileCurrentSignatureSamplingBounds,
 } from '#tests/authentication-work-model.js';
 import { auxiliaryInputEncryptionParameters } from '#tests/auxiliary-input-encryption-parameters.js';
-import { compileClearPreparationLedger } from '#tests/clear-preparation-ledger-model.js';
 import { compileCommonAgreementDegreeCensus } from '#tests/common-agreement-degree-model.js';
 import {
     compileCommonMatrixInitializationCensus,
@@ -24,6 +23,7 @@ import {
     operationSeedBytes,
 } from '#tests/operation-seed-model.js';
 import { shakePermutationGateCharge } from '#tests/oracle-budget-model.js';
+import { compilePreparationLedger } from '#tests/preparation-ledger-model.js';
 import { compileProofHashDomainCensus } from '#tests/proof-hash-domain-model.js';
 import {
     byteAlignedSpongePermutations,
@@ -256,8 +256,8 @@ export const compileIdentityCollisionGroup = () => {
 // and share-encryption counts are linear in h, and the auxiliary group adds at
 // most h ballot messages to its one key comparison.
 export const compileComparisonGrowth = (profile: SupportedProfile) => {
-    const none = compileClearPreparationLedger(profile, 0n);
-    const one = compileClearPreparationLedger(profile, 1n);
+    const none = compilePreparationLedger(profile, 0n);
+    const one = compilePreparationLedger(profile, 1n);
     return latticeAssumptionGroups.map((group) => {
         if (group === 'Auxiliary Ring-LWE')
             return {
@@ -447,7 +447,7 @@ export const compileStatisticalTerms = (
     const soundness = compileSoundnessCharge();
     const growth = compileComparisonGrowth(profile);
     const charges = compileSemanticUseCharges(profile);
-    const one = compileClearPreparationLedger(profile, 1n);
+    const one = compilePreparationLedger(profile, 1n);
     // Per original honest registration: its source coordinates, potential
     // commitment sender scopes and corrupt registration-source extractions.
     const coordinatesPerRegistration = one.generatedSourceEntries;
@@ -725,7 +725,7 @@ export const compileStatisticalTerms = (
             name: 'Adaptive reprogramming of every honest proof',
             scope: 'proofs',
             ratioAt: (honestRegistrations) => {
-                const proofs = compileClearPreparationLedger(
+                const proofs = compilePreparationLedger(
                     profile,
                     honestRegistrations,
                 ).maximumHonestProofScopes;

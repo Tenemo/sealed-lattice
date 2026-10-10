@@ -589,7 +589,7 @@ return { records: keys.length, ordinals };`,
     await Promise.all(
         positions.map(async (position) => {
             if (position === endorsementReplay) {
-                // The first endorsement verifies all clear bodies;
+                // The first endorsement verifies all selected offer bodies;
                 // later activation may use its retained verification.
                 await interruptDelivered(
                     position,
@@ -883,7 +883,7 @@ return { records: keys.length, ordinals };`,
                     coincidentPaddingCuts:
                         first.slotOffset === final.slotOffset,
                     logicalProofBytes: last.observation.halt.proofBytes,
-                    scope: 'Clear fixed-roster preparation only: local confirmation, real signed-offer generation and original-intent restart, organizer selection, quorum endorsements and every original member setup verifier. Missing or damaged required source capsules stop copied original namespaces; verified setup retires its source capsule and wrapping key, and cold recovery restores the original credential and setup without them. Before certification, contributors retransmit identical signed offers; certification retires private preparation while the public records remain retrievable. Harness-only pauses and private plaintext proof digests measure padding replay; their work is included in interrupted operations. This instrumented development run does not exercise departure tolerance, ballots or outcome and establishes no exact-build qualification or phone support.',
+                    scope: 'Fixed-roster preparation only: local confirmation, real signed-offer generation and original-intent restart, organizer selection, quorum endorsements and every original member setup verifier. Missing or damaged required source capsules stop copied original namespaces; verified setup retires its source capsule and wrapping key, and cold recovery restores the original credential and setup without them. Before certification, contributors retransmit identical signed offers; certification retires private preparation while the public records remain retrievable. Harness-only pauses and private plaintext proof digests measure padding replay; their work is included in interrupted operations. This instrumented development run does not exercise departure tolerance, ballots or outcome and establishes no exact-build qualification or phone support.',
                 },
                 null,
                 2,
@@ -2269,7 +2269,7 @@ return key;`,
               ]),
         'A registrant that the organizer leaves out of the roster stays pending when shown it.',
         'The organizer crashes with its roster proposal intent and the last honest participant right after it retains the accepted roster, and an honest participant crashes while it verifies the setup and right after it retains the verified setup; each next visit continues from its retained state, verifying the setup again from the public records after the first of those crashes.',
-        'Every participant locally confirms the fixed roster. Selected eligible contributors publish signed clear offers; the organizer proposes the selection and members endorse it before setup activation. The cohort interrupts original contribution and continuation work, the offer-signing intent, the organizer selection intent and one endorsement intent; each next visit preserves its original seed, checkpoint, signing intent and independently retained preparation state.',
+        'Every participant locally confirms the fixed roster. Selected eligible contributors publish signed contribution offers; the organizer proposes the selection and members endorse it before setup activation. The cohort interrupts original contribution and continuation work, the offer-signing intent, the organizer selection intent and one endorsement intent; each next visit preserves its original seed, checkpoint, signing intent and independently retained preparation state.',
         `Honest browsers crash right after their participants durably enter each ${mode === 'empty' ? 'close and target' : noResult ? 'ballot, close and target' : 'ballot, close, target and release'} generation, and each next visit continues from the retained state.`,
         mode === 'empty'
             ? "Copies of honest participants' state that lose their last data record before their close response or target vote stop for good."

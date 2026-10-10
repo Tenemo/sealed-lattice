@@ -10,7 +10,7 @@ import {
     uniformSelectedKeyEmbedding,
 } from '#tests/setup-selection-model.js';
 
-describe('clear contribution selection candidate', () => {
+describe('contribution selection candidate', () => {
     it('preserves the complete uniform prefix for each fixed guess before adaptive selection', () => {
         for (const modulus of [5, 17, 31]) {
             const result = uniformSelectedKeyEmbedding(modulus);
@@ -160,9 +160,7 @@ describe('clear contribution selection candidate', () => {
     it('counts candidate stages without adding organizer collection sessions', () => {
         for (const organizer of [false, true]) {
             expect(
-                countStagePath(
-                    preparationStagePath('clear-certified', organizer),
-                ),
+                countStagePath(preparationStagePath('certified', organizer)),
             ).toBe(8);
             expect(
                 countStagePath(

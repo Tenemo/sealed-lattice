@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
 import { encodeCandidateManifest } from '#packages/sdk/src/participant/worker/relay/candidate-codec.js';
-import { compileClearPreparationResources } from '#tests/clear-preparation-resource-model.js';
 import { compileContributionBodyCensus } from '#tests/contribution-body-model.js';
+import { compilePreparationResources } from '#tests/preparation-resource-model.js';
 import { compileSetupSelectionWireCensus } from '#tests/setup-selection-wire-model.js';
 import { deriveSupportedProfile } from '#tests/supported-profile-model.js';
 
-describe('clear preparation public resource bounds', () => {
+describe('preparation public resource bounds', () => {
     it.each([
         [3, 2],
         [4, 20],
@@ -18,7 +18,7 @@ describe('clear preparation public resource bounds', () => {
             const profile = deriveSupportedProfile(participants, options);
             const body = compileContributionBodyCensus(profile);
             const wire = compileSetupSelectionWireCensus(participants);
-            const result = compileClearPreparationResources(profile);
+            const result = compilePreparationResources(profile);
             const faults = Math.floor((participants - 1) / 3);
             const selected = Math.max(faults + 1, 2);
             const eligible = selected + faults;

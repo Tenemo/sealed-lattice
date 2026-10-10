@@ -426,7 +426,7 @@ describe('complete participant authentication accounting', () => {
             ),
         ).toEqual([7n, 4n]);
     });
-    it('matches the original poll, registration and clear-preparation signature contexts', async () => {
+    it('matches the original poll, registration and preparation signature contexts', async () => {
         const roles = compileCompleteAuthenticationFrameWork();
         // The poll and roster signature contexts are the bytes of the
         // purposes their signed objects carry.

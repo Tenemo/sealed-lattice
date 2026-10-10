@@ -92,7 +92,7 @@ const compileSourceCache = (requests: bigint) => {
     );
 };
 
-export const compileClearPreparationPollPopulations = (
+export const compilePreparationPollPopulations = (
     pollMaximumParticipants: number,
     optionCount: number,
     originalHonestRegistrations: bigint,
@@ -139,7 +139,7 @@ export const compileClearPreparationPollPopulations = (
     };
 };
 
-export const compileClearPreparationLedger = (
+export const compilePreparationLedger = (
     profile: SupportedProfile,
     originalHonestRegistrations: bigint,
     pollMaximumParticipants = profile.participantCount,

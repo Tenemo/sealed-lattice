@@ -32,7 +32,7 @@ export type ParticipantBootstrapMeasurement = Readonly<{
     finished: number;
 }>;
 
-// This is a trace of an ordinary clear-certified schedule, not protocol
+// This is a trace of an ordinary certified schedule, not protocol
 // authority. Every dependency below names a completed SDK invocation; the
 // owning runtime still verifies all actual bytes and signatures itself.
 export const summarizeParticipantWorkflow = (
@@ -48,7 +48,7 @@ export const summarizeParticipantWorkflow = (
     );
     const thresholds = compileThresholdCompletionProfile(participants);
     const paths = Array.from({ length: participants }, (_, position) =>
-        preparationStagePath('clear-certified', position === 0),
+        preparationStagePath('certified', position === 0),
     );
     const ordered = [...operations].sort(
         (left, right) => left.started - right.started,
@@ -403,7 +403,7 @@ export const summarizeParticipantWorkflow = (
             ...bootstraps.map((bootstrap) => bootstrap.started),
         );
     return {
-        schema: 'explicit-clear-stage-trace/2',
+        schema: 'explicit-stage-trace/2',
         activeMilliseconds,
         bootstrapMilliseconds,
         activeMillisecondsUpperBound:
@@ -438,6 +438,6 @@ export const summarizeParticipantWorkflow = (
             combinedWorkerHelperArenaBytes:
                 participant.combinedWorkerHelperArenaBytes ?? null,
         })),
-        scope: 'Explicit ordinary clear-certified stage traversal with completed SDK-message frontiers. Invocation-only active totals preserve every completed, pending, refused and interrupted attempt. Each browser session bootstrap spans its launch, navigation, SDK delivery and page initialization after pool acquisition, and is charged once to cumulative active upper bounds and the first invocation’s visit bounds. Worker and helper bootstrap and module delivery already occur inside invocation time and are not added again. The organizer close invocation spanning collection and proposal, with any first-session bootstrap, is charged in full to both adjacent visit upper bounds but once cumulatively. These are conservative bounds, not an exact within-call partition or minimum visit claim. Pool queueing and human delays are outside active bounds; wall time starts at the first bootstrap. Module memory compares successive evaluation/continuation workers rather than adding them. These diagnostics create no protocol authority.',
+        scope: 'Explicit ordinary certified stage traversal with completed SDK-message frontiers. Invocation-only active totals preserve every completed, pending, refused and interrupted attempt. Each browser session bootstrap spans its launch, navigation, SDK delivery and page initialization after pool acquisition, and is charged once to cumulative active upper bounds and the first invocation’s visit bounds. Worker and helper bootstrap and module delivery already occur inside invocation time and are not added again. The organizer close invocation spanning collection and proposal, with any first-session bootstrap, is charged in full to both adjacent visit upper bounds but once cumulatively. These are conservative bounds, not an exact within-call partition or minimum visit claim. Pool queueing and human delays are outside active bounds; wall time starts at the first bootstrap. Module memory compares successive evaluation/continuation workers rather than adding them. These diagnostics create no protocol authority.',
     };
 };
