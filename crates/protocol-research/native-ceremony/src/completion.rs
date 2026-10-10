@@ -38,8 +38,12 @@ impl PublicInputs for Inputs<'_> {
     }
     fn ballot(&mut self, author: usize) -> Result<Box<dyn Read + '_>, Error> {
         Ok(Box::new(
-            File::open(crate::ballot_body_path(&self.ballot, self.scenario, author))
-                .map_err(|_| Error::PublicInput)?,
+            File::open(crate::ballots::ballot_body_path(
+                &self.ballot,
+                self.scenario,
+                author,
+            ))
+            .map_err(|_| Error::PublicInput)?,
         ))
     }
 }
@@ -158,7 +162,7 @@ pub fn run(
             }
             ClosedSlot::Usable(body) => {
                 let authentication = body.authentication();
-                let path = crate::ballot_body_path(&ballot, scenario, author);
+                let path = crate::ballots::ballot_body_path(&ballot, scenario, author);
                 classifications.push(Some(
                     crate::aggregate::classify_ballot(
                         poll.clone(),

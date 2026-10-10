@@ -1,4 +1,4 @@
-use crate::{BallotInputs, OriginalEnrollments, Scenario, aggregate, close, completion};
+use crate::{OriginalEnrollments, Scenario, aggregate, ballots::BallotInputs, close, completion};
 use evaluation_target::close::{CloseContext, ClosedSlot};
 use participant_module::finality_work::OwnBallotInclusion;
 use protocol_foundations::poll::{SignedPoll, VerifiedPoll};

@@ -26,7 +26,7 @@ fn invalid_source(
 ) -> Submission {
     let directory = output.join("ballot");
     std::fs::create_dir(&directory).unwrap();
-    let path = crate::ballot_body_path(&directory, scenario, 0);
+    let path = crate::ballots::ballot_body_path(&directory, scenario, 0);
     let profile = setup.profile();
     let relation = ballot_proof::statement::header(
         &poll.identity(),
