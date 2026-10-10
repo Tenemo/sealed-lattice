@@ -139,7 +139,7 @@ const retainedReference = (context: PublicProfileContext) => {
     return reference;
 };
 
-export type VerifiedSetup = Readonly<{
+type VerifiedSetup = Readonly<{
     reference: Uint8Array;
     certificate: Uint8Array;
 }>;

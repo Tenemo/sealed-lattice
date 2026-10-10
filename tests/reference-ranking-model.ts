@@ -10,7 +10,7 @@ const maximumScore = 10;
 export type BallotInventoryEntry =
     | Readonly<{ kind: 'accepted'; scores: readonly number[] }>
     | Readonly<{ kind: 'not-accepted' }>;
-export type RankingResult = Readonly<{
+type RankingResult = Readonly<{
     kind: 'no-result' | 'result';
     orderedOptionPositions: readonly number[];
 }>;

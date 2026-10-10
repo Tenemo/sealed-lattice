@@ -70,7 +70,7 @@ import {
 // interrupted generation draws the same bytes again. The body and envelope
 // are retained before the signing intent, and the intent before the signature.
 
-export type ReleaseSession = {
+type ReleaseSession = {
     readonly close: CloseSession;
     // The participant's own signed target, when the release follows it.
     readonly signed: TargetState | undefined;

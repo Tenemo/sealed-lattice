@@ -474,7 +474,7 @@ const requiredDominantNoiseBudgetBitLength = (
     return (dominantFactorCeiling - 1n).toString(2).length;
 };
 
-export type ThresholdReleaseNoiseCensus = Readonly<{
+type ThresholdReleaseNoiseCensus = Readonly<{
     authorizedSubsetCount: number;
     boundedIntegerSharingReconstructionCount: number;
     completionParticipantCount: number;

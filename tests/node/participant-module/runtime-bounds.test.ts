@@ -18,6 +18,7 @@ import {
     compileParticipantRuntimeLimits,
     compileParticipantRuntimeProfile,
 } from '#tests/participant-runtime-bounds-model.js';
+import { participantLinearMemoryBytes } from '#tools/ci/build-participant-module.js';
 
 // The packaged participant module reports its sizes and budgets; the worker
 // derives its bounds from them. Both must equal the independent models'.
@@ -137,6 +138,10 @@ describe('participant memory plan', () => {
                 noParallelHelpers,
             )
         ).module;
+
+    it('builds the module with the absolute bound it divides', () => {
+        expect(participantLinearMemoryBytes).toBe(absoluteBytes);
+    });
 
     it('divides the absolute linear-memory bound between the worker and up to eight helpers', () => {
         for (const evaluation of [0, 1]) {

@@ -14,7 +14,6 @@ export const signingPurpose = {
     release: 9,
 } as const;
 
-export type SigningPurpose =
-    (typeof signingPurpose)[keyof typeof signingPurpose];
+type SigningPurpose = (typeof signingPurpose)[keyof typeof signingPurpose];
 
 export const purposeBit = (purpose: SigningPurpose) => 1 << purpose;

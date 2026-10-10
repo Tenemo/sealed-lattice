@@ -212,7 +212,7 @@ export const createFixedModulusBfvNoiseModel = (
     };
 };
 
-export type ReleaseInterpolationBounds = Readonly<{
+type ReleaseInterpolationBounds = Readonly<{
     releaseThreshold: number;
     clearingFactor: bigint;
     maximumScaledReconstructionOneNorm: bigint;

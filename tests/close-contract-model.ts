@@ -316,7 +316,7 @@ export const closeInventory = (
 // envelope to the participants that had received it, with its complete body,
 // before they signed their responses (frozen I.7 "received before closing").
 
-export type CloseContractFinding =
+type CloseContractFinding =
     | 'inclusion'
     | 'organizer-inclusion'
     | 'omission-bound'

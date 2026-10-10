@@ -128,7 +128,7 @@ export type ParticipantSession = {
     preparation: PreparationState;
 };
 
-export type ContributionSession = ParticipantSession & {
+type ContributionSession = ParticipantSession & {
     state: ContributionState;
 };
 

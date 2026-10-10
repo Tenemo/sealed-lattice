@@ -32,7 +32,7 @@ export const shareEncryptionParameters = {
     aggregateDecryptionErrorRadius,
 } as const;
 
-export type WideShareLiftingInput = Readonly<{
+type WideShareLiftingInput = Readonly<{
     // The setup contributors, whose shares each aggregate share sums.
     contributorCount: bigint;
     sharingDegree: number;

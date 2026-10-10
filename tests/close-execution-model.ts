@@ -165,7 +165,7 @@ export type CloseExecutionOptions = Readonly<{
     withoutForwarding?: boolean;
 }>;
 
-export type CloseExecutionResult = Readonly<{
+type CloseExecutionResult = Readonly<{
     certifiedTargets: number;
     inventory: ClosedInventory | undefined;
     findings: readonly string[];
@@ -1060,7 +1060,7 @@ export const runCloseExecution = (
     };
 };
 
-export type CompletionProfileExecutionCensus = Readonly<{
+type CompletionProfileExecutionCensus = Readonly<{
     participantCount: number;
     corruptionSets: number;
     executions: number;

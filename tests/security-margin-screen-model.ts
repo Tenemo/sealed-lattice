@@ -145,7 +145,7 @@ export const fheAttackScreens = [
     },
 ] as const;
 
-export type FheAttackScreen = (typeof fheAttackScreens)[number];
+type FheAttackScreen = (typeof fheAttackScreens)[number];
 
 // The lattice-reduction algorithms of the pinned estimator's full estimate,
 // plus the meet-in-the-middle primal hybrid without Babai lifting that its
@@ -216,7 +216,7 @@ export const fheKnownAttackFloor = (modulusBits: bigint) => ({
     ),
 });
 
-export type AttackScreen = Readonly<{
+type AttackScreen = Readonly<{
     attack: string;
     costModel: 'classical' | 'quantum';
     modulusBits: bigint;
@@ -528,7 +528,7 @@ const firstOracleResumeFactor = (profile: SupportedProfile) => {
 
 // The ledger populations one reduction acts on at a profile and original
 // honest registration population.
-export type ReductionOperands = Readonly<{
+type ReductionOperands = Readonly<{
     participantCount: number;
     optionCount: number;
     sourceMaskScopes: bigint;

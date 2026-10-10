@@ -31,8 +31,8 @@ export type CandidateFile = Readonly<{
     chunks: readonly string[];
 }>;
 export type CandidateManifest = Readonly<{ files: readonly CandidateFile[] }>;
-export type CandidateReceipt = Readonly<{ id: string; index: number }>;
-export type CandidatePage = Readonly<{ total: number; ids: readonly string[] }>;
+type CandidateReceipt = Readonly<{ id: string; index: number }>;
+type CandidatePage = Readonly<{ total: number; ids: readonly string[] }>;
 
 const malformed = () => new RangeError('Malformed candidate transport record.');
 const safeLength = (value: number) => Number.isSafeInteger(value) && value >= 0;

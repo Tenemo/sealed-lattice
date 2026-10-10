@@ -14,7 +14,7 @@ type ParticipantState = {
     required: Map<string, string>;
     stored: Map<string, string>;
 };
-export type SetupCertificateModel = Readonly<{
+type SetupCertificateModel = Readonly<{
     selected: readonly SelectedContributionModel[];
     signers: readonly number[];
 }>;

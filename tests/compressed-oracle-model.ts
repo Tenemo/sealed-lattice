@@ -1204,7 +1204,7 @@ export function runOracleCellController(
     return result;
 }
 
-export type OraclePrefixReplacement = {
+type OraclePrefixReplacement = {
     readonly input: Uint8Array;
     readonly prefix: Uint8Array;
 };

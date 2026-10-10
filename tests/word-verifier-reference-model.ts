@@ -395,7 +395,7 @@ type WordVerifierRefusal =
 // Where a verification stopped: opening the proof, streaming its statement,
 // or reading the opening stage with this index.
 type WordVerifierStage = 'open' | 'statement' | number;
-export type WordVerifierVerdict =
+type WordVerifierVerdict =
     | Readonly<{ accepted: true }>
     | Readonly<{
           accepted: false;
@@ -1208,7 +1208,7 @@ const verifyStages = (input: WordProofInput) => {
 // hostile modes keep the honest procedure except for one change: a false
 // statement proves a witness that misses the affine target, and an excess
 // degree raises the degree mask one degree above the largest code degree.
-export type WordProofStatement = Readonly<{
+type WordProofStatement = Readonly<{
     bytes: readonly Uint8Array[];
     operator: (affine: Extension) => Readonly<{
         coefficients: readonly (readonly Extension[])[];

@@ -96,7 +96,7 @@ const maximumListedEntries = ({ close }: ParticipantProfile) =>
     (close.maximumResponseBodyBytes - close.minimumResponseBodyBytes) /
     listedEntryBytes;
 
-export type CloseParameters = Readonly<{
+type CloseParameters = Readonly<{
     // The organizer's close time in Unix milliseconds, only before an intent.
     closeTime?: bigint;
 }>;

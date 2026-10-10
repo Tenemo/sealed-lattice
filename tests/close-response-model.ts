@@ -59,7 +59,7 @@ type JointEnvelope = Readonly<{
     validProof: boolean;
 }>;
 
-export type JointCloseCensus = Readonly<{
+type JointCloseCensus = Readonly<{
     participantCount: number;
     corruptionCases: number;
     views: number;
@@ -479,7 +479,7 @@ const crossCheckReference = (
 // and at most f participants are outside any proposal. A set of f honest
 // listers outside the proposal witnesses that the bound is tight.
 
-export type ListerBruteForceCensus = Readonly<{
+type ListerBruteForceCensus = Readonly<{
     participantCount: number;
     corruptionSets: number;
     proposals: number;
@@ -819,7 +819,7 @@ const closeStages = {
     organizer: ['setup-and-ballot', 'close', 'proposal', 'release', 'verify'],
 } as const;
 
-export type CloseVisitCensus = Readonly<{
+type CloseVisitCensus = Readonly<{
     participantCount: number;
     preparationVisits: number;
     executions: number;

@@ -2,11 +2,11 @@ import { chunkBytes } from '../../module/runtime-bounds.js';
 import type { ParticipantProfile } from '../../module/runtime-bounds.js';
 import { encodeText, equalBytes, readUnsigned64 } from '../../shared/bytes.js';
 
-export type ProofBounds = Pick<
+type ProofBounds = Pick<
     ParticipantProfile['contribution'],
     'minimumProofBytes' | 'maximumProofBytes' | 'bodyHeaderBytes'
 >;
-export type ProofSlot = Readonly<{ offset: number; length: number }>;
+type ProofSlot = Readonly<{ offset: number; length: number }>;
 
 // The private record plan depends only on the authenticated profile. The
 // final slot has the profile's remainder, even when the proof ends earlier.

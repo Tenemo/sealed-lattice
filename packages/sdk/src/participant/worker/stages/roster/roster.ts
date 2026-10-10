@@ -359,7 +359,7 @@ const verifySignature = (
 
 // The root a roster transition committed, with the verified usernames in
 // roster order.
-export type RosterTransition = Readonly<{
+type RosterTransition = Readonly<{
     root: AuthenticatedRoot;
     usernames: readonly string[];
 }>;

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 
 import { evaluateOddPolynomialBlocks } from '#tests/odd-polynomial-block-model.js';
 
-export type BfvPlaintextPurpose =
+type BfvPlaintextPurpose =
     'comparison-input-offset' | 'comparison-constant' | 'ranking-constant';
 
 export const evaluateFixedModulusBfvRanking = <Value>(

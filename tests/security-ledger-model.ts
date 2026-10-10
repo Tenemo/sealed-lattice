@@ -844,7 +844,7 @@ const compileStatisticalPopulationLimits = () =>
         return { participantCount, honestRegistrations };
     });
 
-export type LedgerGroup =
+type LedgerGroup =
     | LatticeAssumptionGroup
     | 'ML-DSA authentication'
     | 'Identity collisions'

@@ -298,7 +298,7 @@ const bruteForceSmallProfile = (
     };
 };
 
-export type ThresholdCompletionProfile = Readonly<{
+type ThresholdCompletionProfile = Readonly<{
     participantCount: number;
     maximumCorruptParticipantCount: number;
     inventoryCertificateThreshold: number;

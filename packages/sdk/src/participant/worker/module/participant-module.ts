@@ -189,7 +189,7 @@ export type ModuleHandlers = {
 // Randomness requests are bounded before any view of module memory exists.
 const maximumRandomRequest = 65_536;
 
-export type LoadedModule = Readonly<{
+type LoadedModule = Readonly<{
     module: ParticipantModule;
     // Handlers for the current operation; an absent handler refuses.
     handlers: ModuleHandlers;

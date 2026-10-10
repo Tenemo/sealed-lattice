@@ -9,7 +9,7 @@ const radix = 1n << BigInt(limbBits),
     carryBound = 1n << 71n;
 const bitLength = (value: bigint): number => value.toString(2).length;
 
-export type ReleaseShareLiftingInput = Readonly<{
+type ReleaseShareLiftingInput = Readonly<{
     polynomialDegree: bigint;
     releaseModulus: bigint;
     releaseNoiseBits: number;

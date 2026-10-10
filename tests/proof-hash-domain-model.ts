@@ -404,7 +404,7 @@ export type ProofGraphEntry = {
     input: ProofGraphInput;
     output: number;
 };
-export type ProofGraphPrefix = {
+type ProofGraphPrefix = {
     instance: string;
     messages: number[];
     oracles: (number | null)[][];

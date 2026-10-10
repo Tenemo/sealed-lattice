@@ -233,7 +233,7 @@ const combinations = (size: number, choose: number): readonly number[][] => {
     return result;
 };
 
-export type ThresholdKeyAggregationCensus = Readonly<{
+type ThresholdKeyAggregationCensus = Readonly<{
     aggregatePublicKeyEquationCount: number;
     authorizedReleaseSetCount: number;
     coefficientModulus: bigint;
