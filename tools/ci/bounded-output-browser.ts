@@ -24,7 +24,7 @@ type OutputTarget = {
 
 const page = `<!doctype html><meta charset="utf-8"><title>Bounded output screen</title>
 <script>
-window.runBoundedExperiment = (configuration) => new Promise((resolve, reject) => {
+window.runBoundedScreen = (configuration) => new Promise((resolve, reject) => {
     const worker = new Worker('/bounded-output-browser-worker.mjs', {type: 'module'});
     let finished = false;
     const finish = (error, result) => {
@@ -35,11 +35,11 @@ window.runBoundedExperiment = (configuration) => new Promise((resolve, reject) =
         if (error) reject(new Error(error));
         else resolve(result);
     };
-    window.boundedExperimentProgress = {sequence:0,progress:null};
+    window.boundedScreenProgress = {sequence:0,progress:null};
     const timer = setTimeout(() => finish('The browser screen worker exceeded its deadline.'), configuration.timeoutMilliseconds);
     worker.onmessage = ({data}) => {
         if (Object.hasOwn(data,'progress')) {
-            window.boundedExperimentProgress = {sequence:window.boundedExperimentProgress.sequence+1,progress:data.progress};
+            window.boundedScreenProgress = {sequence:window.boundedScreenProgress.sequence+1,progress:data.progress};
         } else finish(data.error, data.result);
     };
     worker.onerror = (event) => finish(event.message || 'The browser screen worker failed.');
@@ -198,7 +198,7 @@ export const runFheKeySourceInChrome = async ({
 }) => {
     const screenKind = 'fhe-key-source';
     const caseIndex = 0;
-    const phase = 'operator-screen';
+    const phase = 'key-source-screen';
     const output = path.resolve(outputFile);
     assert.ok(
         output.startsWith(path.resolve(log.artifactDirectoryPath) + path.sep),
@@ -216,7 +216,7 @@ export const runFheKeySourceInChrome = async ({
     await writeFile(
         path.join(
             log.runDirectoryPath,
-            'browser-operator-' + caseIndex + '-input-bindings.json',
+            'browser-screen-' + caseIndex + '-input-bindings.json',
         ),
         JSON.stringify(
             {
@@ -302,7 +302,7 @@ export const runFheKeySourceInChrome = async ({
                         limit: processMemoryLimit,
                         heaps: browser.heaps(),
                         progress: await browser.evaluate(
-                            'window.boundedExperimentProgress',
+                            'window.boundedScreenProgress',
                         ),
                     },
                 });
@@ -320,7 +320,7 @@ export const runFheKeySourceInChrome = async ({
         };
         const emitted = (await Promise.race([
             browser.evaluate(
-                'window.runBoundedExperiment(' +
+                'window.runBoundedScreen(' +
                     JSON.stringify(configuration) +
                     ')',
             ),

@@ -1,11 +1,9 @@
 import { completionProfileCounts } from '#tests/supported-profile-model.js';
+import { toolArguments } from '#tools/ci/command-line.js';
 
 // The most helpers a participant's worker starts, which native threads
 // simulate for an executing case.
 const maximumSimulatedHelpers = 8;
-
-export const registrationSessionTest =
-    'registration_session_tests::sessions_verify_and_refuse_a_registration_as_its_verifier_does';
 
 // Only the native ceremony cases take a profile; the build check and the
 // requested-output probe cover fixed profiles.
@@ -30,7 +28,6 @@ type ProtocolResearchSelection = {
 } & (
     | { name: keyof typeof protocolResearchCases }
     | { name: 'native-fhe-key-source' }
-    | { name: 'registration-session' }
     | { name: 'native-setup-departure' | 'native-selection-fork' }
     | {
           name: 'scalar-fhe-key-source' | 'browser-fhe-key-source';
@@ -41,7 +38,7 @@ type ProtocolResearchSelection = {
 export const selectProtocolResearchCase = (
     commandLineArguments: readonly string[],
 ): ProtocolResearchSelection => {
-    const values = commandLineArguments.filter((value) => value !== '--');
+    const values = [...toolArguments(commandLineArguments)];
     if (
         values[0] === 'native-setup-departure' ||
         values[0] === 'native-selection-fork'
@@ -55,20 +52,6 @@ export const selectProtocolResearchCase = (
             execution: true,
             noResult: false,
             participantCount: 4,
-            optionCount: 2,
-            simulatedHelpers: 0,
-        };
-    }
-    if (values[0] === 'registration-session') {
-        if (values.length !== 1)
-            throw new Error(
-                'The registration session case accepts no profile, filter or helper options.',
-            );
-        return {
-            name: 'registration-session',
-            execution: true,
-            noResult: false,
-            participantCount: 3,
             optionCount: 2,
             simulatedHelpers: 0,
         };
@@ -154,7 +137,7 @@ export const selectProtocolResearchCase = (
 export const selectPublicCompletionCase = (
     commandLineArguments: readonly string[],
 ) => {
-    const values = commandLineArguments.filter((value) => value !== '--');
+    const values = toolArguments(commandLineArguments);
     if (
         values.length === 3 &&
         (values[0] === 'certificate-records' ||

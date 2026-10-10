@@ -8,7 +8,6 @@ import {
     deriveResearchScenario,
     researchBallotScore,
 } from '#tools/ci/protocol-research-scenario.js';
-import { parseRegistrationSessionResult } from '#tools/ci/run-registration-session.js';
 
 describe('guarded protocol research entry', () => {
     it('requires only actual response files while retaining original roster positions and all normal responders', () => {
@@ -129,37 +128,6 @@ describe('guarded protocol research entry', () => {
             ['native-fhe-key-source', 'source'],
         ])
             expect(() => selectProtocolResearchCase(values)).toThrow();
-    });
-    it('executes only the named original-registration session case', () => {
-        expect(
-            selectProtocolResearchCase(['registration-session']),
-        ).toMatchObject({
-            name: 'registration-session',
-            execution: true,
-            simulatedHelpers: 0,
-        });
-        for (const args of [
-            ['registration-session', '3', '2'],
-            ['registration-session', 'unknown'],
-            ['registration-session', '--simulated-helpers', '1'],
-        ])
-            expect(() => selectProtocolResearchCase(args)).toThrow();
-        const test =
-            'test registration_session_tests::sessions_verify_and_refuse_a_registration_as_its_verifier_does ... ok';
-        const summary =
-            'test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 12 filtered out; finished in 1.00s';
-        expect(parseRegistrationSessionResult(`${test}\n${summary}\n`)).toEqual(
-            { kind: 'registration-session', passed: 1, ignored: 0 },
-        );
-        for (const output of [
-            '',
-            summary,
-            test,
-            `${test}\n${summary.replace('1 passed', '0 passed')}`,
-            `${test}\n${summary.replace('0 ignored', '1 ignored')}`,
-            `${test}\n${test}\n${summary}`,
-        ])
-            expect(() => parseRegistrationSessionResult(output)).toThrow();
     });
     it('requires an explicit public case and a nonempty fixture', () => {
         for (const values of [

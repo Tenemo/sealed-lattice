@@ -217,17 +217,17 @@ export const compareNativeReferenceArtifacts = async (
     output: string,
 ) => {
     const comparisons = [];
-    for (const proof of artifacts) {
-        const currentFile = path.join(output, proof.name);
-        assert.equal((await stat(currentFile)).size, proof.bytes);
-        const historical = await open(proof.file, 'r');
+    for (const artifact of artifacts) {
+        const currentFile = path.join(output, artifact.name);
+        assert.equal((await stat(currentFile)).size, artifact.bytes);
+        const historical = await open(artifact.file, 'r');
         let current: FileHandle | undefined;
         try {
             current = await open(currentFile, 'r');
             const left = Buffer.alloc(1 << 20);
             const right = Buffer.alloc(left.length);
-            for (let offset = 0; offset < proof.bytes;) {
-                const length = Math.min(left.length, proof.bytes - offset);
+            for (let offset = 0; offset < artifact.bytes;) {
+                const length = Math.min(left.length, artifact.bytes - offset);
                 for (const [file, buffer] of [
                     [historical, left],
                     [current, right],
@@ -242,15 +242,15 @@ export const compareNativeReferenceArtifacts = async (
                         );
                         assert.ok(
                             bytesRead > 0,
-                            'A deterministic reference proof was truncated.',
+                            'A deterministic reference artifact was truncated.',
                         );
                         read += bytesRead;
                     }
                 }
                 assert.ok(
                     left.subarray(0, length).equals(right.subarray(0, length)),
-                    'A freshly generated proof differs from its deterministic reference: ' +
-                        proof.name,
+                    'A freshly generated artifact differs from its deterministic reference: ' +
+                        artifact.name,
                 );
                 offset += length;
             }
@@ -262,13 +262,17 @@ export const compareNativeReferenceArtifacts = async (
             }
         }
         const sha512 = await fileDigest(currentFile);
-        assert.equal(sha512, proof.sha512);
+        assert.equal(sha512, artifact.sha512);
         assert.equal(
-            await fileDigest(proof.file),
-            proof.sha512,
+            await fileDigest(artifact.file),
+            artifact.sha512,
             'A historical reference changed during comparison.',
         );
-        comparisons.push({ name: proof.name, bytes: proof.bytes, sha512 });
+        comparisons.push({
+            name: artifact.name,
+            bytes: artifact.bytes,
+            sha512,
+        });
     }
     return comparisons;
 };
@@ -292,12 +296,12 @@ export const parseFheKeySourceOutput = (output: string) => {
             assert.ok(value !== null && typeof value === 'object');
             if (typeof value.kind === 'string') return [value];
             assert.ok(
-                value.event === 'native-operator-ready' ||
-                    value.event === 'native-operator-completed' ||
-                    value.event === 'operator-call',
+                value.event === 'operation-ready' ||
+                    value.event === 'operation-completed' ||
+                    value.event === 'operation-call',
                 'The key source screen emitted an unknown diagnostic.',
             );
-            if (value.event === 'operator-call') {
+            if (value.event === 'operation-call') {
                 assert.ok(
                     value.operation === 'step' || value.operation === 'output',
                 );

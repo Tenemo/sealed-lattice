@@ -1,11 +1,10 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 import { participantRuntimeIdentity } from '#tools/ci/build-participant-module.js';
+import { repositoryRoot } from '#tools/ci/command-line.js';
 
-const root = fileURLToPath(new URL('../../', import.meta.url));
 const digest = (bytes: Uint8Array) =>
     createHash('sha512').update(bytes).digest('hex');
 
@@ -14,7 +13,7 @@ const digest = (bytes: Uint8Array) =>
 // independent of the caller's current build and never executes bundled code.
 export const readParticipantArtifactResources = (
     read: (file: string) => Buffer = (file) =>
-        readFileSync(path.join(root, file)),
+        readFileSync(path.join(repositoryRoot, file)),
 ) => {
     const load = (file: string) => {
         try {
@@ -54,8 +53,8 @@ export const readParticipantArtifactResources = (
             item.bytes < 0
         )
             throw new Error('Malformed SDK source manifest entry.');
-        const resolved = path.resolve(root, item.file);
-        const relative = path.relative(root, resolved);
+        const resolved = path.resolve(repositoryRoot, item.file);
+        const relative = path.relative(repositoryRoot, resolved);
         if (
             relative.startsWith('..') ||
             path.isAbsolute(relative) ||

@@ -1,6 +1,5 @@
 import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 import { build } from 'tsdown';
 
@@ -9,10 +8,10 @@ import {
     participantRuntimeIdentity,
     participantSourceManifest,
 } from './build-participant-module.js';
+import { repositoryRoot } from './command-line.js';
 import { recordBundleSources } from './compiled-inputs.js';
 import { sdkPackageOptions } from './sdk-package-tsdown.config.js';
 
-const repositoryRoot = fileURLToPath(new URL('../../', import.meta.url));
 const workerStagingPath = path.join(
     repositoryRoot,
     'target',

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { parseArgs } from 'node:util';
 
 import { deriveSupportedProfile } from '#tests/supported-profile-model.js';
+import { toolArguments } from '#tools/ci/command-line.js';
 
 // The points at which a departing member leaves for good, in stage order:
 // each follows the member's earlier work and precedes the named step.
@@ -172,11 +173,9 @@ export const participantBrowserUsage = [
 export const selectParticipantBrowserOptions = (
     commandLineArguments: readonly string[],
 ) => {
-    const argumentsList = commandLineArguments.filter(
-        (value) => value !== '--',
-    );
+    const argumentsList = toolArguments(commandLineArguments);
     const parsed = parseArgs({
-        args: argumentsList,
+        args: [...argumentsList],
         options: Object.fromEntries(
             Object.entries(browserOptions).map(([name, option]) => [
                 name,

@@ -84,34 +84,29 @@ export const runFheKeySourceScreen = async (
             try {
                 assert.ok(freemem() >= 2 * fixtureProcessMemoryLimit);
                 const resources = compileFheKeySourceScreenResources();
-                const models = [
-                    {
-                        ...resources,
-                        kind: 'key-source' as const,
-                        planningBytes:
-                            host === 'native'
-                                ? resources.nativePlanningBytes
-                                : resources.scalarPlanningBytes,
-                    },
-                ];
-                for (const model of models) {
-                    assert.ok(
-                        model.planningBytes < BigInt(fixtureProcessMemoryLimit),
-                    );
-                    assert.ok(
-                        model.planningBytes <
-                            BigInt(participantLinearMemoryBytes),
-                    );
-                    assert.ok(
-                        model.reportBytes <= model.outputCapacity &&
-                            model.outputCapacity <= 1n << 20n,
-                    );
-                }
+                const model = {
+                    ...resources,
+                    kind: 'key-source' as const,
+                    planningBytes:
+                        host === 'native'
+                            ? resources.nativePlanningBytes
+                            : resources.scalarPlanningBytes,
+                };
+                assert.ok(
+                    model.planningBytes < BigInt(fixtureProcessMemoryLimit),
+                );
+                assert.ok(
+                    model.planningBytes < BigInt(participantLinearMemoryBytes),
+                );
+                assert.ok(
+                    model.reportBytes <= model.outputCapacity &&
+                        model.outputCapacity <= 1n << 20n,
+                );
                 await writeFile(
                     path.join(log.runDirectoryPath, 'resource-inputs.json'),
                     JSON.stringify(
                         {
-                            models,
+                            model,
                             phaseLabels: fheKeySourcePhases,
                             processMemoryLimit: fixtureProcessMemoryLimit,
                             linearMemoryLimit: participantLinearMemoryBytes,
@@ -313,117 +308,109 @@ export const runFheKeySourceScreen = async (
                 const scalar = [];
                 const artifacts = [];
                 const reports = [];
-                for (const model of models) {
-                    const artifactName = 'key-source-' + model.caseId + '.bin';
-                    const file = path.join(output, artifactName);
-                    if (executable !== undefined) {
-                        const result = await runGuardedFixture({
+                const artifactName = 'key-source-' + model.caseId + '.bin';
+                const file = path.join(output, artifactName);
+                if (executable !== undefined) {
+                    const result = await runGuardedFixture({
+                        root,
+                        log,
+                        environment,
+                        processMemoryLimit: fixtureProcessMemoryLimit,
+                        command: executable,
+                        args: [file],
+                        name: 'native-screen-' + model.kind,
+                        handshake: true,
+                        nativeProgressLines: fheKeySourceProgressLines,
+                        parseResult: parseFheKeySourceOutput,
+                    });
+                    assert.equal(result.result.kind, screenKind + '-screen');
+                    assert.equal(
+                        result.result.reportBytes,
+                        Number(model.reportBytes),
+                    );
+                    native.push(result);
+                } else {
+                    assert.ok(source && module);
+                    const expected = source.artifacts[model.caseId];
+                    let result;
+                    if (host === 'browser')
+                        result = await runFheKeySourceInChrome({
                             root,
                             log,
-                            environment,
+                            moduleFile: module.moduleFile,
+                            moduleSha512: module.moduleSha512,
+                            outputFile: file,
+                            expectedBytes: expected.bytes,
+                            expectedSha512: expected.sha512,
                             processMemoryLimit: fixtureProcessMemoryLimit,
-                            command: executable,
-                            args: [file],
-                            name: 'native-operator-' + model.kind,
-                            handshake: true,
-                            nativeProgressLines: fheKeySourceProgressLines,
-                            parseResult: parseFheKeySourceOutput,
+                            linearMemoryLimit: participantLinearMemoryBytes,
                         });
-                        assert.equal(
-                            result.result.kind,
-                            screenKind + '-screen',
+                    else {
+                        const configuration = path.join(
+                            log.runDirectoryPath,
+                            'screen-' + model.caseId + '-input.json',
                         );
-                        assert.equal(
-                            result.result.reportBytes,
-                            Number(model.reportBytes),
-                        );
-                        native.push(result);
-                    } else {
-                        assert.ok(source && module);
-                        const expected = source.artifacts[model.caseId];
-                        let result;
-                        if (host === 'browser')
-                            result = await runFheKeySourceInChrome({
-                                root,
-                                log,
-                                moduleFile: module.moduleFile,
+                        await writeFile(
+                            configuration,
+                            JSON.stringify({
+                                operation: screenKind,
+                                caseIndex: model.caseId,
+                                module: module.moduleFile,
                                 moduleSha512: module.moduleSha512,
                                 outputFile: file,
                                 expectedBytes: expected.bytes,
                                 expectedSha512: expected.sha512,
-                                processMemoryLimit: fixtureProcessMemoryLimit,
-                                linearMemoryLimit: participantLinearMemoryBytes,
-                            });
-                        else {
-                            const configuration = path.join(
-                                log.runDirectoryPath,
-                                'operator-' + model.caseId + '-input.json',
-                            );
-                            await writeFile(
+                            }) + '\n',
+                            { flag: 'wx' },
+                        );
+                        result = await runGuardedFixture({
+                            root,
+                            log,
+                            environment,
+                            processMemoryLimit: fixtureProcessMemoryLimit,
+                            command: process.execPath,
+                            args: [
+                                path.join(
+                                    root,
+                                    'tools/ci/bounded-output-worker.mjs',
+                                ),
                                 configuration,
-                                JSON.stringify({
-                                    operation: screenKind,
-                                    caseIndex: model.caseId,
-                                    module: module.moduleFile,
-                                    moduleSha512: module.moduleSha512,
-                                    outputFile: file,
-                                    expectedBytes: expected.bytes,
-                                    expectedSha512: expected.sha512,
-                                }) + '\n',
-                                { flag: 'wx' },
-                            );
-                            result = await runGuardedFixture({
-                                root,
-                                log,
-                                environment,
-                                processMemoryLimit: fixtureProcessMemoryLimit,
-                                command: process.execPath,
-                                args: [
-                                    path.join(
-                                        root,
-                                        'tools/ci/bounded-output-worker.mjs',
-                                    ),
-                                    configuration,
-                                ],
-                                name: 'scalar-operator-' + model.kind,
-                                handshake: true,
-                            });
-                        }
-                        assert.equal(
-                            result.result.kind,
-                            host === 'browser'
-                                ? 'browser-' + screenKind + '-screen'
-                                : 'scalar-' + screenKind + '-screen',
-                        );
-                        assert.equal(result.result.caseIndex, model.caseId);
-                        assert.equal(
-                            result.result.bytes,
-                            Number(model.reportBytes),
-                        );
-                        assert.equal(result.result.controlCases, 5);
-                        assert.ok(
-                            typeof result.result.maximumLinearMemoryBytes ===
-                                'number' &&
-                                result.result.maximumLinearMemoryBytes <=
-                                    participantLinearMemoryBytes,
-                        );
-                        await compareNativeReferenceArtifacts(
-                            [expected],
-                            output,
-                        );
-                        scalar.push(result);
+                            ],
+                            name: 'scalar-screen-' + model.kind,
+                            handshake: true,
+                        });
                     }
                     assert.equal(
-                        BigInt((await stat(file)).size),
-                        model.reportBytes,
+                        result.result.kind,
+                        host === 'browser'
+                            ? 'browser-' + screenKind + '-screen'
+                            : 'scalar-' + screenKind + '-screen',
                     );
-                    reports.push(parseFheKeySourceReport(await readFile(file)));
-                    artifacts.push({
-                        name: artifactName,
-                        bytes: Number(model.reportBytes),
-                        sha512: await fileDigest(file),
-                    });
+                    assert.equal(result.result.caseIndex, model.caseId);
+                    assert.equal(
+                        result.result.bytes,
+                        Number(model.reportBytes),
+                    );
+                    assert.equal(result.result.controlCases, 5);
+                    assert.ok(
+                        typeof result.result.maximumLinearMemoryBytes ===
+                            'number' &&
+                            result.result.maximumLinearMemoryBytes <=
+                                participantLinearMemoryBytes,
+                    );
+                    await compareNativeReferenceArtifacts([expected], output);
+                    scalar.push(result);
                 }
+                assert.equal(
+                    BigInt((await stat(file)).size),
+                    model.reportBytes,
+                );
+                reports.push(parseFheKeySourceReport(await readFile(file)));
+                artifacts.push({
+                    name: artifactName,
+                    bytes: Number(model.reportBytes),
+                    sha512: await fileDigest(file),
+                });
                 if (source !== undefined)
                     await assertFheKeySourceStable(source, root);
                 await checkFixtureSources(
@@ -436,7 +423,7 @@ export const runFheKeySourceScreen = async (
                 assert.equal(
                     await fileDigest(runtimeFile),
                     runtimeIdentity,
-                    'The operator runtime changed during execution.',
+                    'The screen runtime changed during execution.',
                 );
                 await writeFile(
                     path.join(log.runDirectoryPath, 'result.json'),

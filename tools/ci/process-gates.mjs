@@ -58,7 +58,7 @@ export const withProcessGates = async (args, operation) => {
     assert.equal(
         args.length,
         4,
-        'The operator host requires its paired process guard gates.',
+        'The gated host requires its paired process guard gates.',
     );
     assert.equal(args[0], '--guard-start');
     assert.equal(args[2], '--guard-finish');
@@ -67,13 +67,13 @@ export const withProcessGates = async (args, operation) => {
     assert.notEqual(start, finish);
     for (const file of [start, finish])
         await assert.rejects(lstat(file), { code: 'ENOENT' });
-    console.log(JSON.stringify({ event: 'native-operator-ready' }));
+    console.log(JSON.stringify({ event: 'operation-ready' }));
     await waitForGate(start);
     const began = performance.now();
     const result = await operation();
     console.log(
         JSON.stringify({
-            event: 'native-operator-completed',
+            event: 'operation-completed',
             operationMilliseconds: performance.now() - began,
         }),
     );

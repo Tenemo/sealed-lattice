@@ -5,16 +5,14 @@ import {
 } from './bounded-output-browser-transport.mjs';
 import { runFheKeySourceScreen } from './fhe-key-source-scalar.mjs';
 
-/** @typedef {{caseIndex:0,moduleUrl:string,moduleBytes:number,moduleSha512:string,expectedBytes:number,sinkUrl:string}} OperatorConfiguration */
+/** @typedef {{caseIndex:0,moduleUrl:string,moduleBytes:number,moduleSha512:string,expectedBytes:number,sinkUrl:string}} ScreenConfiguration */
 
 self.onmessage = ({ data }) => {
     void (async () => {
-        const configuration = /** @type {OperatorConfiguration} */ (data);
+        const configuration = /** @type {ScreenConfiguration} */ (data);
         const { moduleUrl, moduleBytes, moduleSha512 } = configuration;
         if (!isSecureContext || typeof crypto.subtle !== 'object')
-            throw new Error(
-                'The experiment worker lacks secure browser hashing.',
-            );
+            throw new Error('The screen worker lacks secure browser hashing.');
         const bytes = await readBoundedBrowserResponse(
             moduleUrl,
             moduleBytes,

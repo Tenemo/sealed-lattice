@@ -5,10 +5,10 @@ import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 import binaryen from 'binaryen';
 
+import { repositoryRoot } from './command-line.js';
 import {
     compiledRustSources,
     requireCheckoutBytes,
@@ -17,7 +17,6 @@ import { rustCompilerCommit, rustToolchain } from './rust-toolchain.js';
 
 import { participantRuntimeLabel } from '#packages/sdk/src/participant/worker/module/custody-identity.js';
 
-const repositoryRoot = fileURLToPath(new URL('../../', import.meta.url));
 const workspace = path.join(repositoryRoot, 'crates', 'protocol-research');
 // The participant module's linear memory never exceeds the absolute bound.
 export const participantLinearMemoryBytes = 671_088_640;

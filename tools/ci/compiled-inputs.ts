@@ -1,9 +1,8 @@
 import { spawnSync } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
-const repositoryRoot = fileURLToPath(new URL('../../', import.meta.url));
+import { repositoryRoot } from '#tools/ci/command-line.js';
 
 // A repository file relative to the repository root with forward slashes, or
 // a refusal when the path lies outside the repository.

@@ -35,7 +35,6 @@ import { acquireProtocolResearchLock } from '#tools/ci/protocol-research-lock.js
 import { selectProtocolResearchCase } from '#tools/ci/protocol-research-registry.js';
 import { deriveResearchScenario } from '#tools/ci/protocol-research-scenario.js';
 import { runFheKeySourceScreen } from '#tools/ci/run-fhe-key-source-screen.js';
-import { runRegistrationSession } from '#tools/ci/run-registration-session.js';
 import {
     rustCompilerCommit,
     rustToolchain,
@@ -66,10 +65,6 @@ type NativeResult = {
     }[];
 };
 const selected = selectProtocolResearchCase(process.argv.slice(2));
-if (selected.name === 'registration-session') {
-    await runRegistrationSession();
-    process.exit(process.exitCode ?? 0);
-}
 if (
     selected.name === 'native-fhe-key-source' ||
     selected.name === 'scalar-fhe-key-source' ||

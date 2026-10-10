@@ -52,14 +52,14 @@ export const createNativeOperationGuard = (
                 if (!line) continue;
                 if (input.allowedProgressLines?.includes(line)) continue;
                 const event = JSON.parse(line) as Record<string, unknown>;
-                if (event.event === 'native-operator-ready') {
+                if (event.event === 'operation-ready') {
                     assert.ok(
                         !readySeen,
                         'The native operation announced readiness twice.',
                     );
                     readySeen = true;
                     readyResolve();
-                } else if (event.event === 'native-operator-completed') {
+                } else if (event.event === 'operation-completed') {
                     assert.ok(
                         started && !completionSeen,
                         'The native operation completed outside its guarded operation.',

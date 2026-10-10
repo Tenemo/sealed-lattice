@@ -76,7 +76,7 @@ fn wait_gate(path: &Path) -> io::Result<()> {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let arguments = arguments(std::env::args_os().skip(1).collect())?;
     if let Some((start, _)) = &arguments.gates {
-        println!("{{\"event\":\"native-operator-ready\"}}");
+        println!("{{\"event\":\"operation-ready\"}}");
         io::stdout().flush()?;
         wait_gate(start)?;
     }
@@ -99,14 +99,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             screen.step()?;
         }
         println!(
-            "{{\"event\":\"operator-call\",\"operation\":\"{}\",\"phase\":{phase},\"milliseconds\":{}}}",
+            "{{\"event\":\"operation-call\",\"operation\":\"{}\",\"phase\":{phase},\"milliseconds\":{}}}",
             if phase == 12 { "output" } else { "step" },
             call.elapsed().as_secs_f64() * 1000.0
         );
     }
     output.sync_all()?;
     println!(
-        "{{\"event\":\"native-operator-completed\",\"operationMilliseconds\":{}}}",
+        "{{\"event\":\"operation-completed\",\"operationMilliseconds\":{}}}",
         started.elapsed().as_secs_f64() * 1000.0
     );
     io::stdout().flush()?;

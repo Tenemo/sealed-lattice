@@ -182,6 +182,7 @@ import {
     compileWideChallengeCompilerCensus,
 } from '#tests/wide-challenge-compiler-model.js';
 import { compileWideShareLiftingCensus } from '#tests/wide-share-lifting-model.js';
+import { toolArguments } from '#tools/ci/command-line.js';
 import { readParticipantArtifactResources } from '#tools/ci/participant-artifact-resources.js';
 
 const formatCount = (value: bigint | number): string =>
@@ -6180,9 +6181,7 @@ const usage =
     'Usage: generate-documentation-census.ts (--output <file> | --check <file>)';
 
 const main = async (): Promise<void> => {
-    const rawArguments = process.argv.slice(2);
-    const argumentsList =
-        rawArguments[0] === '--' ? rawArguments.slice(1) : rawArguments;
+    const argumentsList = toolArguments(process.argv.slice(2));
     const [mode, target] = argumentsList;
     if (
         argumentsList.length !== 2 ||

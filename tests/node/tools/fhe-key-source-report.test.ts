@@ -248,7 +248,7 @@ describe('FHE key source report and source intake', () => {
         };
         const line = JSON.stringify(result);
         const progress = JSON.stringify({
-            event: 'operator-call',
+            event: 'operation-call',
             operation: 'step',
             phase: 1,
             milliseconds: 0,
@@ -263,7 +263,7 @@ describe('FHE key source report and source intake', () => {
             line + '\n' + line,
             'Generated encryption-1\n' + line,
             JSON.stringify({
-                event: 'operator-call',
+                event: 'operation-call',
                 operation: 'step',
                 phase: 1,
                 milliseconds: -1,

@@ -27,7 +27,9 @@ export const runFheKeySourceScreen = async ({
     const binding = (name) => {
         const method = instance.exports['key_source_screen_' + name];
         if (typeof method !== 'function')
-            throw new Error('The operator screen is missing its bounded ABI.');
+            throw new Error(
+                'The key-source screen is missing its bounded ABI.',
+            );
         return /** @type {(...values:number[])=>number} */ (method);
     };
     const begin = binding('begin');

@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 
+import { toolArguments } from '#tools/ci/command-line.js';
+
 export type SourceManifestRow = Readonly<{
     identifier: string;
     relativePath: string;
@@ -148,9 +150,7 @@ const usage =
     'Usage: verify-source-manifest.ts --manifest <file> --root <directory>';
 
 const main = async (): Promise<void> => {
-    const rawArguments = process.argv.slice(2);
-    const argumentsList =
-        rawArguments[0] === '--' ? rawArguments.slice(1) : rawArguments;
+    const argumentsList = toolArguments(process.argv.slice(2));
     if (
         argumentsList.length !== 4 ||
         argumentsList[0] !== '--manifest' ||

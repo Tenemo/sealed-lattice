@@ -1,5 +1,6 @@
 import { fileURLToPath } from 'node:url';
 
+import { toolArguments } from './command-line.js';
 import {
     runCommandAndCaptureOutput,
     runCommandsInSeries,
@@ -70,9 +71,7 @@ export const rustFastTestCommands = (filter?: string): CommandInvocation[] =>
     );
 
 const parseFilter = (rawArguments: readonly string[]): string | undefined => {
-    const commandLineArguments = rawArguments.filter(
-        (argument) => argument !== '--',
-    );
+    const commandLineArguments = toolArguments(rawArguments);
     if (
         commandLineArguments.length > 1 ||
         commandLineArguments.some((argument) => argument.startsWith('-'))

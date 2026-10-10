@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto';
 import { readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
+import { repositoryRoot } from './command-line.js';
 import {
     createPackageManagerCommand,
     runCheckedCommand,
@@ -12,7 +12,6 @@ import { participantRuntimeIdentity } from '#tools/ci/build-participant-module.j
 import { runWithLocalRunLog } from '#tools/ci/local-run-log.js';
 import type { ActiveLocalRunLog } from '#tools/ci/local-run-log.js';
 
-const repositoryRoot = fileURLToPath(new URL('../../', import.meta.url));
 const generatedArtifactRelativePaths = [
     'packages/sdk/dist/index.d.ts',
     'packages/sdk/dist/index.js',

@@ -12,12 +12,12 @@ import {
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 import {
     checkParticipantModule,
     participantRuntimeIdentity,
 } from './build-participant-module.js';
+import { repositoryRoot, toolArguments } from './command-line.js';
 import { runCheckedCommand, type CommandInvocation } from './command-runner.js';
 import { runWithLocalRunLog, type ActiveLocalRunLog } from './local-run-log.js';
 import {
@@ -29,7 +29,6 @@ import {
 import { helperFunctions } from '#packages/sdk/src/participant/worker/module/parallel-helper-instance.js';
 import { moduleFunctions } from '#packages/sdk/src/participant/worker/module/participant-module.js';
 
-const repositoryRoot = fileURLToPath(new URL('../../', import.meta.url));
 const expectedPackageFiles = [
     'LICENSE',
     'README.md',
@@ -369,10 +368,7 @@ const writeConsumer = async (consumerDirectoryPath: string): Promise<void> => {
 const parseOutputPath = (
     commandLineArguments: readonly string[],
 ): string | undefined => {
-    const normalizedArguments =
-        commandLineArguments[0] === '--'
-            ? commandLineArguments.slice(1)
-            : commandLineArguments;
+    const normalizedArguments = toolArguments(commandLineArguments);
     if (normalizedArguments.length === 0) return undefined;
     if (
         normalizedArguments.length === 2 &&

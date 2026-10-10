@@ -49,7 +49,7 @@ describe('native operation sampling handshake', () => {
         expect(() => screen.observeStdout('{broken event}\n')).toThrow();
         screen.stop();
     });
-    it.each(['operator', 'operator host'] as const)(
+    it.each(['native child', 'gated host'] as const)(
         'keeps a fast %s child behind initial and final observations without timing sleeps',
         async (name) => {
             const files = await scratch();
@@ -84,7 +84,7 @@ describe('native operation sampling handshake', () => {
                 [
                     '--input-type=module',
                     '-e',
-                    name === 'operator host'
+                    name === 'gated host'
                         ? `
             import {withProcessGates} from ${JSON.stringify(pathToFileURL(path.resolve('tools/ci/process-gates.mjs')).href)};
             const [start,finish]=process.argv.slice(1);
@@ -100,10 +100,10 @@ describe('native operation sampling handshake', () => {
                 const watcher = watch(path.dirname(file), check);
                 check();
             });
-            emit('native-operator-ready');
+            emit('operation-ready');
             await wait(start);
             emit('work-started');
-            emit('native-operator-completed', {operationMilliseconds: 0});
+            emit('operation-completed', {operationMilliseconds: 0});
             await wait(finish);
         `,
                     files.startFile,
@@ -190,7 +190,7 @@ describe('native operation sampling handshake', () => {
                 },
             });
             try {
-                guard.observeStdout('{"event":"native-operator-ready"}\n');
+                guard.observeStdout('{"event":"operation-ready"}\n');
                 await expect(guard.monitor()).rejects.toThrow();
                 await expect(stat(files.startFile)).rejects.toMatchObject({
                     code: 'ENOENT',

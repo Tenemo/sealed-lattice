@@ -1,10 +1,9 @@
 import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 import { preProcessFile } from 'typescript';
 
-const repositoryRoot = fileURLToPath(new URL('../../', import.meta.url));
+import { repositoryRoot } from '#tools/ci/command-line.js';
 
 // The scripts whose imports the walk follows; any other file ends it.
 const scriptFileName = /\.(?:[cm]?[jt]s)$/u;

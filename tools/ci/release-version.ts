@@ -1,6 +1,7 @@
 import { appendFile, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+
+import { repositoryRoot, toolArguments } from '#tools/ci/command-line.js';
 
 export type ReleaseIncrement = 'minor' | 'patch';
 
@@ -11,7 +12,7 @@ export type ReleaseVersionResult = {
 };
 
 const publicPackageManifestPath = path.resolve(
-    fileURLToPath(new URL('../../', import.meta.url)),
+    repositoryRoot,
     'packages',
     'sdk',
     'package.json',
@@ -22,10 +23,7 @@ const prototypeVersionPattern =
 const parseIncrement = (
     commandLineArguments: readonly string[],
 ): ReleaseIncrement => {
-    const normalizedArguments =
-        commandLineArguments[0] === '--'
-            ? commandLineArguments.slice(1)
-            : commandLineArguments;
+    const normalizedArguments = toolArguments(commandLineArguments);
     const [increment] = normalizedArguments;
     if (
         normalizedArguments.length !== 1 ||
