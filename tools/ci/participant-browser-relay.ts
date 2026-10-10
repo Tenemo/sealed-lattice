@@ -13,6 +13,7 @@ import {
     encodeCandidateManifest,
 } from '#packages/sdk/src/participant/worker/relay/candidate-codec.js';
 import { participantDatabaseName } from '#packages/sdk/src/participant/worker/storage/database.js';
+import { harnessPage, harnessPageType } from '#tools/ci/harness-page.js';
 import { serveParticipantCandidates } from '#tools/ci/participant-candidate-http.js';
 import {
     type ViewedParticipantRecord,
@@ -108,18 +109,24 @@ export const participantDatabase =
 // participant API, which carries the packaged worker; the relay serves it
 // beside the packaged module. The page also runs the SDK's
 // standalone verifier for the poll the runner names, from the same relay.
-const participantPage = `<!doctype html><meta charset="utf-8"><title>Participant</title><script type="module">
+const participantPage = harnessPage(
+    'Participant',
+    `
 import { openParticipant, verifyOutcome } from '/sdk/index.js';
 const relay = new URL('./', location.href).href;
 window.verifyOutcome = (poll) => verifyOutcome({ poll, relay });
 window.runParticipant = (operation, parameters) =>
     openParticipant({ namespace: ${JSON.stringify(participantNamespace)}, relay }).run({ operation, parameters });
-</script>`;
+`,
+    { module: true },
+);
 
 // A patched client's page checks the patched worker against the digest it
 // names and sends the SDK's commands, claiming the runtime's identity.
 const clientPage = (runtime: ParticipantRuntime, workerDigest: string) =>
-    `<!doctype html><meta charset="utf-8"><title>Participant</title><script>
+    harnessPage(
+        'Participant',
+        `
 const runtime = ${JSON.stringify({ identity: runtime.identity, worker: workerDigest })};
 window.runParticipant = async (operation, parameters) => {
     window.paddingReplay = {slots: [], halt: null};
@@ -159,7 +166,8 @@ window.runParticipant = async (operation, parameters) => {
         });
     });
 };
-</script>`;
+`,
+    );
 
 // Every origin serves the SDK's participant API and module and an honest
 // participant's page, except that a corrupt participant's origin serves its
@@ -228,7 +236,7 @@ export const startRelay = async (
             [
                 '/',
                 {
-                    type: 'text/html',
+                    type: harnessPageType,
                     bytes: Buffer.from(
                         client === undefined
                             ? participantPage
@@ -464,7 +472,7 @@ export const startRelay = async (
                           [
                               '/',
                               {
-                                  type: 'text/html',
+                                  type: harnessPageType,
                                   bytes: Buffer.from(
                                       clientPage(runtime, client.digest),
                                   ),

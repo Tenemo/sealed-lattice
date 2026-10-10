@@ -7,6 +7,7 @@ import path from 'node:path';
 import { createBrowserOutputSink } from '#tools/ci/bounded-output-browser-sink.js';
 import { browserChunkBytes } from '#tools/ci/bounded-output-browser-transport.mjs';
 import { fileDigest } from '#tools/ci/fixture-sources.js';
+import { harnessPage, harnessPageType } from '#tools/ci/harness-page.js';
 import type { ActiveLocalRunLog } from '#tools/ci/local-run-log.js';
 import { launchChromeParticipant } from '#tools/ci/participant-runtime-chrome.js';
 import type { ChromeParticipant } from '#tools/ci/participant-runtime-chrome.js';
@@ -22,8 +23,9 @@ type OutputTarget = {
     expectedSha512: string;
 };
 
-const page = `<!doctype html><meta charset="utf-8"><title>Bounded output screen</title>
-<script>
+const page = harnessPage(
+    'Bounded output screen',
+    `
 window.runBoundedScreen = (configuration) => new Promise((resolve, reject) => {
     const worker = new Worker('/bounded-output-browser-worker.mjs', {type: 'module'});
     let finished = false;
@@ -45,7 +47,8 @@ window.runBoundedScreen = (configuration) => new Promise((resolve, reject) => {
     worker.onerror = (event) => finish(event.message || 'The browser screen worker failed.');
     worker.postMessage(configuration);
 });
-</script>`;
+`,
+);
 
 export const serveBoundedBrowserInputs = async (
     root: string,
@@ -53,7 +56,7 @@ export const serveBoundedBrowserInputs = async (
     outputTarget: OutputTarget,
 ) => {
     const assets = new Map<string, { bytes: Uint8Array; type: string }>([
-        ['/', { bytes: Buffer.from(page), type: 'text/html; charset=utf-8' }],
+        ['/', { bytes: Buffer.from(page), type: harnessPageType }],
         [
             '/module.wasm',
             { bytes: await readFile(moduleFile), type: 'application/wasm' },
