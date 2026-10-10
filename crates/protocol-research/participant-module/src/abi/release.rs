@@ -1,5 +1,5 @@
 use super::{SESSION, Session};
-use crate::release_work::{ReleaseBody, ReleaseWork};
+use crate::{release_body::ReleaseBody, release_work::ReleaseWork};
 use protocol_foundations::{
     Error,
     release_signing::{ReleaseEnvelope, body_header},

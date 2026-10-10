@@ -4,7 +4,7 @@ use unicode_normalization::{UnicodeNormalization, is_nfc};
 use super::RefusalReason;
 
 /// The normalization tables are protocol data, not an ambient runtime choice.
-pub const REQUIRED_UNICODE_VERSION: (u8, u8, u8) = (17, 0, 0);
+pub(crate) const REQUIRED_UNICODE_VERSION: (u8, u8, u8) = (17, 0, 0);
 
 const _: () = assert!(
     unicode_normalization::UNICODE_VERSION.0 == REQUIRED_UNICODE_VERSION.0

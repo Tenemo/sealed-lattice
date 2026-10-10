@@ -6,7 +6,7 @@ use crate::{
 use supported_profile::relation::*;
 use zeroize::{Zeroize, Zeroizing};
 
-pub struct Layer {
+pub(crate) struct Layer {
     pub tree: Tree,
     pub values: Vec<Element>,
 }
@@ -24,7 +24,7 @@ impl Layer {
             .collect()
     }
 }
-pub struct Fri {
+pub(crate) struct Fri {
     pub layers: Vec<Layer>,
     pub terminal: Element,
     pub queries: Vec<usize>,

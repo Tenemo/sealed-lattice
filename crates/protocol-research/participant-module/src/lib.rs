@@ -41,6 +41,9 @@ mod registration_fixture;
 #[cfg(test)]
 #[path = "registration-session-tests.rs"]
 mod registration_session_tests;
+#[cfg(any(target_arch = "wasm32", test))]
+#[path = "release-body.rs"]
+mod release_body;
 #[path = "release-work.rs"]
 pub mod release_work;
 #[cfg(any(target_arch = "wasm32", test))]
@@ -124,7 +127,7 @@ impl<F: FnMut(u32, usize, &[u8])> Write for RecordWriter<'_, F> {
         Ok(())
     }
 }
-pub fn key_associated(body_digest: [u8; 64]) -> Vec<u8> {
+pub(crate) fn key_associated(body_digest: [u8; 64]) -> Vec<u8> {
     [
         b"sealed-lattice/recipient-key-custody/v1".as_slice(),
         &body_digest,
@@ -135,7 +138,7 @@ pub fn key_associated(body_digest: [u8; 64]) -> Vec<u8> {
 /// The fresh keys of an enrollment's three sealed capsules, in the order the
 /// participant root retains them: the recipient key's, the credential's and
 /// the sources'.
-pub type DataKeys = Zeroizing<[u8; 96]>;
+pub(crate) type DataKeys = Zeroizing<[u8; 96]>;
 
 /// The kinds of the records an enrollment stages, each of which the worker
 /// retains under the participant root's data kind of the same name.

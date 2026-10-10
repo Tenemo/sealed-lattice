@@ -15,6 +15,3 @@ supported-profile = { path = "../supported-profile" }
 # Test aids for the crates that prove with this engine: a replayed seed in
 # place of the host's randomness, and every row of an affine operator.
 test-support = []
-
-[lib]
-crate-type = ["rlib"]

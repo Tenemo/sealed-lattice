@@ -13,7 +13,7 @@ pub fn digit(value: &BigInt, limb: usize) -> i128 {
 }
 /// The limb's digit of the value's magnitude, with the value's sign. It
 /// reads the at most three magnitude words that hold the digit.
-pub fn digit_in(value: &BigInt, limb: usize, radix_bits: usize) -> i128 {
+pub(crate) fn digit_in(value: &BigInt, limb: usize, radix_bits: usize) -> i128 {
     assert!(radix_bits <= RADIX_BITS);
     let start = radix_bits * limb;
     let mut words = value.magnitude().iter_u64_digits().skip(start / 64);
@@ -169,7 +169,7 @@ impl Plan {
 
 /// Every centered product of a digit with the sparse secret stays within
 /// half the modulus.
-pub fn check_support(sparse: &[i8], radix_bits: usize) {
+pub(crate) fn check_support(sparse: &[i8], radix_bits: usize) {
     let support = sparse
         .iter()
         .map(|value| value.unsigned_abs() as u128)
@@ -180,7 +180,12 @@ pub fn check_support(sparse: &[i8], radix_bits: usize) {
 /// Exact ordinary sparse convolution is an independent full-degree check
 /// at fixed boundary and interior positions; small tests check all.
 #[cfg(not(target_arch = "wasm32"))]
-pub fn check_products(public: &[BigInt], sparse: &[i8], result: &[Vec<i128>], radix_bits: usize) {
+pub(crate) fn check_products(
+    public: &[BigInt],
+    sparse: &[i8],
+    result: &[Vec<i128>],
+    radix_bits: usize,
+) {
     let degree = public.len();
     let positions = if degree <= 32 {
         (0..degree).collect()
@@ -211,7 +216,7 @@ pub fn check_products(public: &[BigInt], sparse: &[i8], result: &[Vec<i128>], ra
 }
 
 #[cfg(any(test, not(target_arch = "wasm32")))]
-pub fn reconstruct_in(digits: &[Vec<i128>], position: usize, radix_bits: usize) -> BigInt {
+pub(crate) fn reconstruct_in(digits: &[Vec<i128>], position: usize, radix_bits: usize) -> BigInt {
     digits.iter().rev().fold(BigInt::from(0), |sum, limb| {
         (sum << radix_bits) + BigInt::from(limb[position])
     })

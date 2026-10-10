@@ -17,22 +17,22 @@ use supported_profile::relation::*;
 use zeroize::Zeroizing;
 
 /// A first-oracle base column's values at queried positions.
-pub static FIRST_OPENINGS: Job = Job {
+pub(crate) static FIRST_OPENINGS: Job = Job {
     kind: 0x0102,
     run: first_openings,
 };
 /// A second-oracle column's values at queried positions.
-pub static SECOND_OPENINGS: Job = Job {
+pub(crate) static SECOND_OPENINGS: Job = Job {
     kind: 0x0103,
     run: second_openings,
 };
 /// A first-oracle base column's masked coefficients.
-pub static FIRST_COEFFICIENTS: Job = Job {
+pub(crate) static FIRST_COEFFICIENTS: Job = Job {
     kind: 0x0104,
     run: first_coefficients,
 };
 /// A second-oracle column's masked coefficients.
-pub static SECOND_COEFFICIENTS: Job = Job {
+pub(crate) static SECOND_COEFFICIENTS: Job = Job {
     kind: 0x0105,
     run: second_coefficients,
 };
@@ -71,14 +71,14 @@ pub const fn coefficient_bytes(width: usize) -> usize {
 }
 
 /// A base column's values: the witness words, or the multiplicities.
-pub enum BaseValues<'a> {
+pub(crate) enum BaseValues<'a> {
     Words(&'a [u16]),
     Counts(&'a [u128]),
 }
 /// A second-oracle column's values, which the job reads from the
 /// reciprocal table it streams: a lookup's scaled words, or the
 /// multiplicities.
-pub enum SecondValues<'a> {
+pub(crate) enum SecondValues<'a> {
     Lookup { words: &'a [u16], factor: u128 },
     Counts(&'a [u128]),
 }
@@ -96,7 +96,7 @@ fn element(bytes: &[u8]) -> Element {
 
 /// A base column: its word width, mask and values, in a buffer of their
 /// exact length, which no growth copies without zeroizing.
-pub fn base_column(values: BaseValues, mask: &[u128]) -> Zeroizing<Vec<u8>> {
+pub(crate) fn base_column(values: BaseValues, mask: &[u128]) -> Zeroizing<Vec<u8>> {
     assert_eq!(mask.len(), MASKS);
     let width = match values {
         BaseValues::Words(_) => 2,
@@ -154,7 +154,7 @@ fn decode_base(input: &[u8]) -> (Zeroizing<Vec<u128>>, Zeroizing<Vec<u128>>, &[u
 }
 /// A second-oracle column: its mask and values, whose reciprocals the job
 /// streams from the reciprocal table, in a buffer of their exact length.
-pub fn second_column(values: SecondValues, mask: &[Element]) -> Zeroizing<Vec<u8>> {
+pub(crate) fn second_column(values: SecondValues, mask: &[Element]) -> Zeroizing<Vec<u8>> {
     assert_eq!(mask.len(), MASKS);
     let values_bytes = match values {
         SecondValues::Lookup { .. } => WORD_BYTES + SYSTEMATIC * 2,
@@ -183,7 +183,7 @@ pub fn second_column(values: SecondValues, mask: &[Element]) -> Zeroizing<Vec<u8
     output
 }
 /// The reciprocal table that each second-oracle column's jobs stream.
-pub fn reciprocal_table(inverses: &[Element]) -> Zeroizing<Vec<u8>> {
+pub(crate) fn reciprocal_table(inverses: &[Element]) -> Zeroizing<Vec<u8>> {
     assert_eq!(inverses.len(), SYSTEMATIC);
     let mut output = Zeroizing::new(Vec::with_capacity(SYSTEMATIC * ELEMENT_BYTES));
     for value in inverses {

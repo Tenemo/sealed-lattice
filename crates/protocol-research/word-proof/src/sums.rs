@@ -11,12 +11,12 @@ use std::{cell::RefCell, collections::BTreeMap, collections::VecDeque};
 use zeroize::Zeroizing;
 
 /// A range of an instance's sums of a shard, zero where it has none.
-pub static COLLECT: Job = Job {
+pub(crate) static COLLECT: Job = Job {
     kind: 0x0120,
     run: collect,
 };
 /// Removes an instance's sums of a shard.
-pub static REMOVE: Job = Job {
+pub(crate) static REMOVE: Job = Job {
     kind: 0x0121,
     run: remove,
 };
@@ -198,7 +198,7 @@ impl Drop for Sums {
 
 /// The sums of one computation's jobs in shards of equal length, each on
 /// the one instance that runs the shard's jobs.
-pub struct ShardSums {
+pub(crate) struct ShardSums {
     session: u64,
     shards: usize,
     length: usize,

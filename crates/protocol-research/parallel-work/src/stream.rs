@@ -54,7 +54,7 @@ impl Local {
 
 /// Absorbs bytes into a helper's stream, finishes it or discards it. The
 /// input is the operation, the sponge, the stream's session and the bytes.
-pub static STREAM: Job = Job {
+pub(crate) static STREAM: Job = Job {
     kind: 0x0400,
     run: stream,
 };

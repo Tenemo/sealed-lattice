@@ -7,27 +7,28 @@ use super::{
     times,
 };
 use parallel_work::{Job, Part, Pipeline, Ticket, submit};
+use supported_profile::relation::SYSTEMATIC;
 
 /// A geometry's sum and query values.
-pub static GEOMETRY: Job = Job {
+pub(crate) static GEOMETRY: Job = Job {
     kind: 0x0200,
     run: geometry,
 };
 /// Values' masked interpolant at queried positions.
-pub static QUERIES: Job = Job {
+pub(crate) static QUERIES: Job = Job {
     kind: 0x0201,
     run: queries,
 };
 /// A run of canonical coefficient records' fingerprints, weighted by the
 /// powers of alpha from the run's position and summed, then with retention
 /// each record's fingerprint.
-pub static FINGERPRINTS: Job = Job {
+pub(crate) static FINGERPRINTS: Job = Job {
     kind: 0x0202,
     run: fingerprints,
 };
 /// A polynomial's adjoint from its coefficients' fingerprints and their
 /// weighted sum, at queried positions of its masked interpolant.
-pub static ADJOINT: Job = Job {
+pub(crate) static ADJOINT: Job = Job {
     kind: 0x0203,
     run: adjoint,
 };
@@ -261,13 +262,13 @@ pub fn evaluate_public_columns(
     let mut output = Vec::with_capacity(columns.len() * indices.len());
     if parallel_work::helpers() == 0 {
         for column in columns {
-            output.extend(query::evaluate_in(column, indices, query::SYSTEMATIC_SIZE)?);
+            output.extend(query::evaluate_in(column, indices, SYSTEMATIC)?);
         }
         return Ok(output);
     }
     let mut pipeline = Pipeline::new(parallel_work::window());
     for (index, column) in columns.into_iter().enumerate() {
-        let ticket = queries_job(&column, indices, query::SYSTEMATIC_SIZE)?;
+        let ticket = queries_job(&column, indices, SYSTEMATIC)?;
         if let Some((_, bytes)) = pipeline.push(index, ticket) {
             output.extend(decode_values(&bytes));
         }

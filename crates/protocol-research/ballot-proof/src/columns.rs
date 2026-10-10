@@ -10,7 +10,9 @@ use zeroize::Zeroizing;
 
 #[derive(Debug)]
 pub struct Error;
-pub fn from_encryption(witness: &LinkedBallotWitness) -> Result<Zeroizing<Vec<Vec<u16>>>, Error> {
+pub(crate) fn from_encryption(
+    witness: &LinkedBallotWitness,
+) -> Result<Zeroizing<Vec<Vec<u16>>>, Error> {
     from_parts(
         witness.context.profile(),
         &witness.packing,

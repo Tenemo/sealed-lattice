@@ -24,7 +24,7 @@ const ONE: Element = [1, 0, 0];
 const FOLDS: usize = (EVALUATION_DOMAIN_SIZE / 2).ilog2() as usize;
 pub const HEADER_LENGTH: usize =
     4 + 64 + 64 + 3 * 64 + 48 + (FOLDS + 3) * 128 + (FOLDS - 1) * 64 + 48;
-pub const CHUNK_LIMIT: usize = 1 << 20;
+pub use parallel_work::CHUNK_LIMIT;
 
 /// The public statement parser of one relation. It yields the relation's
 /// affine operator at the verifier's queries.

@@ -95,7 +95,7 @@ pub fn encode(scores: &[u8]) -> Result<Vec<i32>, Refusal> {
     encode_with_degree(scores, DEGREE)
 }
 /// Refuses option counts and scores outside the supported packing domain.
-pub fn check_scores(scores: &[u8]) -> Result<(), Refusal> {
+pub(crate) fn check_scores(scores: &[u8]) -> Result<(), Refusal> {
     if !Profile::option_range().contains(&scores.len()) {
         return Err(Refusal::Options);
     }

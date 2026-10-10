@@ -16,7 +16,7 @@ fn residue(value: i128) -> u128 {
         value as u128
     }
 }
-pub fn multiply_digits(
+pub(crate) fn multiply_digits(
     public: &[BigInt],
     private: &[Vec<i128>],
     bits: usize,

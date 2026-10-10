@@ -29,13 +29,13 @@ pub const SALT_BYTES: usize = 128;
 const RECOMPUTED_LEVELS: usize = 4;
 
 /// A contiguous subtree's kept inner nodes from its leaves' digests.
-pub static NODES: Job = Job {
+pub(crate) static NODES: Job = Job {
     kind: 0x0150,
     run: subtree_nodes,
 };
 /// A contiguous range's leaf digests from the tree's salt seed and its rows,
 /// then the kept inner nodes of the subtree above them.
-pub static LEAVES: Job = Job {
+pub(crate) static LEAVES: Job = Job {
     kind: 0x0151,
     run: subtree_leaves,
 };
@@ -152,7 +152,7 @@ fn subtree_leaves(input: &[u8]) -> Vec<u8> {
     output
 }
 
-pub fn leaf_message_prefix_bytes(role_bytes: usize) -> usize {
+pub(crate) fn leaf_message_prefix_bytes(role_bytes: usize) -> usize {
     4 + LEAF_DOMAIN.len() + 4 + role_bytes + 2 * (4 + 4) + 4 + SALT_BYTES + 4
 }
 
@@ -165,7 +165,7 @@ pub fn leaf_prefix(role: &[u8], stage: usize) -> ProtocolHash {
     hash
 }
 /// A leaf's hash before its row: the prefix, its index, salt and row width.
-pub fn leaf_start(
+pub(crate) fn leaf_start(
     prefix: &ProtocolHash,
     index: usize,
     salt: &[u8; SALT_BYTES],

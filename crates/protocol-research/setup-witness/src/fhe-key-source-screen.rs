@@ -17,7 +17,7 @@ use std::{cell::RefCell, io};
 use supported_profile::{DEGREE, FHE_SECRET_SUPPORT, Family};
 use zeroize::Zeroizing;
 
-pub const OUTPUT_BYTES: usize = 1024;
+pub(crate) const OUTPUT_BYTES: usize = 1024;
 // Stage refusal shared with the consumed bounded-output host driver.
 const REFUSED: u32 = 6;
 const POSITIONS: [usize; 8] = [

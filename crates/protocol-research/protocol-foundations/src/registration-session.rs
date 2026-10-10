@@ -15,7 +15,7 @@ use std::{cell::RefCell, collections::HashMap};
 
 /// Opens, feeds, finishes or discards a helper's registration session. The
 /// input is the operation, the session and the operation's bytes.
-pub static REGISTRATION: Job = Job { kind: 0x0600, run };
+pub(crate) static REGISTRATION: Job = Job { kind: 0x0600, run };
 const OPEN: u8 = 0;
 const KEY: u8 = 1;
 const FINISH: u8 = 2;

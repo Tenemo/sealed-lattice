@@ -17,7 +17,7 @@ use supported_profile::Profile;
 /// lists no more; a corrupt author cannot inflate honest responses.
 pub const MAXIMUM_LISTED_ENVELOPES_PER_SLOT: usize = 2;
 /// One listing entry: an author position and an envelope or response identity.
-pub const LISTED_ENTRY_BYTES: usize = 2 + 64;
+pub(crate) const LISTED_ENTRY_BYTES: usize = 2 + 64;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ClosePurpose {

@@ -377,7 +377,7 @@ pub fn release_variable_starts(profile: Profile) -> (Vec<usize>, usize) {
 
 /// The share scale and the share and release moduli in 32-bit words, each
 /// after its byte width.
-pub fn release_modulus_parameters(profile: Profile) -> Vec<usize> {
+pub(crate) fn release_modulus_parameters(profile: Profile) -> Vec<usize> {
     let mut values = vec![SHARE_SCALE as usize];
     for mut bytes in [
         share_modulus().to_vec(),

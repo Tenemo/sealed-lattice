@@ -34,7 +34,7 @@ pub fn inverse(value: Element) -> Element {
     assert_ne!(denominator[0], 0);
     scale(numerator, base::power(denominator[0], MODULUS - 2))
 }
-pub fn batch_inverse(values: &[Element]) -> Vec<Element> {
+pub(crate) fn batch_inverse(values: &[Element]) -> Vec<Element> {
     let mut prefixes = Vec::with_capacity(values.len());
     let mut product = ONE;
     for value in values {

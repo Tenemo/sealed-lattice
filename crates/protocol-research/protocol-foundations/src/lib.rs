@@ -285,7 +285,7 @@ pub(crate) fn checked_header(
     Ok(header)
 }
 
-pub fn verify_registration_signature(body: BodyDigest, signature: &[u8]) -> bool {
+pub(crate) fn verify_registration_signature(body: BodyDigest, signature: &[u8]) -> bool {
     let Ok(signature) = signature.try_into() else {
         return false;
     };

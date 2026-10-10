@@ -14,7 +14,7 @@ pub use jobs::{JOBS, evaluate_public_columns};
 pub type Element = [u128; 3];
 const ZERO: Element = [0, 0, 0];
 const ONE: Element = [1, 0, 0];
-pub const CHUNK_LIMIT: usize = 1 << 20;
+pub use parallel_work::CHUNK_LIMIT;
 // The most products one column sum of the arithmetic holds.
 const MAXIMUM_PRODUCTS: usize = 4_096;
 fn plus(left: Element, right: Element) -> Element {

@@ -4,12 +4,11 @@ use crate::{
         CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple,
         hash_foundation_tuple_512,
         participant_identity::{ParticipantIdentity, derive_participant_identity},
-        schemas::{Roster, RosterEntry},
     },
     poll::VerifiedPoll,
     registration::VerifiedRegistration,
 };
-use std::sync::Arc;
+use std::{collections::BTreeSet, sync::Arc};
 use supported_profile::Profile;
 
 /// A retained proposal is at most this long; the largest supported roster's
@@ -193,7 +192,6 @@ impl RosterProposal {
         }
         let fhe_key_family_index = crate::source_binding::fhe_key_family_index(poll, profile)?;
         let family_count = crate::source_binding::fhe_key_families(poll).len();
-        let mut entries = Vec::with_capacity(records.len());
         let mut bodies = Vec::with_capacity(4 + 64 * records.len());
         bodies.extend((records.len() as u32).to_le_bytes());
         let mut organizer_position = None;
@@ -202,10 +200,6 @@ impl RosterProposal {
             if header.poll != poll.identity() || header.fhe_key_commitments.len() != family_count {
                 return Err(Error::Context);
             }
-            entries.push(
-                RosterEntry::new(position as u16, header.signing_public)
-                    .map_err(|_| Error::Shape)?,
-            );
             bodies.extend(record.body_digest());
             if &header.signing_public == poll.organizer()
                 && organizer_position.replace(position).is_some()
@@ -214,8 +208,15 @@ impl RosterProposal {
             }
         }
         let organizer_position = organizer_position.ok_or(Error::Context)?;
-        // The roster refuses a repeated signing key or identity.
-        Roster::new(entries).map_err(|_| Error::Shape)?;
+        // The roster refuses a repeated signing key, and with it a repeated
+        // participant identity, which the key alone derives.
+        let signing_keys: BTreeSet<_> = records
+            .iter()
+            .map(|record| &record.header().signing_public)
+            .collect();
+        if signing_keys.len() != records.len() {
+            return Err(Error::Shape);
+        }
         let body = encode_proposal(poll.identity(), bodies)?;
         let identity = hash_foundation_tuple_512(
             PROPOSAL_IDENTITY_DOMAIN,

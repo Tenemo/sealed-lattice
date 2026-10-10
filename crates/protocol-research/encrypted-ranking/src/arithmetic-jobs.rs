@@ -24,44 +24,44 @@ use zeroize::Zeroizing;
 
 /// Keeps the centered residues of its streamed polynomial modulo each prime
 /// of a set, transformed, as one of its session's sources.
-pub static SOURCES: Job = Job {
+pub(crate) static SOURCES: Job = Job {
     kind: 0x0306,
     run: sources,
 };
 /// The products of two of a session's sources modulo each prime of a set,
 /// transformed back; drops the sources whose last product it is.
-pub static TENSOR: Job = Job {
+pub(crate) static TENSOR: Job = Job {
     kind: 0x0307,
     run: tensor,
 };
 /// The centered residues of its streamed key modulo each prime of a set,
 /// transformed: each prime's key record after its identity.
-pub static RECORDS: Job = Job {
+pub(crate) static RECORDS: Job = Job {
     kind: 0x0308,
     run: records,
 };
 /// Keeps each gadget digit of its streamed polynomial's canonical
 /// coefficients modulo each prime of a set, transformed, for its session's
 /// keyed products.
-pub static DIGITS: Job = Job {
+pub(crate) static DIGITS: Job = Job {
     kind: 0x0309,
     run: digits,
 };
 /// The sum of a session's digits modulo a prime times one group's streamed
 /// key records, transformed back, after the records' identities; the last
 /// group drops the digits.
-pub static KEYED: Job = Job {
+pub(crate) static KEYED: Job = Job {
     kind: 0x030a,
     run: keyed,
 };
 /// The canonical coefficients of a range of positions from their residues.
-pub static LIFT: Job = Job {
+pub(crate) static LIFT: Job = Job {
     kind: 0x0304,
     run: lift,
 };
 /// Drops a session's digits modulo a prime, which a keyed product that ends
 /// before its last job of that prime leaves kept.
-pub static FORGET: Job = Job {
+pub(crate) static FORGET: Job = Job {
     kind: 0x030b,
     run: forget,
 };

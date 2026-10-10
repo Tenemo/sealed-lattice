@@ -1,5 +1,5 @@
 use super::*;
-const DOMAIN_SIZE: usize = 4 * SYSTEMATIC_SIZE;
+const DOMAIN_SIZE: usize = 4 * SYSTEMATIC;
 
 #[test]
 fn transforms_match_every_direct_fourier_coefficient() {

@@ -17,19 +17,19 @@ use zeroize::Zeroizing;
 /// Adds the terms of committed columns that only their own zero products
 /// join, with their lookups', on both cosets; a group with lookups streams
 /// the reciprocal table.
-pub static COLUMNS: Job = Job {
+pub(crate) static COLUMNS: Job = Job {
     kind: 0x0130,
     run: add_columns,
 };
 /// Adds the multiplicity, table reciprocal and table residual terms on one
 /// coset from the reciprocal table it streams.
-pub static COUNTS: Job = Job {
+pub(crate) static COUNTS: Job = Job {
     kind: 0x0131,
     run: add_counts,
 };
 /// Adds an extension oracle's weighted values, or the degree mask's values,
 /// from the coefficients it streams.
-pub static EXTENSION: Job = Job {
+pub(crate) static EXTENSION: Job = Job {
     kind: 0x0132,
     run: add_extension_oracle,
 };

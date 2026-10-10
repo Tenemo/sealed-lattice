@@ -70,7 +70,7 @@ protocol_foundations::operation_codes! {
 /// The host's receipt of one chunk of a public setup object at an
 /// offset: object zero is the statement header and object i + 1 setup
 /// polynomial i.
-pub type PublicChunk = fn(object: usize, offset: usize, bytes: &[u8]);
+pub(crate) type PublicChunk = fn(object: usize, offset: usize, bytes: &[u8]);
 struct PublicOutput {
     profile: Profile,
     // The statement's digest and context, which helpers hash when there are

@@ -56,7 +56,7 @@ pub type Ciphertext = [Polynomial; 2];
 pub const KEY_RECORD_BYTES: usize = 8 * DEGREE;
 /// The most key-record requests after the pending one that the engine names
 /// for the host to read ahead.
-pub const READ_AHEAD: usize = 3;
+pub(crate) const READ_AHEAD: usize = 3;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Refusal {

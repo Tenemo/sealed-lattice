@@ -15,11 +15,11 @@ use fips204::{
 use std::sync::Arc;
 use supported_profile::Profile;
 
-pub const SELECTION_PURPOSE: &str = "sealed-lattice/setup-selection/v1";
-pub const SELECTION_IDENTITY_DOMAIN: &str = "sealed-lattice/setup-selection-identity/v1";
+pub(crate) const SELECTION_PURPOSE: &str = "sealed-lattice/setup-selection/v1";
+pub(crate) const SELECTION_IDENTITY_DOMAIN: &str = "sealed-lattice/setup-selection-identity/v1";
 pub const PROPOSAL_CONTEXT: &[u8] = b"sealed-lattice/setup-selection-proposal/v1";
 pub const ENDORSEMENT_PURPOSE: &str = "sealed-lattice/setup-selection-endorsement/v1";
-pub const ENDORSEMENT_IDENTITY_DOMAIN: &str =
+pub(crate) const ENDORSEMENT_IDENTITY_DOMAIN: &str =
     "sealed-lattice/setup-selection-endorsement-identity/v1";
 pub const ENDORSEMENT_BYTES: usize = 2 + 64 + SIGNATURE_BYTES;
 pub const MAXIMUM_SELECTION_BYTES: usize = 2048;

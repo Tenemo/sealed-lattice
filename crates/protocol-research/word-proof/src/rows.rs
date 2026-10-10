@@ -27,12 +27,12 @@ pub static OPEN: Job = Job {
     run: open,
 };
 /// Absorbs a base polynomial's values into a shard's rows.
-pub static BASE: Job = Job {
+pub(crate) static BASE: Job = Job {
     kind: 0x0111,
     run: absorb_base,
 };
 /// Absorbs an extension polynomial's values into a shard's rows.
-pub static EXTENSION: Job = Job {
+pub(crate) static EXTENSION: Job = Job {
     kind: 0x0112,
     run: absorb_extension,
 };
@@ -42,12 +42,12 @@ pub static CLOSE: Job = Job {
     run: close,
 };
 /// A range of a shard's row states.
-pub static EXPORT: Job = Job {
+pub(crate) static EXPORT: Job = Job {
     kind: 0x0114,
     run: export,
 };
 /// Restores a range of a shard's row states.
-pub static IMPORT: Job = Job {
+pub(crate) static IMPORT: Job = Job {
     kind: 0x0115,
     run: import,
 };
@@ -347,7 +347,7 @@ fn import(input: &[u8]) -> Vec<u8> {
 }
 
 /// The row shards of one oracle commitment.
-pub struct RowShards {
+pub(crate) struct RowShards {
     session: u64,
     classes: usize,
     // Each started polynomial's shard jobs, oldest first.
@@ -453,14 +453,6 @@ impl RowShards {
             })
             .collect();
         self.started(tickets);
-    }
-    /// Absorbs the values of a base polynomial of the coefficients.
-    pub fn absorb_base(&mut self, coefficients: &[u128]) {
-        let mut bytes = Zeroizing::new(Vec::with_capacity(16 * coefficients.len()));
-        for value in coefficients {
-            bytes.extend(value.to_le_bytes());
-        }
-        self.absorb_base_encoded(bytes);
     }
     /// Absorbs the values of a base polynomial of the encoded coefficients.
     pub fn absorb_base_encoded(&mut self, coefficients: Zeroizing<Vec<u8>>) {

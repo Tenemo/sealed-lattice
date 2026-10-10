@@ -72,7 +72,7 @@ struct Session {
     ballot: Option<crate::ballot::BallotWork>,
     close: Option<crate::close_work::CloseWork>,
     finality: Option<crate::finality_work::FinalityWork>,
-    release: Option<crate::release_work::ReleaseBody>,
+    release: Option<crate::release_body::ReleaseBody>,
     // A retained evaluated target the host streams in, and its length.
     evaluation: Option<(usize, Vec<u8>)>,
 }

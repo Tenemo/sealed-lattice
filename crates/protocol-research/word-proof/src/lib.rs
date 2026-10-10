@@ -12,7 +12,7 @@ pub mod fri;
 pub mod jobs;
 pub mod linear;
 #[path = "linear-oracle.rs"]
-pub mod linear_oracle;
+pub(crate) mod linear_oracle;
 #[cfg(test)]
 #[path = "linear-tests.rs"]
 mod linear_tests;

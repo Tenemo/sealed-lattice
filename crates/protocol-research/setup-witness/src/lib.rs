@@ -37,7 +37,7 @@ pub static JOBS: [&Job; 2] = [&contribution::COMMON_RECORDS, &CONVOLUTION];
 /// One limb's centered products of a public polynomial with a sparse
 /// secret. Its input is the ring degree, the limb's signed digits and the
 /// secret's transform.
-pub static CONVOLUTION: Job = Job {
+pub(crate) static CONVOLUTION: Job = Job {
     kind: 0x0501,
     run: convolve,
 };

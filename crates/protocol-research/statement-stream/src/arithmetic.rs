@@ -113,7 +113,7 @@ impl Columns {
 }
 
 #[inline(always)]
-pub fn multiply_bounded(left: u128, right: u128) -> u128 {
+pub(crate) fn multiply_bounded(left: u128, right: u128) -> u128 {
     let mut columns = Columns::ZERO;
     columns.add_product(left, right);
     columns.reduce()
@@ -131,7 +131,7 @@ pub fn multiply_extension(left: [u128; 3], right: [u128; 3]) -> [u128; 3] {
 }
 
 #[inline(always)]
-pub fn multiply_extension_columns(left: [u128; 3], right: [u128; 3]) -> [u128; 3] {
+pub(crate) fn multiply_extension_columns(left: [u128; 3], right: [u128; 3]) -> [u128; 3] {
     let [a0, a1, a2] = left;
     let [b0, b1, b2] = right;
     let mut constant = Columns::ZERO;
@@ -154,7 +154,7 @@ pub fn multiply_extension_columns(left: [u128; 3], right: [u128; 3]) -> [u128; 3
 }
 
 #[inline(always)]
-pub fn multiply_extension_native(left: [u128; 3], right: [u128; 3]) -> [u128; 3] {
+pub(crate) fn multiply_extension_native(left: [u128; 3], right: [u128; 3]) -> [u128; 3] {
     let mut result = [0; 3];
     for (first, a) in left.iter().enumerate() {
         for (second, b) in right.iter().enumerate() {

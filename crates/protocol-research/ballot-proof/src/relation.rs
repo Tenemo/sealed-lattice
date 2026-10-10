@@ -68,7 +68,7 @@ impl VerifiedBallotRelation {
         self.position
     }
 }
-pub struct BallotRelationVerifier {
+pub(crate) struct BallotRelationVerifier {
     profile: Profile,
     verifier: Option<Verifier>,
     expected_header: Vec<u8>,

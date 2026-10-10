@@ -1,13 +1,9 @@
-use crate::SIGNING_PUBLIC_KEY_BYTES;
 use core::{fmt, str};
-use std::collections::BTreeSet;
-
-use supported_profile::Profile;
 
 use super::canonical_tuple::CanonicalDecodeBudget;
 use super::{
     CanonicalCodecError, CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple,
-    RefusalReason, derive_participant_identity,
+    RefusalReason,
 };
 
 pub(super) const FOUNDATION_SCHEMA_VERSION: u16 = 1;
@@ -47,79 +43,6 @@ impl From<CanonicalCodecError> for FoundationSchemaError {
 }
 
 pub(super) type SchemaResult<Value> = Result<Value, FoundationSchemaError>;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RosterEntry {
-    pub roster_position: u16,
-    pub signing_verification_key: [u8; SIGNING_PUBLIC_KEY_BYTES],
-}
-
-impl RosterEntry {
-    pub fn new(
-        roster_position: u16,
-        signing_verification_key: [u8; SIGNING_PUBLIC_KEY_BYTES],
-    ) -> SchemaResult<Self> {
-        let entry = Self {
-            roster_position,
-            signing_verification_key,
-        };
-        entry.validate()?;
-        Ok(entry)
-    }
-
-    fn validate(&self) -> SchemaResult<()> {
-        if usize::from(self.roster_position) >= *Profile::participant_range().end() {
-            return Err(FoundationSchemaError::new(
-                RefusalReason::OutsideSupportedProfile,
-                "roster position is outside the configurable range",
-            ));
-        }
-        Ok(())
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Roster {
-    pub entries: Vec<RosterEntry>,
-}
-
-impl Roster {
-    pub fn new(entries: Vec<RosterEntry>) -> SchemaResult<Self> {
-        validate_roster_entries(&entries)?;
-        Ok(Self { entries })
-    }
-}
-
-fn validate_roster_entries(entries: &[RosterEntry]) -> SchemaResult<()> {
-    if !Profile::participant_range().contains(&entries.len()) {
-        return Err(FoundationSchemaError::new(
-            RefusalReason::OutsideSupportedProfile,
-            "roster size is outside the configurable range",
-        ));
-    }
-
-    let mut signing_keys = BTreeSet::new();
-    let mut participant_identities = BTreeSet::new();
-    for (entry_index, entry) in entries.iter().enumerate() {
-        entry.validate()?;
-        if usize::from(entry.roster_position) != entry_index {
-            return Err(FoundationSchemaError::new(
-                RefusalReason::WrongTypeOrLength,
-                "roster positions must be consecutive and canonically ordered",
-            ));
-        }
-        let participant_identity = derive_participant_identity(&entry.signing_verification_key)?;
-        if !signing_keys.insert(entry.signing_verification_key.as_slice())
-            || !participant_identities.insert(participant_identity)
-        {
-            return Err(FoundationSchemaError::new(
-                RefusalReason::DuplicateIdentity,
-                "roster contains a duplicate identity or signing key",
-            ));
-        }
-    }
-    Ok(())
-}
 
 pub(super) fn require_header(
     tuple: &CanonicalTuple,
@@ -235,7 +158,3 @@ pub(super) fn read_nested_tuple_list_with_budget(
     }
     Ok(tuples)
 }
-
-#[cfg(test)]
-#[path = "schemas-tests.rs"]
-mod tests;

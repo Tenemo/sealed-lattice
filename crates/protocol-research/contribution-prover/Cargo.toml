@@ -4,9 +4,6 @@ version.workspace = true
 edition.workspace = true
 publish.workspace = true
 
-[lib]
-crate-type = ["rlib"]
-
 [dependencies]
 parallel-work = { path = "../parallel-work" }
 protocol-foundations = { path = "../protocol-foundations" }

@@ -19,7 +19,7 @@ pub mod terminal;
 /// brings it to the bytes its live allocations hold and the bytes its input
 /// names, so its memory grows once to what those jobs hold rather than
 /// beside memory it already has free.
-pub static PLAN: parallel_work::Job = parallel_work::Job {
+pub(crate) static PLAN: parallel_work::Job = parallel_work::Job {
     kind: 0x0700,
     run: plan,
 };

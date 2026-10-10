@@ -13,7 +13,7 @@ use fips204::{
 };
 use supported_profile::Profile;
 
-pub const BALLOT_SIGNATURE_CONTEXT: &[u8] = b"sealed-lattice/ballot-envelope/v1";
+pub(crate) const BALLOT_SIGNATURE_CONTEXT: &[u8] = b"sealed-lattice/ballot-envelope/v1";
 /// The envelope's fields after its four-byte marker start at these offsets:
 /// the poll, the setup identity, the author's position, the ballot time, the
 /// body length and the body identity.
@@ -22,7 +22,7 @@ pub const ENVELOPE_SETUP_IDENTITY_OFFSET: usize = 68;
 pub const ENVELOPE_POSITION_OFFSET: usize = 132;
 pub const ENVELOPE_BALLOT_TIME_OFFSET: usize = 134;
 pub const ENVELOPE_BODY_LENGTH_OFFSET: usize = 142;
-pub const ENVELOPE_BODY_IDENTITY_OFFSET: usize = 150;
+pub(crate) const ENVELOPE_BODY_IDENTITY_OFFSET: usize = 150;
 pub const ENVELOPE_BYTES: usize = ENVELOPE_BODY_IDENTITY_OFFSET + 64;
 pub const ENVELOPE_IDENTITY_DOMAIN: &str = "sealed-lattice/ballot-envelope-identity/v1";
 const RETAINED_SETUP_TAG_LABEL: &[u8] = b"sealed-lattice/retained-setup-reference/v2";

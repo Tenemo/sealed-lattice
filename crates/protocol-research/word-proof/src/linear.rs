@@ -14,14 +14,14 @@ pub struct Challenges {
     pub alpha: Element,
     pub mask: Element,
 }
-pub enum PreparedPolynomial {
+pub(crate) enum PreparedPolynomial {
     Value(Element),
     Adjoint(Vec<Element>),
 }
 /// The masked affine sum of a setup proof. Its fixed bases' jobs start with
 /// it and each public polynomial's jobs start as the polynomial arrives, so
 /// the prover keeps no prepared polynomial after its jobs start.
-pub struct AffineSum {
+pub(crate) struct AffineSum {
     plan: ProverOperatorPlan,
     mask: Element,
     target: Element,

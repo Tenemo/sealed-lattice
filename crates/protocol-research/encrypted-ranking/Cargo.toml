@@ -3,10 +3,6 @@ name = "encrypted-ranking"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
-autobins = false
-
-[lib]
-crate-type = ["rlib"]
 
 [features]
 numerical-probes = []

@@ -76,7 +76,12 @@ fn unfinished(tree: &Tree) -> Tree {
 }
 fn absorb(shards: &mut RowShards, polynomial: &Polynomial) {
     match polynomial {
-        Polynomial::Base(coefficients) => shards.absorb_base(coefficients),
+        Polynomial::Base(coefficients) => shards.absorb_base_encoded(Zeroizing::new(
+            coefficients
+                .iter()
+                .flat_map(|value| value.to_le_bytes())
+                .collect(),
+        )),
         Polynomial::Extension(coefficients) => shards.absorb_extension(coefficients),
     }
 }

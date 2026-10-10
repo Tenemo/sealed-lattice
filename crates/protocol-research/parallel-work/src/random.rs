@@ -18,7 +18,7 @@ pub enum Purpose {
 
 /// Serves a draw of the installed operation, or refuses one of a purpose it
 /// does not draw.
-pub type Seeded = fn(Purpose, &mut [u8]) -> bool;
+pub(crate) type Seeded = fn(Purpose, &mut [u8]) -> bool;
 
 thread_local! {
     static SEEDED: Cell<Option<Seeded>> = const { Cell::new(None) };

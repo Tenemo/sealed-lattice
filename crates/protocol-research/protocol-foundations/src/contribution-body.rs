@@ -6,7 +6,7 @@ use supported_profile::{
 };
 
 pub const BODY_HEADER_BYTES: usize = 4 + 8 + SOURCE_SALT_BYTES;
-pub const BODY_DOMAIN: &str = "sealed-lattice/contribution-body/v1";
+pub(crate) const BODY_DOMAIN: &str = "sealed-lattice/contribution-body/v1";
 pub struct ContributionBodyHeader {
     pub proof_length: usize,
     pub source_salt: [u8; SOURCE_SALT_BYTES],

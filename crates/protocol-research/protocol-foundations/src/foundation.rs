@@ -1,11 +1,11 @@
 #[path = "foundation/canonical-tuple.rs"]
-pub mod canonical_tuple;
+pub(crate) mod canonical_tuple;
 pub mod hash;
 pub mod manifest;
 #[path = "foundation/participant-identity.rs"]
 pub mod participant_identity;
 pub mod refusal;
-pub mod schemas;
+pub(crate) mod schemas;
 pub mod text;
 
 use crate::SIGNING_PUBLIC_KEY_BYTES;
@@ -20,7 +20,7 @@ pub use refusal::RefusalReason;
 pub(crate) use schemas::FoundationSchemaError;
 pub use text::StabilizedDisplayText;
 
-pub const MAXIMUM_USERNAME_BYTES: usize = 128;
+pub(crate) const MAXIMUM_USERNAME_BYTES: usize = 128;
 const REGISTRATION_HEADER_PURPOSE: &str = "sealed-lattice/registration-header/v6";
 /// A username arrives as at most this many bytes before normalization.
 pub const MAXIMUM_USERNAME_INGRESS_BYTES: usize = 512;

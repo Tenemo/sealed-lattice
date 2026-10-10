@@ -83,7 +83,7 @@ pub fn common_records(profile: Profile, index: usize) -> Result<Vec<u8>, Error> 
 /// A common polynomial's canonical records, which helper instances of the
 /// participant module compute. Its input is the profile's participant and
 /// option counts and the polynomial's index, which the owner checks.
-pub static COMMON_RECORDS: Job = Job {
+pub(crate) static COMMON_RECORDS: Job = Job {
     kind: 0x0500,
     run: run_common_records,
 };

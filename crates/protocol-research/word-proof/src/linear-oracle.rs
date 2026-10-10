@@ -17,25 +17,25 @@ use zeroize::{Zeroize, Zeroizing};
 // factor, so the finished sums are the values the oracle interpolates.
 
 /// Adds a weighted extension polynomial's values at a shard's rows.
-pub static TERM: Job = Job {
+pub(crate) static TERM: Job = Job {
     kind: 0x0140,
     run: add_term,
 };
 /// The masked coefficients of a weighted combination of committed columns.
-pub static COMBINATION: Job = Job {
+pub(crate) static COMBINATION: Job = Job {
     kind: 0x0141,
     run: combination,
 };
 /// Adds the products of a public polynomial with a combination of committed
 /// columns at a shard's rows.
-pub static PRODUCT: Job = Job {
+pub(crate) static PRODUCT: Job = Job {
     kind: 0x0142,
     run: add_product,
 };
 /// A weighted public polynomial's coefficients, which repeat with the
 /// period of its values: a challenge's geometric sequence or adjoint
 /// values, interpolated.
-pub static PUBLIC: Job = Job {
+pub(crate) static PUBLIC: Job = Job {
     kind: 0x0143,
     run: public_coefficients,
 };
@@ -253,7 +253,7 @@ struct Prepared {
 }
 /// The masked affine sum's values on the domain, which the jobs of its
 /// terms add in the shards of the domain's rows.
-pub struct AffineValues {
+pub(crate) struct AffineValues {
     sums: ShardSums,
     // Products whose shards' jobs have yet to start, oldest first.
     prepared: VecDeque<Prepared>,

@@ -1,7 +1,7 @@
 use super::{Element, Error, MODULUS, ZERO, arithmetic, minus, multiply, plus};
+use supported_profile::relation::{QUERY_COUNT, SYSTEMATIC};
 
-pub const SYSTEMATIC_SIZE: usize = 65_536;
-pub const QUERY_LIMIT: usize = 2 * 704;
+pub(crate) const QUERY_LIMIT: usize = 2 * QUERY_COUNT;
 
 fn scale(value: Element, scalar: u128) -> Element {
     value.map(|entry| multiply(entry, scalar))
@@ -131,7 +131,7 @@ pub(crate) fn check_in(
     indices: &[u32],
     systematic_size: usize,
 ) -> Result<(), Error> {
-    if !systematic_size.is_power_of_two() || !(2..=SYSTEMATIC_SIZE).contains(&systematic_size) {
+    if !systematic_size.is_power_of_two() || !(2..=SYSTEMATIC).contains(&systematic_size) {
         return Err(Error::Parameters);
     }
     validate_indices_in(indices, 4 * systematic_size)?;

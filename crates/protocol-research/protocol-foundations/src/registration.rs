@@ -7,7 +7,7 @@ use parallel_work::ProtocolHash;
 #[path = "registration-session.rs"]
 pub mod session;
 
-pub const CHUNK_LIMIT: usize = 1 << 20;
+pub use parallel_work::CHUNK_LIMIT;
 pub const KEY_BYTES: usize = supported_profile::DEGREE * 21;
 
 pub struct VerifiedRegistration {

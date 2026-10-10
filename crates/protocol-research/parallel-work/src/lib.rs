@@ -31,6 +31,9 @@ use zeroize::Zeroizing;
 pub const MAXIMUM_JOB_BYTES: usize = 8 << 20;
 /// The most parts one job's input joins.
 pub const MAXIMUM_JOB_PARTS: usize = 4;
+/// The most bytes one call to a streaming verifier or session reads, the
+/// slice every host stream divides its bytes into.
+pub const CHUNK_LIMIT: usize = 1 << 20;
 /// The linear memory a helper instance keeps for its running job beside the
 /// state its jobs share: the job's input and output, each at most one
 /// copied buffer, what it computes, and the transform tables jobs cache.

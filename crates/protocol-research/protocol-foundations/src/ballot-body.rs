@@ -5,9 +5,9 @@ use supported_profile::{
     relation::{BALLOT_HEADER_BYTES, PROOF_HEADER_BYTES, ballot_relation},
 };
 
-pub const CONTEXT_BYTES: usize = BALLOT_HEADER_BYTES;
+pub(crate) const CONTEXT_BYTES: usize = BALLOT_HEADER_BYTES;
 pub const HEADER_BYTES: usize = 12 + CONTEXT_BYTES;
-pub const BODY_DOMAIN: &str = "sealed-lattice/ballot-body/v1";
+pub(crate) const BODY_DOMAIN: &str = "sealed-lattice/ballot-body/v1";
 
 /// The body's ciphertext polynomials, by ballot statement index, with their
 /// byte lengths: both FHE ciphertext components, then both auxiliary

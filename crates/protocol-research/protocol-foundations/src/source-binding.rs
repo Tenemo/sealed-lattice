@@ -42,7 +42,7 @@ pub fn fhe_key_families(poll: &VerifiedPoll) -> Vec<Profile> {
     )
 }
 
-pub fn fhe_key_family_index(poll: &VerifiedPoll, profile: Profile) -> Result<usize, Error> {
+pub(crate) fn fhe_key_family_index(poll: &VerifiedPoll, profile: Profile) -> Result<usize, Error> {
     if profile.options() != poll.manifest().option_count()
         || profile.participants() > usize::from(poll.maximum_participants())
     {

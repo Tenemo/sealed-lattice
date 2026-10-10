@@ -118,59 +118,71 @@ fn signed_recipient_keys_still_require_canonical_centered_coefficients() {
     }
 }
 
+// A ten-option poll that admits that many participants.
+fn roster_poll(maximum: usize) -> VerifiedPoll {
+    let text = |value: &str| StabilizedDisplayText::from_ingress_utf8(value.as_bytes()).unwrap();
+    let options = (0..10)
+        .map(|index| {
+            OptionDefinition::new(
+                index,
+                format!("option-{index}"),
+                text(&format!("Option {index}")),
+            )
+            .unwrap()
+        })
+        .collect();
+    let draft = PollDraft::new(
+        Manifest::new(text("Question"), options).unwrap(),
+        1,
+        maximum as u16,
+    )
+    .unwrap();
+    let packet = Credential::from_seed([1; 32])
+        .create_poll(draft, [4; 64], [5; 32])
+        .unwrap();
+    verify_poll(packet.identity, [4; 64], &packet.body, &packet.signature).unwrap()
+}
+
+// A proposal of one registration per credential, in order.
+fn roster_proposal(
+    poll: &VerifiedPoll,
+    credentials: &[&Credential],
+) -> Result<RosterProposal, Error> {
+    let records = credentials
+        .iter()
+        .map(|credential| {
+            Arc::new(VerifiedRegistration::for_roster(
+                RegistrationHeader {
+                    username: normalize_username(b"Participant").unwrap(),
+                    poll: poll.identity(),
+                    signing_public: *credential.signing_public(),
+                    recipient_key_hash: [0; 64],
+
+                    fhe_key_commitments: vec![
+                        [7; 64];
+                        crate::source_binding::fhe_key_families(poll).len()
+                    ],
+                },
+                [0; 64],
+            ))
+        })
+        .collect();
+    RosterProposal::new(poll, records)
+}
+
 #[test]
 fn every_supported_roster_size_up_to_the_poll_maximum_can_be_proposed() {
-    let text = |value: &str| StabilizedDisplayText::from_ingress_utf8(value.as_bytes()).unwrap();
-    let poll = |maximum: usize| {
-        let options = (0..10)
-            .map(|index| {
-                OptionDefinition::new(
-                    index,
-                    format!("option-{index}"),
-                    text(&format!("Option {index}")),
-                )
-                .unwrap()
-            })
-            .collect();
-        let draft = PollDraft::new(
-            Manifest::new(text("Question"), options).unwrap(),
-            1,
-            maximum as u16,
-        )
-        .unwrap();
-        let packet = Credential::from_seed([1; 32])
-            .create_poll(draft, [4; 64], [5; 32])
-            .unwrap();
-        verify_poll(packet.identity, [4; 64], &packet.body, &packet.signature).unwrap()
-    };
     let organizer = Credential::from_seed([1; 32]);
     let members: Vec<_> = (10..30)
         .map(|seed| Credential::from_seed([seed; 32]))
         .collect();
     let proposal = |poll: &VerifiedPoll, size: usize| {
-        let records = std::iter::once(&organizer)
+        let credentials: Vec<_> = std::iter::once(&organizer)
             .chain(&members[..size - 1])
-            .map(|credential| {
-                Arc::new(VerifiedRegistration::for_roster(
-                    RegistrationHeader {
-                        username: normalize_username(b"Participant").unwrap(),
-                        poll: poll.identity(),
-                        signing_public: *credential.signing_public(),
-                        recipient_key_hash: [0; 64],
-
-                        fhe_key_commitments: vec![
-                            [7; 64];
-                            crate::source_binding::fhe_key_families(poll)
-                                .len()
-                        ],
-                    },
-                    [0; 64],
-                ))
-            })
             .collect();
-        RosterProposal::new(poll, records)
+        roster_proposal(poll, &credentials)
     };
-    let largest = poll(20);
+    let largest = roster_poll(20);
     for size in Profile::participant_range() {
         let profile = proposal(&largest, size).unwrap().profile();
         assert_eq!((profile.participants(), profile.options()), (size, 10));
@@ -180,9 +192,30 @@ fn every_supported_roster_size_up_to_the_poll_maximum_can_be_proposed() {
     }
     // A roster above the poll's signed maximum is refused.
     for maximum in 3..20 {
-        let poll = poll(maximum);
+        let poll = roster_poll(maximum);
         assert!(proposal(&poll, maximum).is_ok());
         assert!(matches!(proposal(&poll, maximum + 1), Err(Error::Context)));
     }
     assert_eq!(Profile::participant_range(), 3..=20);
+}
+
+#[test]
+fn a_roster_refuses_a_repeated_signing_key() {
+    let poll = roster_poll(20);
+    let organizer = Credential::from_seed([1; 32]);
+    let members = [
+        Credential::from_seed([10; 32]),
+        Credential::from_seed([11; 32]),
+    ];
+    assert!(roster_proposal(&poll, &[&organizer, &members[0], &members[1]]).is_ok());
+    for credentials in [
+        [&organizer, &members[0], &members[0]],
+        [&organizer, &members[0], &organizer],
+        [&members[1], &organizer, &members[1]],
+    ] {
+        assert!(matches!(
+            roster_proposal(&poll, &credentials),
+            Err(Error::Shape)
+        ));
+    }
 }

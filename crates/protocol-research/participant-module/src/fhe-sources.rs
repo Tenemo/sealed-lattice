@@ -41,7 +41,7 @@ pub(crate) struct Sources {
 }
 
 /// Capsule length is determined by the original verified poll, not the roster.
-pub fn capsule_bytes(poll: &VerifiedPoll) -> usize {
+pub(crate) fn capsule_bytes(poll: &VerifiedPoll) -> usize {
     MAGIC.len() + fhe_key_families(poll).len() * (SEED_BYTES + SALT_BYTES) + TAG_BYTES
 }
 

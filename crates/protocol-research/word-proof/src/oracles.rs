@@ -26,7 +26,7 @@ pub fn random_base(count: usize) -> Vec<u128> {
     }
     output
 }
-pub fn random_extension(count: usize) -> Vec<Element> {
+pub(crate) fn random_extension(count: usize) -> Vec<Element> {
     Zeroizing::new(random_base(3 * count))
         .chunks_exact(3)
         .map(|values| [values[0], values[1], values[2]])
@@ -186,7 +186,7 @@ pub(crate) fn masked_base_polynomial(values: BaseValues, mask: &[u128]) -> Zeroi
 }
 /// The coefficients of an extension column's masked polynomial: its
 /// interpolant less the mask, then the mask times the systematic power.
-pub fn masked_extension_coefficients(
+pub(crate) fn masked_extension_coefficients(
     values: impl Iterator<Item = Element>,
     mask: &[Element],
     transform: &Transform,
@@ -378,7 +378,7 @@ fn query_groups(indices: &[usize]) -> [Vec<(usize, usize)>; 4] {
     }
     groups
 }
-pub fn masked_base_coefficients(
+pub(crate) fn masked_base_coefficients(
     coefficients: Vec<u128>,
     mask: &[u128],
     coset: u128,
@@ -402,14 +402,14 @@ pub fn masked_base_coefficients(
         std::mem::take(&mut *coefficients)
     }
 }
-pub fn extension_values(
+pub(crate) fn extension_values(
     coefficients: &[Element],
     coset: u128,
     transform: &Transform,
 ) -> Vec<Element> {
     extension_values_inner(coefficients, coset, transform, None)
 }
-pub fn extension_values_selected(
+pub(crate) fn extension_values_selected(
     coefficients: &[Element],
     coset: u128,
     transform: &Transform,

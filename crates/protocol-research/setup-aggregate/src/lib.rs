@@ -41,7 +41,7 @@ pub enum Refusal {
 /// Adds centered coefficients of a family: a sign byte of zero or one
 /// before a little-endian magnitude of at most half the modulus, rounded
 /// down, with zero never negative. It works in little-endian words.
-pub struct PolynomialAdder {
+pub(crate) struct PolynomialAdder {
     modulus: Vec<u64>,
     half: Vec<u64>,
     width: usize,

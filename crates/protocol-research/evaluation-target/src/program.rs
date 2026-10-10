@@ -141,7 +141,7 @@ impl Builder {
 
 /// Public computation description only. The target verifier must separately
 /// own the complete source classifications, setup and ciphertext bindings.
-pub struct RankingProgram {
+pub(crate) struct RankingProgram {
     bytes: Vec<u8>,
 }
 impl RankingProgram {
