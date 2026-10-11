@@ -1492,14 +1492,14 @@ return { records: keys.length, ordinals };`,
     // quorum. The last corrupt positions beyond it among the
     // participants that did not depart sign no target vote; they
     // release later from their completed close.
-    const nonVoters = positions.slice(
+    const nonvoters = positions.slice(
         1 +
             maximumCorruptParticipantCount -
             (participantCount - departed.size - closeBounds.quorum),
         1 + maximumCorruptParticipantCount,
     );
     const voters = positions.filter(
-        (position) => !nonVoters.includes(position) && !departed.has(position),
+        (position) => !nonvoters.includes(position) && !departed.has(position),
     );
     assert.equal(voters.length, closeBounds.quorum);
     // Every voter verifies the barrier, classifies each usable
@@ -1508,11 +1508,11 @@ return { records: keys.length, ordinals };`,
     // every usable ballot but the invalid author's is valid, the
     // omitted voter's ballot is reported omitted, a late one late,
     // and a participant without a ballot has none cast.
-    // The equivocator and the invalid author are non-voters.
+    // The equivocator and the invalid author are nonvoters.
     assert.ok(
         [equivocator, invalidAuthor].every(
             (position) =>
-                position === undefined || nonVoters.includes(position),
+                position === undefined || nonvoters.includes(position),
         ),
     );
     // The first other honest voter halts with its target intent, and
@@ -1611,7 +1611,7 @@ return { records: keys.length, ordinals };`,
     const releaseBounds = bounds.release;
     const completionFile = (name: string, position: number) =>
         path.join(completionDirectory, name + String(position) + '.bin');
-    // A voter releases after its signed target and a non-voter after
+    // A voter releases after its signed target and a nonvoter after
     // its completed close.
     const predecessor = (position: number) =>
         voters.includes(position)
@@ -1632,7 +1632,7 @@ return { records: keys.length, ordinals };`,
             assert.equal(details.encrypted, false);
             assert.equal(details.predecessor, undefined);
             assert.equal(details.resumedFrom, undefined);
-            // A non-voter reads its status from the certified target.
+            // A nonvoter reads its status from the certified target.
             assert.equal(details.ballotInclusion, ballotInclusion(position));
         }
     } else {
@@ -1717,7 +1717,7 @@ return { records: keys.length, ordinals };`,
         assert.equal(delivered.encrypted, undefined);
         // A release after the completed close spent the target
         // purpose, and its lock retains the own ballot's status.
-        for (const position of nonVoters) {
+        for (const position of nonvoters) {
             await expectStatus(position, 'sign-target', 'refused');
             assert.equal(
                 (await run(position, 'status')).ballotInclusion,
@@ -1765,7 +1765,7 @@ return { records: keys.length, ordinals };`,
     // certified target carries no result. The equivocator's ballots
     // and the omitted ballot are not counted. The departed organizer's
     // share is absent, so the first share it tries is unavailable, and
-    // the lowest remaining shares include a non-voter's when one
+    // the lowest remaining shares include a nonvoter's when one
     // exists and the interrupted voter's.
     const totals = Array.from({ length: optionCount }, (_unused, option) =>
         positions
@@ -2310,7 +2310,7 @@ return key;`,
                 couldNotVote: lateSetup,
                 departedBeforeClose: departing,
                 omittedBallot: omittedVoter,
-                nonVoters,
+                nonvoters,
                 departed: [...departed],
                 interrupted: interruption,
                 interruptions,

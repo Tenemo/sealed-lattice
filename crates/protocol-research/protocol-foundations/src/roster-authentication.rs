@@ -25,9 +25,9 @@ impl Credential {
         if self.proposal_signed {
             return Err(Error::Consumed);
         }
-        let creator = &proposal.records()[proposal.organizer_position()];
-        if self.signing_public != creator.header().signing_public
-            || self.completed_body != Some(creator.body_digest())
+        let organizer = &proposal.records()[proposal.organizer_position()];
+        if self.signing_public != organizer.header().signing_public
+            || self.completed_body != Some(organizer.body_digest())
         {
             return Err(Error::Context);
         }

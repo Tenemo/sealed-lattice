@@ -57,7 +57,7 @@ fn retained_inputs_check_complete_identity_and_canonical_values() {
     assert!(inputs.read_polynomial(0).is_err());
 }
 #[test]
-fn retained_reference_parser_refuses_wrong_inventory_profile_or_framing() {
+fn retained_reference_parser_refuses_wrong_setup_identity_profile_or_framing() {
     let (mut record, _) = record();
     assert!(RetainedSetupInputs::parse(profile(), &record, [8; 64]).is_err());
     assert!(RetainedSetupInputs::parse(profile(), &record[..record.len() - 1], [9; 64]).is_err());

@@ -45,7 +45,7 @@ export const selectProtocolResearchCase = (
     ) {
         if (values.length !== 1)
             throw new Error(
-                'The setup departure case has a fixed four-participant profile and accepts no overrides.',
+                `The ${values[0]} case has a fixed four-participant profile and accepts no overrides.`,
             );
         return {
             name: values[0],
