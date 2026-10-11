@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
+    describeProtocolProcessTree,
     guardProcessTreeMemory,
     sumProtocolProcessTree,
 } from '#tools/ci/process-tree-memory.js';
@@ -36,6 +37,15 @@ describe('process-tree memory', () => {
         expect(sumProtocolProcessTree(2, rows)).toBe(90);
         expect(sumProtocolProcessTree(2, [...rows].reverse())).toBe(90);
         expect(sumProtocolProcessTree(5, rows)).toBeUndefined();
+        expect(describeProtocolProcessTree(2, rows)).toEqual({
+            processes: 3,
+            bytes: 90,
+        });
+        expect(describeProtocolProcessTree(4, rows)).toEqual({
+            processes: 1,
+            bytes: 40,
+        });
+        expect(describeProtocolProcessTree(5, rows)).toBeUndefined();
     });
 
     it('charges no process that started before the process of its recorded parent identifier, nor its descendants', () => {
@@ -50,6 +60,14 @@ describe('process-tree memory', () => {
         expect(sumProtocolProcessTree(2, rows)).toBe(90);
         expect(sumProtocolProcessTree(2, [...rows].reverse())).toBe(90);
         expect(sumProtocolProcessTree(7, rows)).toBe(7900);
+        expect(describeProtocolProcessTree(2, rows)).toEqual({
+            processes: 3,
+            bytes: 90,
+        });
+        expect(describeProtocolProcessTree(7, rows)).toEqual({
+            processes: 2,
+            bytes: 7900,
+        });
     });
 
     it('reports every sample below the limit until stopped, awaiting each handler', async () => {

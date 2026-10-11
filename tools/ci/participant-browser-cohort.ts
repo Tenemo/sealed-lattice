@@ -806,6 +806,14 @@ export const openParticipantCohort = async (
                                 },
                             });
                         },
+                        // A close that waited long for Chrome to exit is
+                        // recorded with what of Chrome still ran.
+                        (slowClose) => {
+                            log.writeEvent({
+                                eventType: 'participant-browser-slow-close',
+                                details: { ...details, session, ...slowClose },
+                            });
+                        },
                     );
                     assert.equal(
                         await chrome.evaluate('crossOriginIsolated'),

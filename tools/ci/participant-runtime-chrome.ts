@@ -4,6 +4,10 @@ import path from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 
 import { killProcessTree } from '#tools/ci/command-runner.js';
+import {
+    describeProtocolProcessTree,
+    readProtocolProcesses,
+} from '#tools/ci/process-tree-memory.js';
 
 // Drives an installed release Chrome over its DevTools socket with Runtime
 // and Page control, and records CPU samples only when a trace is requested.
@@ -99,10 +103,23 @@ export type ChromeParticipant = Readonly<{
     crash(): Promise<void>;
 }>;
 
-// A closing browser first finishes its storage work, which takes longer
-// while other browsers keep the host's processors busy; a terminated one only
-// has to exit.
-const closeMilliseconds = 60_000;
+// A close that waited longer than the slow-close bound for Chrome to exit:
+// how long it waited, whether Chrome exited and, when the snapshot taken at
+// that bound found it, how many processes Chrome's tree still ran and their
+// private bytes.
+export type SlowChromeClose = Readonly<{
+    milliseconds: number;
+    exited: boolean;
+    remaining?: Readonly<{ processes: number; bytes: number }>;
+}>;
+
+// A closing browser first finishes its storage work. Its process can still
+// take more than a minute to exit afterwards while unrelated backups, sync
+// clients and other programs keep the host's disks and processors busy, so a
+// close waits minutes before it counts Chrome as hung instead of cutting a
+// write; a terminated browser only has to exit.
+const closeMilliseconds = 300_000;
+const slowCloseMilliseconds = 10_000;
 const terminationMilliseconds = 10_000;
 
 const chromeExecutable = () =>
@@ -117,12 +134,14 @@ const chromeExecutable = () =>
 
 // Launches Chrome for a participant's page, passing V8 the flags when given,
 // and hands each line of Chrome's IndexedDB and LevelDB log to the listener
-// as it arrives, before the browser counts as ended.
+// as it arrives, before the browser counts as ended. A close that waits
+// longer than the slow-close bound reaches the other listener.
 export const launchChromeParticipant = async (
     profileDirectory: string,
     origin: string,
     javaScriptFlags?: string,
     onStorageLog?: (line: string) => void,
+    onSlowClose?: (close: SlowChromeClose) => void,
 ): Promise<ChromeParticipant> => {
     const executable = chromeExecutable();
     await access(executable);
@@ -268,17 +287,41 @@ export const launchChromeParticipant = async (
             });
         });
     const close = async () => {
+        const closing = performance.now();
         await Promise.race([
             send('Browser.close').catch(() => undefined),
             new Promise((resolve) => setTimeout(resolve, 2000)),
         ]);
         socket?.close();
-        if (!exited())
-            await exit(
-                closeMilliseconds,
-                () => child.kill(),
-                'Chrome did not close within its deadline.',
-            );
+        if (!exited()) {
+            let remaining: Promise<SlowChromeClose['remaining']> | undefined;
+            const slow = setTimeout(() => {
+                const identifier = child.pid;
+                if (identifier !== undefined)
+                    remaining = readProtocolProcesses().then(
+                        (processes) =>
+                            describeProtocolProcessTree(identifier, processes),
+                        () => undefined,
+                    );
+            }, slowCloseMilliseconds);
+            try {
+                await exit(
+                    closeMilliseconds,
+                    () => child.kill(),
+                    'Chrome did not close within its deadline.',
+                );
+            } finally {
+                clearTimeout(slow);
+                if (remaining !== undefined) {
+                    const tree = await remaining;
+                    onSlowClose?.({
+                        milliseconds: Math.round(performance.now() - closing),
+                        exited: exited(),
+                        ...(tree === undefined ? {} : { remaining: tree }),
+                    });
+                }
+            }
+        }
         await storageLogDelivered();
     };
     // Taskkill also reports a failure when a process of the tree ends by

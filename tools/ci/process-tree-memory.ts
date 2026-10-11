@@ -12,14 +12,14 @@ type ProcessMemory = Readonly<{
     started?: number;
 }>;
 
-// Sums the private bytes of the process and its descendants. Windows keeps
-// an exited parent's identifier, which a later process may take, so a
-// process that started before the process of its parent's identifier is
-// not that process's child.
-export const sumProtocolProcessTree = (
+// Counts the process and its descendants and sums their private bytes.
+// Windows keeps an exited parent's identifier, which a later process may
+// take, so a process that started before the process of its parent's
+// identifier is not that process's child.
+export const describeProtocolProcessTree = (
     identifier: number,
     processes: readonly ProcessMemory[],
-): number | undefined => {
+): Readonly<{ processes: number; bytes: number }> | undefined => {
     const started = new Map(
         processes.map((process) => [process.identifier, process.started]),
     );
@@ -44,11 +44,19 @@ export const sumProtocolProcessTree = (
             }
         }
     }
-    return processes.reduce((total, process) => {
+    const bytes = processes.reduce((total, process) => {
         assert.ok(Number.isSafeInteger(process.bytes) && process.bytes >= 0);
         return total + (owned.has(process.identifier) ? process.bytes : 0);
     }, 0);
+    return { processes: owned.size, bytes };
 };
+
+// Sums the private bytes of the process and its descendants.
+export const sumProtocolProcessTree = (
+    identifier: number,
+    processes: readonly ProcessMemory[],
+): number | undefined =>
+    describeProtocolProcessTree(identifier, processes)?.bytes;
 
 // One snapshot of every process takes about a second on an idle Windows host,
 // most of it the WMI enumeration, and several seconds beside the heavy work a
