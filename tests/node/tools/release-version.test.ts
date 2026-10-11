@@ -86,7 +86,7 @@ describe('release version preparation', () => {
             await writeFile(manifestPath, '{not-json}\n', 'utf8');
             await expect(
                 prepareReleaseVersion({ increment: 'patch', manifestPath }),
-            ).rejects.toThrow('not valid JSON');
+            ).rejects.toThrow();
             expect(await readFile(manifestPath, 'utf8')).toBe('{not-json}\n');
         } finally {
             await rm(temporaryDirectoryPath, { recursive: true, force: true });

@@ -29,7 +29,7 @@ const parserOptions = {
 };
 
 const importResolverSettings = {
-    'import-x/internal-regex': '^#(?:packages|test-vectors|tests|tools)(?:/|$)',
+    'import-x/internal-regex': '^#(?:packages|tests|tools)(?:/|$)',
     'import-x/resolver-next': [
         createTypeScriptImportResolver({
             alwaysTryTypes: true,
@@ -41,16 +41,12 @@ const importResolverSettings = {
 
 const packageSourceImportPatterns = [
     {
-        group: ['#packages/*', '#test-vectors/*', '#tests/*', '#tools/*'],
+        group: ['#packages/*', '#tests/*', '#tools/*'],
         message:
             'Published package source must not depend on repository-private aliases.',
     },
     {
-        group: [
-            '@sealed-lattice/*/*',
-            '!@sealed-lattice/wasm/published-sdk',
-            'sealed-lattice/*',
-        ],
+        group: ['@sealed-lattice/*/*', 'sealed-lattice/*'],
         message:
             'Workspace packages must import another package through its public entry point.',
     },
@@ -59,8 +55,8 @@ const packageSourceImportPatterns = [
 export default defineConfig(
     globalIgnores([
         '.tmp*/**',
-        'temp*/**',
-        'tmp*/**',
+        'logs/**',
+        'temp/**',
         'node_modules/**',
         'reference-projects/**',
         '**/dist/**',
@@ -93,7 +89,6 @@ export default defineConfig(
         rules: {
             ...eslintJs.configs.recommended.rules,
             'no-redeclare': 'off',
-            'no-restricted-exports': 'off',
             'no-restricted-properties': [
                 'error',
                 {
@@ -103,7 +98,6 @@ export default defineConfig(
                         'Use the project crypto-backed randomness helpers instead.',
                 },
             ],
-            'no-shadow': 'off',
             'no-undef': 'off',
             'no-unused-vars': 'off',
             '@typescript-eslint/no-unused-vars': 'off',
@@ -135,7 +129,6 @@ export default defineConfig(
                 { devDependencies: true },
             ],
             'import-x/no-duplicates': 'error',
-            'import-x/prefer-default-export': 'off',
             'import-x/extensions': [
                 'error',
                 'ignorePackages',
@@ -158,71 +151,11 @@ export default defineConfig(
     {
         files: ['packages/*/src/**/*.ts'],
         rules: {
+            'import-x/no-cycle': ['error', { ignoreExternal: true }],
             'import-x/no-relative-packages': 'error',
             'no-restricted-imports': [
                 'error',
                 { patterns: packageSourceImportPatterns },
-            ],
-        },
-    },
-    {
-        files: ['packages/types/src/**/*.ts'],
-        rules: {
-            'no-restricted-imports': [
-                'error',
-                {
-                    paths: [
-                        '@sealed-lattice/crypto',
-                        '@sealed-lattice/protocol',
-                        '@sealed-lattice/wasm',
-                        'sealed-lattice',
-                    ],
-                    patterns: packageSourceImportPatterns,
-                },
-            ],
-        },
-    },
-    {
-        files: ['packages/crypto/src/**/*.ts'],
-        rules: {
-            'no-restricted-imports': [
-                'error',
-                {
-                    paths: [
-                        '@sealed-lattice/protocol',
-                        '@sealed-lattice/wasm',
-                        'sealed-lattice',
-                    ],
-                    patterns: packageSourceImportPatterns,
-                },
-            ],
-        },
-    },
-    {
-        files: ['packages/wasm/src/**/*.ts'],
-        rules: {
-            'no-restricted-imports': [
-                'error',
-                {
-                    paths: [
-                        '@sealed-lattice/crypto',
-                        '@sealed-lattice/protocol',
-                        'sealed-lattice',
-                    ],
-                    patterns: packageSourceImportPatterns,
-                },
-            ],
-        },
-    },
-    {
-        files: ['packages/protocol/src/**/*.ts'],
-        rules: {
-            'no-restricted-imports': [
-                'error',
-                {
-                    paths: ['sealed-lattice'],
-                    patterns: packageSourceImportPatterns,
-                },
             ],
         },
     },
@@ -277,22 +210,17 @@ export default defineConfig(
         },
     },
     {
-        files: ['tools/ci/*.mjs'],
-        languageOptions: {
-            parserOptions: {
-                project: './tsconfig.tools.json',
-            },
-        },
+        files: ['packages/sdk/tests/node/public-api.test.ts'],
         rules: {
-            '@typescript-eslint/no-unsafe-argument': 'off',
-        },
-    },
-    {
-        files: ['tools/ci/packed-package-smoke.mjs'],
-        rules: {
-            // This script is copied into a temporary consumer and runs only
-            // after the packed SDK has been installed there.
-            'import-x/no-unresolved': 'off',
+            'import-x/extensions': [
+                'error',
+                'ignorePackages',
+                {
+                    js: 'always',
+                    mjs: 'always',
+                    ts: 'never',
+                },
+            ],
         },
     },
 );

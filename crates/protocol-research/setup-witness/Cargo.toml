@@ -1,0 +1,26 @@
+[package]
+name = "setup-witness"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+autobins = false
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+num-bigint.workspace = true
+num-traits.workspace = true
+sha3.workspace = true
+zeroize.workspace = true
+parallel-work = { path = "../parallel-work" }
+statement-stream = { path = "../statement-stream" }
+supported-profile = { path = "../supported-profile" }
+
+[features]
+key-source-screen = []
+
+[[bin]]
+name = "screen-fhe-key-source"
+path = "src/bin/screen-fhe-key-source.rs"
+required-features = ["key-source-screen"]
