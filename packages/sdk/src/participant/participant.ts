@@ -157,11 +157,15 @@ export type ParticipantSummary = Readonly<{
  * waits for public input, storage or a device resource such as memory, or
  * follows a module or worker failure, as its cause names and its detail
  * describes, and a later operation continues from the participant's last
- * committed state; a stopped participant never acts again, as its detail
- * describes. Enrollment that ends after its intent is retained but before
- * its secrets are retained stops, since that intent cannot resume private
- * generation. A participant that another runtime created is refused, naming
- * that runtime, so the application can open it with the SDK of that runtime.
+ * committed state. A stopped one ended on missing or inconsistent local
+ * state, as its detail describes; once its stop persistence is confirmed,
+ * the participant never acts again, and after an unconfirmed stop a later
+ * operation stops again unless the participant's last committed state reads
+ * back intact, from which it continues. Enrollment that ends after its intent
+ * is retained but before its secrets are retained stops, since that intent
+ * cannot resume private generation. A participant that another runtime
+ * created is refused, naming that runtime, so the application can open it
+ * with the SDK of that runtime.
  */
 export type ParticipantResponse =
     | Readonly<{

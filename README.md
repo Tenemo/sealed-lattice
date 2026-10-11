@@ -83,7 +83,7 @@ The participant module checks the question and option labels and refuses an inva
 | `completed` | `details` | The operation finished; `details` reports the participant's retained progress. |
 | `refused` | `reason`, and `runtime` for `another runtime` | Nothing changed. |
 | `pending` | `cause`, `detail` | The operation could not finish yet; `detail` describes why. A later operation continues from the participant's last committed state. |
-| `stopped` | `detail`, `stopPersistence` | Missing or inconsistent local state ended the participant for good; `detail` describes it. `stopPersistence` is `confirmed` when the browser durably recorded the stop and `unconfirmed` otherwise. |
+| `stopped` | `detail`, `stopPersistence` | Missing or inconsistent local state ended the operation without further protocol work; `detail` describes it. With `stopPersistence` `confirmed`, the browser durably recorded the stop and the participant never acts again. With `unconfirmed`, the stop may not be recorded: a later operation stops again unless the participant's last committed state reads back intact, and then continues from that state. |
 
 A refusal's `reason` is one of:
 
