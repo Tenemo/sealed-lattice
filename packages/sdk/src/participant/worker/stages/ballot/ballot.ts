@@ -21,7 +21,10 @@ import {
     unsigned64,
 } from '../../shared/bytes.js';
 import { PublicInputFailure, StorageFailure } from '../../shared/failures.js';
-import { snapshotParticipant } from '../../storage/database.js';
+import {
+    estimateStorage,
+    snapshotParticipant,
+} from '../../storage/database.js';
 import { openDelivery } from '../../storage/delivery.js';
 import type { ParticipantStoredRecord } from '../../storage/predecessor.js';
 import { openRecord, sealRecord } from '../../storage/private-records.js';
@@ -230,7 +233,7 @@ export const beginBallot = async (
         throw new Error('No verified setup awaits a ballot.');
     if (!validBallotScores(profile, scores))
         throw new Error('The scores are invalid.');
-    const estimate = await navigator.storage.estimate();
+    const estimate = await estimateStorage();
     if (
         estimate.quota === undefined ||
         estimate.usage === undefined ||

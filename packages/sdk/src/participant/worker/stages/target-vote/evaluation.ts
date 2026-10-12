@@ -137,6 +137,33 @@ const deliverEvaluationInput = async (
 const evaluationStorageFailure = () =>
     new PublicInputFailure('The evaluation storage failed.');
 
+// Starts a transaction on public evaluation storage, which a connection the
+// browser has closed refuses.
+const evaluationTransaction = (
+    storage: IDBDatabase,
+    store: string,
+    mode: IDBTransactionMode,
+) => {
+    try {
+        return storage.transaction(store, mode);
+    } catch {
+        throw evaluationStorageFailure();
+    }
+};
+
+// The bytes of a stored value or key record. A read that the browser fails
+// is an evaluation storage failure; a refused allocation remains a resource
+// failure.
+const storedBytes = async (blob: Blob) => {
+    try {
+        return new Uint8Array(await blob.arrayBuffer());
+    } catch (error) {
+        throw error instanceof DOMException
+            ? evaluationStorageFailure()
+            : error;
+    }
+};
+
 const openEvaluationStorage = async (namespace: string) => {
     const opened = indexedDB.open(
         namespacedName(publicEvaluationName, namespace),
@@ -153,7 +180,11 @@ const writeEvaluationStorage = async (
     storage: IDBDatabase,
     write: (store: IDBObjectStore) => void,
 ) => {
-    const transaction = storage.transaction(evaluationStore, 'readwrite');
+    const transaction = evaluationTransaction(
+        storage,
+        evaluationStore,
+        'readwrite',
+    );
     const done = transactionCompletion(transaction, evaluationStorageFailure);
     try {
         write(transaction.objectStore(evaluationStore));
@@ -179,7 +210,11 @@ const evaluatedTargetRequest = async <Value>(
         opened.result.createObjectStore(evaluatedTargetStore);
     const database = await requestResult(opened, evaluationStorageFailure);
     try {
-        const transaction = database.transaction(evaluatedTargetStore, mode);
+        const transaction = evaluationTransaction(
+            database,
+            evaluatedTargetStore,
+            mode,
+        );
         // Observe completion before creating the request: a synchronous
         // factory failure can still be followed by a transaction abort.
         const done = awaitLater(
@@ -327,7 +362,11 @@ const readStoredBlobs = async (
     storage: IDBDatabase,
     keys: readonly IDBValidKey[],
 ) => {
-    const transaction = storage.transaction(evaluationStore, 'readonly');
+    const transaction = evaluationTransaction(
+        storage,
+        evaluationStore,
+        'readonly',
+    );
     const done = transactionCompletion(transaction, evaluationStorageFailure);
     const store = transaction.objectStore(evaluationStore);
     const values = await Promise.all(
@@ -363,7 +402,7 @@ const readStoredRecords = async (
                 throw new PublicInputFailure(
                     'A stored evaluation key is missing.',
                 );
-            return new Uint8Array(await value.arrayBuffer());
+            return storedBytes(value);
         }),
     );
 };
@@ -423,7 +462,7 @@ const evaluate = async (
                             throw new PublicInputFailure(
                                 'A stored evaluation value is missing.',
                             );
-                        accept(new Uint8Array(await blob.arrayBuffer()));
+                        accept(await storedBytes(blob));
                     }
                 },
                 'A stored evaluation value changed.',

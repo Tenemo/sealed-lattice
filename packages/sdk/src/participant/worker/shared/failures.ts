@@ -15,10 +15,12 @@ export class UnrecognizedState extends Error {}
 // pending; it never stops the participant or replaces retained state.
 export class PublicInputFailure extends Error {}
 
-// A failed write that leaves the participant's retained authority as it
-// was, a transition whose exact predecessor still authenticates or staged
-// records the origin had no room for, leaves the participant pending; any
-// other failure is local state loss.
+// A storage request, transaction or record read that the browser fails, a
+// transition whose exact predecessor still authenticates after its write
+// failed, and staged records the origin has no room for leave the
+// participant pending: the browser commits a transaction whole or not at
+// all, so the participant stays where its last commit left it. Retained
+// state that a check finds missing or changed is local state loss instead.
 export class StorageFailure extends Error {}
 
 // A helper that failed, and an exhausted memory bound of the module instance
@@ -33,12 +35,14 @@ export class ResourceFailure extends Error {}
 // participant stays where its last commit left it.
 export class ModuleFailure extends Error {}
 
+// An allocation the browser refuses throws a RangeError, a resource failure
+// like an exhausted memory bound.
 export const pendingCause = (error: unknown): ParticipantPendingCause =>
     error instanceof PublicInputFailure
         ? 'public input'
         : error instanceof StorageFailure
           ? 'storage'
-          : error instanceof ResourceFailure
+          : error instanceof ResourceFailure || error instanceof RangeError
             ? 'resource'
             : error instanceof ModuleFailure
               ? 'module'

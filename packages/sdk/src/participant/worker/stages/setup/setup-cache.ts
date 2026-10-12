@@ -159,7 +159,13 @@ export const readCachedAggregateChunk = async (
     }
     if (!(value instanceof Blob) || value.size !== chunk.length)
         throw new PublicInputFailure('A cached aggregate chunk is missing.');
-    return new Uint8Array(await value.arrayBuffer());
+    try {
+        return new Uint8Array(await value.arrayBuffer());
+    } catch (error) {
+        throw error instanceof DOMException
+            ? new PublicInputFailure('The setup cache refused a read.')
+            : error;
+    }
 };
 
 // Streams the final public aggregate of one body polynomial from the cache

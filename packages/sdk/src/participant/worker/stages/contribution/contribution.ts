@@ -44,7 +44,9 @@ import {
     addParticipantRecords,
     awaitLater,
     discardStagedRecords,
+    estimateStorage,
     readParticipantValue,
+    recordBytes,
     snapshotParticipant,
 } from '../../storage/database.js';
 import { openDelivery } from '../../storage/delivery.js';
@@ -433,7 +435,7 @@ const openContributionRecord = async (
     );
     if (!(blob instanceof Blob) || blob.size !== sealedLength(record.length))
         throw new Error('A contribution record is missing.');
-    const ciphertext = new Uint8Array(await blob.arrayBuffer());
+    const ciphertext = await recordBytes(blob);
     if (
         !equalBytes(
             custodyIdentity(
@@ -750,7 +752,7 @@ export const beginContribution = async (
         context.position >= context.profile.eligibleContributorCount
     )
         throw new Error('No confirmed roster awaits an eligible offer.');
-    const estimate = await navigator.storage.estimate();
+    const estimate = await estimateStorage();
     if (
         estimate.quota === undefined ||
         estimate.usage === undefined ||
@@ -909,7 +911,7 @@ export const restoreCheckpoint = async (
         const length = profile.contribution.checkpointLengths[index];
         if (!(blob instanceof Blob) || blob.size !== length)
             throw new Error('A checkpoint record is missing.');
-        const sealed = new Uint8Array(await blob.arrayBuffer());
+        const sealed = await recordBytes(blob);
         if (
             !equalBytes(
                 custodyIdentity(context.module, custodyPurpose.record, sealed),

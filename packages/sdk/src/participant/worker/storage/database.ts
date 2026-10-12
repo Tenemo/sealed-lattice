@@ -1,3 +1,4 @@
+import { errorMessage } from '../module/context.js';
 import { StorageFailure, UnrecognizedState } from '../shared/failures.js';
 
 // The participant's origin-local database. The key, root and head stores hold
@@ -74,8 +75,13 @@ export const deleteWorkingStorage = async (namespace: string) => {
         });
 };
 
+// A storage request, transaction or read that the browser failed. The browser
+// commits a transaction whole or not at all, so the failure changed nothing.
+export const storageFailure = (error: unknown) =>
+    new StorageFailure('Local storage failed: ' + errorMessage(error));
+
 // Settles with a request's result. A failed request rejects with the
-// caller's failure, or else with its own error.
+// caller's failure, or else with a storage failure.
 export const requestResult = <Value>(
     request: IDBRequest<Value>,
     failure?: () => Error,
@@ -85,13 +91,14 @@ export const requestResult = <Value>(
         request.onerror = () =>
             reject(
                 failure?.() ??
-                    request.error ??
-                    new Error('Local record request failed.'),
+                    storageFailure(
+                        request.error ?? 'Local record request failed.',
+                    ),
             );
     });
 
 // Settles once a transaction commits. An aborted transaction rejects with the
-// caller's failure, or else with its own error.
+// caller's failure, or else with a storage failure.
 export const transactionCompletion = (
     transaction: IDBTransaction,
     failure?: () => Error,
@@ -101,10 +108,50 @@ export const transactionCompletion = (
         transaction.onabort = () =>
             reject(
                 failure?.() ??
-                    transaction.error ??
-                    new Error('Local transaction aborted.'),
+                    storageFailure(
+                        transaction.error ?? 'Local transaction aborted.',
+                    ),
             );
     });
+
+// Starts a transaction on the participant's database. A connection that the
+// browser has closed refuses it with a storage failure.
+export const participantTransaction = (
+    database: IDBDatabase,
+    stores: string | readonly string[],
+    mode: IDBTransactionMode,
+    options?: IDBTransactionOptions,
+) => {
+    try {
+        return database.transaction(
+            typeof stores === 'string' ? stores : [...stores],
+            mode,
+            options,
+        );
+    } catch (error) {
+        throw storageFailure(error);
+    }
+};
+
+// The bytes of a stored record. A read that the browser fails is a storage
+// failure; a refused allocation remains a resource failure.
+export const recordBytes = async (blob: Blob) => {
+    try {
+        return new Uint8Array(await blob.arrayBuffer());
+    } catch (error) {
+        throw error instanceof DOMException ? storageFailure(error) : error;
+    }
+};
+
+// The browser's estimate of the origin's quota and usage. An estimate that
+// the browser fails is a storage failure.
+export const estimateStorage = async () => {
+    try {
+        return await navigator.storage.estimate();
+    } catch (error) {
+        throw storageFailure(error);
+    }
+};
 
 // Keeps a promise that is awaited later, while other work continues, from
 // reporting an unhandled rejection meanwhile.
@@ -121,17 +168,14 @@ export const openParticipantDatabase = async (
         for (const store of participantStores)
             request.result.createObjectStore(store);
     };
-    let database: IDBDatabase;
-    try {
-        database = await requestResult(request);
-    } catch (error) {
-        // A database of a later version is not one this SDK created.
-        if (error instanceof DOMException && error.name === 'VersionError')
-            throw new UnrecognizedState(
-                'The participant database has another version.',
-            );
-        throw error;
-    }
+    // A database of a later version is not one this SDK created.
+    const database = await requestResult(request, () =>
+        request.error?.name === 'VersionError'
+            ? new UnrecognizedState(
+                  'The participant database has another version.',
+              )
+            : storageFailure(request.error ?? 'The database did not open.'),
+    );
     const names = [...database.objectStoreNames].sort().join(',');
     if (names !== [...participantStores].sort().join(',')) {
         database.close();
@@ -145,8 +189,8 @@ export const readParticipantValue = async (
     store: ParticipantStore,
     key: IDBValidKey,
 ): Promise<unknown> => {
-    const transaction = database.transaction(store, 'readonly');
-    const done = transactionCompletion(transaction);
+    const transaction = participantTransaction(database, store, 'readonly');
+    const done = awaitLater(transactionCompletion(transaction));
     const value = await requestResult<unknown>(
         transaction.objectStore(store).get(key),
     );
@@ -156,33 +200,22 @@ export const readParticipantValue = async (
 
 // Adds records that no root references yet in one strict transaction. Only
 // generated output is staged this way; the next root lists it and its
-// transition checks every staged record before it commits. A transaction the
-// origin's quota aborts adds nothing.
+// transition checks every staged record before it commits. A transaction
+// that the origin's quota or another browser failure aborts adds nothing.
 export const addParticipantRecords = async (
     database: IDBDatabase,
     store: ParticipantStore,
     records: readonly Readonly<{ key: IDBValidKey; bytes: Uint8Array }>[],
 ): Promise<void> => {
-    const transaction = database.transaction(store, 'readwrite', {
+    const transaction = participantTransaction(database, store, 'readwrite', {
         durability: 'strict',
     });
-    const done = transactionCompletion(transaction);
+    const done = awaitLater(transactionCompletion(transaction));
     for (const record of records)
         transaction
             .objectStore(store)
             .add(new Blob([new Uint8Array(record.bytes)]), record.key);
-    try {
-        await done;
-    } catch (error) {
-        if (
-            error instanceof DOMException &&
-            error.name === 'QuotaExceededError'
-        )
-            throw new StorageFailure(
-                'The origin lacks room for staged participant records.',
-            );
-        throw error;
-    }
+    await done;
 };
 
 // Deletes staged records that no root references, in one strict
@@ -194,12 +227,13 @@ export const discardStagedRecords = async (
         keys?: IDBKeyRange;
     }>[],
 ): Promise<void> => {
-    const transaction = database.transaction(
+    const transaction = participantTransaction(
+        database,
         ranges.map((range) => range.store),
         'readwrite',
         { durability: 'strict' },
     );
-    const done = transactionCompletion(transaction);
+    const done = awaitLater(transactionCompletion(transaction));
     for (const { store, keys } of ranges)
         if (keys === undefined) transaction.objectStore(store).clear();
         else transaction.objectStore(store).delete(keys);
@@ -208,11 +242,12 @@ export const discardStagedRecords = async (
 
 // One consistent read of the root authority and every store's cardinality.
 export const snapshotParticipant = async (database: IDBDatabase) => {
-    const transaction = database.transaction(
-        [...participantStores],
+    const transaction = participantTransaction(
+        database,
+        participantStores,
         'readonly',
     );
-    const done = transactionCompletion(transaction);
+    const done = awaitLater(transactionCompletion(transaction));
     const [key, root, head, ...counts] = await Promise.all([
         requestResult<unknown>(transaction.objectStore('key').get(0)),
         requestResult<unknown>(transaction.objectStore('root').get(0)),

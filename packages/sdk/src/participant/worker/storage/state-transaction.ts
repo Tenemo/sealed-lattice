@@ -1,3 +1,7 @@
+import { StorageFailure } from '../shared/failures.js';
+
+import { participantTransaction, storageFailure } from './database.js';
+
 export interface ParticipantTransactionReader {
     get(store: string, key: IDBValidKey): Promise<unknown>;
     count(store: string, key?: IDBValidKey): Promise<number>;
@@ -9,6 +13,9 @@ export interface ParticipantTransactionReader {
 // The validator must await all its work and the writer must be synchronous.
 // A rejected call is not proof of rollback: continuation must authenticate the
 // exact predecessor independently, including after uncertain browser failures.
+// A request or transaction that the browser fails and the validation
+// deadline reject with a storage failure; the validator's and the writer's
+// own failures reject as they are.
 export async function commitParticipantState({
     database,
     stores,
@@ -28,7 +35,7 @@ export async function commitParticipantState({
         timeoutMilliseconds <= 0
     )
         throw new Error('Invalid participant transaction bounds.');
-    const transaction = database.transaction([...stores], 'readwrite', {
+    const transaction = participantTransaction(database, stores, 'readwrite', {
         durability: 'strict',
     });
     let finished = false,
@@ -84,12 +91,19 @@ export async function commitParticipantState({
                     request.onerror = () => {
                         pendingReads--;
                         requests.delete(reject);
-                        reject(asError(request.error));
-                        abort(request.error);
+                        const error = storageFailure(
+                            request.error ?? 'A participant read failed.',
+                        );
+                        reject(error);
+                        abort(error);
                     };
-                } catch (error) {
+                } catch (caught) {
                     requests.delete(reject);
-                    reject(asError(error));
+                    const error =
+                        caught instanceof DOMException
+                            ? storageFailure(caught)
+                            : asError(caught);
+                    reject(error);
                     abort(error);
                 }
             });
@@ -120,27 +134,43 @@ export async function commitParticipantState({
             if (!written || failure)
                 reject(
                     failure ??
-                        new Error('Participant transaction committed early.'),
+                        new StorageFailure(
+                            'Participant transaction committed early.',
+                        ),
                 );
             else resolve();
         };
         transaction.onabort = () => {
             finish();
             reject(
-                failure ?? new Error('Participant state transaction aborted.'),
+                failure ??
+                    new StorageFailure(
+                        'Participant state transaction aborted.',
+                    ),
             );
         };
-        transaction.onerror = () => abort(transaction.error);
+        transaction.onerror = () =>
+            abort(
+                storageFailure(
+                    transaction.error ?? 'A participant request failed.',
+                ),
+            );
     });
     const timer = setTimeout(
-        () => abort(new Error('Participant state validation deadline.')),
+        () =>
+            abort(new StorageFailure('Participant state validation deadline.')),
         timeoutMilliseconds,
     );
     const pump = () => {
         if (finished || failure) return;
         try {
             const heartbeat = transaction.objectStore('head').get(0);
-            heartbeat.onerror = () => abort(heartbeat.error);
+            heartbeat.onerror = () =>
+                abort(
+                    storageFailure(
+                        heartbeat.error ?? 'A participant read failed.',
+                    ),
+                );
             heartbeat.onsuccess = () => {
                 if (finished || failure) return;
                 while (queue.length && !failure) queue.shift()!();
@@ -165,11 +195,13 @@ export async function commitParticipantState({
                 } else pump();
             };
         } catch (error) {
-            abort(error);
+            abort(
+                error instanceof DOMException ? storageFailure(error) : error,
+            );
         }
     };
     if (transaction.durability !== 'strict')
-        abort(new Error('Strict participant durability unavailable.'));
+        abort(new StorageFailure('Strict participant durability unavailable.'));
     else {
         pump();
         void Promise.resolve()

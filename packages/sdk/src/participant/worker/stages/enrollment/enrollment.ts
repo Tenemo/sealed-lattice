@@ -30,6 +30,7 @@ import {
 } from '../../shared/bytes.js';
 import type { ParticipantRefusalReason } from '../../shared/operation-status.js';
 import {
+    estimateStorage,
     isEmptyParticipant,
     participantRecordStores,
     participantStores,
@@ -217,7 +218,7 @@ export const createEnrollment = async (
             if (module.validate_joiner(input.length) !== 0)
                 return 'invalid request';
         }
-        const estimate = await navigator.storage.estimate();
+        const estimate = await estimateStorage();
         if (
             estimate.quota === undefined ||
             estimate.usage === undefined ||

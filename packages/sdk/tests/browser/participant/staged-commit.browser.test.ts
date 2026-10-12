@@ -328,30 +328,75 @@ describe('staged-record root commit boundary', () => {
         ).toBe(1);
     });
 
-    it('keeps an uncertain successful commit fatal when its readback fails', async () => {
+    it('leaves a committed successor pending when the browser fails its readback', async () => {
         const fixed = await fixture();
         const transaction = fixed.database.transaction.bind(fixed.database);
-        const failure = new Error('Successor readback is unavailable.');
         const intercepted = vi
             .spyOn(fixed.database, 'transaction')
             .mockImplementation((stores, mode, options) => {
-                if (mode === 'readonly') throw failure;
+                if (mode === 'readonly')
+                    throw new DOMException(
+                        'The database connection is closing.',
+                        'InvalidStateError',
+                    );
                 return transaction(stores, mode, options);
             });
+        let failure: unknown;
         try {
-            await expect(
-                commitRoot(
-                    fixed.context,
-                    fixed.predecessor,
-                    fixed.transition(),
-                ),
-            ).rejects.toBe(failure);
+            failure = await commitRoot(
+                fixed.context,
+                fixed.predecessor,
+                fixed.transition(),
+            ).then(
+                () => undefined,
+                (error: unknown) => error,
+            );
         } finally {
             intercepted.mockRestore();
         }
+        expect(failure).toBeInstanceOf(StorageFailure);
+        // The next visit authenticates the successor that committed.
         const snapshot = await snapshotParticipant(fixed.database);
         expect(snapshot.head).toMatchObject({ generation: 4 });
+        expect(snapshot.head).not.toEqual(fixed.predecessor.head);
         expect(snapshot.counts.checkpoint).toBe(0);
         expect(snapshot.counts.contribution).toBe(1);
+    });
+
+    it('keeps a committed successor whose readback differs fatal', async () => {
+        const fixed = await fixture();
+        const transaction = fixed.database.transaction.bind(fixed.database);
+        let replaced = false;
+        const intercepted = vi
+            .spyOn(fixed.database, 'transaction')
+            .mockImplementation((stores, mode, options) => {
+                if (mode === 'readonly' && !replaced) {
+                    replaced = true;
+                    // A write started before the readback runs first and
+                    // replaces the committed root.
+                    transaction('root', 'readwrite')
+                        .objectStore('root')
+                        .put(Uint8Array.of(1, 2, 3), 0);
+                }
+                return transaction(stores, mode, options);
+            });
+        let failure: unknown;
+        try {
+            failure = await commitRoot(
+                fixed.context,
+                fixed.predecessor,
+                fixed.transition(),
+            ).then(
+                () => undefined,
+                (error: unknown) => error,
+            );
+        } finally {
+            intercepted.mockRestore();
+        }
+        expect(failure).toBeInstanceOf(Error);
+        expect(failure).not.toBeInstanceOf(StorageFailure);
+        expect((failure as Error).message).toBe(
+            'Participant root readback failed.',
+        );
     });
 });

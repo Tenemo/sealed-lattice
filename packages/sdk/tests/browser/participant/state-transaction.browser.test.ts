@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { StorageFailure } from '#packages/sdk/src/participant/worker/shared/failures.js';
 import {
     commitParticipantState,
     type ParticipantTransactionReader,
@@ -183,11 +184,43 @@ describe('authenticated participant state transactions', () => {
         const waiting = new Promise<void>((resolve) => {
             resume = resolve;
         });
-        await expect(
-            commit(async () => waiting, undefined, 10),
-        ).rejects.toThrow('deadline');
+        const stalled = commit(async () => waiting, undefined, 10);
+        await expect(stalled).rejects.toThrow('deadline');
+        await expect(stalled).rejects.toBeInstanceOf(StorageFailure);
         resume();
         await new Promise((resolve) => setTimeout(resolve, 20));
+        expect(await head()).toBe(18);
+    });
+
+    it('reports a transaction that the browser aborts as a storage failure without writes', async () => {
+        const { database, commit, validate, head } = await fixture();
+        const transact = database.transaction.bind(database);
+        let started: IDBTransaction | undefined;
+        const intercepted = vi
+            .spyOn(database, 'transaction')
+            .mockImplementation((names, mode, options) => {
+                started = transact(names, mode, options);
+                return started;
+            });
+        try {
+            await expect(
+                commit(async (reader) => {
+                    await validate(reader);
+                    started?.abort();
+                }),
+            ).rejects.toBeInstanceOf(StorageFailure);
+        } finally {
+            intercepted.mockRestore();
+        }
+        expect(await head()).toBe(18);
+    });
+
+    it("rejects with the validator's own refusal rather than a storage failure", async () => {
+        const { commit, head } = await fixture();
+        const refusal = new Error('Participant predecessor authority changed.');
+        await expect(commit(() => Promise.reject(refusal))).rejects.toBe(
+            refusal,
+        );
         expect(await head()).toBe(18);
     });
 

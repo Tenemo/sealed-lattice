@@ -29,6 +29,7 @@ import {
     participantRecordStores,
     participantStores,
     readParticipantValue,
+    recordBytes,
     snapshotParticipant,
 } from './database.js';
 import type { ParticipantHead } from './database.js';
@@ -341,7 +342,7 @@ export const readDataRecord = async (
     ]);
     if (!(blob instanceof Blob) || blob.size !== reference.length)
         throw new Error('A participant data record is missing.');
-    const bytes = new Uint8Array(await blob.arrayBuffer());
+    const bytes = await recordBytes(blob);
     if (
         !equalBytes(
             custodyIdentity(context.module, custodyPurpose.record, bytes),

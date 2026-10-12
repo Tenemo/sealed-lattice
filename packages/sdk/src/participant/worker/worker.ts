@@ -131,11 +131,13 @@ const run = async (
                     // changes anything. A local failure after authority
                     // started stops the participant before any other
                     // operation takes the lock. A failed helper, an exhausted
-                    // memory bound and a module call that ended without
-                    // returning touch no retained state and leave the
-                    // participant pending. Enrollment converts failures after
-                    // its intent but before retaining its secrets into local
-                    // state loss instead.
+                    // memory bound or a refused allocation, a module call
+                    // that ended without returning, and a storage request,
+                    // transaction or read that the browser failed touch no
+                    // retained state and leave the participant pending.
+                    // Enrollment converts failures after its intent but
+                    // before retaining its secrets into local state loss
+                    // instead.
                     const outcome = classifyFailure(error, authorityStarted);
                     if (outcome.status === 'refused')
                         return refused(outcome.reason);

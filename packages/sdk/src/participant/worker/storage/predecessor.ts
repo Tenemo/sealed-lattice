@@ -5,6 +5,7 @@ import {
 } from '../module/runtime-bounds.js';
 import { equalBytes, hexadecimal } from '../shared/bytes.js';
 
+import { recordBytes } from './database.js';
 import { openSealedRecord } from './private-records.js';
 import { openRoot } from './root-sealing.js';
 import type { ParticipantTransactionReader } from './state-transaction.js';
@@ -165,7 +166,7 @@ export async function validateParticipantPredecessor(
         const blob = await reader.get(record.store, record.key);
         if (!(blob instanceof Blob) || blob.size !== record.byteLength)
             throw new Error('Required predecessor record is missing.');
-        const bytes = new Uint8Array(await blob.arrayBuffer());
+        const bytes = await recordBytes(blob);
         try {
             const { encryption, identity } = record;
             if (encryption !== undefined)

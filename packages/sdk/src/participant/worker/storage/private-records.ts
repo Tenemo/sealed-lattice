@@ -1,6 +1,6 @@
 import { recordKeyBytes, tagBytes } from '../module/runtime-bounds.js';
 
-import { readParticipantValue } from './database.js';
+import { readParticipantValue, recordBytes } from './database.js';
 import type { ParticipantStore } from './database.js';
 
 // Every private record beneath the authenticated root is sealed once under its
@@ -81,6 +81,6 @@ export const openRecord = async (
     return openSealedRecord(
         record.key,
         record.additionalData,
-        new Uint8Array(await blob.arrayBuffer()),
+        await recordBytes(blob),
     );
 };
