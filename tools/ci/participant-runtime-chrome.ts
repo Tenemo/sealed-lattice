@@ -113,12 +113,10 @@ export type SlowChromeClose = Readonly<{
     remaining?: Readonly<{ processes: number; bytes: number }>;
 }>;
 
-// A closing browser first finishes its storage work. Its process can still
-// take more than a minute to exit afterwards while unrelated backups, sync
-// clients and other programs keep the host's disks and processors busy, so a
-// close waits minutes before it counts Chrome as hung instead of cutting a
-// write; a terminated browser only has to exit.
-const closeMilliseconds = 300_000;
+// A closing browser first finishes its storage work, which takes longer
+// while other browsers keep the host's processors busy; a terminated one only
+// has to exit.
+const closeMilliseconds = 60_000;
 const slowCloseMilliseconds = 10_000;
 const terminationMilliseconds = 10_000;
 
@@ -155,6 +153,11 @@ export const launchChromeParticipant = async (
         '--no-first-run',
         '--no-default-browser-check',
         '--disable-extensions',
+        // Chrome connects to the Google updater shortly after it starts, and
+        // its shutdown waits for a connection already under way. The
+        // updater's COM activation can take minutes, so a participant browser
+        // asked to close meanwhile stayed open that long.
+        '--disable-updater-scheduler',
         '--enable-logging=stderr',
         '--remote-debugging-port=0',
         '--user-data-dir=' + profile,
