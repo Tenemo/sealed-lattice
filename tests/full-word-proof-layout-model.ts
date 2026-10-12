@@ -1,0 +1,191 @@
+import { auxiliaryInputEncryptionParameters } from '#tests/auxiliary-input-encryption-parameters.js';
+import { compileBallotEncryptionColumnLayout } from '#tests/ballot-encryption-relation-model.js';
+import { compileCommonAgreementDegreeCensus } from '#tests/common-agreement-degree-model.js';
+import { compileLinkedReleaseColumnLayout } from '#tests/linked-release-relation-model.js';
+import { maximumSharedPathSiblings } from '#tests/merkle-path-sharing-model.js';
+import { deriveSetupContributionShape } from '#tests/setup-contribution-relation-model.js';
+import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
+import type { SupportedProfile } from '#tests/supported-profile-model.js';
+import { proofCompilerCaps } from '#tests/wide-challenge-compiler-model.js';
+
+// Each tree draws one 512-bit seed and expands every leaf's salt from it and
+// the leaf's index through SHAKE256.
+export const merkleSaltSeedBytes = 64n;
+
+export const compileWordProofLayout = (
+    wordCount: number,
+    lookupCount: number,
+) => {
+    if (
+        !Number.isSafeInteger(wordCount) ||
+        wordCount <= 0 ||
+        !Number.isSafeInteger(lookupCount) ||
+        lookupCount <= 0
+    )
+        throw new RangeError('Invalid word-proof column shape.');
+    const agreement = compileCommonAgreementDegreeCensus();
+    const field = compileSmallLimbProofFieldCensus();
+    const foldCount = Math.log2(agreement.domainSize / 2);
+    const tagBytes = proofCompilerCaps.tagBits / 8n;
+    const saltBytes = proofCompilerCaps.saltBits / 8n;
+    const baseBytes = field.packedFieldElementByteLength;
+    const extensionBytes = field.packedExtensionElementByteLength;
+    const randomReadBytes = 65536n;
+    const randomFieldBytes = (count: bigint) =>
+        ((count * baseBytes + randomReadBytes - 1n) / randomReadBytes) *
+        randomReadBytes;
+    const firstWidth = BigInt(wordCount + 1) * baseBytes + extensionBytes;
+    const secondWidth = BigInt(lookupCount + 2) * extensionBytes;
+    const headerBytes =
+        4n +
+        2n * tagBytes +
+        3n * tagBytes +
+        extensionBytes +
+        BigInt(foldCount + 3) * saltBytes +
+        BigInt(foldCount - 1) * tagBytes +
+        extensionBytes;
+    let maximumProofBytes = headerBytes;
+    let maximumMultiproofBytes = headerBytes;
+    let maximumCachedNodes = 0;
+    // The three oracle trees, then one tree for each folded layer.
+    let treeCount = 3n;
+    const openingGroup = (length: number, width: bigint) =>
+        4n +
+        BigInt(Math.min(2 * agreement.queries, length)) *
+            (4n + width + saltBytes + BigInt(Math.log2(length)) * tagBytes);
+    const multiproofGroup = (length: number, width: bigint) => {
+        const count = Math.min(2 * agreement.queries, length);
+        const siblings = maximumSharedPathSiblings(length, count);
+        maximumCachedNodes = Math.max(maximumCachedNodes, 2 * siblings);
+        return (
+            4n +
+            BigInt(count) * (4n + width + saltBytes) +
+            BigInt(siblings) * tagBytes
+        );
+    };
+    for (const width of [firstWidth, secondWidth, extensionBytes]) {
+        maximumProofBytes += openingGroup(agreement.domainSize, width);
+        maximumMultiproofBytes += multiproofGroup(agreement.domainSize, width);
+    }
+    for (let length = agreement.domainSize / 2; length > 2; length /= 2) {
+        maximumProofBytes += openingGroup(length, extensionBytes);
+        maximumMultiproofBytes += multiproofGroup(length, extensionBytes);
+        treeCount++;
+    }
+    const minimumFirstOracleRandomBytes =
+        merkleSaltSeedBytes +
+        BigInt(wordCount + 1) *
+            randomFieldBytes(BigInt(agreement.maskDimension)) +
+        randomFieldBytes(3n * BigInt(agreement.codeDimension));
+    return {
+        foldCount,
+        headerBytes,
+        firstWidth,
+        secondWidth,
+        maximumProofBytes,
+        maximumMultiproofBytes,
+        maximumCachedNodeDigestBytes: BigInt(maximumCachedNodes) * tagBytes,
+        proverInterpolationPoints: agreement.codeDimension,
+        expandedFirstOracleBytes: firstWidth * BigInt(agreement.domainSize),
+        expandedSecondOracleBytes: secondWidth * BigInt(agreement.domainSize),
+        treeCount,
+        saltSeedBytes: treeCount * merkleSaltSeedBytes,
+        minimumFirstOracleRandomBytes,
+        minimumRequestedRandomBytes:
+            minimumFirstOracleRandomBytes +
+            (treeCount - 1n) * merkleSaltSeedBytes +
+            BigInt(foldCount + 3) * saltBytes +
+            BigInt(lookupCount + 1) *
+                randomFieldBytes(3n * BigInt(agreement.maskDimension)) +
+            randomFieldBytes(3n * BigInt(agreement.witnessDegree + 1)),
+        proverMaskBytes:
+            BigInt(wordCount + 1) *
+                BigInt(agreement.maskDimension) *
+                baseBytes +
+            BigInt(agreement.codeDimension) * extensionBytes +
+            BigInt(lookupCount + 1) *
+                BigInt(agreement.maskDimension) *
+                extensionBytes +
+            BigInt(agreement.witnessDegree + 1) * extensionBytes,
+    };
+};
+
+export const compileFullWordProofLayout = (profile: SupportedProfile) => {
+    const shape = deriveSetupContributionShape(profile);
+    return compileWordProofLayout(
+        shape.wordColumns + shape.booleanColumns,
+        shape.lookupEntries,
+    );
+};
+
+// An affine operator keeps the public values of its terms. The powers of
+// the challenge and the support indicators are regenerated where they are
+// used.
+export const compileBallotWordProofLayout = (profile: SupportedProfile) => {
+    const columns = compileBallotEncryptionColumnLayout(profile);
+    const agreement = compileCommonAgreementDegreeCensus();
+    const field = compileSmallLimbProofFieldCensus();
+    // Each encryption's weighted common-polynomial and key adjoints, at the
+    // FHE ring degree and at the auxiliary degree, and the score column.
+    const fheAdjointRows = BigInt(agreement.systematicSize);
+    const auxiliaryAdjointRows = auxiliaryInputEncryptionParameters.degree;
+    const scoreRows = BigInt(agreement.systematicSize);
+    return {
+        ...compileWordProofLayout(
+            columns.columns.length,
+            columns.lookups.length,
+        ),
+        residentPublicOperatorBytes:
+            (fheAdjointRows + auxiliaryAdjointRows + scoreRows) *
+            field.packedExtensionElementByteLength,
+    };
+};
+
+export const compileLinkedReleaseWordProofLayout = (
+    profile: SupportedProfile,
+) => {
+    const columns = compileLinkedReleaseColumnLayout(profile);
+    const agreement = compileCommonAgreementDegreeCensus();
+    const field = compileSmallLimbProofFieldCensus();
+    // The share polynomial's adjoint and the recipient key's weighted
+    // common-polynomial and key adjoints.
+    const shareAdjointRows = BigInt(agreement.systematicSize);
+    const recipientAdjointRows = BigInt(agreement.systematicSize);
+    return {
+        ...compileWordProofLayout(
+            columns.wordColumns + columns.booleanColumns,
+            columns.lookups.length,
+        ),
+        residentPublicOperatorBytes:
+            (shareAdjointRows + recipientAdjointRows) *
+            field.packedExtensionElementByteLength,
+    };
+};
+
+// A high-degree term aliases to a constant on the prover's smaller
+// interpolation domain. Verification must retain the complete domain.
+export const proverInterpolationAlias = () => {
+    const prime = 97n,
+        root = 28n,
+        coset = 2n,
+        length = 32,
+        dimension = 16;
+    const modulo = (value: bigint) => ((value % prime) + prime) % prime;
+    const points = Array.from(
+        { length },
+        (_unused, index) => (coset * root ** BigInt(index)) % prime,
+    );
+    const claimedConstant = coset ** BigInt(dimension) % prime;
+    const actual = points.map((point) => point ** BigInt(dimension) % prime);
+    return {
+        points,
+        claimedConstant,
+        actual,
+        evenAgreement: actual.every(
+            (value, index) => index % 2 !== 0 || value === claimedConstant,
+        ),
+        oddDifference: actual
+            .filter((_value, index) => index % 2 !== 0)
+            .map((value) => modulo(value - claimedConstant)),
+    };
+};

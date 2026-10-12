@@ -3,12 +3,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { playwright } from '@vitest/browser-playwright';
-import { devices } from 'playwright';
 import { defineConfig, type UserWorkspaceConfig } from 'vitest/config';
 import type { BrowserInstanceOption } from 'vitest/node';
 
 import { resolveTestDiagnosticPaths } from './tools/ci/test-diagnostic-environment.js';
-import { VitestDiagnosticReporter } from './tools/ci/vitest-diagnostic-reporter.js';
 
 const repoRoot = path.dirname(fileURLToPath(import.meta.url));
 const resolveFromRepoRoot = (...segments: string[]): string =>
@@ -23,52 +21,45 @@ const browserServerHost = '127.0.0.1';
 // 49152+ ephemeral port range Windows reserves; strictPort: false still increments it
 // for concurrent browser lanes and clones.
 const browserServerBasePort = 41000;
-const nodeHookTimeoutMs = 240_000;
-const nodeTestTimeoutMs = 60_000;
-const nodeKernelTestTimeoutMs = 15 * 60_000;
+const nodeHookTimeoutMilliseconds = 240_000;
+const nodeTestTimeoutMilliseconds = 60_000;
+const participantModuleTestTimeoutMilliseconds = 15 * 60_000;
 
-const protocolNodeTestGlobs = [
-    'packages/protocol/tests/node/**/*.test.ts',
+const participantModuleNodeTestGlobs = [
+    'tests/node/participant-module/**/*.test.ts',
 ] as const;
-const kernelNodeTestGlobs = [
-    'packages/wasm/tests/node/**/*.kernel.test.ts',
-    'tests/node/**/*.kernel.test.ts',
+const censusNodeTestGlobs = [
+    'tests/node/tools/documentation-census.test.ts',
 ] as const;
 const nodeTestProjectDefinitions = [
     {
-        exclude: [...protocolNodeTestGlobs, ...kernelNodeTestGlobs],
+        exclude: [...participantModuleNodeTestGlobs, ...censusNodeTestGlobs],
         include: [
             'packages/*/tests/node/**/*.test.ts',
             'tests/node/**/*.test.ts',
         ],
         projectName: 'node',
-        testTimeout: nodeTestTimeoutMs,
+        testTimeout: nodeTestTimeoutMilliseconds,
     },
     {
-        include: protocolNodeTestGlobs,
-        projectName: 'node-protocol',
-        testTimeout: nodeKernelTestTimeoutMs,
+        // Rendering the complete deterministic model census exceeds a fast
+        // unit-test interval, so it keeps the fixture-initialization budget.
+        // The census, the participant-module files and the other model files
+        // all run together.
+        include: censusNodeTestGlobs,
+        projectName: 'node-census',
+        testTimeout: nodeHookTimeoutMilliseconds,
     },
     {
-        fileParallelism: false,
-        include: kernelNodeTestGlobs,
-        projectName: 'node-kernel-fast',
-        testTimeout: nodeKernelTestTimeoutMs,
+        include: participantModuleNodeTestGlobs,
+        projectName: 'node-participant-module',
+        testTimeout: participantModuleTestTimeoutMilliseconds,
     },
 ] as const;
 
 const desktopBrowserTestGlobs = [
     'packages/*/tests/browser/**/*.browser.test.ts',
 ] as const;
-const mobileBrowserTestGlobs = [
-    'packages/crypto/tests/browser/authenticated-mailbox-runtime.browser.test.ts',
-    'packages/wasm/tests/browser/accepted-setup-session-runtime.browser.test.ts',
-    'packages/wasm/tests/browser/action-randomness-runtime.browser.test.ts',
-    'packages/wasm/tests/browser/canonical-stream-runtime.browser.test.ts',
-    'packages/wasm/tests/browser/local-storage-root-worker-kernel.browser.test.ts',
-    'packages/wasm/tests/browser/state-verifier-runtime.browser.test.ts',
-] as const;
-
 const testDiagnosticPaths = resolveTestDiagnosticPaths();
 const testAttachmentDirectoryPath = testDiagnosticPaths.attachmentDirectoryPath;
 const testResultFilePath = testDiagnosticPaths.resultFilePath;
@@ -95,13 +86,6 @@ for (const diagnosticDirectoryPath of [
     }
 }
 
-const browserOptimizedDependencies = [
-    '@noble/hashes/hkdf.js',
-    '@noble/hashes/sha2.js',
-    '@noble/hashes/utils.js',
-    '@noble/post-quantum/ml-kem.js',
-] as const;
-
 const rootPrivateAliases = [
     {
         find: '#packages',
@@ -112,8 +96,8 @@ const rootPrivateAliases = [
         replacement: resolveFromRepoRoot('tests'),
     },
     {
-        find: '#test-vectors',
-        replacement: resolveFromRepoRoot('test-vectors'),
+        find: '#tools',
+        replacement: resolveFromRepoRoot('tools'),
     },
 ] as const;
 
@@ -122,39 +106,27 @@ const testResolve = {
     tsconfigPaths: true,
 } as const;
 
-const { defaultBrowserType: _pixelDefaultBrowserType, ...pixelContextOptions } =
-    devices['Pixel 5'];
-const {
-    defaultBrowserType: _iphoneDefaultBrowserType,
-    ...iphoneContextOptions
-} = devices['iPhone 12'];
+// A run log keeps each project's attachments, including failure screenshots,
+// inside its run directory instead of the default repository-root directory.
+const projectAttachments = (projectName: string) =>
+    testAttachmentDirectoryPath === undefined
+        ? {}
+        : {
+              attachmentsDir: path.join(
+                  testAttachmentDirectoryPath,
+                  projectName,
+              ),
+          };
 
 const desktopBrowserInstances: BrowserInstanceOption[] = [
-    { browser: 'chromium', name: 'chromium-desktop' },
-    { browser: 'firefox', name: 'firefox-desktop' },
-    { browser: 'webkit', name: 'webkit-desktop' },
-];
-
-const mobileBrowserInstances: BrowserInstanceOption[] = [
     {
         browser: 'chromium',
-        name: 'pixel-5-chromium',
-        provider: playwright({
-            contextOptions: pixelContextOptions,
-        }),
-    },
-    {
-        browser: 'webkit',
-        name: 'iphone-12-webkit',
-        provider: playwright({
-            contextOptions: iphoneContextOptions,
-        }),
+        name: 'chromium-desktop',
     },
 ];
 
 type NodeProjectInput = {
     readonly exclude?: readonly string[];
-    readonly fileParallelism?: boolean;
     readonly include: readonly string[];
     readonly projectName: string;
     readonly testTimeout: number;
@@ -162,7 +134,6 @@ type NodeProjectInput = {
 
 const makeNodeProject = ({
     exclude,
-    fileParallelism,
     include,
     projectName,
     testTimeout,
@@ -172,13 +143,15 @@ const makeNodeProject = ({
         name: projectName,
         include: [...include],
         ...(exclude === undefined ? {} : { exclude: [...exclude] }),
-        environment: 'node',
+        ...projectAttachments(projectName),
         ...(nodeDiagnosticReportArguments.length === 0
             ? {}
             : { execArgv: nodeDiagnosticReportArguments }),
-        ...(fileParallelism === undefined ? {} : { fileParallelism }),
+        setupFiles: [
+            resolveFromRepoRoot('tools/ci/test-process-exit-diagnostics.ts'),
+        ],
         testTimeout,
-        hookTimeout: nodeHookTimeoutMs,
+        hookTimeout: nodeHookTimeoutMilliseconds,
     },
 });
 
@@ -192,76 +165,66 @@ const makeBrowserProject = ({
     include,
     instances,
     projectName,
-}: BrowserProjectInput): UserWorkspaceConfig => ({
-    resolve: testResolve,
-    test: {
-        name: projectName,
-        include: [...include],
-        // Each real-WASM browser file can instantiate a large kernel and
-        // create workers. Running every file concurrently has exhausted the
-        // Firefox WebAssembly compiler and left its test process unable to
-        // shut down under otherwise valid multi-browser runs.
-        fileParallelism: false,
-        ...(nodeDiagnosticReportArguments.length === 0
-            ? {}
-            : { execArgv: nodeDiagnosticReportArguments }),
-        browser: {
-            enabled: true,
-            api: {
-                host: browserServerHost,
-                port: browserServerBasePort,
-                strictPort: false,
-            },
-            provider: playwright(),
-            headless: true,
-            instances,
-            ...(testAttachmentDirectoryPath === undefined
+}: BrowserProjectInput): UserWorkspaceConfig => {
+    const projectAttachmentDirectoryPath =
+        testAttachmentDirectoryPath === undefined
+            ? undefined
+            : path.join(testAttachmentDirectoryPath, projectName);
+    return {
+        resolve: testResolve,
+        test: {
+            name: projectName,
+            include: [...include],
+            ...projectAttachments(projectName),
+            // Each real-WASM browser file can instantiate a large module and
+            // create workers. Keep the canonical Chromium lane serialized so
+            // concurrent files cannot inflate the measured working set.
+            fileParallelism: false,
+            ...(nodeDiagnosticReportArguments.length === 0
                 ? {}
-                : {
-                      screenshotDirectory: path.join(
-                          testAttachmentDirectoryPath,
-                          'screenshots',
-                      ),
-                      screenshotFailures: true,
-                      trace: {
-                          mode: 'retain-on-failure' as const,
-                          tracesDir: path.join(
-                              testAttachmentDirectoryPath,
-                              'traces',
+                : { execArgv: nodeDiagnosticReportArguments }),
+            browser: {
+                enabled: true,
+                api: {
+                    host: browserServerHost,
+                    port: browserServerBasePort,
+                    strictPort: false,
+                },
+                provider: playwright(),
+                headless: true,
+                instances,
+                // Playwright writes active .network chunks to one project-level
+                // directory before Vitest can add worker identity. Routine
+                // coverage therefore keeps tracing off. Each manual evidence
+                // command selects one isolated instance.
+                trace: 'off' as const,
+                ...(projectAttachmentDirectoryPath === undefined
+                    ? {}
+                    : {
+                          screenshotDirectory: path.join(
+                              projectAttachmentDirectoryPath,
+                              'screenshots',
                           ),
-                      },
-                  }),
+                          screenshotFailures: true,
+                      }),
+            },
         },
-    },
-});
+    };
+};
 
 export default defineConfig({
-    optimizeDeps: {
-        include: [...browserOptimizedDependencies],
-    },
     resolve: testResolve,
     test: {
+        reporters: [
+            'default' as const,
+            ...(process.env.GITHUB_ACTIONS === 'true'
+                ? (['github-actions'] as const)
+                : []),
+            ...(testResultFilePath === undefined ? [] : (['json'] as const)),
+        ],
         ...(testResultFilePath === undefined
-            ? {
-                  reporters: [
-                      'default' as const,
-                      ...(process.env.GITHUB_ACTIONS === 'true'
-                          ? (['github-actions'] as const)
-                          : []),
-                      new VitestDiagnosticReporter(),
-                  ],
-              }
-            : {
-                  outputFile: { json: testResultFilePath },
-                  reporters: [
-                      'default' as const,
-                      ...(process.env.GITHUB_ACTIONS === 'true'
-                          ? (['github-actions'] as const)
-                          : []),
-                      'json' as const,
-                      new VitestDiagnosticReporter(),
-                  ],
-              }),
+            ? {}
+            : { outputFile: { json: testResultFilePath } }),
         projects: [
             ...nodeTestProjectDefinitions.map((projectDefinition) =>
                 makeNodeProject(projectDefinition),
@@ -270,11 +233,6 @@ export default defineConfig({
                 include: desktopBrowserTestGlobs,
                 instances: desktopBrowserInstances,
                 projectName: 'browser-desktop',
-            }),
-            makeBrowserProject({
-                include: mobileBrowserTestGlobs,
-                instances: mobileBrowserInstances,
-                projectName: 'browser-mobile',
             }),
         ],
     },

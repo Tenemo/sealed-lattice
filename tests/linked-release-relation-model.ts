@@ -1,0 +1,515 @@
+import assert from 'node:assert/strict';
+
+import { isCanonicalCenteredPolynomial } from '#tests/canonical-polynomial-model.js';
+import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
+import type { SupportedProfile } from '#tests/supported-profile-model.js';
+import { shareEncryptionParameters } from '#tests/wide-share-lifting-model.js';
+
+const sharing = shareEncryptionParameters;
+const releaseLimbBits = 48;
+const releaseRadix = 1n << BigInt(releaseLimbBits);
+const releaseCarryBits = 72;
+// The recipient-key and decoding equations split every operand, and the one
+// aggregate share, at a whole word for every profile.
+const decodingLimbBits = 96;
+const decodingRadix = 1n << BigInt(decodingLimbBits);
+// The summed share decryption error stays below the shared radius.
+const decodingErrorBits =
+    sharing.aggregateDecryptionErrorRadius.toString(2).length;
+const degree = 16;
+const modulo = (value: bigint, modulus: bigint) =>
+    ((value % modulus) + modulus) % modulus;
+const center = (value: bigint, modulus: bigint) => {
+    const result = modulo(value, modulus);
+    return result > modulus / 2n ? result - modulus : result;
+};
+const magnitude = (value: bigint) => (value < 0n ? -value : value);
+const signedDigit = (value: bigint, limb: number, base: bigint) =>
+    (value < 0n ? -1n : 1n) *
+    ((magnitude(value) / base ** BigInt(limb)) % base);
+const inRange = (value: bigint, bits: number) =>
+    value >= -(1n << BigInt(bits - 1)) && value < 1n << BigInt(bits - 1);
+const privateDigit = (
+    value: bigint,
+    bits: number,
+    limb: number,
+    limbBits: number,
+) => {
+    const base = 1n << BigInt(limbBits);
+    const count = Math.ceil(bits / limbBits);
+    if (limb >= count) return 0n;
+    let digit =
+        (modulo(value, 1n << BigInt(bits)) / base ** BigInt(limb)) % base;
+    if (limb === count - 1 && value < 0n)
+        digit -= 1n << BigInt(bits - limbBits * (count - 1));
+    return digit;
+};
+const convolution = (left: readonly bigint[], right: readonly bigint[]) => {
+    const ordinary = Array.from({ length: 2 * degree - 1 }, () => 0n);
+    for (let first = 0; first < degree; first++)
+        for (let second = 0; second < degree; second++)
+            ordinary[first + second] += left[first] * right[second];
+    return left.map(
+        (_value, position) =>
+            ordinary[position] - (ordinary[position + degree] ?? 0n),
+    );
+};
+const rowProduct = (
+    left: readonly bigint[],
+    right: readonly bigint[],
+    row: number,
+) =>
+    left.reduce(
+        (sum, value, index) =>
+            sum +
+            value *
+                right[(row - index + degree) % degree] *
+                (row < index ? -1n : 1n),
+        0n,
+    );
+
+export const compileLinkedReleaseColumnLayout = (profile: SupportedProfile) => {
+    const lifting = profile.releaseLifting;
+    const variables: readonly (readonly [string, number])[] = [
+        ['key-quotient', 16],
+        ['key-carry', 16],
+        ['key-error', 7],
+        ['aggregate-share', lifting.shareBits],
+        ['decoding-error', decodingErrorBits],
+        ['decoding-quotient', 16],
+        ['decoding-carry', 30],
+        ['release-noise', profile.releaseNoiseBits],
+        ['release-quotient', lifting.quotientBits],
+        ...Array.from(
+            { length: lifting.outputLimbs - 1 },
+            (_, index) => [`release-carry-${index}`, releaseCarryBits] as const,
+        ),
+    ];
+    let offset = 0;
+    const columns = variables.map(([name, bits]) => {
+        const width = bits;
+        const wordCount = Math.ceil(width / 16);
+        const column = {
+            name,
+            bits: width,
+            firstColumn: offset,
+            wordCount,
+        };
+        offset += wordCount;
+        return column;
+    });
+    const lookups = Array.from({ length: offset }, (_, column) => ({
+        column,
+        factor: 1n,
+    }));
+    for (const column of columns) {
+        const remainder = column.bits % 16;
+        if (remainder !== 0)
+            lookups.push({
+                column: column.firstColumn + column.wordCount - 1,
+                factor: 1n << BigInt(16 - remainder),
+            });
+    }
+    return {
+        columns,
+        lookups,
+        wordColumns: offset,
+        booleanColumns: 2,
+        positiveSecretColumn: offset,
+        negativeSecretColumn: offset + 1,
+    };
+};
+
+export const compileLinkedReleaseRelationCensus = (
+    profile: SupportedProfile,
+) => {
+    const recipientSupport = sharing.encryptionSupportWeight;
+    const radix = decodingRadix;
+    const lifting = profile.releaseLifting;
+    const shareBits = lifting.shareBits;
+    const decodingQuotientBits = 16;
+    const decodingCarryBits = 30;
+    const decodingErrorRadius = 1n << BigInt(decodingErrorBits - 1);
+    const decodingCarryRadius = 1n << BigInt(decodingCarryBits - 1);
+    const quotientRadius = 1n << BigInt(decodingQuotientBits - 1);
+    const trueDecodingQuotientBound =
+        ((recipientSupport + 1n) * (sharing.modulus / 2n) +
+            sharing.scale * (1n << BigInt(shareBits - 1)) +
+            decodingErrorRadius) /
+        sharing.modulus;
+    const trueDecodingCarryBound =
+        ((recipientSupport + trueDecodingQuotientBound + 2n) * (radix - 1n) +
+            sharing.scale * (radix / 2n) +
+            decodingErrorRadius) /
+            radix +
+        1n;
+    const decodingResidualBound =
+        (recipientSupport + quotientRadius + 2n) * (radix - 1n) +
+        sharing.scale * (radix / 2n) +
+        decodingErrorRadius +
+        decodingCarryRadius * (radix + 1n);
+    assert.ok(2n * decodingErrorRadius < sharing.scale);
+    assert.ok(
+        2n *
+            (sharing.scale * (1n << BigInt(shareBits - 1)) +
+                decodingErrorRadius) <
+            sharing.modulus,
+    );
+    assert.ok(
+        profile.shareLifting.aggregateSharingMaximum <
+            1n << BigInt(shareBits - 1),
+    );
+    assert.ok(trueDecodingQuotientBound < quotientRadius);
+    assert.ok(trueDecodingCarryBound < decodingCarryRadius);
+    assert.ok(decodingResidualBound < sharing.proofPrime);
+    assert.ok(lifting.holds && lifting.carryBound === 1n << 71n);
+    const layout = compileLinkedReleaseColumnLayout(profile);
+    const wordColumns = layout.wordColumns;
+    const narrowMemberships = layout.lookups.length - wordColumns;
+    return {
+        shareBits,
+        decodingErrorBits,
+        decodingQuotientBits,
+        decodingCarryBits,
+        trueDecodingQuotientBound,
+        trueDecodingCarryBound,
+        decodingResidualBound,
+        releaseResidualBound: lifting.residualBound,
+        wordColumns,
+        narrowMemberships,
+        lookupEntries: wordColumns + narrowMemberships,
+        booleanColumns: 2,
+        // Two key limbs, two decoding limbs and every release output limb.
+        affineRows:
+            BigInt(4 + lifting.outputLimbs) *
+                fixedModulusBfvInputs.polynomialDegree +
+            2n,
+    };
+};
+
+// This fixture retains the full moduli and accepted integer widths. Only the
+// physical ring and honest sparse supports are reduced for independent algebra.
+export const createLinkedReleaseRelationModel = (
+    profile: SupportedProfile,
+    seed = 1n,
+) => {
+    const bounds = compileLinkedReleaseRelationCensus(profile);
+    const radix = decodingRadix;
+    const lifting = profile.releaseLifting;
+    const releaseModulus = profile.release.modulus;
+    const releaseNoiseBits = profile.releaseNoiseBits;
+    const sharingDegree = BigInt(profile.releaseThreshold - 1);
+    const sharingRadius = profile.shareLifting.sharingRadius;
+    const zero = () => Array.from({ length: degree }, () => 0n);
+    let state = seed;
+    const random = () =>
+        (state =
+            (state * 6364136223846793005n + 1442695040888963407n) &
+            ((1n << 256n) - 1n));
+    const sparse = () => {
+        const result = zero();
+        let filled = 0;
+        while (filled < 4) {
+            const position = Number(random() % BigInt(degree));
+            if (result[position] !== 0n) continue;
+            result[position] = filled++ < 2 ? 1n : -1n;
+        }
+        return result;
+    };
+    const recipientSecret = zero().map((_value, index) =>
+        index < 4 ? (index < 2 ? 1n : -1n) : 0n,
+    );
+    const errors = () =>
+        zero().map((_value, index) =>
+            seed === 0n
+                ? index % 2 === 0
+                    ? -64n
+                    : 63n
+                : (random() & 127n) - 64n,
+        );
+    const common = zero().map(() => center(random(), sharing.modulus));
+    const keyError = errors();
+    const keyProduct = convolution(common, recipientSecret);
+    const publicKey = keyProduct.map((value, index) =>
+        center(-value + keyError[index], sharing.modulus),
+    );
+    const keyQuotient = keyProduct.map(
+        (value, index) =>
+            (value + publicKey[index] - keyError[index]) / sharing.modulus,
+    );
+    const encryptedConstant = zero(),
+        encryptedLinear = zero(),
+        share = zero();
+    // Each contributor's evaluated share has magnitude at most
+    // 1 + (d-1)*sharingRadius at a signed monomial point.
+    for (
+        let contributor = 0;
+        contributor < profile.setupContributorCount;
+        contributor++
+    ) {
+        const message = zero().map((_value, index) =>
+            seed === 0n
+                ? index % 2 === 0
+                    ? -sharingDegree * sharingRadius
+                    : sharingDegree * (sharingRadius - 1n)
+                : center(random(), 2n * sharingDegree * sharingRadius),
+        );
+        const ephemeral = sparse(),
+            errorConstant = errors(),
+            errorLinear = errors();
+        const firstProduct = convolution(publicKey, ephemeral),
+            secondProduct = convolution(common, ephemeral);
+        for (let index = 0; index < degree; index++) {
+            share[index] += message[index];
+            encryptedConstant[index] = center(
+                encryptedConstant[index] +
+                    firstProduct[index] +
+                    sharing.scale * message[index] +
+                    errorConstant[index],
+                sharing.modulus,
+            );
+            encryptedLinear[index] = center(
+                encryptedLinear[index] +
+                    secondProduct[index] +
+                    errorLinear[index],
+                sharing.modulus,
+            );
+        }
+    }
+    const phaseProduct = convolution(encryptedLinear, recipientSecret);
+    const decodedPhase = encryptedConstant.map((value, index) =>
+        center(value + phaseProduct[index], sharing.modulus),
+    );
+    const decodingError = decodedPhase.map(
+        (value, index) => value - sharing.scale * share[index],
+    );
+    const decodingQuotient = encryptedConstant.map(
+        (value, index) =>
+            (value +
+                phaseProduct[index] -
+                sharing.scale * share[index] -
+                decodingError[index]) /
+            sharing.modulus,
+    );
+    const targetLinear = zero().map(() => center(random(), releaseModulus));
+    const noise = zero().map((_value, index) =>
+        seed === 0n
+            ? index % 2 === 0
+                ? -(1n << BigInt(releaseNoiseBits - 1))
+                : (1n << BigInt(releaseNoiseBits - 1)) - 1n
+            : (random() % (1n << BigInt(releaseNoiseBits))) -
+              (1n << BigInt(releaseNoiseBits - 1)),
+    );
+    const partial = zero(),
+        releaseQuotient = zero();
+    const keyCarry = zero(),
+        decodingCarry = zero(),
+        releaseCarries = Array.from({ length: lifting.outputLimbs - 1 }, zero);
+    const lowerShare = () =>
+        share.map((value) => modulo(value, radix) - radix / 2n);
+    const upperShare = () =>
+        share.map(
+            (value) =>
+                (value - (modulo(value, radix) - radix / 2n) - radix / 2n) /
+                radix,
+        );
+    const keyRows = () =>
+        [0, 1].map((limb) =>
+            zero().map(
+                (_value, position) =>
+                    rowProduct(
+                        common.map((value) => signedDigit(value, limb, radix)),
+                        recipientSecret,
+                        position,
+                    ) +
+                    signedDigit(publicKey[position], limb, radix) -
+                    signedDigit(sharing.modulus, limb, radix) *
+                        keyQuotient[position] +
+                    (limb === 0
+                        ? -keyError[position] - radix * keyCarry[position]
+                        : keyCarry[position]),
+            ),
+        );
+    const decodingRows = () =>
+        [0, 1].map((limb) =>
+            zero().map(
+                (_value, position) =>
+                    rowProduct(
+                        encryptedLinear.map((value) =>
+                            signedDigit(value, limb, radix),
+                        ),
+                        recipientSecret,
+                        position,
+                    ) +
+                    signedDigit(encryptedConstant[position], limb, radix) -
+                    sharing.scale *
+                        (limb === 0 ? lowerShare() : upperShare())[position] -
+                    signedDigit(sharing.scale * (radix / 2n), limb, radix) -
+                    signedDigit(sharing.modulus, limb, radix) *
+                        decodingQuotient[position] +
+                    (limb === 0
+                        ? -decodingError[position] -
+                          radix * decodingCarry[position]
+                        : decodingCarry[position]),
+            ),
+        );
+    // c*(target*share + noise) = partial + releaseModulus*quotient, in
+    // 48-bit limbs with the profile's clearing factor c.
+    const clearing = lifting.clearingFactor;
+    const releaseRows = () =>
+        Array.from({ length: lifting.outputLimbs }, (_unused, limb) =>
+            zero().map((_value, position) => {
+                let residual =
+                    (limb > 0 ? releaseCarries[limb - 1][position] : 0n) -
+                    (limb < lifting.outputLimbs - 1
+                        ? releaseRadix * releaseCarries[limb][position]
+                        : 0n) -
+                    signedDigit(partial[position], limb, releaseRadix) +
+                    clearing *
+                        privateDigit(
+                            noise[position],
+                            releaseNoiseBits,
+                            limb,
+                            releaseLimbBits,
+                        );
+                for (
+                    let publicLimb = 0;
+                    publicLimb < lifting.publicLimbs;
+                    publicLimb++
+                ) {
+                    const privateLimb = limb - publicLimb;
+                    if (privateLimb < 0) continue;
+                    if (privateLimb < lifting.shareLimbs)
+                        residual +=
+                            clearing *
+                            rowProduct(
+                                targetLinear.map((value) =>
+                                    signedDigit(
+                                        value,
+                                        publicLimb,
+                                        releaseRadix,
+                                    ),
+                                ),
+                                share.map((value) =>
+                                    privateDigit(
+                                        value,
+                                        bounds.shareBits,
+                                        privateLimb,
+                                        releaseLimbBits,
+                                    ),
+                                ),
+                                position,
+                            );
+                    if (privateLimb < lifting.quotientLimbs)
+                        residual -=
+                            signedDigit(
+                                releaseModulus,
+                                publicLimb,
+                                releaseRadix,
+                            ) *
+                            privateDigit(
+                                releaseQuotient[position],
+                                lifting.quotientBits,
+                                privateLimb,
+                                releaseLimbBits,
+                            );
+                }
+                return residual;
+            }),
+        );
+    const recoverCarry = (
+        residuals: readonly bigint[],
+        destination: bigint[],
+        base: bigint,
+    ) =>
+        residuals.forEach((value, position) => {
+            assert.equal(value % base, 0n);
+            destination[position] = value / base;
+        });
+    recoverCarry(keyRows()[0], keyCarry, radix);
+    recoverCarry(decodingRows()[0], decodingCarry, radix);
+    const derivePartial = () => {
+        const product = convolution(targetLinear, share);
+        for (let position = 0; position < degree; position++) {
+            const raw = clearing * (product[position] + noise[position]);
+            partial[position] = center(raw, releaseModulus);
+            releaseQuotient[position] =
+                (raw - partial[position]) / releaseModulus;
+        }
+        releaseCarries.forEach((carry) => carry.fill(0n));
+        for (let limb = 0; limb < lifting.outputLimbs - 1; limb++)
+            recoverCarry(
+                releaseRows()[limb],
+                releaseCarries[limb],
+                releaseRadix,
+            );
+    };
+    derivePartial();
+    const boundedVariables: readonly (readonly [readonly bigint[], number])[] =
+        [
+            [keyError, 7],
+            [keyQuotient, 16],
+            [keyCarry, 16],
+            [share, bounds.shareBits],
+            [decodingError, bounds.decodingErrorBits],
+            [decodingQuotient, bounds.decodingQuotientBits],
+            [decodingCarry, bounds.decodingCarryBits],
+            [noise, releaseNoiseBits],
+            [releaseQuotient, lifting.quotientBits],
+            ...releaseCarries.map(
+                (values) => [values, releaseCarryBits] as const,
+            ),
+        ];
+    const rangeValid = () =>
+        boundedVariables.every(([values, bits]) =>
+            values.every((value) => inRange(value, bits)),
+        );
+    const rows = () => ({
+        key: keyRows().flat(),
+        decoding: decodingRows().flat(),
+        partial: releaseRows().flat(),
+    });
+    const verify = () =>
+        [common, publicKey, encryptedConstant, encryptedLinear].every(
+            (coefficients) =>
+                isCanonicalCenteredPolynomial(
+                    coefficients,
+                    degree,
+                    sharing.modulus,
+                ),
+        ) &&
+        [targetLinear, partial].every((coefficients) =>
+            isCanonicalCenteredPolynomial(coefficients, degree, releaseModulus),
+        ) &&
+        rangeValid() &&
+        recipientSecret.every((value) => value >= -1n && value <= 1n) &&
+        recipientSecret.filter((value) => value === 1n).length === 2 &&
+        recipientSecret.filter((value) => value === -1n).length === 2 &&
+        Object.values(rows())
+            .flat()
+            .every((value) => modulo(value, sharing.proofPrime) === 0n);
+    return {
+        recipientSecret,
+        common,
+        publicKey,
+        keyQuotient,
+        keyCarry,
+        keyError,
+        encryptedConstant,
+        encryptedLinear,
+        share,
+        decodingError,
+        decodingQuotient,
+        targetLinear,
+        noise,
+        partial,
+        releaseQuotient,
+        releaseCarries,
+        rows,
+        rangeValid,
+        verify,
+        derivePartial,
+        decodingCarry,
+        decodedPhase,
+    };
+};

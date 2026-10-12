@@ -1,14 +1,8 @@
 import path from 'node:path';
 
-export const testDiagnosticEnvironmentVariables = {
-    projectLabel: 'SEALED_LATTICE_TEST_PROJECT_LABEL',
-    runDirectory: 'SEALED_LATTICE_RUN_DIRECTORY',
-} as const;
-
 type ResolvedTestDiagnosticPaths = {
     readonly attachmentDirectoryPath?: string;
     readonly diagnosticReportDirectoryPath?: string;
-    readonly eventFilePath?: string;
     readonly projectLabel: string;
     readonly resultFilePath?: string;
 };
@@ -16,11 +10,8 @@ type ResolvedTestDiagnosticPaths = {
 export const resolveTestDiagnosticPaths = (
     environment: NodeJS.ProcessEnv = process.env,
 ): ResolvedTestDiagnosticPaths => {
-    const runDirectoryPath =
-        environment[testDiagnosticEnvironmentVariables.runDirectory];
-    const projectLabel =
-        environment[testDiagnosticEnvironmentVariables.projectLabel] ??
-        `vitest-${process.pid}`;
+    const runDirectoryPath = environment.SEALED_LATTICE_RUN_DIRECTORY;
+    const projectLabel = `vitest-${process.pid}`;
     if (runDirectoryPath === undefined) {
         return { projectLabel };
     }
@@ -35,11 +26,6 @@ export const resolveTestDiagnosticPaths = (
             runDirectoryPath,
             'diagnostic-reports',
             projectLabel,
-        ),
-        eventFilePath: path.join(
-            runDirectoryPath,
-            'tests',
-            `${projectLabel}.jsonl`,
         ),
         projectLabel,
         resultFilePath: path.join(

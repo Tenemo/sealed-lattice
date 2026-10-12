@@ -17,18 +17,6 @@
     "references": [
         {
             "path": "./packages/sdk"
-        },
-        {
-            "path": "./packages/types"
-        },
-        {
-            "path": "./packages/protocol"
-        },
-        {
-            "path": "./packages/crypto"
-        },
-        {
-            "path": "./packages/wasm"
         }
     ]
 }

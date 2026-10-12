@@ -1,27 +1,106 @@
 import { spawnSync } from 'node:child_process';
-import { access, mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
+import {
+    access,
+    mkdir,
+    mkdtemp,
+    readFile,
+    readdir,
+    rm,
+    writeFile,
+} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
-import { createLocalRunLog, runWithLocalRunLog } from '#tools/ci/local-run-log';
 import {
     runCommandsInSeries,
     type CommandInvocation,
-} from '#tools/ci/run-command';
+} from '#tools/ci/command-runner';
+import {
+    createLocalRunLog,
+    runArtifactDirectoryPath,
+    runWithLocalRunLog,
+} from '#tools/ci/local-run-log';
 
+const repositoryRootDirectoryPath = path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    '..',
+    '..',
+    '..',
+);
+
+const runGitCommand = (commandArguments: readonly string[]): string => {
+    const result = spawnSync('git', [...commandArguments], {
+        cwd: repositoryRootDirectoryPath,
+        encoding: 'utf8',
+        windowsHide: true,
+    });
+    if (result.status !== 0) {
+        throw new Error(
+            `Git command failed with status ${String(result.status)}: ${result.stderr}`,
+        );
+    }
+
+    return result.stdout;
+};
+
+// The log root of a temporary checkout, which also holds each run's artifacts.
 const withTemporaryLogRoot = async <Result>(
     action: (rootDirectoryPath: string) => Promise<Result>,
 ): Promise<Result> => {
-    const rootDirectoryPath = await mkdtemp(
+    const checkoutDirectoryPath = await mkdtemp(
         path.join(os.tmpdir(), 'sealed-lattice-local-run-log-'),
     );
     try {
-        return await action(rootDirectoryPath);
+        return await action(path.join(checkoutDirectoryPath, 'logs'));
     } finally {
-        await rm(rootDirectoryPath, { force: true, recursive: true });
+        await rm(checkoutDirectoryPath, { force: true, recursive: true });
+    }
+};
+
+// A repository with one committed file, outside any other repository.
+const withTemporaryRepository = async <Result>(
+    action: (repositoryDirectoryPath: string) => Promise<Result>,
+): Promise<Result> => {
+    const repositoryDirectoryPath = await mkdtemp(
+        path.join(os.tmpdir(), 'sealed-lattice-local-run-repository-'),
+    );
+    try {
+        const git = (commandArguments: readonly string[]) => {
+            const result = spawnSync(
+                'git',
+                [
+                    '-c',
+                    'user.name=Run log test',
+                    '-c',
+                    'user.email=run-log-test@example.com',
+                    '-c',
+                    'commit.gpgsign=false',
+                    '-c',
+                    'core.autocrlf=false',
+                    ...commandArguments,
+                ],
+                {
+                    cwd: repositoryDirectoryPath,
+                    encoding: 'utf8',
+                    windowsHide: true,
+                },
+            );
+            if (result.status !== 0)
+                throw new Error(`Git command failed: ${result.stderr}`);
+        };
+        git(['init', '--quiet']);
+        await writeFile(
+            path.join(repositoryDirectoryPath, 'tracked.txt'),
+            'committed line\n',
+        );
+        git(['add', 'tracked.txt']);
+        git(['commit', '--quiet', '--message', 'Add the tracked file']);
+        return await action(repositoryDirectoryPath);
+    } finally {
+        await rm(repositoryDirectoryPath, { force: true, recursive: true });
     }
 };
 
@@ -35,6 +114,16 @@ const readJsonLines = async (
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
     typeof value === 'object' && value !== null;
+
+const writeFileAt = async (
+    directoryPath: string,
+    relativePath: string,
+    contents: string,
+): Promise<void> => {
+    const filePath = path.join(directoryPath, relativePath);
+    await mkdir(path.dirname(filePath), { recursive: true });
+    await writeFile(filePath, contents);
+};
 
 const findOnlyRunDirectory = async (
     rootDirectoryPath: string,
@@ -54,6 +143,18 @@ const findOnlyRunDirectory = async (
 describe('local run logs', () => {
     it('records command output once with its stream and failure result', () =>
         withTemporaryLogRoot(async (rootDirectoryPath) => {
+            const expectedRepositoryCommitHash = runGitCommand([
+                'rev-parse',
+                '--verify',
+                'HEAD^{commit}',
+            ]).trim();
+            const expectedRepositoryTreeDirty =
+                runGitCommand([
+                    'status',
+                    '--porcelain=v1',
+                    '--untracked-files=normal',
+                    '--ignore-submodules=none',
+                ]).length > 0;
             const log = await createLocalRunLog({
                 commandLineArguments: [],
                 lanes: ['sample'],
@@ -85,6 +186,31 @@ describe('local run logs', () => {
             expect(output).toMatch(/\[sample-command\] \[stderr\] error/u);
             expect(output.match(/\bout\b/gu)).toHaveLength(1);
             expect(output.match(/\berror\b/gu)).toHaveLength(1);
+
+            const summary = JSON.parse(
+                await readFile(
+                    path.join(log.runDirectoryPath, 'summary.json'),
+                    'utf8',
+                ),
+            ) as Record<string, unknown>;
+            expect(summary.repositoryCommitHash).toBe(
+                expectedRepositoryCommitHash,
+            );
+            expect(summary.repositoryTreeDirty).toBe(
+                expectedRepositoryTreeDirty,
+            );
+            // A run that kept no artifacts names no artifact directory.
+            expect(summary).not.toHaveProperty('artifactDirectoryPath');
+            const diagnostics = await readFile(
+                path.join(log.runDirectoryPath, 'diagnostics.txt'),
+                'utf8',
+            );
+            expect(diagnostics).toContain(
+                `Repository commit: ${expectedRepositoryCommitHash}`,
+            );
+            expect(diagnostics).toContain(
+                `Repository tree dirty: ${String(expectedRepositoryTreeDirty)}`,
+            );
 
             const events = await readJsonLines(
                 path.join(log.runDirectoryPath, 'events.jsonl'),
@@ -187,6 +313,112 @@ describe('local run logs', () => {
             );
         }));
 
+    it('keeps the first operative failure instead of a stopped sibling', () =>
+        withTemporaryLogRoot(async (rootDirectoryPath) => {
+            const log = await createLocalRunLog({
+                commandLineArguments: [],
+                lanes: ['initiator', 'sibling'],
+                rootDirectoryPath,
+                scriptName: 'fail-fast sample',
+            });
+            log.writeEvent({
+                commandId: 'initiating-command',
+                details: { exitCode: 7 },
+                eventType: 'command-finished',
+            });
+            log.writeEvent({
+                commandId: 'stopped-sibling',
+                details: { exitCode: 1, terminationRequested: true },
+                eventType: 'command-finished',
+            });
+            await log.finish({ exitCode: 7 });
+
+            const summary = JSON.parse(
+                await readFile(
+                    path.join(log.runDirectoryPath, 'summary.json'),
+                    'utf8',
+                ),
+            ) as Record<string, unknown>;
+            expect(summary.failedCommandId).toBe('initiating-command');
+            await expect(
+                readFile(
+                    path.join(log.runDirectoryPath, 'diagnostics.txt'),
+                    'utf8',
+                ),
+            ).resolves.toContain('Failed command: initiating-command');
+        }));
+
+    it('preserves structured fail-fast cancellation attribution', () =>
+        withTemporaryLogRoot(async (rootDirectoryPath) => {
+            const log = await createLocalRunLog({
+                commandLineArguments: [],
+                lanes: ['sibling'],
+                rootDirectoryPath,
+                scriptName: 'cancellation sample',
+            });
+            const abortController = new AbortController();
+            const exitCode = await runCommandsInSeries(
+                [
+                    {
+                        args: [
+                            '--input-type=module',
+                            '--eval',
+                            'setInterval(() => undefined, 60_000);',
+                        ],
+                        command: process.execPath,
+                        description: 'Stopped sibling',
+                        logFileSlug: 'stopped-sibling',
+                    },
+                ],
+                {
+                    observer: {
+                        onCommandStart: () =>
+                            abortController.abort({
+                                classification: 'sibling-abort',
+                                initiator: 'Knip unused-code scan',
+                            }),
+                    },
+                    outputMode: 'capture',
+                    runLog: log,
+                    signal: abortController.signal,
+                },
+            );
+            await log.finish({ exitCode });
+
+            expect(exitCode).not.toBe(0);
+            const events = await readJsonLines(
+                path.join(log.runDirectoryPath, 'events.jsonl'),
+            );
+            expect(
+                events.find(
+                    (event) =>
+                        event.eventType === 'command-termination-requested',
+                )?.details,
+            ).toEqual({
+                reason: {
+                    classification: 'sibling-abort',
+                    initiator: 'Knip unused-code scan',
+                },
+            });
+            expect(
+                events.find((event) => event.eventType === 'command-finished')
+                    ?.details,
+            ).toMatchObject({
+                terminationReason: {
+                    classification: 'sibling-abort',
+                    initiator: 'Knip unused-code scan',
+                },
+                terminationRequested: true,
+            });
+            const summary = JSON.parse(
+                await readFile(
+                    path.join(log.runDirectoryPath, 'summary.json'),
+                    'utf8',
+                ),
+            ) as Record<string, unknown>;
+            expect(summary).not.toHaveProperty('failedCommandId');
+        }));
+
     it('keeps ordered event and resource journals through normal completion', () =>
         withTemporaryLogRoot(async (rootDirectoryPath) => {
             const log = await createLocalRunLog({
@@ -276,4 +508,336 @@ describe('local run logs', () => {
                 access(path.join(runDirectoryPath, 'summary.json')),
             ).rejects.toMatchObject({ code: 'ENOENT' });
         }));
+
+    it('keeps binary artifacts under the run date and name beside its diagnostics', () =>
+        withTemporaryLogRoot(async (rootDirectoryPath) => {
+            const log = await createLocalRunLog({
+                commandLineArguments: [],
+                lanes: ['sample'],
+                rootDirectoryPath,
+                scriptName: 'artifact sample',
+            });
+            const checkoutDirectoryPath = path.dirname(rootDirectoryPath);
+            expect(log.artifactDirectoryPath).toBe(
+                path.join(
+                    checkoutDirectoryPath,
+                    'temp',
+                    'run-artifacts',
+                    path.relative(rootDirectoryPath, log.runDirectoryPath),
+                ),
+            );
+            // A reader finds any run's artifacts from its run directory, in
+            // the checkout that holds the run.
+            expect(runArtifactDirectoryPath(log.runDirectoryPath)).toBe(
+                log.artifactDirectoryPath,
+            );
+            const otherCheckoutDirectoryPath = path.join(
+                checkoutDirectoryPath,
+                'other-checkout',
+            );
+            expect(
+                runArtifactDirectoryPath(
+                    path.join(
+                        otherCheckoutDirectoryPath,
+                        'logs',
+                        '2026-09-26',
+                        '2026-09-26T12-28-12.441Z-research-participant',
+                    ),
+                ),
+            ).toBe(
+                path.join(
+                    otherCheckoutDirectoryPath,
+                    'temp',
+                    'run-artifacts',
+                    '2026-09-26',
+                    '2026-09-26T12-28-12.441Z-research-participant',
+                ),
+            );
+            await writeFileAt(
+                log.artifactDirectoryPath,
+                'ceremony/proof.bin',
+                'proof',
+            );
+            // Snapshotted sources and framework attachments may be binary.
+            const diagnosticFiles = [
+                'sources/crates/supported-profile/profiles.bin',
+                'attachments/chromium-desktop/resource.wasm',
+            ];
+            for (const relativePath of diagnosticFiles)
+                await writeFileAt(log.runDirectoryPath, relativePath, 'kept');
+            await log.finish({ exitCode: 0 });
+
+            const summary = JSON.parse(
+                await readFile(
+                    path.join(log.runDirectoryPath, 'summary.json'),
+                    'utf8',
+                ),
+            ) as Record<string, unknown>;
+            expect(summary.result).toBe('passed');
+            expect(summary.artifactDirectoryPath).toBe(
+                log.artifactDirectoryPath,
+            );
+            await expect(
+                readFile(
+                    path.join(log.runDirectoryPath, 'diagnostics.txt'),
+                    'utf8',
+                ),
+            ).resolves.toContain(`Artifacts: ${log.artifactDirectoryPath}`);
+            for (const relativePath of diagnosticFiles)
+                await expect(
+                    readFile(
+                        path.join(log.runDirectoryPath, relativePath),
+                        'utf8',
+                    ),
+                ).resolves.toBe('kept');
+            await expect(
+                readFile(
+                    path.join(log.artifactDirectoryPath, 'ceremony/proof.bin'),
+                    'utf8',
+                ),
+            ).resolves.toBe('proof');
+        }));
+
+    it('moves binary artifacts out of the run directory and fails the run', () =>
+        withTemporaryLogRoot(async (rootDirectoryPath) => {
+            const originalExitCode = process.exitCode;
+            try {
+                process.exitCode = undefined;
+                const log = await createLocalRunLog({
+                    commandLineArguments: [],
+                    lanes: ['sample'],
+                    rootDirectoryPath,
+                    scriptName: 'misplaced artifact sample',
+                });
+                const misplaced = [
+                    'proof.bin',
+                    'ceremony/close/intent.bin',
+                    'runtime/participant.wasm',
+                ];
+                for (const relativePath of misplaced)
+                    await writeFileAt(
+                        log.runDirectoryPath,
+                        relativePath,
+                        relativePath,
+                    );
+                await writeFileAt(
+                    log.runDirectoryPath,
+                    'ceremony/close/submissions.txt',
+                    'index',
+                );
+                // An artifact that already exists is never replaced.
+                await writeFileAt(log.runDirectoryPath, 'kept.bin', 'late');
+                await writeFileAt(
+                    log.artifactDirectoryPath,
+                    'kept.bin',
+                    'first',
+                );
+                await log.finish({ exitCode: 0 });
+
+                expect(process.exitCode).toBe(1);
+                const summary = JSON.parse(
+                    await readFile(
+                        path.join(log.runDirectoryPath, 'summary.json'),
+                        'utf8',
+                    ),
+                ) as Record<string, unknown>;
+                expect(summary).toMatchObject({
+                    exitCode: 1,
+                    result: 'runner-failure',
+                });
+                if (!isRecord(summary.error)) {
+                    throw new Error('Expected a runner failure.');
+                }
+                expect(summary.error.message).toContain(
+                    'The run directory held 4 binary artifacts',
+                );
+                expect(summary.error.message).toContain(
+                    `belong in ${log.artifactDirectoryPath}; 1 could not be moved.`,
+                );
+                for (const relativePath of misplaced) {
+                    await expect(
+                        readFile(
+                            path.join(log.artifactDirectoryPath, relativePath),
+                            'utf8',
+                        ),
+                    ).resolves.toBe(relativePath);
+                    await expect(
+                        access(path.join(log.runDirectoryPath, relativePath)),
+                    ).rejects.toMatchObject({ code: 'ENOENT' });
+                }
+                await expect(
+                    readFile(
+                        path.join(
+                            log.runDirectoryPath,
+                            'ceremony/close/submissions.txt',
+                        ),
+                        'utf8',
+                    ),
+                ).resolves.toBe('index');
+                await expect(
+                    readFile(
+                        path.join(log.runDirectoryPath, 'kept.bin'),
+                        'utf8',
+                    ),
+                ).resolves.toBe('late');
+                await expect(
+                    readFile(
+                        path.join(log.artifactDirectoryPath, 'kept.bin'),
+                        'utf8',
+                    ),
+                ).resolves.toBe('first');
+                const events = await readJsonLines(
+                    path.join(log.runDirectoryPath, 'events.jsonl'),
+                );
+                expect(
+                    events.find(
+                        (event) =>
+                            event.eventType === 'run-artifacts-misplaced',
+                    )?.details,
+                ).toMatchObject({ count: 4, unmoved: ['kept.bin'] });
+            } finally {
+                process.exitCode = originalExitCode;
+            }
+        }));
+
+    it('keeps the operative failure when a failed run also misplaced artifacts', () =>
+        withTemporaryLogRoot(async (rootDirectoryPath) => {
+            const log = await createLocalRunLog({
+                commandLineArguments: [],
+                lanes: ['sample'],
+                rootDirectoryPath,
+                scriptName: 'failed artifact sample',
+            });
+            await writeFileAt(log.runDirectoryPath, 'proof.bin', 'proof');
+            await log.finish({
+                error: new Error('Operative failure.'),
+                exitCode: 1,
+            });
+
+            const summary = JSON.parse(
+                await readFile(
+                    path.join(log.runDirectoryPath, 'summary.json'),
+                    'utf8',
+                ),
+            ) as Record<string, unknown>;
+            expect(summary.error).toMatchObject({
+                message: 'Operative failure.',
+            });
+            await expect(
+                readFile(
+                    path.join(log.artifactDirectoryPath, 'proof.bin'),
+                    'utf8',
+                ),
+            ).resolves.toBe('proof');
+            const events = await readJsonLines(
+                path.join(log.runDirectoryPath, 'events.jsonl'),
+            );
+            expect(
+                events.find(
+                    (event) => event.eventType === 'run-artifacts-misplaced',
+                )?.details,
+            ).toMatchObject({ count: 1, paths: ['proof.bin'], unmoved: [] });
+        }));
+
+    it('gives each run that starts at the same moment its own directory', () =>
+        withTemporaryLogRoot(async (rootDirectoryPath) => {
+            const now = new Date('2026-10-10T12:00:00.000Z');
+            const logs = [];
+            for (let index = 0; index < 3; index += 1) {
+                logs.push(
+                    await createLocalRunLog({
+                        commandLineArguments: [],
+                        lanes: ['sample'],
+                        now,
+                        rootDirectoryPath,
+                        scriptName: 'same moment',
+                    }),
+                );
+            }
+            for (const log of logs) await log.finish({ exitCode: 0 });
+
+            expect(
+                logs.map((log) => path.basename(log.runDirectoryPath)),
+            ).toEqual([
+                '2026-10-10T12-00-00.000Z-same-moment',
+                '2026-10-10T12-00-00.000Z-same-moment-2',
+                '2026-10-10T12-00-00.000Z-same-moment-3',
+            ]);
+            for (const log of logs) {
+                const metadata = JSON.parse(
+                    await readFile(
+                        path.join(log.runDirectoryPath, 'metadata.json'),
+                        'utf8',
+                    ),
+                ) as Record<string, unknown>;
+                expect(metadata.runDirectoryPath).toBe(log.runDirectoryPath);
+            }
+        }));
+
+    it('records the tracked changes and untracked names of a dirty tree, never untracked contents', () =>
+        withTemporaryRepository(async (repositoryDirectoryPath) => {
+            await writeFile(
+                path.join(repositoryDirectoryPath, 'tracked.txt'),
+                'changed line\n',
+            );
+            await writeFile(
+                path.join(repositoryDirectoryPath, 'untracked-notes.txt'),
+                'untracked contents\n',
+            );
+            await withTemporaryLogRoot(async (rootDirectoryPath) => {
+                const log = await createLocalRunLog({
+                    commandLineArguments: [],
+                    lanes: ['sample'],
+                    repositoryDirectoryPath,
+                    rootDirectoryPath,
+                    scriptName: 'dirty tree',
+                });
+                await log.finish({ exitCode: 0 });
+
+                const changes = await readFile(
+                    path.join(log.runDirectoryPath, 'working-tree.diff'),
+                    'utf8',
+                );
+                expect(changes).toContain('-committed line');
+                expect(changes).toContain('+changed line');
+                expect(changes).toContain('#   untracked-notes.txt');
+                expect(changes).not.toContain('untracked contents');
+                const summary = JSON.parse(
+                    await readFile(
+                        path.join(log.runDirectoryPath, 'summary.json'),
+                        'utf8',
+                    ),
+                ) as Record<string, unknown>;
+                expect(summary.repositoryTreeDirty).toBe(true);
+                expect(changes).toContain(
+                    `# Changes against ${String(summary.repositoryCommitHash)} when the run started.`,
+                );
+                await expect(
+                    readFile(
+                        path.join(log.runDirectoryPath, 'diagnostics.txt'),
+                        'utf8',
+                    ),
+                ).resolves.toContain('Working-tree changes: ');
+            });
+        }));
+
+    it('records no working-tree changes for a clean tree', () =>
+        withTemporaryRepository(async (repositoryDirectoryPath) =>
+            withTemporaryLogRoot(async (rootDirectoryPath) => {
+                const log = await createLocalRunLog({
+                    commandLineArguments: [],
+                    lanes: ['sample'],
+                    repositoryDirectoryPath,
+                    rootDirectoryPath,
+                    scriptName: 'clean tree',
+                });
+                await log.finish({ exitCode: 0 });
+
+                await expect(
+                    access(
+                        path.join(log.runDirectoryPath, 'working-tree.diff'),
+                    ),
+                ).rejects.toMatchObject({ code: 'ENOENT' });
+            }),
+        ));
 });
