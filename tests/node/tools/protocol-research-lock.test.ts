@@ -11,7 +11,10 @@ import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { acquireProtocolResearchLock } from '#tools/ci/protocol-research-lock.js';
+import {
+    acquireEvidenceRenewalLock,
+    acquireProtocolResearchLock,
+} from '#tools/ci/protocol-research-lock.js';
 import { serializeErrorDiagnostic } from '#tools/ci/run-log-diagnostics.js';
 
 const fault = vi.hoisted(() => ({
@@ -133,6 +136,32 @@ describe('protocol research serialization', () => {
         });
         const nextRelease = await acquireProtocolResearchLock('run-two', root);
         await nextRelease();
+    });
+
+    it('serializes evidence renewals apart from the research runs inside them', async () => {
+        const renewalLockPath = path.join(root, 'temp/evidence-renewal.lock');
+        const releaseRenewal = await acquireEvidenceRenewalLock(
+            'renewal-one',
+            root,
+        );
+        try {
+            await expect(
+                acquireEvidenceRenewalLock('renewal-two', root),
+            ).rejects.toMatchObject({ code: 'EEXIST' });
+            const releaseResearch = await acquireProtocolResearchLock(
+                'research-step',
+                root,
+            );
+            await releaseResearch();
+            expect(JSON.parse(await readFile(renewalLockPath, 'utf8'))).toEqual(
+                { pid: process.pid, run: 'renewal-one' },
+            );
+        } finally {
+            await releaseRenewal();
+        }
+        await expect(readFile(renewalLockPath)).rejects.toMatchObject({
+            code: 'ENOENT',
+        });
     });
 
     it.each(['partial-write', 'initial-stat'] as const)(

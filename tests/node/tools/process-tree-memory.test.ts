@@ -123,6 +123,31 @@ describe('process-tree memory', () => {
         expect(samples).toHaveLength(1);
     });
 
+    it('stops during a long sampling interval without waiting for it', async () => {
+        const processIdentifier = spawnIdleChild();
+        const aborted: unknown[] = [];
+        let settle: () => void = () => undefined;
+        const sampled = new Promise<void>((resolve) => {
+            settle = resolve;
+        });
+        const guard = guardProcessTreeMemory({
+            processIdentifier,
+            memoryLimit: Number.MAX_SAFE_INTEGER,
+            exceededMessage: 'The test guard was exceeded.',
+            sampleIntervalMilliseconds: 3_600_000,
+            onSample: () => settle(),
+            abort: (reason) => {
+                aborted.push(reason);
+                settle();
+            },
+        });
+        await sampled;
+        const stopping = performance.now();
+        await guard.stop();
+        expect(performance.now() - stopping).toBeLessThan(10_000);
+        expect(aborted).toEqual([]);
+    });
+
     it('samples nothing for a process that does not exist and stops cleanly', async () => {
         const samples: number[] = [];
         const aborted: unknown[] = [];

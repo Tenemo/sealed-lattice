@@ -124,7 +124,8 @@ export const readProtocolProcessTree = async (
     return sumProtocolProcessTree(identifier, await readProtocolProcesses());
 };
 
-// Samples a process tree's memory once a second until stopped. Every sample
+// Samples a process tree's memory once per interval, a second unless given,
+// until stopped; stopping ends the wait for the next sample. Every sample
 // reaches `onSample`, and a sample above the limit aborts the guarded run with
 // the guard's message.
 export const guardProcessTreeMemory = (input: {
@@ -133,8 +134,10 @@ export const guardProcessTreeMemory = (input: {
     readonly exceededMessage: string;
     readonly onSample: (bytes: number) => void | Promise<void>;
     readonly abort: (reason: unknown) => void;
+    readonly sampleIntervalMilliseconds?: number;
 }): { readonly stop: () => Promise<void> } => {
     let active = true;
+    const stopped = new AbortController();
     const sampling = (async () => {
         while (active) {
             const bytes = await readProtocolProcessTree(
@@ -145,7 +148,16 @@ export const guardProcessTreeMemory = (input: {
                 if (bytes > input.memoryLimit)
                     throw new Error(input.exceededMessage);
             }
-            if (active) await setTimeout(1000);
+            if (!active) break;
+            try {
+                await setTimeout(
+                    input.sampleIntervalMilliseconds ?? 1000,
+                    undefined,
+                    { signal: stopped.signal },
+                );
+            } catch (error) {
+                if (!stopped.signal.aborted) throw error;
+            }
         }
     })().catch((error: unknown) => {
         input.abort(error);
@@ -153,6 +165,7 @@ export const guardProcessTreeMemory = (input: {
     return {
         stop: async () => {
             active = false;
+            stopped.abort();
             await sampling;
         },
     };
