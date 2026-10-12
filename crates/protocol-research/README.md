@@ -2,7 +2,7 @@
 
 research direction
 
-This workspace versions the executable threshold-FHE research construction. The published SDK's participant module is built from its crates. End-to-end post-quantum security is unestablished. Use synthetic data only.
+This workspace versions the executable threshold-FHE research construction. The published SDK's participant module is built from its crates. End-to-end post-quantum security is unestablished.
 
 The current setup uses signed contribution offers and a quorum-certified selection. The fixed eligible pool contains the first `d+f` original positions, where `d = max(f + 1, 2)`; the organizer selects `d` complete verified offers, and `n-f` matching endorsements certify that selection. Each member confirms the roster locally before acting, and any original member can accept the winning certificate after verifying its inputs. There is no all-participant confirmation inventory or separate contribution-opening operation. The complete security argument, asynchronous adversarial cases and browser lifecycle still require their corresponding checks; one departure case does not establish the full availability guarantee.
 

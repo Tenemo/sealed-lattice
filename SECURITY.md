@@ -1,6 +1,6 @@
 # Security policy
 
-`sealed-lattice` is an unaudited post-quantum-targeting research prototype. End-to-end security is unestablished, and no released version is approved for production elections or other security-sensitive use. Use synthetic data only.
+`sealed-lattice` is an unaudited post-quantum-targeting research prototype. End-to-end security is unestablished, and no released version is approved for production elections or other security-sensitive use.
 
 ## Report a vulnerability
 
