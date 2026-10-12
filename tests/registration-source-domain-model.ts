@@ -57,7 +57,7 @@ export const registrationSourceMask = (
     header(1, 4 + modulus.length);
     integer(4, BigInt(modulus.length));
     literal(modulus);
-    header(4, 8);
+    header(5, 8);
     integer(8, sampleBits);
     header(1, 4 + coordinateBytes);
     integer(4, BigInt(coordinateBytes));

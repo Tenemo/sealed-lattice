@@ -1,3 +1,5 @@
+import { readFile } from 'node:fs/promises';
+
 import { expect, it } from 'vitest';
 
 import { compileCurrentSignatureHashInputs } from '#tests/authentication-work-model.js';
@@ -12,6 +14,39 @@ import {
     minimumRegistrationSourceInputBytes,
 } from '#tests/registration-source-domain-model.js';
 import { compileRegistrationSourceRandomness } from '#tests/registration-source-randomness-model.js';
+
+// The canonical item type codes of the production codec, so that the
+// independent frames below carry the bytes the real commitment hashes.
+const itemTypes = new Map(
+    [
+        ...(
+            /pub enum CanonicalItemType \{([^}]*)\}/u.exec(
+                await readFile(
+                    new URL(
+                        '../../../crates/protocol-research/protocol-foundations/src/foundation/canonical-tuple/value.rs',
+                        import.meta.url,
+                    ),
+                    'utf8',
+                ),
+            )?.[1] ?? ''
+        ).matchAll(/(\w+) = 0x([0-9a-f]+),/gu),
+    ].map(([, name, code]) => [name, Number.parseInt(code, 16)]),
+);
+const itemType = (name: string) => {
+    const code = itemTypes.get(name);
+    if (code === undefined)
+        throw new Error('The codec defines no item type ' + name + '.');
+    return code;
+};
+const sourceItemTypes = [
+    'Ascii',
+    'RawBytes',
+    'RawBytes',
+    'Hash512',
+    'RawBytes',
+    'Unsigned64',
+    'RawBytes',
+].map(itemType);
 
 const uint = (width: number, value: number | bigint) => {
     const bytes = Buffer.alloc(width);
@@ -32,13 +67,16 @@ const frame = (
 ) =>
     Buffer.concat([
         Buffer.from('0100010007000000', 'hex'),
-        field(2, variable(Buffer.from('sealed-lattice/registered-fhe-key/v2'))),
-        field(1, owner),
-        field(1, Buffer.alloc(64, 3)),
-        field(6, Buffer.alloc(64, 5)),
-        field(1, variable(modulus)),
-        field(4, uint(8, sampleBits)),
-        field(1, variable(coordinate)),
+        field(
+            sourceItemTypes[0],
+            variable(Buffer.from('sealed-lattice/registered-fhe-key/v2')),
+        ),
+        field(sourceItemTypes[1], owner),
+        field(sourceItemTypes[2], Buffer.alloc(64, 3)),
+        field(sourceItemTypes[3], Buffer.alloc(64, 5)),
+        field(sourceItemTypes[4], variable(modulus)),
+        field(sourceItemTypes[5], uint(8, sampleBits)),
+        field(sourceItemTypes[6], variable(coordinate)),
     ]);
 
 it('separates the credential hash inputs from the source language by exact lengths', () => {
@@ -155,9 +193,7 @@ const decode = (bytes: Buffer, degree: number) => {
     }
     if (
         offset !== bytes.length ||
-        fields.some(
-            (value, index) => value.type !== [2, 1, 1, 6, 1, 4, 1][index],
-        )
+        fields.some((value, index) => value.type !== sourceItemTypes[index])
     )
         return undefined;
     const unwrap = (value: Buffer) =>
