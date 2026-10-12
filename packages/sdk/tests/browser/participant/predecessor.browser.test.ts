@@ -5,15 +5,11 @@ import {
     validateParticipantPredecessor,
 } from '#packages/sdk/src/participant/worker/storage/predecessor.js';
 import { commitParticipantState } from '#packages/sdk/src/participant/worker/storage/state-transaction.js';
+import { fixtureRequest } from '#tests/browser-storage.js';
 
 const stores = ['head', 'root', 'key', 'stopped', 'data', 'sealed'];
 const databases: IDBDatabase[] = [];
-const result = <Value>(request: IDBRequest<Value>) =>
-    new Promise<Value>((resolve, reject) => {
-        request.onsuccess = () => resolve(request.result);
-        request.onerror = () =>
-            reject(request.error ?? new Error('Record read failed.'));
-    });
+
 const done = (transaction: IDBTransaction) =>
     new Promise<void>((resolve, reject) => {
         transaction.oncomplete = () => resolve();
@@ -52,7 +48,7 @@ const fixture = async (generation = 16, rootNonce = generationSixteenNonce) => {
     opening.onupgradeneeded = () => {
         for (const name of stores) opening.result.createObjectStore(name);
     };
-    const database = await result(opening);
+    const database = await fixtureRequest(opening, 'Record read failed.');
     databases.push(database);
     const key = await crypto.subtle.generateKey(
         { name: 'AES-GCM', length: 256 },
@@ -151,8 +147,9 @@ const fixture = async (generation = 16, rootNonce = generationSixteenNonce) => {
     };
     const currentGeneration = async () =>
         (
-            (await result(
+            (await fixtureRequest(
                 database.transaction('head').objectStore('head').get(0),
+                'Record read failed.',
             )) as typeof head
         ).generation;
     return {
@@ -170,7 +167,10 @@ const fixture = async (generation = 16, rootNonce = generationSixteenNonce) => {
 afterEach(async () => {
     for (const database of databases.splice(0)) {
         database.close();
-        await result(indexedDB.deleteDatabase(database.name));
+        await fixtureRequest(
+            indexedDB.deleteDatabase(database.name),
+            'Record read failed.',
+        );
     }
 });
 

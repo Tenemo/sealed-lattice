@@ -14,28 +14,22 @@ import {
     namespacedName,
     setupCacheName,
 } from '#packages/sdk/src/participant/worker/storage/database.js';
+import { fixtureRequest, writeFixtureStore } from '#tests/browser-storage.js';
 
 const databases: IDBDatabase[] = [];
 const names: string[] = [];
-const result = <Value>(request: IDBRequest<Value>) =>
-    new Promise<Value>((resolve, reject) => {
-        request.onsuccess = () => resolve(request.result);
-        request.onerror = () =>
-            reject(request.error ?? new Error('Cache fixture read failed.'));
-    });
+
 const write = (
     database: IDBDatabase,
     change: (store: IDBObjectStore) => void,
 ) =>
-    new Promise<void>((resolve, reject) => {
-        const transaction = database.transaction('aggregate', 'readwrite');
-        transaction.oncomplete = () => resolve();
-        transaction.onabort = () =>
-            reject(
-                transaction.error ?? new Error('Cache fixture write failed.'),
-            );
-        change(transaction.objectStore('aggregate'));
-    });
+    writeFixtureStore(
+        database,
+        'aggregate',
+        change,
+        undefined,
+        'Cache fixture write failed.',
+    );
 
 // These are untrusted cache bytes and transport bounds only. No verifier,
 // signature or verified setup capability is replaced by this fixture.
@@ -46,7 +40,10 @@ const fixture = async () => {
     const opening = indexedDB.open(name, 1);
     opening.onupgradeneeded = () =>
         opening.result.createObjectStore('aggregate');
-    const database = await result(opening);
+    const database = await fixtureRequest(
+        opening,
+        'Cache fixture read failed.',
+    );
     databases.push(database);
     const context = {
         namespace,
@@ -79,7 +76,10 @@ const fixture = async () => {
 afterEach(async () => {
     for (const database of databases.splice(0)) database.close();
     for (const name of names.splice(0))
-        await result(indexedDB.deleteDatabase(name));
+        await fixtureRequest(
+            indexedDB.deleteDatabase(name),
+            'Cache fixture read failed.',
+        );
 });
 
 describe('bounded public aggregate cache reads', () => {
@@ -146,9 +146,12 @@ describe('bounded public aggregate cache reads', () => {
         ).rejects.toBe(refusal);
         expect(seen).toEqual([0, 6]);
         const transaction = database.transaction('aggregate', 'readonly');
-        expect(await result(transaction.objectStore('aggregate').count())).toBe(
-            0,
-        );
+        expect(
+            await fixtureRequest(
+                transaction.objectStore('aggregate').count(),
+                'Cache fixture read failed.',
+            ),
+        ).toBe(0);
     });
 });
 
@@ -181,11 +184,12 @@ const withBallotModule = (
     };
 };
 const cachedChunks = async (database: IDBDatabase) =>
-    result(
+    fixtureRequest(
         database
             .transaction('aggregate', 'readonly')
             .objectStore('aggregate')
             .count(),
+        'Cache fixture read failed.',
     );
 
 describe('ballot key delivery', () => {

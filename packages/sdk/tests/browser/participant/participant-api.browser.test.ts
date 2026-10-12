@@ -1,16 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
+import { fixtureRequest } from '#tests/browser-storage.js';
 import { openParticipant } from 'sealed-lattice';
-
-const requestResult = <Value>(request: IDBRequest<Value>) =>
-    new Promise<Value>((resolve, reject) => {
-        request.onsuccess = () => resolve(request.result);
-        request.onerror = () => reject(request.error ?? new Error('Failed.'));
-    });
 
 // Counts every store of a namespace's participant database.
 const storeCounts = async (name: string) => {
-    const database = await requestResult(indexedDB.open(name));
+    const database = await fixtureRequest(indexedDB.open(name), 'Failed.');
     try {
         const stores = [...database.objectStoreNames];
         const transaction = database.transaction(stores, 'readonly');
@@ -20,8 +15,9 @@ const storeCounts = async (name: string) => {
                     async (store) =>
                         [
                             store,
-                            await requestResult(
+                            await fixtureRequest(
                                 transaction.objectStore(store).count(),
+                                'Failed.',
                             ),
                         ] as const,
                 ),
@@ -52,7 +48,7 @@ const writeParticipant = async (name: string, head: unknown) => {
         for (const store of participantStores)
             opening.result.createObjectStore(store);
     };
-    const database = await requestResult(opening);
+    const database = await fixtureRequest(opening, 'Failed.');
     try {
         const key = await crypto.subtle.generateKey(
             { name: 'AES-GCM', length: 256 },
@@ -119,7 +115,7 @@ describe('participant API', () => {
                 true,
             );
         } finally {
-            await requestResult(indexedDB.deleteDatabase(name));
+            await fixtureRequest(indexedDB.deleteDatabase(name), 'Failed.');
         }
     });
 
@@ -151,7 +147,7 @@ describe('participant API', () => {
             expect(counts.head).toBe(1);
             expect(counts.stopped).toBe(0);
         } finally {
-            await requestResult(indexedDB.deleteDatabase(name));
+            await fixtureRequest(indexedDB.deleteDatabase(name), 'Failed.');
         }
     });
 
@@ -171,7 +167,7 @@ describe('participant API', () => {
                             .createObjectStore(store)
                             .put(Uint8Array.of(1), 0);
                 };
-                (await requestResult(opening)).close();
+                (await fixtureRequest(opening, 'Failed.')).close();
                 const before = await storeCounts(name);
                 const participant = openParticipant({
                     namespace,
@@ -189,11 +185,14 @@ describe('participant API', () => {
                         reason: 'unrecognized state',
                     });
                 expect(await storeCounts(name)).toEqual(before);
-                const reopened = await requestResult(indexedDB.open(name));
+                const reopened = await fixtureRequest(
+                    indexedDB.open(name),
+                    'Failed.',
+                );
                 expect(reopened.version).toBe(version);
                 reopened.close();
             } finally {
-                await requestResult(indexedDB.deleteDatabase(name));
+                await fixtureRequest(indexedDB.deleteDatabase(name), 'Failed.');
             }
         }
     });
@@ -223,7 +222,7 @@ describe('participant API', () => {
                     });
                 expect((await storeCounts(name)).stopped).toBe(1);
             } finally {
-                await requestResult(indexedDB.deleteDatabase(name));
+                await fixtureRequest(indexedDB.deleteDatabase(name), 'Failed.');
             }
         }
     });

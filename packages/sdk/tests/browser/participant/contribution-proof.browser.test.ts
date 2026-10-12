@@ -13,6 +13,7 @@ import {
     openRecord,
     sealRecord,
 } from '#packages/sdk/src/participant/worker/storage/private-records.js';
+import { fixtureRequest, writeFixtureStore } from '#tests/browser-storage.js';
 
 // Synthetic proof bytes isolate private storage framing and transport. Real
 // AES-GCM and IndexedDB are exercised; no fixture asserts proof acceptance.
@@ -38,24 +39,13 @@ const expectedSlots = [
 ];
 type Slot = (typeof expectedSlots)[number];
 const databases: IDBDatabase[] = [];
-const requestResult = <Value>(request: IDBRequest<Value>) =>
-    new Promise<Value>((resolve, reject) => {
-        request.onsuccess = () => resolve(request.result);
-        request.onerror = () =>
-            reject(request.error ?? new Error('Fixture read failed.'));
-    });
+
 const write = (
     database: IDBDatabase,
     change: (store: IDBObjectStore) => void,
 ) =>
-    new Promise<void>((resolve, reject) => {
-        const transaction = database.transaction('contribution', 'readwrite', {
-            durability: 'strict',
-        });
-        transaction.oncomplete = () => resolve();
-        transaction.onabort = () =>
-            reject(transaction.error ?? new Error('Fixture write failed.'));
-        change(transaction.objectStore('contribution'));
+    writeFixtureStore(database, 'contribution', change, {
+        durability: 'strict',
     });
 const proofBytes = (length: number) =>
     Uint8Array.from(
@@ -141,7 +131,7 @@ const fixture = async () => {
 afterEach(async () => {
     for (const database of databases.splice(0)) {
         database.close();
-        await requestResult(indexedDB.deleteDatabase(database.name));
+        await fixtureRequest(indexedDB.deleteDatabase(database.name));
     }
 });
 

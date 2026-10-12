@@ -1,4 +1,3 @@
-import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import {
     type IncomingMessage,
@@ -33,6 +32,7 @@ import {
     type ParticipantTransfer,
     observeParticipantTransfer,
 } from '#tools/ci/participant-transfer.js';
+import { rewriteWorkerCheckpoint } from '#tools/ci/worker-instrumentation.js';
 
 // The path of the organizer's origin under which the relay stores and
 // serves the second roster's records.
@@ -78,20 +78,12 @@ export const haltingClient = (
     worker: Buffer,
     generation: number,
 ): HaltingClient => {
-    const committed =
-        '\treturn {\n\t\thead,\n\t\tplaintext: reopened,\n\t\tmanifest\n\t};\n';
-    const bundled = worker.toString('utf8');
-    assert.equal(
-        bundled.split(committed).length,
-        2,
-        'The worker bundle does not return one committed root.',
-    );
-    const patched = Buffer.from(
-        bundled.replace(
+    const patched = rewriteWorkerCheckpoint(
+        worker,
+        'root-readback',
+        (committed) =>
+            `if (head.generation === ${String(generation)} && predecessor.head.generation !== ${String(generation)}) await new Promise(() => undefined);\n` +
             committed,
-            `\tif (head.generation === ${String(generation)} && predecessor.head.generation !== ${String(generation)}) await new Promise(() => undefined);\n` +
-                committed,
-        ),
     );
     return {
         generation,

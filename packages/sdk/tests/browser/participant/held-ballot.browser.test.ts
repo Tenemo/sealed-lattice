@@ -24,6 +24,7 @@ import {
     participantDatabaseName,
 } from '#packages/sdk/src/participant/worker/storage/database.js';
 import { sealRecord } from '#packages/sdk/src/participant/worker/storage/private-records.js';
+import { fixtureRequest, writeFixtureStore } from '#tests/browser-storage.js';
 
 const opened: IDBDatabase[] = [];
 const names: string[] = [];
@@ -43,24 +44,12 @@ const profile = readParticipantProfile(
     2,
 );
 if (profile === undefined) throw new Error('The fixture profile was refused.');
-const requestResult = <Value>(request: IDBRequest<Value>) =>
-    new Promise<Value>((resolve, reject) => {
-        request.onsuccess = () => resolve(request.result);
-        request.onerror = () =>
-            reject(request.error ?? new Error('Fixture read failed.'));
-    });
+
 const write = (
     database: IDBDatabase,
     change: (store: IDBObjectStore) => void,
     storeName: 'close' | 'ballot' = 'close',
-) =>
-    new Promise<void>((resolve, reject) => {
-        const transaction = database.transaction(storeName, 'readwrite');
-        transaction.oncomplete = () => resolve();
-        transaction.onabort = () =>
-            reject(transaction.error ?? new Error('Fixture write failed.'));
-        change(transaction.objectStore(storeName));
-    });
+) => writeFixtureStore(database, storeName, change);
 
 // This isolates ciphertext custody and selection, using real IndexedDB,
 // AES-GCM and the module's envelope identity. The synthetic envelope and body
@@ -141,7 +130,7 @@ const fixture = async (author = 1) => {
 afterEach(async () => {
     for (const database of opened.splice(0)) database.close();
     for (const name of names.splice(0))
-        await requestResult(
+        await fixtureRequest(
             indexedDB.deleteDatabase(participantDatabaseName(name)),
         );
 });

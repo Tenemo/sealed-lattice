@@ -5,15 +5,11 @@ import {
     commitParticipantState,
     type ParticipantTransactionReader,
 } from '#packages/sdk/src/participant/worker/storage/state-transaction.js';
+import { fixtureRequest } from '#tests/browser-storage.js';
 
 const databases: IDBDatabase[] = [];
 const stores = ['head', 'root', 'key', 'records'];
-const requestResult = <Value>(request: IDBRequest<Value>) =>
-    new Promise<Value>((resolve, reject) => {
-        request.onsuccess = () => resolve(request.result);
-        request.onerror = () =>
-            reject(request.error ?? new Error('IndexedDB request failed.'));
-    });
+
 const completed = (transaction: IDBTransaction) =>
     new Promise<void>((resolve, reject) => {
         transaction.oncomplete = () => resolve();
@@ -26,7 +22,7 @@ const fixture = async () => {
     opening.onupgradeneeded = () => {
         for (const store of stores) opening.result.createObjectStore(store);
     };
-    const database = await requestResult(opening);
+    const database = await fixtureRequest(opening, 'IndexedDB request failed.');
     databases.push(database);
     const key = await crypto.subtle.generateKey(
         { name: 'AES-GCM', length: 256 },
@@ -76,7 +72,10 @@ const fixture = async () => {
         );
     };
     const head = () =>
-        requestResult(database.transaction('head').objectStore('head').get(0));
+        fixtureRequest(
+            database.transaction('head').objectStore('head').get(0),
+            'IndexedDB request failed.',
+        );
     const commit = (
         check = validate,
         write = (transaction: IDBTransaction) => {
@@ -99,7 +98,10 @@ afterEach(async () => {
     vi.restoreAllMocks();
     for (const database of databases.splice(0)) {
         database.close();
-        await requestResult(indexedDB.deleteDatabase(database.name));
+        await fixtureRequest(
+            indexedDB.deleteDatabase(database.name),
+            'IndexedDB request failed.',
+        );
     }
 });
 

@@ -14,25 +14,17 @@ import {
     evaluatedTargetName,
     namespacedName,
 } from '#packages/sdk/src/participant/worker/storage/database.js';
+import { fixtureRequest, writeFixtureStore } from '#tests/browser-storage.js';
 
 const databases: IDBDatabase[] = [];
 const names: string[] = [];
-const result = <Value>(request: IDBRequest<Value>) =>
-    new Promise<Value>((resolve, reject) => {
-        request.onsuccess = () => resolve(request.result);
-        request.onerror = () =>
-            reject(request.error ?? new Error('Fixture read failed.'));
-    });
+
 const storeCopy = (database: IDBDatabase, bytes: Blob) =>
-    new Promise<void>((resolve, reject) => {
-        const transaction = database.transaction('target', 'readwrite');
-        transaction.oncomplete = () => resolve();
-        transaction.onabort = () =>
-            reject(transaction.error ?? new Error('Fixture write failed.'));
-        transaction.objectStore('target').put(bytes, 0);
+    writeFixtureStore(database, 'target', (store) => {
+        store.put(bytes, 0);
     });
 const storedCopy = (database: IDBDatabase) =>
-    result<unknown>(
+    fixtureRequest<unknown>(
         database.transaction('target').objectStore('target').get(0),
     );
 
@@ -45,7 +37,7 @@ const fixture = async (length = 2 * chunkBytes + 37) => {
     names.push(name);
     const opening = indexedDB.open(name, 1);
     opening.onupgradeneeded = () => opening.result.createObjectStore('target');
-    const database = await result(opening);
+    const database = await fixtureRequest(opening);
     databases.push(database);
     const bytes = Uint8Array.from(
         { length },
@@ -99,7 +91,7 @@ afterEach(async () => {
     vi.restoreAllMocks();
     for (const database of databases.splice(0)) database.close();
     for (const name of names.splice(0))
-        await result(indexedDB.deleteDatabase(name));
+        await fixtureRequest(indexedDB.deleteDatabase(name));
 });
 
 describe('retained target bounded copies', () => {
@@ -127,7 +119,7 @@ describe('retained target bounded copies', () => {
             fixed.bytes,
         );
         expect(sizes).toEqual([chunkBytes, chunkBytes, 37]);
-        const keys = await result(
+        const keys = await fixtureRequest(
             fixed.database
                 .transaction('target')
                 .objectStore('target')
