@@ -208,14 +208,17 @@ impl RosterProposal {
             }
         }
         let organizer_position = organizer_position.ok_or(Error::Context)?;
-        // The roster refuses a repeated signing key, and with it a repeated
-        // participant identity, which the key alone derives.
-        let signing_keys: BTreeSet<_> = records
-            .iter()
-            .map(|record| &record.header().signing_public)
-            .collect();
-        if signing_keys.len() != records.len() {
-            return Err(Error::Shape);
+        // The roster refuses a repeated signing key or participant identity.
+        // Distinct keys derive distinct identities only outside a collision of
+        // the identity hash, so the identities are compared as well.
+        let mut signing_keys = BTreeSet::new();
+        let mut participant_identities = BTreeSet::new();
+        for record in &records {
+            let signing_public = &record.header().signing_public;
+            let identity = derive_participant_identity(signing_public).map_err(|_| Error::Shape)?;
+            if !signing_keys.insert(signing_public) || !participant_identities.insert(identity) {
+                return Err(Error::Shape);
+            }
         }
         let body = encode_proposal(poll.identity(), bodies)?;
         let identity = hash_foundation_tuple_512(
