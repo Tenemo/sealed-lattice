@@ -224,38 +224,50 @@ export type OutcomeVerification = Readonly<
 // worker without helpers.
 const openHelpers = async (url: string) => {
     const count = affordedHelpers();
-    if (count === 0) return { workers: [], ports: [] };
     const workers: Worker[] = [];
     const ports: MessagePort[] = [];
-    const listening = await allStartedInTime(
-        Array.from(
-            { length: count },
-            () =>
-                new Promise<boolean>((resolve) => {
-                    const worker = new Worker(url, { type: 'module' });
-                    const channel = new MessageChannel();
-                    workers.push(worker);
-                    ports.push(channel.port2);
-                    worker.onmessage = () => {
-                        resolve(true);
-                    };
-                    worker.onerror = () => {
-                        resolve(false);
-                    };
-                    worker.postMessage(helperRole, [channel.port1]);
-                }),
-        ),
-    );
-    for (const worker of workers) {
-        worker.onmessage = null;
-        worker.onerror = null;
+    const ownedPorts: MessagePort[] = [];
+    const stop = () => {
+        for (const worker of workers) {
+            worker.onmessage = null;
+            worker.onerror = null;
+            worker.terminate();
+        }
+        for (const port of ownedPorts) port.close();
+        workers.length = ports.length = ownedPorts.length = 0;
+    };
+    if (count === 0) return { workers, ports, stop };
+    try {
+        const listening = await allStartedInTime(
+            Array.from(
+                { length: count },
+                () =>
+                    new Promise<boolean>((resolve) => {
+                        const worker = new Worker(url, { type: 'module' });
+                        workers.push(worker);
+                        const channel = new MessageChannel();
+                        ownedPorts.push(channel.port1, channel.port2);
+                        ports.push(channel.port2);
+                        worker.onmessage = () => {
+                            resolve(true);
+                        };
+                        worker.onerror = () => {
+                            resolve(false);
+                        };
+                        worker.postMessage(helperRole, [channel.port1]);
+                    }),
+            ),
+        );
+        for (const worker of workers) {
+            worker.onmessage = null;
+            worker.onerror = null;
+        }
+        if (!listening) stop();
+    } catch {
+        // Optional helpers that cannot start leave the operation scalar.
+        stop();
     }
-    if (!listening) {
-        for (const worker of workers) worker.terminate();
-        for (const port of ports) port.close();
-        return { workers: [], ports: [] };
-    }
-    return { workers, ports };
+    return { workers, ports, stop };
 };
 
 // Runs the command in a worker of its own beside helpers of their own, and
@@ -265,38 +277,47 @@ const runWorkerOnce = async (
     command: WorkerCommand | VerificationCommand,
 ) => {
     const helpers = await openHelpers(url);
-    return new Promise<WorkerResult>((resolve) => {
-        const worker = new Worker(url, { type: 'module' });
-        let finished = false;
-        const finish = (result: WorkerResult) => {
-            if (finished) return;
-            finished = true;
-            worker.terminate();
-            for (const helper of helpers.workers) helper.terminate();
-            resolve(result);
-        };
-        worker.onmessage = (event: MessageEvent<WorkerResult>) => {
-            finish(event.data);
-        };
-        worker.onerror = (event) => {
-            finish({
-                status: 'pending',
-                cause: 'worker',
-                detail: event.message || 'The participant worker failed.',
-            });
-        };
-        // The worker would wait for a failed helper's jobs, so the operation
-        // ends as pending, as when the browser closes.
-        for (const helper of helpers.workers)
-            helper.onerror = (event) => {
-                finish({
-                    status: 'pending',
-                    cause: 'worker',
-                    detail: event.message || 'A participant helper failed.',
-                });
-            };
-        worker.postMessage(command, helpers.ports);
+    let worker: Worker | undefined;
+    const pending = (detail: string): WorkerResult => ({
+        status: 'pending',
+        cause: 'worker',
+        detail,
     });
+    try {
+        return await new Promise<WorkerResult>((resolve) => {
+            worker = new Worker(url, { type: 'module' });
+            worker.onmessage = (event: MessageEvent<WorkerResult>) => {
+                resolve(event.data);
+            };
+            worker.onerror = (event) => {
+                resolve(
+                    pending(event.message || 'The participant worker failed.'),
+                );
+            };
+            worker.onmessageerror = () =>
+                resolve(
+                    pending(
+                        'The participant worker message could not be read.',
+                    ),
+                );
+            // The worker would wait for a failed helper's jobs, so the operation
+            // ends as pending, as when the browser closes.
+            for (const helper of helpers.workers)
+                helper.onerror = (event) => {
+                    resolve(
+                        pending(
+                            event.message || 'A participant helper failed.',
+                        ),
+                    );
+                };
+            worker.postMessage(command, helpers.ports);
+        });
+    } catch (error) {
+        return pending(error instanceof Error ? error.message : String(error));
+    } finally {
+        worker?.terminate();
+        helpers.stop();
+    }
 };
 
 // Runs the request's command. An instance's memory never shrinks and ends
