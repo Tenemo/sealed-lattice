@@ -8,6 +8,8 @@ import {
     unsigned32,
 } from '../../shared/bytes.js';
 
+import { contributionPhase } from './contribution-state.js';
+
 export type PreparationSignature = Readonly<
     | { stage: 'intent'; body: Uint8Array }
     | { stage: 'signed'; body: Uint8Array; signature: Uint8Array }
@@ -160,11 +162,12 @@ export const unusedPreparationPurposes = (bytes: Uint8Array) => {
         if (
             !equalBytes(contribution.subarray(0, 4), encodeText('PCS5')) ||
             phase === undefined ||
-            phase < 4 ||
-            phase > 9
+            phase < contributionPhase.generationIntent ||
+            phase > contributionPhase.signed
         )
             throw new Error('Invalid retained offer phase.');
-        if (phase < 9) mask |= purposeBit(signingPurpose.offer);
+        if (phase < contributionPhase.signed)
+            mask |= purposeBit(signingPurpose.offer);
     }
     for (const [purpose, field] of [
         [signingPurpose.selectionProposal, selection],

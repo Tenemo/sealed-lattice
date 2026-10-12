@@ -60,7 +60,7 @@ const buildDefinitions = [
 // and emit the entry's declarations.
 const buildTools = ['rolldown', 'tsdown', 'typescript'];
 
-export type ParticipantModuleBuild = Readonly<{
+type ParticipantModuleBuild = Readonly<{
     module: Buffer;
     // The compiler's version report without its host line, and the compiler
     // flags with the machine's paths replaced by their names, so neither

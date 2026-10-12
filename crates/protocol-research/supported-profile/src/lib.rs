@@ -443,7 +443,7 @@ impl Profile {
     /// gadget coordinate's encryption, two relinearization and automorphism
     /// key equations and each recipient's constant and linear share equations.
     /// Each equation has its quotient, its carries and its error.
-    pub fn setup_variable_bits(self) -> Vec<usize> {
+    fn setup_variable_bits(self) -> Vec<usize> {
         let mut bits = Vec::new();
         for _ in 0..self.sharing_degree() {
             bits.extend([

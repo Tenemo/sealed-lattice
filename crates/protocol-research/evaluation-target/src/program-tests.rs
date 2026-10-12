@@ -66,7 +66,7 @@ fn every_profile_and_requested_result_length_has_an_executable_program() {
         for top_count in [0, options + 1] {
             assert!(matches!(
                 RankingProgram::for_profile(profile, top_count),
-                Err(Error::UnsupportedTopCount)
+                Err(UnsupportedTopCount)
             ));
         }
     }

@@ -70,7 +70,7 @@ const monitorStopLimitMilliseconds = 10 * 60_000;
 const recentOutputLineLimit = 40;
 const monitorScriptName = 'monitor-host-contention';
 
-export type EvidenceRenewalPlan = Readonly<{
+type EvidenceRenewalPlan = Readonly<{
     carried: readonly EvidenceRenewalStepRecord[];
     run: readonly EvidenceRenewalStep[];
 }>;

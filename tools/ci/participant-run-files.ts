@@ -28,7 +28,7 @@ export type ParticipantTransferTotals = Readonly<{
 
 // The details of a `participant-operation` event: the participant's
 // cumulative origin counters when the operation ended.
-export type ParticipantOperationEvent = Readonly<{
+type ParticipantOperationEvent = Readonly<{
     milliseconds: number;
     operation: string;
     originTransfer: ParticipantTransferTotals;

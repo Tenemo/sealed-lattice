@@ -37,6 +37,15 @@ export type ContributionRecord = RecordLocation &
 
 export type CheckpointRecord = Readonly<{ key: Uint8Array; hash: Uint8Array }>;
 
+export const contributionPhase = {
+    generationIntent: 4,
+    checkpoint: 5,
+    continuationIntent: 6,
+    body: 7,
+    signingIntent: 8,
+    signed: 9,
+} as const;
+
 export type ContributionState = Readonly<{
     phase: number;
     position: number;
@@ -76,9 +85,17 @@ const signingLength = (profile: ParticipantProfile, kind: SigningKind) =>
         : profile.registration.signatureBytes;
 
 const retainedShape = (phase: number) => ({
-    stage: phase,
-    signingRecords: phase <= 7 ? 0 : phase === 8 ? 1 : 2,
-    seedBytes: phase === 4 || phase === 6 ? operationSeedBytes : 0,
+    signingRecords:
+        phase <= contributionPhase.body
+            ? 0
+            : phase === contributionPhase.signingIntent
+              ? 1
+              : 2,
+    seedBytes:
+        phase === contributionPhase.generationIntent ||
+        phase === contributionPhase.continuationIntent
+            ? operationSeedBytes
+            : 0,
 });
 
 const prefixBytes = 4 + 1 + 2 + 4 * 4;
@@ -157,8 +174,8 @@ export const decodeContributionState = (
     const phase = bytes[4];
     if (
         phase === undefined ||
-        phase < 4 ||
-        phase > 9 ||
+        phase < contributionPhase.generationIntent ||
+        phase > contributionPhase.signed ||
         bytes.length < prefix ||
         bytes.length > bounds.maximumStateBytes ||
         !equalBytes(bytes.subarray(0, 4), encodeText('PCS5'))
@@ -174,9 +191,9 @@ export const decodeContributionState = (
     const bodyRecords = bounds.publicRecords.length;
     const proofRecords = proofRecordLayout(bounds);
     const shaped =
-        shape.stage === 4
+        phase === contributionPhase.generationIntent
             ? headerLength === 0 && publicCount === 0 && privateCount === 0
-            : shape.stage <= 6
+            : phase <= contributionPhase.continuationIntent
               ? headerLength >= 1 &&
                 headerLength <= bounds.maximumCheckpointHeaderBytes &&
                 publicCount === bodyRecords &&
@@ -228,7 +245,7 @@ export const decodeContributionState = (
         publicRecords.push(record);
         offset += publicEntryBytes;
     }
-    if (shape.stage >= 7)
+    if (phase >= contributionPhase.body)
         proofLength(bounds, bytes.subarray(prefix, prefix + headerLength));
     const privateRecords: CheckpointRecord[] = [];
     for (let index = 0; index < privateCount; index++) {
@@ -307,12 +324,12 @@ export const discardInterruptedRecords = async (
     state: ContributionState | undefined,
 ) => {
     const proof = proofObject(context.profile);
-    if (state?.phase === 4)
+    if (state?.phase === contributionPhase.generationIntent)
         await discardStagedRecords(context.database, [
             { store: 'contribution' },
             { store: 'checkpoint' },
         ]);
-    else if (state?.phase === 6)
+    else if (state?.phase === contributionPhase.continuationIntent)
         await discardStagedRecords(context.database, [
             {
                 store: 'contribution',

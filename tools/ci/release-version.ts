@@ -3,9 +3,9 @@ import path from 'node:path';
 
 import { repositoryRoot, toolArguments } from '#tools/ci/command-line.js';
 
-export type ReleaseIncrement = 'minor' | 'patch';
+type ReleaseIncrement = 'minor' | 'patch';
 
-export type ReleaseVersionResult = {
+type ReleaseVersionResult = {
     readonly previousVersion: string;
     readonly tag: string;
     readonly version: string;

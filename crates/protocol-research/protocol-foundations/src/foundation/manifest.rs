@@ -62,7 +62,6 @@ impl OptionDefinition {
     }
 
     fn canonical_tuple(&self) -> SchemaResult<CanonicalTuple> {
-        self.validate()?;
         Ok(CanonicalTuple::new(
             OPTION_DEFINITION_SCHEMA_IDENTIFIER,
             FOUNDATION_SCHEMA_VERSION,
@@ -109,7 +108,9 @@ impl Manifest {
             display_title,
             options,
         };
-        manifest.validate()?;
+        manifest.validate_components()?;
+        // Construction also checks the combined nested-item size bound.
+        manifest.canonical_tuple()?;
         Ok(manifest)
     }
 
@@ -130,7 +131,6 @@ impl Manifest {
         let mut option_identifiers = BTreeSet::new();
         let mut display_labels = BTreeSet::new();
         for (option_position, option) in self.options().iter().enumerate() {
-            option.validate()?;
             if usize::from(option.option_index) != option_position {
                 return Err(FoundationSchemaError::new(
                     RefusalReason::WrongTypeOrLength,
@@ -156,7 +156,6 @@ impl Manifest {
     }
 
     fn canonical_tuple(&self) -> SchemaResult<CanonicalTuple> {
-        self.validate_components()?;
         let options = self
             .options
             .iter()
@@ -170,10 +169,6 @@ impl Manifest {
                 CanonicalItem::nested_tuple_list(&options)?,
             ],
         ))
-    }
-
-    fn validate(&self) -> SchemaResult<()> {
-        self.canonical_tuple().map(|_| ())
     }
 
     pub fn encode(&self) -> SchemaResult<Vec<u8>> {

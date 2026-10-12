@@ -11,7 +11,7 @@ import { runCheckedCommand } from '#tools/ci/command-runner.js';
 import type { ActiveLocalRunLog } from '#tools/ci/local-run-log.js';
 import { rustCompilerCommit, rustToolchain } from '#tools/ci/rust-toolchain.js';
 
-export type FixtureBuildContext = Readonly<{
+type FixtureBuildContext = Readonly<{
     root: string;
     log: ActiveLocalRunLog;
     environment: NodeJS.ProcessEnv;

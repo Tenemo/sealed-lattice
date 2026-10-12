@@ -26,7 +26,7 @@ pub fn random_base(count: usize) -> Vec<u128> {
     }
     output
 }
-pub(crate) fn random_extension(count: usize) -> Vec<Element> {
+fn random_extension(count: usize) -> Vec<Element> {
     Zeroizing::new(random_base(3 * count))
         .chunks_exact(3)
         .map(|values| [values[0], values[1], values[2]])

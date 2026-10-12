@@ -22,6 +22,7 @@ import {
     publishClose,
     resumeClose,
 } from '../stages/close/close.js';
+import { contributionPhase } from '../stages/contribution/contribution-state.js';
 import {
     beginContribution,
     continueContribution,
@@ -249,7 +250,10 @@ export const executeOperation = async (
         }
         case 'contribute': {
             let session = await resumeParticipant(profileContext(), root);
-            if (session.state === undefined || session.state.phase === 4) {
+            if (
+                session.state === undefined ||
+                session.state.phase === contributionPhase.generationIntent
+            ) {
                 const proposal = await reverifyRoster(
                     context,
                     relay,
@@ -267,14 +271,20 @@ export const executeOperation = async (
                 if (!isContributionSession(session))
                     throw new Error('No offer intent is retained.');
                 await generateContribution(session);
-            } else if (session.state.phase === 5 || session.state.phase === 6) {
+            } else if (
+                session.state.phase === contributionPhase.checkpoint ||
+                session.state.phase === contributionPhase.continuationIntent
+            ) {
                 if (!isContributionSession(session))
                     throw new Error('No own proof checkpoint is retained.');
                 await restoreCheckpoint(session, relay);
             }
             if (!isContributionSession(session))
                 throw new Error('No own offer is retained.');
-            if (session.state.phase === 5 || session.state.phase === 6)
+            if (
+                session.state.phase === contributionPhase.checkpoint ||
+                session.state.phase === contributionPhase.continuationIntent
+            )
                 await continueContribution(session);
             const offer = await signContribution(session);
             root = session.root;

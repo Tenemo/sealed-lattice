@@ -70,6 +70,7 @@ import {
     readProof,
 } from './contribution-proof.js';
 import {
+    contributionPhase,
     recordAssociatedData,
     signingObject,
     contributionInventory,
@@ -445,7 +446,7 @@ export const beginContribution = async (
     )
         throw new StorageFailure('The origin lacks room for a contribution.');
     const state: ContributionState = {
-        phase: 4,
+        phase: contributionPhase.generationIntent,
         position: context.position,
         header: new Uint8Array(),
         publicRecords: [],
@@ -453,7 +454,10 @@ export const beginContribution = async (
         signingRecords: [],
         seed: crypto.getRandomValues(new Uint8Array(operationSeedBytes)),
     };
-    await commitContribution(session, { phase: 4, state });
+    await commitContribution(session, {
+        phase: contributionPhase.generationIntent,
+        state,
+    });
     if (!isContributionSession(session))
         throw new Error('No contribution intent was retained.');
     return session;
@@ -468,7 +472,7 @@ export const generateContribution = async (session: ContributionSession) => {
     const { context } = session;
     const { module, profile } = context;
     const bounds = profile.contribution;
-    if (session.state.phase !== 4)
+    if (session.state.phase !== contributionPhase.generationIntent)
         throw new Error('No contribution intent is locked.');
     const run = proverRun(session, true);
     const privateRecords: CheckpointRecord[] = [];
@@ -549,7 +553,7 @@ export const generateContribution = async (session: ContributionSession) => {
         run.close();
     }
     await commitContribution(session, {
-        phase: 5,
+        phase: contributionPhase.checkpoint,
         state: {
             ...session.state,
             header,
@@ -571,7 +575,10 @@ export const restoreCheckpoint = async (
     const { context, state } = session;
     const { module, profile } = context;
     const phase = session.state.phase;
-    if (phase !== 5 && phase !== 6)
+    if (
+        phase !== contributionPhase.checkpoint &&
+        phase !== contributionPhase.continuationIntent
+    )
         throw new Error('No contribution checkpoint is retained.');
     if (
         !checkpoint(
@@ -652,11 +659,14 @@ export const continueContribution = async (session: ContributionSession) => {
     const { profile } = context;
     const bounds = profile.contribution;
     const phase = session.state.phase;
-    if (phase !== 5 && phase !== 6)
+    if (
+        phase !== contributionPhase.checkpoint &&
+        phase !== contributionPhase.continuationIntent
+    )
         throw new Error('No contribution checkpoint is retained.');
-    if (phase === 5)
+    if (phase === contributionPhase.checkpoint)
         await commitContribution(session, {
-            phase: 6,
+            phase: contributionPhase.continuationIntent,
             state: {
                 ...session.state,
                 seed: crypto.getRandomValues(
@@ -760,7 +770,7 @@ export const continueContribution = async (session: ContributionSession) => {
         run.close();
     }
     await commitContribution(session, {
-        phase: 7,
+        phase: contributionPhase.body,
         state: {
             ...state,
             header,
@@ -857,11 +867,12 @@ export const signContribution = async (
 ): Promise<SignedPacket> => {
     const { context } = session;
     const { profile } = context;
-    if (session.state.phase < 7)
+    if (session.state.phase < contributionPhase.body)
         throw new Error('No complete contribution is retained.');
-    if (session.state.phase === 9) return storedOffer(session);
+    if (session.state.phase === contributionPhase.signed)
+        return storedOffer(session);
     const envelope = await bodyOffer(session);
-    if (session.state.phase === 7) {
+    if (session.state.phase === contributionPhase.body) {
         const output = await sealContributionRecord(
             session,
             signingObject(profile, 'offerEnvelope'),
@@ -869,7 +880,7 @@ export const signContribution = async (
             envelope,
         );
         await commitContribution(session, {
-            phase: 8,
+            phase: contributionPhase.signingIntent,
             state: {
                 ...session.state,
                 signingRecords: [output.record],
@@ -895,7 +906,7 @@ export const signContribution = async (
         signed.signature,
     );
     await commitContribution(session, {
-        phase: 9,
+        phase: contributionPhase.signed,
         state: {
             ...session.state,
             signingRecords: [...session.state.signingRecords, output.record],

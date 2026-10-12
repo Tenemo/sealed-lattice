@@ -95,7 +95,7 @@ const sdkEntrySources = async (): Promise<readonly string[]> => {
     return recorded.sources;
 };
 
-export const buildSdkPackage = async (): Promise<void> => {
+const buildSdkPackage = async (): Promise<void> => {
     const participant = await buildParticipantModule();
     const { worker, sources: workerSources } = await buildParticipantWorker();
     const sourceManifest = Buffer.from(

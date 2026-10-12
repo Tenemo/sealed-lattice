@@ -4,9 +4,7 @@ use supported_profile::{DEGREE, Profile};
 const COMPARISON_BLOCK_WIDTH: usize = 16;
 
 #[derive(Debug, PartialEq, Eq)]
-pub enum Error {
-    UnsupportedTopCount,
-}
+pub struct UnsupportedTopCount;
 
 struct Instruction {
     operation: u32,
@@ -148,10 +146,10 @@ impl RankingProgram {
     /// The encrypted ranking of the profile's accepted ballots: their sum,
     /// every pairwise comparison, each option's rank over the comparison
     /// window and the rank-equality weights of the requested result length.
-    pub fn for_profile(profile: Profile, top_count: usize) -> Result<Self, Error> {
+    pub fn for_profile(profile: Profile, top_count: usize) -> Result<Self, UnsupportedTopCount> {
         let options = profile.options();
         if !(1..=options).contains(&top_count) {
-            return Err(Error::UnsupportedTopCount);
+            return Err(UnsupportedTopCount);
         }
         let mut builder = Builder {
             instructions: Vec::new(),

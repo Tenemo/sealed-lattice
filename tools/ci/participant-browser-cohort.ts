@@ -728,7 +728,7 @@ export const openParticipantCohort = async (
     });
     const origin = (position: number) =>
         `http://127.0.0.1:${String(basePort + position)}`;
-    const profile = (position: number) =>
+    const browserProfilePath = (position: number) =>
         path.join(profileDirectory, `participant-${String(position)}`);
     const copyProfile = (copy: string) =>
         path.join(profileDirectory, `copy-${copy}`);
@@ -744,7 +744,7 @@ export const openParticipantCohort = async (
     const depart = async (position: number) => {
         await browsers.crash(participantBrowser(position));
         departed.add(position);
-        await rm(profile(position), {
+        await rm(browserProfilePath(position), {
             recursive: true,
             maxRetries: 10,
             retryDelay: 500,
@@ -785,7 +785,7 @@ export const openParticipantCohort = async (
                 try {
                     chrome = await launchChromeParticipant(
                         copy === undefined
-                            ? profile(position)
+                            ? browserProfilePath(position)
                             : copyProfile(copy),
                         origin(position) +
                             (copy === secondRosterCopy ? secondRosterPath : ''),
@@ -1203,12 +1203,13 @@ export const openParticipantCohort = async (
     // handler can outlive the browser.
     const copyState = async (position: number, copy: string) => {
         await endBrowser(position);
-        await cp(profile(position), copyProfile(copy), {
+        await cp(browserProfilePath(position), copyProfile(copy), {
             recursive: true,
             errorOnExist: true,
             force: false,
             filter: (source) =>
-                path.relative(profile(position), source) !== 'Crashpad',
+                path.relative(browserProfilePath(position), source) !==
+                'Crashpad',
         });
         copies.set(copy, position);
     };
