@@ -1,3 +1,5 @@
+import { rootGeneration } from '../storage/root-generation.js';
+
 import { parallelJobBounds } from './parallel-helpers.js';
 import { operationSeedBytes, readModuleMemory } from './participant-module.js';
 import type { ParticipantModule } from './participant-module.js';
@@ -40,8 +42,12 @@ const maximum = (...values: number[]) => Math.max(...values);
 // organizer's proposal intent, and each suffix has a length.
 // The reservation includes the source key retained before setup. Later
 // roots retire that key and its capsule and use a shorter actual prefix.
-const rootPrefixBytes = 4 + 96 + 64 + 4;
-const preparedRootPrefixBytes = 4 + 64 + 64 + 4;
+export const requiresFheKeySources = (generation: number) =>
+    generation < rootGeneration.setupRetained;
+export const rootDataKeyBytes = (generation: number) =>
+    recordKeyBytes * (requiresFheKeySources(generation) ? 3 : 2);
+export const rootPrefixBytes = (generation: number) =>
+    4 + rootDataKeyBytes(generation) + identityBytes + 4;
 // A root reference: its kind, ordinal, length and identity.
 export const rootReferenceBytes = 1 + 4 + 4 + identityBytes;
 const suffixLengthBytes = 4;
@@ -356,7 +362,7 @@ const dataKindMaximums = (
 // The largest enrollment root: every record but the setup reference and
 // certificate, which it lacks, and the organizer's proposal intent.
 const enrollmentRootBytes = (registration: ParticipantLimits['registration']) =>
-    rootPrefixBytes +
+    rootPrefixBytes(rootGeneration.registered) +
     rootReferenceBytes *
         dataKindMaximums(registration, 0, 0).reduce(
             (total, bytes) => total + chunks(bytes),
@@ -646,10 +652,10 @@ const profileBounds = (
         bytes.reduce((total, value) => total + suffixLengthBytes + value, 0);
     const maximumRootBytes =
         maximum(
-            rootPrefixBytes +
+            rootPrefixBytes(rootGeneration.preparation) +
                 rootReferenceBytes * enrollmentRecords +
                 suffixes(maximumPreparationBytes),
-            preparedRootPrefixBytes +
+            rootPrefixBytes(rootGeneration.setupRetained) +
                 rootReferenceBytes * limits.root.maximumRecords +
                 maximum(
                     suffixes(

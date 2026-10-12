@@ -13,6 +13,7 @@ import type { ParticipantProfile } from '../../module/runtime-bounds.js';
 import { ballotEnvelopeOffset } from '../../module/runtime-bounds.js';
 import { createCandidatePublication } from '../../relay/publication.js';
 import type { PublicRelay } from '../../relay/relay.js';
+import type { ParticipantSession } from '../../runtime/participant-session.js';
 import {
     concatenate,
     equalBytes,
@@ -43,7 +44,6 @@ import {
     closeRecordInventory,
     decodeCloseState,
 } from '../close/close-state.js';
-import type { ParticipantSession } from '../contribution/contribution.js';
 import {
     deliverFinalAggregate,
     readFinalAggregate,

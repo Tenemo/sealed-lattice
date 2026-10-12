@@ -6,6 +6,8 @@ import {
 } from '../../module/participant-module.js';
 import { createCandidatePublication } from '../../relay/publication.js';
 import type { PublicRelay } from '../../relay/relay.js';
+import type { ParticipantSession } from '../../runtime/participant-session.js';
+import { contributionRecords } from '../../runtime/participant-session.js';
 import { concatenate, equalBytes, unsigned32 } from '../../shared/bytes.js';
 import { PublicInputFailure } from '../../shared/failures.js';
 import type { SignedPacket } from '../../shared/signed-packet.js';
@@ -24,8 +26,6 @@ import {
     collectingCloseState,
     encodeCloseState,
 } from '../close/close-state.js';
-import type { ParticipantSession } from '../contribution/contribution.js';
-import { contributionRecords } from '../contribution/contribution.js';
 import { encodePreparationState } from '../contribution/preparation-state.js';
 import {
     proposalRegistrationBodyDigests,

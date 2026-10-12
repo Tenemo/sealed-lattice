@@ -10,6 +10,8 @@ import {
 } from '../../relay/offer-discovery.js';
 import { createCandidatePublication } from '../../relay/publication.js';
 import type { PublicRelay } from '../../relay/relay.js';
+import { commitPreparation } from '../../runtime/participant-session.js';
+import type { ParticipantSession } from '../../runtime/participant-session.js';
 import {
     concatenate,
     equalBytes,
@@ -26,8 +28,6 @@ import {
 import type { SignedPacket } from '../../shared/signed-packet.js';
 import { openDelivery } from '../../storage/delivery.js';
 import { rootGeneration } from '../../storage/root-generation.js';
-import { commitPreparation } from '../contribution/contribution.js';
-import type { ParticipantSession } from '../contribution/contribution.js';
 import type { PreparationEndorsement } from '../contribution/preparation-state.js';
 
 import {

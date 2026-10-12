@@ -14,6 +14,7 @@ import {
     chunkBytes,
     foregroundVisitMilliseconds,
     participantDataKindMaximums,
+    requiresFheKeySources,
     tagBytes,
 } from '../../module/runtime-bounds.js';
 import { purposeBit, signingPurpose } from '../../module/signing-purpose.js';
@@ -54,7 +55,6 @@ import {
     dataKind,
     encodeManifest,
     readDataKind,
-    requiresFheKeySources,
 } from '../../storage/root.js';
 import { commitParticipantState } from '../../storage/state-transaction.js';
 import { unusedPreparationPurposes } from '../contribution/preparation-state.js';

@@ -15,6 +15,7 @@ import {
 } from '../../relay/candidates.js';
 import { createCandidatePublication } from '../../relay/publication.js';
 import type { PublicRelay } from '../../relay/relay.js';
+import type { ParticipantSession } from '../../runtime/participant-session.js';
 import {
     concatenate,
     equalBytes,
@@ -48,7 +49,6 @@ import {
     resumeBallot,
     retainedBallotRecords,
 } from '../ballot/ballot.js';
-import type { ParticipantSession } from '../contribution/contribution.js';
 import { retainedRecordContext } from '../setup/setup.js';
 
 import {

@@ -10,6 +10,9 @@ import {
     chunkBytes,
     foregroundVisitMilliseconds,
     participantDataKindMaximums,
+    requiresFheKeySources,
+    rootDataKeyBytes,
+    rootPrefixBytes,
     rootReferenceBytes,
     tagBytes,
 } from '../module/runtime-bounds.js';
@@ -39,6 +42,8 @@ import {
     isRootGeneration,
     lastRootGeneration,
     rootGeneration,
+    targetPhase,
+    releasePhase,
 } from './root-generation.js';
 import {
     createRootKey,
@@ -54,18 +59,12 @@ import { commitParticipantState } from './state-transaction.js';
 // length-prefixed suffixes follow in a fixed order, each present from its
 // first generation: preparation, then ballot and close together, then target
 // signing, then release.
-export const requiresFheKeySources = (generation: number) =>
-    generation < rootGeneration.setupRetained;
-const dataKeyBytes = (generation: number) =>
-    requiresFheKeySources(generation) ? 96 : 64;
-const prefixBytes = (generation: number) =>
-    4 + dataKeyBytes(generation) + 64 + 4;
 const suffixStarts = {
-    preparation: 4,
-    ballot: 12,
-    close: 12,
-    target: 23,
-    release: 25,
+    preparation: rootGeneration.preparation,
+    ballot: rootGeneration.setupRetained,
+    close: rootGeneration.setupRetained,
+    target: targetPhase.intent,
+    release: releasePhase.locked,
 } as const;
 type ManifestSuffix = keyof typeof suffixStarts;
 const suffixOrder: readonly ManifestSuffix[] = [
@@ -154,7 +153,7 @@ export const encodeManifest = (
         return concatenate(unsigned32(bytes.length), bytes);
     });
     if (
-        manifest.dataKeys.length !== dataKeyBytes(generation) ||
+        manifest.dataKeys.length !== rootDataKeyBytes(generation) ||
         Object.keys(manifest.suffixes).length !== suffixes.length
     )
         throw new Error(
@@ -233,12 +232,12 @@ const decodeManifest = (
 ): ParticipantManifest => {
     if (
         !isRootGeneration(generation) ||
-        bytes.length < prefixBytes(generation) ||
+        bytes.length < rootPrefixBytes(generation) ||
         !equalBytes(bytes.subarray(0, 4), encodeText('ERM9'))
     )
         throw new Error('Invalid participant root manifest.');
-    const prefix = prefixBytes(generation);
-    const keysEnd = 4 + dataKeyBytes(generation);
+    const prefix = rootPrefixBytes(generation);
+    const keysEnd = 4 + rootDataKeyBytes(generation);
     const count = readUnsigned32(bytes, prefix - 4);
     if (
         count > limits.root.maximumRecords ||

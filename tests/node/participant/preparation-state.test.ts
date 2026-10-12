@@ -5,8 +5,8 @@ import { describe, expect, it } from 'vitest';
 import {
     decodeContributionState,
     encodeContributionState,
-} from '#packages/sdk/src/participant/worker/stages/contribution/contribution.js';
-import type { ContributionState } from '#packages/sdk/src/participant/worker/stages/contribution/contribution.js';
+} from '#packages/sdk/src/participant/worker/stages/contribution/contribution-state.js';
+import type { ContributionState } from '#packages/sdk/src/participant/worker/stages/contribution/contribution-state.js';
 import {
     decodePreparationState,
     encodePreparationState,

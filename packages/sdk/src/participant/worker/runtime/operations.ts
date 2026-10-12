@@ -24,13 +24,10 @@ import {
 } from '../stages/close/close.js';
 import {
     beginContribution,
-    confirmRoster,
     continueContribution,
     generateContribution,
-    isContributionSession,
     publishOffer,
     restoreCheckpoint,
-    resumeParticipant,
     signContribution,
 } from '../stages/contribution/contribution.js';
 import type { EnrollmentRequest } from '../stages/enrollment/enrollment.js';
@@ -74,6 +71,11 @@ import {
 import { authenticateRoot } from '../storage/root.js';
 
 import { isOperationAvailable } from './operation-availability.js';
+import {
+    confirmRoster,
+    isContributionSession,
+    resumeParticipant,
+} from './participant-session.js';
 import { summary } from './participant-summary.js';
 import { refused } from './worker-messages.js';
 import type { WorkerCommand, WorkerResult } from './worker-messages.js';

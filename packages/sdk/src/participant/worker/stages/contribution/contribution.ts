@@ -1,4 +1,3 @@
-import { writeModuleInput } from '../../module/context.js';
 import type { ParticipantProfileContext } from '../../module/context.js';
 import {
     custodyIdentity,
@@ -12,26 +11,23 @@ import {
     tryModuleCommand,
     writeProofInput,
 } from '../../module/participant-module.js';
-import type { ParticipantProfile } from '../../module/runtime-bounds.js';
-import {
-    chunkBytes,
-    identityBytes,
-    privateEntryBytes,
-    publicEntryBytes,
-    recordKeyBytes,
-    signingEntryBytes,
-} from '../../module/runtime-bounds.js';
+import { chunkBytes, recordKeyBytes } from '../../module/runtime-bounds.js';
 import { findCandidate, readCandidateFile } from '../../relay/candidates.js';
 import { publishOfferAnnouncement } from '../../relay/offer-discovery.js';
 import { createCandidatePublication } from '../../relay/publication.js';
 import type { PublicRelay } from '../../relay/relay.js';
 import {
+    isContributionSession,
+    resumeParticipant,
+} from '../../runtime/participant-session.js';
+import type {
+    ParticipantSession,
+    ContributionSession,
+} from '../../runtime/participant-session.js';
+import {
     concatenate,
-    encodeText,
     equalBytes,
     hexadecimal,
-    readUnsigned16,
-    readUnsigned32,
     tupleFields,
     unsigned16,
     unsigned32,
@@ -43,14 +39,11 @@ import type { SignedPacket } from '../../shared/signed-packet.js';
 import {
     addParticipantRecords,
     awaitLater,
-    discardStagedRecords,
     estimateStorage,
     readParticipantValue,
     recordBytes,
-    snapshotParticipant,
 } from '../../storage/database.js';
 import { openDelivery } from '../../storage/delivery.js';
-import type { ParticipantStoredRecord } from '../../storage/predecessor.js';
 import {
     openSealedRecord,
     sealRecord,
@@ -59,7 +52,6 @@ import {
 import { rootGeneration } from '../../storage/root-generation.js';
 import type { AuthenticatedRoot } from '../../storage/root.js';
 import {
-    authenticateRecords,
     commitRoot,
     dataKind,
     dataRecordInventory,
@@ -75,68 +67,22 @@ import {
 import {
     createProofWriter,
     proofLength,
-    proofRecordLayout,
     readProof,
 } from './contribution-proof.js';
 import {
-    decodePreparationState,
-    encodePreparationState,
-} from './preparation-state.js';
-import type { PreparationState } from './preparation-state.js';
-
-// Own offer work advances independently of the preparation journal. Its
-// generation and continuation seeds reproduce interrupted work exactly.
-// Every signature has a durable message intent before any public derivative is exposed.
-
-type RecordLocation = Readonly<{
-    object: number;
-    offset: number;
-    length: number;
-}>;
-
-type ContributionRecord = RecordLocation &
-    Readonly<{ key: Uint8Array; hash: Uint8Array }>;
-
-type CheckpointRecord = Readonly<{ key: Uint8Array; hash: Uint8Array }>;
-
-export type ContributionState = Readonly<{
-    phase: number;
-    position: number;
-    // The first-oracle checkpoint header until completion, then SCB2.
-    header: Uint8Array;
-    publicRecords: readonly ContributionRecord[];
-    privateRecords: readonly CheckpointRecord[];
-    signingRecords: readonly ContributionRecord[];
-    // The randomness seed of a generation or continuation intent.
-    seed: Uint8Array;
-}>;
-
-// What a contribution record is bound to besides its location: the poll,
-// whose identity names the runtime, the roster proposal and the
-// participant.
-type ProposalRecordContext = Readonly<{
-    poll: Uint8Array;
-    proposal: Uint8Array;
-    position: number;
-}>;
-
-// Every original roster member has the same preparation journal. Own offer
-// work is optional and advances independently from quorum selection.
-export type ParticipantSession = {
-    readonly context: ParticipantProfileContext;
-    readonly records: ProposalRecordContext;
-    root: AuthenticatedRoot;
-    state?: ContributionState;
-    preparation: PreparationState;
-};
-
-type ContributionSession = ParticipantSession & {
-    state: ContributionState;
-};
-
-export const isContributionSession = (
-    session: ParticipantSession,
-): session is ContributionSession => session.state !== undefined;
+    recordAssociatedData,
+    signingObject,
+    contributionInventory,
+    encodeContributionState,
+    proofObject,
+} from './contribution-state.js';
+import type {
+    ContributionRecord,
+    SigningKind,
+    ContributionState,
+    CheckpointRecord,
+} from './contribution-state.js';
+import { encodePreparationState } from './preparation-state.js';
 
 // The sealed checkpoint bytes one write stores while the next are sealed.
 const checkpointWriteBytes = 4 << 20;
@@ -178,221 +124,6 @@ const offerSigningOperation = {
     signOffer: 5,
     bodyHeader: 8,
 } as const;
-
-const signingKinds = ['offerEnvelope', 'offerSignature'] as const;
-type SigningKind = (typeof signingKinds)[number];
-
-// Setup polynomial i is object i + 1, as the prover emits it; the proof and
-// the signing records follow the last setup polynomial.
-const proofObject = (profile: ParticipantProfile) =>
-    profile.contribution.expandedPolynomials + 1;
-
-const signingObject = (profile: ParticipantProfile, kind: SigningKind) =>
-    proofObject(profile) + 1 + signingKinds.indexOf(kind);
-
-const signingLength = (profile: ParticipantProfile, kind: SigningKind) =>
-    kind === 'offerEnvelope'
-        ? profile.contribution.offerEnvelopeBytes
-        : profile.registration.signatureBytes;
-
-const retainedShape = (phase: number) => ({
-    stage: phase,
-    signingRecords: phase <= 7 ? 0 : phase === 8 ? 1 : 2,
-    seedBytes: phase === 4 || phase === 6 ? operationSeedBytes : 0,
-});
-
-const prefixBytes = 4 + 1 + 2 + 4 * 4;
-
-const encodeSigningRecord = (record: ContributionRecord) =>
-    concatenate(
-        unsigned16(record.object),
-        unsigned32(record.length),
-        record.key,
-        record.hash,
-    );
-
-export const encodeContributionState = (state: ContributionState) =>
-    concatenate(
-        encodeText('PCS5'),
-        new Uint8Array([state.phase]),
-        unsigned16(state.position),
-        unsigned32(state.header.length),
-        unsigned32(state.publicRecords.length),
-        unsigned32(state.privateRecords.length),
-        unsigned32(state.signingRecords.length),
-        state.header,
-        ...state.publicRecords.map((record) =>
-            concatenate(
-                unsigned16(record.object),
-                unsigned32(record.offset),
-                unsigned32(record.length),
-                record.key,
-                record.hash,
-            ),
-        ),
-        ...state.privateRecords.map((record) =>
-            concatenate(record.key, record.hash),
-        ),
-        ...state.signingRecords.map(encodeSigningRecord),
-        state.seed,
-    );
-
-// Decodes the first signing records in their order from the offset.
-const decodeSigningRecords = (
-    bytes: Uint8Array,
-    offset: number,
-    count: number,
-    profile: ParticipantProfile,
-) =>
-    signingKinds.slice(0, count).map((kind, index) => {
-        const start = offset + index * signingEntryBytes;
-        const record = {
-            object: readUnsigned16(bytes, start),
-            offset: 0,
-            length: readUnsigned32(bytes, start + 2),
-            key: bytes.slice(start + 6, start + 6 + recordKeyBytes),
-            hash: bytes.slice(
-                start + 6 + recordKeyBytes,
-                start + signingEntryBytes,
-            ),
-        };
-        if (
-            record.object !== signingObject(profile, kind) ||
-            record.length !== signingLength(profile, kind)
-        )
-            throw new Error('Noncanonical contribution signing record.');
-        return record;
-    });
-
-// Decodes the contribution suffix of an authenticated root. The body records
-// and every physical proof slot follow the profile's fixed plan. From
-// completion onward SCB2 frames the logical proof prefix inside those slots,
-// and the signing records agree with its independent phase.
-export const decodeContributionState = (
-    bytes: Uint8Array,
-    profile: ParticipantProfile,
-): ContributionState => {
-    const bounds = profile.contribution;
-    const prefix = prefixBytes;
-    const phase = bytes[4];
-    if (
-        phase === undefined ||
-        phase < 4 ||
-        phase > 9 ||
-        bytes.length < prefix ||
-        bytes.length > bounds.maximumStateBytes ||
-        !equalBytes(bytes.subarray(0, 4), encodeText('PCS5'))
-    )
-        throw new Error('Invalid contribution state.');
-    const position = readUnsigned16(bytes, 5);
-    const counts = 7;
-    const headerLength = readUnsigned32(bytes, counts);
-    const publicCount = readUnsigned32(bytes, counts + 4);
-    const privateCount = readUnsigned32(bytes, counts + 8);
-    const signingCount = readUnsigned32(bytes, counts + 12);
-    const shape = retainedShape(phase);
-    const bodyRecords = bounds.publicRecords.length;
-    const proofRecords = proofRecordLayout(bounds);
-    const shaped =
-        shape.stage === 4
-            ? headerLength === 0 && publicCount === 0 && privateCount === 0
-            : shape.stage <= 6
-              ? headerLength >= 1 &&
-                headerLength <= bounds.maximumCheckpointHeaderBytes &&
-                publicCount === bodyRecords &&
-                privateCount === bounds.checkpointLengths.length
-              : headerLength === bounds.bodyHeaderBytes &&
-                privateCount === 0 &&
-                publicCount === bodyRecords + proofRecords.length;
-    if (
-        position >= profile.eligibleContributorCount ||
-        !shaped ||
-        signingCount !== shape.signingRecords ||
-        bytes.length !==
-            prefix +
-                headerLength +
-                publicEntryBytes * publicCount +
-                privateEntryBytes * privateCount +
-                signingEntryBytes * signingCount +
-                shape.seedBytes
-    )
-        throw new Error('The contribution state does not match its phase.');
-    let offset = prefix + headerLength;
-    const publicRecords: ContributionRecord[] = [];
-    for (let index = 0; index < publicCount; index++) {
-        const record = {
-            object: readUnsigned16(bytes, offset),
-            offset: readUnsigned32(bytes, offset + 2),
-            length: readUnsigned32(bytes, offset + 6),
-            key: bytes.slice(offset + 10, offset + 10 + recordKeyBytes),
-            hash: bytes.slice(
-                offset + 10 + recordKeyBytes,
-                offset + publicEntryBytes,
-            ),
-        };
-        let canonical: boolean;
-        if (index < bodyRecords) {
-            const expected = bounds.publicRecords[index];
-            canonical =
-                record.object === expected.object &&
-                record.offset === expected.offset &&
-                record.length === expected.length;
-        } else {
-            const expected = proofRecords[index - bodyRecords];
-            canonical =
-                record.object === proofObject(profile) &&
-                record.offset === expected.offset &&
-                record.length === expected.length;
-        }
-        if (!canonical) throw new Error('Noncanonical contribution record.');
-        publicRecords.push(record);
-        offset += publicEntryBytes;
-    }
-    if (shape.stage >= 7)
-        proofLength(bounds, bytes.subarray(prefix, prefix + headerLength));
-    const privateRecords: CheckpointRecord[] = [];
-    for (let index = 0; index < privateCount; index++) {
-        privateRecords.push({
-            key: bytes.slice(offset, offset + recordKeyBytes),
-            hash: bytes.slice(
-                offset + recordKeyBytes,
-                offset + privateEntryBytes,
-            ),
-        });
-        offset += privateEntryBytes;
-    }
-    const signingRecords = decodeSigningRecords(
-        bytes,
-        offset,
-        signingCount,
-        profile,
-    );
-    offset += signingEntryBytes * signingCount;
-    return {
-        phase,
-        position,
-        header: bytes.slice(prefix, prefix + headerLength),
-        publicRecords,
-        privateRecords,
-        signingRecords,
-        seed: bytes.slice(offset, offset + shape.seedBytes),
-    };
-};
-
-// Each record has its own key, so the fixed zero nonce is used once per key.
-const recordAssociatedData = (
-    context: ProposalRecordContext,
-    record: RecordLocation,
-) =>
-    concatenate(
-        encodeText('sealed-lattice/participant-contribution-record/v2'),
-        context.poll,
-        context.proposal,
-        unsigned16(context.position),
-        unsigned16(record.object),
-        unsigned32(record.offset),
-        unsigned32(record.length),
-    );
 
 type SealedOutput = Readonly<{
     record: ContributionRecord;
@@ -463,31 +194,6 @@ const openSigning = (session: ContributionSession, kind: SigningKind) => {
         throw new Error('A contribution signing record is missing.');
     return openContributionRecord(session, record);
 };
-
-// The stored records a contribution state lists. Public and signing records
-// are authenticated by their own keys; checkpoint records, which the module
-// seals, by their ciphertext hashes.
-const contributionInventory = (
-    profile: ParticipantProfile,
-    state: ContributionState,
-    context: ProposalRecordContext,
-): ParticipantStoredRecord[] => [
-    ...[...state.publicRecords, ...state.signingRecords].map((record) => ({
-        store: 'contribution',
-        key: [record.object, record.offset],
-        byteLength: sealedLength(record.length),
-        encryption: {
-            key: record.key,
-            additionalData: recordAssociatedData(context, record),
-        },
-    })),
-    ...state.privateRecords.map((record, index) => ({
-        store: 'checkpoint',
-        key: index,
-        byteLength: profile.contribution.checkpointLengths[index],
-        identity: record.hash,
-    })),
-];
 
 type ContributionTransition = Readonly<{
     phase: number;
@@ -718,28 +424,6 @@ const proverRun = (session: ContributionSession, statement: boolean) => {
             randomness.discard();
         },
     };
-};
-
-// Only records outside the authenticated own intent can be discarded. This
-// applies before every preparation operation, including certification of a
-// different contributor set after an interrupted own proof.
-const discardInterruptedRecords = async (
-    context: ParticipantProfileContext,
-    state: ContributionState | undefined,
-) => {
-    const proof = proofObject(context.profile);
-    if (state?.phase === 4)
-        await discardStagedRecords(context.database, [
-            { store: 'contribution' },
-            { store: 'checkpoint' },
-        ]);
-    else if (state?.phase === 6)
-        await discardStagedRecords(context.database, [
-            {
-                store: 'contribution',
-                keys: IDBKeyRange.bound([proof], [proof + 1], false, true),
-            },
-        ]);
 };
 
 export const beginContribution = async (
@@ -1229,102 +913,6 @@ export const contributionCandidateKey = (
 export const polynomialFile = (expandedIndex: number) =>
     'polynomial-' + String(expandedIndex).padStart(2, '0') + '.bin';
 
-// Has the module retain the stored proposal's context at this participant's
-// position and returns the proposal's identity.
-const retainProposal = async (
-    context: ParticipantProfileContext,
-    root: AuthenticatedRoot,
-) => {
-    const { module } = context;
-    const proposal = await readDataKind(
-        context,
-        root.manifest,
-        dataKind.proposal,
-    );
-    const control = concatenate(
-        root.manifest.poll,
-        unsigned16(context.position),
-        unsigned32(proposal.length),
-        proposal,
-    );
-    writeModuleInput(context, control);
-    if (module.retain_proposal(control.length) !== 0)
-        throw new Error('The retained proposal context was refused.');
-    return readModuleMemory(
-        module,
-        module.retained_proposal_identity_pointer(),
-        identityBytes,
-    );
-};
-
-export const resumeParticipant = async (
-    context: ParticipantProfileContext,
-    root: AuthenticatedRoot,
-    verified?: VerifiedProposal,
-): Promise<ParticipantSession> => {
-    const { generation } = root.head;
-    const suffix = root.manifest.suffixes.preparation;
-    if (
-        generation < rootGeneration.rosterSigned ||
-        (generation === rootGeneration.rosterSigned) !== (suffix === undefined)
-    )
-        throw new Error('No accepted roster is retained.');
-    const preparation =
-        suffix === undefined
-            ? {}
-            : decodePreparationState(suffix, context.profile);
-    if (
-        generation >= rootGeneration.setupRetained &&
-        Object.keys(preparation).length !== 0
-    )
-        throw new Error('Retired preparation authority is still present.');
-    const state =
-        preparation.contribution === undefined
-            ? undefined
-            : decodeContributionState(
-                  preparation.contribution,
-                  context.profile,
-              );
-    if (state !== undefined && state.position !== context.position)
-        throw new Error('The retained offer names another participant.');
-    await discardInterruptedRecords(context, state);
-    const snapshot = await snapshotParticipant(context.database);
-    if (
-        snapshot.counts.contribution !==
-            (state === undefined
-                ? 0
-                : state.publicRecords.length + state.signingRecords.length) ||
-        snapshot.counts.checkpoint !== (state?.privateRecords.length ?? 0)
-    )
-        throw new Error('The contribution records changed.');
-    if (verified !== undefined && verified.position !== context.position)
-        throw new Error('The verified proposal moved this participant.');
-    const proposal =
-        verified?.identity ?? (await retainProposal(context, root));
-    if (
-        generation >= rootGeneration.preparation &&
-        context.module.confirm_roster() !== 0
-    )
-        throw new Error('The original confirmed roster could not be restored.');
-    const session: ParticipantSession = {
-        context,
-        root,
-        preparation,
-        records: {
-            poll: root.manifest.poll,
-            proposal,
-            position: context.position,
-        },
-        ...(state === undefined ? {} : { state }),
-    };
-    if (generation < rootGeneration.setupRetained)
-        await authenticateRecords(context, root, [
-            ...dataRecordInventory(root.manifest),
-            ...contributionRecords(session),
-        ]);
-    return session;
-};
-
 export const resumeContribution = async (
     context: ParticipantProfileContext,
     root: AuthenticatedRoot,
@@ -1335,49 +923,6 @@ export const resumeContribution = async (
         throw new Error('No own contribution is retained.');
     return session;
 };
-
-export const commitPreparation = async (
-    session: ParticipantSession,
-    update: Pick<PreparationState, 'selection' | 'endorsement'>,
-) => {
-    if (
-        session.root.head.generation !== rootGeneration.rosterSigned &&
-        session.root.head.generation !== rootGeneration.preparation
-    )
-        throw new Error('Preparation is already retired.');
-    const preparation = { ...session.preparation, ...update };
-    session.root = await commitRoot(session.context, session.root, {
-        generation: rootGeneration.preparation,
-        manifest: {
-            ...session.root.manifest,
-            suffixes: { preparation: encodePreparationState(preparation) },
-        },
-        predecessorRecords: [
-            ...dataRecordInventory(session.root.manifest),
-            ...contributionRecords(session),
-        ],
-    });
-    session.preparation = preparation;
-};
-
-// The human confirms the displayed, verified roster before any setup work.
-export const confirmRoster = async (session: ParticipantSession) => {
-    if (session.root.head.generation === rootGeneration.rosterSigned)
-        await commitPreparation(session, {});
-    if (session.context.module.confirm_roster() !== 0)
-        throw new Error('The credential refused the confirmed roster.');
-};
-
-// The stored records the retained contribution or roster confirmation
-// lists, if any.
-export const contributionRecords = (session: ParticipantSession) =>
-    isContributionSession(session)
-        ? contributionInventory(
-              session.context.profile,
-              session.state,
-              session.records,
-          )
-        : [];
 
 // Publishes one correlated complete signed offer, then announces its body.
 export const publishOffer = async (
