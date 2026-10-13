@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import { appendFile, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
@@ -34,31 +35,49 @@ const parseIncrement = (
     return increment;
 };
 
-export const incrementPrototypeVersion = (
-    currentVersion: string,
-    increment: ReleaseIncrement,
-): string => {
-    const match = prototypeVersionPattern.exec(currentVersion);
+const parsePrototypeVersion = (version: string) => {
+    const match = prototypeVersionPattern.exec(version);
     if (match?.groups === undefined) {
         throw new Error(
-            `Expected a stable pre-1.0 semantic version, received ${currentVersion}.`,
+            `Expected a stable pre-1.0 semantic version, received ${version}.`,
         );
     }
     const minor = Number(match.groups.minor);
     const patch = Number(match.groups.patch);
     if (!Number.isSafeInteger(minor) || !Number.isSafeInteger(patch)) {
         throw new Error(
-            `Version is outside JavaScript's safe range: ${currentVersion}.`,
+            `Version is outside JavaScript's safe range: ${version}.`,
         );
     }
+    return { minor, patch };
+};
+
+export const incrementPrototypeVersion = (
+    currentVersion: string,
+    increment: ReleaseIncrement,
+): string => {
+    const { minor, patch } = parsePrototypeVersion(currentVersion);
     return increment === 'minor'
         ? `0.${String(minor + 1)}.0`
         : `0.${String(minor)}.${String(patch + 1)}`;
 };
 
+// The highest prototype version among the repository's release tags.
+const latestReleasedVersion = (releaseTags: readonly string[]) =>
+    releaseTags
+        .map((tag) => tag.replace(/^v/u, ''))
+        .filter((version) => prototypeVersionPattern.test(version))
+        .map((version) => ({ version, ...parsePrototypeVersion(version) }))
+        .sort(
+            (left, right) =>
+                left.minor - right.minor || left.patch - right.patch,
+        )
+        .pop()?.version;
+
 export const prepareReleaseVersion = async (input: {
     readonly increment: ReleaseIncrement;
     readonly manifestPath?: string;
+    readonly releaseTags: readonly string[];
 }): Promise<ReleaseVersionResult> => {
     const manifestPath = path.resolve(
         input.manifestPath ?? publicPackageManifestPath,
@@ -81,6 +100,14 @@ export const prepareReleaseVersion = async (input: {
     }
 
     const previousVersion = manifest.version;
+    // The release workflow is the manifest version's only writer, so the
+    // manifest still names the latest released version.
+    const released = latestReleasedVersion(input.releaseTags);
+    if (released !== undefined && released !== previousVersion) {
+        throw new Error(
+            `The public package manifest names ${previousVersion}, but the latest release tag is v${released}.`,
+        );
+    }
     const version = incrementPrototypeVersion(previousVersion, input.increment);
     manifest.version = version;
     await writeFile(
@@ -91,14 +118,27 @@ export const prepareReleaseVersion = async (input: {
     return { previousVersion, tag: `v${version}`, version };
 };
 
+const listReleaseTags = (): string[] => {
+    const result = spawnSync('git', ['tag', '--list', 'v*'], {
+        cwd: repositoryRoot,
+        encoding: 'utf8',
+        windowsHide: true,
+    });
+    if (result.error !== undefined) throw result.error;
+    if (result.status !== 0)
+        throw new Error('The release tags could not be listed.');
+    return result.stdout.split(/\r?\n/u).filter((tag) => tag.length > 0);
+};
+
 const main = async (): Promise<void> => {
     const release = await prepareReleaseVersion({
         increment: parseIncrement(process.argv.slice(2)),
+        releaseTags: listReleaseTags(),
     });
     if (process.env.GITHUB_OUTPUT !== undefined) {
         await appendFile(
             process.env.GITHUB_OUTPUT,
-            `version=${release.version}\ntag=${release.tag}\n`,
+            `version=${release.version}\ntag=${release.tag}\nprevious_tag=v${release.previousVersion}\n`,
             'utf8',
         );
     }

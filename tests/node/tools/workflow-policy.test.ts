@@ -113,6 +113,31 @@ describe('workflow policy', () => {
         ).toEqual([]);
     });
 
+    it('publishes with the pinned Node release and the package the tag job retained', async () => {
+        const { jobs } = await readWorkflow('release');
+        const steps = jobs['publish-npm'].steps ?? [];
+        const setupNode = steps.findIndex((step) =>
+            step.uses?.startsWith('actions/setup-node@'),
+        );
+        const publish = steps.findIndex((step) =>
+            step.run?.startsWith('npm publish'),
+        );
+        expect(setupNode).toBeGreaterThan(0);
+        expect(steps[setupNode].with?.['node-version-file']).toBe('.nvmrc');
+        expect(publish).toBeGreaterThan(setupNode);
+        const upload = jobs.package.steps?.find((step) =>
+            step.uses?.startsWith('actions/upload-artifact@'),
+        );
+        const download = steps.find((step) =>
+            step.uses?.startsWith('actions/download-artifact@'),
+        );
+        // A re-run of the failed jobs must find the artifact by its name.
+        const name = upload?.with?.name;
+        expect(name).toEqual(expect.any(String));
+        expect(name).not.toContain('run_attempt');
+        expect(download?.with?.name).toBe(name);
+    });
+
     it('requires every CI job before the verify status', async () => {
         const { jobs } = await readWorkflow('ci');
         expect([...(jobs.verify.needs ?? [])].sort()).toEqual(
