@@ -1,14 +1,16 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-    compileLocalOracleUpdate,
     compileOracleCellController,
     compileOraclePrefixReplacement,
-    compilePrefixCopy,
-    compileSparseRouting,
     oracleCellControllerWork,
     prefixOracleWork,
     runOracleCellController,
+} from '#tests/compressed-oracle/oracle-access.js';
+import { compileSparseRouting } from '#tests/compressed-oracle/sparse-routing.js';
+import {
+    compileLocalOracleUpdate,
+    compilePrefixCopy,
 } from '#tests/compressed-oracle-model.js';
 import {
     oracleDomainCells,

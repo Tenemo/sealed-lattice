@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
     labelledHashExtractionWork,
     sourceCoordinateDecodingWork,
-} from '#tests/compressed-oracle-model.js';
+} from '#tests/compressed-oracle/source-extraction.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import { operationSeedBytes } from '#tests/operation-seed-model.js';
 import { byteAlignedSpongePermutations } from '#tests/proof-hash-work-model.js';

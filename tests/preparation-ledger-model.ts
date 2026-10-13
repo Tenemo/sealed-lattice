@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 
 import { compileCommonMatrixSamplingCensus } from '#tests/common-matrix-sampling-model.js';
-import { sourceCacheWork } from '#tests/compressed-oracle-model.js';
+import { sourceCacheWork } from '#tests/compressed-oracle/source-extraction.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import { compileRegistrationSetupBindingScreen } from '#tests/registration-setup-binding-model.js';
 import { compileSetupSelectionCensus } from '#tests/setup-selection-model.js';

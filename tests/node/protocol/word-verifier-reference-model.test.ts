@@ -8,21 +8,27 @@ import { compileSetupContributionColumnLayout } from '#tests/setup-contribution-
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
 import { deriveSupportedProfile } from '#tests/supported-profile-model.js';
 import {
-    catalogueWordRelation,
     evaluateSystematicColumns,
     type Extension,
     lookupTableCoefficients,
-    productionWordProofDomain,
-    proveWordRelation,
-    verifyWordProof,
-    wordContextParameters,
     wordFieldArithmetic as arithmetic,
-    type WordProofInput,
-    wordProofDomain,
+} from '#tests/word-proof-reference/field.js';
+import {
+    proveWordRelation,
     type WordProverMode,
+} from '#tests/word-proof-reference/prover.js';
+import {
+    catalogueWordRelation,
+    productionWordProofDomain,
+    wordContextParameters,
+    wordProofDomain,
     type WordRelation,
     wordRelationShape,
     type WordStatementParser,
+} from '#tests/word-proof-reference/transcript.js';
+import {
+    verifyWordProof,
+    type WordProofInput,
 } from '#tests/word-verifier-reference-model.js';
 
 const census = compileSmallLimbProofFieldCensus();

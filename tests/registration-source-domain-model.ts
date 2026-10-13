@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 
-import type { OracleInputMask } from '#tests/compressed-oracle-model.js';
+import type { OracleInputMask } from '#tests/compressed-oracle/oracle-access.js';
 
 // The source-target predicate reads syntax, owner and the immutable family.
 // It deliberately leaves the salt, poll and coordinate unconstrained.

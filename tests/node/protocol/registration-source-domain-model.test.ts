@@ -6,7 +6,7 @@ import { compileCurrentSignatureHashInputs } from '#tests/authentication-work-mo
 import {
     compileOracleMaskRouting,
     runOracleSliceRouting,
-} from '#tests/compressed-oracle-model.js';
+} from '#tests/compressed-oracle/oracle-access.js';
 import { compileRegistrationSetupBindingScreen } from '#tests/registration-setup-binding-model.js';
 import {
     registrationSourceMask,

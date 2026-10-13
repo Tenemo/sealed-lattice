@@ -7,7 +7,7 @@ import {
     oracleSliceRoutingWork,
     prefixOracleWork,
     runOracleCellController,
-} from '#tests/compressed-oracle-model.js';
+} from '#tests/compressed-oracle/oracle-access.js';
 
 export function oracleDomainCells(
     inputCapacity: bigint,

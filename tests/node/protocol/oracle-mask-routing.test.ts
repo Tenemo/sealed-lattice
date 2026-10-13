@@ -6,7 +6,7 @@ import {
     oracleSliceRoutingWork,
     runOracleSliceRouting,
     type OracleInputMask,
-} from '#tests/compressed-oracle-model.js';
+} from '#tests/compressed-oracle/oracle-access.js';
 
 describe('exact raw-input oracle slice masks', () => {
     it('routes non-adjacent fields with exact lengths and clean reversible work', () => {

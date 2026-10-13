@@ -3,22 +3,26 @@ import { describe, expect, it } from 'vitest';
 import { compileSourceDomainOracleBudget } from '#tests/oracle-budget-model.js';
 import { compileRegistrationSourceExtractionWork } from '#tests/registration-source-randomness-model.js';
 import {
-    budgetSplitBits,
-    ceilingLog2,
-    compileSecurityMarginScreen,
     criterionAttacks,
-    decisiveExperimentGates,
     fheAttackScreens,
     fheKnownAttackFloor,
-    compileFhePopulationLimits,
+} from '#tests/security-margin/attack-screens.js';
+import { compileFhePopulationLimits } from '#tests/security-margin/population-limits.js';
+import {
+    budgetSplitBits,
+    ceilingLog2,
+    decisiveExperimentGates,
     reductionGates,
     reductionVariants,
     registrationSourceInputBits,
     requiredFheAssumptionBits,
     securityTargetBits,
-    sourceDomainRequirementAt,
     supportedLevelBits,
     unpricedWorkAllowance,
+} from '#tests/security-margin/reduction-work.js';
+import {
+    compileSecurityMarginScreen,
+    sourceDomainRequirementAt,
 } from '#tests/security-margin-screen-model.js';
 import {
     deriveSupportedProfile,

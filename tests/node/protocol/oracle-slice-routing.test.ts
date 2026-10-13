@@ -7,7 +7,7 @@ import {
     compileOraclePrefixReplacement,
     runOraclePrefixReplacement,
     compileOracleMaskRouting,
-} from '#tests/compressed-oracle-model.js';
+} from '#tests/compressed-oracle/oracle-access.js';
 import {
     oracleDomainWork,
     shadowOracleDomainWork,

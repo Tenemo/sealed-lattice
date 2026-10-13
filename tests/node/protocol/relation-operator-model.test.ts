@@ -11,12 +11,12 @@ import {
 } from '#tests/linked-release-relation-model.js';
 import {
     applyRelationOperator,
-    ballotRelationOperator,
     evaluateRelationOperator,
     relationOperatorColumns,
-    releaseRelationOperator,
-    setupRelationOperator,
 } from '#tests/relation-operator-model.js';
+import { ballotRelationOperator } from '#tests/relation-operators/ballot.js';
+import { releaseRelationOperator } from '#tests/relation-operators/release.js';
+import { setupRelationOperator } from '#tests/relation-operators/setup.js';
 import {
     compileSetupContributionColumnLayout,
     createSetupContributionRelationModel,
@@ -29,9 +29,9 @@ import { shareEncryptionParameters } from '#tests/wide-share-lifting-model.js';
 import {
     evaluateSystematicColumns,
     wordFieldArithmetic,
-    wordProofDomain,
     type Extension,
-} from '#tests/word-verifier-reference-model.js';
+} from '#tests/word-proof-reference/field.js';
+import { wordProofDomain } from '#tests/word-proof-reference/transcript.js';
 
 const { one, multiply } = wordFieldArithmetic;
 const power = (value: Extension, exponent: number) => {

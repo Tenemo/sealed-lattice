@@ -27,16 +27,22 @@ import {
     type Rational,
 } from '#tests/security-ledger-model.js';
 import {
-    compileFhePopulationLimits,
-    compileLatticePopulationLimits,
     instanceKnownAttackFloor,
     latticeAssumptionGroups,
-    latticeGroupComparisons,
     latticeGroupFloors,
-    latticeRequirementAt,
+} from '#tests/security-margin/attack-screens.js';
+import {
+    compileFhePopulationLimits,
+    compileLatticePopulationLimits,
     populationSearchCap,
+} from '#tests/security-margin/population-limits.js';
+import {
     supportedLevelBits,
     unpricedWorkAllowance,
+} from '#tests/security-margin/reduction-work.js';
+import {
+    latticeGroupComparisons,
+    latticeRequirementAt,
 } from '#tests/security-margin-screen-model.js';
 import {
     deriveSupportedProfile,

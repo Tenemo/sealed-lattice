@@ -16,7 +16,7 @@ import {
     catalogueWordRelation,
     productionWordProofDomain,
     wordRelationShape,
-} from '#tests/word-verifier-reference-model.js';
+} from '#tests/word-proof-reference/transcript.js';
 
 describe('wide verifier messages and short authentication tags', () => {
     it('derives the current three source families separately before taking a round-error maximum', () => {

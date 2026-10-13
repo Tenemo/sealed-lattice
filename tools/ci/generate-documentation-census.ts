@@ -32,6 +32,8 @@ import {
     renderParticipantVaultKeyWork,
 } from '#tools/ci/census/custody.js';
 import { compileCensusInputs } from '#tools/ci/census/inputs.js';
+import { renderCompressedOracleCircuitWork } from '#tools/ci/census/oracle-circuit-work.js';
+import { renderProofHashByteAndPermutationWork } from '#tools/ci/census/proof-hash-work.js';
 import {
     renderBoundedPolynomialProofCensus,
     renderProofVerifierQueryBounds,
@@ -61,13 +63,7 @@ import {
     renderCompleteOrdinaryWorkflowResourceScreen,
     renderScalarEvaluationStorageScreen,
 } from '#tools/ci/census/resources.js';
-import {
-    renderProofHashByteAndPermutationWork,
-    renderComposedSecurityLedger,
-    renderSimulatorRecipientKeyAvailability,
-    renderCompressedOracleCircuitWork,
-    renderCommitmentEquivocationFiniteModel,
-} from '#tools/ci/census/security.js';
+import { renderComposedSecurityLedger } from '#tools/ci/census/security.js';
 import {
     renderAuthenticationFramesAndCompletedPrefix,
     renderRecipientKeyArithmeticBounds,
@@ -81,6 +77,10 @@ import {
     renderSetupSelectionWireAndResources,
     renderRosterProposalCensus,
 } from '#tools/ci/census/setup.js';
+import {
+    renderSimulatorRecipientKeyAvailability,
+    renderCommitmentEquivocationFiniteModel,
+} from '#tools/ci/census/simulation.js';
 import { toolArguments } from '#tools/ci/command-line.js';
 
 const renderCensusText = (): string => {

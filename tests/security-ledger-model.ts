@@ -33,18 +33,24 @@ import {
 import { compileProofRandomnessBudgets } from '#tests/proof-randomness-budget-model.js';
 import { compileRecipientKeyUniquenessBound } from '#tests/recipient-key-uniqueness-model.js';
 import {
-    budgetSplitBits,
-    compileLatticePopulationLimits,
-    decisiveExperimentGates,
-    largestPopulationWithin,
     latticeAssumptionGroups,
-    latticeGroupComparisons,
     latticeGroupFloors,
-    latticeRequirementAt,
+    type LatticeAssumptionGroup,
+} from '#tests/security-margin/attack-screens.js';
+import {
+    compileLatticePopulationLimits,
+    largestPopulationWithin,
+} from '#tests/security-margin/population-limits.js';
+import {
+    budgetSplitBits,
+    decisiveExperimentGates,
     securityTargetBits,
     supportedLevelBits,
     unpricedWorkAllowance,
-    type LatticeAssumptionGroup,
+} from '#tests/security-margin/reduction-work.js';
+import {
+    latticeGroupComparisons,
+    latticeRequirementAt,
 } from '#tests/security-margin-screen-model.js';
 import { compileSetupRandomnessCensus } from '#tests/setup-randomness-model.js';
 import {
