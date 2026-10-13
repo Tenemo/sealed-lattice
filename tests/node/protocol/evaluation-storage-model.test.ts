@@ -62,8 +62,16 @@ describe('scalar evaluation storage schedule', () => {
                 result.rns.keyProductPrimes,
             ]).toEqual(primes);
             expect(result.jobBytes).toBe(job);
-            const source = readFileSync(
+            const engine = readFileSync(
                 'crates/protocol-research/encrypted-ranking/src/ranking.rs',
+                'utf8',
+            );
+            const memory = readFileSync(
+                'crates/protocol-research/encrypted-ranking/src/ranking-memory.rs',
+                'utf8',
+            );
+            const storage = readFileSync(
+                'crates/protocol-research/encrypted-ranking/src/ranking-storage.rs',
                 'utf8',
             );
             for (const operand of [
@@ -73,11 +81,11 @@ describe('scalar evaluation storage schedule', () => {
                 'const TRANSFORM_TABLES: usize = 2',
                 'const KEPT_SOURCES: usize = 3',
             ])
-                expect(source).toContain(operand);
-            expect(source).toContain(
+                expect(memory).toContain(operand);
+            expect(storage).toContain(
                 '.max_by_key(|index| (next_use(**index), **index))',
             );
-            expect(source).toContain('reloads.len() + 1');
+            expect(engine).toContain('reloads.len() + 1');
         },
     );
 

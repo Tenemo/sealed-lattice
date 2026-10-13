@@ -1,7 +1,8 @@
+use super::memory::helpers_reserved_bytes;
 use super::{
     super::{prime_count_bounds, primes, shared},
     Ciphertext, DEGREE, Engine, Instruction, MEMORY_BYTES, Profile, Progress, Refusal, capacity,
-    evictions, helper_memory_bytes, helpers_reserved_bytes, peak_values, stored_bytes, value_bytes,
+    evictions, helper_memory_bytes, peak_values, stored_bytes, value_bytes,
 };
 use parallel_work::JOB_MEMORY_BYTES;
 use std::collections::BTreeSet;

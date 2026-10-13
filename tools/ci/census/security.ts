@@ -4,6 +4,11 @@ import {
 } from '#tests/preparation-ledger-model.js';
 import {
     atMost,
+    rational,
+    rationalCeilingLog2,
+    type Rational,
+} from '#tests/security-ledger/rational.js';
+import {
     compileAuthenticationGroup,
     compileIdentityCollisionGroup,
     compileRecordCreationPricing,
@@ -13,11 +18,8 @@ import {
     compileStatisticalTerms,
     ledgerGroups,
     maximumChargedQueries,
-    rational,
-    rationalCeilingLog2,
     soundnessChargeAt,
     statisticalRatioAt,
-    type Rational,
     type StatisticalTerm,
 } from '#tests/security-ledger-model.js';
 import { instanceAttackScreens } from '#tests/security-margin/attack-screens.js';

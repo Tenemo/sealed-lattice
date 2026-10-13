@@ -7,18 +7,18 @@
 //! job bound, and its jobs, like those of each of its primes, run on the one
 //! helper that holds its transform tables and the transformed polynomials
 //! its sessions keep there.
-use super::{Arithmetic, Polynomial, shared, word_arithmetic::widening_multiply};
+#[path = "arithmetic-job-kernels.rs"]
+mod kernels;
+#[path = "keyed-products.rs"]
+mod keyed_products;
+pub(super) use keyed_products::{Keyed, KeyedProduct};
+
+use super::{Arithmetic, Polynomial, shared};
 use parallel_work::{
-    Job, MAXIMUM_JOB_BYTES, Part, Pipeline, Shared, Ticket, session, share, share_words, submit,
+    Job, MAXIMUM_JOB_BYTES, Part, Pipeline, Shared, Ticket, session, share_words, submit,
 };
 use protocol_foundations::{foundation::CanonicalItem, identity::IdentityHasher};
-use std::{
-    cell::RefCell,
-    collections::{HashMap, VecDeque},
-    iter::StepBy,
-    ops::Range,
-    rc::Rc,
-};
+use std::{iter::StepBy, ops::Range, rc::Rc};
 use supported_profile::Profile;
 use zeroize::Zeroizing;
 
@@ -26,44 +26,44 @@ use zeroize::Zeroizing;
 /// of a set, transformed, as one of its session's sources.
 pub(crate) static SOURCES: Job = Job {
     kind: 0x0306,
-    run: sources,
+    run: kernels::sources,
 };
 /// The products of two of a session's sources modulo each prime of a set,
 /// transformed back; drops the sources whose last product it is.
 pub(crate) static TENSOR: Job = Job {
     kind: 0x0307,
-    run: tensor,
+    run: kernels::tensor,
 };
 /// The centered residues of its streamed key modulo each prime of a set,
 /// transformed: each prime's key record after its identity.
 pub(crate) static RECORDS: Job = Job {
     kind: 0x0308,
-    run: records,
+    run: kernels::records,
 };
 /// Keeps each gadget digit of its streamed polynomial's canonical
 /// coefficients modulo each prime of a set, transformed, for its session's
 /// keyed products.
 pub(crate) static DIGITS: Job = Job {
     kind: 0x0309,
-    run: digits,
+    run: kernels::digits,
 };
 /// The sum of a session's digits modulo a prime times one group's streamed
 /// key records, transformed back, after the records' identities; the last
 /// group drops the digits.
 pub(crate) static KEYED: Job = Job {
     kind: 0x030a,
-    run: keyed,
+    run: kernels::keyed,
 };
 /// The canonical coefficients of a range of positions from their residues.
 pub(crate) static LIFT: Job = Job {
     kind: 0x0304,
-    run: lift,
+    run: kernels::lift,
 };
 /// Drops a session's digits modulo a prime, which a keyed product that ends
 /// before its last job of that prime leaves kept.
 pub(crate) static FORGET: Job = Job {
     kind: 0x030b,
-    run: forget,
+    run: kernels::forget,
 };
 pub static JOBS: [&Job; 7] = [&SOURCES, &TENSOR, &RECORDS, &DIGITS, &KEYED, &LIFT, &FORGET];
 
@@ -93,13 +93,6 @@ pub(super) const KEYED_GROUPS: usize = 2;
 /// square's one source.
 pub(super) const DROP_LEFT: u32 = 1;
 pub(super) const DROP_RIGHT: u32 = 2;
-
-thread_local! {
-    /// The transformed polynomials each session keeps modulo each prime
-    /// whose jobs run here, by position: its sources, or a polynomial's
-    /// digits.
-    static KEPT: RefCell<HashMap<(u64, usize, usize), Vec<u64>>> = RefCell::default();
-}
 
 /// The lift of a product: of a plaintext or secret product, of an external
 /// product, or of a ciphertext tensor.
@@ -256,187 +249,6 @@ fn window() -> usize {
     parallel_work::helpers() + 1
 }
 
-fn sources(input: &[u8]) -> Vec<u8> {
-    let (arithmetic, set, rest) = read_set(input);
-    let (session, slot) = (session_number(rest), number(&rest[8..]));
-    let residues = arithmetic.set_residues(set);
-    KEPT.with(|kept| {
-        let mut kept = kept.borrow_mut();
-        for (prime, mut residues) in set.primes().zip(residues) {
-            arithmetic.transform(prime).forward(&mut residues);
-            assert!(
-                kept.insert((session, prime, slot), residues).is_none(),
-                "Kept source"
-            );
-        }
-    });
-    Vec::new()
-}
-fn tensor(input: &[u8]) -> Vec<u8> {
-    let (arithmetic, set, rest) = read_set(input);
-    let session = session_number(rest);
-    let [left, right, drops] = std::array::from_fn(|index| number(&rest[8 + 4 * index..]));
-    let drops = drops as u32;
-    let mut output = Vec::with_capacity(8 * arithmetic.degree * set.len());
-    KEPT.with(|kept| {
-        let mut kept = kept.borrow_mut();
-        for prime in set.primes() {
-            let reduction = &arithmetic.reductions[prime];
-            // A dropped left source becomes the product.
-            let mut product = if drops & DROP_LEFT != 0 || (left == right && drops != 0) {
-                kept.remove(&(session, prime, left)).expect("Kept source")
-            } else {
-                kept[&(session, prime, left)].clone()
-            };
-            if left == right {
-                for value in &mut product {
-                    *value = reduction.multiply(*value, *value);
-                }
-            } else {
-                for (value, other) in product.iter_mut().zip(&kept[&(session, prime, right)]) {
-                    *value = reduction.multiply(*value, *other);
-                }
-                if drops & DROP_RIGHT != 0 {
-                    kept.remove(&(session, prime, right));
-                }
-            }
-            arithmetic.transform(prime).backward(&mut product);
-            extend(&mut output, &product);
-        }
-    });
-    output
-}
-fn records(input: &[u8]) -> Vec<u8> {
-    let (arithmetic, set, rest) = read_set(input);
-    let context = RecordContext::read(rest);
-    let residues = arithmetic.set_residues(set);
-    let record_bytes = 8 * arithmetic.degree;
-    let mut output = Vec::with_capacity(set.len() * (IDENTITY_BYTES + record_bytes));
-    for (prime, mut residues) in set.primes().zip(residues) {
-        arithmetic.transform(prime).forward(&mut residues);
-        let start = output.len();
-        output.resize(start + IDENTITY_BYTES, 0);
-        extend(&mut output, &residues);
-        let identity = record_identity(
-            &context,
-            context.ordinal,
-            prime,
-            &output[start + IDENTITY_BYTES..],
-        );
-        output[start..start + IDENTITY_BYTES].copy_from_slice(&identity);
-    }
-    output
-}
-fn digits(input: &[u8]) -> Vec<u8> {
-    let (arithmetic, set, rest) = read_set(input);
-    let session = session_number(rest);
-    let digits = arithmetic.set_digits(set);
-    KEPT.with(|kept| {
-        let mut kept = kept.borrow_mut();
-        for (prime, digits) in set.primes().zip(digits) {
-            let transform = arithmetic.transform(prime);
-            for (digit, mut residues) in digits.into_iter().enumerate() {
-                transform.forward(&mut residues);
-                assert!(
-                    kept.insert((session, prime, digit), residues).is_none(),
-                    "Kept digits"
-                );
-            }
-        }
-    });
-    Vec::new()
-}
-fn keyed(input: &[u8]) -> Vec<u8> {
-    let (arithmetic, prime, rest) = read(input);
-    let (session, last) = (session_number(rest), number(&rest[8..]) != 0);
-    let context = RecordContext::read(&rest[12..]);
-    let (degree, gadget_length) = (arithmetic.degree, arithmetic.gadget_length);
-    let record_bytes = 8 * degree;
-    assert_eq!(
-        parallel_work::streamed_length(),
-        record_bytes * gadget_length
-    );
-    let reduction = &arithmetic.reductions[prime];
-    // Each record's identity absorbs its words as the job reads them.
-    let mut hashers: Vec<IdentityHasher> = (0..gadget_length)
-        .map(|digit| record_hasher(&context, context.ordinal + digit, prime, record_bytes))
-        .collect();
-    let mut sum = vec![0u64; degree];
-    // A position's products of a digit, below a prime below 2^58, and a
-    // key word, below 2^64 even in a changed record, are below 2^122, so at
-    // most 64 of them sum below 2^128 and each position reduces once. A
-    // changed record then fails only its identity.
-    assert!(gadget_length <= 64);
-    let mut products = vec![0u128; KEYED_BLOCK.min(degree)];
-    let mut words = vec![0u8; 8 * products.len()];
-    KEPT.with(|kept| {
-        let mut kept = kept.borrow_mut();
-        for first in (0..degree).step_by(products.len()) {
-            let count = products.len().min(degree - first);
-            products.fill(0);
-            for (digit, hasher) in hashers.iter_mut().enumerate() {
-                let words = &mut words[..8 * count];
-                parallel_work::read(digit * record_bytes + 8 * first, words);
-                hasher.absorb(words).expect("Record identity");
-                let digits = &kept[&(session, prime, digit)][first..first + count];
-                for ((product, digit), key) in
-                    products.iter_mut().zip(digits).zip(words.chunks_exact(8))
-                {
-                    let (low, high) = widening_multiply(*digit, word(key));
-                    *product += (u128::from(high) << 64) | u128::from(low);
-                }
-            }
-            for (value, product) in sum[first..first + count].iter_mut().zip(&products) {
-                *value = reduction.reduce_wide(*product);
-            }
-        }
-        if last {
-            for digit in 0..gadget_length {
-                kept.remove(&(session, prime, digit));
-            }
-        }
-    });
-    drop((products, words));
-    let mut output = Vec::with_capacity(IDENTITY_BYTES * gadget_length + 8 * degree);
-    for hasher in hashers {
-        output.extend(hasher.finish().expect("Record identity"));
-    }
-    arithmetic.transform(prime).backward(&mut sum);
-    extend(&mut output, &sum);
-    output
-}
-fn forget(input: &[u8]) -> Vec<u8> {
-    let (session, prime) = (session_number(input), number(&input[8..]));
-    KEPT.with(|kept| {
-        kept.borrow_mut()
-            .retain(|(kept_session, kept_prime, _), _| {
-                (*kept_session, *kept_prime) != (session, prime)
-            });
-    });
-    Vec::new()
-}
-fn lift(input: &[u8]) -> Vec<u8> {
-    let (arithmetic, lifted, rest) = read(input);
-    let lift = arithmetic.lift(lifted);
-    let positions = number(rest);
-    let values = words(&rest[4..]);
-    assert_eq!(values.len(), lift.count * positions);
-    let residues: Vec<&[u64]> = values.chunks_exact(positions).collect();
-    let mut coefficients = vec![0u64; positions * arithmetic.words];
-    for (position, coefficient) in coefficients.chunks_exact_mut(arithmetic.words).enumerate() {
-        lift.coefficient(
-            &residues,
-            position,
-            &arithmetic.reductions,
-            &arithmetic.wide,
-            coefficient,
-        );
-    }
-    let mut output = Vec::with_capacity(8 * coefficients.len());
-    extend(&mut output, &coefficients);
-    output
-}
-
 /// Polynomials' transformed residues modulo the first primes of a count,
 /// which the instances that run those primes' jobs keep until their last
 /// product.
@@ -446,19 +258,6 @@ pub(super) struct Sources {
     started: Vec<Ticket>,
 }
 
-/// The prime and group of a keyed product's job of the index among the
-/// jobs of the primes' two groups. The jobs come in batches of as many
-/// primes as there are helpers, each batch's first group before its second,
-/// so that each helper, which holds one prime of a batch, has a job while
-/// the batch runs; without helpers each prime's groups come in turn.
-fn keyed_job(index: usize, primes: usize, helpers: usize) -> (usize, usize) {
-    let batch = helpers.max(1);
-    let first = index / (KEYED_GROUPS * batch) * batch;
-    let held = batch.min(primes - first);
-    let within = index - KEYED_GROUPS * first;
-    (first + within % held, within / held)
-}
-
 /// The key records a keyed product needs next: one group's keys from the
 /// first ordinal, modulo one prime.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -466,60 +265,6 @@ pub struct RecordRequest {
     pub first: usize,
     pub count: usize,
     pub prime: usize,
-}
-
-/// A keyed product in progress: the sums of a polynomial's gadget digits
-/// times each gadget coordinate's key of two groups, one job for each prime
-/// and group in the order of [`keyed_job`], each over the records of its
-/// group's keys modulo its prime, which the caller delivers. Each prime's
-/// digits are kept from just before its first group's job to its last
-/// group's.
-pub(super) struct KeyedProduct {
-    session: u64,
-    context: RecordContext,
-    // The polynomial until the last prime's digits have started.
-    polynomial: Option<Shared>,
-    started: Vec<Ticket>,
-    requested: usize,
-    delivered: Vec<u8>,
-    // The pending request's records when the host shared them itself.
-    shared: Option<Shared>,
-    running: VecDeque<(usize, Ticket)>,
-    sums: [Vec<Vec<u64>>; KEYED_GROUPS],
-    // The primes whose digits have started and whose last group's job has
-    // not.
-    kept: Vec<usize>,
-}
-impl Drop for KeyedProduct {
-    // A product that ends before its last group's job of a prime, as after
-    // a refusal, drops that prime's digits where they are kept, after its
-    // jobs there.
-    fn drop(&mut self) {
-        for prime in self.kept.drain(..) {
-            let mut input = self.session.to_le_bytes().to_vec();
-            input.extend((prime as u32).to_le_bytes());
-            submit(&FORGET, Some(prime), &[Part::Bytes(&input)], 0);
-        }
-    }
-}
-/// A keyed product's next need: the records of a request, the end of a
-/// job the host awaits, by the host's number, or both groups' sums modulo
-/// each prime, which the caller lifts.
-pub(super) enum Keyed {
-    Records(RecordRequest),
-    Waiting(u32),
-    Done([Vec<Vec<u64>>; KEYED_GROUPS]),
-}
-
-impl KeyedProduct {
-    /// The ordinal of its first group's first key.
-    pub(super) fn first_ordinal(&self) -> usize {
-        self.context.ordinal
-    }
-    /// The index of its pending request.
-    pub(super) fn requested(&self) -> usize {
-        self.requested
-    }
 }
 
 impl Arithmetic {
@@ -688,236 +433,7 @@ impl Arithmetic {
         let products = self.source_products(&mut sources, 0, 1, DROP_LEFT | DROP_RIGHT);
         self.lifted(&products, lifted)
     }
-    /// The key's record modulo each external-product prime, in prime order,
-    /// and each record's identity.
-    pub(super) fn key_records(
-        &self,
-        key: &[u64],
-        context: RecordContext,
-    ) -> (Vec<[u8; 64]>, Vec<Vec<u8>>) {
-        let shared = self.shared_polynomial(key);
-        let sets = prime_sets(self.external_primes, self.degree, parallel_work::helpers());
-        let record_bytes = 8 * self.degree;
-        let tickets: Vec<Ticket> = sets
-            .iter()
-            .map(|set| {
-                let mut input = self.set_header(*set);
-                context.write(&mut input);
-                submit(
-                    &RECORDS,
-                    Some(set.first),
-                    &[Part::Bytes(&input), Part::Streamed(&shared)],
-                    set.len() * (IDENTITY_BYTES + record_bytes),
-                )
-            })
-            .collect();
-        drop(shared);
-        let mut identities = vec![[0; 64]; self.external_primes];
-        let mut records = vec![Vec::new(); self.external_primes];
-        for (set, ticket) in sets.into_iter().zip(tickets) {
-            let output = ticket.wait();
-            for (prime, bytes) in set
-                .primes()
-                .zip(output.chunks_exact(IDENTITY_BYTES + record_bytes))
-            {
-                identities[prime] = bytes[..IDENTITY_BYTES].try_into().unwrap();
-                records[prime] = bytes[IDENTITY_BYTES..].to_vec();
-            }
-        }
-        (identities, records)
-    }
-    /// Starts the keyed product of the value with the two groups of keys
-    /// from the context's ordinal.
-    pub(super) fn keyed_product(&self, value: &[u64], context: RecordContext) -> KeyedProduct {
-        KeyedProduct {
-            session: session(),
-            context,
-            polynomial: Some(self.shared_polynomial(value)),
-            started: Vec::new(),
-            requested: 0,
-            delivered: Vec::new(),
-            shared: None,
-            running: VecDeque::new(),
-            sums: std::array::from_fn(|_| vec![Vec::new(); self.external_primes]),
-            kept: Vec::new(),
-        }
-    }
-    /// The records a keyed product's next job needs.
-    fn keyed_request(&self, product: &KeyedProduct) -> RecordRequest {
-        self.keyed_request_at(product.context.ordinal, product.requested)
-    }
-    /// The records that the job of the index needs in a keyed product whose
-    /// first group's first key has the ordinal.
-    fn keyed_request_at(&self, ordinal: usize, index: usize) -> RecordRequest {
-        let (prime, group) = keyed_job(index, self.external_primes, parallel_work::helpers());
-        RecordRequest {
-            first: ordinal + group * self.gadget_length,
-            count: self.gadget_length,
-            prime,
-        }
-    }
-    /// The requests of such a keyed product from the job of the index on.
-    pub(super) fn keyed_requests_from(
-        &self,
-        ordinal: usize,
-        index: usize,
-    ) -> impl Iterator<Item = RecordRequest> + '_ {
-        (index..KEYED_GROUPS * self.external_primes)
-            .map(move |index| self.keyed_request_at(ordinal, index))
-    }
-    /// Takes the next record of the keyed product's pending request; false
-    /// when it is not that record.
-    pub(super) fn deliver_record(
-        &self,
-        product: &mut KeyedProduct,
-        ordinal: usize,
-        prime: usize,
-        record: &[u8],
-    ) -> bool {
-        // Once every job has requested its records, no request is left.
-        if product.requested == KEYED_GROUPS * self.external_primes || product.shared.is_some() {
-            return false;
-        }
-        let record_bytes = 8 * self.degree;
-        let request = self.keyed_request(product);
-        let received = product.delivered.len() / record_bytes;
-        if prime != request.prime
-            || received == request.count
-            || ordinal != request.first + received
-            || record.len() != record_bytes
-        {
-            return false;
-        }
-        if product.delivered.is_empty() {
-            product
-                .delivered
-                .reserve_exact(request.count * record_bytes);
-        }
-        product.delivered.extend_from_slice(record);
-        true
-    }
-    /// Takes the pending request's records, which the host shared itself
-    /// one after another; false when they are not that whole request's
-    /// records or a record of it was delivered.
-    pub(super) fn deliver_shared_records(
-        &self,
-        product: &mut KeyedProduct,
-        request: RecordRequest,
-        records: Shared,
-    ) -> bool {
-        if product.requested == KEYED_GROUPS * self.external_primes
-            || request != self.keyed_request(product)
-            || !product.delivered.is_empty()
-            || product.shared.is_some()
-            || records.length() != request.count * 8 * self.degree
-        {
-            return false;
-        }
-        product.shared = Some(records);
-        true
-    }
-    /// Starts the job of a complete delivery and takes the outputs beyond
-    /// the window. Returns the next request, the oldest such job while it
-    /// runs when the host can await it, or both groups' sums once every job
-    /// has ended. Fails when a job's records are not those whose identities
-    /// the caller holds, by ordinal and prime.
-    pub(super) fn advance_keyed(
-        &self,
-        product: &mut KeyedProduct,
-        identities: &[Vec<[u8; 64]>],
-    ) -> Result<Keyed, ()> {
-        let total = KEYED_GROUPS * self.external_primes;
-        let record_bytes = 8 * self.degree;
-        if product.requested < total
-            && (product.shared.is_some()
-                || product.delivered.len() == self.gadget_length * record_bytes)
-        {
-            let request = self.keyed_request(product);
-            let (_, group) = keyed_job(
-                product.requested,
-                self.external_primes,
-                parallel_work::helpers(),
-            );
-            if group == 0
-                && let Some(polynomial) = &product.polynomial
-            {
-                let set = PrimeSet {
-                    first: request.prime,
-                    stride: 1,
-                    count: request.prime + 1,
-                };
-                let mut input = self.set_header(set);
-                input.extend(product.session.to_le_bytes());
-                product.started.push(submit(
-                    &DIGITS,
-                    Some(request.prime),
-                    &[Part::Bytes(&input), Part::Streamed(polynomial)],
-                    0,
-                ));
-                product.kept.push(request.prime);
-            }
-            if group + 1 == KEYED_GROUPS {
-                product.kept.retain(|prime| *prime != request.prime);
-            }
-            let mut input = self.header(request.prime);
-            input.extend(product.session.to_le_bytes());
-            input.extend(u32::from(group + 1 == KEYED_GROUPS).to_le_bytes());
-            RecordContext {
-                ordinal: request.first,
-                ..product.context
-            }
-            .write(&mut input);
-            let records = product
-                .shared
-                .take()
-                .unwrap_or_else(|| share(Zeroizing::new(std::mem::take(&mut product.delivered))));
-            let ticket = submit(
-                &KEYED,
-                Some(request.prime),
-                &[Part::Bytes(&input), Part::Streamed(&records)],
-                IDENTITY_BYTES * self.gadget_length + record_bytes,
-            );
-            drop(records);
-            product.running.push_back((product.requested, ticket));
-            product.requested += 1;
-            if product.requested == total {
-                product.polynomial = None;
-            }
-        }
-        let window = if product.requested == total {
-            0
-        } else {
-            window()
-        };
-        while product.running.len() > window {
-            if let Some(number) = product.running[0].1.pending() {
-                return Ok(Keyed::Waiting(number));
-            }
-            let (index, ticket) = product.running.pop_front().unwrap();
-            let output = ticket.wait();
-            let (prime, group) = keyed_job(index, self.external_primes, parallel_work::helpers());
-            let first = product.context.ordinal + group * self.gadget_length;
-            let (held, sum) = output.split_at(IDENTITY_BYTES * self.gadget_length);
-            for (digit, identity) in held.chunks_exact(IDENTITY_BYTES).enumerate() {
-                if identities
-                    .get(first + digit)
-                    .and_then(|record| record.get(prime))
-                    .map(<[u8; 64]>::as_slice)
-                    != Some(identity)
-                {
-                    return Err(());
-                }
-            }
-            product.sums[group][prime] = words(sum);
-        }
-        if product.requested < total {
-            return Ok(Keyed::Records(self.keyed_request(product)));
-        }
-        for ticket in product.started.drain(..) {
-            assert!(ticket.wait().is_empty());
-        }
-        Ok(Keyed::Done(std::mem::take(&mut product.sums)))
-    }
+
     /// The canonical coefficients that the residues modulo the lift's primes
     /// determine.
     pub(super) fn lifted(&self, residues: &[impl AsRef<[u64]>], lifted: Lifted) -> Polynomial {

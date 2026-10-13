@@ -10,6 +10,10 @@ import {
     atMost,
     rationalCeilingLog2,
     ceilingSquareRoot,
+    rational,
+    type Rational,
+} from '#tests/security-ledger/rational.js';
+import {
     compileAuthenticationGroup,
     compileComparisonGrowth,
     compileIdentityCollisionGroup,
@@ -19,12 +23,10 @@ import {
     compileSoundnessCharge,
     compileStatisticalTerms,
     groupBudget,
-    rational,
     ratioResolutionBits,
     semanticUseStepsOutsideComparisons,
     soundnessChargeAt,
     statisticalRatioAt,
-    type Rational,
 } from '#tests/security-ledger-model.js';
 import {
     instanceKnownAttackFloor,

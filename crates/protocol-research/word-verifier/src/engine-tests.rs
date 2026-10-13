@@ -1,7 +1,9 @@
+use super::query_domain::CORRECTED_DEGREES;
+use super::transcript::hash;
 use super::*;
 use supported_profile::{
     Profile,
-    relation::{PROOF_HEADER_BYTES, ballot_relation},
+    relation::{MAXIMUM_DEGREE, PROOF_HEADER_BYTES, SYSTEMATIC, ballot_relation},
 };
 
 // A statement that refuses every byte, so no proof it opens completes.

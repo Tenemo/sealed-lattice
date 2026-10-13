@@ -11,7 +11,7 @@ import { compileProofVerifierQueryCensus } from '#tests/proof-verifier-query-mod
 
 // Independent raw-input recognizer for the three fixed proof purposes. It does
 // not verify a proof, authenticate an identity or observe native hash calls.
-// Source grammar: word-verifier/engine.rs, supported-profile/relation.rs and
+// Source grammar: word-verifier/proof-transcript.rs, supported-profile/relation.rs and
 // the original-identity role constructors in protocol-foundations.
 const agreement = compileCommonAgreementDegreeCensus();
 const tagBytes = 64;
