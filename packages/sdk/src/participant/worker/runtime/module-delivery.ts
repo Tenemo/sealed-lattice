@@ -93,11 +93,22 @@ export const instantiateForOperation = async (
 // The WebAssembly memory a completed operation held: the worker instance's
 // linear memory and how far its allocations reached, and its helpers' and
 // the shared arena's, beside the bounds of the operation's memory plan.
+export type OperationMemory = Readonly<{
+    workerBytes: number;
+    workerUsedBytes: number;
+    workerBoundBytes: number;
+    helpers: number;
+    helperBoundBytes: number;
+    helperBytes: number;
+    largestHelperBytes: number;
+    arenaBytes: number;
+}>;
+
 export const operationMemory = (
     module: ParticipantModule,
     helpers: ParallelHelpers,
     evaluation: boolean,
-) => ({
+): OperationMemory => ({
     workerBytes: module.memory.buffer.byteLength,
     workerUsedBytes: module.linear_memory_high_water() >>> 0,
     workerBoundBytes:
@@ -107,4 +118,3 @@ export const operationMemory = (
         module.helper_memory_bound(helpers.count, evaluation ? 1 : 0) >>> 0,
     ...helpers.memory(),
 });
-export type OperationMemory = ReturnType<typeof operationMemory>;
