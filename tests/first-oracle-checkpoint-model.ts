@@ -5,7 +5,7 @@ import {
     merkleSaltSeedBytes,
 } from '#tests/full-word-proof-layout-model.js';
 import { compileRosterProposalCensus } from '#tests/roster-proposal-model.js';
-import { compileSetupContributionRelationCensus } from '#tests/setup-contribution-relation-model.js';
+import { compileSetupContributionRelationCensus } from '#tests/setup-relation/shape.js';
 import type { SupportedProfile } from '#tests/supported-profile-model.js';
 
 // The most plaintext bytes one checkpoint record seals.

@@ -1,6 +1,6 @@
 import { compileBallotBodyCensus } from '#tests/ballot-body-model.js';
 import { compileCommonMatrixSamplingCensus } from '#tests/common-matrix-sampling-model.js';
-import { deriveSetupContributionShape } from '#tests/setup-contribution-relation-model.js';
+import { deriveSetupContributionShape } from '#tests/setup-relation/shape.js';
 import { compileWideChallengeCompilerCensus } from '#tests/wide-challenge-compiler-model.js';
 import {
     formatCount,

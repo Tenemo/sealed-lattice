@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
+import { createSetupContributionRelationModel } from '#tests/setup-contribution-relation-model.js';
 import {
     compileSetupContributionRelationCensus,
     compileSetupContributionColumnLayout,
-    createSetupContributionRelationModel,
     deriveSetupContributionShape,
-} from '#tests/setup-contribution-relation-model.js';
+} from '#tests/setup-relation/shape.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
 import {
     completionProfile,

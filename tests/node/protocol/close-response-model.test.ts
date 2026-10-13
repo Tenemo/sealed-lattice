@@ -12,10 +12,8 @@ import {
     type CloseIntent,
     type CloseResponse,
 } from '#tests/close-contract-model.js';
-import {
-    exploreCompletionProfileExecutions,
-    runCloseExecution,
-} from '#tests/close-execution-model.js';
+import { exploreCompletionProfileExecutions } from '#tests/close-execution/exploration.js';
+import { runCloseExecution } from '#tests/close-execution-model.js';
 import {
     bruteForceListerSets,
     compileCloseObligationCounterexamples,

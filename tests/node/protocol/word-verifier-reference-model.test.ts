@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 import { proofRelationCatalogue } from '#tests/proof-relation-catalogue-model.js';
-import { compileSetupContributionColumnLayout } from '#tests/setup-contribution-relation-model.js';
+import { compileSetupContributionColumnLayout } from '#tests/setup-relation/shape.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
 import { deriveSupportedProfile } from '#tests/supported-profile-model.js';
 import {

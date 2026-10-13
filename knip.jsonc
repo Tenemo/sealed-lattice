@@ -11,7 +11,7 @@
                 "tools/ci/bounded-output-browser-worker.mjs",
                 "tools/ci/bounded-output-worker.mjs",
             ],
-            "project": ["tests/**/*.ts", "tools/**/*.{ts,mjs}"],
+            "project": ["tests/**/*.{ts,mjs}", "tools/**/*.{ts,mjs}"],
         },
         "packages/sdk": {
             "entry": [

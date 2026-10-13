@@ -17,7 +17,7 @@ import { compileParticipantReleaseCustody } from '#tests/participant-release-cus
 import { compileRecipientKeyCensus } from '#tests/recipient-key-model.js';
 import { compileRegistrationEnrollmentCensus } from '#tests/registration-enrollment-model.js';
 import { compileRosterProposalCensus } from '#tests/roster-proposal-model.js';
-import { compileSetupContributionRelationCensus } from '#tests/setup-contribution-relation-model.js';
+import { compileSetupContributionRelationCensus } from '#tests/setup-relation/shape.js';
 import { compileSetupSelectionWireCensus } from '#tests/setup-selection-wire-model.js';
 import {
     ballotScoreRange,

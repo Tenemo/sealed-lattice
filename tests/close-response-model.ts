@@ -22,8 +22,8 @@ import {
     type CloseResponse,
     type SlotClassification,
 } from '#tests/close-contract-model.js';
+import { exploreCompletionProfileExecutions } from '#tests/close-execution/exploration.js';
 import {
-    exploreCompletionProfileExecutions,
     runCloseExecution,
     type CloseExecutionOptions,
 } from '#tests/close-execution-model.js';

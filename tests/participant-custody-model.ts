@@ -5,7 +5,7 @@ import { compileParticipantBallotCustody } from '#tests/participant-ballot-custo
 import { compileParticipantCloseCustody } from '#tests/participant-close-custody-model.js';
 import { compileParticipantReleaseCustody } from '#tests/participant-release-custody-model.js';
 import { compileRegistrationEnrollmentCensus } from '#tests/registration-enrollment-model.js';
-import { compileSetupContributionRelationCensus } from '#tests/setup-contribution-relation-model.js';
+import { compileSetupContributionRelationCensus } from '#tests/setup-relation/shape.js';
 import { compileSetupSelectionWireCensus } from '#tests/setup-selection-wire-model.js';
 import type { SupportedProfile } from '#tests/supported-profile-model.js';
 import { compileTargetSigningStateCensus } from '#tests/target-signing-state-model.js';

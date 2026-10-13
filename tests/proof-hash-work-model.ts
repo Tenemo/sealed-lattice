@@ -13,7 +13,7 @@ import { participantReleaseProofRoleBytes } from '#tests/participant-release-cus
 import { compileProofVerifierQueryCensus } from '#tests/proof-verifier-query-model.js';
 import { compileRecipientKeyCensus } from '#tests/recipient-key-model.js';
 import { compileRosterProposalCensus } from '#tests/roster-proposal-model.js';
-import { compileSetupContributionRelationCensus } from '#tests/setup-contribution-relation-model.js';
+import { compileSetupContributionRelationCensus } from '#tests/setup-relation/shape.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
 import type { SupportedProfile } from '#tests/supported-profile-model.js';
 import {

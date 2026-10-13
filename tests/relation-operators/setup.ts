@@ -26,10 +26,8 @@ import {
     addWeighted,
     zeros,
 } from '#tests/relation-operator-model.js';
-import {
-    deriveSetupContributionShape,
-    setupEquationWidths,
-} from '#tests/setup-contribution-relation-model.js';
+import { setupEquationWidths } from '#tests/setup-relation/equations.js';
+import { deriveSetupContributionShape } from '#tests/setup-relation/shape.js';
 import {
     interpolationRingDegree,
     type SupportedProfile,

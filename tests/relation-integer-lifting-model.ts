@@ -4,7 +4,7 @@ import { auxiliaryInputEncryptionParameters } from '#tests/auxiliary-input-encry
 import { compileBallotEncryptionColumnLayout } from '#tests/ballot-encryption-relation-model.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import { compileLinkedReleaseColumnLayout } from '#tests/linked-release-relation-model.js';
-import { setupEquationWidths } from '#tests/setup-contribution-relation-model.js';
+import { setupEquationWidths } from '#tests/setup-relation/equations.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
 import {
     ballotScoreRange,

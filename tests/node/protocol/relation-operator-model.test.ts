@@ -17,10 +17,8 @@ import {
 import { ballotRelationOperator } from '#tests/relation-operators/ballot.js';
 import { releaseRelationOperator } from '#tests/relation-operators/release.js';
 import { setupRelationOperator } from '#tests/relation-operators/setup.js';
-import {
-    compileSetupContributionColumnLayout,
-    createSetupContributionRelationModel,
-} from '#tests/setup-contribution-relation-model.js';
+import { createSetupContributionRelationModel } from '#tests/setup-contribution-relation-model.js';
+import { compileSetupContributionColumnLayout } from '#tests/setup-relation/shape.js';
 import {
     deriveSupportedProfile,
     type SupportedProfile,

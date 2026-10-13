@@ -3,7 +3,7 @@ import { compileBallotEncryptionColumnLayout } from '#tests/ballot-encryption-re
 import { compileCommonAgreementDegreeCensus } from '#tests/common-agreement-degree-model.js';
 import { compileLinkedReleaseColumnLayout } from '#tests/linked-release-relation-model.js';
 import { maximumSharedPathSiblings } from '#tests/merkle-path-sharing-model.js';
-import { deriveSetupContributionShape } from '#tests/setup-contribution-relation-model.js';
+import { deriveSetupContributionShape } from '#tests/setup-relation/shape.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
 import type { SupportedProfile } from '#tests/supported-profile-model.js';
 import { proofCompilerCaps } from '#tests/wide-challenge-compiler-model.js';

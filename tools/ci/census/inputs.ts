@@ -50,8 +50,8 @@ import { compileRnsArithmeticResourceCensus } from '#tests/rns-arithmetic-resour
 import { compileRosterProposalCensus } from '#tests/roster-proposal-model.js';
 import { compileSelectedOpeningTransformCensus } from '#tests/selected-opening-transform-model.js';
 import { compileSetupAggregateResources } from '#tests/setup-aggregate-resource-model.js';
-import { compileSetupContributionRelationCensus } from '#tests/setup-contribution-relation-model.js';
 import { compileSetupRandomnessCensus } from '#tests/setup-randomness-model.js';
+import { compileSetupContributionRelationCensus } from '#tests/setup-relation/shape.js';
 import { compileSetupSelectionWireCensus } from '#tests/setup-selection-wire-model.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
 import { compileFixedSpongeInitializationCensus } from '#tests/sponge-initialization-model.js';

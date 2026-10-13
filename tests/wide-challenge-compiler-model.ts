@@ -1,7 +1,7 @@
 import { compileBallotEncryptionRelationCensus } from '#tests/ballot-encryption-relation-model.js';
 import { compileCommonAgreementDegreeCensus } from '#tests/common-agreement-degree-model.js';
 import { compileLinkedReleaseRelationCensus } from '#tests/linked-release-relation-model.js';
-import { deriveSetupContributionShape } from '#tests/setup-contribution-relation-model.js';
+import { deriveSetupContributionShape } from '#tests/setup-relation/shape.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
 import {
     listSupportedProfiles,
