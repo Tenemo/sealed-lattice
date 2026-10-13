@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { stripTypeScriptTypes } from 'node:module';
 import { createContext, Script } from 'node:vm';
 
+import { ScriptTarget, transpileModule } from 'typescript';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -44,12 +44,12 @@ describe('sparse-router circuit construction', () => {
             'tests/compressed-oracle-model.ts',
             'utf8',
         );
-        const javascript = stripTypeScriptTypes(
+        const javascript = transpileModule(
             source
                 .replace(/^import assert from 'node:assert\/strict';\r?$/mu, '')
                 .replace(/^export /gmu, ''),
-            { mode: 'transform' },
-        );
+            { compilerOptions: { target: ScriptTarget.ES2022 } },
+        ).outputText;
         let words = 0;
         // Count real Array.from results in an isolated evaluation. No gate,
         // wire, predicate, or circuit output is overridden by this observer.
