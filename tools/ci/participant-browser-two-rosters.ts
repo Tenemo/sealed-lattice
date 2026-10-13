@@ -2,17 +2,17 @@ import assert from 'node:assert/strict';
 import { cp, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import {
-    type Member,
-    type ParticipantCohort,
-    prose,
-    secondRosterCopy,
-} from '#tools/ci/participant-browser-cohort.js';
+import { type ParticipantCohort } from '#tools/ci/participant-browser-cohort.js';
 import {
     foreignFamilies,
     foreignRecordView,
 } from '#tools/ci/participant-browser-public-records.js';
 import { completeRoster } from '#tools/ci/participant-browser-roster-completion.js';
+import {
+    type Member,
+    prose,
+    secondRosterCopy,
+} from '#tools/ci/participant-cohort-state.js';
 
 // Completes two rosters of one poll beside each other and serves each
 // roster's records to a member of the other.

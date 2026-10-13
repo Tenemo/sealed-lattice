@@ -8,12 +8,10 @@ import {
 } from '#packages/sdk/src/participant/worker/relay/candidate-codec.js';
 import { tupleFields } from '#packages/sdk/src/participant/worker/shared/bytes.js';
 import { targetPhase } from '#packages/sdk/src/participant/worker/storage/root-generation.js';
-import type {
-    Member,
-    ParticipantCohort,
-} from '#tools/ci/participant-browser-cohort.js';
+import type { ParticipantCohort } from '#tools/ci/participant-browser-cohort.js';
 import type { ParticipantDepartureBoundary } from '#tools/ci/participant-browser-options.js';
 import { generatedOfferIdentity } from '#tools/ci/participant-browser-public-records.js';
+import { type Member } from '#tools/ci/participant-cohort-state.js';
 import type { CheckpointCustodyObservation } from '#tools/ci/participant-preparation-storage.js';
 
 // Completes one roster from its proposal to its combined

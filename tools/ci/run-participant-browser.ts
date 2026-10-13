@@ -1,9 +1,7 @@
 import { runWithLocalRunLog } from '#tools/ci/local-run-log.js';
 import {
     closeParticipantCohort,
-    createCohortState,
     openParticipantCohort,
-    participantBrowserSettings,
 } from '#tools/ci/participant-browser-cohort.js';
 import { runFaultSchedule } from '#tools/ci/participant-browser-fault-schedule.js';
 import {
@@ -12,6 +10,10 @@ import {
 } from '#tools/ci/participant-browser-options.js';
 import { runSingleRoster } from '#tools/ci/participant-browser-single-roster.js';
 import { runTwoRosters } from '#tools/ci/participant-browser-two-rosters.js';
+import {
+    createCohortState,
+    participantBrowserSettings,
+} from '#tools/ci/participant-cohort-state.js';
 import { acquireProtocolResearchLock } from '#tools/ci/protocol-research-lock.js';
 
 // Runs a browser cohort of the selected profile through the maintained

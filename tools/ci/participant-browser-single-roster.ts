@@ -9,12 +9,10 @@ import {
     encodeSetupSelectionModel,
     setupSelectionIdentityModel,
 } from '#tests/setup-selection-wire-model.js';
-import {
-    type ParticipantCohort,
-    requireScalarMemory,
-} from '#tools/ci/participant-browser-cohort.js';
+import { type ParticipantCohort } from '#tools/ci/participant-browser-cohort.js';
 import { generatedOfferIdentity } from '#tools/ci/participant-browser-public-records.js';
 import { completeRoster } from '#tools/ci/participant-browser-roster-completion.js';
+import { requireScalarMemory } from '#tools/ci/participant-cohort-state.js';
 import { summarizeParticipantWorkflow } from '#tools/ci/participant-workflow-measurements.js';
 
 // Carries one roster through each stage once, with the recovery,
