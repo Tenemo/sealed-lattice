@@ -45,10 +45,9 @@ jobs:
                   persist-credentials: false
                   ref: ${{ github.sha }}
             - uses: ./.github/actions/bootstrap-pnpm
-            - uses: ./.github/actions/participant-toolchain
-            - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
+            - uses: ./.github/actions/rust-toolchain
               with:
-                  workspaces: |
+                  cache-workspaces: |
                       crates/protocol-research -> ../../target/participant-module
                       crates/protocol-research
 
@@ -178,10 +177,9 @@ jobs:
                   persist-credentials: false
                   ref: ${{ needs.verify.outputs.tag }}
             - uses: ./.github/actions/bootstrap-pnpm
-            - uses: ./.github/actions/participant-toolchain
-            - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
+            - uses: ./.github/actions/rust-toolchain
               with:
-                  workspaces: crates/protocol-research -> ../../target/participant-module
+                  cache-workspaces: crates/protocol-research -> ../../target/participant-module
 
             - name: Verify checked-out release commit
               env:

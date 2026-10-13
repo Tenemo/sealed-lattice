@@ -14,7 +14,8 @@ on:
             - packages/sdk/src/participant/worker/**
             - pnpm-lock.yaml
             - pnpm-workspace.yaml
-            - tests/*.ts
+            - tests/**/*.ts
+            - '!tests/node/**'
             - tools/ci/**
     push:
         branches:
@@ -29,7 +30,8 @@ on:
             - packages/sdk/src/participant/worker/**
             - pnpm-lock.yaml
             - pnpm-workspace.yaml
-            - tests/*.ts
+            - tests/**/*.ts
+            - '!tests/node/**'
             - tools/ci/**
     workflow_dispatch:
 
@@ -62,10 +64,9 @@ jobs:
               with:
                   persist-credentials: false
             - uses: ./.github/actions/bootstrap-pnpm
-            - uses: ./.github/actions/participant-toolchain
-            - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
+            - uses: ./.github/actions/rust-toolchain
               with:
-                  workspaces: crates/protocol-research
+                  cache-workspaces: crates/protocol-research
             - name: Run the guarded protocol research case
               env:
                   RESEARCH_CASE: ${{ matrix.case }}
