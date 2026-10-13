@@ -1,3 +1,4 @@
+import type { ParticipantSummary } from '../../participant-contract.js';
 import { isEligibleContributor } from '../module/context.js';
 import type { ParticipantProfileContext } from '../module/context.js';
 import { hexadecimal } from '../shared/bytes.js';
@@ -16,7 +17,9 @@ import type { AuthenticatedRoot } from '../storage/root.js';
 // retained, in progress from the attempt lock, signed, or impossible once the
 // participant learned that ballot submission closed without a ballot of its
 // own.
-const ballotState = (root: AuthenticatedRoot) => {
+const ballotState = (
+    root: AuthenticatedRoot,
+): ParticipantSummary['ballotState'] => {
     const { generation } = root.head;
     if (generation < rootGeneration.setupRetained) return undefined;
     if (generation === rootGeneration.setupRetained) return 'open';

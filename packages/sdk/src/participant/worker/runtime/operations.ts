@@ -1,3 +1,4 @@
+import type { ParticipantReportedDetails } from '../../participant-contract.js';
 import { isEligibleContributor } from '../module/context.js';
 import type {
     ParticipantContext,
@@ -14,22 +15,26 @@ import {
     resumeBallot,
 } from '../stages/ballot/ballot.js';
 import {
-    advanceClose,
     closeEvents,
     isCloseComplete,
+    resumeClose,
+} from '../stages/close/close-custody.js';
+import { publishClose } from '../stages/close/close-delivery.js';
+import {
+    advanceClose,
     lockPublishedIntent,
     parseCloseParameters,
-    publishClose,
-    resumeClose,
 } from '../stages/close/close.js';
+import {
+    publishOffer,
+    signContribution,
+} from '../stages/contribution/contribution-offer.js';
 import { contributionPhase } from '../stages/contribution/contribution-state.js';
 import {
     beginContribution,
     continueContribution,
     generateContribution,
-    publishOffer,
     restoreCheckpoint,
-    signContribution,
 } from '../stages/contribution/contribution.js';
 import type { EnrollmentRequest } from '../stages/enrollment/enrollment.js';
 import {
@@ -79,7 +84,10 @@ import {
 } from './participant-session.js';
 import { summary } from './participant-summary.js';
 import { refused } from './worker-messages.js';
-import type { WorkerCommand, WorkerResult } from './worker-messages.js';
+import type {
+    WorkerCommand,
+    ParticipantWorkerResult,
+} from './worker-messages.js';
 
 const text = (value: unknown) => {
     if (typeof value !== 'string')
@@ -104,7 +112,7 @@ export const executeOperation = async (
     relay: PublicRelay,
     command: WorkerCommand,
     started: () => void,
-): Promise<WorkerResult> => {
+): Promise<ParticipantWorkerResult> => {
     const parameters = command.parameters;
     if (command.operation === 'create') {
         const role = text(parameters.role);
@@ -168,7 +176,7 @@ export const executeOperation = async (
             ? await retainedProfile(context, root, enrollment)
             : undefined;
     // What an operation reports beside the participant's summary.
-    let reported: Readonly<Record<string, unknown>> = {};
+    let reported: ParticipantReportedDetails = {};
     const profileContext = (): ParticipantProfileContext => {
         if (profiled === undefined)
             throw new Error('The participant profile is not known.');
@@ -490,7 +498,10 @@ export const executeOperation = async (
             };
         }
         default:
-            return refused('invalid request');
+            throw new Error(
+                'Unhandled participant operation: ' +
+                    String(command.operation satisfies never),
+            );
     }
     // A roster retained by this operation names the profile only now.
     return {

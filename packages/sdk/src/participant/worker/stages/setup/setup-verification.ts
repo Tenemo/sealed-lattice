@@ -35,7 +35,7 @@ import type { SignedPacket } from '../../shared/signed-packet.js';
 import {
     contributionCandidateKey,
     polynomialFile,
-} from '../contribution/contribution.js';
+} from '../contribution/contribution-offer.js';
 import {
     proposalRegistrationBodyDigests,
     rosterBegin,

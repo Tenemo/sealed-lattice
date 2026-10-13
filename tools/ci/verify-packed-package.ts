@@ -357,6 +357,7 @@ const writeConsumer = async (consumerDirectoryPath: string): Promise<void> => {
                 "const result: Promise<ParticipantResponse> = participant.run({ operation: 'status' });",
                 "const options: ParticipantSummary['options'] = [{ identifier: 'option-0', label: 'Option 0' }];",
                 'void result;',
+                "void result.then((response) => { if (response.status === 'completed') { const identifiers: readonly string[] | undefined = response.details.identifiers; const proofRandomBytes: number | undefined = response.details.proofRandomBytes; void identifiers; void proofRandomBytes; } });",
                 'void options;',
                 '',
             ].join('\n'),

@@ -12,13 +12,13 @@ import {
 } from '#packages/sdk/src/participant/worker/module/runtime-bounds.js';
 import { ballotRecordAssociatedData } from '#packages/sdk/src/participant/worker/stages/ballot/ballot-state.js';
 import type { BallotSession } from '#packages/sdk/src/participant/worker/stages/ballot/ballot.js';
+import { heldBallotBody } from '#packages/sdk/src/participant/worker/stages/close/close-custody.js';
+import type { CloseSession } from '#packages/sdk/src/participant/worker/stages/close/close-custody.js';
 import {
     closeEventKind,
     closeRecordAssociatedData,
     collectingCloseState,
 } from '#packages/sdk/src/participant/worker/stages/close/close-state.js';
-import { heldBallotBody } from '#packages/sdk/src/participant/worker/stages/close/close.js';
-import type { CloseSession } from '#packages/sdk/src/participant/worker/stages/close/close.js';
 import {
     openParticipantDatabase,
     participantDatabaseName,

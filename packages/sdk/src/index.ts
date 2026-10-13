@@ -10,4 +10,4 @@ export type {
     ParticipantRequest,
     ParticipantResponse,
     ParticipantSummary,
-} from './participant/participant.js';
+} from './participant/participant-contract.js';

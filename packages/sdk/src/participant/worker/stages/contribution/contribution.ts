@@ -13,13 +13,8 @@ import {
 } from '../../module/participant-module.js';
 import { chunkBytes, recordKeyBytes } from '../../module/runtime-bounds.js';
 import { findCandidate, readCandidateFile } from '../../relay/candidates.js';
-import { publishOfferAnnouncement } from '../../relay/offer-discovery.js';
-import { createCandidatePublication } from '../../relay/publication.js';
 import type { PublicRelay } from '../../relay/relay.js';
-import {
-    isContributionSession,
-    resumeParticipant,
-} from '../../runtime/participant-session.js';
+import { isContributionSession } from '../../runtime/participant-session.js';
 import type {
     ParticipantSession,
     ContributionSession,
@@ -27,15 +22,10 @@ import type {
 import {
     concatenate,
     equalBytes,
-    hexadecimal,
-    tupleFields,
     unsigned16,
-    unsigned32,
     unsigned64,
 } from '../../shared/bytes.js';
 import { PublicInputFailure, StorageFailure } from '../../shared/failures.js';
-import { decodeSignedPacket } from '../../shared/signed-packet.js';
-import type { SignedPacket } from '../../shared/signed-packet.js';
 import {
     addParticipantRecords,
     awaitLater,
@@ -43,21 +33,8 @@ import {
     readParticipantValue,
     recordBytes,
 } from '../../storage/database.js';
-import { openDelivery } from '../../storage/delivery.js';
-import {
-    openSealedRecord,
-    sealRecord,
-    sealedLength,
-} from '../../storage/private-records.js';
 import { rootGeneration } from '../../storage/root-generation.js';
-import type { AuthenticatedRoot } from '../../storage/root.js';
-import {
-    commitRoot,
-    dataKind,
-    dataRecordInventory,
-    readDataKind,
-} from '../../storage/root.js';
-import type { VerifiedProposal } from '../roster/roster.js';
+import { dataKind, readDataKind } from '../../storage/root.js';
 import {
     proposalRegistrationBodyDigests,
     registrationFile,
@@ -65,25 +42,20 @@ import {
 } from '../roster/roster.js';
 
 import {
-    createProofWriter,
-    proofLength,
-    readProof,
-} from './contribution-proof.js';
-import {
-    contributionPhase,
-    recordAssociatedData,
-    signingObject,
-    contributionInventory,
-    encodeContributionState,
-    proofObject,
-} from './contribution-state.js';
+    type SealedOutput,
+    sealContributionRecord,
+    commitContribution,
+    openContributionRecord,
+    signing,
+    offerSigningOperation,
+} from './contribution-custody.js';
+import { createProofWriter, proofLength } from './contribution-proof.js';
+import { contributionPhase, proofObject } from './contribution-state.js';
 import type {
     ContributionRecord,
-    SigningKind,
     ContributionState,
     CheckpointRecord,
 } from './contribution-state.js';
-import { encodePreparationState } from './preparation-state.js';
 
 // The sealed checkpoint bytes one write stores while the next are sealed.
 const checkpointWriteBytes = 4 << 20;
@@ -117,166 +89,6 @@ const checkpointOperation = {
     finish: 6,
 } as const;
 
-const offerSigningOperation = {
-    beginBody: 1,
-    polynomial: 2,
-    proof: 3,
-    finishBody: 4,
-    signOffer: 5,
-    bodyHeader: 8,
-} as const;
-
-type SealedOutput = Readonly<{
-    record: ContributionRecord;
-    ciphertext: Uint8Array;
-}>;
-
-const sealContributionRecord = async (
-    session: ParticipantSession,
-    object: number,
-    offset: number,
-    bytes: Uint8Array,
-): Promise<SealedOutput> => {
-    const location = { object, offset, length: bytes.length };
-    const { key, ciphertext } = await sealRecord(
-        recordAssociatedData(session.records, location),
-        bytes,
-    );
-    return {
-        record: {
-            ...location,
-            key,
-            hash: custodyIdentity(
-                session.context.module,
-                custodyPurpose.record,
-                ciphertext,
-            ),
-        },
-        ciphertext,
-    };
-};
-
-const openContributionRecord = async (
-    session: ParticipantSession,
-    record: ContributionRecord,
-) => {
-    const blob = await readParticipantValue(
-        session.context.database,
-        'contribution',
-        [record.object, record.offset],
-    );
-    if (!(blob instanceof Blob) || blob.size !== sealedLength(record.length))
-        throw new Error('A contribution record is missing.');
-    const ciphertext = await recordBytes(blob);
-    if (
-        !equalBytes(
-            custodyIdentity(
-                session.context.module,
-                custodyPurpose.record,
-                ciphertext,
-            ),
-            record.hash,
-        )
-    )
-        throw new Error('A contribution record changed.');
-    return openSealedRecord(
-        record.key,
-        recordAssociatedData(session.records, record),
-        ciphertext,
-    );
-};
-
-const openSigning = (session: ContributionSession, kind: SigningKind) => {
-    const object = signingObject(session.context.profile, kind);
-    const record = session.state.signingRecords.find(
-        (value) => value.object === object,
-    );
-    if (record === undefined)
-        throw new Error('A contribution signing record is missing.');
-    return openContributionRecord(session, record);
-};
-
-type ContributionTransition = Readonly<{
-    phase: number;
-    state: ContributionState;
-    // Generated records stored ahead of this root; its transition checks
-    // that each one opens before it commits.
-    staged?: boolean;
-    // Signing records written with the root.
-    signing?: readonly SealedOutput[];
-    clearCheckpoint?: boolean;
-}>;
-
-const commitContribution = async (
-    session: ParticipantSession,
-    transition: ContributionTransition,
-) => {
-    const { context, root } = session;
-    const profile = context.profile;
-    const predecessor =
-        root.head.generation >= rootGeneration.preparation &&
-        session.state !== undefined
-            ? contributionInventory(profile, session.state, session.records)
-            : [];
-    const listed = new Set(
-        predecessor.map(
-            (record) => record.store + ':' + JSON.stringify(record.key),
-        ),
-    );
-    const staged =
-        transition.staged === true
-            ? contributionInventory(
-                  profile,
-                  transition.state,
-                  session.records,
-              ).filter(
-                  (record) =>
-                      !listed.has(
-                          record.store + ':' + JSON.stringify(record.key),
-                      ),
-              )
-            : [];
-    session.root = await commitRoot(context, root, {
-        generation: rootGeneration.preparation,
-        manifest: {
-            ...root.manifest,
-            suffixes: {
-                ...root.manifest.suffixes,
-                preparation: encodePreparationState({
-                    ...session.preparation,
-                    contribution: encodeContributionState({
-                        ...transition.state,
-                        phase: transition.phase,
-                    }),
-                }),
-            },
-        },
-        predecessorRecords: [
-            ...dataRecordInventory(root.manifest),
-            ...predecessor,
-        ],
-        stagedRecords: staged,
-        write: (transaction) => {
-            for (const output of transition.signing ?? [])
-                transaction
-                    .objectStore('contribution')
-                    .add(new Blob([new Uint8Array(output.ciphertext)]), [
-                        output.record.object,
-                        output.record.offset,
-                    ]);
-            if (transition.clearCheckpoint === true)
-                transaction.objectStore('checkpoint').clear();
-        },
-    });
-    session.state = { ...transition.state, phase: transition.phase };
-    session.preparation = {
-        ...session.preparation,
-        contribution: encodeContributionState(session.state),
-    };
-    for (const output of transition.signing ?? [])
-        (await openContributionRecord(session, output.record)).fill(0);
-};
-
 const proverOutput = (context: ParticipantProfileContext) =>
     readModuleMemory(
         context.module,
@@ -295,17 +107,6 @@ const checkpoint = (
         argument: position,
         input: bytes,
     }) !== undefined;
-
-const signing = (
-    context: ParticipantProfileContext,
-    operation: number,
-    bytes: Uint8Array = new Uint8Array(),
-    argument = 0,
-) =>
-    moduleCommand(context.module, 'offerSigning', operation, {
-        argument,
-        input: bytes,
-    });
 
 // Runs prover commands with the randomness of one generation or
 // continuation, which the module expands from its retained seed. Only
@@ -782,209 +583,4 @@ export const continueContribution = async (session: ContributionSession) => {
         clearCheckpoint: true,
     });
     return run.randomBytes();
-};
-
-// Reads every authenticated private proof slot and its padding. Only the
-// exact framed proof reaches the signer or relay, and completion of either
-// caller waits for the full fixed record pass.
-const readRetainedProof = (
-    session: ContributionSession,
-    consume: (offset: number, bytes: Uint8Array) => void | Promise<void>,
-) => {
-    const { profile } = session.context;
-    const records = session.state.publicRecords.filter(
-        (record) => record.object === proofObject(profile),
-    );
-    return readProof(
-        profile.contribution,
-        session.state.header,
-        async (slot, index) => {
-            const record = records[index];
-            if (
-                record === undefined ||
-                record.offset !== slot.offset ||
-                record.length !== slot.length
-            )
-                throw new Error('The private proof record plan changed.');
-            return openContributionRecord(session, record);
-        },
-        consume,
-    );
-};
-
-// Recomputes the commitment to the retained body in the module's signer.
-const bodyOffer = async (session: ContributionSession) => {
-    const { context, state } = session;
-    const { profile } = context;
-    const control = concatenate(
-        unsigned16(state.position),
-        unsigned64(BigInt(proofLength(profile.contribution, state.header))),
-    );
-    try {
-        const header = signing(
-            context,
-            offerSigningOperation.beginBody,
-            control,
-        );
-        if (!equalBytes(header, state.header))
-            throw new Error('The original source opening changed.');
-    } finally {
-        control.fill(0);
-    }
-    for (const polynomial of profile.contribution.polynomials)
-        for (const record of state.publicRecords.filter(
-            (value) => value.object === polynomial.expandedIndex + 1,
-        )) {
-            const bytes = await openContributionRecord(session, record);
-            const input = concatenate(unsigned32(record.offset), bytes);
-            try {
-                signing(
-                    context,
-                    offerSigningOperation.polynomial,
-                    input,
-                    polynomial.expandedIndex,
-                );
-            } finally {
-                bytes.fill(0);
-                input.fill(0);
-            }
-        }
-    await readRetainedProof(session, (offset, bytes) => {
-        signing(context, offerSigningOperation.proof, bytes, offset);
-    });
-    return signing(context, offerSigningOperation.finishBody);
-};
-
-const storedOffer = async (
-    session: ContributionSession,
-): Promise<SignedPacket> => ({
-    body: await openSigning(session, 'offerEnvelope'),
-    signature: await openSigning(session, 'offerSignature'),
-});
-
-export const signContribution = async (
-    session: ContributionSession,
-): Promise<SignedPacket> => {
-    const { context } = session;
-    const { profile } = context;
-    if (session.state.phase < contributionPhase.body)
-        throw new Error('No complete contribution is retained.');
-    if (session.state.phase === contributionPhase.signed)
-        return storedOffer(session);
-    const envelope = await bodyOffer(session);
-    if (session.state.phase === contributionPhase.body) {
-        const output = await sealContributionRecord(
-            session,
-            signingObject(profile, 'offerEnvelope'),
-            0,
-            envelope,
-        );
-        await commitContribution(session, {
-            phase: contributionPhase.signingIntent,
-            state: {
-                ...session.state,
-                signingRecords: [output.record],
-            },
-            signing: [output],
-        });
-    }
-    const body = await openSigning(session, 'offerEnvelope');
-    if (!equalBytes(envelope, body))
-        throw new Error('The locked offer changed.');
-    const signed = decodeSignedPacket(
-        signing(context, offerSigningOperation.signOffer),
-        profile.registration.signatureBytes,
-    );
-    if (signed === undefined)
-        throw new Error('Malformed signed contribution packet.');
-    if (!equalBytes(signed.body, body))
-        throw new Error('The signer changed the offer.');
-    const output = await sealContributionRecord(
-        session,
-        signingObject(profile, 'offerSignature'),
-        0,
-        signed.signature,
-    );
-    await commitContribution(session, {
-        phase: contributionPhase.signed,
-        state: {
-            ...session.state,
-            signingRecords: [...session.state.signingRecords, output.record],
-        },
-        signing: [output],
-    });
-    return storedOffer(session);
-};
-
-export const contributionCandidateKey = (
-    position: number,
-    bodyIdentity: Uint8Array,
-) => 'contribution-' + String(position) + '/' + hexadecimal(bodyIdentity);
-
-export const polynomialFile = (expandedIndex: number) =>
-    'polynomial-' + String(expandedIndex).padStart(2, '0') + '.bin';
-
-export const resumeContribution = async (
-    context: ParticipantProfileContext,
-    root: AuthenticatedRoot,
-    verified?: VerifiedProposal,
-): Promise<ContributionSession> => {
-    const session = await resumeParticipant(context, root, verified);
-    if (!isContributionSession(session))
-        throw new Error('No own contribution is retained.');
-    return session;
-};
-
-// Publishes one correlated complete signed offer, then announces its body.
-export const publishOffer = async (
-    session: ContributionSession,
-    relay: PublicRelay,
-    offer: SignedPacket,
-) => {
-    const { profile } = session.context;
-    const fields = tupleFields(offer.body);
-    if (fields.length !== 5 || fields[4].length !== 64)
-        throw new Error('The retained offer envelope is malformed.');
-    const bodyIdentity = fields[4];
-    const key = contributionCandidateKey(session.state.position, bodyIdentity);
-    const delivery = await openDelivery(session.context, session.root);
-    const publication = createCandidatePublication(relay, key, delivery);
-    await publication.addBytes('offer.bin', offer.body);
-    await publication.addBytes('offer-signature.bin', offer.signature);
-    await publication.addBytes('body-header.bin', session.state.header);
-    for (const polynomial of profile.contribution.polynomials) {
-        await publication.addStream(
-            polynomialFile(polynomial.expandedIndex),
-            polynomial.bytes,
-            async (accept) => {
-                for (const record of session.state.publicRecords.filter(
-                    (value) => value.object === polynomial.expandedIndex + 1,
-                )) {
-                    const bytes = await openContributionRecord(session, record);
-                    try {
-                        await accept(bytes);
-                    } finally {
-                        bytes.fill(0);
-                    }
-                }
-            },
-        );
-    }
-    await publication.addStream(
-        'proof.bin',
-        proofLength(profile.contribution, session.state.header),
-        async (accept) => {
-            await readRetainedProof(session, async (_offset, bytes) => {
-                try {
-                    await accept(bytes);
-                } finally {
-                    bytes.fill(0);
-                }
-            });
-        },
-    );
-    await publication.finish();
-    await delivery.transfer(() =>
-        publishOfferAnnouncement(relay, session.state.position, bodyIdentity),
-    );
 };

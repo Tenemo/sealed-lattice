@@ -171,14 +171,187 @@ export const moduleFunctions = [
     'custody_identity_begin',
     'custody_identity_absorb',
     'custody_identity_finish',
-] as const;
+] as const satisfies readonly Exclude<keyof ParticipantModule, 'memory'>[];
 
 type ModuleFunction = (...values: number[]) => number;
-export type ParticipantModule = Readonly<
-    Record<(typeof moduleFunctions)[number], ModuleFunction> & {
-        memory: WebAssembly.Memory;
-    }
->;
+export type ParticipantModule = Readonly<{
+    memory: WebAssembly.Memory;
+    participant_bounds_pointer: () => number;
+    participant_limits: () => number;
+    participant_profile_bounds: (
+        participants: number,
+        options: number,
+    ) => number;
+    linear_memory_high_water: () => number;
+    helper_memory_bound: (helpers: number, evaluation: number) => number;
+    worker_memory_bound: (helpers: number, evaluation: number) => number;
+    worker_reserve: (helpers: number, evaluation: number) => number;
+    input_pointer: () => number;
+    input_capacity: () => number;
+    poll_identity_pointer: () => number;
+    validate_organizer: (length: number) => number;
+    validate_joiner: (length: number) => number;
+    prepare_organizer: (length: number) => number;
+    prepare_joiner: (length: number) => number;
+    restore: (length: number) => number;
+    restore_prepared: (length: number) => number;
+    retire_contribution_sources: () => number;
+    own_registration_input_pointer: () => number;
+    own_registration_input_capacity: () => number;
+    own_registration_command: (operation: number, length: number) => number;
+    own_registration_body_digest_pointer: () => number;
+    own_registration_username_pointer: () => number;
+    own_registration_username_length: () => number;
+    own_registration_option_count: () => number;
+    own_registration_maximum_participants: () => number;
+    own_registration_poll: () => number;
+    roster_begin: (length: number) => number;
+    roster_open_records: () => number;
+    roster_record: (
+        operation: number,
+        position: number,
+        length: number,
+    ) => number;
+    roster_finish: () => number;
+    roster_body_pointer: () => number;
+    roster_body_length: () => number;
+    roster_identity_pointer: () => number;
+    roster_usernames: () => number;
+    validate_roster_signer: () => number;
+    sign_roster_proposal: (length: number) => number;
+    roster_signature_pointer: () => number;
+    verify_roster_signature: (length: number) => number;
+    retain_proposal: (length: number) => number;
+    retained_proposal_identity_pointer: () => number;
+    participant_ballot_command: (
+        operation: number,
+        argument: number,
+        length: number,
+    ) => number;
+    participant_close_command: (
+        operation: number,
+        argument: number,
+        length: number,
+    ) => number;
+    participant_finality_command: (operation: number, length: number) => number;
+    participant_release_command: (operation: number, length: number) => number;
+    completion_input_pointer: () => number;
+    completion_input_capacity: () => number;
+    completion_output_pointer: () => number;
+    completion_output_length: () => number;
+    completion_command: (
+        operation: number,
+        argument: number,
+        length: number,
+    ) => number;
+    close_input_pointer: () => number;
+    close_input_capacity: () => number;
+    close_command: (operation: number, length: number) => number;
+    close_missing_pointer: () => number;
+    close_missing_count: () => number;
+    ballot_body_input_pointer: () => number;
+    ballot_body_input_capacity: () => number;
+    ballot_classification_begin: (length: number) => number;
+    ballot_classification_requires_key: () => number;
+    ballot_classification_key_begin: (index: number) => number;
+    ballot_classification_key_chunk: (length: number) => number;
+    ballot_classification_key_finish: () => number;
+    ballot_classification_chunk: (length: number) => number;
+    ballot_classification_finish: () => number;
+    ballot_classification_is_valid: () => number;
+    evaluation_target_input_pointer: () => number;
+    evaluation_target_input_capacity: () => number;
+    evaluation_target_output_pointer: () => number;
+    evaluation_target_output_length: () => number;
+    evaluation_target_command: (
+        operation: number,
+        argument: number,
+        length: number,
+    ) => number;
+    evaluation_target_body_pointer: () => number;
+    evaluation_target_body_length: () => number;
+    evaluation_target_finished: () => number;
+    retain_evaluation: () => number;
+    restore_evaluation: (operation: number, length: number) => number;
+    confirm_roster: () => number;
+    offer_signing_command: (
+        operation: number,
+        argument: number,
+        length: number,
+    ) => number;
+    selection_signing_command: (operation: number, length: number) => number;
+    retain_selection_inputs: () => number;
+    restore_selection_inputs: (length: number) => number;
+    contribution_output_pointer: () => number;
+    contribution_output_length: () => number;
+    begin_contribution: (position: number) => number;
+    contribution_proof_input_pointer: () => number;
+    contribution_proof_input_capacity: () => number;
+    contribution_proof_command: (
+        operation: number,
+        argument: number,
+        length: number,
+    ) => number;
+    contribution_proof_phase: () => number;
+    contribution_proof_output_pointer: () => number;
+    contribution_proof_output_length: () => number;
+    contribution_checkpoint_records: () => number;
+    contribution_checkpoint_command: (
+        operation: number,
+        position: number,
+        length: number,
+    ) => number;
+    contribution_checkpoint_key: (position: number, length: number) => number;
+    operation_random_input_pointer: () => number;
+    operation_random_command: (operation: number, length: number) => number;
+    operation_random_drawn: (stream: number) => number;
+    setup_input_pointer: () => number;
+    setup_input_capacity: () => number;
+    setup_chunk_capacity: () => number;
+    setup_roster_begin: (length: number) => number;
+    setup_roster_record: (
+        operation: number,
+        position: number,
+        length: number,
+    ) => number;
+    setup_roster_finish: (length: number) => number;
+    setup_option_count: () => number;
+    setup_output_pointer: () => number;
+    setup_output_length: () => number;
+    setup_offer_begin: (length: number) => number;
+    setup_offer_polynomial: (
+        index: number,
+        offset: number,
+        length: number,
+    ) => number;
+    setup_offer_proof: (offset: number, length: number) => number;
+    setup_offer_finish: () => number;
+    setup_offer_available: (position: number, length: number) => number;
+    setup_selection_build: (length: number) => number;
+    setup_selection_begin: (length: number) => number;
+    setup_selection_output: () => number;
+    setup_selection_aggregate: () => number;
+    setup_begin_selected_offer: (position: number) => number;
+    setup_begin_selected_offer_verification: (length: number) => number;
+    setup_polynomial: (index: number, offset: number, length: number) => number;
+    setup_selected_offer_proof: (offset: number, length: number) => number;
+    setup_finish_selected_offer: () => number;
+    setup_accepted: () => number;
+    setup_selection_finish: () => number;
+    setup_discard_aggregation: () => number;
+    setup_endorsement: (length: number) => number;
+    setup_certificate_build: () => number;
+    setup_certificate: (length: number) => number;
+    setup_finish_certificate: () => number;
+    retain_setup: () => number;
+    restore_setup: (length: number) => number;
+    custody_identity_input_pointer: () => number;
+    custody_identity_input_capacity: () => number;
+    custody_identity_output_pointer: () => number;
+    custody_identity_begin: (purpose: number, length: number) => number;
+    custody_identity_absorb: (length: number) => number;
+    custody_identity_finish: () => number;
+}>;
 
 export type ModuleHandlers = {
     random?: (target: Uint8Array<ArrayBuffer>) => void;

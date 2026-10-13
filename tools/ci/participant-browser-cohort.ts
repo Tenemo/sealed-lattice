@@ -14,7 +14,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 
 import { build } from 'tsdown';
 
-import type { ParticipantRequest } from '#packages/sdk/src/participant/participant.js';
+import type { ParticipantRequest } from '#packages/sdk/src/participant/participant-contract.js';
 import { chunkBytes } from '#packages/sdk/src/participant/worker/module/runtime-bounds.js';
 import type { WorkerResult } from '#packages/sdk/src/participant/worker/runtime/worker-messages.js';
 import { compileOperationProofDraws } from '#tests/operation-seed-model.js';

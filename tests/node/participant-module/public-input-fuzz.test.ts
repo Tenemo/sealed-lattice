@@ -75,7 +75,10 @@ const call = (
 ) => {
     let failure: unknown;
     try {
-        return module[name](...values);
+        // Fuzzing deliberately bypasses the typed host signatures.
+        const command: (...arguments_: readonly number[]) => number =
+            module[name];
+        return command(...values);
     } catch (error) {
         failure = error;
     }

@@ -56,7 +56,7 @@ describe('participant module failures', () => {
         expect(module.input_capacity()).toBe(0);
         let failure: unknown;
         try {
-            module.restore();
+            module.restore(0);
         } catch (error) {
             failure = error;
         }
@@ -68,7 +68,7 @@ describe('participant module failures', () => {
         // names, because the instance's state is unknown.
         for (const call of [
             () => module.input_capacity(),
-            () => module.restore(),
+            () => module.restore(0),
         ])
             expect(call).toThrow(failure);
     });
@@ -80,7 +80,7 @@ describe('participant module failures', () => {
         );
         let failure: unknown;
         try {
-            module.retain_proposal();
+            module.retain_proposal(0);
         } catch (error) {
             failure = error;
         }
@@ -95,7 +95,7 @@ describe('participant module failures', () => {
             noHelpers,
         );
         // No operation installed a randomness handler, so the import refuses.
-        expect(() => module.prepare_organizer()).toThrow(ModuleFailure);
+        expect(() => module.prepare_organizer(0)).toThrow(ModuleFailure);
         // With a handler, a fresh instance draws and returns.
         const fresh = await instantiateParticipantModule(
             standInModule(),
@@ -105,7 +105,7 @@ describe('participant module failures', () => {
         fresh.handlers.random = (target) => {
             drawn += target.length;
         };
-        expect(fresh.module.prepare_organizer()).toBe(0);
+        expect(fresh.module.prepare_organizer(0)).toBe(0);
         expect(drawn).toBe(16);
         expect(handlers.random).toBeUndefined();
     });

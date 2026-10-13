@@ -15,6 +15,7 @@ import type { PublicRelay } from '../../relay/relay.js';
 import { concatenate, equalBytes, hexadecimal } from '../../shared/bytes.js';
 import { PublicInputFailure } from '../../shared/failures.js';
 import { ballotCandidateKey } from '../ballot/ballot.js';
+import type { heldBallotBody } from '../close/close-custody.js';
 import {
     closeProposalCandidateKey,
     closureBodyFile,
@@ -26,7 +27,6 @@ import {
     responseIdentity,
     responseListing,
 } from '../close/close-records.js';
-import type { heldBallotBody } from '../close/close.js';
 import {
     deliverFinalAggregate,
     readFinalAggregate,

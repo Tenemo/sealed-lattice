@@ -23,9 +23,8 @@ import {
     refused,
 } from './runtime/worker-messages.js';
 import type {
-    VerificationCommand,
-    WorkerCommand,
-    WorkerResult,
+    ParticipantWorkerResult,
+    VerificationWorkerResult,
 } from './runtime/worker-messages.js';
 import { fromHexadecimal } from './shared/bytes.js';
 import { classifyFailure, pendingCause } from './shared/failures.js';
@@ -47,9 +46,9 @@ const evaluatingOperations: ReadonlySet<string> = new Set([
 ]);
 
 const run = async (
-    command: WorkerCommand,
+    command: unknown,
     helperPorts: readonly MessagePort[],
-): Promise<WorkerResult> => {
+): Promise<ParticipantWorkerResult> => {
     if (!isSupportedBrowser()) return refused('unsupported browser');
     if (!isWellFormed(command)) return refused('invalid request');
     const relay: PublicRelay = { base: command.relay };
@@ -71,7 +70,7 @@ const run = async (
         const parallel = helpers;
         return await navigator.locks.request(
             namespacedName('sealed-lattice-participant', command.namespace),
-            async (): Promise<WorkerResult> => {
+            async (): Promise<ParticipantWorkerResult> => {
                 let module: ParticipantModule | undefined;
                 try {
                     const instance = await instantiateForOperation(
@@ -174,9 +173,9 @@ const run = async (
 const verificationNamespace = (poll: string) => 'verification.' + poll;
 
 const runVerification = async (
-    command: VerificationCommand,
+    command: unknown,
     helperPorts: readonly MessagePort[],
-): Promise<WorkerResult> => {
+): Promise<VerificationWorkerResult> => {
     if (!isSupportedBrowser()) return refused('unsupported browser');
     if (!isWellFormedVerification(command)) return refused('invalid request');
     let helpers: ParallelHelpers | undefined;
@@ -188,7 +187,7 @@ const runVerification = async (
         const namespace = verificationNamespace(command.poll);
         return await navigator.locks.request(
             namespacedName('sealed-lattice-verification', namespace),
-            async (): Promise<WorkerResult> => {
+            async (): Promise<VerificationWorkerResult> => {
                 const { module, handlers } = await instantiateForOperation(
                     compiledModule,
                     parallel,
@@ -231,11 +230,7 @@ const runVerification = async (
     }
 };
 
-self.onmessage = (
-    event: MessageEvent<
-        WorkerCommand | VerificationCommand | typeof helperRole
-    >,
-) => {
+self.onmessage = (event: MessageEvent<unknown>) => {
     if (event.data === helperRole) {
         self.onmessage = null;
         listenAsHelper(event.ports[0]);

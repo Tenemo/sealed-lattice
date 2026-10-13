@@ -12,9 +12,9 @@ import {
     fromHexadecimal,
     hexadecimal,
 } from '#packages/sdk/src/participant/worker/shared/bytes.js';
+import { resumeContribution } from '#packages/sdk/src/participant/worker/stages/contribution/contribution-custody.js';
 import { proofLength } from '#packages/sdk/src/participant/worker/stages/contribution/contribution-proof.js';
 import { encodeContributionState } from '#packages/sdk/src/participant/worker/stages/contribution/contribution-state.js';
-import { resumeContribution } from '#packages/sdk/src/participant/worker/stages/contribution/contribution.js';
 import { encodePreparationState } from '#packages/sdk/src/participant/worker/stages/contribution/preparation-state.js';
 import { restoreEnrollment } from '#packages/sdk/src/participant/worker/stages/enrollment/enrollment.js';
 import { retainedProfile } from '#packages/sdk/src/participant/worker/stages/roster/roster.js';

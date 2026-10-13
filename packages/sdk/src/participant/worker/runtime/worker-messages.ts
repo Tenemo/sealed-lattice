@@ -1,10 +1,17 @@
 import type {
+    OutcomeVerification,
+    ParticipantRequest,
+    ParticipantSummary,
+    ParticipantReportedDetails,
+} from '../../participant-contract.js';
+import type {
     IncompleteOperation,
     ParticipantRefusalReason,
 } from '../shared/operation-status.js';
 import { participantNamespacePattern } from '../storage/database.js';
 
 import type { OperationMemory } from './module-delivery.js';
+import { isParticipantOperation } from './operation-availability.js';
 
 // The application's SDK supplies the namespace of the participant's local
 // state, the relay's base URL, the module's URL and the identities its build
@@ -15,7 +22,7 @@ import type { OperationMemory } from './module-delivery.js';
 // the operation's other work ends there, and the page runs the operation
 // again in a fresh worker.
 export type WorkerCommand = Readonly<{
-    operation: string;
+    operation: ParticipantRequest['operation'];
     namespace: string;
     relay: string;
     module: string;
@@ -44,17 +51,24 @@ export type VerificationCommand = Readonly<{
 // says why, and a participant that another runtime created is refused with
 // that runtime's identity, which its head names. A pending result names what
 // the participant waits for.
-export type WorkerResult =
+export type ParticipantWorkerResult =
     | Readonly<{
           status: 'completed';
-          details: Readonly<Record<string, unknown>>;
+          details: Omit<ParticipantSummary, 'isStoragePersistent'> &
+              ParticipantReportedDetails &
+              Readonly<Record<string, unknown>>;
       }>
     | IncompleteOperation
     | Readonly<{ status: 'evaluated'; memory: OperationMemory }>;
 
+export type VerificationWorkerResult = OutcomeVerification;
+export type WorkerResult = ParticipantWorkerResult | VerificationWorkerResult;
+
 // A refused request changed nothing.
-export const refused = (
-    reason: Exclude<ParticipantRefusalReason, 'another runtime'>,
+export const refused = <
+    Reason extends Exclude<ParticipantRefusalReason, 'another runtime'>,
+>(
+    reason: Reason,
 ) => ({ status: 'refused', reason }) as const;
 
 // An absolute HTTP or HTTPS URL in its canonical form.
@@ -79,20 +93,35 @@ const isBaseUrl = (value: unknown) => {
     );
 };
 
-export const isWellFormed = (command: WorkerCommand) =>
-    typeof command.namespace === 'string' &&
-    participantNamespacePattern.test(command.namespace) &&
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+    typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const hasRuntime = (command: Record<string, unknown>) =>
     isBaseUrl(command.relay) &&
     httpUrl(command.module) !== undefined &&
+    isRecord(command.identity) &&
+    typeof command.identity.source === 'string' &&
+    typeof command.identity.module === 'string' &&
+    typeof command.identity.worker === 'string';
+
+export const isWellFormed = (command: unknown): command is WorkerCommand =>
+    isRecord(command) &&
+    hasRuntime(command) &&
+    isParticipantOperation(command.operation) &&
+    isRecord(command.parameters) &&
+    typeof command.namespace === 'string' &&
+    participantNamespacePattern.test(command.namespace) &&
     (command.separateEvaluation === undefined ||
         typeof command.separateEvaluation === 'boolean');
 
-export const isVerification = (
-    command: WorkerCommand | VerificationCommand,
-): command is VerificationCommand => command.operation === 'verify-outcome';
+export const isVerification = (command: unknown) =>
+    isRecord(command) && command.operation === 'verify-outcome';
 
-export const isWellFormedVerification = (command: VerificationCommand) =>
+export const isWellFormedVerification = (
+    command: unknown,
+): command is VerificationCommand =>
+    isRecord(command) &&
+    hasRuntime(command) &&
+    command.operation === 'verify-outcome' &&
     typeof command.poll === 'string' &&
-    /^[0-9a-f]{128}$/u.test(command.poll) &&
-    isBaseUrl(command.relay) &&
-    httpUrl(command.module) !== undefined;
+    /^[0-9a-f]{128}$/u.test(command.poll);
