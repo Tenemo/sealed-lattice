@@ -5,7 +5,7 @@ import {
     candidateManifestBytes,
     encodeCandidatePage,
     encodeCandidateReceipt,
-    isCandidateId,
+    isCandidateLocator,
     isCandidateKey,
 } from '#packages/sdk/src/participant/worker/relay/candidate-codec.js';
 import type {
@@ -20,7 +20,10 @@ type Views = Readonly<{
     manifest?: (
         candidate: StoredParticipantCandidate,
     ) => Promise<Uint8Array | undefined>;
-    chunk?: (id: string, bytes: Uint8Array) => Promise<Uint8Array | undefined>;
+    chunk?: (
+        locator: string,
+        bytes: Uint8Array,
+    ) => Promise<Uint8Array | undefined>;
     page?: (key: string, offset: number) => ReturnType<Store['page']>;
 }>;
 
@@ -66,10 +69,10 @@ export const serveParticipantCandidates = async (
             request.method === 'POST' &&
             url.search === ''
         ) {
-            const id = await store.putChunk(
+            const locator = await store.putChunk(
                 await readBody(request, candidateChunkBytes),
             );
-            send(Buffer.from(id, 'hex'));
+            send(Buffer.from(locator, 'hex'));
             return true;
         }
         if (pathname.startsWith('/candidates/')) {
@@ -86,7 +89,7 @@ export const serveParticipantCandidates = async (
                     return true;
                 }
                 const receipt = await store.append(key, bytes);
-                await views.published?.(await store.candidate(receipt.id));
+                await views.published?.(await store.candidate(receipt.locator));
                 send(encodeCandidateReceipt(receipt));
                 return true;
             }
@@ -108,26 +111,26 @@ export const serveParticipantCandidates = async (
         }
         for (const prefix of ['/candidate/', '/chunk/']) {
             if (!pathname.startsWith(prefix)) continue;
-            const id = pathname.slice(prefix.length);
+            const locator = pathname.slice(prefix.length);
             if (
                 request.method !== 'GET' ||
                 url.search !== '' ||
-                !isCandidateId(id)
+                !isCandidateLocator(locator)
             )
                 break;
             if (prefix === '/candidate/') {
-                const candidate = await store.candidate(id);
+                const candidate = await store.candidate(locator);
                 send(
                     views.manifest === undefined
                         ? candidate.bytes
                         : await views.manifest(candidate),
                 );
             } else {
-                const bytes = await store.chunk(id);
+                const bytes = await store.chunk(locator);
                 send(
                     views.chunk === undefined
                         ? bytes
-                        : await views.chunk(id, bytes),
+                        : await views.chunk(locator, bytes),
                 );
             }
             return true;

@@ -255,10 +255,7 @@ export const beginContribution = async (
         signingRecords: [],
         seed: crypto.getRandomValues(new Uint8Array(operationSeedBytes)),
     };
-    await commitContribution(session, {
-        phase: contributionPhase.generationIntent,
-        state,
-    });
+    await commitContribution(session, { state });
     if (!isContributionSession(session))
         throw new Error('No contribution intent was retained.');
     return session;
@@ -354,9 +351,9 @@ export const generateContribution = async (session: ContributionSession) => {
         run.close();
     }
     await commitContribution(session, {
-        phase: contributionPhase.checkpoint,
         state: {
             ...session.state,
+            phase: contributionPhase.checkpoint,
             header,
             publicRecords: run.stored,
             privateRecords,
@@ -422,10 +419,13 @@ export const restoreCheckpoint = async (
     const registrationBodyDigests = proposalRegistrationBodyDigests(
         await readDataKind(context, session.root.manifest, dataKind.proposal),
     );
-    for (const [position, id] of registrationBodyDigests.entries()) {
+    for (const [
+        position,
+        registrationBodyDigest,
+    ] of registrationBodyDigests.entries()) {
         await findCandidate(
             relay,
-            registrationCandidateKey(id),
+            registrationCandidateKey(registrationBodyDigest),
             async (candidate) => {
                 const key = await readCandidateFile(
                     relay,
@@ -467,9 +467,9 @@ export const continueContribution = async (session: ContributionSession) => {
         throw new Error('No contribution checkpoint is retained.');
     if (phase === contributionPhase.checkpoint)
         await commitContribution(session, {
-            phase: contributionPhase.continuationIntent,
             state: {
                 ...session.state,
+                phase: contributionPhase.continuationIntent,
                 seed: crypto.getRandomValues(
                     new Uint8Array(operationSeedBytes),
                 ),
@@ -571,9 +571,9 @@ export const continueContribution = async (session: ContributionSession) => {
         run.close();
     }
     await commitContribution(session, {
-        phase: contributionPhase.body,
         state: {
             ...state,
+            phase: contributionPhase.body,
             header,
             publicRecords: [...state.publicRecords, ...proof],
             privateRecords: [],

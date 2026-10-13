@@ -64,10 +64,7 @@ fn every_profile_and_requested_result_length_has_an_executable_program() {
             assert!(counts.iter().sum::<usize>() <= MAXIMUM_INSTRUCTIONS);
         }
         for top_count in [0, options + 1] {
-            assert!(matches!(
-                RankingProgram::for_profile(profile, top_count),
-                Err(UnsupportedTopCount)
-            ));
+            assert!(RankingProgram::for_profile(profile, top_count).is_none());
         }
     }
     for (participants, options) in [(3, 2), (3, 20), (10, 10), (20, 2), (20, 20)] {

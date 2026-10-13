@@ -22,10 +22,12 @@ export const publishRegistrationRecords = async (
     root: AuthenticatedRoot,
     enrollment: RestoredEnrollment,
 ) => {
-    const id = hexadecimal(enrollment.registrationBodyDigest);
+    const registrationBodyDigest = hexadecimal(
+        enrollment.registrationBodyDigest,
+    );
     const groups: [string, [number, string][]][] = [
         [
-            registrationCandidateKey(id),
+            registrationCandidateKey(registrationBodyDigest),
             [
                 [dataKind.publicKey, registrationFile.publicKey],
                 [dataKind.header, registrationFile.header],

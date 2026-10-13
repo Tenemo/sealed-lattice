@@ -48,7 +48,9 @@ it('retains distinct immutable candidates through concurrent publication, pagina
                 store.append('close-proposal', manifest),
             ),
         );
-        expect(new Set(receipts.map((receipt) => receipt.id)).size).toBe(69);
+        expect(new Set(receipts.map((receipt) => receipt.locator)).size).toBe(
+            69,
+        );
         expect(
             receipts
                 .map((receipt) => receipt.index)
@@ -57,16 +59,16 @@ it('retains distinct immutable candidates through concurrent publication, pagina
         const first = await store.page('close-proposal', 0);
         const rest = await participantRelayStore(directory).page(
             'close-proposal',
-            first.ids.length,
+            first.locators.length,
         );
-        expect(first.ids).toHaveLength(64);
-        expect(rest.ids).toHaveLength(5);
+        expect(first.locators).toHaveLength(64);
+        expect(rest.locators).toHaveLength(5);
         expect(first.total).toBe(69);
         expect(rest.total).toBe(69);
-        expect(new Set([...first.ids, ...rest.ids])).toEqual(
-            new Set(receipts.map((receipt) => receipt.id)),
+        expect(new Set([...first.locators, ...rest.locators])).toEqual(
+            new Set(receipts.map((receipt) => receipt.locator)),
         );
-        const original = await store.file(receipts[0].id, 'body.bin');
+        const original = await store.file(receipts[0].locator, 'body.bin');
         await store.putChunk(Uint8Array.of(9, 9, 9));
         const bytes = [];
         for await (const part of original.read()) bytes.push(part);
@@ -89,7 +91,7 @@ it('selects and hides equivocal candidate discovery without changing the immutab
                     ],
                 }),
             );
-            const candidate = await store.candidate(receipt.id);
+            const candidate = await store.candidate(receipt.locator);
             await projection.published(candidate);
             candidates.push({
                 candidate,
@@ -103,7 +105,7 @@ it('selects and hides equivocal candidate discovery without changing the immutab
         const reader = projection.forReader(view, () => undefined);
         const all = {
             total: 3,
-            ids: candidates.map(({ candidate }) => candidate.id),
+            locators: candidates.map(({ candidate }) => candidate.locator),
         };
         expect(await reader.page('ballot-1', 0)).toEqual(all);
         expect(
@@ -114,24 +116,27 @@ it('selects and hides equivocal candidate discovery without changing the immutab
             view.set('ballot-1/submission.bin', identity);
             expect(await reader.page('ballot-1', 0)).toEqual({
                 total: 1,
-                ids: [candidate.id],
+                locators: [candidate.locator],
             });
             expect(await reader.page('ballot-1', 1)).toEqual({
                 total: 1,
-                ids: [],
+                locators: [],
             });
             expect(await reader.manifest(candidate)).toEqual(
                 new Uint8Array(candidate.bytes),
             );
             const body = [];
             for await (const bytes of (
-                await store.file(candidate.id, 'body.bin')
+                await store.file(candidate.locator, 'body.bin')
             ).read())
                 body.push(bytes);
             expect(Buffer.concat(body)).toEqual(Buffer.of(value));
         }
         view.set('ballot-1/submission.bin', undefined);
-        expect(await reader.page('ballot-1', 0)).toEqual({ total: 0, ids: [] });
+        expect(await reader.page('ballot-1', 0)).toEqual({
+            total: 0,
+            locators: [],
+        });
         expect(await store.page('ballot-1', 0)).toEqual(all);
         view.delete('ballot-1/submission.bin');
         expect(await reader.page('ballot-1', 0)).toEqual(all);
@@ -144,7 +149,7 @@ it('selects and hides equivocal candidate discovery without changing the immutab
                 files: [{ name: 'body.bin', length: 1, chunks: [shared] }],
             }),
         );
-        const closure = await store.candidate(closureReceipt.id);
+        const closure = await store.candidate(closureReceipt.locator);
         await projection.published(closure);
         view.set('close/closure/body.bin', undefined);
         expect(await reader.manifest(closure)).toBeUndefined();
@@ -171,18 +176,25 @@ it('never appends a manifest whose immutable chunks are missing or incomplete', 
     withStore(async (_directory, store) => {
         const empty = await store.putChunk(new Uint8Array());
         const short = await store.putChunk(Uint8Array.of(1));
-        for (const id of ['f'.repeat(32), empty, short]) {
+        for (const locator of ['f'.repeat(32), empty, short]) {
             await expect(
                 store.append(
                     'poll',
                     encodeCandidateManifest({
                         files: [
-                            { name: 'definition.bin', length: 2, chunks: [id] },
+                            {
+                                name: 'definition.bin',
+                                length: 2,
+                                chunks: [locator],
+                            },
                         ],
                     }),
                 ),
             ).rejects.toThrow();
-            expect(await store.page('poll', 0)).toEqual({ total: 0, ids: [] });
+            expect(await store.page('poll', 0)).toEqual({
+                total: 0,
+                locators: [],
+            });
         }
         const complete = await store.putChunk(Uint8Array.of(1, 2));
         const receipt = await store.append(

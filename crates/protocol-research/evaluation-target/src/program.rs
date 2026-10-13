@@ -3,9 +3,6 @@ use supported_profile::{DEGREE, Profile};
 /// The comparison polynomial is evaluated in blocks of this many powers.
 const COMPARISON_BLOCK_WIDTH: usize = 16;
 
-#[derive(Debug, PartialEq, Eq)]
-pub struct UnsupportedTopCount;
-
 struct Instruction {
     operation: u32,
     inputs: Vec<usize>,
@@ -146,10 +143,10 @@ impl RankingProgram {
     /// The encrypted ranking of the profile's accepted ballots: their sum,
     /// every pairwise comparison, each option's rank over the comparison
     /// window and the rank-equality weights of the requested result length.
-    pub fn for_profile(profile: Profile, top_count: usize) -> Result<Self, UnsupportedTopCount> {
+    pub fn for_profile(profile: Profile, top_count: usize) -> Option<Self> {
         let options = profile.options();
         if !(1..=options).contains(&top_count) {
-            return Err(UnsupportedTopCount);
+            return None;
         }
         let mut builder = Builder {
             instructions: Vec::new(),
@@ -189,7 +186,7 @@ impl RankingProgram {
             2 + top_count as u32
         };
         let result = builder.append(5, &[sum], constant);
-        Ok(Self {
+        Some(Self {
             bytes: builder.encode(result),
         })
     }

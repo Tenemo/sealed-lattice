@@ -25,8 +25,11 @@ it.each(['absent', 'different', 'truncated'] as const)(
                             ? new Uint8Array(11)
                             : encodeCandidatePage(
                                   fault === 'absent'
-                                      ? { total: 0, ids: [] }
-                                      : { total: 1, ids: ['fe'.repeat(16)] },
+                                      ? { total: 0, locators: [] }
+                                      : {
+                                            total: 1,
+                                            locators: ['fe'.repeat(16)],
+                                        },
                               );
                     return new Response(new Uint8Array(bytes));
                 }

@@ -6,7 +6,10 @@ import {
     decodeContributionState,
     encodeContributionState,
 } from '#packages/sdk/src/participant/worker/stages/contribution/contribution-state.js';
-import type { ContributionState } from '#packages/sdk/src/participant/worker/stages/contribution/contribution-state.js';
+import type {
+    ContributionPhase,
+    ContributionState,
+} from '#packages/sdk/src/participant/worker/stages/contribution/contribution-state.js';
 import { compileParticipantRuntimeProfile } from '#tests/participant-runtime-bounds-model.js';
 
 // The SHA-256 digest of stored bytes, which pins their exact format.
@@ -46,7 +49,7 @@ const record = (
 // These are references and opaque checkpoint headers for codec checks.
 // They create no authenticated storage, contribution or proof capability.
 const stateAt = (
-    phase: number,
+    phase: ContributionPhase,
     proofLength = bounds.minimumProofBytes,
     position = 2,
 ): ContributionState => ({
@@ -91,7 +94,7 @@ describe('independent contribution state framing', () => {
     it('admits every own phase for eligible pool members beyond the selected count', () => {
         expect(profile.setupContributorCount).toBe(2);
         expect(profile.eligibleContributorCount).toBe(3);
-        for (const phase of [4, 5, 6, 7, 8, 9]) {
+        for (const phase of [4, 5, 6, 7, 8, 9] as const) {
             for (const position of [0, 1, 2]) {
                 const state = stateAt(
                     phase,
@@ -114,7 +117,7 @@ describe('independent contribution state framing', () => {
     });
 
     it('retains the same maximum proof slot inventory for varied logical lengths', () => {
-        for (const phase of [7, 8, 9]) {
+        for (const phase of [7, 8, 9] as const) {
             let encodedLength: number | undefined;
             for (const length of [
                 bounds.minimumProofBytes,
@@ -146,7 +149,7 @@ describe('independent contribution state framing', () => {
     });
 
     it('rejects phase substitution instead of reviving or discarding private work', () => {
-        for (const phase of [4, 5, 6, 7, 8, 9]) {
+        for (const phase of [4, 5, 6, 7, 8, 9] as const) {
             const encoded = encodeContributionState(stateAt(phase));
             for (const changedPhase of [0, 3, 4, 5, 6, 7, 8, 9, 10, 255]) {
                 if (changedPhase === phase) continue;
@@ -172,7 +175,7 @@ describe('independent contribution state framing', () => {
     });
 
     it('rejects missing, extra, shortened and displaced body or proof records', () => {
-        for (const phase of [5, 6, 7, 8, 9]) {
+        for (const phase of [5, 6, 7, 8, 9] as const) {
             const state = stateAt(phase);
             const last = state.publicRecords.length - 1;
             for (const records of [
@@ -198,7 +201,7 @@ describe('independent contribution state framing', () => {
                     decode({ ...state, publicRecords: records }),
                 ).toThrow();
         }
-        for (const phase of [5, 6]) {
+        for (const phase of [5, 6] as const) {
             const state = stateAt(phase);
             expect(() =>
                 decode({
@@ -219,12 +222,12 @@ describe('independent contribution state framing', () => {
     });
 
     it('rejects wrong seed and offer record shapes at their actual phases', () => {
-        for (const phase of [4, 5, 6, 7, 8, 9]) {
+        for (const phase of [4, 5, 6, 7, 8, 9] as const) {
             const state = stateAt(phase);
             for (const seed of [new Uint8Array(63), new Uint8Array(65)])
                 expect(() => decode({ ...state, seed })).toThrow();
         }
-        for (const phase of [8, 9]) {
+        for (const phase of [8, 9] as const) {
             const state = stateAt(phase);
             for (const signingRecords of [
                 state.signingRecords.slice(1),
@@ -269,7 +272,7 @@ describe('independent contribution state framing', () => {
 
     it('pins the bytes every own phase stores', () => {
         expect(
-            [4, 5, 6, 7, 8, 9].map((phase) =>
+            ([4, 5, 6, 7, 8, 9] as const).map((phase) =>
                 storedDigest(encodeContributionState(stateAt(phase))),
             ),
         ).toEqual([

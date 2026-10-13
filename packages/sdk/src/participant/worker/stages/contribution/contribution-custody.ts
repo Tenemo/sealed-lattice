@@ -120,7 +120,6 @@ export const openSigning = (
 };
 
 type ContributionTransition = Readonly<{
-    phase: number;
     state: ContributionState;
     // Generated records stored ahead of this root; its transition checks
     // that each one opens before it commits.
@@ -159,19 +158,17 @@ export const commitContribution = async (
                       ),
               )
             : [];
+    const preparation = {
+        ...session.preparation,
+        contribution: encodeContributionState(transition.state),
+    };
     session.root = await commitRoot(context, root, {
         generation: rootGeneration.preparation,
         manifest: {
             ...root.manifest,
             suffixes: {
                 ...root.manifest.suffixes,
-                preparation: encodePreparationState({
-                    ...session.preparation,
-                    contribution: encodeContributionState({
-                        ...transition.state,
-                        phase: transition.phase,
-                    }),
-                }),
+                preparation: encodePreparationState(preparation),
             },
         },
         predecessorRecords: [
@@ -191,11 +188,8 @@ export const commitContribution = async (
                 transaction.objectStore('checkpoint').clear();
         },
     });
-    session.state = { ...transition.state, phase: transition.phase };
-    session.preparation = {
-        ...session.preparation,
-        contribution: encodeContributionState(session.state),
-    };
+    session.state = transition.state;
+    session.preparation = preparation;
     for (const output of transition.signing ?? [])
         (await openContributionRecord(session, output.record)).fill(0);
 };

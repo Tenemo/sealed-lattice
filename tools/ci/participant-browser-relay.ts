@@ -355,7 +355,7 @@ export const startRelay = async (
                 ...reader,
                 manifest: async (candidate) => {
                     candidateReads[Number(new URL(origin).port) - basePort].add(
-                        candidate.id,
+                        candidate.locator,
                     );
                     return reader.manifest(candidate);
                 },
@@ -398,7 +398,7 @@ export const startRelay = async (
                         if (target !== undefined && target.chunks.length > 0) {
                             const wrong = await store.chunk(target.chunks[0]);
                             wrong[0] ^= 1;
-                            const id = await store.putChunk(wrong);
+                            const locator = await store.putChunk(wrong);
                             changed = (
                                 await store.append(
                                     key,
@@ -408,7 +408,7 @@ export const startRelay = async (
                                                 ? {
                                                       ...file,
                                                       chunks: [
-                                                          id,
+                                                          locator,
                                                           ...file.chunks.slice(
                                                               1,
                                                           ),
@@ -418,11 +418,11 @@ export const startRelay = async (
                                         ),
                                     }),
                                 )
-                            ).id;
+                            ).locator;
                         }
                         publicationFaultEvidence.push({
                             key,
-                            empty: empty.id,
+                            empty: empty.locator,
                             ...(changed === undefined ? {} : { changed }),
                         });
                     }

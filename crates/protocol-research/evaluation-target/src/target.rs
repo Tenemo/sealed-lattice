@@ -143,7 +143,7 @@ impl ClassifiedClosedInventory {
                     self.setup.profile(),
                     usize::from(self.poll.top_count()),
                 )
-                .map_err(|_| Error::UnsupportedProfile)?,
+                .ok_or(Error::UnsupportedProfile)?,
             )
         };
         let mut engine = program

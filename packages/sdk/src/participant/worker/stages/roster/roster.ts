@@ -106,10 +106,10 @@ export const streamRegistrations = async (
             throw new PublicInputFailure(refusal);
     };
     const record = async (position: number) => {
-        const id = registrationBodyDigests[position];
+        const registrationBodyDigest = registrationBodyDigests[position];
         await findCandidate(
             relay,
-            registrationCandidateKey(id),
+            registrationCandidateKey(registrationBodyDigest),
             async (candidate) => {
                 try {
                     const header = await readCandidateFile(
@@ -129,7 +129,7 @@ export const streamRegistrations = async (
                         position,
                         concatenate(
                             unsigned16(position),
-                            fromHexadecimal(id),
+                            fromHexadecimal(registrationBodyDigest),
                             unsigned32(header.length),
                             header,
                             signature,
@@ -207,13 +207,15 @@ export const streamRegistrations = async (
 // The module decides whether it supports a roster of this size; a request
 // outside every supported size is refused before it reaches the module.
 export const validRegistrationBodyDigests = (
-    ids: readonly string[],
+    registrationBodyDigests: readonly string[],
     limits: ParticipantLimits,
 ) =>
-    ids.length >= limits.participants.minimum &&
-    ids.length <= limits.participants.maximum &&
-    new Set(ids).size === ids.length &&
-    ids.every((id) => /^[0-9a-f]{128}$/u.test(id));
+    registrationBodyDigests.length >= limits.participants.minimum &&
+    registrationBodyDigests.length <= limits.participants.maximum &&
+    new Set(registrationBodyDigests).size === registrationBodyDigests.length &&
+    registrationBodyDigests.every((registrationBodyDigest) =>
+        /^[0-9a-f]{128}$/u.test(registrationBodyDigest),
+    );
 
 export type VerifiedProposal = Readonly<{
     body: Uint8Array;
@@ -612,7 +614,9 @@ export const parseRegistrationBodyDigests = (value: unknown): string[] => {
     if (
         !Array.isArray(value) ||
         !value.every(
-            (id) => typeof id === 'string' && /^[0-9a-f]{128}$/u.test(id),
+            (registrationBodyDigest) =>
+                typeof registrationBodyDigest === 'string' &&
+                /^[0-9a-f]{128}$/u.test(registrationBodyDigest),
         )
     )
         throw new InvalidRequest('Malformed proposed record identifiers.');

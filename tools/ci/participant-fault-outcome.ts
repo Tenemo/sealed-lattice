@@ -234,8 +234,8 @@ export const verifyFaultOutcome = async (
         const page = decodeCandidatePage(
             new Uint8Array(await listed.arrayBuffer()),
         );
-        assert.ok(page.ids.length > 0);
-        const source = await fetch(base + '/candidate/' + page.ids[0]);
+        assert.ok(page.locators.length > 0);
+        const source = await fetch(base + '/candidate/' + page.locators[0]);
         assert.equal(source.status, 200);
         const manifest = new Uint8Array(await source.arrayBuffer());
         decodeCandidateManifest(manifest);
@@ -247,7 +247,7 @@ export const verifyFaultOutcome = async (
         const receipt = decodeCandidateReceipt(
             new Uint8Array(await posted.arrayBuffer()),
         );
-        const readback = await fetch(base + '/candidate/' + receipt.id);
+        const readback = await fetch(base + '/candidate/' + receipt.locator);
         assert.equal(readback.status, 200);
         assert.deepEqual(
             new Uint8Array(await readback.arrayBuffer()),
@@ -263,14 +263,14 @@ export const verifyFaultOutcome = async (
         assert.equal(discovery.status, 200);
         assert.equal(
             decodeCandidatePage(new Uint8Array(await discovery.arrayBuffer()))
-                .ids[0],
-            receipt.id,
+                .locators[0],
+            receipt.locator,
         );
         log.writeEvent({
             eventType: 'participant-replayed-candidate',
-            details: { sourceKey, targetKey, candidate: receipt.id },
+            details: { sourceKey, targetKey, candidate: receipt.locator },
         });
-        return receipt.id;
+        return receipt.locator;
     };
     const voteReplays: string[] = [];
     for (const position of silent)
@@ -521,9 +521,9 @@ export const verifyFaultOutcome = async (
                     voteForgeries,
                     'The target votes are incomplete.',
                 );
-                for (const id of voteReplays)
+                for (const locator of voteReplays)
                     assert.ok(
-                        candidateReads[position].has(id),
+                        candidateReads[position].has(locator),
                         'The verifier did not encounter the replayed target candidate.',
                     );
                 for (const { forgeries, detail } of ballotForgeries)
@@ -534,9 +534,9 @@ export const verifyFaultOutcome = async (
                     registrationBodyDigests
                         .slice(0, 2)
                         .map(
-                            (id) =>
+                            (registrationBodyDigest) =>
                                 'No valid complete candidate is available: registration/' +
-                                id,
+                                registrationBodyDigest,
                         ),
                 );
             }
@@ -546,9 +546,9 @@ export const verifyFaultOutcome = async (
                     shareForgeries,
                     'The release shares are incomplete.',
                 );
-                for (const id of shareReplays)
+                for (const locator of shareReplays)
                     assert.ok(
-                        candidateReads[position].has(id),
+                        candidateReads[position].has(locator),
                         'The verifier did not encounter the replayed release candidate.',
                     );
             }

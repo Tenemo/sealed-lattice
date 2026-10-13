@@ -149,17 +149,21 @@ describe('bounded candidate transport framing', () => {
     });
 
     it('keeps receipt and page integers exact and caps every page before allocation', () => {
-        const id = 'de'.repeat(16);
+        const locator = 'de'.repeat(16);
         const maximum = Number.MAX_SAFE_INTEGER;
+        const fixedReceipt = Buffer.alloc(24, 0xde);
+        fixedReceipt.writeBigUInt64LE(BigInt(maximum), 16);
         expect(
-            decodeCandidateReceipt(
-                encodeCandidateReceipt({ id, index: maximum }),
-            ),
-        ).toEqual({ id, index: maximum });
+            Buffer.from(encodeCandidateReceipt({ locator, index: maximum })),
+        ).toEqual(fixedReceipt);
+        expect(decodeCandidateReceipt(fixedReceipt)).toEqual({
+            locator,
+            index: maximum,
+        });
         expect(() =>
-            encodeCandidateReceipt({ id, index: maximum + 1 }),
+            encodeCandidateReceipt({ locator, index: maximum + 1 }),
         ).toThrow();
-        const receipt = encodeCandidateReceipt({ id, index: 0 });
+        const receipt = encodeCandidateReceipt({ locator, index: 0 });
         new DataView(receipt.buffer).setBigUint64(
             16,
             BigInt(maximum) + 1n,
@@ -168,11 +172,18 @@ describe('bounded candidate transport framing', () => {
         expect(() => decodeCandidateReceipt(receipt)).toThrow();
         const page = {
             total: maximum,
-            ids: Array.from({ length: 64 }, () => id),
+            locators: Array.from({ length: 64 }, () => locator),
         };
-        expect(decodeCandidatePage(encodeCandidatePage(page))).toEqual(page);
+        const fixedPage = Buffer.alloc(12 + 64 * 16, 0xde);
+        fixedPage.writeBigUInt64LE(BigInt(maximum), 0);
+        fixedPage.writeUInt32LE(64, 8);
+        expect(Buffer.from(encodeCandidatePage(page))).toEqual(fixedPage);
+        expect(decodeCandidatePage(fixedPage)).toEqual(page);
         expect(() =>
-            encodeCandidatePage({ total: maximum, ids: [...page.ids, id] }),
+            encodeCandidatePage({
+                total: maximum,
+                locators: [...page.locators, locator],
+            }),
         ).toThrow();
         const encoded = encodeCandidatePage(page);
         encoded[8] = 65;

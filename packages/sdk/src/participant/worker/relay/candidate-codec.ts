@@ -8,7 +8,7 @@ import {
 // Opaque transport identifiers name bytes, never a protocol identity or a
 // verified capability. Fixed chunking bounds both manifest and request counts.
 export const candidateChunkBytes = 1 << 20;
-export const candidateIdentifierBytes = 16;
+export const candidateLocatorBytes = 16;
 export const candidatePageEntries = 64;
 export const candidateManifestBytes = 1 << 20;
 const candidateMaximumFileBytes = 0xffff_fffb;
@@ -19,7 +19,8 @@ const candidateKeyBytes = 256;
 const segment = '[a-z0-9]+(?:[.-][a-z0-9]+)*';
 const filePattern = new RegExp('^' + segment + '$', 'u');
 const keyPattern = new RegExp('^' + segment + '(?:/' + segment + ')*$', 'u');
-export const isCandidateId = (value: string) => /^[0-9a-f]{32}$/u.test(value);
+export const isCandidateLocator = (value: string) =>
+    /^[0-9a-f]{32}$/u.test(value);
 export const isCandidateFileName = (value: string) =>
     value.length <= candidateNameBytes && filePattern.test(value);
 export const isCandidateKey = (value: string) =>
@@ -31,8 +32,8 @@ export type CandidateFile = Readonly<{
     chunks: readonly string[];
 }>;
 export type CandidateManifest = Readonly<{ files: readonly CandidateFile[] }>;
-type CandidateReceipt = Readonly<{ id: string; index: number }>;
-type CandidatePage = Readonly<{ total: number; ids: readonly string[] }>;
+type CandidateReceipt = Readonly<{ locator: string; index: number }>;
+type CandidatePage = Readonly<{ total: number; locators: readonly string[] }>;
 
 const malformed = () => new RangeError('Malformed candidate transport record.');
 const safeLength = (value: number) => Number.isSafeInteger(value) && value >= 0;
@@ -53,14 +54,14 @@ export const encodeCandidateManifest = (manifest: CandidateManifest) => {
             file.length > candidateMaximumFileBytes ||
             file.chunks.length !==
                 Math.ceil(file.length / candidateChunkBytes) ||
-            file.chunks.some((id) => !isCandidateId(id))
+            file.chunks.some((locator) => !isCandidateLocator(locator))
         )
             throw malformed();
         length +=
             2 +
             file.name.length +
             8 +
-            candidateIdentifierBytes * file.chunks.length;
+            candidateLocatorBytes * file.chunks.length;
         if (length > candidateManifestBytes) throw malformed();
     }
     const bytes = new Uint8Array(length);
@@ -75,9 +76,9 @@ export const encodeCandidateManifest = (manifest: CandidateManifest) => {
         offset += file.name.length;
         view.setBigUint64(offset, BigInt(file.length), true);
         offset += 8;
-        for (const id of file.chunks) {
-            bytes.set(fromHexadecimal(id), offset);
-            offset += candidateIdentifierBytes;
+        for (const locator of file.chunks) {
+            bytes.set(fromHexadecimal(locator), offset);
+            offset += candidateLocatorBytes;
         }
     }
     return bytes;
@@ -122,21 +123,20 @@ export const decodeCandidateManifest = (
         const length = Number(encodedLength);
         const chunks = Math.ceil(length / candidateChunkBytes);
         if (
-            chunks >
-            Math.floor((bytes.length - offset) / candidateIdentifierBytes)
+            chunks > Math.floor((bytes.length - offset) / candidateLocatorBytes)
         )
             throw malformed();
-        const identifiers = [];
+        const locators = [];
         for (let chunk = 0; chunk < chunks; chunk++) {
-            identifiers.push(
+            locators.push(
                 hexadecimal(
-                    bytes.subarray(offset, offset + candidateIdentifierBytes),
+                    bytes.subarray(offset, offset + candidateLocatorBytes),
                 ),
             );
-            offset += candidateIdentifierBytes;
+            offset += candidateLocatorBytes;
         }
         files.push(
-            Object.freeze({ name, length, chunks: Object.freeze(identifiers) }),
+            Object.freeze({ name, length, chunks: Object.freeze(locators) }),
         );
     }
     if (offset !== bytes.length) throw malformed();
@@ -144,12 +144,12 @@ export const decodeCandidateManifest = (
 };
 
 export const encodeCandidateReceipt = (receipt: CandidateReceipt) => {
-    if (!isCandidateId(receipt.id) || !safeLength(receipt.index))
+    if (!isCandidateLocator(receipt.locator) || !safeLength(receipt.index))
         throw malformed();
-    const bytes = new Uint8Array(candidateIdentifierBytes + 8);
-    bytes.set(fromHexadecimal(receipt.id));
+    const bytes = new Uint8Array(candidateLocatorBytes + 8);
+    bytes.set(fromHexadecimal(receipt.locator));
     new DataView(bytes.buffer).setBigUint64(
-        candidateIdentifierBytes,
+        candidateLocatorBytes,
         BigInt(receipt.index),
         true,
     );
@@ -157,15 +157,15 @@ export const encodeCandidateReceipt = (receipt: CandidateReceipt) => {
 };
 
 export const decodeCandidateReceipt = (bytes: Uint8Array): CandidateReceipt => {
-    if (bytes.length !== candidateIdentifierBytes + 8) throw malformed();
+    if (bytes.length !== candidateLocatorBytes + 8) throw malformed();
     const index = new DataView(
         bytes.buffer,
         bytes.byteOffset,
         bytes.byteLength,
-    ).getBigUint64(candidateIdentifierBytes, true);
+    ).getBigUint64(candidateLocatorBytes, true);
     if (index > BigInt(Number.MAX_SAFE_INTEGER)) throw malformed();
     return {
-        id: hexadecimal(bytes.subarray(0, candidateIdentifierBytes)),
+        locator: hexadecimal(bytes.subarray(0, candidateLocatorBytes)),
         index: Number(index),
     };
 };
@@ -173,16 +173,16 @@ export const decodeCandidateReceipt = (bytes: Uint8Array): CandidateReceipt => {
 export const encodeCandidatePage = (page: CandidatePage) => {
     if (
         !safeLength(page.total) ||
-        page.ids.length > candidatePageEntries ||
-        page.ids.length > page.total ||
-        page.ids.some((id) => !isCandidateId(id))
+        page.locators.length > candidatePageEntries ||
+        page.locators.length > page.total ||
+        page.locators.some((locator) => !isCandidateLocator(locator))
     )
         throw malformed();
     const header = new Uint8Array(12);
     const view = new DataView(header.buffer);
     view.setBigUint64(0, BigInt(page.total), true);
-    view.setUint32(8, page.ids.length, true);
-    return concatenate(header, ...page.ids.map(fromHexadecimal));
+    view.setUint32(8, page.locators.length, true);
+    return concatenate(header, ...page.locators.map(fromHexadecimal));
 };
 
 // A discovery page holds the list's total length and its count, then up to
@@ -227,8 +227,8 @@ export const fillsDiscoveryPage = (
 export const decodeCandidatePage = (bytes: Uint8Array): CandidatePage => {
     const { total, entries } = decodeDiscoveryPage(
         bytes,
-        candidateIdentifierBytes,
+        candidateLocatorBytes,
         candidatePageEntries,
     );
-    return { total, ids: entries.map((entry) => hexadecimal(entry)) };
+    return { total, locators: entries.map((entry) => hexadecimal(entry)) };
 };

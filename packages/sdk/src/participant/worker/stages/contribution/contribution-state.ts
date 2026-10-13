@@ -46,8 +46,11 @@ export const contributionPhase = {
     signed: 9,
 } as const;
 
+export type ContributionPhase =
+    (typeof contributionPhase)[keyof typeof contributionPhase];
+
 export type ContributionState = Readonly<{
-    phase: number;
+    phase: ContributionPhase;
     position: number;
     // The first-oracle checkpoint header until completion, then SCB2.
     header: Uint8Array;
@@ -266,7 +269,7 @@ export const decodeContributionState = (
     );
     offset += signingEntryBytes * signingCount;
     return {
-        phase,
+        phase: phase as ContributionPhase,
         position,
         header: bytes.slice(prefix, prefix + headerLength),
         publicRecords,

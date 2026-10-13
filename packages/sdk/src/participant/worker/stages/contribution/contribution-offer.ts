@@ -126,9 +126,9 @@ export const signContribution = async (
             envelope,
         );
         await commitContribution(session, {
-            phase: contributionPhase.signingIntent,
             state: {
                 ...session.state,
+                phase: contributionPhase.signingIntent,
                 signingRecords: [output.record],
             },
             signing: [output],
@@ -152,9 +152,9 @@ export const signContribution = async (
         signed.signature,
     );
     await commitContribution(session, {
-        phase: contributionPhase.signed,
         state: {
             ...session.state,
+            phase: contributionPhase.signed,
             signingRecords: [...session.state.signingRecords, output.record],
         },
         signing: [output],

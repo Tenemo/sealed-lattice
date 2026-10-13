@@ -14,21 +14,21 @@ export const participantRelayFixture = () => {
     const manifests = new Map<string, Uint8Array>();
     const lists = new Map<string, string[]>();
     let serial = 0;
-    const identifier = () => (++serial).toString(16).padStart(32, '0');
+    const nextLocator = () => (++serial).toString(16).padStart(32, '0');
     const putChunk = (bytes: Uint8Array) => {
-        const id = identifier();
-        chunks.set(id, bytes.slice());
-        return id;
+        const locator = nextLocator();
+        chunks.set(locator, bytes.slice());
+        return locator;
     };
     const append = (key: string, bytes: Uint8Array) => {
         decodeCandidateManifest(bytes);
-        const id = identifier();
-        manifests.set(id, bytes.slice());
+        const locator = nextLocator();
+        manifests.set(locator, bytes.slice());
         const entries = lists.get(key) ?? [];
         const index = entries.length;
-        entries.push(id);
+        entries.push(locator);
         lists.set(key, entries);
-        return { id, index };
+        return { locator, index };
     };
     const publish = (key: string, files: ReadonlyMap<string, Uint8Array>) =>
         append(
@@ -90,7 +90,10 @@ export const participantRelayFixture = () => {
             return response(
                 encodeCandidatePage({
                     total: entries.length,
-                    ids: entries.slice(offset, offset + candidatePageEntries),
+                    locators: entries.slice(
+                        offset,
+                        offset + candidatePageEntries,
+                    ),
                 }),
             );
         }
