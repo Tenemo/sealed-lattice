@@ -281,7 +281,7 @@ const auditCase = async (
                         `Origin ${String(origin)} refused no cross-roster ${family}.`,
                     );
             return undefined;
-        case 'departure':
+        case 'setup-departure':
         case 'unselected':
         case 'selection':
             assert.equal(result.independentOutcome?.status, 'completed');

@@ -107,7 +107,7 @@ const lifecycleMatrixSteps: readonly EvidenceRenewalStep[] = [
         '--scalar',
         '--base-port=42380',
     ]),
-    cohort('departure', 'Combined preparation departures', [
+    cohort('setup-departure', 'Combined preparation departures', [
         '7',
         '2',
         '--setup-departure',
