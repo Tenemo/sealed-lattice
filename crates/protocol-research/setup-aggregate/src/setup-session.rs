@@ -6,7 +6,7 @@ use crate::{
     verified::{SetupAggregator, VerifiedSelectionInputs, VerifiedSetupAggregate, build_selection},
 };
 use protocol_foundations::{
-    Credential, SIGNATURE_BYTES,
+    Credential,
     contribution_body::BODY_HEADER_BYTES,
     contribution_offer::{AuthenticatedContributionOffer, MAXIMUM_OFFER_BYTES, authenticate_offer},
     poll::VerifiedPoll,
@@ -19,6 +19,7 @@ use protocol_foundations::{
         authenticate_certificate, authenticate_endorsement, authenticate_selection,
         encode_certificate,
     },
+    signed_packet,
 };
 use std::sync::Arc;
 use supported_profile::relation::PROOF_HEADER_BYTES;
@@ -30,13 +31,6 @@ pub struct Refused;
 fn refused(failed: bool) -> Result<(), Refused> {
     if failed { Err(Refused) } else { Ok(()) }
 }
-fn packet(bytes: &[u8], maximum: usize) -> Option<(&[u8], &[u8])> {
-    let length = u32::from_le_bytes(bytes.get(..4)?.try_into().ok()?) as usize;
-    if length > maximum || bytes.len() != 4 + length + SIGNATURE_BYTES {
-        return None;
-    }
-    Some((&bytes[4..4 + length], &bytes[4 + length..]))
-}
 
 struct OfferInput<'a> {
     offer: Arc<AuthenticatedContributionOffer>,
@@ -47,22 +41,17 @@ fn offer_input(
     roster: Arc<AuthenticatedRosterProposal>,
     bytes: &[u8],
 ) -> Result<OfferInput<'_>, ()> {
-    let envelope_length =
-        u32::from_le_bytes(bytes.get(..4).ok_or(())?.try_into().unwrap()) as usize;
-    if envelope_length > MAXIMUM_OFFER_BYTES
-        || bytes.len()
-            != 4 + envelope_length + SIGNATURE_BYTES + BODY_HEADER_BYTES + PROOF_HEADER_BYTES
-    {
+    let (envelope, signature, headers) =
+        signed_packet::leading(bytes, MAXIMUM_OFFER_BYTES).ok_or(())?;
+    if headers.len() != BODY_HEADER_BYTES + PROOF_HEADER_BYTES {
         return Err(());
     }
-    let end = 4 + envelope_length;
-    let offer = authenticate_offer(roster, &bytes[4..end], &bytes[end..end + SIGNATURE_BYTES])
-        .map_err(|_| ())?;
-    let header = end + SIGNATURE_BYTES;
+    let offer = authenticate_offer(roster, envelope, signature).map_err(|_| ())?;
+    let (body_header, proof_header) = headers.split_at(BODY_HEADER_BYTES);
     Ok(OfferInput {
         offer: Arc::new(offer),
-        body_header: &bytes[header..header + BODY_HEADER_BYTES],
-        proof_header: &bytes[header + BODY_HEADER_BYTES..],
+        body_header,
+        proof_header,
     })
 }
 fn keep_offer(
@@ -193,7 +182,7 @@ impl SetupSession {
         let Self { input, roster, .. } = self;
         let Some((body, signature)) = input
             .get(..length)
-            .and_then(|bytes| packet(bytes, MAXIMUM_PROPOSAL_BYTES))
+            .and_then(|bytes| signed_packet::split(bytes, MAXIMUM_PROPOSAL_BYTES))
         else {
             return Err(Refused);
         };
@@ -367,7 +356,8 @@ impl SetupSession {
         let result = (|| {
             let roster = self.proposal.clone().ok_or(())?;
             let (body, signature) =
-                packet(self.input.get(..length).ok_or(())?, MAXIMUM_SELECTION_BYTES).ok_or(())?;
+                signed_packet::split(self.input.get(..length).ok_or(())?, MAXIMUM_SELECTION_BYTES)
+                    .ok_or(())?;
             authenticate_selection(roster, body, signature).map_err(|_| ())
         })();
         match result {

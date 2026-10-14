@@ -27,6 +27,8 @@ pub mod roster;
 pub mod roster_authentication;
 #[path = "roster-input.rs"]
 pub mod roster_input;
+#[path = "signed-packet.rs"]
+pub mod signed_packet;
 #[path = "source-binding.rs"]
 pub mod source_binding;
 #[path = "target-signing.rs"]

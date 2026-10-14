@@ -2,7 +2,7 @@ use ballot_proof::submission::{
     AuthenticatedBallotBody, AuthenticatedBallotEnvelope, BallotBodyAuthentication,
     authenticate_envelope,
 };
-use protocol_foundations::{SIGNATURE_BYTES, ballot_authentication::BallotEnvelope};
+use protocol_foundations::{SIGNATURE_BYTES, ballot_authentication::BallotEnvelope, signed_packet};
 use setup_aggregate::verified::VerifiedSetupAggregate;
 use std::{
     fs::File,
@@ -16,13 +16,6 @@ pub struct Submission {
     pub envelope: BallotEnvelope,
     pub signature: [u8; SIGNATURE_BYTES],
     pub body: PathBuf,
-}
-
-pub fn packet(body: &[u8], signature: &[u8]) -> Vec<u8> {
-    let mut bytes = Vec::from((body.len() as u32).to_le_bytes());
-    bytes.extend(body);
-    bytes.extend(signature);
-    bytes
 }
 
 pub(super) fn read_chunks(path: &Path, mut consume: impl FnMut(&[u8])) -> usize {
@@ -61,9 +54,9 @@ pub fn authenticate(
     body.finish().unwrap()
 }
 
-pub(super) fn split(packet: &[u8]) -> (&[u8], &[u8]) {
-    let length = u32::from_le_bytes(packet[..4].try_into().unwrap()) as usize;
-    (&packet[4..4 + length], &packet[4 + length..])
+/// The body and signature of a packet the ceremony produced.
+pub fn split(packet: &[u8]) -> (&[u8], &[u8]) {
+    signed_packet::split(packet, packet.len()).expect("A ceremony packet is well formed.")
 }
 
 pub(super) fn control(submission: &Submission) -> Vec<u8> {

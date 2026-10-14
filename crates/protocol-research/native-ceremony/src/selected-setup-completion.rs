@@ -1,7 +1,10 @@
 use crate::{OriginalEnrollments, Scenario, aggregate, ballots::BallotInputs, close, completion};
 use evaluation_target::close::{CloseContext, ClosedSlot};
 use participant_module::finality_work::OwnBallotInclusion;
-use protocol_foundations::poll::{SignedPoll, VerifiedPoll};
+use protocol_foundations::{
+    poll::{SignedPoll, VerifiedPoll},
+    signed_packet,
+};
 use setup_aggregate::verified::VerifiedSetupAggregate;
 use std::{fs, path::Path, sync::Arc};
 
@@ -85,12 +88,12 @@ pub fn run(
         .map(|body| body.authentication().clone())
         .collect();
     let authenticated = close::authenticate_responses(&context, &intent, &responses, &envelopes);
-    let length = u32::from_le_bytes(proposal[..4].try_into().unwrap()) as usize;
+    let (proposal_body, proposal_signature) = close::split(&proposal);
     let barrier = context
         .verify_proposal(
             intent,
-            &proposal[4..4 + length],
-            &proposal[4 + length..],
+            proposal_body,
+            proposal_signature,
             &authenticated,
             &bodies,
         )
@@ -105,7 +108,7 @@ pub fn run(
     close::write_records(
         &output.join("close"),
         output,
-        &close::packet(&body, &signature),
+        &signed_packet::encode(&body, &signature),
         active.iter().copied().zip(&responses),
         &proposal,
         &held,

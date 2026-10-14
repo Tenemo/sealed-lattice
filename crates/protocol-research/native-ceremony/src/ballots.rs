@@ -17,6 +17,7 @@ use protocol_foundations::{
     poll::{SignedPoll, VerifiedPoll},
     roster::RetainedContributionContext,
     setup_selection::AuthenticatedSelectionCertificate,
+    signed_packet,
 };
 use setup_aggregate::verified::VerifiedSetupAggregate;
 use std::{
@@ -84,9 +85,7 @@ impl BallotInputs<'_> {
         let control = [
             self.poll.identity().as_slice(),
             self.poll.runtime().as_slice(),
-            (self.definition.body.len() as u32).to_le_bytes().as_slice(),
-            self.definition.body.as_slice(),
-            self.definition.signature.as_slice(),
+            signed_packet::encode(&self.definition.body, &self.definition.signature).as_slice(),
             self.setup.identity().as_slice(),
             retained_reference.as_slice(),
         ]
@@ -235,9 +234,7 @@ pub(crate) fn run(
         [
             poll.identity().as_slice(),
             poll.runtime().as_slice(),
-            (packet.body.len() as u32).to_le_bytes().as_slice(),
-            packet.body.as_slice(),
-            packet.signature.as_slice(),
+            signed_packet::encode(&packet.body, &packet.signature).as_slice(),
             setup.identity().as_slice(),
             reference,
         ]

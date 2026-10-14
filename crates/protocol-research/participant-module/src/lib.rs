@@ -8,6 +8,8 @@ use setup_witness::registration::RegistrationKey;
 use std::io::{self, Write};
 use zeroize::Zeroizing;
 
+#[cfg(target_arch = "wasm32")]
+mod abi;
 pub mod ballot;
 #[path = "close-work.rs"]
 pub mod close_work;
@@ -46,12 +48,6 @@ mod registration_session_tests;
 mod release_body;
 #[path = "release-work.rs"]
 pub mod release_work;
-#[cfg(any(target_arch = "wasm32", test))]
-#[path = "signed-packet.rs"]
-mod signed_packet;
-
-#[cfg(target_arch = "wasm32")]
-mod abi;
 
 /// Every job a helper instance runs. Every proof crate proves with the one
 /// shared engine, so its jobs serve every proof kind.

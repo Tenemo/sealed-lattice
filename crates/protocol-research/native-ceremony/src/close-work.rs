@@ -16,7 +16,8 @@ use std::{
     sync::Arc,
 };
 
-use super::records::{Submission, control, packet, read_chunks, split};
+use super::records::{Submission, control, read_chunks, split};
+use protocol_foundations::signed_packet;
 
 /// An input a participant's close state accepted, as its persistent close log
 /// retains it: a held submission, the locked intent, or a response the
@@ -192,7 +193,7 @@ pub fn open(
         )
         .unwrap();
     let signature = sign(&mut works[0], &mut enrollments[0].credential, &body).unwrap();
-    let intent = packet(&body, &signature);
+    let intent = signed_packet::encode(&body, &signature);
     for (work, enrollment) in works
         .iter_mut()
         .zip(enrollments.iter_mut().map(|(_, enrollment)| enrollment))
@@ -235,7 +236,7 @@ pub fn respond(
         sign(work, credential, &again),
         Err(Error::Consumed)
     ));
-    packet(&body, &signature)
+    signed_packet::encode(&body, &signature)
 }
 
 pub fn authenticate_responses(
@@ -291,7 +292,7 @@ pub(super) fn conclude(work: &mut CloseWork, credential: &mut Credential) -> (Ve
         .command(credential, CloseOperation::PrepareResponse, 0, &[])
         .unwrap();
     let signature = sign(work, credential, &body).unwrap();
-    let own = packet(&body, &signature);
+    let own = signed_packet::encode(&body, &signature);
     // One response per participant.
     let again = work
         .command(credential, CloseOperation::PrepareResponse, 0, &[])
@@ -306,7 +307,7 @@ pub(super) fn conclude(work: &mut CloseWork, credential: &mut Credential) -> (Ve
         .command(credential, CloseOperation::PrepareProposal, 0, &[])
         .unwrap();
     let signature = sign(work, credential, &body).unwrap();
-    (own, packet(&body, &signature))
+    (own, signed_packet::encode(&body, &signature))
 }
 
 /// The organizer, which knows every listed envelope, authenticates the other

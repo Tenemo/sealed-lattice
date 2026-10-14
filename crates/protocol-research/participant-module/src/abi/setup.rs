@@ -1,7 +1,11 @@
 //! The setup: the participant's selection signatures, the retained selection
 //! inputs and setup, and the retirement of the contribution sources.
 use super::{SESSION, Session, original_context};
-use crate::{offer_signing::OfferSigning, signed_packet};
+use crate::offer_signing::OfferSigning;
+use protocol_foundations::{
+    setup_selection::{ENDORSEMENT_BYTES, MAXIMUM_SELECTION_BYTES},
+    signed_packet,
+};
 use zeroize::{Zeroize, Zeroizing};
 
 protocol_foundations::operation_codes! {
@@ -82,7 +86,8 @@ fn selection_operation(
             };
         }
         Some(SelectionOperation::RestoreProposal) => {
-            let (body, signature) = signed_packet::selection(&input).ok_or(Error::Shape)?;
+            let (body, signature) =
+                signed_packet::split(&input, MAXIMUM_SELECTION_BYTES).ok_or(Error::Shape)?;
             let proposal = setup_selection::authenticate_selection(roster, body, signature)?;
             state
                 .enrollment
@@ -93,7 +98,9 @@ fn selection_operation(
         }
         Some(SelectionOperation::RestoreEndorsement) => {
             let (body, signature, endorsement) =
-                signed_packet::endorsed_selection(&input).ok_or(Error::Shape)?;
+                signed_packet::leading(&input, MAXIMUM_SELECTION_BYTES)
+                    .filter(|(_, _, endorsement)| endorsement.len() == ENDORSEMENT_BYTES)
+                    .ok_or(Error::Shape)?;
             let proposal =
                 setup_selection::authenticate_selection(roster.clone(), body, signature)?;
             let endorsement = setup_selection::authenticate_endorsement(

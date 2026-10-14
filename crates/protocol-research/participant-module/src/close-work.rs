@@ -13,6 +13,7 @@ use protocol_foundations::{
         MAXIMUM_LISTED_ENVELOPES_PER_SLOT, maximum_close_message_bytes,
     },
     poll::VerifiedPoll,
+    signed_packet,
 };
 use setup_aggregate::verified::VerifiedSetupAggregate;
 use std::sync::Arc;
@@ -84,22 +85,9 @@ pub struct CloseWork {
     prepared: Option<Prepared>,
 }
 
-/// A length-prefixed body and its signature, filling the bytes.
+/// A signed packet filling the bytes.
 fn packet(bytes: &[u8], maximum: usize) -> Result<(&[u8], &[u8]), Error> {
-    let (packet, rest) = leading_packet(bytes, maximum)?;
-    if !rest.is_empty() {
-        return Err(Error::Shape);
-    }
-    Ok(packet[4..].split_at(packet.len() - 4 - SIGNATURE_BYTES))
-}
-/// A packet and the bytes that follow it.
-fn leading_packet(bytes: &[u8], maximum: usize) -> Result<(&[u8], &[u8]), Error> {
-    let length =
-        u32::from_le_bytes(bytes.get(..4).ok_or(Error::Shape)?.try_into().unwrap()) as usize;
-    if length > maximum || bytes.len() < 4 + length + SIGNATURE_BYTES {
-        return Err(Error::Shape);
-    }
-    Ok(bytes.split_at(4 + length + SIGNATURE_BYTES))
+    signed_packet::split(bytes, maximum).ok_or(Error::Shape)
 }
 impl CloseWork {
     pub fn new(
@@ -386,8 +374,7 @@ impl CloseWork {
         }
         let intent = self.intent.as_ref().ok_or(Error::Context)?;
         let maximum = maximum_close_message_bytes(ClosePurpose::Response, self.count());
-        let (leading, rest) = leading_packet(input, maximum)?;
-        let (body, signature) = packet(leading, maximum)?;
+        let (body, signature, rest) = signed_packet::leading(input, maximum).ok_or(Error::Shape)?;
         let submission = ENVELOPE_BYTES + SIGNATURE_BYTES;
         if !rest.len().is_multiple_of(submission) {
             return Err(Error::Shape);

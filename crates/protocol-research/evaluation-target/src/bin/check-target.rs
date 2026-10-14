@@ -22,6 +22,7 @@ use protocol_foundations::{
     roster_authentication::authenticate_roster_proposal,
     roster_input::RosterInputVerifier,
     setup_selection::{MAXIMUM_SELECTION_BYTES, authenticate_certificate, certificate_bytes},
+    signed_packet,
 };
 use setup_aggregate::offer_verifier::ContributionOfferVerifier;
 use setup_aggregate::{CHUNK_BYTES, contribution_family, verified::SetupAggregator};
@@ -90,19 +91,8 @@ fn end(file: &mut File) -> io::Result<()> {
     }
     Ok(())
 }
-/// A length-prefixed signed message body followed by its signature.
 fn packet(bytes: &[u8], maximum: usize) -> io::Result<(&[u8], &[u8])> {
-    let length = u32::from_le_bytes(
-        bytes
-            .get(..4)
-            .ok_or_else(|| refusal("packet"))?
-            .try_into()
-            .map_err(refusal)?,
-    ) as usize;
-    if length > maximum || bytes.len() != 4 + length + SIGNATURE_BYTES {
-        return Err(refusal("packet length"));
-    }
-    Ok((&bytes[4..4 + length], &bytes[4 + length..]))
+    signed_packet::split(bytes, maximum).ok_or_else(|| refusal("packet length"))
 }
 fn close_packet(
     directory: &Path,

@@ -4,8 +4,8 @@ mod delivery;
 mod records;
 #[path = "close-work.rs"]
 mod work;
-pub use records::{Submission, authenticate, envelope, packet, write_records};
-use records::{control, split, wanted_bytes};
+pub use records::{Submission, authenticate, envelope, split, write_records};
+use records::{control, wanted_bytes};
 pub use work::{
     authenticate_responses, close_work, deliver, now_milliseconds, open, organize, owner_of,
     replay, respond, sign,
@@ -27,6 +27,7 @@ use protocol_foundations::{
     },
     foundation::{CanonicalItem, CanonicalTuple},
     poll::VerifiedPoll,
+    signed_packet,
 };
 use setup_aggregate::verified::VerifiedSetupAggregate;
 use std::{path::Path, sync::Arc, time::Instant};
@@ -174,7 +175,7 @@ pub fn run(
         Err(Error::Context)
     ));
     let (intent_body, intent_signature) = open(&mut works, enrollments, close_time);
-    let intent_packet = packet(&intent_body, &intent_signature);
+    let intent_packet = signed_packet::encode(&intent_body, &intent_signature);
     let mut repeated = close_work(&enrollments[0], &poll, &setup, 0);
     let later = repeated
         .command(
@@ -211,7 +212,7 @@ pub fn run(
                 &mut enrollments[first_honest].credential,
                 CloseOperation::LockIntent,
                 0,
-                &packet(unsigned.body(), &intent_signature)
+                &signed_packet::encode(unsigned.body(), &intent_signature)
             )
             .is_err()
     );
@@ -391,7 +392,7 @@ pub fn run(
                     &mut enrollments[0].credential,
                     CloseOperation::AdmitResponse,
                     0,
-                    &packet(late_listing.body(), &late_signature)
+                    &signed_packet::encode(late_listing.body(), &late_signature)
                 )
                 .is_err()
         );
@@ -434,7 +435,7 @@ pub fn run(
                 .err(),
             Some(CloseError::Shape)
         );
-        late_response = Some(packet(late_listing.body(), &late_signature));
+        late_response = Some(signed_packet::encode(late_listing.body(), &late_signature));
     }
     // A response naming another intent is refused before its signature.
     let other_intent = CloseIntentMessage::new(poll.identity(), setup.identity(), 7).unwrap();

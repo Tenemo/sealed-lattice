@@ -1,9 +1,8 @@
 //! The contribution: its offer signing, its proof and checkpoints, and the
 //! retained proposal it names.
 use super::{SESSION, Session, original_context};
-use crate::signed_packet;
 use contribution_prover::contribution_session::{CONTRIBUTION_INPUT_BYTES, ContributionSession};
-use protocol_foundations::roster::RetainedContributionContext;
+use protocol_foundations::{roster::RetainedContributionContext, signed_packet};
 use std::cell::RefCell;
 use zeroize::{Zeroize, Zeroizing};
 protocol_foundations::operation_codes! {
