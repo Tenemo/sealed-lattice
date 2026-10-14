@@ -42,7 +42,7 @@ impl OneShotProof {
         let mut transcript =
             Transcript::new(role, context_hash.finalize(), relation.message_bytes());
         transcript.next();
-        let first = FirstOracle::create(role, &witness, false);
+        let first = FirstOracle::create(role, &witness);
         transcript.respond(&[&first.tree.root()]);
         transcript.next();
         let beta = transcript::challenge(&transcript.message, 0, true);

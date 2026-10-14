@@ -212,7 +212,7 @@ impl Prover {
         let transcript = self.transcript.as_mut().ok_or(())?;
         match self.phase {
             Phase::FirstInitialize => {
-                self.first = Some(FirstOracle::initialize(&self.relation, &self.role, false));
+                self.first = Some(FirstOracle::initialize(&self.relation, &self.role));
                 self.phase = Phase::FirstColumn(0);
             }
             Phase::FirstColumn(index) => {

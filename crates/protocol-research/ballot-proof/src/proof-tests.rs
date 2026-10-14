@@ -61,8 +61,11 @@ fn ballot_proofs_verify_only_for_their_role_profile_inputs_and_true_ciphertext()
     let role = b"ballot-proof-test";
     let (statement, columns) = synthetic_ballot(profile);
     let relation = ballot_relation(profile);
+    PROOF_STREAM.with(|stream| stream.set(3));
+    random::install(serve);
     let witness = Witness::from_columns(&relation, statement.digest(), columns).unwrap();
     let proof = prove(role, &statement, witness, false);
+    random::release();
     let mut bytes = Vec::new();
     proof.write(&mut bytes);
     drop(proof);
@@ -95,11 +98,60 @@ fn ballot_proofs_verify_only_for_their_role_profile_inputs_and_true_ciphertext()
     // stays nonzero and below half the modulus.
     let (mut statement, columns) = synthetic_ballot(profile);
     statement.polynomials[2][1] ^= 1;
+    random::install(serve);
     let witness = Witness::from_columns(&relation, statement.digest(), columns).unwrap();
     let proof = prove(role, &statement, witness, true);
+    random::release();
     let mut bytes = Vec::new();
     proof.write(&mut bytes);
     assert!(!verify(profile, role, &statement, &bytes));
+}
+
+// Every edit of an honest proof is refused: a commitment root, a fold root
+// and the terminal value of its header, the first and last bytes of its
+// openings and one between, one byte less and one byte more.
+#[test]
+fn edited_ballot_proofs_are_refused() {
+    let profile = Profile::new(3, 2).unwrap();
+    let role = b"ballot-proof-test";
+    let (statement, columns) = synthetic_ballot(profile);
+    let relation = ballot_relation(profile);
+    PROOF_STREAM.with(|stream| stream.set(5));
+    random::install(serve);
+    let witness = Witness::from_columns(&relation, statement.digest(), columns).unwrap();
+    let mut bytes = Vec::new();
+    prove(role, &statement, witness, false).write(&mut bytes);
+    random::release();
+    assert!(verify(profile, role, &statement, &bytes));
+    // The header holds the magic, the statement and context digests, three
+    // roots, the mask sum, twenty message salts, the fold roots and the
+    // terminal value.
+    let first_root = 4 + 64 + 64;
+    let first_fold_root = first_root + 3 * 64 + 48 + 20 * 128;
+    for offset in [
+        first_root,
+        first_fold_root,
+        HEADER_LENGTH - 48,
+        HEADER_LENGTH,
+        (HEADER_LENGTH + bytes.len()) / 2,
+        bytes.len() - 1,
+    ] {
+        let mut edited = bytes.clone();
+        edited[offset] ^= 1;
+        assert!(!verify(profile, role, &statement, &edited), "{offset}");
+    }
+    assert!(!verify(
+        profile,
+        role,
+        &statement,
+        &bytes[..bytes.len() - 1]
+    ));
+    assert!(!verify(
+        profile,
+        role,
+        &statement,
+        &[&bytes[..], &[0]].concat()
+    ));
 }
 
 // Statistical zero knowledge allows one published proof for each mask
