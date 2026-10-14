@@ -1,5 +1,3 @@
-import { readFile } from 'node:fs/promises';
-
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -16,6 +14,7 @@ import {
     compileBallotSignatureHashWork,
     pureSignatureFrame,
 } from '#tests/authentication-work-model.js';
+import { readRustSource, rustStringConstant } from '#tests/node/rust-source.js';
 import {
     framedProofHashBytes,
     proofHashProfiles,
@@ -449,21 +448,12 @@ describe('complete participant authentication accounting', () => {
                 'ENDORSEMENT_PURPOSE',
             ],
         ] as const) {
-            const source = await readFile(
-                new URL(
-                    '../../../crates/protocol-research/protocol-foundations/src/' +
-                        file,
-                    import.meta.url,
-                ),
-                'utf8',
+            const source = await readRustSource(
+                'crates/protocol-research/protocol-foundations/src/' + file,
             );
-            const actual = source.match(
-                new RegExp('const ' + name + ': [^=]+ = b?"([^"]+)";', 'u'),
-            );
-            expect(actual).not.toBeNull();
             expect(
                 roles.find((role) => role.purpose === purpose)!.context,
-            ).toBe(actual![1]);
+            ).toBe(rustStringConstant(source, name));
         }
         expect(roles[0].context).toBe('sealed-lattice/poll-definition/v2');
         expect(roles[1].context).toBe('sealed-lattice/registration/v1');

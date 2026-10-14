@@ -1,7 +1,9 @@
-import { readFile } from 'node:fs/promises';
-
 import { describe, expect, it } from 'vitest';
 
+import {
+    readRustSource,
+    rustIntegerConstant,
+} from '#tests/node/rust-source.js';
 import { compilePrivateRandomnessScopes } from '#tests/operation-seed-model.js';
 
 // Enumerate original seed identities and their consumers independently of
@@ -138,29 +140,25 @@ describe('original private-randomness scope populations', () => {
     });
 
     it('binds the domain and seed-width operands to the current source owners', async () => {
-        const operation = await readFile(
+        const operation = await readRustSource(
             'crates/protocol-research/participant-module/src/operation-random.rs',
-            'utf8',
         );
-        const source = await readFile(
+        const source = await readRustSource(
             'crates/protocol-research/participant-module/src/fhe-sources.rs',
-            'utf8',
         );
-        const tree = await readFile(
+        const tree = await readRustSource(
             'crates/protocol-research/word-proof/src/tree.rs',
-            'utf8',
         );
         const rows = compilePrivateRandomnessScopes(1n, 1n, 1n, 1n).domains;
-        expect(operation).toContain('const SEED_BYTES: usize = 64;');
-        expect(source).toContain('const SEED_BYTES: usize = 64;');
-        expect(tree).toContain('pub const SALT_SEED_BYTES: usize = 64;');
+        expect(rustIntegerConstant(operation, 'SEED_BYTES')).toBe(64n);
+        expect(rustIntegerConstant(source, 'SEED_BYTES')).toBe(64n);
+        expect(rustIntegerConstant(tree, 'SALT_SEED_BYTES')).toBe(64n);
         expect(source).toContain(`"${rows[0].domain}"`);
         for (const row of rows.slice(1, -1))
             expect(operation).toContain(`"${row.domain}"`);
         expect(tree).toContain(`b"${rows[rows.length - 1].domain}"`);
-        const restore = await readFile(
+        const restore = await readRustSource(
             'crates/protocol-research/word-proof/src/first-checkpoint.rs',
-            'utf8',
         );
         expect(restore).toContain('tree: Tree::with_seed(');
     });

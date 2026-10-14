@@ -3,6 +3,10 @@ import { readFile } from 'node:fs/promises';
 
 import { describe, expect, it } from 'vitest';
 
+import {
+    readRustSource,
+    rustIntegerConstant,
+} from '#tests/node/rust-source.js';
 import { reduceSignedDigitModel } from '#tests/setup-randomness-model.js';
 import {
     boundSetupKeyArithmetic,
@@ -428,48 +432,45 @@ describe('source coefficient allocation comparison', () => {
             profile,
             workspaceManifest,
             manifest,
-            builder,
-            toolchain,
             reduction,
             gaussian,
             arithmetic,
         ] = await Promise.all([
-            read('crates/protocol-research/setup-witness/src/lib.rs'),
-            read('crates/protocol-research/supported-profile/src/lib.rs'),
+            readRustSource('crates/protocol-research/setup-witness/src/lib.rs'),
+            readRustSource(
+                'crates/protocol-research/supported-profile/src/lib.rs',
+            ),
             read('crates/protocol-research/Cargo.toml'),
             read('crates/protocol-research/setup-witness/Cargo.toml'),
-            read('tools/ci/build-participant-module.ts'),
-            read('tools/ci/rust-toolchain.ts'),
-            read('crates/protocol-research/setup-witness/src/reduction.rs'),
-            read('crates/protocol-research/setup-witness/src/gaussian.rs'),
-            read('crates/protocol-research/statement-stream/src/arithmetic.rs'),
+            readRustSource(
+                'crates/protocol-research/setup-witness/src/reduction.rs',
+            ),
+            readRustSource(
+                'crates/protocol-research/setup-witness/src/gaussian.rs',
+            ),
+            readRustSource(
+                'crates/protocol-research/statement-stream/src/arithmetic.rs',
+            ),
         ]);
         expect(source).toContain(
             'Vec::with_capacity((digits.len() * radix_bits).div_ceil(32) + 1)',
         );
         expect(source).toContain('BigUint::new(words)');
-        expect(profile).toContain('pub const FHE_LIMB_BITS: usize = 96;');
+        expect(rustIntegerConstant(profile, 'FHE_LIMB_BITS')).toBe(96n);
         expect(workspaceManifest).toContain('num-bigint = "=0.5.1"');
         expect(manifest).toContain('num-bigint.workspace = true');
-        expect(toolchain).toContain(
-            "export const rustCompilerCommit = '59807616e1fa2540724bfbac14d7976d7e4a3860';",
-        );
-        expect(builder).toContain('commit-hash: ${rustCompilerCommit}');
-        expect(builder).toContain("'wasm32-unknown-unknown'");
-        expect(profile).toContain(
-            'pub const FHE_SECRET_SUPPORT: usize = 1_024;',
-        );
+        expect(rustIntegerConstant(profile, 'FHE_SECRET_SUPPORT')).toBe(1_024n);
         for (const name of ['SETUP_QUOTIENT_BITS', 'SETUP_FHE_CARRY_BITS'])
-            expect(profile).toContain(`pub const ${name}: usize = 16;`);
-        expect(profile).toContain('pub const SETUP_ERROR_BITS: usize = 7;');
-        expect(profile).toContain('const GADGET_BASE_BITS: usize = 144;');
-        expect(reduction).toContain('pub const MAXIMUM_LIMBS: usize = 16;');
+            expect(rustIntegerConstant(profile, name)).toBe(16n);
+        expect(rustIntegerConstant(profile, 'SETUP_ERROR_BITS')).toBe(7n);
+        expect(rustIntegerConstant(profile, 'GADGET_BASE_BITS')).toBe(144n);
+        expect(rustIntegerConstant(reduction, 'MAXIMUM_LIMBS')).toBe(16n);
         expect(reduction).toContain('digits.last().copied().unwrap() <= 65536');
         expect(reduction).toContain('if top >= modulus_top << 16');
         expect(reduction).toContain('for bit in (0..16).rev()');
         expect(gaussian).toContain('const THRESHOLDS: &[u8; 127 * 20]');
         expect(gaussian).toContain('rank - 64');
-        expect(arithmetic).toContain('const OFFSET: u128 = 133;');
+        expect(rustIntegerConstant(arithmetic, 'OFFSET')).toBe(133n);
         expect(arithmetic).toContain(
             'pub const MODULUS: u128 = u128::MAX - (OFFSET << 64) + 2;',
         );

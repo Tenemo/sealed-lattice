@@ -1,7 +1,9 @@
-import { readFile } from 'node:fs/promises';
-
 import { describe, expect, it } from 'vitest';
 
+import {
+    readRustSource,
+    rustIntegerConstant,
+} from '#tests/node/rust-source.js';
 import {
     boundSparseSupportSampling,
     compileSparseSupportSamplingCensus,
@@ -33,13 +35,7 @@ const incompleteTapes = (degree: number, support: number, draws: number) => {
 describe('bounded sparse-support sampling comparison', () => {
     it('matches the independently maintained browser reader and sampling call sites', async () => {
         const read = (name: string) =>
-            readFile(
-                new URL(
-                    '../../../crates/protocol-research/' + name,
-                    import.meta.url,
-                ),
-                'utf8',
-            );
+            readRustSource('crates/protocol-research/' + name);
         const [reader, source, contribution, registration, shared] =
             await Promise.all([
                 read('setup-witness/src/random.rs'),
@@ -50,11 +46,7 @@ describe('bounded sparse-support sampling comparison', () => {
             ]);
         const profile = completionProfile();
         const rows = compileSparseSupportSamplingCensus(profile);
-        const bufferBytes = BigInt(
-            reader
-                .match(/const BLOCK_BYTES: usize = ([\d_]+);/u)![1]
-                .replace(/_/gu, ''),
-        );
+        const bufferBytes = rustIntegerConstant(reader, 'BLOCK_BYTES');
         expect(
             rows.every((value) => value.browserBufferBytes === bufferBytes),
         ).toBe(true);
@@ -63,17 +55,7 @@ describe('bounded sparse-support sampling comparison', () => {
         expect(source).toContain('if selected < support / 2 { 1 } else { -1 }');
         // Degrees and supports are named constants of the shared profile
         // crate.
-        const constant = (name: string) =>
-            BigInt(
-                shared
-                    .match(
-                        new RegExp(
-                            'pub const ' + name + ': usize = ([\\d_]+);',
-                            'u',
-                        ),
-                    )![1]
-                    .replace(/_/gu, ''),
-            );
+        const constant = (name: string) => rustIntegerConstant(shared, name);
         expect(
             rows
                 .slice(0, 3)

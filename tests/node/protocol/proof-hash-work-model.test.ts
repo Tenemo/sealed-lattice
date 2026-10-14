@@ -1,7 +1,9 @@
-import { readFile } from 'node:fs/promises';
-
 import { describe, expect, it } from 'vitest';
 
+import {
+    readRustSource,
+    rustIntegerConstant,
+} from '#tests/node/rust-source.js';
 import {
     byteAlignedSpongePermutations,
     compileProofHashWork,
@@ -88,18 +90,10 @@ describe('proof hash work', () => {
     });
 
     it('uses each actual Rust descriptor word width across small and large profiles', async () => {
-        const source = await readFile(
-            new URL(
-                '../../../crates/protocol-research/supported-profile/src/relation.rs',
-                import.meta.url,
-            ),
-            'utf8',
+        const source = await readRustSource(
+            'crates/protocol-research/supported-profile/src/relation.rs',
         );
-        const fixed = BigInt(
-            source
-                .match(/const MESSAGE_BYTES: usize = ([\d_]+);/u)![1]
-                .replace(/_/gu, ''),
-        );
+        const fixed = rustIntegerConstant(source, 'MESSAGE_BYTES');
         expect(fixed).toBe(262144n);
         expect(source.match(/message_bytes: MESSAGE_BYTES/gu)).toHaveLength(2);
         expect(source).toContain(
@@ -379,28 +373,23 @@ describe('proof hash work', () => {
 
     it('retains every subtree and row-job initialization under the supported helper bound', async () => {
         const [tree, rows, parallel, verifier, digest] = await Promise.all([
-            readFile('crates/protocol-research/word-proof/src/tree.rs', 'utf8'),
-            readFile('crates/protocol-research/word-proof/src/rows.rs', 'utf8'),
-            readFile(
-                'crates/protocol-research/parallel-work/src/lib.rs',
-                'utf8',
-            ),
-            readFile(
+            readRustSource('crates/protocol-research/word-proof/src/tree.rs'),
+            readRustSource('crates/protocol-research/word-proof/src/rows.rs'),
+            readRustSource('crates/protocol-research/parallel-work/src/lib.rs'),
+            readRustSource(
                 'crates/protocol-research/word-verifier/src/engine.rs',
-                'utf8',
             ),
-            readFile(
+            readRustSource(
                 'crates/protocol-research/parallel-work/src/protocol-hash.rs',
-                'utf8',
             ),
         ]);
-        expect(tree).toContain('const SUBTREE_LEAVES: usize = 1 << 14;');
-        expect(tree).toContain('const SALT_BYTES: usize = 128;');
-        expect(rows).toContain('const ROWS_PER_JOB: usize = 16_384;');
-        expect(parallel).toContain('const MAXIMUM_HELPERS: usize = 8;');
+        expect(rustIntegerConstant(tree, 'SUBTREE_LEAVES')).toBe(1n << 14n);
+        expect(rustIntegerConstant(tree, 'SALT_BYTES')).toBe(128n);
+        expect(rustIntegerConstant(rows, 'ROWS_PER_JOB')).toBe(16_384n);
+        expect(rustIntegerConstant(parallel, 'MAXIMUM_HELPERS')).toBe(8n);
         expect(verifier).toContain('role.is_empty() || role.len() > 1024');
-        expect(digest).toContain('const RATE: usize = 136;');
-        expect(digest).toContain('const PREFIX_BYTES: usize = 64;');
+        expect(rustIntegerConstant(digest, 'RATE')).toBe(136n);
+        expect(rustIntegerConstant(digest, 'PREFIX_BYTES')).toBe(64n);
         const work = compileProofHashWork(
             completionProfile(),
             proofHashProfiles(completionProfile())[0],

@@ -7,6 +7,10 @@ import {
     compileRankingProgramModel,
     compileScalarEvaluationCapacity,
 } from '#tests/evaluation-storage-model.js';
+import {
+    rustIntegerConstant,
+    stripRustComments,
+} from '#tests/node/rust-source.js';
 import { deriveSupportedProfile } from '#tests/supported-profile-model.js';
 
 describe('scalar evaluation storage schedule', () => {
@@ -66,22 +70,24 @@ describe('scalar evaluation storage schedule', () => {
                 'crates/protocol-research/encrypted-ranking/src/ranking.rs',
                 'utf8',
             );
-            const memory = readFileSync(
-                'crates/protocol-research/encrypted-ranking/src/ranking-memory.rs',
-                'utf8',
+            const memory = stripRustComments(
+                readFileSync(
+                    'crates/protocol-research/encrypted-ranking/src/ranking-memory.rs',
+                    'utf8',
+                ),
             );
             const storage = readFileSync(
                 'crates/protocol-research/encrypted-ranking/src/ranking-storage.rs',
                 'utf8',
             );
-            for (const operand of [
-                '402_653_184',
-                '67_108_864',
-                '2_097_152',
-                'const TRANSFORM_TABLES: usize = 2',
-                'const KEPT_SOURCES: usize = 3',
-            ])
-                expect(memory).toContain(operand);
+            for (const [name, value] of [
+                ['MEMORY_BYTES', 402_653_184n],
+                ['RUNTIME_RESERVE_BYTES', 67_108_864n],
+                ['TRANSFER_RESERVE_BYTES', 2_097_152n],
+                ['TRANSFORM_TABLES', 2n],
+                ['KEPT_SOURCES', 3n],
+            ] as const)
+                expect(rustIntegerConstant(memory, name), name).toBe(value);
             expect(storage).toContain(
                 '.max_by_key(|index| (next_use(**index), **index))',
             );

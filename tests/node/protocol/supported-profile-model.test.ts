@@ -1,11 +1,13 @@
-import { readFile } from 'node:fs/promises';
-
 import { describe, expect, it, vi } from 'vitest';
 
 import {
     fixedModulusBfvInputs,
     verifyProthCertificate,
 } from '#tests/fixed-modulus-bfv-model.js';
+import {
+    readRustSource,
+    rustIntegerConstant,
+} from '#tests/node/rust-source.js';
 import { compileReleaseShareLiftingCensus } from '#tests/release-share-lifting-model.js';
 import {
     clearedReconstructionCoefficient,
@@ -116,12 +118,11 @@ describe('supported profile parameters', () => {
         expect(profile.shareLifting.limbBits).toBe(96);
         expect(profile.releaseLifting.shareBits).toBe(120);
         // The shared Rust profile crate fixes the FHE and release radices.
-        const shared = await readFile(
+        const shared = await readRustSource(
             'crates/protocol-research/supported-profile/src/lib.rs',
-            'utf8',
         );
-        expect(shared).toContain('pub const FHE_LIMB_BITS: usize = 96;');
-        expect(shared).toContain('pub const RELEASE_LIMB_BITS: usize = 48;');
+        expect(rustIntegerConstant(shared, 'FHE_LIMB_BITS')).toBe(96n);
+        expect(rustIntegerConstant(shared, 'RELEASE_LIMB_BITS')).toBe(48n);
     });
 
     it('derives degree-one sharing and two-share release for three participants', () => {
