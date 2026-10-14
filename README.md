@@ -1,8 +1,8 @@
 # sealed-lattice
 
-`sealed-lattice` is a TypeScript and Rust/WebAssembly research library for browser-first, fixed-roster, private-score polling. It targets end-to-end post-quantum security without a trusted tally service, but that security is not yet established.
+`sealed-lattice` is a TypeScript and Rust/WebAssembly research library for browser-first, fixed-roster, private-score polling. It targets end-to-end post-quantum security without a trusted tally service.
 
-The project implements its voting construction end to end, but the construction has no supported-phone qualification or production approval, and its end-to-end security is not established. Do not use it with real ballots, credentials, keys, or secret material. Read the [security policy](SECURITY.md) before experimenting.
+Its end-to-end security is not established, so do not use it with real ballots, credentials, keys, or secret material. The [current implementation boundary](#current-implementation-boundary) states what the project implements and what remains open; read the [security policy](SECURITY.md) before experimenting.
 
 ## Intended protocol
 
@@ -10,28 +10,30 @@ The project implements its voting construction end to end, but the construction 
 - A valid ballot gives every option an integer score from 1 through 10. Every score defaults to 1, and there is no abstention action.
 - A participant may submit at most one ballot. Invalid and late submissions are ignored; a submission is late when its signed ballot time is after the organizer's public close time.
 - The organizer may close voting without waiting for every participant to cast a ballot. Closing creates one verifiable inventory of on-time submissions, including invalid submissions with their deterministic classification and the exact accepted subset. When a result is released, every accepted ballot is counted exactly once.
-- For `n` participants, let `f = floor((n - 1) / 3)`. From roster fixing onward, up to `f` participants in total may leave, lose state or refuse without blocking the poll; the organizer remains required through closing, and after closure any `n-f` valid continuers must finish without a particular participant, including the organizer. Failures never shrink the roster, lower thresholds or remove accepted ballots.
-- Neither the organizer nor the relay can choose which valid ballots count, apart from the close time and a bounded omission of at most `f` on-time ballots. Each affected voter is shown that its ballot was not included.
+- From roster fixing onward, a bounded number of participants may leave, lose state or refuse without blocking the poll. The organizer remains required through closing, and after closure the poll finishes without any particular participant. Failures never shrink the roster, lower thresholds or remove accepted ballots.
+- Neither the organizer nor the relay can choose which valid ballots count, apart from the close time and a bounded omission of on-time ballots. Each affected voter is shown that its ballot was not included.
 - The result reveals only the requested ordered option identifiers. Totals, margins, comparisons, ranks, and individual scores remain private.
-- A result is released only when at least `f+2` ballots are accepted, so it always combines at least two honest voters' ballots. Otherwise the protocol returns a public, verifiable no-result outcome.
+- A result is released only when enough ballots are accepted that it combines at least two honest voters' ballots. Otherwise the protocol returns a public, verifiable no-result outcome.
 
-The [security policy](SECURITY.md#intended-security-model) defines the adversary, the closing quorums, the bounded omission and the completion boundary exactly. Those thresholds are necessary constraints, not a complete protocol.
+The [security policy](SECURITY.md#intended-security-model) defines the adversary bound `f` and every threshold exactly: the departure tolerance, the closing quorums, the bounded omission, the result minimum and the completion boundary. Those thresholds are necessary constraints, not a complete protocol.
 
 The construction combines exact threshold homomorphic encryption from a dealerless fixed-roster setup, public ballot proofs, quorum-based ballot closing, deterministic encrypted ranking, and target-bound threshold release. The [security policy](SECURITY.md#open-security-blockers) lists what its security still requires.
 
 ## Current implementation boundary
 
-The public package exposes the participant API, which runs one participant's complete lifecycle in a browser worker: registration, roster agreement, setup contribution and verification, the ballot, closing, target votes, release shares and the local result, and the outcome verifier, which checks a poll's outcome from the relay without participant state. The package ships the participant WebAssembly module, the worker and their source manifest, from which anyone can recompute the runtime identity. The API returns only the participant's verified progress and its authorized result; it exposes no decryption of ballots, totals or intermediate values, no participant-secret export and no path around certified release. Removed construction formats are not accepted as compatibility inputs or fallback modes.
+The public package exposes the participant API, which runs one participant's complete lifecycle in a browser worker: registration, roster agreement, setup contribution and verification, the ballot, closing, target votes, release shares and the local result, and the outcome verifier, which checks a poll's outcome from the relay without participant state. The package ships the participant WebAssembly module, the worker and their source manifest, from which anyone can recompute the runtime identity. The API returns only the participant's verified progress and its authorized result; it exposes no decryption of ballots, totals or intermediate values, no participant-secret export and no path around certified release.
 
-Preparation binds contribution sources during registration and uses registration-bound public contribution offers, an organizer proposal and quorum endorsements before ballot authority. Original roster members can accept the certified setup without completing their own offer. Recorded scalar desktop cohorts exercise departures, recovery, state loss, turnout boundaries, split rosters, losing endorsements and independent retrieval, including a ten-participant workflow. The renewed baseline has completed the guarded lifecycle matrix; subsequent cleanup has focused development checks, with complete renewal pending for its exact runtime bytes. An implemented step is not an established one: the runtime has run only in development environments, and its complete security bound, numerical registration limit, remaining resource limits and supported-phone qualification are still open.
+Preparation binds contribution sources during registration and uses registration-bound public contribution offers, an organizer proposal and quorum endorsements before ballot authority. Original roster members can accept the certified setup without completing their own offer. Recorded scalar desktop cohorts exercise departures, recovery, state loss, turnout boundaries, split rosters, losing endorsements and independent retrieval, including a ten-participant workflow.
 
-The [protocol research workspace](crates/protocol-research/README.md) holds the Rust crates from which the participant module is built, the executable native construction and its guarded runner. Its native cryptographic workflow does not establish durable browser participation, complete security or qualification.
+An implemented step is not an established one. The construction is a research direction: it has run only in development environments, each recorded run is development evidence for the exact runtime bytes it ran, and its complete security bound, numerical registration limit, remaining resource limits, supported-phone qualification and production approval are still open.
+
+The [protocol research workspace](crates/protocol-research/README.md) holds the Rust crates from which the participant module is built, the executable native construction and the runners that exercise them.
 
 `sealed-vote` is the host application responsible for registration, invitations, poll management, notifications, and the user interface. Anyone with the poll link may register until the organizer closes registration and fixes the public username roster. Each participant confirms that ordered username-to-credential roster before acting on it. Public usernames do not establish real-world identity, and duplicate-person prevention, coercion resistance, and endpoint security remain outside this library.
 
 ## Install
 
-Node.js 24.14.1 or later is required.
+The package's `engines` field states the Node.js version it requires.
 
 ```bash
 npm install sealed-lattice
@@ -139,11 +141,11 @@ The worker runs from a `blob:` URL, compiles the packaged `participant.wasm` aft
 
 ## Development
 
-The repository uses Node.js 24.14.1, pnpm 11.25.0, and Rust 1.95.0 with the `wasm32-unknown-unknown` target, Clippy and rustfmt for the participant module. The participant module builds offline, so fetch its locked dependencies once before the first build.
+The repository pins Node.js in `.nvmrc`, pnpm in `package.json` and, for the participant module, the Rust toolchain with its `wasm32-unknown-unknown` target, Clippy and rustfmt in `crates/protocol-research/rust-toolchain.toml`. The participant module builds offline, so fetch its locked dependencies once before the first build, from the directory whose toolchain file selects the compiler.
 
 ```bash
 pnpm install --frozen-lockfile
-cargo +1.95.0 fetch --locked --manifest-path crates/protocol-research/Cargo.toml
+(cd crates/protocol-research && cargo fetch --locked)
 pnpm run check
 ```
 
