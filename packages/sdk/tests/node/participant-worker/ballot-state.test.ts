@@ -14,7 +14,7 @@ import {
 import type { BallotState } from '#packages/sdk/src/participant/worker/stages/ballot/ballot-state.js';
 import type { RecordContext } from '#packages/sdk/src/participant/worker/storage/private-records.js';
 import { ballotPhase } from '#packages/sdk/src/participant/worker/storage/root-generation.js';
-import { ballotStateLayout } from '#tests/node/participant/stored-layouts.js';
+import { ballotStateLayout } from '#packages/sdk/tests/node/participant-worker/stored-layouts.js';
 import { compileParticipantBallotCustody } from '#tests/participant-ballot-custody-model.js';
 import { compileParticipantRuntimeProfile } from '#tests/participant-runtime-bounds-model.js';
 import { deriveSupportedProfile } from '#tests/supported-profile-model.js';

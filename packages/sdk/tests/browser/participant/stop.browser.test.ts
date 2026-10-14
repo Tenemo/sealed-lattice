@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { stopParticipant } from '#packages/sdk/src/participant/worker/storage/stop.js';
-import { fixtureRequest } from '#tests/browser-storage.js';
+import { fixtureRequest } from '#packages/sdk/tests/browser-storage.js';
 
 const databases: IDBDatabase[] = [];
 const names: string[] = [];

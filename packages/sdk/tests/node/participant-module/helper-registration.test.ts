@@ -27,12 +27,13 @@ import {
     verifiedRosterUsernames,
 } from '#packages/sdk/src/participant/worker/stages/roster/roster.js';
 import { dataKind } from '#packages/sdk/src/participant/worker/storage/root.js';
-import { useHelperWorkers } from '#tests/node/participant-module/helper-workers-fixture.js';
+import { useHelperWorkers } from '#packages/sdk/tests/node/participant-module/helper-workers-fixture.js';
 import {
     participantModule,
     failureOf,
     shake,
-} from '#tests/node/participant-module/packaged-participant-fixture.js';
+} from '#packages/sdk/tests/node/participant-module/packaged-participant-fixture.js';
+import { participantRelayFixture } from '#packages/sdk/tests/participant-relay-fixture.js';
 import {
     ascii,
     item,
@@ -40,7 +41,6 @@ import {
     tuple,
     variable,
 } from '#tests/node/protocol/reference/canonical-tuple.js';
-import { participantRelayFixture } from '#tests/participant-relay-fixture.js';
 
 const registrationHelpers = useHelperWorkers();
 

@@ -5,7 +5,7 @@ import {
     commitParticipantState,
     type ParticipantTransactionReader,
 } from '#packages/sdk/src/participant/worker/storage/state-transaction.js';
-import { fixtureRequest } from '#tests/browser-storage.js';
+import { fixtureRequest } from '#packages/sdk/tests/browser-storage.js';
 
 const databases: IDBDatabase[] = [];
 const stores = ['head', 'root', 'key', 'records'];

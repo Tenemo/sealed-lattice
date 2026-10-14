@@ -8,7 +8,7 @@ import type {
     ContributionPhase,
     ContributionState,
 } from '#packages/sdk/src/participant/worker/stages/contribution/contribution-state.js';
-import { contributionStateLayout } from '#tests/node/participant/stored-layouts.js';
+import { contributionStateLayout } from '#packages/sdk/tests/node/participant-worker/stored-layouts.js';
 import { compileParticipantRuntimeProfile } from '#tests/participant-runtime-bounds-model.js';
 
 const profile = compileParticipantRuntimeProfile(4, 2);

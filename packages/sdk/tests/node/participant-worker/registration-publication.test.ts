@@ -24,7 +24,7 @@ import type {
     AuthenticatedRoot,
     RecordReference,
 } from '#packages/sdk/src/participant/worker/storage/root.js';
-import { participantRelayFixture } from '#tests/participant-relay-fixture.js';
+import { participantRelayFixture } from '#packages/sdk/tests/participant-relay-fixture.js';
 
 const local = vi.hoisted(() => ({
     read: vi.fn(),

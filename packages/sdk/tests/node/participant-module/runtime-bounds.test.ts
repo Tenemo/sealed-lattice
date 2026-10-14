@@ -23,9 +23,7 @@ import { participantLinearMemoryBytes } from '#tools/ci/build-participant-module
 // The packaged participant module reports its sizes and budgets; the worker
 // derives its bounds from them. Both must equal the independent models'.
 const participantModule = await WebAssembly.compile(
-    await readFile(
-        new URL('../../../packages/sdk/dist/participant.wasm', import.meta.url),
-    ),
+    await readFile(new URL('../../../dist/participant.wasm', import.meta.url)),
 );
 const { module } = await instantiateParticipantModule(
     participantModule,

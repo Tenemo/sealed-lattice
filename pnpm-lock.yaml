@@ -83,6 +83,9 @@ importers:
 
   packages/sdk:
     devDependencies:
+      binaryen:
+        specifier: ^132.0.0
+        version: 132.0.0
       vitest:
         specifier: ^4.1.11
         version: 4.1.11(@types/node@24.13.3)(@vitest/browser-playwright@4.1.11)(vite@8.2.2(@types/node@24.13.3)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.13)(yaml@2.9.0))

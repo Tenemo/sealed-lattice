@@ -27,7 +27,7 @@ import {
     joinInput,
     rosterBegin,
     recordBegin,
-} from '#tests/node/participant-module/public-input-fixture.js';
+} from '#packages/sdk/tests/node/participant-module/public-input-fixture.js';
 
 describe('participant module public input', () => {
     it('refuses every join and roster input with a changed byte, length or roster count', async () => {

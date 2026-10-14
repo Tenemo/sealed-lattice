@@ -11,12 +11,12 @@ import {
 } from '#packages/sdk/src/participant/worker/module/parallel-helpers.js';
 import type { ParallelHelpers } from '#packages/sdk/src/participant/worker/module/parallel-helpers.js';
 import { ResourceFailure } from '#packages/sdk/src/participant/worker/shared/failures.js';
-import { useHelperWorkers } from '#tests/node/participant-module/helper-workers-fixture.js';
+import { useHelperWorkers } from '#packages/sdk/tests/node/participant-module/helper-workers-fixture.js';
 import {
     payload,
     participantModule,
     failureOf,
-} from '#tests/node/participant-module/packaged-participant-fixture.js';
+} from '#packages/sdk/tests/node/participant-module/packaged-participant-fixture.js';
 
 const helperWorkers = useHelperWorkers();
 

@@ -14,7 +14,7 @@ import {
     releasePhase,
     targetPhase,
 } from '#packages/sdk/src/participant/worker/storage/root-generation.js';
-import { releaseStateLayout } from '#tests/node/participant/stored-layouts.js';
+import { releaseStateLayout } from '#packages/sdk/tests/node/participant-worker/stored-layouts.js';
 import { compileParticipantReleaseCustody } from '#tests/participant-release-custody-model.js';
 import { compileParticipantRuntimeProfile } from '#tests/participant-runtime-bounds-model.js';
 import { deriveSupportedProfile } from '#tests/supported-profile-model.js';

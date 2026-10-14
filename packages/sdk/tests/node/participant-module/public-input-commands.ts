@@ -1,5 +1,5 @@
 import type { ParticipantModule } from '#packages/sdk/src/participant/worker/module/participant-module.js';
-import { type ModuleCommand } from '#tests/node/participant-module/public-input-fixture.js';
+import { type ModuleCommand } from '#packages/sdk/tests/node/participant-module/public-input-fixture.js';
 
 // The module's input buffers and the commands that read public input from
 // them. Every command refuses with one; a query answers zero when it refuses.

@@ -24,7 +24,10 @@ import {
     participantDatabaseName,
 } from '#packages/sdk/src/participant/worker/storage/database.js';
 import { sealRecord } from '#packages/sdk/src/participant/worker/storage/private-records.js';
-import { fixtureRequest, writeFixtureStore } from '#tests/browser-storage.js';
+import {
+    fixtureRequest,
+    writeFixtureStore,
+} from '#packages/sdk/tests/browser-storage.js';
 
 const opened: IDBDatabase[] = [];
 const names: string[] = [];

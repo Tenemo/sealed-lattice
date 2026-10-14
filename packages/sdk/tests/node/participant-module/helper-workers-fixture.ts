@@ -2,7 +2,7 @@ import { MessageChannel, Worker } from 'node:worker_threads';
 
 import { afterEach, beforeEach, vi } from 'vitest';
 
-import { distribution } from '#tests/node/participant-module/packaged-participant-fixture.js';
+import { distribution } from '#packages/sdk/tests/node/participant-module/packaged-participant-fixture.js';
 
 export const useHelperWorkers = () => {
     const threads: Worker[] = [];

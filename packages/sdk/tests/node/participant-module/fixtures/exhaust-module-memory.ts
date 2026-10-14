@@ -1,8 +1,10 @@
 import { readFile } from 'node:fs/promises';
 
-import { noParallelHelpers } from '#packages/sdk/src/participant/worker/module/parallel-helpers.js';
-import { instantiateParticipantModule } from '#packages/sdk/src/participant/worker/module/participant-module.js';
-import { ResourceFailure } from '#packages/sdk/src/participant/worker/shared/failures.js';
+// This file runs in its own Node process inside the SDK package, whose
+// manifest maps no repository aliases, so it imports the SDK relatively.
+import { noParallelHelpers } from '../../../../src/participant/worker/module/parallel-helpers.js';
+import { instantiateParticipantModule } from '../../../../src/participant/worker/module/participant-module.js';
+import { ResourceFailure } from '../../../../src/participant/worker/shared/failures.js';
 
 const modulePath = process.argv[2];
 if (modulePath === undefined) throw new Error('The module path is required.');

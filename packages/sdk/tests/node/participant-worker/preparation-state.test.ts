@@ -20,7 +20,7 @@ import {
     preparationJournalFields,
     preparationJournalLayout,
     preparationStateLayout,
-} from '#tests/node/participant/stored-layouts.js';
+} from '#packages/sdk/tests/node/participant-worker/stored-layouts.js';
 import { compileParticipantRuntimeProfile } from '#tests/participant-runtime-bounds-model.js';
 
 const profile = compileParticipantRuntimeProfile(4, 2);

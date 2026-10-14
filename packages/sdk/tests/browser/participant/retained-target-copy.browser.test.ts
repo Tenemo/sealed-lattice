@@ -14,7 +14,10 @@ import {
     evaluatedTargetName,
     namespacedName,
 } from '#packages/sdk/src/participant/worker/storage/database.js';
-import { fixtureRequest, writeFixtureStore } from '#tests/browser-storage.js';
+import {
+    fixtureRequest,
+    writeFixtureStore,
+} from '#packages/sdk/tests/browser-storage.js';
 
 const databases: IDBDatabase[] = [];
 const names: string[] = [];

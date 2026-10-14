@@ -38,7 +38,7 @@ import type {
 import {
     fixtureRequest,
     writeFixtureTransaction,
-} from '#tests/browser-storage.js';
+} from '#packages/sdk/tests/browser-storage.js';
 
 const compiledModule = await WebAssembly.compile(
     await (

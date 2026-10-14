@@ -10,7 +10,7 @@ import {
 
 type Codes = Readonly<Record<string, number>>;
 
-const repositoryRoot = new URL('../../../', import.meta.url);
+const repositoryRoot = new URL('../../../../../', import.meta.url);
 
 // The texts of the files with the extension below a directory.
 const sourceTexts = async (

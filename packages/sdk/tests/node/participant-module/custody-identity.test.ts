@@ -11,7 +11,7 @@ import { instantiateParticipantModule } from '#packages/sdk/src/participant/work
 import {
     participantModule,
     payload as fixturePayload,
-} from '#tests/node/participant-module/packaged-participant-fixture.js';
+} from '#packages/sdk/tests/node/participant-module/packaged-participant-fixture.js';
 
 // A custody identity as the foundation framing defines it, encoded here: the
 // tuple header (schema 1, version 1, two items), the domain as an ASCII item

@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
 import {
     distribution,
     moduleBytes,
-} from '#tests/node/participant-module/packaged-participant-fixture.js';
+} from '#packages/sdk/tests/node/participant-module/packaged-participant-fixture.js';
 
 describe('participant module memory', () => {
     it('ends the call that exhausts the linear-memory bound with a resource failure, and its instance refuses every later call', () => {

@@ -4,10 +4,7 @@ import { readFile } from 'node:fs/promises';
 // The packaged participant module and worker, whose helper role runs on
 // threads here as the page starts it beside an operation's worker in a
 // cross-origin isolated browser.
-export const distribution = new URL(
-    '../../../packages/sdk/dist/',
-    import.meta.url,
-);
+export const distribution = new URL('../../../dist/', import.meta.url);
 
 export const moduleBytes = await readFile(
     new URL('participant.wasm', distribution),

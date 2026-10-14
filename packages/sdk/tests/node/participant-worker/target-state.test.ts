@@ -10,7 +10,7 @@ import {
     completedClosePhase,
     targetPhase,
 } from '#packages/sdk/src/participant/worker/storage/root-generation.js';
-import { targetStateLayout } from '#tests/node/participant/stored-layouts.js';
+import { targetStateLayout } from '#packages/sdk/tests/node/participant-worker/stored-layouts.js';
 import { compileParticipantRuntimeProfile } from '#tests/participant-runtime-bounds-model.js';
 import { compileTargetSigningStateCensus } from '#tests/target-signing-state-model.js';
 

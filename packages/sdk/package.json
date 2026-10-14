@@ -34,6 +34,7 @@
         "build": "tsx ../../tools/ci/build-sdk-package.ts"
     },
     "devDependencies": {
+        "binaryen": "^132.0.0",
         "vitest": "^4.1.11"
     },
     "keywords": [

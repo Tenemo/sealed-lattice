@@ -5,7 +5,7 @@ import {
     validateParticipantPredecessor,
 } from '#packages/sdk/src/participant/worker/storage/predecessor.js';
 import { commitParticipantState } from '#packages/sdk/src/participant/worker/storage/state-transaction.js';
-import { fixtureRequest } from '#tests/browser-storage.js';
+import { fixtureRequest } from '#packages/sdk/tests/browser-storage.js';
 
 const stores = ['head', 'root', 'key', 'stopped', 'data', 'sealed'];
 const databases: IDBDatabase[] = [];

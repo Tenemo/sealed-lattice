@@ -20,7 +20,7 @@ import {
     organizer,
     minimumParticipants,
     rosterBegin,
-} from '#tests/node/participant-module/public-input-fixture.js';
+} from '#packages/sdk/tests/node/participant-module/public-input-fixture.js';
 
 describe('participant module public input', () => {
     it('withholds offer and setup authority for partial carriers and proof bytes without a verified roster', async () => {

@@ -13,7 +13,10 @@ import {
     openRecord,
     sealRecord,
 } from '#packages/sdk/src/participant/worker/storage/private-records.js';
-import { fixtureRequest, writeFixtureStore } from '#tests/browser-storage.js';
+import {
+    fixtureRequest,
+    writeFixtureStore,
+} from '#packages/sdk/tests/browser-storage.js';
 
 // Synthetic proof bytes isolate private storage framing and transport. Real
 // AES-GCM and IndexedDB are exercised; no fixture asserts proof acceptance.

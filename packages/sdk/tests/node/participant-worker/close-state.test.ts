@@ -16,7 +16,7 @@ import type {
 import {
     closeStateLayout,
     type CloseRetained,
-} from '#tests/node/participant/stored-layouts.js';
+} from '#packages/sdk/tests/node/participant-worker/stored-layouts.js';
 import { compileParticipantRuntimeProfile } from '#tests/participant-runtime-bounds-model.js';
 
 const profile = compileParticipantRuntimeProfile(3, 2);

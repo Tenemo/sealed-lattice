@@ -30,7 +30,7 @@ const nodeTestTimeoutMilliseconds = 60_000;
 const participantModuleTestTimeoutMilliseconds = 15 * 60_000;
 
 const participantModuleNodeTestGlobs = [
-    'tests/node/participant-module/**/*.test.ts',
+    'packages/sdk/tests/node/participant-module/**/*.test.ts',
 ] as const;
 const censusNodeTestGlobs = [
     'tests/node/tools/documentation-census.test.ts',

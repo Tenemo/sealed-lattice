@@ -8,6 +8,7 @@
     },
     "include": [
         "packages/*/tests/**/*.ts",
+        "packages/*/tests/**/*.mjs",
         "tools/**/*.ts",
         "tools/**/*.mjs",
         "tests/**/*.ts",

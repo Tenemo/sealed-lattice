@@ -28,9 +28,7 @@ import {
 // participant produces. A command must refuse such input and return: a trap
 // would end every visit that reads the same public bytes as pending.
 const participantModule = await WebAssembly.compile(
-    await readFile(
-        new URL('../../../packages/sdk/dist/participant.wasm', import.meta.url),
-    ),
+    await readFile(new URL('../../../dist/participant.wasm', import.meta.url)),
 );
 
 export const instantiate = () =>

@@ -10,7 +10,7 @@ import {
     publicInputCommands,
     drawArgument,
     writtenBytes,
-} from '#tests/node/participant-module/public-input-commands.js';
+} from '#packages/sdk/tests/node/participant-module/public-input-commands.js';
 import {
     instantiate,
     shake,
@@ -19,7 +19,7 @@ import {
     minimumParticipants,
     joinInput,
     rosterBegin,
-} from '#tests/node/participant-module/public-input-fixture.js';
+} from '#packages/sdk/tests/node/participant-module/public-input-fixture.js';
 
 describe('participant module public input', () => {
     it('refuses arbitrary arguments and bytes at every command that reads public input, and the instance stays usable', async () => {

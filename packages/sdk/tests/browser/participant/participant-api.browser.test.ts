@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { fixtureRequest } from '#tests/browser-storage.js';
+import { fixtureRequest } from '#packages/sdk/tests/browser-storage.js';
 import { openParticipant } from 'sealed-lattice';
 
 // Counts every store of a namespace's participant database.

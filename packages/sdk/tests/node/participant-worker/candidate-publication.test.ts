@@ -3,7 +3,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { encodeCandidatePage } from '#packages/sdk/src/participant/worker/relay/candidate-codec.js';
 import { createCandidatePublication } from '#packages/sdk/src/participant/worker/relay/publication.js';
 import { guardDelivery } from '#packages/sdk/src/participant/worker/storage/delivery.js';
-import { participantRelayFixture } from '#tests/participant-relay-fixture.js';
+import { participantRelayFixture } from '#packages/sdk/tests/participant-relay-fixture.js';
 
 afterEach(() => vi.unstubAllGlobals());
 
