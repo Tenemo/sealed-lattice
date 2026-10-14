@@ -52,16 +52,6 @@ jobs:
                       crates/protocol-research -> ../../target/participant-module
                       crates/protocol-research
 
-            # Trusted publishing needs npm 11.5.1 or later, which the pinned
-            # Node release supplies here and in the publish job.
-            - name: Require npm with trusted publishing
-              run: |
-                  npm_version=$(npm --version)
-                  if ! printf '%s\n%s\n' 11.5.1 "${npm_version}" | sort --version-sort --check=quiet; then
-                    echo "npm ${npm_version} cannot publish through trusted publishing." >&2
-                    exit 1
-                  fi
-
             - name: Fetch the release tags
               run: git fetch --tags origin
 
@@ -252,8 +242,8 @@ jobs:
             contents: read
             id-token: write
         steps:
-            # The pinned Node release supplies the npm that trusted publishing
-            # needs; the runner image's own npm cannot publish.
+            # Trusted publishing needs npm 11.5.1 or later. The job publishes
+            # with a pinned npm, not the one the runner or Node release bundles.
             - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
               with:
                   persist-credentials: false
@@ -263,6 +253,8 @@ jobs:
             - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f
               with:
                   node-version-file: .nvmrc
+            - name: Install the pinned npm
+              run: npm install --global npm@12.2.0
 
             - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
               with:

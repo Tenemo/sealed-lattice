@@ -10,8 +10,7 @@ debug.log
 dist/
 target/
 *.tsbuildinfo
-.vitest-attachments/
-**/__screenshots__/
+.vitest/
 
 # Miscellaneous
 .DS_Store

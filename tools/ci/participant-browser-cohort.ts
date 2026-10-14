@@ -166,7 +166,7 @@ export const openParticipantCohort = async (
             : undefined;
     let preparationStorageBundle: string | undefined;
     if (mode === 'preparation' || unselectedCheckpoint) {
-        const bundles = await build({
+        const handle = await build({
             config: false,
             clean: false,
             write: false,
@@ -189,7 +189,7 @@ export const openParticipantCohort = async (
             tsconfig: path.join(root, 'tsconfig.tools.json'),
             outputOptions: { codeSplitting: false },
         });
-        const chunks = bundles.flatMap((bundle) => bundle.chunks);
+        const chunks = handle.bundles.flatMap((bundle) => bundle.chunks);
         assert.equal(
             chunks.length,
             1,

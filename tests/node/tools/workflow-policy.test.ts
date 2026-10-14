@@ -113,7 +113,7 @@ describe('workflow policy', () => {
         ).toEqual([]);
     });
 
-    it('publishes with the pinned Node release and the package the tag job retained', async () => {
+    it('publishes with the pinned Node release and npm and the package the tag job retained', async () => {
         const { jobs } = await readWorkflow('release');
         const steps = jobs['publish-npm'].steps ?? [];
         const setupNode = steps.findIndex((step) =>
@@ -122,9 +122,13 @@ describe('workflow policy', () => {
         const publish = steps.findIndex((step) =>
             step.run?.startsWith('npm publish'),
         );
+        const npm = steps.findIndex((step) =>
+            /^npm install --global npm@\d+\.\d+\.\d+$/u.test(step.run ?? ''),
+        );
         expect(setupNode).toBeGreaterThan(0);
         expect(steps[setupNode].with?.['node-version-file']).toBe('.nvmrc');
-        expect(publish).toBeGreaterThan(setupNode);
+        expect(npm).toBeGreaterThan(setupNode);
+        expect(publish).toBeGreaterThan(npm);
         const upload = jobs.package.steps?.find((step) =>
             step.uses?.startsWith('actions/upload-artifact@'),
         );

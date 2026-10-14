@@ -17,7 +17,8 @@ const resolveFromRepoRoot = (...segments: string[]): string =>
     path.resolve(repoRoot, ...segments);
 
 const browserServerHost = '127.0.0.1';
-// Without an explicit port, vitest's browser server auto-selects one that, on
+// Without an explicit port, the Vitest server that browser mode runs on
+// auto-selects one that, on
 // Windows hosts running Hyper-V or WSL, can land in a reserved excluded range
 // (for example 62744-65187 or 50000-50059) where bind fails with EACCES.
 // strictPort: false only falls through on EADDRINUSE, not EACCES, so the run
@@ -89,7 +90,7 @@ for (const diagnosticDirectoryPath of [
 }
 
 // The repository-private subpath imports resolve through the TypeScript
-// paths that mirror them.
+// paths that mirror them. Every project inherits the root configuration.
 const testResolve = { tsconfigPaths: true } as const;
 
 // A run log keeps each project's attachments, including failure screenshots,
@@ -124,7 +125,6 @@ const makeNodeProject = ({
     projectName,
     testTimeout,
 }: NodeProjectInput): UserWorkspaceConfig => ({
-    resolve: testResolve,
     test: {
         name: projectName,
         include: [...include],
@@ -148,7 +148,6 @@ const browserAttachmentDirectoryPath =
         ? undefined
         : path.join(testAttachmentDirectoryPath, browserProjectName);
 const browserProject: UserWorkspaceConfig = {
-    resolve: testResolve,
     test: {
         name: browserProjectName,
         include: [...desktopBrowserTestGlobs],
@@ -162,11 +161,6 @@ const browserProject: UserWorkspaceConfig = {
             : { execArgv: nodeDiagnosticReportArguments }),
         browser: {
             enabled: true,
-            api: {
-                host: browserServerHost,
-                port: browserServerBasePort,
-                strictPort: false,
-            },
             provider: playwright(),
             headless: true,
             instances: desktopBrowserInstances,
@@ -201,6 +195,11 @@ class HeavyProjectsFirstSequencer extends BaseSequencer {
 export default defineConfig({
     resolve: testResolve,
     test: {
+        api: {
+            host: browserServerHost,
+            port: browserServerBasePort,
+            strictPort: false,
+        },
         sequence: { sequencer: HeavyProjectsFirstSequencer },
         globalSetup: [
             resolveFromRepoRoot('tools/ci/supported-profile-global-setup.ts'),

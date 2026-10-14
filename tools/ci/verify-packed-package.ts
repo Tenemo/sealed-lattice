@@ -21,6 +21,7 @@ import {
     isNamedExports,
     isVariableStatement,
     ScriptTarget,
+    SyntaxKind,
 } from 'typescript';
 
 import {
@@ -195,7 +196,9 @@ const requireDocumentedRuntimeExports = async (
         ScriptTarget.Latest,
         true,
     );
-    const exported = new Set(
+    // A value is exported by its own export modifier or by a later export
+    // list; the bundler may emit either form.
+    const listed = new Set(
         declarations.statements.flatMap((statement) =>
             isExportDeclaration(statement) &&
             statement.exportClause !== undefined &&
@@ -214,11 +217,17 @@ const requireDocumentedRuntimeExports = async (
             : isFunctionDeclaration(statement) && statement.name !== undefined
               ? [statement.name.text]
               : [];
+        const modified =
+            (isVariableStatement(statement) ||
+                isFunctionDeclaration(statement)) &&
+            (statement.modifiers ?? []).some(
+                (modifier) => modifier.kind === SyntaxKind.ExportKeyword,
+            );
         const documented = (
             getLeadingCommentRanges(text, statement.pos) ?? []
         ).some((range) => text.startsWith('/**', range.pos));
         return names
-            .filter((name) => exported.has(name))
+            .filter((name) => modified || listed.has(name))
             .map((name) => ({ name, documented }));
     });
     if (values.length === 0 || values.some(({ documented }) => !documented))
