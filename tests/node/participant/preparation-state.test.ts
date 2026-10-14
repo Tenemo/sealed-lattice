@@ -1,5 +1,3 @@
-import { createHash } from 'node:crypto';
-
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -18,11 +16,12 @@ import type {
     PreparationState,
 } from '#packages/sdk/src/participant/worker/stages/contribution/preparation-state.js';
 import { encodeManifest } from '#packages/sdk/src/participant/worker/storage/root.js';
+import {
+    preparationJournalFields,
+    preparationJournalLayout,
+    preparationStateLayout,
+} from '#tests/node/participant/stored-layouts.js';
 import { compileParticipantRuntimeProfile } from '#tests/participant-runtime-bounds-model.js';
-
-// The SHA-256 digest of stored bytes, which pins their exact format.
-const storedDigest = (bytes: Uint8Array) =>
-    createHash('sha256').update(bytes).digest('hex');
 
 const profile = compileParticipantRuntimeProfile(4, 2);
 const bounds = profile.preparation;
@@ -81,33 +80,6 @@ const unfinished = (phase: 4 | 5 | 6): ContributionState => ({
     seed: filled(phase === 5 ? 0 : 64, 61),
 });
 
-// Independent PRE2 framing, useful for hostile inputs the encoder would
-// never deliberately produce. Each of the three authorities has one length.
-const journal = (fields: readonly Uint8Array[]) => {
-    const bytes = new Uint8Array(
-        4 + fields.reduce((total, value) => total + 4 + value.length, 0),
-    );
-    bytes.set(new TextEncoder().encode('PRE2'));
-    let offset = 4;
-    for (const field of fields) {
-        new DataView(bytes.buffer).setUint32(offset, field.length, true);
-        bytes.set(field, offset + 4);
-        offset += 4 + field.length;
-    }
-    return bytes;
-};
-const fields = (state: PreparationState) => {
-    const bytes = encodePreparationState(state);
-    const output: Uint8Array[] = [];
-    let offset = 4;
-    for (let index = 0; index < 3; index++) {
-        const length = new DataView(bytes.buffer).getUint32(offset, true);
-        output.push(bytes.slice(offset + 4, offset + 4 + length));
-        offset += 4 + length;
-    }
-    return output;
-};
-
 describe('independent preparation authority journal', () => {
     it('keeps selection and endorsement intents and signatures independent', () => {
         for (const selectionStage of [undefined, 'intent', 'signed'] as const) {
@@ -126,7 +98,9 @@ describe('independent preparation authority journal', () => {
                 };
                 const bytes = encodePreparationState(state);
                 expect(decodePreparationState(bytes, profile)).toEqual(state);
-                expect(bytes).toEqual(journal(fields(state)));
+                expect(Buffer.from(bytes)).toEqual(
+                    preparationStateLayout(state),
+                );
                 expect(unusedPreparationPurposes(bytes)).toBe(
                     2 +
                         (selectionStage === 'signed' ? 0 : 4) +
@@ -241,10 +215,12 @@ describe('independent preparation authority journal', () => {
                             ? {}
                             : { endorsement: endorsement(endorsed) }),
                     };
-                    const encodedFields = fields(state);
+                    const encodedFields = preparationJournalFields(state);
                     encodedFields[0] = contribution;
                     expect(
-                        unusedPreparationPurposes(journal(encodedFields)),
+                        unusedPreparationPurposes(
+                            preparationJournalLayout(encodedFields),
+                        ),
                     ).toBe(
                         (ownPhase === 9 ? 0 : 2) +
                             (selected === 'signed' ? 0 : 4) +
@@ -256,7 +232,7 @@ describe('independent preparation authority journal', () => {
     });
 
     it('refuses malformed slot lengths, unknown phases and stale signature tails', () => {
-        const valid = fields({
+        const valid = preparationJournalFields({
             selection: selection('intent'),
             endorsement: endorsement('signed'),
         });
@@ -274,14 +250,17 @@ describe('independent preparation authority journal', () => {
                     position === index ? changed : value,
                 );
                 expect(() =>
-                    decodePreparationState(journal(input), profile),
+                    decodePreparationState(
+                        preparationJournalLayout(input),
+                        profile,
+                    ),
                 ).toThrow();
             }
             const changed = valid[index].slice();
             changed[0] = changed[0] === 1 ? 2 : 1;
             expect(() =>
                 decodePreparationState(
-                    journal(
+                    preparationJournalLayout(
                         valid.map((value, position) =>
                             position === index ? changed : value,
                         ),
@@ -294,7 +273,7 @@ describe('independent preparation authority journal', () => {
                 invalidPhase[0] = stage;
                 expect(() =>
                     unusedPreparationPurposes(
-                        journal(
+                        preparationJournalLayout(
                             valid.map((value, position) =>
                                 position === index ? invalidPhase : value,
                             ),
@@ -318,7 +297,7 @@ describe('independent preparation authority journal', () => {
             ).toThrow();
         expect(() =>
             decodePreparationState(
-                journal([valid[0], valid[2], valid[1]]),
+                preparationJournalLayout([valid[0], valid[2], valid[1]]),
                 profile,
             ),
         ).toThrow();
@@ -344,7 +323,7 @@ describe('independent preparation authority journal', () => {
         for (const phase of [0, 3, 10, 255])
             expect(() =>
                 unusedPreparationPurposes(
-                    journal([
+                    preparationJournalLayout([
                         Uint8Array.of(80, 67, 83, 53, phase),
                         new Uint8Array(),
                         new Uint8Array(),
@@ -369,25 +348,22 @@ describe('independent preparation authority journal', () => {
         ).toThrow();
     });
 
-    it('pins the bytes of an empty, an intended and a signed journal', () => {
-        expect(
-            [
-                {},
-                {
-                    contribution: encodeContributionState(unfinished(5)),
-                    selection: selection('intent'),
-                    endorsement: endorsement('intent'),
-                },
-                {
-                    contribution: encodeContributionState(unfinished(6)),
-                    selection: selection('signed'),
-                    endorsement: endorsement('signed'),
-                },
-            ].map((state) => storedDigest(encodePreparationState(state))),
-        ).toEqual([
-            '336148d39032496ea4772e27e7f26f8d11c94dcc36c920e297e339976ec97359',
-            '8bc5ce9c593e15110308dc1cb4f58d6da0ffa9faa1599cda55db84c46a98d002',
-            '3a6b3862d77a809fdc26aed51f79a89730b843b6fa722f6950c9eb95679e74c3',
-        ]);
+    it('stores an empty, an intended and a signed journal in its layout', () => {
+        for (const state of [
+            {},
+            {
+                contribution: encodeContributionState(unfinished(5)),
+                selection: selection('intent'),
+                endorsement: endorsement('intent'),
+            },
+            {
+                contribution: encodeContributionState(unfinished(6)),
+                selection: selection('signed'),
+                endorsement: endorsement('signed'),
+            },
+        ])
+            expect(Buffer.from(encodePreparationState(state))).toEqual(
+                preparationStateLayout(state),
+            );
     });
 });

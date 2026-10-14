@@ -1,5 +1,3 @@
-import { createHash } from 'node:crypto';
-
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -16,13 +14,10 @@ import {
 import type { BallotState } from '#packages/sdk/src/participant/worker/stages/ballot/ballot-state.js';
 import type { RecordContext } from '#packages/sdk/src/participant/worker/storage/private-records.js';
 import { ballotPhase } from '#packages/sdk/src/participant/worker/storage/root-generation.js';
+import { ballotStateLayout } from '#tests/node/participant/stored-layouts.js';
 import { compileParticipantBallotCustody } from '#tests/participant-ballot-custody-model.js';
 import { compileParticipantRuntimeProfile } from '#tests/participant-runtime-bounds-model.js';
 import { deriveSupportedProfile } from '#tests/supported-profile-model.js';
-
-// The SHA-256 digest of stored bytes, which pins their exact format.
-const storedDigest = (bytes: Uint8Array) =>
-    createHash('sha256').update(bytes).digest('hex');
 
 const runtimeProfile = (participants: number, options: number) => {
     const profile = compileParticipantRuntimeProfile(participants, options);
@@ -280,21 +275,22 @@ describe('participant ballot state', () => {
             expect(value).not.toBe(binding(records)[index]);
     });
 
-    it('pins the bytes every phase stores', () => {
-        expect(
-            phases.map((phase) =>
-                storedDigest(
-                    encodeBallotState(
-                        phase,
-                        stateAt(phase, bounds.minimumBodyBytes),
-                    ),
-                ),
-            ),
-        ).toEqual([
-            'a2ea2e4c9834070fa83883ecd19ab17f5a2a27bc50601f7765f5dcc44bfe94ff',
-            '980749d89100fbe1976c0d063650807c159cdac9468f2142e8de1760ae56add8',
-            'ca81992a0ef4e8c3b12a5d260def7b92ffec4f521d4dfeaedd1f684bd061f213',
-            'ebbd0a3a8b9a78c9e4d29ae13f0325f6d6dd79a5ab24cb0fda8d4e6785d4939a',
-        ]);
+    it('stores every phase in its layout', () => {
+        for (const phase of phases)
+            for (const bodyLength of [
+                bounds.minimumBodyBytes,
+                bounds.maximumBodyBytes,
+            ]) {
+                const state = stateAt(phase, bodyLength);
+                expect(Buffer.from(encodeBallotState(phase, state))).toEqual(
+                    ballotStateLayout({
+                        ...state,
+                        ballotTime:
+                            phase < ballotPhase.signed
+                                ? state.ballotTime
+                                : undefined,
+                    }),
+                );
+            }
     });
 });

@@ -1,5 +1,3 @@
-import { createHash } from 'node:crypto';
-
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -16,13 +14,10 @@ import {
     releasePhase,
     targetPhase,
 } from '#packages/sdk/src/participant/worker/storage/root-generation.js';
+import { releaseStateLayout } from '#tests/node/participant/stored-layouts.js';
 import { compileParticipantReleaseCustody } from '#tests/participant-release-custody-model.js';
 import { compileParticipantRuntimeProfile } from '#tests/participant-runtime-bounds-model.js';
 import { deriveSupportedProfile } from '#tests/supported-profile-model.js';
-
-// The SHA-256 digest of stored bytes, which pins their exact format.
-const storedDigest = (bytes: Uint8Array) =>
-    createHash('sha256').update(bytes).digest('hex');
 
 const profile = compileParticipantRuntimeProfile(3, 2);
 const bounds = profile.release;
@@ -230,21 +225,19 @@ describe('participant release state', () => {
         ).toBe(true);
     });
 
-    it('pins the bytes every phase stores', () => {
-        expect(
-            phases.map((phase) =>
-                storedDigest(
-                    encodeReleaseState(
-                        phase,
-                        stateAt(phase, 7, bounds.minimumBodyBytes),
-                    ),
-                ),
-            ),
-        ).toEqual([
-            '3f739df5c7ffa666889e9b76279d2f9ee36260068ddefdc7924dc50c2b79c28f',
-            '8638dc2d021cd817c12d50ef257a74c4070fb37bfc3f89ee3f9f661a41c50f9b',
-            'fee866accfcb9c0a48553edc3168841287cc8eba5323168ebd1c0336161dd5f6',
-            'c6e70668345a9bcac2f4bd5772c78c8a3420bb2116d88da56cd85ed783b1bf40',
-        ]);
+    it('stores every phase and status in its layout', () => {
+        for (const phase of phases)
+            for (const ballotInclusion of ballotInclusions) {
+                const state = stateAt(
+                    phase,
+                    7,
+                    bounds.minimumBodyBytes,
+                    targetPhase.signed,
+                    ballotInclusion,
+                );
+                expect(Buffer.from(encodeReleaseState(phase, state))).toEqual(
+                    releaseStateLayout(state),
+                );
+            }
     });
 });

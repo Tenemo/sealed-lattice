@@ -1,5 +1,3 @@
-import { createHash } from 'node:crypto';
-
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -10,11 +8,8 @@ import type {
     ContributionPhase,
     ContributionState,
 } from '#packages/sdk/src/participant/worker/stages/contribution/contribution-state.js';
+import { contributionStateLayout } from '#tests/node/participant/stored-layouts.js';
 import { compileParticipantRuntimeProfile } from '#tests/participant-runtime-bounds-model.js';
-
-// The SHA-256 digest of stored bytes, which pins their exact format.
-const storedDigest = (bytes: Uint8Array) =>
-    createHash('sha256').update(bytes).digest('hex');
 
 const profile = compileParticipantRuntimeProfile(4, 2);
 const bounds = profile.contribution;
@@ -270,18 +265,12 @@ describe('independent contribution state framing', () => {
         }
     });
 
-    it('pins the bytes every own phase stores', () => {
-        expect(
-            ([4, 5, 6, 7, 8, 9] as const).map((phase) =>
-                storedDigest(encodeContributionState(stateAt(phase))),
-            ),
-        ).toEqual([
-            '474f222d0459cb981f8dbf8eba3358894c193350521df6ccab9076775b20dea0',
-            '97ec1590ccd4ddebfdd9fb8571d7b37d31e35ea2db6a0c0da62441d43f41e6d8',
-            '4b3d365b16756cf4234edf2d3487cb6ccede06ca9a1e09b2f622ce33de4236ae',
-            'cf1a91bb116a30d03177ad2d06036ed589d6f5b2f10a84a47fbb01ee2789db37',
-            '051e7b8c8ddc6fc9dcdab984320f406089131b814c7197cb687e2a604a02eece',
-            'a65d601ae2067e22fd0cced38b3942201e15ce7b356d28dfea48c7284ab2d1fa',
-        ]);
+    it('stores every own phase in its layout', () => {
+        for (const phase of [4, 5, 6, 7, 8, 9] as const) {
+            const state = stateAt(phase);
+            expect(Buffer.from(encodeContributionState(state))).toEqual(
+                contributionStateLayout(state),
+            );
+        }
     });
 });

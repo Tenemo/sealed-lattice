@@ -225,7 +225,7 @@ const checkReferences = (
         throw new Error('Participant records do not match the generation.');
 };
 
-const decodeManifest = (
+export const decodeManifest = (
     bytes: Uint8Array,
     generation: number,
     limits: ParticipantLimits,
