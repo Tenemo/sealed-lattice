@@ -142,13 +142,12 @@ it('routes raw source families and salts without reordering or aliasing their or
 // An independent length-delimited decoder, not the mask's offsets.
 const decode = (bytes: Buffer, degree: number) => {
     if (
-        bytes.length < 8 ||
+        bytes.length < 6 ||
         bytes.readUInt16LE() !== 1 ||
-        bytes.readUInt16LE(2) !== 1 ||
-        bytes.readUInt32LE(4) !== 7
+        bytes.readUInt32LE(2) !== 7
     )
         return undefined;
-    let offset = 8;
+    let offset = 6;
     const fields: { type: number; bytes: Buffer }[] = [];
     for (let index = 0; index < 7; index++) {
         if (offset + 6 > bytes.length) return undefined;

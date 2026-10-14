@@ -43,7 +43,7 @@ export const compileRegistrationSourceRandomness = (
         // Seven tuple items; the final seed is fixed bytes, with no inner
         // length. Only the ASCII domain and modulus have inner lengths.
         const sourceInputBytes =
-            8n +
+            6n +
             6n * 6n +
             4n +
             bytes('sealed-lattice/fhe-source-randomness/v2') +
@@ -57,7 +57,7 @@ export const compileRegistrationSourceRandomness = (
         // variable-byte public coordinate. This is ordinary SHAKE,
         // without ProtocolHash's separate fixed 64-byte prefix.
         const commitmentInputBytes =
-            8n +
+            6n +
             7n * 6n +
             4n +
             bytes('sealed-lattice/registered-fhe-key/v2') +

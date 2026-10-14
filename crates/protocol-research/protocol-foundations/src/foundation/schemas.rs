@@ -5,8 +5,6 @@ use super::{
     CanonicalCodecRefusal, CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple,
 };
 
-pub(super) const FOUNDATION_SCHEMA_VERSION: u16 = 1;
-
 /// A foundation value whose tuple does not have its schema's shape.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FoundationSchemaRefusal;
@@ -25,9 +23,6 @@ pub(super) fn require_header(
     item_count: usize,
 ) -> SchemaResult<()> {
     if tuple.schema_identifier != schema_identifier {
-        return Err(FoundationSchemaRefusal);
-    }
-    if tuple.schema_version != FOUNDATION_SCHEMA_VERSION {
         return Err(FoundationSchemaRefusal);
     }
     if tuple.items.len() != item_count {

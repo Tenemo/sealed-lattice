@@ -3,10 +3,10 @@ import { compileRegistrationEnrollmentCensus } from '#tests/registration-enrollm
 import type { SupportedProfile } from '#tests/supported-profile-model.js';
 import { thresholdProfileFor } from '#tests/threshold-completion-model.js';
 
-// Canonical tuple framing: an eight-byte tuple header, then a two-byte type
-// and a four-byte length for each item. ASCII and byte-string values also
-// carry a four-byte inner length.
-const tupleHeaderBytes = 8n;
+// Canonical tuple framing: a six-byte tuple header, then a two-byte type and
+// a four-byte length for each item. ASCII and byte-string values also carry a
+// four-byte inner length.
+const tupleHeaderBytes = 6n;
 const itemHeaderBytes = 6n;
 const innerLengthBytes = 4n;
 const identityBytes = 64n;

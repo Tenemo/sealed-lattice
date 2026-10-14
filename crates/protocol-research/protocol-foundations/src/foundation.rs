@@ -9,8 +9,8 @@ pub mod text;
 
 use crate::SIGNING_PUBLIC_KEY_BYTES;
 pub use canonical_tuple::{
-    CANONICAL_TUPLE_SCHEMA_IDENTIFIER, CANONICAL_TUPLE_VERSION, CanonicalCodecRefusal,
-    CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple,
+    CANONICAL_TUPLE_SCHEMA_IDENTIFIER, CanonicalCodecRefusal, CanonicalDecodeLimits, CanonicalItem,
+    CanonicalItemType, CanonicalTuple,
 };
 pub use hash::{Hash512, hash_foundation_tuple_512};
 pub(crate) use participant_identity::derive_participant_identity;
@@ -71,7 +71,6 @@ impl RegistrationHeader {
             return Err(crate::Refusal::Shape);
         }
         CanonicalTuple::new(
-            1,
             1,
             vec![
                 CanonicalItem::nonempty_ascii(REGISTRATION_HEADER_PURPOSE).unwrap(),

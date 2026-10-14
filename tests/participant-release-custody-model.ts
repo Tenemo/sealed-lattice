@@ -9,7 +9,7 @@ import type { SupportedProfile } from '#tests/supported-profile-model.js';
 import { compileTargetSigningStateCensus } from '#tests/target-signing-state-model.js';
 
 export const participantReleaseProofRoleBytes =
-    8n +
+    6n +
     6n * 6n +
     4n +
     BigInt(Buffer.byteLength('sealed-lattice/certified-release/v3')) +

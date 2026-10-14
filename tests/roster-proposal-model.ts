@@ -16,7 +16,7 @@ export const compileRosterProposalCensus = (participantCount: number) => {
     const key = compileRecipientKeyCensus();
     const bytes = (value: string) => BigInt(Buffer.byteLength(value));
     const roleBytes =
-        8n +
+        6n +
         5n * 6n +
         4n +
         bytes('sealed-lattice/setup-contribution/v3') +
@@ -25,7 +25,7 @@ export const compileRosterProposalCensus = (participantCount: number) => {
         2n * 64n +
         2n;
     const proposalBytes =
-        8n +
+        6n +
         3n * 6n +
         4n +
         bytes('sealed-lattice/roster-proposal/v2') +

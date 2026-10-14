@@ -505,7 +505,7 @@ impl VerifiedEvaluationTarget {
         fields: Vec<CanonicalItem>,
         ciphertext: Option<Vec<u8>>,
     ) -> Result<Self, Refusal> {
-        let body = CanonicalTuple::new(1, 1, fields)
+        let body = CanonicalTuple::new(1, fields)
             .encode()
             .map_err(|_| Refusal::Encoding)?;
         let identity = target_identity(&body, inventory.setup().profile().participants())?;

@@ -16,7 +16,7 @@ fn requested_prefixes_preserve_the_reference_schedule_and_complete_ordering() {
             .iter()
             .map(|byte| format!("{byte:02x}"))
             .collect::<String>(),
-        "6f230d8e00c9b80be546192ecfcc96be45e7f634946ee38dc26b1c9a472f7730fba1ab21fc9efe9d52c7dcbf27d674e3f610b746dd39fdbbc2aba2f35dd1296d"
+        "5d8e3744d3d1e00e902ccf6f7fafeec4d586f310ae4abdab30293b918837bf778180780dc4f71eac86e8a2e988ae05f61df0211e497427c7baf7c4627d27b3a4"
     );
     for top_count in 1..10 {
         let selected = RankingProgram::for_profile(completion(), top_count).unwrap();

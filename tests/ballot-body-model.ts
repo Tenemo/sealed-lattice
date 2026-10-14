@@ -40,7 +40,7 @@ export const compileBallotBodyCensus = (profile: SupportedProfile) => {
     const setupKeyPolynomials = [{ expandedIndex: 1, bytes: fheBytes }];
     const contextBytes = 4n + 64n + 64n + 2n + 1n + 1n;
     const proofRoleBytes =
-        8n +
+        6n +
         5n * 6n +
         4n +
         BigInt(Buffer.byteLength('sealed-lattice/ballot-proof/v3')) +
@@ -60,7 +60,7 @@ export const compileBallotBodyCensus = (profile: SupportedProfile) => {
         proof.maximumMultiproofBytes -
         proof.headerBytes;
     const hashPrefixBytes =
-        8n +
+        6n +
         2n * 6n +
         4n +
         BigInt(Buffer.byteLength('sealed-lattice/ballot-body/v1')) +

@@ -27,7 +27,6 @@ const RETAINED_INPUTS_LABEL: &[u8] = b"sealed-lattice/retained-selection-inputs/
 pub fn selection_body_bytes(profile: Profile) -> usize {
     CanonicalTuple::new(
         1,
-        1,
         vec![
             CanonicalItem::nonempty_ascii(SELECTION_PURPOSE).expect("Purpose"),
             CanonicalItem::hash512([0; 64]),
@@ -70,7 +69,6 @@ impl SelectionProposal {
             entries.extend(body);
         }
         let body = CanonicalTuple::new(
-            1,
             1,
             vec![
                 CanonicalItem::nonempty_ascii(SELECTION_PURPOSE).map_err(|_| Refusal::Shape)?,
@@ -204,7 +202,6 @@ fn verify(
 }
 pub fn endorsement_body(selection: [u8; 64], position: usize) -> Result<Vec<u8>, Refusal> {
     CanonicalTuple::new(
-        1,
         1,
         vec![
             CanonicalItem::nonempty_ascii(ENDORSEMENT_PURPOSE).map_err(|_| Refusal::Shape)?,

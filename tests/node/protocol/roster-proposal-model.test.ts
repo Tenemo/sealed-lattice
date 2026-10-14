@@ -25,7 +25,7 @@ describe('verified registration roster proposal', () => {
                     BigInt(encoded.length),
                 );
                 expect(encoded.length).toBe(
-                    8 + 5 * 6 + (4 + 36) + (4 + 128) + 2 * 64 + 2,
+                    6 + 5 * 6 + (4 + 36) + (4 + 128) + 2 * 64 + 2,
                 );
             }
         }

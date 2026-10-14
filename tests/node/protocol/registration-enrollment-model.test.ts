@@ -11,7 +11,7 @@ describe('signed registration and original-key custody', () => {
     it('accounts for the canonical username and every public or secret record', () => {
         const value = compileRegistrationEnrollmentCensus();
         expect(value.maximumHeaderBytes).toBe(
-            8n +
+            6n +
                 6n * 6n +
                 4n +
                 37n +
@@ -23,12 +23,12 @@ describe('signed registration and original-key custody', () => {
                 4n +
                 64n * value.maximumSourceFamilyCount,
         );
-        expect(value.pollDefinitionOverheadBytes).toBe(2143n);
+        expect(value.pollDefinitionOverheadBytes).toBe(2141n);
         // A two-option poll: 694 bytes of runtime, lengths, counts, username
         // and data keys beside the texts, which fill the poll definition but
-        // its 2,143 bytes of framing and the manifest's 30 + 2 * 36 + 16.
+        // its 2,141 bytes of framing and the manifest's 28 + 2 * 34 + 16.
         expect(value.maximumOrganizerInputBytes).toBe(
-            694n + 1_048_576n - 2143n - 118n,
+            694n + 1_048_576n - 2141n - 112n,
         );
         expect(value.maximumJoinInputBytes).toBeLessThan(1_572_864n);
         expect(value.recipientCapsuleBytes).toBe(528n);
@@ -66,7 +66,7 @@ describe('signed registration and original-key custody', () => {
             2n + (value.maximumSourceCapsuleBytes - 16n + 15n) / 16n,
         );
         const associated = Buffer.concat([
-            Buffer.alloc(8),
+            Buffer.alloc(6),
             Buffer.alloc(6),
             Buffer.alloc(4),
             Buffer.from('sealed-lattice/fhe-source-custody/v1'),

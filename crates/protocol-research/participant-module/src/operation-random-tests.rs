@@ -80,23 +80,23 @@ fn keeps_every_stream_prefix_byte_identical() {
     for (domain, prefix) in [
         (
             "sealed-lattice/contribution-witness-randomness/v1",
-            "2297d650533fa5fbb4375d4079f7c2c93021294f1af2e8a87e8c726fcde00485",
+            "631baef846a6d182def6e7f35dbfef8213303c9ea933ad5ac9a6dbfb14d30473",
         ),
         (
             "sealed-lattice/contribution-proof-randomness/v1",
-            "6f1b400635987db4ec310467d3c18504a8c20f10db97b3ce363fbd6ab31619e9",
+            "5e0a5ce2c71d653031e529256d45df8c452657f00107287a207d289de6ba3e11",
         ),
         (
             "sealed-lattice/ballot-encryption-randomness/v1",
-            "6217f66dc66ad2d96f479d088afc2bfa3c3de796225f151400878c8427816cb6",
+            "01adb5cdcf8602aa76a814e2aaf4eba8db56109bec689aece19cb1cfffe7e928",
         ),
         (
             "sealed-lattice/ballot-proof-randomness/v1",
-            "2a797736edb78035078707cc60556bc6c4e13cc97c7baae2b89be4cb3f9a3ecc",
+            "a7ee66697e5cb77cc1c0a0bf1a8e6105f64b830bd7c5dae070c5acdfe9bb0c52",
         ),
         (
             "sealed-lattice/release-proof-randomness/v1",
-            "21623b8240dbaa983801f07031793a9f99024e41941237cf253e01b42539bb3c",
+            "1be195f12e1b4ee0957dd26e11045556db3d98652d7960ae8d2f701cb457201a",
         ),
     ] {
         let mut bytes = [0; 32];

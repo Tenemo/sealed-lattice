@@ -3,8 +3,7 @@
 use crate::{
     Refusal,
     foundation::{
-        CANONICAL_TUPLE_SCHEMA_IDENTIFIER, CANONICAL_TUPLE_VERSION, CanonicalItem,
-        CanonicalItemType, CanonicalTuple,
+        CANONICAL_TUPLE_SCHEMA_IDENTIFIER, CanonicalItem, CanonicalItemType, CanonicalTuple,
     },
 };
 use parallel_work::{CHUNK_LIMIT, HashStream, PendingDigest, Sponge};
@@ -107,14 +106,10 @@ pub fn framing(
     items.push(CanonicalItem::nonempty_ascii(domain).map_err(|_| Refusal::Shape)?);
     items.extend_from_slice(prefix);
     let count = word(items.len() + 1)?;
-    let mut framing = CanonicalTuple::new(
-        CANONICAL_TUPLE_SCHEMA_IDENTIFIER,
-        CANONICAL_TUPLE_VERSION,
-        items,
-    )
-    .encode()
-    .map_err(|_| Refusal::Shape)?;
-    framing[4..8].copy_from_slice(&count.to_le_bytes());
+    let mut framing = CanonicalTuple::new(CANONICAL_TUPLE_SCHEMA_IDENTIFIER, items)
+        .encode()
+        .map_err(|_| Refusal::Shape)?;
+    framing[2..6].copy_from_slice(&count.to_le_bytes());
     framing.extend_from_slice(&CanonicalItemType::RawBytes.canonical_code().to_le_bytes());
     match trailing {
         Trailing::Fixed(length) => framing.extend_from_slice(&word(length)?.to_le_bytes()),

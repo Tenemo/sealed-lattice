@@ -34,10 +34,6 @@ const schemaIdentifier = rustIntegerConstant(
     tupleConstants,
     'CANONICAL_TUPLE_SCHEMA_IDENTIFIER',
 );
-const schemaVersion = rustIntegerConstant(
-    tupleConstants,
-    'CANONICAL_TUPLE_VERSION',
-);
 
 // The little-endian encoding of a nonnegative integer in exactly this many
 // bytes. A value that does not fit is refused.
@@ -72,12 +68,10 @@ export const ascii = (text: string): Buffer => {
     return item(itemType.ascii, variable(Buffer.from(text, 'ascii')));
 };
 
-// A tuple: the schema identifier, the schema version and the item count,
-// then the items.
+// A tuple: the schema identifier and the item count, then the items.
 export const tuple = (items: readonly Uint8Array[]): Buffer =>
     Buffer.concat([
         unsigned(schemaIdentifier, 2),
-        unsigned(schemaVersion, 2),
         unsigned(items.length, 4),
         ...items,
     ]);

@@ -76,7 +76,6 @@ fn manifest_rejects_wrong_count_order_duplicates_and_empty_text() {
         .collect();
     too_many.push(CanonicalTuple::new(
         OPTION_DEFINITION_SCHEMA_IDENTIFIER,
-        FOUNDATION_SCHEMA_VERSION,
         vec![
             CanonicalItem::unsigned16(*GOAL_OPTION_COUNTS.end()),
             CanonicalItem::nonempty_ascii("option-20").expect("identifier encodes"),
@@ -85,7 +84,6 @@ fn manifest_rejects_wrong_count_order_duplicates_and_empty_text() {
     ));
     let too_many_bytes = CanonicalTuple::new(
         MANIFEST_SCHEMA_IDENTIFIER,
-        FOUNDATION_SCHEMA_VERSION,
         vec![
             CanonicalItem::display_text(&display_text("Title")).expect("title encodes"),
             CanonicalItem::nested_tuple_list(&too_many).expect("options encode"),
@@ -125,7 +123,6 @@ fn manifest_rejects_wrong_count_order_duplicates_and_empty_text() {
     );
     let unchecked_bytes = CanonicalTuple::new(
         MANIFEST_SCHEMA_IDENTIFIER,
-        FOUNDATION_SCHEMA_VERSION,
         vec![
             CanonicalItem::display_text(&display_text("Title")).expect("title encodes"),
             CanonicalItem::nested_tuple_list(

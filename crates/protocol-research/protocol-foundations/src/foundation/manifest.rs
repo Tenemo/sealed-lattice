@@ -4,8 +4,8 @@ use supported_profile::Profile;
 
 use super::canonical_tuple::CanonicalDecodeBudget;
 use super::schemas::{
-    FOUNDATION_SCHEMA_VERSION, SchemaResult, read_ascii, read_nested_tuple_list_with_budget,
-    read_u16, read_variable_item, require_header,
+    SchemaResult, read_ascii, read_nested_tuple_list_with_budget, read_u16, read_variable_item,
+    require_header,
 };
 use super::{
     CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple,
@@ -58,7 +58,6 @@ impl OptionDefinition {
     fn canonical_tuple(&self) -> SchemaResult<CanonicalTuple> {
         Ok(CanonicalTuple::new(
             OPTION_DEFINITION_SCHEMA_IDENTIFIER,
-            FOUNDATION_SCHEMA_VERSION,
             vec![
                 CanonicalItem::unsigned16(self.option_index),
                 CanonicalItem::nonempty_ascii(&self.option_identifier)?,
@@ -142,7 +141,6 @@ impl Manifest {
             .collect::<SchemaResult<Vec<_>>>()?;
         Ok(CanonicalTuple::new(
             MANIFEST_SCHEMA_IDENTIFIER,
-            FOUNDATION_SCHEMA_VERSION,
             vec![
                 CanonicalItem::display_text(&self.display_title)?,
                 CanonicalItem::nested_tuple_list(&options)?,

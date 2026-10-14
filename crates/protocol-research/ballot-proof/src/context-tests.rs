@@ -14,7 +14,7 @@ fn proof_roles_separate_every_variable_context_input() {
         assert_ne!(changed.unwrap(), original);
     }
     assert!(original.len() <= 1024);
-    assert_eq!(original.len(), 334);
+    assert_eq!(original.len(), 332);
     let tuple = CanonicalTuple::decode(&original, &Default::default()).unwrap();
     assert_eq!(tuple.items.len(), 5);
     assert_eq!(

@@ -14,20 +14,19 @@ pub(super) fn decode_tuple_at(
     if nesting_depth > limits.maximum_nesting_depth
         || nesting_depth > ABSOLUTE_MAXIMUM_NESTING_DEPTH
         || bytes.len() > limits.maximum_tuple_byte_length
-        || bytes.len() < 8
+        || bytes.len() < 6
     {
         return Err(CanonicalCodecRefusal);
     }
     let schema_identifier = u16::from_le_bytes([bytes[0], bytes[1]]);
-    let schema_version = u16::from_le_bytes([bytes[2], bytes[3]]);
-    let item_count = u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]) as usize;
+    let item_count = u32::from_le_bytes([bytes[2], bytes[3], bytes[4], bytes[5]]) as usize;
     if item_count > limits.maximum_item_count {
         return Err(CanonicalCodecRefusal);
     }
     // The declared item headers must fit before any is read.
     let minimum_length = item_count
         .checked_mul(6)
-        .and_then(|value| value.checked_add(8))
+        .and_then(|value| value.checked_add(6))
         .ok_or(CanonicalCodecRefusal)?;
     if minimum_length > bytes.len() {
         return Err(CanonicalCodecRefusal);
@@ -40,7 +39,7 @@ pub(super) fn decode_tuple_at(
     )?;
 
     let mut items = Vec::with_capacity(item_count);
-    let mut offset = 8usize;
+    let mut offset = 6usize;
     for _ in 0..item_count {
         let header_end = offset.checked_add(6).ok_or(CanonicalCodecRefusal)?;
         if header_end > bytes.len() {
@@ -84,7 +83,6 @@ pub(super) fn decode_tuple_at(
     Ok((
         CanonicalTuple {
             schema_identifier,
-            schema_version,
             items,
         },
         offset,

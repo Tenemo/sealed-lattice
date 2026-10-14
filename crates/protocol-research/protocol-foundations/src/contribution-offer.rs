@@ -81,7 +81,6 @@ impl OfferEnvelope {
         }
         let bytes = CanonicalTuple::new(
             1,
-            1,
             vec![
                 CanonicalItem::nonempty_ascii(OFFER_PURPOSE).map_err(|_| Refusal::Shape)?,
                 CanonicalItem::hash512(roster),

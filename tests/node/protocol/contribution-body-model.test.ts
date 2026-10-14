@@ -65,7 +65,7 @@ describe('complete contribution body encoding', () => {
         );
         const headerBytes = 8n + 64n;
         const payloadBytes = 24n * 65536n * 109n + 20n * 65536n * 21n;
-        const prefixBytes = 8n + 2n * 6n + 4n + 35n + 4n;
+        const prefixBytes = 6n + 2n * 6n + 4n + 35n + 4n;
         // The full word proof's header is its shortest encoding.
         const minimumProofBytes = 3936n;
         expect(value.headerBytes).toBe(headerBytes);

@@ -154,7 +154,6 @@ fn coordinate_commitment_matches_independent_framing_and_transport_partitions() 
     let length = DEGREE * (1 + modulus.len());
     let mut prefix = CanonicalTuple::new(
         1,
-        1,
         vec![
             CanonicalItem::nonempty_ascii("sealed-lattice/registered-fhe-key/v2").unwrap(),
             CanonicalItem::fixed_bytes(credential.signing_public()).unwrap(),

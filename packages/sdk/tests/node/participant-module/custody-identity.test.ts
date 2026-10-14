@@ -14,14 +14,13 @@ import {
 } from '#packages/sdk/tests/node/participant-module/packaged-participant-fixture.js';
 
 // A custody identity as the foundation framing defines it, encoded here: the
-// tuple header (schema 1, version 1, two items), the domain as an ASCII item
+// tuple header (schema 1, two items), the domain as an ASCII item
 // (type 2) and the payload as a raw-bytes item (type 1), each item's length
 // before its inner length, hashed with SHAKE256 to 64 bytes.
 const independentIdentity = (domain: string, payload: Uint8Array) => {
     const label = Buffer.from(domain, 'ascii');
-    const framing = Buffer.alloc(28 + label.length);
+    const framing = Buffer.alloc(26 + label.length);
     let offset = framing.writeUInt16LE(1, 0);
-    offset = framing.writeUInt16LE(1, offset);
     offset = framing.writeUInt32LE(2, offset);
     offset = framing.writeUInt16LE(2, offset);
     offset = framing.writeUInt32LE(4 + label.length, offset);
@@ -64,7 +63,7 @@ describe('participant custody identities', () => {
                 ),
             ).toString('hex'),
         ).toBe(
-            'c43f773788c6d66f30eb39ee7230312ad8dda3e5cbb3205075377d824eaa781d54b6dd3661553cb3c64ece7bd15a6df92fdd901b2ba81ae35334879f69fdf8a4',
+            'ae4e93421e5300b846a0f24f8a8f637b190afbdd215153a94708eedf948717a047815cfac7aa5e4a01c4d9a6c9daabacdf892ec65fe2e95befb100ca4497c2e2',
         );
     });
 

@@ -30,10 +30,9 @@ const identity = (domain: string, bytes: Uint8Array) => {
         prefix.writeUInt32LE(value.length, 6);
         return Buffer.concat([prefix, value]);
     };
-    const header = Buffer.alloc(8);
+    const header = Buffer.alloc(6);
     header.writeUInt16LE(1);
-    header.writeUInt16LE(1, 2);
-    header.writeUInt32LE(2, 4);
+    header.writeUInt32LE(2, 2);
     return createHash('shake256', { outputLength: 64 })
         .update(header)
         .update(item(2, purpose))

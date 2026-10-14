@@ -79,7 +79,7 @@ export const compileRegistrationEnrollmentCensus = () => {
         (value + divisor - 1n) / divisor;
     const bytes = (value: string) => BigInt(Buffer.byteLength(value, 'utf8'));
     const maximumHeaderBytes =
-        8n +
+        6n +
         6n * 6n +
         4n +
         bytes('sealed-lattice/registration-header/v6') +
@@ -107,7 +107,7 @@ export const compileRegistrationEnrollmentCensus = () => {
     // Seven items: the purpose, runtime, nonce, organizer key, manifest,
     // result length and participant maximum.
     const pollDefinitionOverheadBytes =
-        8n +
+        6n +
         7n * 6n +
         4n +
         bytes('sealed-lattice/poll-definition/v2') +
@@ -118,7 +118,7 @@ export const compileRegistrationEnrollmentCensus = () => {
         2n +
         2n;
     // The canonical manifest inside the poll definition frames the question
-    // and labels: its eight-byte tuple header, two six-byte item headers, the
+    // and labels: its six-byte tuple header, two six-byte item headers, the
     // question's four-byte length and the option list's two-byte element type
     // and four-byte count, then per option its own tuple header, three item
     // headers, its two-byte index and the four-byte lengths of its identifier
@@ -127,7 +127,7 @@ export const compileRegistrationEnrollmentCensus = () => {
         let identifierBytes = 0n;
         for (let index = 0n; index < options; index++)
             identifierBytes += bytes(`option-${String(index)}`);
-        return 30n + 36n * options + identifierBytes;
+        return 28n + 34n * options + identifierBytes;
     };
     // The organizer input carries the runtime, the result length, the
     // participant maximum, the question, the option count, each label and
@@ -184,7 +184,7 @@ export const compileRegistrationEnrollmentCensus = () => {
             bytes('sealed-lattice/recipient-key-custody/v1') + 64n,
         signingAssociatedBytes: bytes('registration-signing-seed/1') + 64n,
         sourceAssociatedBytes:
-            8n +
+            6n +
             2n * 6n +
             4n +
             bytes('sealed-lattice/fhe-source-custody/v1') +

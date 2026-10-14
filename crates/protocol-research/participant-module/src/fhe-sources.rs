@@ -53,7 +53,6 @@ pub(crate) fn maximum_capsule_bytes() -> usize {
 fn associated(body: [u8; 64]) -> Vec<u8> {
     CanonicalTuple::new(
         1,
-        1,
         vec![
             CanonicalItem::nonempty_ascii("sealed-lattice/fhe-source-custody/v1").unwrap(),
             CanonicalItem::hash512(body),

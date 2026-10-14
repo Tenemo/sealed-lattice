@@ -154,7 +154,6 @@ impl RetainedContributionContext {
 fn encode_proposal(poll: [u8; 64], bodies: Vec<u8>) -> Result<Vec<u8>, Refusal> {
     CanonicalTuple::new(
         1,
-        1,
         vec![
             CanonicalItem::nonempty_ascii(PROPOSAL_PURPOSE).map_err(|_| Refusal::Shape)?,
             CanonicalItem::hash512(poll),
@@ -309,7 +308,6 @@ pub(crate) fn encode_contribution_role(
         return Err(Refusal::Shape);
     }
     let role = CanonicalTuple::new(
-        1,
         1,
         vec![
             CanonicalItem::nonempty_ascii("sealed-lattice/setup-contribution/v3")

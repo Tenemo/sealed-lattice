@@ -31,7 +31,7 @@ describe('ballot body framing', () => {
         ).toBe(layout.reconstructedInputBytes);
         expect(layout.contextBytes).toBe(136n);
         expect(layout.proofRoleBytes).toBe(
-            8n + 30n + 4n + 30n + 4n + 128n + 128n + 2n,
+            6n + 30n + 4n + 30n + 4n + 128n + 128n + 2n,
         );
         // The proof length and the context, then the proof header from the
         // separately tested proof layout model.

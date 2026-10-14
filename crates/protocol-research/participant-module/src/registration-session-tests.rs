@@ -118,7 +118,6 @@ fn checkpoint_import_preserves_the_verified_original_owner(
     bodies.extend([8; 64]);
     let proposal = CanonicalTuple::new(
         1,
-        1,
         vec![
             CanonicalItem::nonempty_ascii("sealed-lattice/roster-proposal/v2").unwrap(),
             CanonicalItem::hash512(poll.identity()),
@@ -132,7 +131,6 @@ fn checkpoint_import_preserves_the_verified_original_owner(
     let prefix = [poll.identity(), *context.identity()].concat();
     let role = |credential: &Credential, position: u16, purpose: &str| {
         CanonicalTuple::new(
-            1,
             1,
             vec![
                 CanonicalItem::nonempty_ascii(purpose).unwrap(),

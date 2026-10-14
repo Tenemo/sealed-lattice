@@ -19,17 +19,16 @@ export const contributionBodyHashPrefix = (bodyBytes: number) => {
         bodyBytes > 0xffff_fffb
     )
         throw new RangeError('Invalid contribution body length.');
-    const prefix = Buffer.alloc(8 + 2 * 6 + 4 + bodyDomain.length + 4);
+    const prefix = Buffer.alloc(6 + 2 * 6 + 4 + bodyDomain.length + 4);
     prefix.writeUInt16LE(1, 0);
-    prefix.writeUInt16LE(1, 2);
-    prefix.writeUInt32LE(2, 4);
-    prefix.writeUInt16LE(2, 8);
-    prefix.writeUInt32LE(4 + bodyDomain.length, 10);
-    prefix.writeUInt32LE(bodyDomain.length, 14);
-    bodyDomain.copy(prefix, 18);
-    prefix.writeUInt16LE(1, 18 + bodyDomain.length);
-    prefix.writeUInt32LE(4 + bodyBytes, 20 + bodyDomain.length);
-    prefix.writeUInt32LE(bodyBytes, 24 + bodyDomain.length);
+    prefix.writeUInt32LE(2, 2);
+    prefix.writeUInt16LE(2, 6);
+    prefix.writeUInt32LE(4 + bodyDomain.length, 8);
+    prefix.writeUInt32LE(bodyDomain.length, 12);
+    bodyDomain.copy(prefix, 16);
+    prefix.writeUInt16LE(1, 16 + bodyDomain.length);
+    prefix.writeUInt32LE(4 + bodyBytes, 18 + bodyDomain.length);
+    prefix.writeUInt32LE(bodyBytes, 22 + bodyDomain.length);
     return prefix;
 };
 
@@ -84,7 +83,7 @@ export const compileContributionBodyCensus = (profile: SupportedProfile) => {
     );
     const maximumBodyBytes =
         headerBytes + polynomialPayloadBytes + proof.maximumMultiproofBytes;
-    const hashPrefixBytes = 8n + 2n * 6n + 4n + BigInt(bodyDomain.length) + 4n;
+    const hashPrefixBytes = 6n + 2n * 6n + 4n + BigInt(bodyDomain.length) + 4n;
     const minimumHashInputBytes =
         hashPrefixBytes +
         headerBytes +

@@ -24,7 +24,6 @@ fn encode_release_proof_role(
     let position = u16::try_from(position).map_err(|_| Refusal::Context)?;
     CanonicalTuple::new(
         1,
-        1,
         vec![
             CanonicalItem::nonempty_ascii("sealed-lattice/certified-release/v3")
                 .map_err(|_| Refusal::Encoding)?,

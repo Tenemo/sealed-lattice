@@ -18,12 +18,7 @@ const variable = (bytes: Buffer) =>
 const item = (type: number, bytes: Buffer) =>
     Buffer.concat([unsigned(type, 2), unsigned(bytes.length, 4), bytes]);
 const tuple = (items: Buffer[]) =>
-    Buffer.concat([
-        unsigned(1, 2),
-        unsigned(1, 2),
-        unsigned(items.length, 4),
-        ...items,
-    ]);
+    Buffer.concat([unsigned(1, 2), unsigned(items.length, 4), ...items]);
 const ascii = (text: string) => item(2, variable(Buffer.from(text, 'ascii')));
 const hash = (hexadecimal: string) => {
     if (!/^[0-9a-f]{128}$/u.test(hexadecimal))
@@ -132,7 +127,7 @@ export const compileSetupSelectionWireCensus = (participants: number) => {
     const signatureBytes = compileRegistrationEnrollmentCensus().signatureBytes;
     const text = (value: string) => BigInt(Buffer.byteLength(value, 'ascii'));
     const offerEnvelopeBytes =
-        8n +
+        6n +
         5n * 6n +
         4n +
         text('sealed-lattice/contribution-offer/v1') +
@@ -141,7 +136,7 @@ export const compileSetupSelectionWireCensus = (participants: number) => {
         8n +
         64n;
     const selectionBodyBytes =
-        8n +
+        6n +
         3n * 6n +
         4n +
         text('sealed-lattice/setup-selection/v1') +
@@ -150,7 +145,7 @@ export const compileSetupSelectionWireCensus = (participants: number) => {
         4n +
         BigInt(profile.setupContributorCount) * (2n + 64n);
     const endorsementBodyBytes =
-        8n +
+        6n +
         3n * 6n +
         4n +
         text('sealed-lattice/setup-selection-endorsement/v1') +
@@ -180,7 +175,7 @@ export const compileSetupSelectionWireCensus = (participants: number) => {
         // Ordinary body identity: domain and variable-byte body, no sender,
         // whole-body salt, role or predecessor copied into this hash input.
         bodyHashPrefixBytes:
-            8n +
+            6n +
             2n * 6n +
             4n +
             text('sealed-lattice/contribution-body/v1') +

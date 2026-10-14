@@ -423,7 +423,6 @@ pub fn run(
         entries.sort();
         let three = CanonicalTuple::new(
             1,
-            1,
             vec![
                 CanonicalItem::nonempty_ascii(ClosePurpose::Response.context()).unwrap(),
                 CanonicalItem::hash512(poll.identity()),

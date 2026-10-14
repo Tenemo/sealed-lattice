@@ -21,7 +21,7 @@ fn body(participants: usize, accepted: usize, evaluated: bool) -> Vec<u8> {
     if evaluated {
         items.push(CanonicalItem::hash512([4; 64]));
     }
-    CanonicalTuple::new(1, 1, items).encode().unwrap()
+    CanonicalTuple::new(1, items).encode().unwrap()
 }
 #[test]
 fn only_the_minimum_turnout_selects_the_evaluated_branch() {

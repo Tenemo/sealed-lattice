@@ -41,15 +41,10 @@ const originalOwner = (bytes: Buffer) =>
 const parseRole = (
     role: Buffer,
 ): { purpose: Purpose; owner: string } | undefined => {
-    if (
-        role.length < 8 ||
-        role.readUInt16LE(0) !== 1 ||
-        role.readUInt16LE(2) !== 1
-    )
-        return undefined;
-    const count = role.readUInt32LE(4);
+    if (role.length < 6 || role.readUInt16LE(0) !== 1) return undefined;
+    const count = role.readUInt32LE(2);
     if (count !== 5 && count !== 6) return undefined;
-    let offset = 8;
+    let offset = 6;
     const items: { type: number; bytes: Buffer }[] = [];
     for (let index = 0; index < count; index++) {
         if (offset + 6 > role.length) return undefined;

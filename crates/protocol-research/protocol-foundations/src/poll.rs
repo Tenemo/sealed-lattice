@@ -16,7 +16,7 @@ const POLL_PURPOSE: &str = "sealed-lattice/poll-definition/v2";
 pub(crate) const POLL_SIGNATURE_CONTEXT: &[u8] = POLL_PURPOSE.as_bytes();
 pub const MAXIMUM_POLL_BYTES: usize = 1_048_576;
 pub(crate) const POLL_BODY_OVERHEAD: usize =
-    8 + 7 * 6 + 4 + POLL_PURPOSE.len() + 64 + 32 + SIGNING_PUBLIC_KEY_BYTES + 4 + 2 + 2;
+    6 + 7 * 6 + 4 + POLL_PURPOSE.len() + 64 + 32 + SIGNING_PUBLIC_KEY_BYTES + 4 + 2 + 2;
 
 pub struct PollDraft {
     manifest: Manifest,
@@ -73,7 +73,6 @@ impl PollDraft {
             return Err(Refusal::Shape);
         }
         let body = CanonicalTuple::new(
-            1,
             1,
             vec![
                 CanonicalItem::nonempty_ascii(POLL_PURPOSE).map_err(|_| Refusal::Shape)?,

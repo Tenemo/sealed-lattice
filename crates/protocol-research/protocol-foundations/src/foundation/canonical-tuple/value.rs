@@ -241,24 +241,21 @@ pub(super) fn decode_variable_value(bytes: &[u8]) -> Result<&[u8], CanonicalCode
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CanonicalTuple {
     pub schema_identifier: u16,
-    pub schema_version: u16,
     pub items: Vec<CanonicalItem>,
 }
 
 impl CanonicalTuple {
-    pub fn new(schema_identifier: u16, schema_version: u16, items: Vec<CanonicalItem>) -> Self {
+    pub fn new(schema_identifier: u16, items: Vec<CanonicalItem>) -> Self {
         Self {
             schema_identifier,
-            schema_version,
             items,
         }
     }
 
-    /// Whether the tuple has the canonical schema and version and exactly
-    /// `item_count` items.
+    /// Whether the tuple has the canonical schema and exactly `item_count`
+    /// items.
     pub fn has_header(&self, item_count: usize) -> bool {
         self.schema_identifier == super::CANONICAL_TUPLE_SCHEMA_IDENTIFIER
-            && self.schema_version == super::CANONICAL_TUPLE_VERSION
             && self.items.len() == item_count
     }
 
@@ -281,7 +278,7 @@ impl CanonicalTuple {
             )?;
         }
         let item_count = u32::try_from(self.items.len()).map_err(|_| CanonicalCodecRefusal)?;
-        let total_length = self.items.iter().try_fold(8usize, |length, item| {
+        let total_length = self.items.iter().try_fold(6usize, |length, item| {
             let _ = u32::try_from(item.canonical_bytes.len()).map_err(|_| CanonicalCodecRefusal)?;
             length
                 .checked_add(6)
@@ -293,7 +290,6 @@ impl CanonicalTuple {
         }
         let mut output = Vec::with_capacity(total_length);
         output.extend_from_slice(&self.schema_identifier.to_le_bytes());
-        output.extend_from_slice(&self.schema_version.to_le_bytes());
         output.extend_from_slice(&item_count.to_le_bytes());
         for item in &self.items {
             output.extend_from_slice(&item.item_type.canonical_code().to_le_bytes());

@@ -34,11 +34,11 @@ fn matches_independent_shake256_vectors() {
     // SHAKE256 over the canonical tuple, computed outside Rust.
     assert_eq!(
         hexadecimal(&identity(PUBLIC_POLYNOMIAL_DOMAIN, b"").unwrap()),
-        "c43f773788c6d66f30eb39ee7230312ad8dda3e5cbb3205075377d824eaa781d54b6dd3661553cb3c64ece7bd15a6df92fdd901b2ba81ae35334879f69fdf8a4"
+        "ae4e93421e5300b846a0f24f8a8f637b190afbdd215153a94708eedf948717a047815cfac7aa5e4a01c4d9a6c9daabacdf892ec65fe2e95befb100ca4497c2e2"
     );
     assert_eq!(
         hexadecimal(&identity(PUBLIC_POLYNOMIAL_DOMAIN, &[0, 1, 2, 255]).unwrap()),
-        "83d5019a3cb3292618bc674220dc584994c5db0e304ca47d144c6d1af27787cfb42ff63a9170c5e3c1761432f27adab775f8d7a047549e66c6b89a79f52c2b11"
+        "584f8823279d9ab61e689aa7513a466e917e4204e931b061ea7352d11e6b21d95533cffd89c7bec1cb76a06faf744d37548f2640775aac8781364b2e5d284dae"
     );
 }
 
@@ -75,13 +75,9 @@ fn frames_a_fixed_or_variable_payload_as_its_canonical_raw_byte_item() {
         let mut items = vec![CanonicalItem::nonempty_ascii(PUBLIC_POLYNOMIAL_DOMAIN).unwrap()];
         items.extend_from_slice(&prefix);
         items.push(item);
-        let canonical = CanonicalTuple::new(
-            CANONICAL_TUPLE_SCHEMA_IDENTIFIER,
-            CANONICAL_TUPLE_VERSION,
-            items,
-        )
-        .encode()
-        .unwrap();
+        let canonical = CanonicalTuple::new(CANONICAL_TUPLE_SCHEMA_IDENTIFIER, items)
+            .encode()
+            .unwrap();
         assert_eq!(framed, canonical);
     }
     assert!(framing("", &prefix, Trailing::Fixed(1)).is_err());

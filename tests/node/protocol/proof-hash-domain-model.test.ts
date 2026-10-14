@@ -293,9 +293,10 @@ describe('ballot hash domain correspondence model', () => {
                 expect(
                     parseProofHashInput(Buffer.alloc(length, pattern)),
                 ).toBeUndefined();
-        // The foundation tuple starts with its schema/version, not a proof tag.
+        // The foundation tuple starts with its schema identifier and item
+        // count, not a proof tag.
         const participantIdentity = Buffer.alloc(2100);
-        participantIdentity.set([1, 0, 1, 0]);
+        participantIdentity.set([1, 0, 2, 0, 0, 0]);
         expect(parseProofHashInput(participantIdentity)).toBeUndefined();
         // This is a raw-domain control, not a native key-generation trace.
     });

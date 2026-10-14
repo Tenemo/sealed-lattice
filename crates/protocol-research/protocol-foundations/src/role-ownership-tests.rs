@@ -471,7 +471,6 @@ fn contribution_roles_retain_the_original_owner_across_roster_verification_and_c
                 .unwrap()
                 .to_lowercase_hex();
         assert_eq!(tuple.schema_identifier, 1);
-        assert_eq!(tuple.schema_version, 1);
         assert_eq!(tuple.items.len(), 5);
         assert_eq!(tuple.items[0].item_type(), CanonicalItemType::Ascii);
         assert_eq!(

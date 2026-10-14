@@ -104,13 +104,12 @@ fn body_digest_matches_the_framed_shake256_across_part_boundaries() {
     let mut body = header(profile, &context(profile), &proof(PROOF_HEADER_BYTES)).unwrap();
     body.extend((0..ciphertext_bytes(profile)).map(|index| (index % 251) as u8));
     // SHAKE256 over the canonical tuple of the domain text and the body as
-    // one raw-byte item: schema, version and item count, then each item's
-    // type, length and length-prefixed bytes.
+    // one raw-byte item: schema and item count, then each item's type,
+    // length and length-prefixed bytes.
     let domain = BODY_DOMAIN.as_bytes();
     let mut sponge = Shake256::default();
     for part in [
         &0x0001_u16.to_le_bytes()[..],
-        &1_u16.to_le_bytes(),
         &2_u32.to_le_bytes(),
         &0x02_u16.to_le_bytes(),
         &(domain.len() as u32 + 4).to_le_bytes(),

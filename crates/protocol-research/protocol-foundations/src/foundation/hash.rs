@@ -1,8 +1,7 @@
 use core::fmt;
 
 use super::{
-    CANONICAL_TUPLE_SCHEMA_IDENTIFIER, CANONICAL_TUPLE_VERSION, CanonicalCodecRefusal,
-    CanonicalItem, CanonicalTuple,
+    CANONICAL_TUPLE_SCHEMA_IDENTIFIER, CanonicalCodecRefusal, CanonicalItem, CanonicalTuple,
 };
 use sha3::{
     Shake256,
@@ -83,12 +82,7 @@ fn canonical_foundation_tuple_hash_preimage(
     let mut framed_items = Vec::with_capacity(items.len().saturating_add(1));
     framed_items.push(CanonicalItem::nonempty_ascii(domain)?);
     framed_items.extend_from_slice(items);
-    CanonicalTuple::new(
-        CANONICAL_TUPLE_SCHEMA_IDENTIFIER,
-        CANONICAL_TUPLE_VERSION,
-        framed_items,
-    )
-    .encode()
+    CanonicalTuple::new(CANONICAL_TUPLE_SCHEMA_IDENTIFIER, framed_items).encode()
 }
 
 #[cfg(test)]

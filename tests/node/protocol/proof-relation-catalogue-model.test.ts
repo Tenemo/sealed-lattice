@@ -61,7 +61,7 @@ const frame = (
 describe('fixed three-purpose raw-domain catalogue', () => {
     it('uses the independently pinned original-PID role widths and complete state widths', () => {
         expect(Object.values(roles).map((value) => value.length)).toEqual([
-            340, 334, 409,
+            338, 332, 407,
         ]);
         const shapes = [
             [3, 2, 131072],

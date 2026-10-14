@@ -34,7 +34,6 @@ export const registrationSourceMask = (
         integer(BigInt(length), 4);
     };
     integer(1n, 2);
-    integer(1n, 2);
     integer(7n, 4);
     const domain = new TextEncoder().encode(
         'sealed-lattice/registered-fhe-key/v2',

@@ -16,7 +16,6 @@ fn hash_uses_exact_typed_tuple_framing() {
 
     let mut expected_frame = Vec::new();
     expected_frame.extend_from_slice(&0x0001_u16.to_le_bytes());
-    expected_frame.extend_from_slice(&1_u16.to_le_bytes());
     expected_frame.extend_from_slice(&3_u32.to_le_bytes());
     let domain = b"sealed-lattice/test/hash/v1";
     expected_frame.extend_from_slice(&0x02_u16.to_le_bytes());

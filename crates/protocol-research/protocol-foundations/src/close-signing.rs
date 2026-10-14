@@ -43,7 +43,7 @@ impl ClosePurpose {
 }
 
 /// The exact encoded length of the largest message of a purpose, from the
-/// canonical tuple layout: an eight-byte header and, per item, a two-byte type
+/// canonical tuple layout: a six-byte header and, per item, a two-byte type
 /// and four-byte length, with a four-byte length inside variable values.
 pub fn maximum_close_message_bytes(purpose: ClosePurpose, participants: usize) -> usize {
     match purpose {
@@ -60,7 +60,7 @@ pub fn maximum_close_message_bytes(purpose: ClosePurpose, participants: usize) -
 }
 /// The purpose, poll identity and setup identity open every close message.
 fn close_prefix_bytes(purpose: ClosePurpose) -> usize {
-    8 + (6 + 4 + purpose.context().len()) + 2 * (6 + 64)
+    6 + (6 + 4 + purpose.context().len()) + 2 * (6 + 64)
 }
 /// The exact encoded length of a response listing this many entries.
 pub fn close_response_bytes(entries: usize) -> usize {
@@ -116,7 +116,7 @@ fn encode(
         CanonicalItem::hash512(setup_identity),
     ];
     items.extend(rest);
-    CanonicalTuple::new(1, 1, items)
+    CanonicalTuple::new(1, items)
         .encode()
         .map_err(|_| Refusal::Shape)
 }

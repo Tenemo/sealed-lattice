@@ -22,7 +22,6 @@ impl AsRef<[u8]> for OversizedByteSource {
 fn unchecked_single_item_tuple(item_type: CanonicalItemType, canonical_bytes: &[u8]) -> Vec<u8> {
     let mut tuple = Vec::new();
     tuple.extend_from_slice(&1_u16.to_le_bytes());
-    tuple.extend_from_slice(&1_u16.to_le_bytes());
     tuple.extend_from_slice(&1_u32.to_le_bytes());
     tuple.extend_from_slice(&item_type.canonical_code().to_le_bytes());
     tuple.extend_from_slice(
@@ -51,7 +50,6 @@ fn representative_tuple() -> CanonicalTuple {
         .expect("display text normalizes");
     CanonicalTuple::new(
         0x0110,
-        1,
         vec![
             CanonicalItem::unsigned16(1),
             CanonicalItem::ascii("sealed-lattice").expect("printable ASCII"),
@@ -71,12 +69,11 @@ fn representative_tuples_and_homogeneous_lists_round_trip_byte_identically() {
     assert_eq!(decoded.encode().expect("decoded tuple re-encodes"), encoded);
 
     let nested_values = [
-        CanonicalTuple::new(0x0111, 1, vec![CanonicalItem::unsigned16(0)]),
-        CanonicalTuple::new(0x0111, 1, vec![CanonicalItem::unsigned16(1)]),
+        CanonicalTuple::new(0x0111, vec![CanonicalItem::unsigned16(0)]),
+        CanonicalTuple::new(0x0111, vec![CanonicalItem::unsigned16(1)]),
     ];
     let list_tuple = CanonicalTuple::new(
         0x0110,
-        1,
         vec![CanonicalItem::nested_tuple_list(&nested_values).expect("tuple list")],
     );
     let encoded = list_tuple.encode().expect("encode");
@@ -193,7 +190,7 @@ fn hostile_counts_lengths_types_and_termination_refuse_before_allocation() {
         maximum_nesting_depth: 2,
         ..CanonicalDecodeLimits::default()
     };
-    let mut oversized_count = vec![0x10, 0x01, 1, 0];
+    let mut oversized_count = vec![0x10, 0x01];
     oversized_count.extend_from_slice(&u32::MAX.to_le_bytes());
     assert_eq!(
         CanonicalTuple::decode(&oversized_count, &limits),
@@ -201,10 +198,10 @@ fn hostile_counts_lengths_types_and_termination_refuse_before_allocation() {
         "oversized count must refuse"
     );
 
-    let mut unknown_type = CanonicalTuple::new(1, 1, vec![CanonicalItem::unsigned16(1)])
+    let mut unknown_type = CanonicalTuple::new(1, vec![CanonicalItem::unsigned16(1)])
         .encode()
         .expect("encode");
-    unknown_type[8..10].copy_from_slice(&0xffff_u16.to_le_bytes());
+    unknown_type[6..8].copy_from_slice(&0xffff_u16.to_le_bytes());
     assert_eq!(
         CanonicalTuple::decode(&unknown_type, &limits),
         Err(CanonicalCodecRefusal),
@@ -212,9 +209,9 @@ fn hostile_counts_lengths_types_and_termination_refuse_before_allocation() {
     );
 
     let mut hostile_length = unknown_type;
-    hostile_length[8..10]
+    hostile_length[6..8]
         .copy_from_slice(&CanonicalItemType::RawBytes.canonical_code().to_le_bytes());
-    hostile_length[10..14].copy_from_slice(&u32::MAX.to_le_bytes());
+    hostile_length[8..12].copy_from_slice(&u32::MAX.to_le_bytes());
     assert_eq!(
         CanonicalTuple::decode(&hostile_length, &limits),
         Err(CanonicalCodecRefusal),
@@ -355,7 +352,7 @@ fn prefix_decodes_share_one_cumulative_budget() {
 #[test]
 fn constructors_do_not_emit_values_the_default_decoder_refuses() {
     let too_many_values = vec![
-        CanonicalTuple::new(1, 1, vec![]);
+        CanonicalTuple::new(1, vec![]);
         CanonicalDecodeLimits::default().maximum_item_count + 1
     ];
     assert_eq!(
@@ -365,7 +362,6 @@ fn constructors_do_not_emit_values_the_default_decoder_refuses() {
     );
 
     let too_many_items = CanonicalTuple::new(
-        1,
         1,
         vec![CanonicalItem::unsigned16(0); CanonicalDecodeLimits::default().maximum_item_count + 1],
     );
@@ -383,7 +379,6 @@ fn constructors_do_not_emit_values_the_default_decoder_refuses() {
     );
 
     let half_limit_tuple = CanonicalTuple::new(
-        1,
         1,
         vec![
             CanonicalItem::fixed_bytes(vec![0; maximum_item_byte_length / 2])

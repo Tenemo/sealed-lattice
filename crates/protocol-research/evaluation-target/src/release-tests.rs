@@ -16,7 +16,7 @@ fn proof_role_separates_every_verified_context_input() {
         assert_ne!(changed.unwrap(), original);
     }
     assert!(original.len() <= 1024);
-    assert_eq!(original.len(), 409);
+    assert_eq!(original.len(), 407);
     let tuple = CanonicalTuple::decode(&original, &Default::default()).unwrap();
     assert_eq!(tuple.items.len(), 6);
     assert_eq!(
