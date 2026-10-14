@@ -1,5 +1,4 @@
 pub mod contribution;
-pub mod convolution;
 #[path = "fhe-key-source.rs"]
 pub mod fhe_key_source;
 #[cfg(feature = "key-source-screen")]
@@ -10,11 +9,11 @@ pub mod fixed_auxiliary;
 pub mod gaussian;
 pub mod reduction;
 pub mod registration;
-use convolution::{Plan, RADIX_BITS, digit, digit_in};
 use num_bigint::{BigInt, BigUint, Sign};
 use num_traits::Signed;
 use parallel_work::{Job, Part, Ticket, share, submit};
 use sha3::digest::XofReader;
+use statement_stream::negacyclic::{self, Plan, RADIX_BITS, digit, digit_in};
 use std::{cell::RefCell, collections::BTreeMap, rc::Rc};
 #[path = "common-polynomial.rs"]
 mod common_polynomial;
@@ -81,7 +80,7 @@ impl Products {
     fn start(public: &[BigInt], secret: &Sparse, limbs: usize, radix_bits: usize) -> Self {
         let degree = public.len();
         assert_eq!(secret.values.len(), degree);
-        convolution::check_support(&secret.values, radix_bits);
+        negacyclic::check_support(&secret.values, radix_bits);
         let mut transform = Zeroizing::new(Vec::with_capacity(16 * degree));
         for value in secret.transform.iter() {
             transform.extend(value.to_le_bytes());
@@ -132,7 +131,7 @@ impl Products {
         #[cfg(not(target_arch = "wasm32"))]
         {
             let (public, sparse, radix_bits) = &self.check;
-            convolution::check_products(public, sparse, &products, *radix_bits);
+            negacyclic::check_products(public, sparse, &products, *radix_bits);
         }
         products
     }
@@ -374,8 +373,8 @@ fn key_with_error(
                 - modulus_digits[limb] * quotients[position]
                 + carry;
             if limb + 1 < limbs {
-                assert_eq!(row % convolution::RADIX, 0);
-                carry = row / convolution::RADIX;
+                assert_eq!(row % negacyclic::RADIX, 0);
+                carry = row / negacyclic::RADIX;
                 carries[limb][position] = carry;
             } else {
                 assert_eq!(row, 0, "final key carry at {position}");

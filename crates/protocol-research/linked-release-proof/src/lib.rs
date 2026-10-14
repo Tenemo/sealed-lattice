@@ -1,5 +1,4 @@
 #![deny(unsafe_op_in_unsafe_fn)]
-mod convolution;
 pub mod proof;
 pub mod statement;
 mod witness;

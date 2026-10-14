@@ -55,6 +55,7 @@ dependencies = [
  "protocol-foundations",
  "setup-aggregate",
  "setup-witness",
+ "statement-stream",
  "supported-profile",
  "zeroize",
 ]
@@ -511,6 +512,7 @@ dependencies = [
  "num-traits",
  "parallel-work",
  "supported-profile",
+ "zeroize",
 ]
 
 [[package]]

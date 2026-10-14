@@ -4,6 +4,7 @@ pub mod affine;
 pub mod arithmetic;
 pub mod coefficient;
 mod jobs;
+pub mod negacyclic;
 mod query;
 mod setup;
 use arithmetic::{Columns, MODULUS, add, multiply, subtract};

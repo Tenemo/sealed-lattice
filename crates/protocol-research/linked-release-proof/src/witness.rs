@@ -1,12 +1,13 @@
-use crate::{
-    convolution::{multiply_digits, signed_digit},
-    statement::{
-        self, DECODING_CARRY, DECODING_ERROR, DECODING_QUOTIENT, FIRST_RELEASE_CARRY, KEY_CARRY,
-        KEY_ERROR, KEY_QUOTIENT, NOISE, PublicStatement, RELEASE_QUOTIENT, SHARE,
-    },
+use crate::statement::{
+    self, DECODING_CARRY, DECODING_ERROR, DECODING_QUOTIENT, FIRST_RELEASE_CARRY, KEY_CARRY,
+    KEY_ERROR, KEY_QUOTIENT, NOISE, PublicStatement, RELEASE_QUOTIENT, SHARE,
 };
 use num_bigint::{BigInt, Sign};
 use num_traits::{Signed, ToPrimitive};
+use statement_stream::{
+    arithmetic::MODULUS,
+    negacyclic::{Plan, digit_in},
+};
 use supported_profile::{
     Profile, RECIPIENT_SECRET_SUPPORT, RELEASE_DECODING_LIMB_BITS, RELEASE_LIMB_BITS, SHARE_SCALE,
     relation::*,
@@ -59,6 +60,33 @@ fn reconstruct(digits: &[Vec<i128>], position: usize) -> BigInt {
     digits.iter().rev().fold(BigInt::from(0), |sum, values| {
         (sum << RELEASE_LIMB_BITS) + values[position]
     })
+}
+/// The products of the public values' digits with the private values'
+/// digits, each limb pair's product added at the sum of the two limbs.
+pub(crate) fn multiply_digits(
+    public: &[BigInt],
+    private: &[Vec<i128>],
+    bits: usize,
+    public_limbs: usize,
+) -> Zeroizing<Vec<Vec<i128>>> {
+    // Every sum of limb pair products stays within half the field modulus.
+    assert!(
+        private
+            .iter()
+            .flatten()
+            .all(|value| value.unsigned_abs() < 1 << bits)
+    );
+    assert!(
+        public.len() as u128 * private.len() as u128 * ((1u128 << bits) - 1).pow(2) < MODULUS / 2
+    );
+    let plan = Plan::new(public.len());
+    let transforms = Zeroizing::new(
+        private
+            .iter()
+            .map(|values| plan.private_transform(values.iter().copied()))
+            .collect::<Vec<_>>(),
+    );
+    Zeroizing::new(plan.limb_pair_products(public, public_limbs, bits, &transforms))
 }
 fn private_digit(value: &BigInt, limb: usize, bits: usize, total_bits: usize) -> i128 {
     if limb * bits >= total_bits {
@@ -209,8 +237,8 @@ fn derive_inner(
             "Recipient-key reconstruction differs"
         );
         let key_low = decoding_limb(&key_product, position)
-            + signed_digit(&inputs.public_key[position], 0, RELEASE_DECODING_LIMB_BITS)
-            - signed_digit(&modulus, 0, RELEASE_DECODING_LIMB_BITS) * quotient.to_i128().unwrap()
+            + digit_in(&inputs.public_key[position], 0, RELEASE_DECODING_LIMB_BITS)
+            - digit_in(&modulus, 0, RELEASE_DECODING_LIMB_BITS) * quotient.to_i128().unwrap()
             - error.to_i128().unwrap();
         assert!(key_low % radix == 0, "Recipient-key carry is not integral");
         layout.signed_column(&mut columns, KEY_QUOTIENT, position, &quotient);
@@ -244,14 +272,14 @@ fn derive_inner(
         let lower = shares[position].rem_euclid(radix) - radix / 2;
         let offset = BigInt::from(SHARE_SCALE) * (radix / 2);
         let raw = decoding_limb(&decryption_product, position)
-            + signed_digit(
+            + digit_in(
                 &inputs.encrypted_constant[position],
                 0,
                 RELEASE_DECODING_LIMB_BITS,
             )
             - scale * lower
-            - signed_digit(&offset, 0, RELEASE_DECODING_LIMB_BITS)
-            - signed_digit(&modulus, 0, RELEASE_DECODING_LIMB_BITS) * quotient.to_i128().unwrap()
+            - digit_in(&offset, 0, RELEASE_DECODING_LIMB_BITS)
+            - digit_in(&modulus, 0, RELEASE_DECODING_LIMB_BITS) * quotient.to_i128().unwrap()
             - error.to_i128().unwrap();
         assert!(
             raw % radix == 0,
@@ -313,11 +341,11 @@ fn derive_inner(
         for limb in 0..output_limbs {
             let mut residual = carry
                 + clearing * product.get(limb).map_or(0, |values| values[position])
-                - signed_digit(&value, limb, RELEASE_LIMB_BITS)
+                - digit_in(&value, limb, RELEASE_LIMB_BITS)
                 + clearing * private_digit(&noise, limb, RELEASE_LIMB_BITS, noise_bits);
             for public_limb in 0..public_limbs.min(limb + 1) {
                 if limb - public_limb < quotient_limbs {
-                    residual -= signed_digit(&release_modulus, public_limb, RELEASE_LIMB_BITS)
+                    residual -= digit_in(&release_modulus, public_limb, RELEASE_LIMB_BITS)
                         * private_digit(
                             &quotient,
                             limb - public_limb,

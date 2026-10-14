@@ -11,6 +11,7 @@ num-bigint.workspace = true
 parallel-work = { path = "../parallel-work" }
 setup-aggregate = { path = "../setup-aggregate" }
 setup-witness = { path = "../setup-witness" }
+statement-stream = { path = "../statement-stream" }
 protocol-foundations = { path = "../protocol-foundations" }
 supported-profile = { path = "../supported-profile" }
 

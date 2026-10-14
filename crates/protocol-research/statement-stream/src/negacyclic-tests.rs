@@ -1,4 +1,5 @@
 use super::*;
+use num_traits::Signed;
 // Each digit equals the one the integer's own shifts and masks give, at
 // every limb of values of both signs, zero and a single set bit at the
 // edges of the words that a digit spans.
@@ -68,5 +69,58 @@ fn signed_digit_products_match_every_ordinary_coefficient() {
         for radix_bits in [95, 96] {
             plan.digit_products(&public, &sparse, &transformed, 2, radix_bits);
         }
+    }
+}
+// The limb pair products of public values with multi-limb private values
+// equal, at every position, the exact negacyclic product of the public
+// values with the private values the limbs make.
+#[test]
+fn limb_pair_products_match_the_exact_negacyclic_product() {
+    let degree = 16;
+    let radix_bits = 48;
+    let plan = Plan::new(degree);
+    let mut state = 0x9e37_79b9_7f4a_7c15u64;
+    let mut next = || {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        state
+    };
+    let public: Vec<BigInt> = (0..degree)
+        .map(|index| {
+            let value = (BigInt::from(next()) << 64usize) + BigInt::from(next());
+            if index % 3 == 0 { -value } else { value }
+        })
+        .collect();
+    // An unsigned low limb and a signed top limb.
+    let private: Vec<Vec<i128>> = vec![
+        (0..degree).map(|_| i128::from(next() >> 16)).collect(),
+        (0..degree)
+            .map(|index| {
+                let value = i128::from(next() >> 40);
+                if index % 2 == 0 { -value } else { value }
+            })
+            .collect(),
+    ];
+    let transforms: Vec<_> = private
+        .iter()
+        .map(|values| plan.private_transform(values.iter().copied()))
+        .collect();
+    let products = plan.limb_pair_products(&public, 3, radix_bits, &transforms);
+    assert_eq!(products.len(), 4);
+    let values: Vec<BigInt> = (0..degree)
+        .map(|position| reconstruct_in(&private, position, radix_bits))
+        .collect();
+    for position in 0..degree {
+        let mut expected = BigInt::from(0);
+        for (input, value) in values.iter().enumerate() {
+            let product = &public[(position + degree - input) % degree] * value;
+            if position < input {
+                expected -= product;
+            } else {
+                expected += product;
+            }
+        }
+        assert_eq!(reconstruct_in(&products, position, radix_bits), expected);
     }
 }
