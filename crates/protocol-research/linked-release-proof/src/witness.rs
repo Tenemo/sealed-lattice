@@ -28,7 +28,7 @@ impl Random {
         let mut used = 0;
         while used < output.len() {
             if self.offset == self.bytes.len() {
-                word_proof::random::fill(&mut self.bytes);
+                parallel_work::random::proof(&mut self.bytes);
                 self.offset = 0;
             }
             let count = (output.len() - used).min(self.bytes.len() - self.offset);

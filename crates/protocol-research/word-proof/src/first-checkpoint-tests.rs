@@ -51,7 +51,7 @@ fn restored_checkpoints_commit_the_same_first_oracle() {
         step(&mut prover);
     }
     assert!(prover.phase == Phase::FirstColumn(3));
-    let mut export = Export::begin_with_inputs(&mut prover, &[]).unwrap();
+    let mut export = Export::begin_with_inputs(&mut prover, &[[5; 64]; 3]).unwrap();
     let header = export.header();
     let mut import = Import::begin(&header).unwrap();
     let lengths = record_lengths(&relation);

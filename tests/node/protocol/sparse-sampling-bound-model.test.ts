@@ -80,7 +80,7 @@ describe('bounded sparse-support sampling comparison', () => {
                 .every((value) => value.degree === constant('DEGREE')),
         ).toBe(true);
         expect(rows).toHaveLength(3);
-        expect(contribution.match(/witness\.sparse\(/gu)).toHaveLength(3);
+        expect(contribution.match(/witness\.sparse\(/gu)).toHaveLength(2);
         expect(registration.match(/witness\.sparse\(/gu)).toHaveLength(1);
         const support = (code: string, label: string) =>
             constant(
@@ -96,9 +96,7 @@ describe('bounded sparse-support sampling comparison', () => {
         expect(support(registration, 'registration-secret')).toBe(
             rows[0].support,
         );
-        // The standalone new() constructor still samples its own original
-        // key. Active enrollment supplies it through from_source instead.
-        expect(support(contribution, 'fhe-secret')).toBe(rows[1].support);
+        // Enrollment supplies the original FHE secret through from_source.
         expect(contribution).toContain(
             'witness.sparse_from_values(values, &plan)',
         );

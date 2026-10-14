@@ -109,9 +109,6 @@ pub fn common_records_job(profile: Profile, index: usize) -> Result<Ticket, Erro
     ))
 }
 impl Contribution {
-    pub fn new(profile: Profile) -> Self {
-        Self::create(profile, None)
-    }
     /// Continues the original source's FHE key in its exact parameter family.
     /// The caller owns registration authentication and retained-source custody.
     pub fn from_source(
@@ -119,22 +116,14 @@ impl Contribution {
         source: fhe_key_source::FheKeySource,
     ) -> Result<Self, Error> {
         source.check_profile(profile)?;
-        Ok(Self::create(profile, Some(source)))
+        Ok(Self::create(profile, source))
     }
-    fn create(profile: Profile, source: Option<fhe_key_source::FheKeySource>) -> Self {
+    fn create(profile: Profile, source: fhe_key_source::FheKeySource) -> Self {
         let modulus = integer(&profile.family_modulus(Family::Fhe));
         let plan = Plan::new(DEGREE);
         let mut witness = Witness::new();
-        let (secret, first_encryption_error) = match source {
-            Some(source) => {
-                let (values, error) = source.into_parts();
-                (witness.sparse_from_values(values, &plan), Some(error))
-            }
-            None => (
-                witness.sparse("fhe-secret", DEGREE, FHE_SECRET_SUPPORT, &plan),
-                None,
-            ),
-        };
+        let (values, error) = source.into_parts();
+        let secret = witness.sparse_from_values(values, &plan);
         let auxiliary = witness.sparse("fhe-auxiliary", DEGREE, FHE_SECRET_SUPPORT, &plan);
         let ephemerals = (0..profile.participants())
             .map(|index| {
@@ -187,7 +176,7 @@ impl Contribution {
             share_modulus: integer(share_modulus()),
             witness,
             secret,
-            first_encryption_error,
+            first_encryption_error: Some(error),
             auxiliary,
             ephemerals,
             sharing,
@@ -196,9 +185,6 @@ impl Contribution {
             next_recipient: 0,
             finished: false,
         }
-    }
-    pub fn profile(&self) -> Profile {
-        self.profile
     }
     pub fn gadget(
         &mut self,

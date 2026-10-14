@@ -21,9 +21,6 @@ impl VerifiedBallotSubmission {
     pub fn envelope(&self) -> &BallotEnvelope {
         &self.authentication.envelope
     }
-    pub fn signature(&self) -> &[u8; SIGNATURE_BYTES] {
-        &self.authentication.signature
-    }
 }
 
 /// Authenticates the envelope only. Its body and proof still require verification.

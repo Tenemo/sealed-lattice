@@ -282,29 +282,6 @@ impl Credential {
         self.signed_ballot = Some((envelope.identity(), envelope.ballot_time()));
         Ok(())
     }
-    /// One signature operation beneath the authenticated participant-state boundary.
-    /// The caller must derive the envelope from the exact verified body and setup.
-    pub fn sign_ballot_envelope(
-        &mut self,
-        roster: &AuthenticatedRosterProposal,
-        envelope: &BallotEnvelope,
-    ) -> Result<[u8; SIGNATURE_BYTES], Error> {
-        if self.signed_ballot.is_some() {
-            return Err(Error::Consumed);
-        }
-        let record = roster
-            .proposal()
-            .records()
-            .get(envelope.position())
-            .ok_or(Error::Context)?;
-        if envelope.poll() != &record.header().poll
-            || record.header().signing_public != self.signing_public
-            || self.completed_body != Some(record.body_digest())
-        {
-            return Err(Error::Context);
-        }
-        self.sign_ballot_bytes(envelope)
-    }
     fn sign_ballot_bytes(
         &mut self,
         envelope: &BallotEnvelope,

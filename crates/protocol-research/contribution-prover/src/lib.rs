@@ -20,8 +20,7 @@ pub fn import_checkpoint(
     let expected = context
         .checkpoint_role(prefix, position, import.profile())
         .map_err(|_| Error::Operation)?;
-    if import.role() != expected || import.input_hashes().len() != context.profile().participants()
-    {
+    if import.role() != expected {
         return Err(Error::Operation);
     }
     Ok(import)

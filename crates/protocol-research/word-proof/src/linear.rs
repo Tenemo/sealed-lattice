@@ -153,7 +153,6 @@ impl AffineSum {
             role,
             std::mem::take(&mut *evaluations),
             target,
-            plan.lookup_weight,
             mask,
             second.mask_sum,
             false,

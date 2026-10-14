@@ -673,7 +673,7 @@ pub(crate) fn run(
     assert!(
         enrollments[0]
             .credential
-            .sign_ballot_envelope(setup.roster(), &envelope)
+            .sign_retained_ballot_envelope(&owner, &envelope)
             .is_err()
     );
     let authenticated =
@@ -700,7 +700,7 @@ pub(crate) fn run(
     assert!(
         enrollments[1]
             .credential
-            .sign_ballot_envelope(setup.roster(), &envelope)
+            .sign_retained_ballot_envelope(&owner, &envelope)
             .is_err()
     );
     let mut submissions: Vec<Option<close::Submission>> = vec![None; enrollments.len()];
@@ -724,9 +724,10 @@ pub(crate) fn run(
             *body.identity(),
         )
         .unwrap();
+        let author_owner = close::owner_of(&enrollments[author].credential, poll, setup, author);
         let wrong_position_signature = enrollments[author]
             .credential
-            .sign_ballot_envelope(setup.roster(), &wrong_position)
+            .sign_retained_ballot_envelope(&author_owner, &wrong_position)
             .unwrap();
         let authentication = ballot_proof::submission::authenticate_envelope(
             setup,
@@ -787,9 +788,10 @@ pub(crate) fn run(
             hash.finish().unwrap(),
         )
         .unwrap();
+        let author_owner = close::owner_of(&enrollments[author].credential, poll, setup, author);
         let invalid_proof_signature = enrollments[author]
             .credential
-            .sign_ballot_envelope(setup.roster(), &invalid_proof_envelope)
+            .sign_retained_ballot_envelope(&author_owner, &invalid_proof_envelope)
             .unwrap();
         write(
             ballot_directory.join("invalid-proof-envelope.bin"),

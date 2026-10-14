@@ -185,8 +185,10 @@ fn checkpoint_import_preserves_the_verified_original_owner(
     for position in [1, 2, usize::MAX] {
         assert!(contribution_prover::import_checkpoint(&context, position, &valid).is_err());
     }
+    // The checkpoint decoder refuses a header without every recipient key
+    // hash.
     let missing_keys = request(&expected_role, 0);
-    assert!(word_proof::bridge::first_checkpoint::Import::begin(&missing_keys[128..]).is_ok());
+    assert!(word_proof::bridge::first_checkpoint::Import::begin(&missing_keys[128..]).is_err());
     assert!(contribution_prover::import_checkpoint(&context, 0, &missing_keys).is_err());
     for offset in [0, 64] {
         let mut changed = valid.clone();

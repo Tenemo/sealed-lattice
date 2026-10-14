@@ -1,6 +1,6 @@
 use ballot_proof::submission::{AuthenticatedBallotBody, AuthenticatedBallotEnvelope};
 use protocol_foundations::{
-    SIGNATURE_BYTES, SIGNING_PUBLIC_KEY_BYTES,
+    SIGNING_PUBLIC_KEY_BYTES,
     close_signing::{
         CloseIntentMessage, CloseProposalMessage, ClosePurpose, CloseResponseMessage,
         MAXIMUM_LISTED_ENVELOPES_PER_SLOT, verify_close_signature,
@@ -28,35 +28,22 @@ pub struct CloseContext {
 #[derive(Clone)]
 pub struct AuthenticatedCloseIntent {
     message: CloseIntentMessage,
-    signature: [u8; SIGNATURE_BYTES],
 }
 impl AuthenticatedCloseIntent {
     pub fn message(&self) -> &CloseIntentMessage {
         &self.message
     }
-    pub fn signature(&self) -> &[u8; SIGNATURE_BYTES] {
-        &self.signature
-    }
 }
 
-/// An authenticated close response together with the exact authenticated
-/// envelope of every entry it lists. It creates no inventory.
+/// An authenticated close response whose every listed entry has its exact
+/// authenticated envelope. It creates no inventory.
 #[derive(Clone)]
 pub struct AuthenticatedCloseResponse {
     message: CloseResponseMessage,
-    signature: [u8; SIGNATURE_BYTES],
-    listed: Vec<AuthenticatedBallotEnvelope>,
 }
 impl AuthenticatedCloseResponse {
     pub fn message(&self) -> &CloseResponseMessage {
         &self.message
-    }
-    pub fn signature(&self) -> &[u8; SIGNATURE_BYTES] {
-        &self.signature
-    }
-    /// The listed envelopes in listing order.
-    pub fn listed(&self) -> &[AuthenticatedBallotEnvelope] {
-        &self.listed
     }
 }
 
@@ -78,7 +65,6 @@ pub struct VerifiedCloseBarrier {
     setup: Arc<VerifiedSetupAggregate>,
     intent: AuthenticatedCloseIntent,
     proposal: CloseProposalMessage,
-    signature: [u8; SIGNATURE_BYTES],
     responses: Vec<AuthenticatedCloseResponse>,
     slots: Vec<ClosedSlot>,
 }
@@ -94,9 +80,6 @@ impl VerifiedCloseBarrier {
     }
     pub fn proposal(&self) -> &CloseProposalMessage {
         &self.proposal
-    }
-    pub fn proposal_signature(&self) -> &[u8; SIGNATURE_BYTES] {
-        &self.signature
     }
     /// The used responses in ascending responder order.
     pub fn responses(&self) -> &[AuthenticatedCloseResponse] {
@@ -173,10 +156,7 @@ impl CloseContext {
         ) {
             return Err(Error::Signature);
         }
-        Ok(AuthenticatedCloseIntent {
-            message,
-            signature: signature.try_into().map_err(|_| Error::Shape)?,
-        })
+        Ok(AuthenticatedCloseIntent { message })
     }
     /// The on-time envelope identities known for each slot, from the known
     /// envelopes and the envelopes of the held bodies.
@@ -254,25 +234,19 @@ impl CloseContext {
         ) {
             return Err(Error::Signature);
         }
-        let mut listed = Vec::with_capacity(message.listed().len());
         for (author, identity) in message.listed() {
-            let authentication = available
+            let envelope = available
                 .iter()
                 .find(|value| value.envelope().identity() == *identity)
-                .ok_or(Error::Incomplete)?;
-            let envelope = authentication.envelope();
+                .ok_or(Error::Incomplete)?
+                .envelope();
             if envelope.position() != *author
                 || envelope.ballot_time() > intent.message.close_time()
             {
                 return Err(Error::Context);
             }
-            listed.push(authentication.clone());
         }
-        Ok(AuthenticatedCloseResponse {
-            message,
-            signature: signature.try_into().map_err(|_| Error::Shape)?,
-            listed,
-        })
+        Ok(AuthenticatedCloseResponse { message })
     }
     /// Whether an organizer with these known envelopes and held bodies can
     /// include this response: every slot it lists where only one on-time
@@ -418,7 +392,6 @@ impl CloseContext {
             setup: self.setup.clone(),
             intent,
             proposal,
-            signature: signature.try_into().map_err(|_| Error::Shape)?,
             responses: used,
             slots,
         })

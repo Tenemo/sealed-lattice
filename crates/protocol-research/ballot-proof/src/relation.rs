@@ -49,15 +49,11 @@ fn fixed_input_identities(profile: Profile) -> Result<[[u8; 64]; 3], Refusal> {
 /// Proof-valid linked ciphertexts under this verifier's own setup.
 /// Envelope authentication and authoritative publication are separate gates.
 pub struct VerifiedBallotRelation {
-    statement: [u8; 64],
     poll: [u8; 64],
     setup_identity: [u8; 64],
     position: usize,
 }
 impl VerifiedBallotRelation {
-    pub fn statement(&self) -> &[u8; 64] {
-        &self.statement
-    }
     pub fn poll(&self) -> &[u8; 64] {
         &self.poll
     }
@@ -79,7 +75,6 @@ pub(crate) struct BallotRelationVerifier {
     // The identity of the common or key polynomial in progress.
     hash: Option<IdentityHasher>,
     statement_done: bool,
-    statement: [u8; 64],
 }
 impl BallotRelationVerifier {
     pub fn new(
@@ -124,7 +119,6 @@ impl BallotRelationVerifier {
             polynomial_bytes: 0,
             hash: None,
             statement_done: false,
-            statement,
         })
     }
     pub fn push_statement(&mut self, bytes: &[u8]) -> Result<(), Refusal> {
@@ -226,7 +220,6 @@ impl BallotRelationVerifier {
             return Err(Refusal::Relation);
         }
         Ok(VerifiedBallotRelation {
-            statement: self.statement,
             poll: self.expected_header[4..68].try_into().unwrap(),
             setup_identity: self.expected_header[68..132].try_into().unwrap(),
             position: u16::from_le_bytes(self.expected_header[132..134].try_into().unwrap())

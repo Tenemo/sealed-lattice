@@ -216,7 +216,7 @@ pub fn run(
             )
             .is_err()
     );
-    // No attempt starts after the close intent, by either signing path.
+    // No attempt starts after the close intent, and no ballot is signed.
     if let Some(&nonvoter) = scenario.nonvoters.first() {
         let owner = owner_of(&enrollments[nonvoter].credential, &poll, &setup, nonvoter);
         assert!(matches!(
@@ -238,7 +238,7 @@ pub fn run(
         assert!(matches!(
             enrollments[nonvoter]
                 .credential
-                .sign_ballot_envelope(roster, &envelope),
+                .sign_retained_ballot_envelope(&owner, &envelope),
             Err(Error::Consumed)
         ));
     }

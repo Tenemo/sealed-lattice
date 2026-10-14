@@ -20,7 +20,7 @@ const MAGIC: &[u8; 4] = b"FPC4";
 const MAXIMUM_ROLE_BYTES: usize = 1024;
 
 // The checkpoint names its profile, whose statement header it carries, and
-// either no recipient key hashes or one for each participant.
+// one recipient key hash for each participant.
 #[derive(Clone)]
 struct Header {
     profile: Profile,
@@ -70,7 +70,7 @@ impl Header {
         }
         let count =
             u16::from_le_bytes(bytes[input_start..input_start + 2].try_into().unwrap()) as usize;
-        if ![0, profile.participants()].contains(&count)
+        if count != profile.participants()
             || bytes.len() != input_start + 2 + count * 64
             || bytes[start + 128..input_start] != statement
         {
@@ -159,7 +159,7 @@ impl Export {
     ) -> Result<Self, Error> {
         let profile = prover.profile;
         // A header the import would refuse is never exported.
-        if ![0, profile.participants()].contains(&input_hashes.len())
+        if input_hashes.len() != profile.participants()
             || !(1..=MAXIMUM_ROLE_BYTES).contains(&prover.role.len())
         {
             return Err(Error::Operation);

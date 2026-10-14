@@ -113,7 +113,7 @@ impl Transcript {
     }
     pub fn respond(&mut self, parts: &[&[u8]]) {
         let mut salt = [0; 128];
-        crate::random::fill(&mut salt);
+        parallel_work::random::proof(&mut salt);
         self.respond_with_salt(parts, salt);
     }
     pub fn respond_with_salt(&mut self, parts: &[&[u8]], salt: [u8; 128]) {

@@ -185,7 +185,6 @@ impl LinearOracle {
             role,
             std::mem::take(&mut *evaluations),
             operator.target,
-            operator.lookup_weight,
             mask_challenge,
             second.mask_sum,
             adversarial,

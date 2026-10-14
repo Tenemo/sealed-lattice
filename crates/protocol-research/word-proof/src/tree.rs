@@ -194,7 +194,7 @@ pub struct Tree {
 impl Tree {
     pub fn new(role: &[u8], stage: usize, length: usize, width: usize) -> Self {
         let mut seed = Zeroizing::new([0; SALT_SEED_BYTES]);
-        crate::random::fill(seed.as_mut_slice());
+        parallel_work::random::proof(seed.as_mut_slice());
         Self::with_seed(role, stage, length, width, seed)
     }
     /// A tree whose leaves' salts expand from the seed.

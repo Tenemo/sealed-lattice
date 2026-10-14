@@ -17,14 +17,10 @@ use std::sync::Arc;
 
 pub struct AuthenticatedReleaseEnvelope {
     envelope: ReleaseEnvelope,
-    signature: [u8; SIGNATURE_BYTES],
 }
 impl AuthenticatedReleaseEnvelope {
     pub fn envelope(&self) -> &ReleaseEnvelope {
         &self.envelope
-    }
-    pub fn signature(&self) -> &[u8; SIGNATURE_BYTES] {
-        &self.signature
     }
 }
 impl ReleaseContext {
@@ -50,10 +46,7 @@ impl ReleaseContext {
         if !key.verify(envelope.bytes(), &signature, RELEASE_SIGNATURE_CONTEXT) {
             return Err(Error::Signature);
         }
-        Ok(AuthenticatedReleaseEnvelope {
-            envelope,
-            signature,
-        })
+        Ok(AuthenticatedReleaseEnvelope { envelope })
     }
 }
 
@@ -210,21 +203,14 @@ impl VerifiedReleaseBody {
         if authentication.envelope.bytes() != self.envelope().bytes() {
             return Err(Error::Context);
         }
-        Ok(VerifiedReleaseShare {
-            body: self,
-            authentication,
-        })
+        Ok(VerifiedReleaseShare { body: self })
     }
 }
 pub struct VerifiedReleaseShare {
     body: VerifiedReleaseBody,
-    authentication: AuthenticatedReleaseEnvelope,
 }
 impl VerifiedReleaseShare {
     pub fn body(&self) -> &VerifiedReleaseBody {
         &self.body
-    }
-    pub fn authentication(&self) -> &AuthenticatedReleaseEnvelope {
-        &self.authentication
     }
 }

@@ -12,6 +12,6 @@ statement-stream = { path = "../statement-stream" }
 supported-profile = { path = "../supported-profile" }
 
 [features]
-# Test aids for the crates that prove with this engine: a replayed seed in
-# place of the host's randomness, and every row of an affine operator.
+# A test aid for the crates that prove with this engine: every row of an
+# affine operator.
 test-support = []

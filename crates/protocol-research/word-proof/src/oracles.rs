@@ -13,7 +13,7 @@ pub fn random_base(count: usize) -> Vec<u128> {
     let mut output = Vec::with_capacity(count);
     let mut bytes = Zeroizing::new(vec![0; RANDOM_READ_BYTES]);
     while output.len() < count {
-        crate::random::fill(&mut bytes);
+        parallel_work::random::proof(&mut bytes);
         for word in bytes.chunks_exact(RANDOM_WORD_BYTES) {
             let value = u128::from_le_bytes(word.try_into().unwrap());
             if value < MODULUS {

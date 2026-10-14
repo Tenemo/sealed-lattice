@@ -1,6 +1,33 @@
 use super::*;
 use crate::{CHUNK_LIMIT, HEADER_LENGTH, statement::tests::synthetic_ballot, verifier};
+use parallel_work::random::{self, Purpose};
+use std::cell::Cell;
 use supported_profile::{Profile, relation::ballot_relation};
+
+thread_local! {
+    // The state of the SplitMix64 stream that serves the proof's draws, as
+    // an operation's retained seed serves them.
+    static PROOF_STREAM: Cell<u64> = const { Cell::new(0) };
+}
+
+fn serve(purpose: Purpose, bytes: &mut [u8]) -> bool {
+    if purpose != Purpose::Proof {
+        return false;
+    }
+    PROOF_STREAM.with(|stream| {
+        let mut state = stream.get();
+        for chunk in bytes.chunks_mut(8) {
+            state = state.wrapping_add(0x9e37_79b9_7f4a_7c15);
+            let mut word = state;
+            word = (word ^ (word >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+            word = (word ^ (word >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+            word ^= word >> 31;
+            chunk.copy_from_slice(&word.to_le_bytes()[..chunk.len()]);
+        }
+        stream.set(state);
+    });
+    true
+}
 
 fn verify(profile: Profile, role: &[u8], statement: &PublicStatement, proof: &[u8]) -> bool {
     let Ok(mut verifier) = verifier(profile, role, statement.digest(), &proof[..HEADER_LENGTH])
@@ -70,11 +97,13 @@ fn a_replayed_mask_draw_repeats_its_proof() {
     let (statement, columns) = synthetic_ballot(profile);
     let relation = ballot_relation(profile);
     let prove = |seed| {
-        word_proof::random::REPLAYED.with(|replayed| replayed.set(Some(seed)));
+        PROOF_STREAM.with(|stream| stream.set(seed));
+        random::install(serve);
         let witness =
             Witness::from_columns(&relation, statement.digest(), columns.clone()).unwrap();
         let mut bytes = Vec::new();
         prove(role, &statement, witness, false).write(&mut bytes);
+        random::release();
         bytes
     };
     let first = prove(1);

@@ -33,7 +33,9 @@ describe('complete first-oracle proof checkpoint', () => {
             position(bridge, 'transcript.respond(&[&first.tree.root()]);'),
         );
         expect(transcript).toContain('let mut salt = [0; 128];');
-        expect(transcript).toContain('crate::random::fill(&mut salt);');
+        expect(transcript).toContain(
+            'parallel_work::random::proof(&mut salt);',
+        );
         expect(checkpoint).toContain('tree: Tree::with_seed(');
 
         // Independent request schedule for the completion profile: one full

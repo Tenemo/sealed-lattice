@@ -1,6 +1,6 @@
 use crate::close::{
     Submission, authenticate, authenticate_responses, close_work, deliver, now_milliseconds, open,
-    organize, replay, respond, write_records,
+    organize, owner_of, replay, respond, write_records,
 };
 use crate::scenario::Scenario;
 use ballot_proof::{
@@ -59,9 +59,10 @@ fn invalid_source(
         hash.finish().unwrap(),
     )
     .unwrap();
+    let owner = owner_of(&enrollment.credential, poll, setup, 0);
     let signature = enrollment
         .credential
-        .sign_ballot_envelope(setup.roster(), &envelope)
+        .sign_retained_ballot_envelope(&owner, &envelope)
         .unwrap();
     crate::write(directory.join("envelope.bin"), envelope.bytes());
     crate::write(directory.join("signature.bin"), &signature);

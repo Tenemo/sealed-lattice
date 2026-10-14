@@ -24,7 +24,6 @@ fn parser(profile: Profile, fhe_key: &[u8]) -> BallotRelationVerifier {
         polynomial_bytes: 0,
         hash: None,
         statement_done: false,
-        statement: [0; 64],
     }
 }
 
