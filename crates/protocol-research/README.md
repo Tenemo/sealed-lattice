@@ -55,7 +55,7 @@ Before the organizer answers, the case checks that no other participant takes a 
 
 A target with fewer accepted ballots than the minimum turnout takes the no-result branch. The no-result cases cover a close with no ballot and one whose only listed submission is an authenticated invalid ballot. The latter preserves a valid body header and consumes the classification operands before rejecting its malformed proof.
 
-The runner derives the expected roles, ranking and checked set counts from the independent TypeScript threshold and ranking models, not from the ceremony, and scales its deadline with the participant count. These cases retain volatile native private state; they do not establish browser custody, durable outcome publication or a complete participant workflow.
+The runner derives the expected ballot classification, target signers, close responses and ranking from the independent TypeScript threshold and ranking models, not from the ceremony, and scales its deadline with the participant count. These cases retain volatile native private state; they do not establish browser custody, durable outcome publication or a complete participant workflow.
 
 ### Fixed preparation cases
 

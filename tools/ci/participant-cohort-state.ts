@@ -116,12 +116,6 @@ ${body}
     }
 })()`;
 
-// Lists words as prose.
-export const prose = (words: readonly string[]) =>
-    words.length < 2
-        ? words.join('')
-        : `${words.slice(0, -1).join(', ')} or ${words[words.length - 1]}`;
-
 // A roster member: its origin, or a copy of the organizer's private state
 // at that origin.
 export type Member = Readonly<{ origin: number; copy?: string }>;

@@ -30,7 +30,6 @@ import {
 import {
     databaseScript,
     operationMilliseconds,
-    prose,
     requireScalarMemory,
 } from '#tools/ci/participant-cohort-state.js';
 import type { FaultClose } from '#tools/ci/participant-fault-close.js';
@@ -669,37 +668,6 @@ return key;`,
         assert.equal(verified.details.hasResult, result.hasResult);
         assert.deepEqual(verified.details.identifiers, result.identifiers);
     }
-    const scope = [
-        mode === 'empty'
-            ? "Browser registration, roster agreement, setup contribution and setup verification with no ballot cast, a participant whose setup is retained only after the organizer's close intent and so can no longer vote, close responses that list nothing under the organizer's proposal, a participant refused a ballot after its intent lock, target evaluation and votes, and a certified no-result target for which the participants remaining after the organizer departs with its private state release nothing, in the maintained participant runtime in external Chrome."
-            : noResult
-              ? "Browser registration, roster agreement, setup contribution, setup verification, signed ballots, close responses with the organizer's proposal at a close time that leaves one valid on-time ballot fewer than the minimum turnout, beside a corrupt participant's authentic invalid ballot when the profile tolerates one, target evaluation and votes, and a certified no-result target for which the participants remaining after the organizer departs with its private state release nothing, in the maintained participant runtime in external Chrome."
-              : "Browser registration, roster agreement, setup contribution, setup verification, signed ballots, one of them the all-minimum ballot, close responses with the organizer's proposal, and target evaluation and votes, release shares after the organizer departs with its private state, one of them generated again from its retained seed after its browser closed while generating it, and any beyond the certificate quorum released without a target vote, and the combined shorter result in the maintained participant runtime in external Chrome. A corrupt participant that copies its private state signs two more ballots, one of them late, and the relay's views make its slot conflicting, so none of its ballots counts.",
-        ...(departing === undefined || omittedVoter === undefined
-            ? []
-            : [
-                  "An honest participant departs with its private state after preparation and before the close, casting nothing. The relay hides another honest voter's on-time ballot from every other participant and serves its close response only after the organizer's proposal, so the proposal omits that ballot and its voter's target reports the omission.",
-              ]),
-        'A registrant that the organizer leaves out of the roster stays pending when shown it.',
-        'The organizer crashes with its roster proposal intent and the last honest participant right after it retains the accepted roster, and an honest participant crashes while it verifies the setup and right after it retains the verified setup; each next visit continues from its retained state, verifying the setup again from the public records after the first of those crashes.',
-        'Every participant locally confirms the fixed roster. Selected eligible contributors publish signed contribution offers; the organizer proposes the selection and members endorse it before setup activation. The cohort interrupts original contribution and continuation work, the offer-signing intent, the organizer selection intent and one endorsement intent; each next visit preserves its original seed, checkpoint, signing intent and independently retained preparation state.',
-        `Honest browsers crash right after their participants durably enter each ${mode === 'empty' ? 'close and target' : noResult ? 'ballot, close and target' : 'ballot, close, target and release'} generation, and each next visit continues from the retained state.`,
-        mode === 'empty'
-            ? "Copies of honest participants' state that lose their last data record before their close response or target vote stop for good."
-            : "Copies of honest participants' state stop for good once they lose their last ballot record with the ballot body retained, or, before their close response or target vote, their last close record or, holding none, their last data record.",
-        `Relay views that ${noResult ? 'relabel or replay votes' : 'relabel, replay or alter votes and shares'} or swap two registrations under each other's names leave their participants pending until the relay's own records let them finish, and altered retained state stops a participant for good.`,
-        ...(mode === 'empty'
-            ? []
-            : [
-                  "Relay views that alter or withhold the body of a participant's own counted ballot, replace its submission with another counted author's authentic one or alter its signature leave that participant's result visit pending, and with the relay's own records it reaches the same outcome from the certified target that counts the ballot.",
-              ]),
-        ...(foreign === undefined
-            ? []
-            : [
-                  `Relay views that serve another poll's ${prose(foreignProbes.filter(({ detail }) => detail !== undefined).map(({ family }) => family))} under this poll's names leave a participant pending, and its ${prose(unreadOutcomes.map(({ family }) => family))}, which a result visit that restores the verified setup and the evaluated target does not read, leave that visit the same outcome.`,
-              ]),
-        "Once its altered retained state stops a participant, that participant and the registrant left out of the roster each verify the same outcome with the standalone outcome verifier from the poll's identity and the relay's public records alone.",
-    ].join(' ');
     await writeFile(
         path.join(log.runDirectoryPath, 'result.json'),
         JSON.stringify(
@@ -791,7 +759,6 @@ return key;`,
                 result: noResult
                     ? { kind: 'no-result' }
                     : { kind: 'result', identifiers: expectedResult },
-                scope,
             },
             null,
             2,

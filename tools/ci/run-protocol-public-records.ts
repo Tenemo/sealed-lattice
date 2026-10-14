@@ -70,7 +70,6 @@ await runWithLocalRunLog(
                 ? [selected.completionDirectory]
                 : []),
         ],
-        lanes: ['Independent public setup, target and completion verification'],
         scriptName: 'research:protocol:public-records',
     },
     async (log) => {
@@ -468,14 +467,6 @@ await runWithLocalRunLog(
                         executableSha512: createHash('sha512')
                             .update(await readFile(executable))
                             .digest('hex'),
-                        scope:
-                            selected.name === 'available-records'
-                                ? 'Actual original signatures and proofs with missing files and corrupted extras. Public setup and target are recomputed. This tests threshold-driven retrieval after generation; it does not simulate authors leaving before generating their shares.'
-                                : selected.stage === 'certificate'
-                                  ? 'Public setup, close barrier, usable-slot classification, deterministic target and available certificate signatures are independently recomputed and verified. No release is generated or required. Durable certificate publication and post-boundary disappearance remain separate gates.'
-                                  : selected.stage === 'release'
-                                    ? 'One supplied release share passes original-key authentication and the complete owning proof verifier after public setup, target and certificate recomputation. Wrong-target, incomplete-proof, altered-proof and duplicate controls run at that author. One share cannot reconstruct an outcome. This is component evidence, not outcome availability or a complete security argument.'
-                                    : 'Public setup, close barrier, usable-slot classification, deterministic target, available certificate signatures and release proofs are independently verified from supplied public files. No participant private state is consumed; durable delivery and actual departure chronology remain separate gates.',
                         result: report,
                     },
                     null,

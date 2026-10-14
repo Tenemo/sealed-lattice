@@ -79,7 +79,6 @@ if (import.meta.main) {
         {
             scriptName: 'build:verify-reproducible',
             commandLineArguments: [],
-            lanes: ['Exact package reproduction and source identity'],
         },
         async (log) => {
             await verifyBuildReproducibility(log);

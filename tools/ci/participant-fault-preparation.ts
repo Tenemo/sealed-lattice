@@ -767,7 +767,6 @@ return { records: keys.length, ordinals };`,
                     coincidentPaddingCuts:
                         first.slotOffset === final.slotOffset,
                     logicalProofBytes: last.observation.halt.proofBytes,
-                    scope: 'Fixed-roster preparation only: local confirmation, real signed-offer generation and original-intent restart, organizer selection, quorum endorsements and every original member setup verifier. Missing or damaged required source capsules stop copied original namespaces; verified setup retires its source capsule and wrapping key, and cold recovery restores the original credential and setup without them. Before certification, contributors retransmit identical signed offers; certification retires private preparation while the public records remain retrievable. Harness-only pauses and private plaintext proof digests measure padding replay; their work is included in interrupted operations. This instrumented development run does not exercise departure tolerance, ballots or outcome and establishes no exact-build qualification or phone support.',
                 },
                 null,
                 2,

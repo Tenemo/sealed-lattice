@@ -135,7 +135,6 @@ const main = async (): Promise<void> => {
     await runWithLocalRunLog(
         {
             commandLineArguments: rawArguments,
-            lanes: ['Fast Rust tests'],
             scriptName: 'test:rust:fast',
         },
         async (runLog) => {

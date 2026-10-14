@@ -152,7 +152,6 @@ export const startParticipantResourceSampling = ({
                         process.platform === 'win32'
                             ? 'FILE_STANDARD_INFO AllocationSize and EndOfFile'
                             : 'lstat size and blocks times 512',
-                    scope: 'Per-path default file streams, including browser database journals, Blob files and profile overhead. Transport-only directories are nested within the separately reported diagnostic public directories; those rows must not be added. Samples are not atomic snapshots, do not include volume metadata or filesystem journals, and can miss transient peaks and unlinked open files. Multiple hard links count by path and are reported explicitly.',
                     directories: Object.fromEntries(allocationSummaries),
                 },
                 null,

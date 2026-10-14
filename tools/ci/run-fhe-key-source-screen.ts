@@ -70,13 +70,6 @@ export const runFheKeySourceScreen = async (
                     ? []
                     : [nativeRunDirectory]),
             ],
-            lanes: [
-                'Pin FHE key-source screen inputs',
-                'Build FHE key-source screen fixture',
-                host === 'native'
-                    ? 'Native FHE key-source screen'
-                    : 'Source-matched bounded scalar FHE key-source screen',
-            ],
         },
         async (log) => {
             const unlock = await acquireProtocolResearchLock(
@@ -112,7 +105,6 @@ export const runFheKeySourceScreen = async (
                             phaseLabels: fheKeySourcePhases,
                             processMemoryLimit: screenProcessMemoryLimit,
                             linearMemoryLimit: participantLinearMemoryBytes,
-                            scope: 'Original FHE source creation, public-coordinate emission, restoration into a contribution, first-gadget generation and independent coordinate checks. Planning and sampled process/linear limits remain distinct; no proof or participant capability is created.',
                         },
                         (_key, value: unknown) =>
                             typeof value === 'bigint' ? String(value) : value,
@@ -443,7 +435,6 @@ export const runFheKeySourceScreen = async (
                                       module: module?.inspected,
                                       scalar,
                                   }),
-                            scope: 'A fixed synthetic FHE source emits its original public coordinate and restores that coordinate into the first contribution gadget. Independent coordinate checks and identical public reports compare native and scalar execution. Other gadget randomness comes from the native operating system or secure scalar host. No proof, registration, participant capability or supported-phone qualification is created.',
                         },
                         null,
                         2,

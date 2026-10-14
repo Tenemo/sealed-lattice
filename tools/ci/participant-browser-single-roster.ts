@@ -27,7 +27,6 @@ export const runSingleRoster = async (cohort: ParticipantCohort) => {
         setupDeparture,
         unselectedCheckpoint,
         selectionFork,
-        memoryPressure,
         publicationFaults,
         sequential,
         measureRecovery,
@@ -421,15 +420,6 @@ export const runSingleRoster = async (cohort: ParticipantCohort) => {
                 memoryPressures,
                 transfers,
                 sampledResources,
-                unmeasured: [
-                    measureWorkflow
-                        ? 'Exact within-call allocation of organizer close work; explicit visit durations are conservative upper bounds'
-                        : 'Productive-visit traversal for this fault schedule',
-                    'Exact transient browser and JavaScript memory peaks between samples',
-                    'HTTP headers and link-layer transfer overhead',
-                    'Human delays between visits',
-                    'Physical-device performance and power use',
-                ],
                 workflow: measureWorkflow
                     ? summarizeParticipantWorkflow(
                           ordinaryOperations,
@@ -438,43 +428,6 @@ export const runSingleRoster = async (cohort: ParticipantCohort) => {
                           ordinaryBootstraps,
                       )
                     : null,
-                scope: [
-                    setupDeparture
-                        ? "Original registrations fix one roster; honest eligible position one disappears immediately after roster publication, before confirmation or contribution. Position two announces an invalid body identity before its valid original offer; the organizer stays pending without consuming selection authority and later accepts the valid offer behind that hint. In the seven-participant case, position two also loses its entire profile after completing its offer but before selection, so the remaining quorum certifies setup containing the departed author's original contribution. Every surviving original member votes, closes, certifies the target and releases the verified result. Original positions and thresholds remain unchanged; the diagnostic fields identify the selected and active sets. This is the named external Chrome schedule, not a general adversarial-scheduling proof."
-                        : unselectedCheckpoint
-                          ? 'All four original participants remain available, with cooperative corrupt position two and no permanent departure in the real branch. Honest eligible position one retains its genuine phase-five checkpoint while positions zero and two are selected. It endorses without completing its own offer, preserves the original nested own state and encrypted records, then retires them only on certified setup activation and casts a ballot and releases. An isolated damaged-checkpoint copy stops before activation or publication; the healthy original continues. Diagnostic fingerprints stay separate from protocol authority. This is desktop development evidence, not supported-phone qualification.'
-                          : 'Browser registration, roster confirmation, signed contribution offers, quorum setup selection and verification, ballots, close responses, target votes, release shares and the combined result of one roster, with the recorded stage and recovery schedule in the maintained participant runtime in external Chrome.',
-                    ...(measureRecovery
-                        ? [
-                              'Original participant zero loses its worker and browser at the retained contribution checkpoint, ballot body, target signing intent and release body. Each following session restores the original state. Workflow totals include every interrupted attempt, cold startup and completed recovery; the recorded cuts define this recovery workload. A fresh outcome verifier checks the outcome after every original participant departs, with its startup and work reported separately.',
-                          ]
-                        : []),
-                    ...(departureSchedule !== undefined
-                        ? [
-                              'Members other than the organizer, as many as the profile tolerates, leave for good at the scheduled boundaries between the roster’s publication and the target vote, each losing its browser and private state. Members leaving before their offer never offer, and selected authors leave after offering. The remaining quorum completes setup certification, close, target certification, release and the combined result without them, counting the ballots of departed voters, and a fresh outcome verifier checks the same outcome. This is one named schedule, not every departure combination.',
-                          ]
-                        : []),
-                    ...(cpuProfiling
-                        ? [
-                              'Chrome recorded the CPU samples of every operation, which slows it.',
-                          ]
-                        : []),
-                    ...(selectionFork
-                        ? [
-                              'A corrupt organizer signs two selections from the same original credential in separate private copies. Honest position one keeps its one losing endorsement, accepts the certified selection of positions zero and two, and completes its ballot and release without issuing another endorsement. A fresh outcome verifier checks the same outcome.',
-                          ]
-                        : []),
-                    ...(memoryPressure
-                        ? [
-                              'The second contributor first contributed in a browser that caps each WebAssembly memory below what its contribution needs, which left it pending, and its next visit completed the contribution.',
-                          ]
-                        : []),
-                    ...(publicationFaults
-                        ? [
-                              'Every publication key receives an empty and a corrupted candidate before the genuine carrier. The organizer retains a signed ballot whose publication is refused and closes without retrying that ballot. Its closure publishes the exact required body, and a fresh outcome verifier retrieves the result after every original participant has departed.',
-                          ]
-                        : []),
-                ].join(' '),
             },
             null,
             2,

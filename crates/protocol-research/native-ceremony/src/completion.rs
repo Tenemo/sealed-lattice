@@ -527,10 +527,6 @@ pub fn run(
         assert_eq!(result.result().unwrap().identifiers(), expected);
     }
     let departures = departure_sets.len();
-    let departed: Vec<_> = scenario.departed.into_iter().collect();
-    let corrupt: Vec<_> = (0..profile.participants())
-        .filter(|position| scenario.corrupt(*position))
-        .collect();
     let selection = protocol_foundations::setup_selection::SelectionProposal::decode(
         setup.roster().proposal(),
         &fs::read(output.join("selection.bin")).unwrap(),
@@ -542,7 +538,7 @@ pub fn run(
         .iter()
         .map(|(position, _)| *position)
         .collect();
-    crate::write(directory.join("result.json"),format!("{{\"kind\":\"result\",\"accepted\":{accepted:?},\"invalid\":{invalid:?},\"conflicting\":{conflicting:?},\"signers\":{signers:?},\"identifiers\":{verified:?},\"releaseSubsets\":{subsets},\"departureSets\":{departures},\"departed\":{departed:?},\"corrupt\":{corrupt:?},\"selectedAuthors\":{selected_authors:?},\"milliseconds\":{}}}\n",started.elapsed().as_secs_f64()*1000.0).as_bytes());
+    crate::write(directory.join("result.json"),format!("{{\"kind\":\"result\",\"accepted\":{accepted:?},\"invalid\":{invalid:?},\"conflicting\":{conflicting:?},\"signers\":{signers:?},\"identifiers\":{verified:?},\"selectedAuthors\":{selected_authors:?},\"milliseconds\":{}}}\n",started.elapsed().as_secs_f64()*1000.0).as_bytes());
     println!(
         "Verified original ballot-to-result path, {subsets} release subsets and {departures} bounded departure sets"
     );

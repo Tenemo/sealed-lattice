@@ -340,7 +340,6 @@ const main = async (): Promise<void> => {
     await runWithLocalRunLog(
         {
             commandLineArguments,
-            lanes: ['Host contention around a timed step'],
             scriptName: hostContentionMonitorScriptName,
         },
         async (log) => {
@@ -401,12 +400,6 @@ const main = async (): Promise<void> => {
                                 samples.map((sample) => sample.ownProcessors),
                             ),
                         },
-                        scope: 'Development observation of this host while it stays in ordinary use. The probe times one fixed single-threaded SHA-512 workload under this process’s placement; its slowdown compares the median long repetition with the scaled minimum of short repetitions.',
-                        limitations: [
-                            'The probe workload stays in the processor caches, so it does not show how unrelated load slows memory-bound work.',
-                            'The uncontended estimate is the fastest short repetition, not a measurement on an idle host.',
-                            'Own processes are those whose command line names one of the renewal’s checkouts.',
-                        ],
                     },
                     null,
                     2,

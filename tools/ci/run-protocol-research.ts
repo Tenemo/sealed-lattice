@@ -47,10 +47,6 @@ type NativeResult = {
     conflicting?: number[];
     signers?: number[];
     identifiers?: string[];
-    releaseSubsets?: number;
-    departureSets?: number;
-    departed?: number[];
-    corrupt?: number[];
     selectedAuthors?: number[];
     cases?: {
         milliseconds: number;
@@ -135,16 +131,6 @@ await runWithLocalRunLog(
             ...(selected.simulatedHelpers === 0
                 ? []
                 : ['--simulated-helpers', String(selected.simulatedHelpers)]),
-        ],
-        lanes: [
-            'Pinned protocol research build',
-            ...(selected.execution
-                ? [
-                      requestedOutputCase
-                          ? 'Encrypted requested-output gates'
-                          : 'Native original-credential completion',
-                  ]
-                : []),
         ],
         scriptName: 'research:protocol',
     },
@@ -316,12 +302,6 @@ await runWithLocalRunLog(
                             process.platform === 'win32'
                                 ? 'process-tree private bytes'
                                 : 'process-tree resident bytes',
-                        unmeasured: {
-                            physicalStorage: null,
-                            participantVisits: null,
-                            networkTransfers: null,
-                            recoveryWork: null,
-                        },
                     },
                     (_key, value: unknown) =>
                         typeof value === 'bigint' ? String(value) : value,
@@ -513,13 +493,6 @@ await runWithLocalRunLog(
                         case: selected.name,
                         executableSha512: runtime.toString('hex'),
                         unitSimulatedHelpers,
-                        unmeasured: {
-                            completion: null,
-                            peakMemory: null,
-                            storage: null,
-                            transfers: null,
-                            recovery: null,
-                        },
                     }) + '\n',
                     { flag: 'wx' },
                 );
@@ -726,14 +699,10 @@ await runWithLocalRunLog(
                 // The reference ranking of the accepted ballots; ties go to
                 // the lower option position.
                 assert.deepEqual(result.identifiers, scenario.identifiers);
-                assert.equal(result.releaseSubsets, scenario.releaseSubsets);
-                assert.equal(result.departureSets, scenario.departureSets);
                 if (
                     selected.name === 'native-setup-departure' ||
                     selected.name === 'native-selection-fork'
                 ) {
-                    assert.deepEqual(result.departed, scenario.departed);
-                    assert.deepEqual(result.corrupt, scenario.corrupt);
                     assert.deepEqual(
                         result.selectedAuthors,
                         scenario.selectedAuthors,
@@ -807,19 +776,6 @@ await runWithLocalRunLog(
                         peakMemory,
                         samples,
                         publicDiagnosticBytes,
-                        unmeasured: {
-                            physicalStorage: null,
-                            browserCompletion: null,
-                            actualDepartureChronology: null,
-                            participantVisits: null,
-                            networkTransfers: null,
-                            recoveryWork: null,
-                        },
-                        scope: requestedOutputCase
-                            ? 'Real full-degree BFV coefficient-selection operations on deterministic synthetic ciphertexts encrypting known rank powers. A test-only secret decoder checks every plaintext coefficient against direct interpolation, including all omitted ranks and padding. No participant, ballot proof, certificate, release share or outcome is created.'
-                            : selected.noResult
-                              ? 'Fresh native certified no-result execution using original credentials. No release shares are generated. This is not durable browser participation, security admission or supported-phone qualification.'
-                              : 'Fresh native cryptographic execution using tracked sources and original credentials. Subset controls run after share generation. This is not durable browser participation, security admission or supported-phone qualification.',
                     },
                     null,
                     2,

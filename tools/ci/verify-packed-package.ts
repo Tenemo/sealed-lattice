@@ -601,7 +601,6 @@ const main = async (): Promise<void> => {
     await runWithLocalRunLog(
         {
             commandLineArguments: commandLineArguments,
-            lanes: ['Packed package smoke'],
             scriptName: 'smoke:pack:npm',
         },
         async (runLog) => {

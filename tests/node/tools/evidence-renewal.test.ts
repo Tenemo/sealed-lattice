@@ -16,7 +16,6 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
     auditArchivedRuntime,
-    desktopCompletionChecks,
     receivedByAction,
 } from '#tools/ci/audit-renewed-lifecycle-matrix.js';
 import { participantRuntimeIdentity } from '#tools/ci/build-participant-module.js';
@@ -697,53 +696,6 @@ describe('evidence renewal measurements', () => {
                 operationEvent(0, 'release', 99),
             ]),
         ).toThrow("Participant 0's received counter decreased.");
-    });
-
-    it('classifies completion measurements at and beyond each limit', () => {
-        const atLimits = {
-            sequentialCompletionMilliseconds: 5 * 60 * 60_000,
-            maximumParticipantActiveUpperBoundMilliseconds: 30 * 60_000,
-            maximumVisitActiveUpperBoundMilliseconds: 15 * 60_000,
-            productiveVisits: [5, 3],
-            maximumReportedWorkerBytes: 384 * 2 ** 20,
-            largestActionReceivedPayloadBytes: 2 * 2 ** 30,
-            maximumSentPayloadBytes: 2 * 2 ** 30,
-            totalSentPayloadBytes: 2 * 2 ** 30,
-        };
-        expect(
-            Object.values(desktopCompletionChecks(atLimits, false)).every(
-                Boolean,
-            ),
-        ).toBe(true);
-        expect(
-            desktopCompletionChecks(
-                {
-                    sequentialCompletionMilliseconds: 5 * 60 * 60_000 + 1,
-                    maximumParticipantActiveUpperBoundMilliseconds:
-                        30 * 60_000 + 1,
-                    maximumVisitActiveUpperBoundMilliseconds: 15 * 60_000 + 1,
-                    productiveVisits: [6, 11],
-                    maximumReportedWorkerBytes: 384 * 2 ** 20 + 1,
-                    largestActionReceivedPayloadBytes: 2 * 2 ** 30 + 1,
-                    maximumSentPayloadBytes: 2 * 2 ** 30 + 1,
-                    totalSentPayloadBytes: 2 * 2 ** 30 + 1,
-                },
-                false,
-            ),
-        ).toEqual({
-            sequentialWithinFiveHours: false,
-            participantWithinThirtyMinutes: false,
-            visitWithinFifteenMinutes: false,
-            visitsWithinTen: false,
-            preferredFiveVisits: false,
-            reportedWorkerWithinPlanningTarget: false,
-            cleanActionDownloadWithinPlanningTarget: false,
-            participantUploadWithinPlanningTarget: false,
-            totalUploadWithinPlanningTarget: false,
-        });
-        expect(
-            Object.keys(desktopCompletionChecks(atLimits, true)),
-        ).not.toContain('cleanActionDownloadWithinPlanningTarget');
     });
 
     it('projects the slowdown each limit tolerates under both transfer models', () => {

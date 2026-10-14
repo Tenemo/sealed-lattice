@@ -65,22 +65,16 @@ type Interruption = Readonly<{
 }>;
 
 export type ParticipantRunResult = Readonly<{
-    activePositions?: readonly number[];
     crossRosterProbes?: readonly Readonly<{
         detail: unknown;
         family: string;
         origin: number;
         served: number;
     }>[];
-    departed?: readonly number[];
-    departedAfterOffer?: number;
-    departedAfterRoster?: number;
-    departedBeforeClose?: number;
     departureSchedule?: readonly Readonly<{
         boundary: string;
         position: number;
     }>[];
-    departures?: boolean;
     identifiers?: unknown;
     incompleteResponseEvidence?: unknown;
     independentOutcome?: Readonly<{
@@ -91,12 +85,9 @@ export type ParticipantRunResult = Readonly<{
         status: string;
     }>;
     interruptions?: readonly Interruption[];
-    mode?: string;
-    omittedBallot?: unknown;
     optionCount: number;
     participantCount: number;
     publicationFaultEvidence?: unknown;
-    publicationFaults?: boolean;
     publicationRecoveryEvidence?: unknown;
     recovery?: boolean;
     result?: Readonly<{ kind: string }>;
@@ -104,24 +95,17 @@ export type ParticipantRunResult = Readonly<{
     runtimeIdentity: string;
     sampledResources?: readonly Readonly<{ originStorageBytes: number }>[];
     scalar: boolean;
-    scope: unknown;
-    selectedPositions?: readonly number[];
-    selectionFork?: boolean;
     sequential?: boolean;
-    setupDeparture?: boolean;
     sourceCustody?: unknown;
     sourceRefusals?: unknown;
     standaloneMilliseconds?: number;
     stateLosses?: readonly unknown[];
     topCount: number;
     transfers: readonly ParticipantTransferTotals[];
-    unmeasured?: unknown;
-    unselectedCheckpoint?: boolean;
     workflow?: Readonly<{
         activeMillisecondsUpperBound: number;
         operations: readonly WorkflowOperation[];
         participants: readonly WorkflowParticipant[];
-        scope: unknown;
         sequentialCompletionMilliseconds: number;
     }>;
 }>;

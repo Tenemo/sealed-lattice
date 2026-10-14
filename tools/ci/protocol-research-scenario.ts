@@ -1,18 +1,8 @@
 import { evaluateReferenceRanking } from '#tests/reference-ranking-model.js';
 import { thresholdProfileFor } from '#tests/threshold-completion-model.js';
 
-// Release subsets and departure sets the ceremony checks after share
-// generation: every set when there are at most this many, otherwise this
-// many.
-const checkedSetLimit = 256;
 const maximumScore = 10;
 
-const binomial = (count: number, size: number): number => {
-    let value = 1;
-    for (let index = 0; index < size; index++)
-        value = (value * (count - index)) / (index + 1);
-    return value;
-};
 const range = (start: number, end: number): number[] =>
     Array.from(
         { length: Math.max(0, end - start) },
@@ -84,9 +74,6 @@ export const deriveResearchScenario = (
         optionCount,
         optionCount,
     );
-    let departureTotal = 0;
-    for (let size = 0; size <= corrupt; size++)
-        departureTotal += binomial(participantCount, size);
     return {
         participantCount,
         optionCount,
@@ -104,23 +91,11 @@ export const deriveResearchScenario = (
         responseFiles: range(0, participantCount)
             .filter((position) => !departed.includes(position))
             .map((position) => 'response-' + position + '.bin'),
-        ...(setupDeparture || selectionFork
-            ? { departed, selectedAuthors: [0, 2] }
-            : {}),
+        ...(setupDeparture || selectionFork ? { selectedAuthors: [0, 2] } : {}),
         identifiers: ranking.orderedOptionPositions.map(
             (option) => `option-${option}`,
         ),
         releaseThreshold: thresholds.resultReleaseThreshold,
         certificateThreshold: thresholds.inventoryCertificateThreshold,
-        releaseSubsets: Math.min(
-            binomial(
-                participantCount - Number(setupDeparture),
-                thresholds.resultReleaseThreshold,
-            ),
-            checkedSetLimit,
-        ),
-        departureSets: setupDeparture
-            ? 1
-            : Math.min(departureTotal, checkedSetLimit),
     };
 };

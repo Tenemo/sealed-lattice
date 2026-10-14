@@ -353,11 +353,6 @@ export const runFheKeySourceInChrome = async ({
                 launchArguments: browser.launchArguments,
             },
             ...serving.counters(),
-            unmeasured: {
-                physicalPhone: null,
-                networkHeaders: null,
-                transientMemoryBetweenSamples: null,
-            },
         };
     } finally {
         globalThis.clearTimeout(timer);

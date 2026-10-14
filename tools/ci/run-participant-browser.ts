@@ -73,20 +73,6 @@ const {
 await runWithLocalRunLog(
     {
         commandLineArguments,
-        lanes: [
-            'Participant runtime assembly',
-            'Browser registration and roster agreement',
-            'Browser setup contribution',
-            'Browser setup verification',
-            'Browser signed ballots',
-            'Browser close responses',
-            'Browser target votes',
-            'Browser release shares',
-            'Browser result',
-            'Browser relay forgeries',
-            'Browser records of another poll',
-            'Browser altered and lost storage',
-        ],
         scriptName: 'research:participant',
     },
     async (log) => {

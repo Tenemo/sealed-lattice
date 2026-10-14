@@ -47,7 +47,8 @@ export type ActiveLocalRunLog = {
 type LocalRunLogInput = {
     readonly commandLineArguments: readonly string[];
     readonly environment?: NodeJS.ProcessEnv;
-    readonly lanes: readonly string[];
+    // The lanes or steps a run with more than one executes, in order.
+    readonly lanes?: readonly string[];
     readonly now?: Date;
     readonly repositoryDirectoryPath?: string;
     readonly resourceSampleIntervalMilliseconds?: number;
@@ -751,7 +752,7 @@ export const createLocalRunLog = async (
             ...selectDiagnosticEnvironment(environment),
             SEALED_LATTICE_RUN_DIRECTORY: runDirectoryPath,
         },
-        lanes: input.lanes,
+        ...(input.lanes === undefined ? {} : { lanes: input.lanes }),
         logicalProcessorCount: os.cpus().length,
         nodeVersion: process.version,
         operatingSystem: {

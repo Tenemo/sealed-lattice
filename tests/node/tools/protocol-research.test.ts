@@ -49,15 +49,12 @@ describe('guarded protocol research entry', () => {
         });
         expect(deriveResearchScenario(4, 2, false, true)).toMatchObject({
             corrupt: [0],
-            departed: [],
             selectedAuthors: [0, 2],
             honest: [1, 2, 3],
             accepted: [0, 1, 2, 3],
             signers: [0, 1, 2, 3],
             conflicting: [],
             invalid: [],
-            releaseSubsets: 6,
-            departureSets: 5,
         });
         expect(() => deriveResearchScenario(4, 2, true, true)).toThrow();
         expect(() =>
@@ -81,7 +78,6 @@ describe('guarded protocol research entry', () => {
             expect(() => selectProtocolResearchCase(values)).toThrow();
         expect(deriveResearchScenario(4, 2, true)).toMatchObject({
             corrupt: [2],
-            departed: [1],
             selectedAuthors: [0, 2],
             honest: [0, 1, 3],
             accepted: [0, 2, 3],
@@ -91,8 +87,6 @@ describe('guarded protocol research entry', () => {
             omitted: [],
             certificateThreshold: 3,
             releaseThreshold: 2,
-            releaseSubsets: 3,
-            departureSets: 1,
         });
         expect(() => deriveResearchScenario(3, 2, true)).toThrow();
     });
@@ -273,8 +267,6 @@ describe('guarded protocol research entry', () => {
             ),
             releaseThreshold: 4,
             certificateThreshold: 7,
-            releaseSubsets: 210,
-            departureSets: 176,
         });
         // No corruption: every participant is honest and nobody is omitted.
         expect(deriveResearchScenario(3, 2)).toMatchObject({
@@ -285,8 +277,6 @@ describe('guarded protocol research entry', () => {
             conflicting: [],
             signers: [0, 1, 2],
             identifiers: ['option-1', 'option-0'],
-            releaseSubsets: 3,
-            departureSets: 1,
         });
         expect(deriveResearchScenario(4, 3)).toMatchObject({
             accepted: [0, 2, 3],
@@ -302,8 +292,6 @@ describe('guarded protocol research entry', () => {
             omitted: [19],
             invalid: [4, 5],
             conflicting: [6],
-            releaseSubsets: 256,
-            departureSets: 256,
         });
         expect(largest.identifiers.slice(0, 4)).toEqual([
             'option-6',

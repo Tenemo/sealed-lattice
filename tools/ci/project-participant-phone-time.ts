@@ -9,7 +9,6 @@ import { repositoryRoot, toolArguments } from '#tools/ci/command-line.js';
 import {
     readEvidenceRenewalRecord,
     stepPassed,
-    type EvidenceRenewalStepRecord,
 } from '#tools/ci/evidence-renewal-record.js';
 import { runWithLocalRunLog } from '#tools/ci/local-run-log.js';
 import {
@@ -35,7 +34,6 @@ const limits = {
 };
 // Application-payload goodputs in decimal megabits per second.
 const goodputs = [20, 50, 100, 200];
-const illustrativeSlowdowns = [1, 1.5, 2, 2.5, 3, 4];
 const round = (value: number) => Math.round(value * 100) / 100;
 
 export const payloadSeconds = (bytes: number, megabits: number) =>
@@ -77,15 +75,6 @@ export const bindingSlowdown = <Row>(
     };
 };
 
-// The placement sentence the projection's scope depends on, from the
-// renewal's record of the run.
-const placementLimitation = (
-    placement: EvidenceRenewalStepRecord['placement'],
-) =>
-    placement === undefined
-        ? 'The run had no processor placement, so the host’s scheduler and unrelated load set the speed of its single worker.'
-        : `The run held every process within affinity mask ${placement.affinityMask} at ${placement.priority} priority while the host stayed in ordinary use, so its single worker ran at the speed of one of those logical processors under that load.`;
-
 const digest = async (file: string) =>
     createHash('sha512')
         .update(await readFile(file))
@@ -103,7 +92,6 @@ const main = async (): Promise<void> => {
     await runWithLocalRunLog(
         {
             commandLineArguments,
-            lanes: ['Desktop-to-phone tolerance projection'],
             scriptName: 'project-phone-time',
         },
         async (log) => {
@@ -298,40 +286,6 @@ const main = async (): Promise<void> => {
                     },
                 };
             });
-            const worstMinutes = (
-                rows: readonly {
-                    activeSecondsUpperBound: number;
-                    payloadBytes: number;
-                }[],
-                slowdown: number,
-                megabits: number,
-            ) =>
-                round(
-                    Math.max(
-                        ...rows.map(
-                            (row) =>
-                                slowdown * row.activeSecondsUpperBound +
-                                payloadSeconds(row.payloadBytes, megabits),
-                        ),
-                    ) / 60,
-                );
-            const illustrations = illustrativeSlowdowns.flatMap((slowdown) =>
-                [50, 100].map((megabits) => ({
-                    slowdown,
-                    goodputMegabitsPerSecond: megabits,
-                    worstVisitMinutes: worstMinutes(visits, slowdown, megabits),
-                    worstParticipantMinutes: worstMinutes(
-                        participantRows,
-                        slowdown,
-                        megabits,
-                    ),
-                    sequentialHours: round(
-                        (slowdown * sequential.completionSeconds +
-                            payloadSeconds(sequential.payloadBytes, megabits)) /
-                            3600,
-                    ),
-                })),
-            );
             await writeFile(
                 path.join(log.runDirectoryPath, 'evidence.json'),
                 JSON.stringify(
@@ -356,17 +310,6 @@ const main = async (): Promise<void> => {
                         participants: participantRows,
                         visits,
                         projection,
-                        illustrations,
-                        scope: 'Development projection of the ordinary ten-participant, ten-option sequential scalar workflow from this host to a slower device. The tolerable slowdown is the largest uniform factor by which a device may exceed this host on every visit before a completion limit is crossed. No desktop-to-phone factor is asserted; the selected phone’s own measurement remains the qualification gate.',
-                        limitations: [
-                            placementLimitation(record.placement),
-                            'Every visit is assumed to slow by the same factor. Memory-bound, storage and startup work can scale differently, and sustained thermal throttling is not modeled.',
-                            'Compute bounds are the workflow report’s conservative visit and participant upper bounds; the sequential limit scales the whole cohort wall time, including harness overhead.',
-                            'Payload is application payload counted by the origin counters at the stated goodput; HTTP headers, link-layer costs, latency and retransmission are excluded.',
-                            'The additive model moves the payload after the work; the overlap model hides it entirely behind the work. The real schedule lies between them.',
-                            'The run uses one worker with no helpers, which a multicore device may shorten.',
-                            'Only the selected-offer workload is covered; a participant whose offer is selected carries the contribution visit.',
-                        ],
                     },
                     null,
                     2,

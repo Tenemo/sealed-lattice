@@ -10,7 +10,6 @@ import {
 import { completeRoster } from '#tools/ci/participant-browser-roster-completion.js';
 import {
     type Member,
-    prose,
     secondRosterCopy,
 } from '#tools/ci/participant-cohort-state.js';
 
@@ -180,11 +179,6 @@ export const runTwoRosters = async (cohort: ParticipantCohort) => {
             identifiers,
         );
     }
-    // Both rosters retain signed-envelope-before-body ordering.
-    const rostersScope = [
-        "A corrupt organizer's private state is copied after its registration, and the copy proposes a second roster of the same poll to other registrants under its own path of the organizer's origin, where the relay serves that roster's records. Both rosters, whose only corrupt member is the organizer, complete roster agreement, setup contribution and verification, signed ballots, close responses, target votes, release shares and the combined result in parallel in the maintained participant runtime in external Chrome.",
-        `Relay views that serve one roster's ${prose(foreignFamilies.filter(({ details }) => details !== undefined).map(({ family }) => family))} under the other roster's names leave a member of each roster pending, and with the relay's own records it reaches its roster's outcome; its ${prose(foreignFamilies.filter(({ details }) => details === undefined).map(({ family }) => family))}, which a result visit that restores the verified setup and the evaluated target does not read, leave that member its roster's outcome.`,
-    ].join(' ');
     await writeFile(
         path.join(log.runDirectoryPath, 'result.json'),
         JSON.stringify(
@@ -208,7 +202,6 @@ export const runTwoRosters = async (cohort: ParticipantCohort) => {
                 },
                 crossRosterProbes,
                 topCount,
-                scope: rostersScope,
                 scalar,
             },
             null,
