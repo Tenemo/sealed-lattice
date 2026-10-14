@@ -125,14 +125,14 @@ export const ballotEnvelopeMatches = (
 export const decodeBallotState = (
     profile: ParticipantProfile,
     context: RecordContext,
-    generation: number,
+    phase: number,
     bytes: Uint8Array,
 ): BallotState => {
     const bounds = profile.ballot;
     if (
-        generation < ballotPhase.locked ||
-        generation > ballotPhase.signed ||
-        !isRootGeneration(generation) ||
+        phase < ballotPhase.locked ||
+        phase > ballotPhase.signed ||
+        !isRootGeneration(phase) ||
         bytes.length > bounds.maximumStateBytes ||
         !equalBytes(bytes.subarray(0, marker.length), marker)
     )
@@ -147,21 +147,19 @@ export const decodeBallotState = (
     };
     const scores = take(take(1)[0]);
     if (
-        generation === ballotPhase.signed
+        phase === ballotPhase.signed
             ? scores.length !== 0
             : !validBallotScores(profile, scores)
     )
         throw new Error('The locked scores changed.');
     const ballotTime =
-        generation === ballotPhase.signed ? 0n : readUnsigned64(take(8), 0);
-    const seed = take(
-        generation === ballotPhase.ready ? operationSeedBytes : 0,
-    );
+        phase === ballotPhase.signed ? 0n : readUnsigned64(take(8), 0);
+    const seed = take(phase === ballotPhase.ready ? operationSeedBytes : 0);
     const bodyLength = readUnsigned32(take(4), 0);
     const bodyCount = readUnsigned16(take(2), 0);
     const bodyRecords = Math.ceil(bodyLength / bounds.recordBytes);
     if (
-        generation < ballotPhase.body
+        phase < ballotPhase.body
             ? bodyLength !== 0 || bodyCount !== 0
             : bodyLength < bounds.minimumBodyBytes ||
               bodyLength > bounds.maximumBodyBytes ||
@@ -172,22 +170,22 @@ export const decodeBallotState = (
         take(recordKeyBytes),
     );
     const envelope =
-        generation >= ballotPhase.body
+        phase >= ballotPhase.body
             ? take(bounds.envelopeBytes)
             : new Uint8Array();
     const signature =
-        generation === ballotPhase.signed
+        phase === ballotPhase.signed
             ? take(profile.registration.signatureBytes)
             : new Uint8Array();
     if (offset !== bytes.length)
         throw new Error('The ballot state has extra bytes.');
     if (
-        generation >= ballotPhase.body &&
+        phase >= ballotPhase.body &&
         !ballotEnvelopeMatches(
             envelope,
             context,
             bodyLength,
-            generation === ballotPhase.signed ? undefined : ballotTime,
+            phase === ballotPhase.signed ? undefined : ballotTime,
         )
     )
         throw new Error('The retained envelope changed its context.');

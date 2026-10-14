@@ -3,8 +3,10 @@ import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
-import { completedClosePhase } from '#packages/sdk/src/participant/worker/stages/close/close-state.js';
-import { targetPhase } from '#packages/sdk/src/participant/worker/storage/root-generation.js';
+import {
+    completedClosePhase,
+    targetPhase,
+} from '#packages/sdk/src/participant/worker/storage/root-generation.js';
 import { type ParticipantCohort } from '#tools/ci/participant-browser-cohort.js';
 import type { FaultClose } from '#tools/ci/participant-fault-close.js';
 export const releaseFaultTarget = async (

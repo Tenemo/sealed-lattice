@@ -33,7 +33,11 @@ import type {
     RecordContext,
     SealedRecord,
 } from '../../storage/private-records.js';
-import { ballotPhase } from '../../storage/root-generation.js';
+import {
+    ballotPhase,
+    ballotPhaseOf,
+    rootGeneration,
+} from '../../storage/root-generation.js';
 import {
     commitRoot,
     dataKind,
@@ -144,7 +148,7 @@ const retainedBallotState = (
     return decodeBallotState(
         context.profile,
         records,
-        Math.min(root.head.generation, ballotPhase.signed),
+        ballotPhaseOf(root.head.generation),
         bytes,
     );
 };
@@ -229,7 +233,7 @@ export const beginBallot = async (
 ): Promise<BallotSession> => {
     const { context, root } = participant;
     const { profile } = context;
-    if (root.head.generation !== ballotPhase.locked - 1)
+    if (root.head.generation !== rootGeneration.setupRetained)
         throw new Error('No verified setup awaits a ballot.');
     if (!validBallotScores(profile, scores))
         throw new Error('The scores are invalid.');

@@ -6,8 +6,10 @@ import {
     readUnsigned16,
     unsigned16,
 } from '../../shared/bytes.js';
-import { targetPhase } from '../../storage/root-generation.js';
-import { completedClosePhase } from '../close/close-state.js';
+import {
+    completedClosePhase,
+    targetPhase,
+} from '../../storage/root-generation.js';
 
 // The target signing suffix follows the completed close: the participant's
 // signed response, and for the organizer its signed proposal. Generation 23

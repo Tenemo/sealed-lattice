@@ -19,7 +19,11 @@ import type {
     SealedRecord,
 } from '../../storage/private-records.js';
 import { openRecord, sealRecord } from '../../storage/private-records.js';
-import { closePhase, rootGeneration } from '../../storage/root-generation.js';
+import {
+    closePhase,
+    completedClosePhase,
+    rootGeneration,
+} from '../../storage/root-generation.js';
 import { commitRoot, dataRecordInventory } from '../../storage/root.js';
 import type { BallotSession } from '../ballot/ballot.js';
 import {
@@ -38,7 +42,6 @@ import {
     closeRecordAssociatedData,
     closeRecordInventory,
     closeRecordLengths,
-    completedClosePhase,
     decodeCloseState,
     encodeCloseState,
 } from './close-state.js';

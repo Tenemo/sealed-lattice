@@ -14,11 +14,11 @@ import type { ParticipantStoredRecord } from '../../storage/predecessor.js';
 import { sealedLength } from '../../storage/private-records.js';
 import type { RecordContext } from '../../storage/private-records.js';
 import {
+    completedClosePhase,
     isRootGeneration,
     releasePhase,
     targetPhase,
 } from '../../storage/root-generation.js';
-import { completedClosePhase } from '../close/close-state.js';
 import { ballotInclusions } from '../target-vote/target-state.js';
 import type { BallotInclusion } from '../target-vote/target-state.js';
 
@@ -50,11 +50,7 @@ export type ReleaseState = Readonly<{
     signature: Uint8Array;
 }>;
 
-const phaseOf = (generation: number) =>
-    Math.min(generation, releasePhase.signed);
-
 export const encodeReleaseState = (generation: number, state: ReleaseState) => {
-    const phase = phaseOf(generation);
     return concatenate(
         marker,
         Uint8Array.of(
@@ -67,8 +63,8 @@ export const encodeReleaseState = (generation: number, state: ReleaseState) => {
         state.target,
         state.seed,
         ...state.bodyKeys,
-        ...(phase >= releasePhase.body ? [state.envelope] : []),
-        ...(phase === releasePhase.signed ? [state.signature] : []),
+        ...(generation >= releasePhase.body ? [state.envelope] : []),
+        ...(generation === releasePhase.signed ? [state.signature] : []),
     );
 };
 
@@ -93,7 +89,6 @@ export const decodeReleaseState = (
     bytes: Uint8Array,
 ): ReleaseState => {
     const bounds = profile.release;
-    const phase = phaseOf(generation);
     if (
         generation < releasePhase.locked ||
         !isRootGeneration(generation) ||
@@ -108,8 +103,9 @@ export const decodeReleaseState = (
     const targetLength = readUnsigned16(bytes, marker.length + 2);
     const bodyLength = readUnsigned32(bytes, marker.length + 4);
     const bodyCount = readUnsigned16(bytes, marker.length + 8);
-    const seedLength = phase === releasePhase.ready ? operationSeedBytes : 0;
-    const withBody = phase >= releasePhase.body;
+    const seedLength =
+        generation === releasePhase.ready ? operationSeedBytes : 0;
+    const withBody = generation >= releasePhase.body;
     if (
         targetLength === 0 ||
         targetLength > profile.target.maximumBodyBytes ||
@@ -122,7 +118,7 @@ export const decodeReleaseState = (
         throw new Error('The release state has other counts.');
     const tail =
         (withBody ? bounds.envelopeBytes : 0) +
-        (phase === releasePhase.signed
+        (generation === releasePhase.signed
             ? profile.registration.signatureBytes
             : 0);
     const seedStart = prefixBytes + targetLength;
@@ -145,7 +141,7 @@ export const decodeReleaseState = (
         ),
         envelope: bytes.slice(tailStart, envelopeEnd),
         signature:
-            phase === releasePhase.signed
+            generation === releasePhase.signed
                 ? bytes.slice(envelopeEnd)
                 : new Uint8Array(),
     };

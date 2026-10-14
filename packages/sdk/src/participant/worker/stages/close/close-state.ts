@@ -12,7 +12,11 @@ import {
 import type { ParticipantStoredRecord } from '../../storage/predecessor.js';
 import { sealedLength } from '../../storage/private-records.js';
 import type { RecordContext } from '../../storage/private-records.js';
-import { closePhase, rootGeneration } from '../../storage/root-generation.js';
+import {
+    closePhase,
+    closePhaseOf,
+    rootGeneration,
+} from '../../storage/root-generation.js';
 
 // The close log beneath the authenticated root. It retains every close input
 // the participant's state machine accepted, in arrival order, so restoration
@@ -68,17 +72,16 @@ export const collectingCloseState = (): CloseState => ({
     proposalPacket: new Uint8Array(),
 });
 
-// The completed close of a participant: its signed response, and for the
-// organizer its signed proposal.
-export const completedClosePhase = (isOrganizer: boolean) =>
-    isOrganizer ? closePhase.proposed : closePhase.responded;
-
-// The close phase a root generation supplies: zero while the log collects,
-// and the completed close after it.
-const phaseOf = (generation: number, isOrganizer: boolean) => {
-    if (generation > closePhase.proposed)
-        return completedClosePhase(isOrganizer);
-    return generation >= closePhase.intent ? generation : 0;
+// The signed close messages a root generation retains for publication: the
+// organizer's locked intent, the signed response and the organizer's signed
+// proposal, each from its phase on.
+export const closePublications = (generation: number, isOrganizer: boolean) => {
+    const phase = closePhaseOf(generation, isOrganizer);
+    return {
+        intent: isOrganizer && phase >= closePhase.locked,
+        response: phase >= closePhase.responded,
+        proposal: phase === closePhase.proposed,
+    };
 };
 
 // The fields each phase retains after the events.
@@ -128,7 +131,11 @@ export const encodeCloseState = (
             unsigned32(event.length),
             ...event.keys,
         ]),
-        ...phaseFields(phaseOf(generation, isOrganizer), isOrganizer, state),
+        ...phaseFields(
+            closePhaseOf(generation, isOrganizer),
+            isOrganizer,
+            state,
+        ),
     );
 
 // The plaintext length of each record of an event, in record order.
@@ -204,7 +211,7 @@ export const decodeCloseState = (
     bytes: Uint8Array,
 ): CloseState => {
     const { close, registration } = profile;
-    const phase = phaseOf(generation, isOrganizer);
+    const phase = closePhaseOf(generation, isOrganizer);
     if (
         generation < rootGeneration.setupRetained ||
         (!isOrganizer &&

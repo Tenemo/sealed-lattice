@@ -2,14 +2,16 @@ import { createHash } from 'node:crypto';
 
 import { describe, expect, it } from 'vitest';
 
-import { completedClosePhase } from '#packages/sdk/src/participant/worker/stages/close/close-state.js';
 import {
     ballotInclusions,
     decodeTargetState,
     encodeTargetState,
 } from '#packages/sdk/src/participant/worker/stages/target-vote/target-state.js';
 import type { BallotInclusion } from '#packages/sdk/src/participant/worker/stages/target-vote/target-state.js';
-import { targetPhase } from '#packages/sdk/src/participant/worker/storage/root-generation.js';
+import {
+    completedClosePhase,
+    targetPhase,
+} from '#packages/sdk/src/participant/worker/storage/root-generation.js';
 import { compileParticipantRuntimeProfile } from '#tests/participant-runtime-bounds-model.js';
 import { compileTargetSigningStateCensus } from '#tests/target-signing-state-model.js';
 

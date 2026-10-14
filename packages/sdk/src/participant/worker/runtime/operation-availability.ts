@@ -1,6 +1,9 @@
 import type { ParticipantRequest } from '../../participant-contract.js';
-import { completedClosePhase } from '../stages/close/close-state.js';
-import { rootGeneration, targetPhase } from '../storage/root-generation.js';
+import {
+    completedClosePhase,
+    rootGeneration,
+    targetPhase,
+} from '../storage/root-generation.js';
 
 // What a retained participant's operation availability depends on: its root
 // generation, its role, whether its retained proposal names its profile and

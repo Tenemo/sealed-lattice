@@ -305,7 +305,11 @@ export const retainSetup = async (
                 ...root.manifest.suffixes,
                 preparation: encodePreparationState({}),
                 ballot: new Uint8Array(),
-                close: encodeCloseState(12, false, collectingCloseState()),
+                close: encodeCloseState(
+                    rootGeneration.setupRetained,
+                    false,
+                    collectingCloseState(),
+                ),
             },
         },
         predecessorRecords: [

@@ -20,7 +20,6 @@ import {
 } from '../../shared/bytes.js';
 import { PublicInputFailure } from '../../shared/failures.js';
 import { openDelivery } from '../../storage/delivery.js';
-import { closePhase } from '../../storage/root-generation.js';
 import { ballotCandidateKey, readBallotBody } from '../ballot/ballot.js';
 
 import {
@@ -55,7 +54,7 @@ import {
     responseIdentity,
     responseListing,
 } from './close-records.js';
-import { closeEventKind } from './close-state.js';
+import { closeEventKind, closePublications } from './close-state.js';
 
 // The most entries a response lists, two envelopes for each slot, which also
 // bounds the bodies the organizer can hold.
@@ -542,15 +541,16 @@ export const publishClose = async (
     session: CloseSession,
     relay: PublicRelay,
 ) => {
-    const generation = generationOf(session);
+    const { intent, response, proposal } = closePublications(
+        generationOf(session),
+        session.isOrganizer,
+    );
+    if (!intent && !response) return;
     const { state } = session;
     const { position } = session.records;
-    const responder =
-        !session.isOrganizer && generation >= closePhase.responded;
-    if (generation < closePhase.locked) return;
     const { context, root } = session.participant;
     const delivery = await openDelivery(context, root);
-    if (session.isOrganizer) {
+    if (intent) {
         const publication = createCandidatePublication(
             relay,
             closeIntentCandidateKey,
@@ -559,7 +559,7 @@ export const publishClose = async (
         await publication.addBytes('intent.bin', state.intentPacket);
         await publication.finish();
     }
-    if (generation >= closePhase.responded) {
+    if (response) {
         const publication = createCandidatePublication(
             relay,
             closeResponseCandidateKey(position),
@@ -570,10 +570,11 @@ export const publishClose = async (
             'submissions.bin',
             await listedCopies(session),
         );
-        if (responder) await forwardListedBodies(session, publication);
+        if (!session.isOrganizer)
+            await forwardListedBodies(session, publication);
         await publication.finish();
     }
-    if (generation === closePhase.proposed) {
+    if (proposal) {
         const publication = createCandidatePublication(
             relay,
             closeProposalCandidateKey,

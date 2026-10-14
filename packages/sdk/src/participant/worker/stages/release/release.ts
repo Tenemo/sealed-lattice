@@ -22,7 +22,11 @@ import { snapshotParticipant } from '../../storage/database.js';
 import { openDelivery } from '../../storage/delivery.js';
 import type { SealedRecord } from '../../storage/private-records.js';
 import { openRecord, sealRecord } from '../../storage/private-records.js';
-import { releasePhase, targetPhase } from '../../storage/root-generation.js';
+import {
+    completedClosePhase,
+    releasePhase,
+    targetPhase,
+} from '../../storage/root-generation.js';
 import { commitRoot, dataRecordInventory } from '../../storage/root.js';
 import { retainedBallotRecords } from '../ballot/ballot.js';
 import type { CloseSession } from '../close/close-custody.js';
@@ -30,7 +34,6 @@ import {
     completedCloseRecords,
     restoreCompletedClose,
 } from '../close/close-custody.js';
-import { completedClosePhase } from '../close/close-state.js';
 import { discardEvaluation } from '../target-vote/evaluation.js';
 import type {
     BallotInclusion,

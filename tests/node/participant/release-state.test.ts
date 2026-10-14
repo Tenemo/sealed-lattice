@@ -2,7 +2,6 @@ import { createHash } from 'node:crypto';
 
 import { describe, expect, it } from 'vitest';
 
-import { completedClosePhase } from '#packages/sdk/src/participant/worker/stages/close/close-state.js';
 import {
     decodeReleaseState,
     encodeReleaseState,
@@ -13,6 +12,7 @@ import type { ReleaseState } from '#packages/sdk/src/participant/worker/stages/r
 import { ballotInclusions } from '#packages/sdk/src/participant/worker/stages/target-vote/target-state.js';
 import type { BallotInclusion } from '#packages/sdk/src/participant/worker/stages/target-vote/target-state.js';
 import {
+    completedClosePhase,
     releasePhase,
     targetPhase,
 } from '#packages/sdk/src/participant/worker/storage/root-generation.js';

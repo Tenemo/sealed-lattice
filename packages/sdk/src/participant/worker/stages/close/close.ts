@@ -251,7 +251,11 @@ export const lockPublishedIntent = async (
     session: CloseSession,
     relay: PublicRelay,
 ) => {
-    if (session.isOrganizer || generationOf(session) !== 12) return false;
+    if (
+        session.isOrganizer ||
+        generationOf(session) !== rootGeneration.setupRetained
+    )
+        return false;
     await startCloseWork(session);
     return lockAvailableIntent(session, relay);
 };

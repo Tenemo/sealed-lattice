@@ -8,7 +8,10 @@ import type { PublicRelay } from '../../relay/relay.js';
 import { equalBytes } from '../../shared/bytes.js';
 import { PublicInputFailure } from '../../shared/failures.js';
 import { openDelivery } from '../../storage/delivery.js';
-import { targetPhase } from '../../storage/root-generation.js';
+import {
+    completedClosePhase,
+    targetPhase,
+} from '../../storage/root-generation.js';
 import { commitRoot, dataRecordInventory } from '../../storage/root.js';
 import { retainedBallotRecords } from '../ballot/ballot.js';
 import type { CloseSession } from '../close/close-custody.js';
@@ -19,7 +22,6 @@ import {
     heldSubmissions,
     restoreCompletedClose,
 } from '../close/close-custody.js';
-import { completedClosePhase } from '../close/close-state.js';
 
 import { CloseRecordSource } from './close-barrier.js';
 import {

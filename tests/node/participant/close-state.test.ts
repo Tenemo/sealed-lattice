@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
     closeEventKind,
+    closePublications,
     closeRecordInventory,
     closeRecordLengths,
     collectingCloseState,
@@ -328,5 +329,35 @@ describe('participant close state', () => {
             'cd57fe2154156ead007f464f5e8fabe3a20e6683fbb4694221410bca504bab9a',
             '01ff1d44e0c31819ef1763aaae4dc968c1e325517943d5120840b3f6053063e3',
         ]);
+    });
+
+    it('republishes the organizer intent from its lock and the organizer proposal at every later generation, and a response from its signature', () => {
+        const published = (generation: number, isOrganizer: boolean) =>
+            Object.entries(closePublications(generation, isOrganizer))
+                .filter(([, retained]) => retained)
+                .map(([message]) => message);
+        const completed = [23, 24, 25, 26, 27, 29];
+        for (const [generation, messages] of [
+            [12, []],
+            [17, []],
+            [18, []],
+            [19, ['intent']],
+            [20, ['intent']],
+            [21, ['intent', 'response']],
+            ...[22, ...completed].map(
+                (later) => [later, ['intent', 'response', 'proposal']] as const,
+            ),
+        ] as const)
+            expect(published(generation, true)).toEqual(messages);
+        for (const [generation, messages] of [
+            [12, []],
+            [17, []],
+            [19, []],
+            [20, []],
+            ...[21, ...completed].map(
+                (later) => [later, ['response']] as const,
+            ),
+        ] as const)
+            expect(published(generation, false)).toEqual(messages);
     });
 });
