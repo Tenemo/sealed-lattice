@@ -1,109 +1,89 @@
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { Readable } from 'node:stream';
+
+import { onTestFinished } from 'vitest';
+
 import {
     candidateChunkBytes,
     candidatePageEntries,
-    decodeCandidateManifest,
     encodeCandidateManifest,
-    encodeCandidatePage,
-    encodeCandidateReceipt,
 } from '#packages/sdk/src/participant/worker/relay/candidate-codec.js';
+import { serveParticipantCandidates } from '#tools/ci/participant-candidate-http.js';
+import { participantRelayStore } from '#tools/ci/participant-relay-record.js';
 
-// In-memory transport only: it never authenticates a protocol record. Tests
-// may alter these public bytes independently of the owning verifier.
+// The harness relay's own request handling and storage in a temporary
+// directory, so a test is refused what the relay refuses. It never
+// authenticates a protocol record; tests may alter these public bytes
+// independently of the owning verifier.
 export const participantRelayFixture = () => {
-    const chunks = new Map<string, Uint8Array>();
-    const manifests = new Map<string, Uint8Array>();
-    const lists = new Map<string, string[]>();
-    let serial = 0;
-    const nextLocator = () => (++serial).toString(16).padStart(32, '0');
-    const putChunk = (bytes: Uint8Array) => {
-        const locator = nextLocator();
-        chunks.set(locator, bytes.slice());
-        return locator;
-    };
-    const append = (key: string, bytes: Uint8Array) => {
-        decodeCandidateManifest(bytes);
-        const locator = nextLocator();
-        manifests.set(locator, bytes.slice());
-        const entries = lists.get(key) ?? [];
-        const index = entries.length;
-        entries.push(locator);
-        lists.set(key, entries);
-        return { locator, index };
-    };
-    const publish = (key: string, files: ReadonlyMap<string, Uint8Array>) =>
-        append(
-            key,
-            encodeCandidateManifest({
-                files: [...files].map(([name, bytes]) => ({
-                    name,
-                    length: bytes.length,
-                    chunks: Array.from(
-                        {
-                            length: Math.ceil(
-                                bytes.length / candidateChunkBytes,
-                            ),
-                        },
-                        (_, index) =>
-                            putChunk(
-                                bytes.subarray(
-                                    index * candidateChunkBytes,
-                                    (index + 1) * candidateChunkBytes,
-                                ),
-                            ),
+    const directory = mkdtempSync(path.join(tmpdir(), 'participant-relay-'));
+    onTestFinished(() => rmSync(directory, { recursive: true, force: true }));
+    const store = participantRelayStore(directory);
+    const publish = async (
+        key: string,
+        files: ReadonlyMap<string, Uint8Array>,
+    ) => {
+        const entries = [];
+        for (const [name, bytes] of files) {
+            const chunks = [];
+            for (
+                let offset = 0;
+                offset < bytes.length;
+                offset += candidateChunkBytes
+            )
+                chunks.push(
+                    await store.putChunk(
+                        bytes.subarray(offset, offset + candidateChunkBytes),
                     ),
-                })),
-            }),
-        );
-    const response = (bytes: Uint8Array | undefined) =>
-        bytes === undefined
-            ? new Response(null, { status: 404 })
-            : new Response(new Uint8Array(bytes));
+                );
+            entries.push({ name, length: bytes.length, chunks });
+        }
+        return store.append(key, encodeCandidateManifest({ files: entries }));
+    };
+    // The file names of each manifest published under the key, in order.
+    const published = async (key: string) => {
+        const names: string[][] = [];
+        for (let offset = 0; ; offset += candidatePageEntries) {
+            const page = await store.page(key, offset);
+            for (const locator of page.locators)
+                names.push(
+                    (await store.candidate(locator)).manifest.files.map(
+                        ({ name }) => name,
+                    ),
+                );
+            if (offset + candidatePageEntries >= page.total) return names;
+        }
+    };
     const fetch = async (request: string, options: RequestInit = {}) => {
-        const url = new URL(request);
-        if (options.method === 'POST') {
-            const bytes = new Uint8Array(
-                await (options.body as Blob).arrayBuffer(),
-            );
-            if (url.pathname === '/chunks') {
-                if (bytes.length > candidateChunkBytes)
-                    return new Response(null, { status: 413 });
-                return response(
-                    Uint8Array.from(putChunk(bytes).match(/../gu)!, (byte) =>
-                        parseInt(byte, 16),
-                    ),
-                );
-            }
-            if (url.pathname.startsWith('/candidates/'))
-                return response(
-                    encodeCandidateReceipt(
-                        append(
-                            url.pathname.slice('/candidates/'.length),
-                            bytes,
-                        ),
-                    ),
-                );
-        }
-        if (url.pathname.startsWith('/candidates/')) {
-            const entries =
-                lists.get(url.pathname.slice('/candidates/'.length)) ?? [];
-            const offset = Number(url.searchParams.get('offset'));
-            return response(
-                encodeCandidatePage({
-                    total: entries.length,
-                    locators: entries.slice(
-                        offset,
-                        offset + candidatePageEntries,
-                    ),
-                }),
-            );
-        }
-        if (url.pathname.startsWith('/candidate/'))
-            return response(
-                manifests.get(url.pathname.slice('/candidate/'.length)),
-            );
-        if (url.pathname.startsWith('/chunk/'))
-            return response(chunks.get(url.pathname.slice('/chunk/'.length)));
-        return new Response(null, { status: 404 });
+        const body =
+            options.body instanceof Blob
+                ? new Uint8Array(await options.body.arrayBuffer())
+                : new Uint8Array();
+        let status = 200;
+        let bytes: Uint8Array | undefined;
+        const response = {
+            setHeader: () => undefined,
+            writeHead: (value: number) => {
+                status = value;
+                return response;
+            },
+            end: (value?: Uint8Array) => {
+                bytes = value;
+            },
+        };
+        const served = await serveParticipantCandidates(
+            store,
+            Object.assign(Readable.from(body.length > 0 ? [body] : []), {
+                method: options.method ?? 'GET',
+            }),
+            response,
+            new URL(request),
+        );
+        return served && status === 200 && bytes !== undefined
+            ? new Response(new Uint8Array(bytes))
+            : new Response(null, { status: served ? status : 404 });
     };
-    return { chunks, manifests, lists, publish, fetch };
+    return { publish, published, fetch };
 };

@@ -1,5 +1,3 @@
-import type { IncomingMessage, ServerResponse } from 'node:http';
-
 import {
     candidateChunkBytes,
     candidateManifestBytes,
@@ -14,6 +12,15 @@ import type {
 } from '#tools/ci/participant-relay-record.js';
 
 type Store = ReturnType<typeof participantRelayStore>;
+// The parts of a Node HTTP request and response the relay uses, which the
+// in-process test transport also supplies.
+type CandidateRequest = AsyncIterable<Uint8Array> &
+    Readonly<{ method?: string }>;
+type CandidateResponse = {
+    setHeader: (name: string, value: string) => unknown;
+    writeHead: (status: number) => { end: () => unknown };
+    end: (bytes?: Uint8Array) => unknown;
+};
 type Views = Readonly<{
     accept?: (key: string, bytes: Uint8Array) => Promise<boolean>;
     published?: (candidate: StoredParticipantCandidate) => Promise<void>;
@@ -27,10 +34,10 @@ type Views = Readonly<{
     page?: (key: string, offset: number) => ReturnType<Store['page']>;
 }>;
 
-const readBody = async (request: IncomingMessage, maximum: number) => {
-    const parts: Buffer[] = [];
+const readBody = async (request: CandidateRequest, maximum: number) => {
+    const parts: Uint8Array[] = [];
     let length = 0;
-    for await (const bytes of request as AsyncIterable<Buffer>) {
+    for await (const bytes of request) {
         length += bytes.length;
         if (length > maximum)
             throw new RangeError('Publication exceeds its bound.');
@@ -43,8 +50,8 @@ const readBody = async (request: IncomingMessage, maximum: number) => {
 // a malicious relay; no server verdict supplies authentication or acceptance.
 export const serveParticipantCandidates = async (
     store: Store,
-    request: IncomingMessage,
-    response: ServerResponse,
+    request: CandidateRequest,
+    response: CandidateResponse,
     url: URL,
     views: Views = {},
 ) => {

@@ -5,7 +5,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ParticipantContext } from '#packages/sdk/src/participant/worker/module/context.js';
 import { custodyPurpose } from '#packages/sdk/src/participant/worker/module/custody-identity.js';
 import { chunkBytes } from '#packages/sdk/src/participant/worker/module/runtime-bounds.js';
-import { decodeCandidateManifest } from '#packages/sdk/src/participant/worker/relay/candidate-codec.js';
 import { hexadecimal } from '#packages/sdk/src/participant/worker/shared/bytes.js';
 import type { RestoredEnrollment } from '#packages/sdk/src/participant/worker/stages/enrollment/enrollment.js';
 import { publishRegistrationRecords } from '#packages/sdk/src/participant/worker/stages/roster/registration-publication.js';
@@ -214,17 +213,6 @@ const fixture = async (
     };
 };
 
-// The file names of each manifest the relay recorded under a key.
-const publishedFiles = (
-    transport: ReturnType<typeof participantRelayFixture>,
-    key: string,
-) =>
-    (transport.lists.get(key) ?? []).map((id) =>
-        decodeCandidateManifest(transport.manifests.get(id)!).files.map(
-            ({ name }) => name,
-        ),
-    );
-
 describe('bounded registration publication', () => {
     it('publishes the complete recipient key in bounded records after a complete first pass', async () => {
         const state = await fixture(65_536 * 21);
@@ -274,8 +262,7 @@ describe('bounded registration publication', () => {
                     : []),
             ]);
             expect(
-                publishedFiles(
-                    state.transport,
+                await state.transport.published(
                     'registration/' + '03'.repeat(64),
                 ),
             ).toEqual([
@@ -285,10 +272,10 @@ describe('bounded registration publication', () => {
                     'signature.bin',
                 ],
             ]);
-            expect(publishedFiles(state.transport, 'poll')).toEqual([
+            expect(await state.transport.published('poll')).toEqual([
                 ['definition.bin', 'signature.bin'],
             ]);
-            expect(publishedFiles(state.transport, 'roster')).toEqual(
+            expect(await state.transport.published('roster')).toEqual(
                 generation === 3 ? [['proposal.bin', 'signature.bin']] : [],
             );
         },

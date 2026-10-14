@@ -195,7 +195,7 @@ const verifyRoster = async (
         const key = registrationCandidateKey(registrationBodyDigests[position]);
         // A complete transport manifest can still carry an incomplete key.
         // The owning verifier must discard that attempt and accept later bytes.
-        transport.publish(
+        await transport.publish(
             key,
             new Map([
                 ...files,
@@ -205,7 +205,7 @@ const verifyRoster = async (
                 ],
             ]),
         );
-        transport.publish(key, files);
+        await transport.publish(key, files);
     }
     const relay = { base: 'https://relay.test/' };
     const served = vi
