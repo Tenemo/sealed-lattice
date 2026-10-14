@@ -12,7 +12,7 @@ use participant_module::{
     release_work::ReleaseWork,
 };
 use protocol_foundations::{
-    Credential, release_signing::body_header, target_signing::TargetMessage,
+    Credential, RETAINED_TAG_BYTES, release_signing::body_header, target_signing::TargetMessage,
 };
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -268,6 +268,38 @@ pub fn run(
         assert!(restore(&enrollments[0].credential, &changed).is_err());
     }
     assert!(restore(&enrollments[0].credential, &retained[..retained.len() - 1]).is_err());
+    // A copy its credential keys again restores only while it carries
+    // exactly the ciphertext its body names: no byte after it, and no other
+    // ciphertext byte.
+    let rekeyed = |bytes: &[u8]| {
+        let mut copy = bytes.to_vec();
+        copy.extend(enrollments[0].credential.retained_tag(
+            b"sealed-lattice/retained-evaluation-target/v2",
+            &poll,
+            bytes,
+        ));
+        copy
+    };
+    let unkeyed = &retained[..retained.len() - RETAINED_TAG_BYTES];
+    assert!(restore(&enrollments[0].credential, &rekeyed(unkeyed)).is_ok());
+    let extended = rekeyed(&[unkeyed, &[0]].concat());
+    if evaluated.ciphertext().is_some() {
+        assert!(matches!(
+            restore(&enrollments[0].credential, &extended),
+            Err(Error::Context)
+        ));
+        let mut changed = unkeyed.to_vec();
+        *changed.last_mut().unwrap() ^= 1;
+        assert!(matches!(
+            restore(&enrollments[0].credential, &rekeyed(&changed)),
+            Err(Error::Context)
+        ));
+    } else {
+        assert!(matches!(
+            restore(&enrollments[0].credential, &extended),
+            Err(Error::Encoding)
+        ));
+    }
     let mut collector = CertificateCollector::new(target.clone());
     assert!(collector.certificate().is_err());
     assert_eq!(statuses.len(), enrollments.len());
