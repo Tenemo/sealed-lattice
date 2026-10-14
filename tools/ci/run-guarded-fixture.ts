@@ -87,10 +87,8 @@ export const runGuardedFixture = async ({
         {
             runLog: log,
             outputMode: 'inherit',
-            signal: AbortSignal.any([
-                controller.signal,
-                AbortSignal.timeout(600_000),
-            ]),
+            signal: controller.signal,
+            guard: { timeoutMilliseconds: 600_000 },
             observer: {
                 onCommandOutput({ chunk, streamName }) {
                     if (streamName === 'stdout') {

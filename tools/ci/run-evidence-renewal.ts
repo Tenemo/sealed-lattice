@@ -32,7 +32,6 @@ import {
     runWithLocalRunLog,
     type ActiveLocalRunLog,
 } from '#tools/ci/local-run-log.js';
-import { guardProcessTreeMemory } from '#tools/ci/process-tree-memory.js';
 import {
     describeProcessorPlacement,
     parseProcessorPlacement,
@@ -402,16 +401,6 @@ const runStep = async (
         }
     }
     if (invocation !== undefined && failures.length === 0) {
-        const controller = new AbortController();
-        const timer = setTimeout(
-            () =>
-                controller.abort({
-                    classification: 'lane-timeout',
-                    limitMilliseconds: stepLimitMilliseconds,
-                }),
-            stepLimitMilliseconds,
-        );
-        let guard: { readonly stop: () => Promise<void> } | undefined;
         try {
             exitCode = await runCommandsInSeries(
                 [
@@ -420,57 +409,32 @@ const runStep = async (
                         : placeCommand(invocation, placement),
                 ],
                 {
+                    guard: {
+                        timeoutMilliseconds: stepLimitMilliseconds,
+                        memory: {
+                            limitBytes: context.memoryLimit,
+                            exceededMessage: `${step.name} exceeded the renewal's process-tree memory limit of ${String(context.memoryLimit)} bytes.`,
+                            sampleEventType: 'renewal-memory-sample',
+                            sampleIntervalMilliseconds:
+                                memorySampleIntervalMilliseconds,
+                            onSample: (bytes) => {
+                                peakProcessTreeBytes = Math.max(
+                                    peakProcessTreeBytes,
+                                    bytes,
+                                );
+                            },
+                        },
+                    },
                     observer: {
                         onCommandOutput: ({ chunk }) => recent.append(chunk),
-                        onCommandStart: ({ processIdentifier }) => {
-                            if (processIdentifier === undefined) return;
-                            guard = guardProcessTreeMemory({
-                                processIdentifier,
-                                memoryLimit: context.memoryLimit,
-                                exceededMessage: `${step.name} exceeded the renewal's process-tree memory limit of ${String(context.memoryLimit)} bytes.`,
-                                sampleIntervalMilliseconds:
-                                    memorySampleIntervalMilliseconds,
-                                onSample: (bytes) => {
-                                    peakProcessTreeBytes = Math.max(
-                                        peakProcessTreeBytes,
-                                        bytes,
-                                    );
-                                    context.runLog.writeEvent({
-                                        details: {
-                                            bytes,
-                                            memoryLimit: context.memoryLimit,
-                                            name: step.name,
-                                        },
-                                        eventType: 'renewal-memory-sample',
-                                    });
-                                },
-                                abort: (reason) => {
-                                    failures.push(errorMessage(reason));
-                                    controller.abort(reason);
-                                },
-                            });
-                        },
                     },
                     outputMode: 'capture',
                     runLog: context.runLog,
-                    signal: controller.signal,
                 },
             );
         } catch (error) {
             failures.push(errorMessage(error));
-        } finally {
-            clearTimeout(timer);
-            await guard?.stop();
         }
-        if (
-            (
-                controller.signal.reason as
-                    { classification?: unknown } | undefined
-            )?.classification === 'lane-timeout'
-        )
-            failures.push(
-                `${step.name} exceeded its ${formatDuration(stepLimitMilliseconds)} limit.`,
-            );
     }
     if (monitor !== undefined) {
         try {

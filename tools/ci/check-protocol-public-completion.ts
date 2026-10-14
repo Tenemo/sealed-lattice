@@ -19,7 +19,6 @@ import {
     runArtifactDirectoryPath,
     runWithLocalRunLog,
 } from '#tools/ci/local-run-log.js';
-import { guardProcessTreeMemory } from '#tools/ci/process-tree-memory.js';
 import { acquireProtocolResearchLock } from '#tools/ci/protocol-research-lock.js';
 import {
     selectProtocolResearchCase,
@@ -296,9 +295,7 @@ await runWithLocalRunLog(
             ) => {
                 // The reader's scratch holds only its working values.
                 try {
-                    const controller = new AbortController();
-                    let guard: { stop: () => Promise<void> } | undefined,
-                        peakMemory = 0,
+                    let peakMemory = 0,
                         samples = 0;
                     const exitCode = await runCommandsInSeries(
                         [
@@ -323,50 +320,23 @@ await runWithLocalRunLog(
                         {
                             runLog: log,
                             outputMode: 'inherit',
-                            signal: AbortSignal.any([
-                                controller.signal,
-                                AbortSignal.timeout(verificationTimeout),
-                            ]),
-                            observer: {
-                                onCommandStart({ processIdentifier }) {
-                                    assert.ok(processIdentifier);
-                                    guard = guardProcessTreeMemory({
-                                        processIdentifier,
-                                        memoryLimit: 1073741824,
-                                        exceededMessage:
-                                            'Reader process-tree memory guard exceeded.',
-                                        onSample: (bytes) => {
-                                            samples++;
-                                            peakMemory = Math.max(
-                                                peakMemory,
-                                                bytes,
-                                            );
-                                            log.writeEvent({
-                                                eventType:
-                                                    'threshold-reader-memory',
-                                                details: {
-                                                    bytes,
-                                                    limit: 1073741824,
-                                                },
-                                            });
-                                        },
-                                        abort: (reason) => {
-                                            controller.abort(reason);
-                                        },
-                                    });
-                                },
-                                onCommandExit() {
-                                    void guard?.stop();
+                            guard: {
+                                timeoutMilliseconds: verificationTimeout,
+                                memory: {
+                                    limitBytes: 1073741824,
+                                    exceededMessage:
+                                        'Reader process-tree memory guard exceeded.',
+                                    sampleEventType: 'threshold-reader-memory',
+                                    onSample: (bytes) => {
+                                        samples++;
+                                        peakMemory = Math.max(
+                                            peakMemory,
+                                            bytes,
+                                        );
+                                    },
                                 },
                             },
                         },
-                    ).finally(async () => {
-                        await guard?.stop();
-                    });
-                    assert.equal(
-                        controller.signal.aborted,
-                        false,
-                        String(controller.signal.reason),
                     );
                     return { exitCode, peakMemory, samples };
                 } finally {

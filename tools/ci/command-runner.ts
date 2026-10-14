@@ -11,6 +11,7 @@ import {
     resolvePackageManagerRunner,
     type PackageManagerRunner,
 } from './package-manager-runner.js';
+import { guardProcessTreeMemory } from './process-tree-memory.js';
 import {
     redactCommandLineArguments,
     redactDiagnosticText,
@@ -61,7 +62,29 @@ export type CommandRunObserver = {
     readonly onCommandStart?: (event: CommandStartEvent) => void;
 };
 
+// Stops a command that runs past its timeout, or whose process tree's
+// sampled private bytes exceed the memory limit. Every sample is recorded
+// under the event type.
+export type CommandGuard = Readonly<{
+    timeoutMilliseconds?: number;
+    memory?: Readonly<{
+        limitBytes: number;
+        exceededMessage: string;
+        sampleEventType: string;
+        sampleIntervalMilliseconds?: number;
+        onSample?: (bytes: number) => void;
+    }>;
+}>;
+
 type CommandOutputMode = 'capture' | 'inherit';
+
+type CommandRunInput = {
+    readonly guard?: CommandGuard;
+    readonly observer?: CommandRunObserver;
+    readonly outputMode?: CommandOutputMode;
+    readonly runLog?: ActiveLocalRunLog;
+    readonly signal?: AbortSignal;
+};
 type KillableChildProcess = Pick<ChildProcess, 'kill' | 'pid'>;
 type ProcessTreeKillResult = {
     readonly error?: ReturnType<typeof serializeErrorDiagnostic>;
@@ -311,14 +334,9 @@ const spawnOptions = (
     windowsHide: true,
 });
 
-const runCommand = async (
+const spawnCommand = async (
     invocation: CommandInvocation,
-    input: {
-        readonly observer?: CommandRunObserver;
-        readonly outputMode?: CommandOutputMode;
-        readonly runLog?: ActiveLocalRunLog;
-        readonly signal?: AbortSignal;
-    },
+    input: CommandRunInput,
 ): Promise<number> => {
     if (input.signal?.aborted === true) return 1;
     const outputMode = input.outputMode ?? 'inherit';
@@ -519,10 +537,85 @@ const runCommand = async (
     });
 };
 
+// Runs a command within its guard. A command the guard stops fails with the
+// guard's reason once its process tree has exited; a timeout counts as the
+// command's own failure in the run log.
+const runCommand = async (
+    invocation: CommandInvocation,
+    input: CommandRunInput,
+): Promise<number> => {
+    const { guard } = input;
+    if (guard === undefined) return spawnCommand(invocation, input);
+    const { memory, timeoutMilliseconds } = guard;
+    const stopped = new AbortController();
+    const timer =
+        timeoutMilliseconds === undefined
+            ? undefined
+            : setTimeout(() => {
+                  stopped.abort({
+                      classification: 'lane-timeout',
+                      limitMilliseconds: timeoutMilliseconds,
+                  });
+              }, timeoutMilliseconds);
+    let sampler: { readonly stop: () => Promise<void> } | undefined;
+    let exitCode: number;
+    try {
+        exitCode = await spawnCommand(invocation, {
+            ...input,
+            signal:
+                input.signal === undefined
+                    ? stopped.signal
+                    : AbortSignal.any([input.signal, stopped.signal]),
+            observer: {
+                ...input.observer,
+                onCommandStart: (event) => {
+                    input.observer?.onCommandStart?.(event);
+                    if (
+                        memory === undefined ||
+                        event.processIdentifier === undefined
+                    )
+                        return;
+                    sampler = guardProcessTreeMemory({
+                        processIdentifier: event.processIdentifier,
+                        memoryLimit: memory.limitBytes,
+                        exceededMessage: memory.exceededMessage,
+                        sampleIntervalMilliseconds:
+                            memory.sampleIntervalMilliseconds,
+                        onSample: (bytes) => {
+                            input.runLog?.writeEvent({
+                                commandId: event.logFiles?.commandId,
+                                details: {
+                                    bytes,
+                                    memoryLimit: memory.limitBytes,
+                                },
+                                eventType: memory.sampleEventType,
+                            });
+                            memory.onSample?.(bytes);
+                        },
+                        abort: (reason) => {
+                            stopped.abort(reason);
+                        },
+                    });
+                },
+            },
+        });
+    } finally {
+        clearTimeout(timer);
+        await sampler?.stop();
+    }
+    if (!stopped.signal.aborted) return exitCode;
+    const reason: unknown = stopped.signal.reason;
+    if (reason instanceof Error) throw reason;
+    throw new Error(
+        `${invocation.description} exceeded its ${String(timeoutMilliseconds)}-millisecond limit.`,
+    );
+};
+
 export const runCommandAndCaptureOutput = async (
     invocation: CommandInvocation,
     input: {
         readonly echoOutput?: boolean;
+        readonly guard?: CommandGuard;
         readonly onCommandStart?: CommandRunObserver['onCommandStart'];
         readonly runLog?: ActiveLocalRunLog;
         readonly signal?: AbortSignal;
@@ -532,6 +625,7 @@ export const runCommandAndCaptureOutput = async (
     let stderr = '';
     let terminationSignal: NodeJS.Signals | null = null;
     const exitCode = await runCommand(invocation, {
+        guard: input.guard,
         observer: {
             onCommandStart: input.onCommandStart,
             onCommandExit: (event) => {
@@ -574,12 +668,7 @@ export const runCheckedCommand = async (
 
 export const runCommandsInSeries = async (
     invocations: readonly CommandInvocation[],
-    input: {
-        readonly observer?: CommandRunObserver;
-        readonly outputMode?: CommandOutputMode;
-        readonly runLog?: ActiveLocalRunLog;
-        readonly signal?: AbortSignal;
-    } = {},
+    input: CommandRunInput = {},
 ): Promise<number> => {
     for (const invocation of invocations) {
         if (input.signal?.aborted === true) return 1;
