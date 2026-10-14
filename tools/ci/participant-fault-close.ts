@@ -199,6 +199,10 @@ export const closeFaultBallots = async (
         assert.equal((await run(0, 'cast-ballot')).generation, 17);
     }
     const ballotBounds = bounds.ballot;
+    // The envelope ends with the ballot time, the body length and the body
+    // identity.
+    const bodyLengthOffset = ballotBounds.envelopeBytes - 64 - 8;
+    const ballotTimeOffset = bodyLengthOffset - 8;
     // The diagnostic index names an original submission for fixture inspection.
     const submissionDirectory = async (author: number) =>
         path.join(
@@ -215,7 +219,10 @@ export const closeFaultBallots = async (
         const envelope = await readFile(path.join(directory, 'envelope.bin'));
         const body = await stat(path.join(directory, 'body.bin'));
         assert.equal(envelope.length, ballotBounds.envelopeBytes);
-        assert.equal(envelope.readBigUInt64LE(142), BigInt(body.size));
+        assert.equal(
+            envelope.readBigUInt64LE(bodyLengthOffset),
+            BigInt(body.size),
+        );
         assert.ok(
             body.size >= ballotBounds.minimumBodyBytes &&
                 body.size <= ballotBounds.maximumBodyBytes,
@@ -233,7 +240,7 @@ export const closeFaultBallots = async (
         Number(
             (
                 await readFile(path.join(directory, 'envelope.bin'))
-            ).readBigUInt64LE(134),
+            ).readBigUInt64LE(ballotTimeOffset),
         );
     const ballotTimes = new Map(
         await Promise.all(
