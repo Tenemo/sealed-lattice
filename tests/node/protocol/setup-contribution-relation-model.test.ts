@@ -119,9 +119,9 @@ describe('complete setup contribution relation in a reduced ring', () => {
                 2n * 65536n * (3n * 16n) + 32768n * 16n + 1408n * 48n,
             fullRingQueryCosets: 4n,
             expandedStatementPolynomialCount: 42n + 31n,
-            expandedStatementHeaderByteLength: 4n + 4n + 108n + 20n,
+            expandedStatementHeaderByteLength: 4n + 108n,
             expandedStatementByteLength:
-                4n + 4n + 108n + 20n + 42n * 65536n * 109n + 31n * 65536n * 21n,
+                4n + 108n + 42n * 65536n * 109n + 31n * 65536n * 21n,
             maximumEncodedOperatorByteLength:
                 64n + 2n * 48n + 355n * 1408n * 48n,
             maximumIntegerLimbConvolutionMagnitude: 1024n * ((1n << 96n) - 1n),

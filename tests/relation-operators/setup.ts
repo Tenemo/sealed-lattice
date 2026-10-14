@@ -41,12 +41,12 @@ const productionSetupLayout = {
 
 const gadgetPolynomials = 7;
 
-const setupHeader = (profile: SupportedProfile, degree: number) =>
+const setupHeader = (profile: SupportedProfile) =>
     Buffer.concat([
         Buffer.from('SCO2', 'latin1'),
-        littleEndian(BigInt(degree), 4),
-        ...[profile.ciphertext.modulus, shareEncryptionParameters.modulus].map(
-            (value) => littleEndian(value, byteLength(value)),
+        littleEndian(
+            profile.ciphertext.modulus,
+            byteLength(profile.ciphertext.modulus),
         ),
     ]);
 
@@ -76,7 +76,7 @@ export const setupRelationOperator = (
     const participants = profile.participantCount;
     const shareCommon = gadgetPolynomials * gadgetLength;
     const polynomialCount = shareCommon + 3 * participants + 1;
-    const header = setupHeader(profile, degree);
+    const header = setupHeader(profile);
     if (
         statement.length !==
         header.length +

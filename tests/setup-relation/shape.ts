@@ -163,10 +163,7 @@ export const compileSetupContributionRelationCensus = (
         );
     const syntheticWitnessHeaderByteLength = 4n + 3n * 4n + 64n;
     const expandedStatementHeaderByteLength =
-        4n +
-        4n +
-        publicCoefficientMagnitudeByteLength +
-        shareMagnitudeByteLength;
+        4n + publicCoefficientMagnitudeByteLength;
     return {
         ...shape,
         fullAffineCoefficientByteLength:

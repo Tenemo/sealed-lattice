@@ -261,9 +261,7 @@ const reducedSetup = (profile: SupportedProfile) => {
     ];
     const header = Buffer.concat([
         Buffer.from('SCO2', 'latin1'),
-        unsigned(BigInt(setupLayout.degree), 4),
         unsigned(modulus, byteLength(modulus)),
-        unsigned(shareModulus, byteLength(shareModulus)),
     ]);
     const statement = Buffer.concat([
         header,

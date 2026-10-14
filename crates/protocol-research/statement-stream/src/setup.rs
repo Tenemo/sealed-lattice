@@ -80,9 +80,7 @@ impl Layout {
         }
     }
     fn header(self) -> Vec<u8> {
-        let mut header = self.profile.setup_statement_header();
-        header[4..8].copy_from_slice(&(self.degree as u32).to_le_bytes());
-        header
+        self.profile.setup_statement_header()
     }
     fn polynomial(self, index: usize) -> Option<(Family, usize)> {
         self.profile

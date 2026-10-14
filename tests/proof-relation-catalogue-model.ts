@@ -112,12 +112,10 @@ export const proofRelationCatalogueEntry = (profile: SupportedProfile) =>
                 ];
                 header = Buffer.concat([
                     Buffer.from('SCO2'),
-                    words([degree]),
                     proofCatalogueInteger(
                         profile.ciphertext.modulus,
                         width(profile.ciphertext.modulus),
                     ),
-                    proofCatalogueInteger(sharing.modulus, 20),
                 ]);
                 families = [
                     {

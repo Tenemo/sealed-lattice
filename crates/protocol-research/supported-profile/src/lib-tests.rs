@@ -185,10 +185,11 @@ fn setup_polynomials_are_numbered_once_by_family() {
         assert_eq!(profile.setup_family(profile.setup_polynomials()), None);
     }
     let completion = Profile::new(10, 10).unwrap();
-    assert_eq!(completion.setup_statement_header().len(), 136);
+    // The magic and the 108-byte ciphertext modulus.
+    assert_eq!(completion.setup_statement_header().len(), 4 + 108);
     assert_eq!(
         completion.setup_statement_length(),
-        136 + 42 * DEGREE * 109 + 31 * DEGREE * 21
+        4 + 108 + 42 * DEGREE * 109 + 31 * DEGREE * 21
     );
     assert_eq!(completion.setup_polynomials(), 73);
     assert_eq!(completion.share_common_polynomial(), 42);

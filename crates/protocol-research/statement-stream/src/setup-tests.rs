@@ -713,7 +713,6 @@ fn malformed_or_unbound_statements_never_return_an_operator() {
             Refusal::Length,
             Refusal::Binding,
             Refusal::Encoding,
-            Refusal::Parameters,
         ];
         for (kind, expected) in expected.into_iter().enumerate() {
             let mut bytes = original.clone();
@@ -726,9 +725,7 @@ fn malformed_or_unbound_statements_never_return_an_operator() {
                 3 => bytes.push(0),
                 4 => bytes[header + 1] ^= 1,
                 // A share coefficient beyond half the modulus.
-                5 => bytes[share + 1..share + 1 + share_modulus().len()].fill(0xff),
-                // The preceding statement grammar cannot enter this relation.
-                _ => bytes[..4].copy_from_slice(b"SCO1"),
+                _ => bytes[share + 1..share + 1 + share_modulus().len()].fill(0xff),
             }
             // Each statement but the unbound one is bound, so only its own
             // check can refuse it.

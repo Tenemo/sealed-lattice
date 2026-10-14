@@ -141,15 +141,7 @@ describe('complete first-oracle proof checkpoint', () => {
         expect(model.recordHashBytes).toBe(64n * records);
         expect(model.maximumHeaderBytes).toBeLessThan(16384n);
         expect(model.maximumHeaderBytes).toBe(
-            1n +
-                1n +
-                4n +
-                2n +
-                1024n +
-                64n +
-                (4n + 4n + 108n + 20n) +
-                2n +
-                10n * 64n,
+            1n + 1n + 4n + 2n + 1024n + 64n + (4n + 108n) + 2n + 10n * 64n,
         );
         const actualHeader = Buffer.concat([
             Buffer.from([10, 10]),
@@ -157,12 +149,7 @@ describe('complete first-oracle proof checkpoint', () => {
             Buffer.from([79, 1]),
             Buffer.alloc(335),
             Buffer.alloc(64),
-            Buffer.concat([
-                Buffer.from('SCO2'),
-                Buffer.alloc(4),
-                Buffer.alloc(108),
-                Buffer.alloc(20),
-            ]),
+            Buffer.concat([Buffer.from('SCO2'), Buffer.alloc(108)]),
             Buffer.from([10, 0]),
             Buffer.alloc(10 * 64),
         ]);
@@ -184,7 +171,7 @@ describe('complete first-oracle proof checkpoint', () => {
         );
         expect(model.publicRecordCount).toBe(1n + 24n * 7n + 20n * 2n);
         expect(model.publicPlaintextBytes).toBe(
-            4n + 4n + 108n + 20n + 24n * 65536n * 109n + 20n * 65536n * 21n,
+            4n + 108n + 24n * 65536n * 109n + 20n * 65536n * 21n,
         );
         expect(model.maximumRootPlaintextBytes).toBeLessThan(1_048_576n);
         expect(model.maximumRetainedPayloadBytes).toBeLessThan(402_653_184n);

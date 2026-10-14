@@ -513,13 +513,12 @@ impl Profile {
             sparse_supports,
         }
     }
-    /// The setup statement header: its magic, the ring degree and the FHE
-    /// and share-encryption moduli.
+    /// The setup statement header: its magic and the profile's ciphertext
+    /// modulus. The ring degree and the share-encryption modulus are the
+    /// suite's.
     pub fn setup_statement_header(self) -> Vec<u8> {
         let mut header = STATEMENT_MAGIC.to_vec();
-        header.extend((DEGREE as u32).to_le_bytes());
         header.extend(self.ciphertext_modulus().to_bytes());
-        header.extend(share_modulus());
         header
     }
     /// Bytes of one setup polynomial: a sign byte and a magnitude for each
