@@ -8,10 +8,7 @@ import {
     shakePermutationGateCharge,
 } from '#tests/oracle-budget-model.js';
 import { compilePreparationLedger } from '#tests/preparation-ledger-model.js';
-import {
-    firstOracleResumeHashWork,
-    proofHashProfiles,
-} from '#tests/proof-hash-work-model.js';
+import { setupFirstOracleResumeWork } from '#tests/proof-hash-work-model.js';
 import { compileRegistrationSetupBindingScreen } from '#tests/registration-setup-binding-model.js';
 import { registrationSourceMask } from '#tests/registration-source-domain-model.js';
 import { compileRegistrationSourceExtractionWork } from '#tests/registration-source-randomness-model.js';
@@ -123,15 +120,7 @@ const resumeFactors = new Map<SupportedProfile, bigint>();
 export const firstOracleResumeFactor = (profile: SupportedProfile) => {
     const cached = resumeFactors.get(profile);
     if (cached !== undefined) return cached;
-    const setup = proofHashProfiles(profile).find(
-        (value) => value.role === 'setup',
-    );
-    assert.ok(setup !== undefined);
-    const factor = firstOracleResumeHashWork(
-        setup.firstWidth,
-        setup.roleBytes,
-        (setup.firstWidth - 48n) / 16n,
-    ).completeInputFactor;
+    const factor = setupFirstOracleResumeWork(profile).completeInputFactor;
     resumeFactors.set(profile, factor);
     return factor;
 };

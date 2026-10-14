@@ -546,6 +546,12 @@ export const supportedProfileRanges = () => {
     };
 };
 
+// The supported profile with the most participants and options.
+export const largestSupportedProfile = () => {
+    const { participants, options } = supportedProfileRanges();
+    return deriveSupportedProfile(participants.maximum, options.maximum);
+};
+
 // Every supported profile, by participant count and then option count.
 export const listSupportedProfiles = (): readonly SupportedProfile[] =>
     supportedParticipantCounts().flatMap((participantCount) =>

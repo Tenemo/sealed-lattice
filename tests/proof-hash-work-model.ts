@@ -288,6 +288,22 @@ export const proofHashProfiles = (profile: SupportedProfile) => {
     });
 };
 
+// The first-oracle leaf hash of a profile's setup proof resumed at its latest
+// checkpoint cut, which retains every base column and so maximizes the
+// complete-input factor for the profile.
+export const setupFirstOracleResumeWork = (profile: SupportedProfile) => {
+    const setup = proofHashProfiles(profile).find(
+        (value) => value.role === 'setup',
+    );
+    if (setup === undefined)
+        throw new Error('The proof hash profiles have no setup role.');
+    return firstOracleResumeHashWork(
+        setup.firstWidth,
+        setup.roleBytes,
+        (setup.firstWidth - 48n) / 16n,
+    );
+};
+
 export const compileProofHashWork = (
     supportedProfile: SupportedProfile,
     profile: ReturnType<typeof proofHashProfiles>[number],
