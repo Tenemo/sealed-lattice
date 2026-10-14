@@ -17,15 +17,15 @@ use word_proof::field::{self, Element, MODULUS, ONE, ZERO};
 use std::collections::BTreeMap;
 
 #[derive(Debug)]
-pub enum Error {
+pub enum Refusal {
     Shape,
     Encoding,
     Binding,
     Arithmetic,
 }
-impl From<statement_stream::Error> for Error {
-    fn from(error: statement_stream::Error) -> Self {
-        use statement_stream::Error as Stream;
+impl From<statement_stream::Refusal> for Refusal {
+    fn from(error: statement_stream::Refusal) -> Self {
+        use statement_stream::Refusal as Stream;
         match error {
             Stream::Parameters | Stream::Length | Stream::Incomplete => Self::Shape,
             Stream::Encoding => Self::Encoding,
@@ -76,24 +76,24 @@ pub fn header(
     position: usize,
     options: usize,
     top_count: usize,
-) -> Result<Vec<u8>, Error> {
+) -> Result<Vec<u8>, Refusal> {
     let mut header = HEADER_MAGIC.to_vec();
     header.extend(poll);
     header.extend(setup_identity);
     header.extend(
         u16::try_from(position)
-            .map_err(|_| Error::Shape)?
+            .map_err(|_| Refusal::Shape)?
             .to_le_bytes(),
     );
-    header.push(u8::try_from(options).map_err(|_| Error::Shape)?);
-    header.push(u8::try_from(top_count).map_err(|_| Error::Shape)?);
+    header.push(u8::try_from(options).map_err(|_| Refusal::Shape)?);
+    header.push(u8::try_from(top_count).map_err(|_| Refusal::Shape)?);
     Ok(header)
 }
 fn polynomial_stream(
     profile: Profile,
     index: usize,
     alpha: Element,
-) -> Result<PolynomialStream, Error> {
+) -> Result<PolynomialStream, Refusal> {
     let family = family(index);
     PolynomialStream::new(
         &profile.family_modulus(family),
@@ -101,7 +101,7 @@ fn polynomial_stream(
         FHE_LIMB_BITS,
         alpha,
     )
-    .map_err(|_| Error::Arithmetic)
+    .map_err(|_| Refusal::Arithmetic)
 }
 fn signed(value: i64) -> u128 {
     if value < 0 {
@@ -110,12 +110,12 @@ fn signed(value: i64) -> u128 {
         value as u128
     }
 }
-pub(crate) fn encode_polynomial(values: &[BigInt], width: usize) -> Result<Vec<u8>, Error> {
+pub(crate) fn encode_polynomial(values: &[BigInt], width: usize) -> Result<Vec<u8>, Refusal> {
     let mut bytes = Vec::with_capacity(values.len() * width);
     for value in values {
         let (sign, magnitude) = value.to_bytes_le();
         if magnitude.len() >= width {
-            return Err(Error::Encoding);
+            return Err(Refusal::Encoding);
         }
         bytes.push(u8::from(sign == Sign::Minus));
         bytes.extend(&magnitude);
@@ -124,7 +124,7 @@ pub(crate) fn encode_polynomial(values: &[BigInt], width: usize) -> Result<Vec<u
     Ok(bytes)
 }
 impl PublicStatement {
-    pub fn from_encryption(witness: &LinkedBallotWitness) -> Result<Self, Error> {
+    pub fn from_encryption(witness: &LinkedBallotWitness) -> Result<Self, Refusal> {
         let context = &witness.context;
         let header = header(
             &context.poll().identity(),
@@ -140,7 +140,7 @@ impl PublicStatement {
         header: Vec<u8>,
         fhe: &EncryptionWitness,
         auxiliary: &EncryptionWitness,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, Refusal> {
         let mut polynomials = Vec::with_capacity(POLYNOMIALS);
         for (encryption, family) in [(fhe, Family::Fhe), (auxiliary, Family::Auxiliary)] {
             let width = coefficient_bytes(profile, family);
@@ -167,7 +167,7 @@ impl PublicStatement {
         }
         hash.finalize()
     }
-    pub fn operator(&self, alpha: Element) -> Result<Operator, Error> {
+    pub fn operator(&self, alpha: Element) -> Result<Operator, Refusal> {
         affine::operator::<Builder>(self.profile, alpha, &self.header, &self.polynomials)
     }
 }
@@ -247,7 +247,7 @@ impl Builder {
     }
 }
 impl OperatorBuilder for Builder {
-    type Error = Error;
+    type Refusal = Refusal;
     const HEADER_BYTES: usize = BALLOT_HEADER_BYTES;
     const POLYNOMIALS: usize = POLYNOMIALS;
     fn columns(profile: Profile) -> usize {
@@ -260,12 +260,12 @@ impl OperatorBuilder for Builder {
         profile: Profile,
         index: usize,
         alpha: Element,
-    ) -> Result<PolynomialStream, Error> {
+    ) -> Result<PolynomialStream, Refusal> {
         polynomial_stream(profile, index, alpha)
     }
-    fn begin(profile: Profile, alpha: Element, header: &[u8]) -> Result<Self, Error> {
+    fn begin(profile: Profile, alpha: Element, header: &[u8]) -> Result<Self, Refusal> {
         protocol_foundations::ballot_body::check_context(profile, header)
-            .map_err(|_| Error::Shape)?;
+            .map_err(|_| Refusal::Shape)?;
         Ok(Self {
             profile,
             columns: BallotColumns::new(profile),
@@ -279,9 +279,9 @@ impl OperatorBuilder for Builder {
             consumed: 0,
         })
     }
-    fn polynomial(&mut self, index: usize, parser: PolynomialStream) -> Result<(), Error> {
+    fn polynomial(&mut self, index: usize, parser: PolynomialStream) -> Result<(), Refusal> {
         if self.consumed != index || index >= POLYNOMIALS {
-            return Err(Error::Shape);
+            return Err(Refusal::Shape);
         }
         self.consumed += 1;
         let auxiliary = family(index) == Family::Auxiliary;
@@ -299,7 +299,7 @@ impl OperatorBuilder for Builder {
             },
         );
         if local < 2 {
-            let adjoint = parser.adjoint().map_err(|_| Error::Encoding)?;
+            let adjoint = parser.adjoint().map_err(|_| Refusal::Encoding)?;
             let positive = if auxiliary {
                 self.columns.auxiliary_positive()
             } else {
@@ -310,7 +310,7 @@ impl OperatorBuilder for Builder {
                 .entry(positive)
                 .or_insert_with(|| vec![ZERO; adjoint.len()]);
             if combined.len() != adjoint.len() {
-                return Err(Error::Shape);
+                return Err(Refusal::Shape);
             }
             for (target, value) in combined.iter_mut().zip(adjoint) {
                 *target = field::add(*target, field::multiply(weight, value));
@@ -318,14 +318,17 @@ impl OperatorBuilder for Builder {
         } else {
             self.target = field::add(
                 self.target,
-                field::multiply(weight, parser.finish_value().map_err(|_| Error::Encoding)?),
+                field::multiply(
+                    weight,
+                    parser.finish_value().map_err(|_| Refusal::Encoding)?,
+                ),
             );
         }
         Ok(())
     }
-    fn finish(mut self) -> Result<Operator, Error> {
+    fn finish(mut self) -> Result<Operator, Refusal> {
         if self.consumed != POLYNOMIALS {
-            return Err(Error::Shape);
+            return Err(Refusal::Shape);
         }
         let columns = self.columns;
         let limb_weight = power(self.alpha, SYSTEMATIC);
@@ -384,10 +387,10 @@ impl OperatorBuilder for Builder {
             SYSTEMATIC,
         );
         let options = self.profile.options();
-        let matrix = PackingMatrix::new(options).map_err(|_| Error::Shape)?;
+        let matrix = PackingMatrix::new(options).map_err(|_| Refusal::Shape)?;
         let geometric = powers(self.alpha, SYSTEMATIC);
         for option in 0..options {
-            let column = matrix.column(option).map_err(|_| Error::Shape)?;
+            let column = matrix.column(option).map_err(|_| Refusal::Shape)?;
             let value = column
                 .iter()
                 .zip(&geometric)

@@ -1,6 +1,6 @@
 use crate::{
     certification::{CertificateCollector, VerifiedInventoryCertificate},
-    release::{Error, ReleaseContext},
+    release::{Refusal, ReleaseContext},
     release_body::{AuthenticatedReleaseEnvelope, ReleaseBodyVerifier},
     target::VerifiedEvaluationTarget,
     terminal::{ReleaseCollector, VerifiedNoResult, VerifiedResult, verify_no_result},
@@ -90,7 +90,7 @@ impl CompletionSession {
         operation: u32,
         argument: usize,
         length: usize,
-    ) -> Result<(), Error> {
+    ) -> Result<(), Refusal> {
         let operation = CompletionOperation::from_code(operation);
         if length > COMPLETION_INPUT_BYTES
             || (!matches!(
@@ -98,15 +98,15 @@ impl CompletionSession {
                 Some(CompletionOperation::BeginShareConstant | CompletionOperation::PushOperand)
             ) && argument != 0)
         {
-            return Err(Error::Encoding);
+            return Err(Refusal::Encoding);
         }
         self.output.clear();
         match operation {
             Some(CompletionOperation::BeginVotes) => {
                 if length != 0 || self.votes.is_some() {
-                    return Err(Error::Context);
+                    return Err(Refusal::Context);
                 }
-                let target = target().ok_or(Error::Incomplete)?;
+                let target = target().ok_or(Refusal::Incomplete)?;
                 let count = target.setup().profile().participants();
                 let collector = CertificateCollector::new(target);
                 self.word(count);
@@ -114,24 +114,24 @@ impl CompletionSession {
                 self.votes = Some(collector);
             }
             Some(CompletionOperation::InsertVote) => {
-                let votes = self.votes.as_mut().ok_or(Error::Incomplete)?;
+                let votes = self.votes.as_mut().ok_or(Refusal::Incomplete)?;
                 let inserted = votes
                     .insert(&self.input[..length])
-                    .map_err(|_| Error::Signature)?;
+                    .map_err(|_| Refusal::Signature)?;
                 let count = votes.accepted();
                 self.word(usize::from(inserted));
                 self.word(count);
             }
             Some(CompletionOperation::Certify) => {
                 if length != 0 || self.certificate.is_some() {
-                    return Err(Error::Context);
+                    return Err(Refusal::Context);
                 }
                 let certificate = Arc::new(
                     self.votes
                         .as_ref()
-                        .ok_or(Error::Incomplete)?
+                        .ok_or(Refusal::Incomplete)?
                         .certificate()
-                        .map_err(|_| Error::Incomplete)?,
+                        .map_err(|_| Refusal::Incomplete)?,
                 );
                 let has_result = certificate.target().ciphertext().is_some();
                 if has_result {
@@ -142,20 +142,20 @@ impl CompletionSession {
             }
             Some(CompletionOperation::BeginShareConstant) => {
                 if length != 0 {
-                    return Err(Error::Encoding);
+                    return Err(Refusal::Encoding);
                 }
-                let certificate = self.certificate.as_ref().ok_or(Error::Incomplete)?;
+                let certificate = self.certificate.as_ref().ok_or(Refusal::Incomplete)?;
                 let target = certificate.target();
                 if target.ciphertext().is_none() {
-                    return Err(Error::NoResult);
+                    return Err(Refusal::NoResult);
                 }
                 let setup = target.setup();
                 let profile = setup.profile();
                 if argument >= profile.participants() {
-                    return Err(Error::Context);
+                    return Err(Refusal::Context);
                 }
                 let index = profile.share_constant_polynomial(argument);
-                let reader = setup.read_polynomial(index).map_err(|_| Error::Context)?;
+                let reader = setup.read_polynomial(index).map_err(|_| Refusal::Context)?;
                 // A public-data retry replaces only unfinished verification.
                 // It cannot revoke a certified target or an accepted share.
                 self.operand = Some(Operand {
@@ -171,18 +171,18 @@ impl CompletionSession {
             Some(CompletionOperation::PushOperand) => {
                 self.operand
                     .as_mut()
-                    .ok_or(Error::Incomplete)?
+                    .ok_or(Refusal::Incomplete)?
                     .reader
                     .push(argument, &self.input[..length])
-                    .map_err(|_| Error::Encoding)?;
+                    .map_err(|_| Refusal::Encoding)?;
             }
             Some(CompletionOperation::FinishOperand) => {
                 if length != 0 {
-                    return Err(Error::Encoding);
+                    return Err(Refusal::Encoding);
                 }
-                let operand = self.operand.take().ok_or(Error::Incomplete)?;
-                let verified = operand.reader.finish().map_err(|_| Error::Encoding)?;
-                let certificate = self.certificate.as_ref().ok_or(Error::Incomplete)?;
+                let operand = self.operand.take().ok_or(Refusal::Incomplete)?;
+                let verified = operand.reader.finish().map_err(|_| Refusal::Encoding)?;
+                let certificate = self.certificate.as_ref().ok_or(Refusal::Incomplete)?;
                 if let Some(constant) = operand.constant {
                     self.context = Some(Arc::new(ReleaseContext::new(
                         certificate.clone(),
@@ -194,7 +194,7 @@ impl CompletionSession {
                 } else {
                     let setup = certificate.target().setup();
                     let index = setup.profile().share_linear_polynomial(operand.position);
-                    let reader = setup.read_polynomial(index).map_err(|_| Error::Context)?;
+                    let reader = setup.read_polynomial(index).map_err(|_| Refusal::Context)?;
                     self.operand = Some(Operand {
                         position: operand.position,
                         reader,
@@ -205,62 +205,67 @@ impl CompletionSession {
             }
             Some(CompletionOperation::AuthenticateRelease) => {
                 if self.authentication.is_some() {
-                    return Err(Error::Context);
+                    return Err(Refusal::Context);
                 }
                 let authentication = self
                     .context
                     .as_ref()
-                    .ok_or(Error::Incomplete)?
+                    .ok_or(Refusal::Incomplete)?
                     .authenticate(&self.input[..length])?;
                 self.word(authentication.envelope().body_length());
                 self.authentication = Some(authentication);
             }
             Some(CompletionOperation::BeginReleaseBody) => {
                 if self.body.is_some() || self.authentication.is_none() {
-                    return Err(Error::Context);
+                    return Err(Refusal::Context);
                 }
                 self.body = Some(ReleaseBodyVerifier::new(
-                    self.context.clone().ok_or(Error::Incomplete)?,
+                    self.context.clone().ok_or(Refusal::Incomplete)?,
                     &self.input[..length],
                 )?);
             }
             Some(CompletionOperation::PushReleaseBody) => {
                 self.body
                     .as_mut()
-                    .ok_or(Error::Incomplete)?
+                    .ok_or(Refusal::Incomplete)?
                     .push(&self.input[..length])?;
             }
             Some(CompletionOperation::FinishRelease) => {
                 if length != 0 {
-                    return Err(Error::Encoding);
+                    return Err(Refusal::Encoding);
                 }
-                let body = self.body.take().ok_or(Error::Incomplete)?.finish()?;
-                let authentication = self.authentication.take().ok_or(Error::Incomplete)?;
+                let body = self.body.take().ok_or(Refusal::Incomplete)?.finish()?;
+                let authentication = self.authentication.take().ok_or(Refusal::Incomplete)?;
                 let share = Arc::new(body.authenticate(authentication)?);
                 let inserted = self
                     .releases
                     .as_mut()
-                    .ok_or(Error::Incomplete)?
+                    .ok_or(Refusal::Incomplete)?
                     .insert(share)?;
                 self.context = None;
                 self.word(usize::from(inserted));
             }
             Some(CompletionOperation::Result) => {
                 if length != 0 {
-                    return Err(Error::Encoding);
+                    return Err(Refusal::Encoding);
                 }
                 if self.terminal.is_none() {
-                    let certificate = self.certificate.clone().ok_or(Error::Incomplete)?;
+                    let certificate = self.certificate.clone().ok_or(Refusal::Incomplete)?;
                     self.terminal = Some(if certificate.target().ciphertext().is_none() {
                         Terminal::NoResult(verify_no_result(certificate)?)
                     } else {
-                        Terminal::Result(self.releases.as_ref().ok_or(Error::Incomplete)?.result()?)
+                        Terminal::Result(
+                            self.releases
+                                .as_ref()
+                                .ok_or(Refusal::Incomplete)?
+                                .result()?,
+                        )
                     });
                 }
-                match self.terminal.as_ref().ok_or(Error::Incomplete)? {
+                match self.terminal.as_ref().ok_or(Refusal::Incomplete)? {
                     Terminal::NoResult(value) => {
                         if value.certificate().target().ciphertext().is_some() {
-                            return Err(Error::Context);
+                            return Err(Refusal::Context);
                         }
                         self.output.extend(0u32.to_le_bytes());
                     }
@@ -274,7 +279,7 @@ impl CompletionSession {
                     }
                 }
             }
-            None => return Err(Error::Encoding),
+            None => return Err(Refusal::Encoding),
         }
         Ok(())
     }

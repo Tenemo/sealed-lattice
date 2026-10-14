@@ -58,7 +58,7 @@ fn refuses_moduli_whose_limbs_exceed_the_column_sum_bound() {
         modulus.push(0);
         assert_eq!(
             check_parameters(&modulus, 2, radix_bits, ZERO),
-            Err(Error::Parameters)
+            Err(Refusal::Parameters)
         );
     }
     let magnitude = vec![0xff; 8_704];
@@ -78,11 +78,11 @@ fn refuses_moduli_whose_limbs_exceed_the_column_sum_bound() {
 fn refuses_partial_records_and_forbidden_lengths_without_output() {
     let mut stream = auxiliary_stream();
     stream.push(&[0; 5]).unwrap();
-    assert_eq!(stream.finish_value(), Err(Error::Incomplete));
+    assert_eq!(stream.finish_value(), Err(Refusal::Incomplete));
     let mut stream = auxiliary_stream();
-    assert_eq!(stream.push(&vec![0; CHUNK_LIMIT + 1]), Err(Error::Length));
-    assert_eq!(stream.push(&[]), Err(Error::Encoding));
-    assert_eq!(stream.finish_value(), Err(Error::Encoding));
+    assert_eq!(stream.push(&vec![0; CHUNK_LIMIT + 1]), Err(Refusal::Length));
+    assert_eq!(stream.push(&[]), Err(Refusal::Encoding));
+    assert_eq!(stream.finish_value(), Err(Refusal::Encoding));
 }
 
 #[test]
@@ -171,7 +171,7 @@ fn record_runs_and_their_jobs_match_one_stream() {
     };
     assert_eq!(adjoint(total), Ok(expected));
     // Fingerprints whose weighted sum is not the total never close.
-    assert_eq!(adjoint(plus(total, ONE)), Err(Error::Arithmetic));
+    assert_eq!(adjoint(plus(total, ONE)), Err(Refusal::Arithmetic));
     // A run refuses a magnitude beyond half the modulus, a negative zero
     // and a sign byte beyond one.
     for (offset, value) in [(width - 1, half[half.len() - 1] + 1), (0, 1), (0, 2)] {
@@ -181,11 +181,11 @@ fn record_runs_and_their_jobs_match_one_stream() {
         let mut records = PolynomialRecords::new(&modulus, DEGREE, FHE_LIMB_BITS, alpha).unwrap();
         assert_eq!(
             records.push(&changed, |_, _, _| Ok(())),
-            Err(Error::Encoding)
+            Err(Refusal::Encoding)
         );
         assert_eq!(
             records.push(&bytes[..width], |_, _, _| Ok(())),
-            Err(Error::Length)
+            Err(Refusal::Length)
         );
     }
 }

@@ -413,7 +413,7 @@ pub(crate) fn run(
                 0,
                 &timed_scores
             ),
-            Err(protocol_foundations::Error::Consumed)
+            Err(protocol_foundations::Refusal::Consumed)
         ));
     }
     // Refused inputs consume neither the ballot attempt nor the keys already
@@ -443,7 +443,7 @@ pub(crate) fn run(
                 0,
                 &input
             ),
-            Err(protocol_foundations::Error::Shape)
+            Err(protocol_foundations::Refusal::Shape)
         ));
     }
     work.command(
@@ -642,7 +642,7 @@ pub(crate) fn run(
     // unlocks a purpose that the root's records show unused.
     assert!(matches!(
         restored.sign_retained_ballot_envelope(&restored_owner, &changed_envelope),
-        Err(protocol_foundations::Error::Consumed)
+        Err(protocol_foundations::Refusal::Consumed)
     ));
     // Restoring the completed ballot consumes the purpose even after an unlock.
     restored

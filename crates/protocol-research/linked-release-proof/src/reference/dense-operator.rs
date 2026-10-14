@@ -30,8 +30,8 @@ struct Builder {
     consumed: usize,
 }
 impl Builder {
-    fn new(profile: Profile, alpha: Element, header: &[u8]) -> Result<Self, Error> {
-        release_header_position(profile, header).ok_or(Error::Shape)?;
+    fn new(profile: Profile, alpha: Element, header: &[u8]) -> Result<Self, Refusal> {
+        release_header_position(profile, header).ok_or(Refusal::Shape)?;
         let (starts, words) = release_variable_starts(profile);
         let mut value = ONE;
         let geometric = (0..SYSTEMATIC)
@@ -127,9 +127,9 @@ impl Builder {
             );
         }
     }
-    fn polynomial(&mut self, index: usize, polynomial: PolynomialStream) -> Result<(), Error> {
+    fn polynomial(&mut self, index: usize, polynomial: PolynomialStream) -> Result<(), Refusal> {
         if index != self.consumed {
-            return Err(Error::Shape);
+            return Err(Refusal::Shape);
         }
         self.consumed += 1;
         match index {
@@ -175,13 +175,13 @@ impl Builder {
                     ),
                 )
             }
-            _ => return Err(Error::Shape),
+            _ => return Err(Refusal::Shape),
         }
         Ok(())
     }
-    fn finish(mut self) -> Result<Dense, Error> {
+    fn finish(mut self) -> Result<Dense, Refusal> {
         if self.consumed != POLYNOMIALS {
-            return Err(Error::Shape);
+            return Err(Refusal::Shape);
         }
         let geometric = std::mem::take(&mut self.geometric);
         let limb_weight = self.limb_weight;
@@ -293,10 +293,10 @@ impl Builder {
 }
 
 /// The dense operator of the statement at the challenge.
-pub(crate) fn operator(statement: &PublicStatement, alpha: Element) -> Result<Dense, Error> {
+pub(crate) fn operator(statement: &PublicStatement, alpha: Element) -> Result<Dense, Refusal> {
     let mut builder = Builder::new(statement.profile, alpha, &statement.header)?;
     if statement.polynomials.len() != POLYNOMIALS {
-        return Err(Error::Shape);
+        return Err(Refusal::Shape);
     }
     for (index, bytes) in statement.polynomials.iter().enumerate() {
         let mut parser = polynomial_stream(statement.profile, index, alpha)?;

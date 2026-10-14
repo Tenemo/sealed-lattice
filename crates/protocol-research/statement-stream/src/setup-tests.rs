@@ -580,7 +580,7 @@ fn stream(
     bytes: &[u8],
     digest: [u8; 64],
     indices: &[u32],
-) -> Result<StatementOutput, Error> {
+) -> Result<StatementOutput, Refusal> {
     let mut stream = SetupStatementStream::with_layout(layout, digest, [17, 37, 91], indices)?;
     for part in bytes.chunks(107) {
         stream.push(part)?;
@@ -707,13 +707,13 @@ fn malformed_or_unbound_statements_never_return_an_operator() {
                 })
                 .sum::<usize>();
         let expected = [
-            Error::Parameters,
-            Error::Encoding,
-            Error::Incomplete,
-            Error::Length,
-            Error::Binding,
-            Error::Encoding,
-            Error::Parameters,
+            Refusal::Parameters,
+            Refusal::Encoding,
+            Refusal::Incomplete,
+            Refusal::Length,
+            Refusal::Binding,
+            Refusal::Encoding,
+            Refusal::Parameters,
         ];
         for (kind, expected) in expected.into_iter().enumerate() {
             let mut bytes = original.clone();
@@ -747,7 +747,7 @@ fn malformed_or_unbound_statements_never_return_an_operator() {
     let layout = reduced(Profile::new(3, 2).unwrap());
     let mut stream =
         SetupStatementStream::with_layout(layout, [0; 64], [17, 37, 91], &[0, 1]).unwrap();
-    assert_eq!(stream.push(&vec![0; CHUNK_LIMIT + 1]), Err(Error::Length));
-    assert_eq!(stream.push(&[]), Err(Error::Encoding));
+    assert_eq!(stream.push(&vec![0; CHUNK_LIMIT + 1]), Err(Refusal::Length));
+    assert_eq!(stream.push(&[]), Err(Refusal::Encoding));
     assert!(stream.finish().is_err());
 }

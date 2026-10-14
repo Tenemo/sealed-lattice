@@ -2,7 +2,7 @@
 //! joiner's signed poll, each followed by the username, and the retained
 //! records a restore reopens. Each parse refuses a frame past its bound, a
 //! username the module would not normalize and bytes after the last field.
-use crate::{Enrollment, Error};
+use crate::{Enrollment, Refusal};
 use protocol_foundations::{
     SEALED_SIGNING_SEED_BYTES, SIGNATURE_BYTES,
     foundation::{
@@ -156,12 +156,15 @@ pub(crate) fn restore_input(input: &[u8], prepared: bool) -> Option<RestoreInput
 
 impl RestoreInput<'_> {
     /// Reopens the retained credential under the signed poll it names.
-    pub(crate) fn enrollment(&self, poll: &VerifiedPoll) -> Result<Enrollment, Error> {
+    pub(crate) fn enrollment(&self, poll: &VerifiedPoll) -> Result<Enrollment, Refusal> {
         let [recipient_capsule, signing_capsule] = self.capsules;
         if self.prepared {
-            let (length, setup) = self.sources.split_first_chunk::<4>().ok_or(Error::Shape)?;
+            let (length, setup) = self
+                .sources
+                .split_first_chunk::<4>()
+                .ok_or(Refusal::Shape)?;
             if u32::from_le_bytes(*length) as usize != setup.len() {
-                return Err(Error::Shape);
+                return Err(Refusal::Shape);
             }
             Enrollment::restore_prepared(
                 poll,
@@ -173,7 +176,7 @@ impl RestoreInput<'_> {
             )
         } else {
             if self.sources.len() != crate::fhe_sources::capsule_bytes(poll) {
-                return Err(Error::Shape);
+                return Err(Refusal::Shape);
             }
             Enrollment::restore(
                 poll,

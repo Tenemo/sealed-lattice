@@ -6,7 +6,7 @@ use evaluation_target::close::{
     AuthenticatedCloseIntent, AuthenticatedCloseResponse, CloseContext, usable_entries,
 };
 use protocol_foundations::{
-    Credential, Error, SIGNATURE_BYTES,
+    Credential, Refusal, SIGNATURE_BYTES,
     ballot_authentication::{BallotEnvelope, ENVELOPE_BYTES, RetainedSetupOwner},
     close_signing::{
         CloseIntentMessage, CloseMessage, CloseProposalMessage, ClosePurpose, CloseResponseMessage,
@@ -86,25 +86,25 @@ pub struct CloseWork {
 }
 
 /// A signed packet filling the bytes.
-fn packet(bytes: &[u8], maximum: usize) -> Result<(&[u8], &[u8]), Error> {
-    signed_packet::split(bytes, maximum).ok_or(Error::Shape)
+fn packet(bytes: &[u8], maximum: usize) -> Result<(&[u8], &[u8]), Refusal> {
+    signed_packet::split(bytes, maximum).ok_or(Refusal::Shape)
 }
 impl CloseWork {
     pub fn new(
         owner: RetainedSetupOwner,
         poll: Arc<VerifiedPoll>,
         setup: Arc<VerifiedSetupAggregate>,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, Refusal> {
         let proposal = setup.roster().proposal();
         if owner.poll() != &poll.identity()
             || owner.setup_identity() != &setup.identity()
             || owner.position() >= proposal.records().len()
         {
-            return Err(Error::Context);
+            return Err(Refusal::Context);
         }
         Ok(Self {
             owner: Arc::new(owner),
-            context: CloseContext::new(poll, setup).map_err(|_| Error::Context)?,
+            context: CloseContext::new(poll, setup).map_err(|_| Refusal::Context)?,
             intent: None,
             pending: None,
             held: Vec::new(),
@@ -125,7 +125,7 @@ impl CloseWork {
         credential: &mut Credential,
         body: &[u8],
         packet: &[u8],
-    ) -> Result<(), Error> {
+    ) -> Result<(), Refusal> {
         let message = protocol_foundations::target_signing::TargetMessage::parse(
             body,
             self.context.participant_count(),
@@ -139,14 +139,14 @@ impl CloseWork {
         &self,
         credential: &Credential,
         body: &[u8],
-    ) -> Result<crate::finality_work::OwnBallotInclusion, Error> {
+    ) -> Result<crate::finality_work::OwnBallotInclusion, Refusal> {
         let message =
             protocol_foundations::target_signing::TargetMessage::parse(body, self.count())?;
-        let intent = self.intent.as_ref().ok_or(Error::Context)?;
+        let intent = self.intent.as_ref().ok_or(Refusal::Context)?;
         if message.poll() != self.owner.poll()
             || message.setup_identity() != self.owner.setup_identity()
         {
-            return Err(Error::Context);
+            return Err(Refusal::Context);
         }
         Ok(crate::finality_work::classified_ballot_inclusion(
             credential.signed_ballot().map(|(_, time)| *time),
@@ -168,14 +168,14 @@ impl CloseWork {
     /// Refuses a delivered envelope that no response could need: a late one
     /// once the intent is locked, or a new one for a slot that already has two
     /// known envelopes.
-    fn admit(&self, authentication: &AuthenticatedBallotEnvelope) -> Result<(), Error> {
+    fn admit(&self, authentication: &AuthenticatedBallotEnvelope) -> Result<(), Refusal> {
         let envelope = authentication.envelope();
         if self
             .intent
             .as_ref()
             .is_some_and(|intent| envelope.ballot_time() > intent.message().close_time())
         {
-            return Err(Error::Context);
+            return Err(Refusal::Context);
         }
         if !self.known(&envelope.identity())
             && self
@@ -185,7 +185,7 @@ impl CloseWork {
                 .count()
                 >= MAXIMUM_LISTED_ENVELOPES_PER_SLOT
         {
-            return Err(Error::Consumed);
+            return Err(Refusal::Consumed);
         }
         Ok(())
     }
@@ -203,12 +203,12 @@ impl CloseWork {
         operation: CloseOperation,
         argument: usize,
         input: &[u8],
-    ) -> Result<Vec<u8>, Error> {
+    ) -> Result<Vec<u8>, Refusal> {
         if input.len() > 1 << 20 || (operation != CloseOperation::RestoreMessage && argument != 0) {
-            return Err(Error::Shape);
+            return Err(Refusal::Shape);
         }
         match operation {
-            CloseOperation::Begin => Err(Error::Shape),
+            CloseOperation::Begin => Err(Refusal::Shape),
             CloseOperation::PrepareIntent => self.prepare_intent(input),
             CloseOperation::LockIntent => self.lock_intent(credential, input),
             CloseOperation::BeginHeldBody => self.begin_held_body(input),
@@ -230,12 +230,12 @@ impl CloseWork {
         self.prepared.is_none() && self.pending.is_none()
     }
     /// The organizer's close intent. Input is the close time.
-    fn prepare_intent(&mut self, input: &[u8]) -> Result<Vec<u8>, Error> {
+    fn prepare_intent(&mut self, input: &[u8]) -> Result<Vec<u8>, Refusal> {
         if !self.ready() || self.intent.is_some() {
-            return Err(Error::Consumed);
+            return Err(Refusal::Consumed);
         }
-        let time = u64::from_le_bytes(input.try_into().map_err(|_| Error::Shape)?);
-        let message = self.context.intent(time).map_err(|_| Error::Context)?;
+        let time = u64::from_le_bytes(input.try_into().map_err(|_| Refusal::Shape)?);
+        let message = self.context.intent(time).map_err(|_| Refusal::Context)?;
         let body = message.body().to_vec();
         self.prepared = Some(Prepared::Intent(message));
         Ok(body)
@@ -244,9 +244,13 @@ impl CloseWork {
     /// that lock before any response is prepared. Held bodies and known
     /// envelopes timed after the close time can never be listed or
     /// needed, so the lock discards them and frees their slots.
-    fn lock_intent(&mut self, credential: &mut Credential, input: &[u8]) -> Result<Vec<u8>, Error> {
+    fn lock_intent(
+        &mut self,
+        credential: &mut Credential,
+        input: &[u8],
+    ) -> Result<Vec<u8>, Refusal> {
         if !self.ready() || self.intent.is_some() {
-            return Err(Error::Consumed);
+            return Err(Refusal::Consumed);
         }
         let (body, signature) = packet(
             input,
@@ -255,7 +259,7 @@ impl CloseWork {
         let intent = self
             .context
             .authenticate_intent(body, signature)
-            .map_err(|_| Error::Crypto)?;
+            .map_err(|_| Refusal::Crypto)?;
         credential.lock_close_intent(&self.owner, self.roster(), intent.message(), signature)?;
         let close_time = intent.message().close_time();
         self.held
@@ -271,16 +275,16 @@ impl CloseWork {
     /// author can sign, is refused before it is transferred, as is a
     /// body timed after a locked close time or a new envelope for a
     /// slot with two known ones.
-    fn begin_held_body(&mut self, input: &[u8]) -> Result<Vec<u8>, Error> {
+    fn begin_held_body(&mut self, input: &[u8]) -> Result<Vec<u8>, Refusal> {
         if !self.ready() || input.len() != ENVELOPE_BYTES + SIGNATURE_BYTES {
-            return Err(Error::Shape);
+            return Err(Refusal::Shape);
         }
         let authentication = authenticate_envelope(
             self.context.setup(),
             &input[..ENVELOPE_BYTES],
             &input[ENVELOPE_BYTES..],
         )
-        .map_err(|_| Error::Crypto)?;
+        .map_err(|_| Refusal::Crypto)?;
         self.admit(&authentication)?;
         let envelope = authentication.envelope();
         let slot = self
@@ -292,35 +296,35 @@ impl CloseWork {
                 .into_iter()
                 .any(|value| value.authentication().envelope().identity() == envelope.identity())
         {
-            return Err(Error::Consumed);
+            return Err(Refusal::Consumed);
         }
         self.pending =
-            Some(BallotBodyAuthentication::new(authentication).map_err(|_| Error::Shape)?);
+            Some(BallotBodyAuthentication::new(authentication).map_err(|_| Refusal::Shape)?);
         Ok(Vec::new())
     }
-    fn push_held_body(&mut self, input: &[u8]) -> Result<Vec<u8>, Error> {
+    fn push_held_body(&mut self, input: &[u8]) -> Result<Vec<u8>, Refusal> {
         if self
             .pending
             .as_mut()
-            .ok_or(Error::Context)?
+            .ok_or(Refusal::Context)?
             .push(input)
             .is_err()
         {
             self.pending = None;
-            return Err(Error::Crypto);
+            return Err(Refusal::Crypto);
         }
         Ok(Vec::new())
     }
-    fn finish_held_body(&mut self, input: &[u8]) -> Result<Vec<u8>, Error> {
+    fn finish_held_body(&mut self, input: &[u8]) -> Result<Vec<u8>, Refusal> {
         if !input.is_empty() {
-            return Err(Error::Shape);
+            return Err(Refusal::Shape);
         }
         let body = self
             .pending
             .take()
-            .ok_or(Error::Context)?
+            .ok_or(Refusal::Context)?
             .finish()
-            .map_err(|_| Error::Crypto)?;
+            .map_err(|_| Refusal::Crypto)?;
         self.remember(body.authentication());
         self.held.push(body);
         Ok(Vec::new())
@@ -329,11 +333,11 @@ impl CloseWork {
     /// other participant responds without waiting; the organizer only
     /// once `q-1` other responses are ready, so every response it has
     /// not yet authenticated is unnecessary to its proposal.
-    fn prepare_response(&mut self, input: &[u8]) -> Result<Vec<u8>, Error> {
+    fn prepare_response(&mut self, input: &[u8]) -> Result<Vec<u8>, Refusal> {
         if !self.ready() || !input.is_empty() {
-            return Err(Error::Consumed);
+            return Err(Refusal::Consumed);
         }
-        let intent = self.intent.as_ref().ok_or(Error::Context)?;
+        let intent = self.intent.as_ref().ok_or(Refusal::Context)?;
         if self.is_organizer()
             && self
                 .responses
@@ -350,12 +354,12 @@ impl CloseWork {
                 .count()
                 < inventory_threshold(self.count()) - 1
         {
-            return Err(Error::Context);
+            return Err(Refusal::Context);
         }
         let message = self
             .context
             .response(intent, self.owner.position(), &self.envelopes, &self.held)
-            .map_err(|_| Error::Context)?;
+            .map_err(|_| Refusal::Context)?;
         let body = message.body().to_vec();
         self.prepared = Some(Prepared::Response(message));
         Ok(body)
@@ -365,19 +369,20 @@ impl CloseWork {
     /// know, with its signature. Only the first response of a responder
     /// is retained, and its envelopes join the known set only once it
     /// authenticates; a later one is refused.
-    fn admit_response(&mut self, input: &[u8]) -> Result<Vec<u8>, Error> {
+    fn admit_response(&mut self, input: &[u8]) -> Result<Vec<u8>, Refusal> {
         if !self.ready() {
-            return Err(Error::Consumed);
+            return Err(Refusal::Consumed);
         }
         if !self.is_organizer() {
-            return Err(Error::Context);
+            return Err(Refusal::Context);
         }
-        let intent = self.intent.as_ref().ok_or(Error::Context)?;
+        let intent = self.intent.as_ref().ok_or(Refusal::Context)?;
         let maximum = maximum_close_message_bytes(ClosePurpose::Response, self.count());
-        let (body, signature, rest) = signed_packet::leading(input, maximum).ok_or(Error::Shape)?;
+        let (body, signature, rest) =
+            signed_packet::leading(input, maximum).ok_or(Refusal::Shape)?;
         let submission = ENVELOPE_BYTES + SIGNATURE_BYTES;
         if !rest.len().is_multiple_of(submission) {
-            return Err(Error::Shape);
+            return Err(Refusal::Shape);
         }
         let message = CloseResponseMessage::parse(body, self.count())?;
         if self
@@ -385,7 +390,7 @@ impl CloseWork {
             .iter()
             .any(|value| value.message().responder() == message.responder())
         {
-            return Err(Error::Consumed);
+            return Err(Refusal::Consumed);
         }
         let mut supplied: Vec<AuthenticatedBallotEnvelope> = Vec::new();
         for bytes in rest.chunks_exact(submission) {
@@ -394,7 +399,7 @@ impl CloseWork {
                 &bytes[..ENVELOPE_BYTES],
                 &bytes[ENVELOPE_BYTES..],
             )
-            .map_err(|_| Error::Crypto)?;
+            .map_err(|_| Refusal::Crypto)?;
             let identity = authentication.envelope().identity();
             if self.known(&identity)
                 || supplied
@@ -405,7 +410,7 @@ impl CloseWork {
                     .iter()
                     .any(|(_, listed)| *listed == identity)
             {
-                return Err(Error::Context);
+                return Err(Refusal::Context);
             }
             supplied.push(authentication);
         }
@@ -413,7 +418,7 @@ impl CloseWork {
         let response = self
             .context
             .authenticate_response(intent, body, signature, &available)
-            .map_err(|_| Error::Crypto)?;
+            .map_err(|_| Refusal::Crypto)?;
         for authentication in &supplied {
             self.remember(authentication);
         }
@@ -423,11 +428,11 @@ impl CloseWork {
     /// Signing is reachable only after the root commits this exact
     /// body. One request consumes the prepared body; the
     /// credential consumes its purpose before signing.
-    fn sign(&mut self, credential: &mut Credential, input: &[u8]) -> Result<Vec<u8>, Error> {
-        if input != self.prepared.as_ref().ok_or(Error::Context)?.body() {
-            return Err(Error::Context);
+    fn sign(&mut self, credential: &mut Credential, input: &[u8]) -> Result<Vec<u8>, Refusal> {
+        if input != self.prepared.as_ref().ok_or(Refusal::Context)?.body() {
+            return Err(Refusal::Context);
         }
-        let prepared = self.prepared.take().ok_or(Error::Context)?;
+        let prepared = self.prepared.take().ok_or(Refusal::Context)?;
         let roster = self.context.setup().roster();
         let signature = match &prepared {
             Prepared::Intent(message) => {
@@ -445,16 +450,16 @@ impl CloseWork {
     /// The organizer's proposal: its own response and the first `q-1`
     /// other authenticated responses to its intent, in arrival order,
     /// that keep every usable slot's body held.
-    fn prepare_proposal(&mut self, input: &[u8]) -> Result<Vec<u8>, Error> {
+    fn prepare_proposal(&mut self, input: &[u8]) -> Result<Vec<u8>, Refusal> {
         if !self.ready() || !input.is_empty() {
-            return Err(Error::Consumed);
+            return Err(Refusal::Consumed);
         }
         let organizer = self.owner.position();
         let own = self
             .responses
             .iter()
             .find(|response| response.message().responder() == organizer)
-            .ok_or(Error::Context)?;
+            .ok_or(Refusal::Context)?;
         // A response joins only while every usable slot of the
         // selection has a held body, so a response listing a body no
         // one supplies cannot stall the proposal.
@@ -469,7 +474,7 @@ impl CloseWork {
         };
         let mut selected = vec![own];
         if !holds(&selected) {
-            return Err(Error::Context);
+            return Err(Refusal::Context);
         }
         for response in &self.responses {
             if selected.len() == inventory_threshold(self.count()) {
@@ -484,11 +489,11 @@ impl CloseWork {
             }
         }
         let selected: Vec<_> = selected.into_iter().cloned().collect();
-        let intent = self.intent.as_ref().ok_or(Error::Context)?;
+        let intent = self.intent.as_ref().ok_or(Refusal::Context)?;
         let message = self
             .context
             .proposal(intent, &selected)
-            .map_err(|_| Error::Context)?;
+            .map_err(|_| Refusal::Context)?;
         let body = message.body().to_vec();
         self.prepared = Some(Prepared::Proposal(message));
         Ok(body)
@@ -500,9 +505,9 @@ impl CloseWork {
         credential: &mut Credential,
         argument: usize,
         input: &[u8],
-    ) -> Result<Vec<u8>, Error> {
+    ) -> Result<Vec<u8>, Refusal> {
         if !self.ready() {
-            return Err(Error::Consumed);
+            return Err(Refusal::Consumed);
         }
         let count = self.count();
         let organizer = self.context.organizer();
@@ -547,7 +552,7 @@ impl CloseWork {
                     signature,
                 )
             }
-            _ => Err(Error::Shape),
+            _ => Err(Refusal::Shape),
         }?;
         Ok(Vec::new())
     }
@@ -557,9 +562,9 @@ impl CloseWork {
         &mut self,
         credential: &mut Credential,
         input: &[u8],
-    ) -> Result<Vec<u8>, Error> {
+    ) -> Result<Vec<u8>, Refusal> {
         if input.len() != ENVELOPE_BYTES + SIGNATURE_BYTES {
-            return Err(Error::Shape);
+            return Err(Refusal::Shape);
         }
         let envelope =
             BallotEnvelope::decode(self.context.setup().profile(), &input[..ENVELOPE_BYTES])?;
@@ -572,9 +577,9 @@ impl CloseWork {
     }
     /// A failed transport discards its tentative body without
     /// accepting even a complete prefix or changing held records.
-    fn discard_held_body(&mut self, input: &[u8]) -> Result<Vec<u8>, Error> {
+    fn discard_held_body(&mut self, input: &[u8]) -> Result<Vec<u8>, Refusal> {
         if !input.is_empty() {
-            return Err(Error::Shape);
+            return Err(Refusal::Shape);
         }
         self.pending = None;
         Ok(Vec::new())
@@ -582,11 +587,11 @@ impl CloseWork {
     /// The bodies the organizer still needs, as consecutive two-byte
     /// author positions and envelope identities: at most one per slot,
     /// each listed by an authenticated response.
-    fn wanted_bodies(&self, input: &[u8]) -> Result<Vec<u8>, Error> {
+    fn wanted_bodies(&self, input: &[u8]) -> Result<Vec<u8>, Refusal> {
         if !input.is_empty() || !self.is_organizer() {
-            return Err(Error::Shape);
+            return Err(Refusal::Shape);
         }
-        let intent = self.intent.as_ref().ok_or(Error::Context)?;
+        let intent = self.intent.as_ref().ok_or(Refusal::Context)?;
         Ok(self
             .context
             .organizer_wanted(intent, &self.envelopes, &self.held, &self.responses)
@@ -598,7 +603,7 @@ impl CloseWork {
     }
     /// The submission identity of an envelope of this poll's profile,
     /// which listings and wanted bodies name. It changes no state.
-    fn envelope_identity(&self, input: &[u8]) -> Result<Vec<u8>, Error> {
+    fn envelope_identity(&self, input: &[u8]) -> Result<Vec<u8>, Refusal> {
         Ok(
             BallotEnvelope::decode(self.context.setup().profile(), input)?
                 .identity()

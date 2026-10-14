@@ -1,9 +1,7 @@
 use crate::close::{ClosedSlot, VerifiedCloseBarrier};
 use crate::program::RankingProgram;
 use ballot_proof::body::BallotBodyClassification;
-use encrypted_ranking::ranking::{
-    Ciphertext, DEGREE, Engine, PolynomialDecoder, Progress, Refusal,
-};
+use encrypted_ranking::ranking::{Ciphertext, DEGREE, Engine, PolynomialDecoder, Progress};
 use protocol_foundations::{
     Credential, RETAINED_TAG_BYTES,
     ballot_authentication::BallotEnvelope,
@@ -18,7 +16,7 @@ use std::{io::Read, sync::Arc};
 use supported_profile::minimum_turnout;
 
 #[derive(Debug)]
-pub enum Error {
+pub enum Refusal {
     Context,
     Incomplete,
     UnsupportedProfile,
@@ -30,24 +28,24 @@ pub enum Error {
 
 /// The provider supplies bytes, never acceptance flags or operand identities.
 pub trait PublicInputs {
-    fn aggregate(&mut self, index: usize) -> Result<Box<dyn Read + '_>, Error>;
-    fn ballot(&mut self, author: usize) -> Result<Box<dyn Read + '_>, Error>;
+    fn aggregate(&mut self, index: usize) -> Result<Box<dyn Read + '_>, Refusal>;
+    fn ballot(&mut self, author: usize) -> Result<Box<dyn Read + '_>, Refusal>;
 }
 
 /// Public working ciphertexts and key records. Every readback is checked
 /// against the identity retained in the live evaluator before a value is
 /// retired or used again, and every key record before its product is used.
 pub trait WorkingStore {
-    fn put(&mut self, index: usize, value: &Ciphertext) -> Result<(), Error>;
+    fn put(&mut self, index: usize, value: &Ciphertext) -> Result<(), Refusal>;
     /// The stored bytes of the value of the index.
-    fn get(&mut self, index: usize) -> Result<Vec<u8>, Error>;
-    fn remove(&mut self, index: usize) -> Result<(), Error>;
+    fn get(&mut self, index: usize) -> Result<Vec<u8>, Refusal>;
+    fn remove(&mut self, index: usize) -> Result<(), Refusal>;
     /// Stores the record of the current cache's key of the ordinal modulo
     /// the prime.
-    fn put_record(&mut self, ordinal: usize, prime: usize, record: &[u8]) -> Result<(), Error>;
-    fn get_record(&mut self, ordinal: usize, prime: usize) -> Result<Vec<u8>, Error>;
+    fn put_record(&mut self, ordinal: usize, prime: usize, record: &[u8]) -> Result<(), Refusal>;
+    fn get_record(&mut self, ordinal: usize, prime: usize) -> Result<Vec<u8>, Refusal>;
     /// Removes every key record.
-    fn clear_records(&mut self) -> Result<(), Error>;
+    fn clear_records(&mut self) -> Result<(), Refusal>;
 }
 
 /// Classification codes in the target: 0 absent, 1 invalid, 2 accepted and
@@ -62,10 +60,10 @@ impl ClassifiedClosedInventory {
     pub fn new(
         barrier: VerifiedCloseBarrier,
         classifications: Vec<Option<BallotBodyClassification>>,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, Refusal> {
         let count = barrier.slots().len();
         if classifications.len() != count {
-            return Err(Error::Incomplete);
+            return Err(Refusal::Incomplete);
         }
         let mut encoded = Vec::with_capacity(count);
         for (slot, classification) in barrier.slots().iter().zip(classifications) {
@@ -78,7 +76,7 @@ impl ClassifiedClosedInventory {
                 }
                 (ClosedSlot::Usable(source), Some(BallotBodyClassification::Invalid(value))) => {
                     if source.authentication().envelope().bytes() != value.envelope().bytes() {
-                        return Err(Error::Context);
+                        return Err(Refusal::Context);
                     }
                     encoded.push(1);
                 }
@@ -87,11 +85,11 @@ impl ClassifiedClosedInventory {
                     // its verified body, so equal body hashes cannot transfer
                     // validity across authors or ballot times.
                     if value.envelope().bytes() != source.authentication().envelope().bytes() {
-                        return Err(Error::Context);
+                        return Err(Refusal::Context);
                     }
                     encoded.push(2);
                 }
-                _ => return Err(Error::Incomplete),
+                _ => return Err(Refusal::Incomplete),
             }
         }
         Ok(Self {
@@ -104,8 +102,8 @@ impl ClassifiedClosedInventory {
     }
     /// The envelope of the author's accepted ballot, or none when the
     /// author's slot holds no accepted ballot.
-    pub(crate) fn accepted(&self, author: usize) -> Result<Option<&BallotEnvelope>, Error> {
-        let code = self.classifications.get(author).ok_or(Error::Context)?;
+    pub(crate) fn accepted(&self, author: usize) -> Result<Option<&BallotEnvelope>, Refusal> {
+        let code = self.classifications.get(author).ok_or(Refusal::Context)?;
         Ok(match (code, &self.barrier.slots()[author]) {
             (2, ClosedSlot::Usable(source)) => Some(source.authentication().envelope()),
             _ => None,
@@ -120,13 +118,13 @@ impl ClassifiedClosedInventory {
     pub fn barrier(&self) -> &VerifiedCloseBarrier {
         &self.barrier
     }
-    fn target_fields(&self) -> Result<Vec<CanonicalItem>, Error> {
+    fn target_fields(&self) -> Result<Vec<CanonicalItem>, Refusal> {
         Ok(vec![
-            CanonicalItem::nonempty_ascii(TARGET_PURPOSE).map_err(|_| Error::Encoding)?,
+            CanonicalItem::nonempty_ascii(TARGET_PURPOSE).map_err(|_| Refusal::Encoding)?,
             CanonicalItem::hash512(self.poll().identity()),
             CanonicalItem::hash512(self.setup().identity()),
             CanonicalItem::hash512(*self.barrier.proposal().identity()),
-            CanonicalItem::variable_bytes(&self.classifications).map_err(|_| Error::Encoding)?,
+            CanonicalItem::variable_bytes(&self.classifications).map_err(|_| Refusal::Encoding)?,
         ])
     }
     /// Loads the next key polynomial the evaluation's cache requires when it
@@ -135,29 +133,29 @@ impl ClassifiedClosedInventory {
     pub(crate) fn next_key(
         &self,
         engine: &mut Engine,
-    ) -> Result<Option<(usize, KeyReader)>, Error> {
-        let required = engine.requirements().map_err(|_| Error::Arithmetic)?;
+    ) -> Result<Option<(usize, KeyReader)>, Refusal> {
+        let required = engine.requirements().map_err(|_| Refusal::Arithmetic)?;
         let ordinal = engine.key_count();
         if ordinal >= required.key_count {
-            return Err(Error::Incomplete);
+            return Err(Refusal::Incomplete);
         }
         let profile = engine.profile();
         let length = DEGREE * engine.coefficient_bytes();
         let (common, index) =
-            Engine::key_identity(profile, required.cache.ok_or(Error::Arithmetic)?, ordinal)
-                .map_err(|_| Error::Arithmetic)?;
+            Engine::key_identity(profile, required.cache.ok_or(Refusal::Arithmetic)?, ordinal)
+                .map_err(|_| Refusal::Arithmetic)?;
         if common {
             let bytes = setup_witness::contribution::common_records(profile, index)
-                .map_err(|_| Error::PublicInput)?;
+                .map_err(|_| Refusal::PublicInput)?;
             if bytes.len() != length {
-                return Err(Error::PublicInput);
+                return Err(Refusal::PublicInput);
             }
             let polynomial = engine
                 .decode_polynomial(&bytes)
-                .map_err(|_| Error::PublicInput)?;
+                .map_err(|_| Refusal::PublicInput)?;
             engine
                 .load_key(ordinal, polynomial)
-                .map_err(|_| Error::Arithmetic)?;
+                .map_err(|_| Refusal::Arithmetic)?;
             return Ok(None);
         }
         let metadata = self
@@ -165,12 +163,12 @@ impl ClassifiedClosedInventory {
             .polynomials()
             .iter()
             .find(|value| value.index() == index)
-            .ok_or(Error::Context)?;
+            .ok_or(Refusal::Context)?;
         let reader = KeyReader {
             ordinal,
             length,
             hash: IdentityHasher::new(PUBLIC_POLYNOMIAL_DOMAIN, &[], length)
-                .map_err(|_| Error::Context)?,
+                .map_err(|_| Refusal::Context)?,
             expected: *metadata.digest(),
             decoder: engine.polynomial_decoder(),
         };
@@ -183,16 +181,16 @@ impl ClassifiedClosedInventory {
         &self,
         engine: &mut Engine,
         author: usize,
-    ) -> Result<Option<BallotReader>, Error> {
-        let required = engine.requirements().map_err(|_| Error::Arithmetic)?;
+    ) -> Result<Option<BallotReader>, Refusal> {
+        let required = engine.requirements().map_err(|_| Refusal::Arithmetic)?;
         if required.input_position != Some(author) {
-            return Err(Error::Context);
+            return Err(Refusal::Context);
         }
         let Some(envelope) = self.accepted(author)? else {
             let zero = engine.zero_value();
             engine
                 .load_input(author, zero)
-                .map_err(|_| Error::Arithmetic)?;
+                .map_err(|_| Refusal::Arithmetic)?;
             return Ok(None);
         };
         Ok(Some(BallotReader {
@@ -200,12 +198,12 @@ impl ClassifiedClosedInventory {
             length: envelope.body_length(),
             received: 0,
             hash: ballot_body::body_hasher(engine.profile(), envelope.body_length())
-                .map_err(|_| Error::PublicInput)?,
+                .map_err(|_| Refusal::PublicInput)?,
             expected: *envelope.body_identity(),
             components: [engine.polynomial_decoder(), engine.polynomial_decoder()],
         }))
     }
-    pub fn start(self) -> Result<RunningEvaluation, Error> {
+    pub fn start(self) -> Result<RunningEvaluation, Refusal> {
         let program =
             if self.accepted_authors().count() < minimum_turnout(self.classifications.len()) {
                 None
@@ -215,13 +213,14 @@ impl ClassifiedClosedInventory {
                         self.setup().profile(),
                         usize::from(self.poll().top_count()),
                     )
-                    .ok_or(Error::UnsupportedProfile)?,
+                    .ok_or(Refusal::UnsupportedProfile)?,
                 )
             };
         let mut engine = program
             .as_ref()
             .map(|program| {
-                Engine::new(self.setup().profile(), program.bytes()).map_err(|_| Error::Arithmetic)
+                Engine::new(self.setup().profile(), program.bytes())
+                    .map_err(|_| Refusal::Arithmetic)
             })
             .transpose()?;
         // The instance and each helper grow once to what the evaluation plans
@@ -258,29 +257,29 @@ impl ClassifiedClosedInventory {
         self,
         inputs: &mut impl PublicInputs,
         store: &mut impl WorkingStore,
-    ) -> Result<VerifiedEvaluationTarget, Error> {
+    ) -> Result<VerifiedEvaluationTarget, Refusal> {
         let mut session = self.start()?;
         let Some(engine) = session.engine.as_mut() else {
             return session.finish();
         };
         while !engine.finished() {
-            let required = engine.requirements().map_err(|_| Error::Arithmetic)?;
+            let required = engine.requirements().map_err(|_| Refusal::Arithmetic)?;
             for index in required.spills {
                 let mut read = engine
                     .begin_readback(index)
-                    .map_err(|_| Error::Arithmetic)?;
-                store.put(index, engine.value(index).map_err(|_| Error::Arithmetic)?)?;
+                    .map_err(|_| Refusal::Arithmetic)?;
+                store.put(index, engine.value(index).map_err(|_| Refusal::Arithmetic)?)?;
                 engine
                     .push_read(&mut read, &store.get(index)?)
-                    .map_err(|_| Error::Storage)?;
-                engine.finish_read(read).map_err(|_| Error::Storage)?;
+                    .map_err(|_| Refusal::Storage)?;
+                engine.finish_read(read).map_err(|_| Refusal::Storage)?;
             }
             for index in required.reloads {
-                let mut read = engine.begin_reload(index).map_err(|_| Error::Storage)?;
+                let mut read = engine.begin_reload(index).map_err(|_| Refusal::Storage)?;
                 engine
                     .push_read(&mut read, &store.get(index)?)
-                    .map_err(|_| Error::Storage)?;
-                engine.finish_read(read).map_err(|_| Error::Storage)?;
+                    .map_err(|_| Refusal::Storage)?;
+                engine.finish_read(read).map_err(|_| Refusal::Storage)?;
             }
             if required.cache.is_some() {
                 // A new cache replaces the earlier cache's records.
@@ -323,11 +322,13 @@ impl ClassifiedClosedInventory {
                             let record = store.get_record(ordinal, request.prime)?;
                             engine
                                 .key_record(ordinal, request.prime, &record)
-                                .map_err(|_| Error::Storage)?;
+                                .map_err(|_| Refusal::Storage)?;
                         }
                     }
-                    Err(Refusal::Identity) => return Err(Error::Storage),
-                    Err(_) => return Err(Error::Arithmetic),
+                    Err(encrypted_ranking::ranking::Refusal::Identity) => {
+                        return Err(Refusal::Storage);
+                    }
+                    Err(_) => return Err(Refusal::Arithmetic),
                 }
             }
         }
@@ -345,7 +346,7 @@ impl RunningEvaluation {
     /// and the identity of its final ciphertext, whose framing also fixes its
     /// length. The program is not a field, since the profile and the poll's
     /// result length determine it.
-    pub(crate) fn finish(self) -> Result<VerifiedEvaluationTarget, Error> {
+    pub(crate) fn finish(self) -> Result<VerifiedEvaluationTarget, Refusal> {
         let Self { inventory, engine } = self;
         let mut fields = inventory.target_fields()?;
         let ciphertext = match engine {
@@ -354,7 +355,7 @@ impl RunningEvaluation {
                 None
             }
             Some(engine) => {
-                let ciphertext = engine.final_switch().map_err(|_| Error::Arithmetic)?;
+                let ciphertext = engine.final_switch().map_err(|_| Refusal::Arithmetic)?;
                 fields.extend([
                     CanonicalItem::unsigned16(1),
                     CanonicalItem::hash512(ciphertext_identity(&ciphertext)?),
@@ -368,12 +369,12 @@ impl RunningEvaluation {
 
 const CIPHERTEXT_IDENTITY_DOMAIN: &str = "sealed-lattice/evaluation-ciphertext/v1";
 
-fn ciphertext_identity(ciphertext: &[u8]) -> Result<[u8; 64], Error> {
+fn ciphertext_identity(ciphertext: &[u8]) -> Result<[u8; 64], Refusal> {
     Ok(hash_foundation_tuple_512(
         CIPHERTEXT_IDENTITY_DOMAIN,
-        &[CanonicalItem::variable_bytes(ciphertext).map_err(|_| Error::Encoding)?],
+        &[CanonicalItem::variable_bytes(ciphertext).map_err(|_| Refusal::Encoding)?],
     )
-    .map_err(|_| Error::Encoding)?
+    .map_err(|_| Refusal::Encoding)?
     .into_bytes())
 }
 
@@ -390,22 +391,22 @@ impl KeyReader {
     pub(crate) fn length(&self) -> usize {
         self.length
     }
-    pub(crate) fn push(&mut self, engine: &Engine, bytes: &[u8]) -> Result<(), Error> {
-        self.hash.absorb(bytes).map_err(|_| Error::PublicInput)?;
+    pub(crate) fn push(&mut self, engine: &Engine, bytes: &[u8]) -> Result<(), Refusal> {
+        self.hash.absorb(bytes).map_err(|_| Refusal::PublicInput)?;
         engine
             .decode_into(&mut self.decoder, bytes)
-            .map_err(|_| Error::PublicInput)
+            .map_err(|_| Refusal::PublicInput)
     }
-    pub(crate) fn finish(self, engine: &mut Engine) -> Result<(), Error> {
-        if self.hash.finish().map_err(|_| Error::PublicInput)? != self.expected {
-            return Err(Error::PublicInput);
+    pub(crate) fn finish(self, engine: &mut Engine) -> Result<(), Refusal> {
+        if self.hash.finish().map_err(|_| Refusal::PublicInput)? != self.expected {
+            return Err(Refusal::PublicInput);
         }
         let polynomial = engine
             .finish_polynomial(self.decoder)
-            .map_err(|_| Error::PublicInput)?;
+            .map_err(|_| Refusal::PublicInput)?;
         engine
             .load_key(self.ordinal, polynomial)
-            .map_err(|_| Error::Arithmetic)
+            .map_err(|_| Refusal::Arithmetic)
     }
 }
 
@@ -423,8 +424,8 @@ impl BallotReader {
     pub(crate) fn length(&self) -> usize {
         self.length
     }
-    pub(crate) fn push(&mut self, engine: &Engine, bytes: &[u8]) -> Result<(), Error> {
-        self.hash.push(bytes).map_err(|_| Error::PublicInput)?;
+    pub(crate) fn push(&mut self, engine: &Engine, bytes: &[u8]) -> Result<(), Refusal> {
+        self.hash.push(bytes).map_err(|_| Refusal::PublicInput)?;
         let split = DEGREE * engine.coefficient_bytes();
         let received = self.received;
         for (index, component) in self.components.iter_mut().enumerate() {
@@ -434,28 +435,28 @@ impl BallotReader {
             if first < last {
                 engine
                     .decode_into(component, &bytes[first - received..last - received])
-                    .map_err(|_| Error::PublicInput)?;
+                    .map_err(|_| Refusal::PublicInput)?;
             }
         }
         self.received += bytes.len();
         Ok(())
     }
-    pub(crate) fn finish(self, engine: &mut Engine) -> Result<(), Error> {
-        if self.hash.finish().map_err(|_| Error::PublicInput)? != self.expected {
-            return Err(Error::PublicInput);
+    pub(crate) fn finish(self, engine: &mut Engine) -> Result<(), Refusal> {
+        if self.hash.finish().map_err(|_| Refusal::PublicInput)? != self.expected {
+            return Err(Refusal::PublicInput);
         }
         let [first, second] = self.components;
         let value = [
             engine
                 .finish_polynomial(first)
-                .map_err(|_| Error::PublicInput)?,
+                .map_err(|_| Refusal::PublicInput)?,
             engine
                 .finish_polynomial(second)
-                .map_err(|_| Error::PublicInput)?,
+                .map_err(|_| Refusal::PublicInput)?,
         ];
         engine
             .load_input(self.author, value)
-            .map_err(|_| Error::Arithmetic)
+            .map_err(|_| Refusal::Arithmetic)
     }
 }
 
@@ -464,20 +465,20 @@ impl BallotReader {
 fn read_exactly(
     mut reader: Box<dyn Read + '_>,
     length: usize,
-    mut receive: impl FnMut(&[u8]) -> Result<(), Error>,
-) -> Result<(), Error> {
+    mut receive: impl FnMut(&[u8]) -> Result<(), Refusal>,
+) -> Result<(), Refusal> {
     let mut buffer = vec![0; length.min(1 << 20)];
     let mut offset = 0;
     while offset < length {
         let part = buffer.len().min(length - offset);
         reader
             .read_exact(&mut buffer[..part])
-            .map_err(|_| Error::PublicInput)?;
+            .map_err(|_| Refusal::PublicInput)?;
         receive(&buffer[..part])?;
         offset += part;
     }
-    if reader.read(&mut [0]).map_err(|_| Error::PublicInput)? != 0 {
-        return Err(Error::PublicInput);
+    if reader.read(&mut [0]).map_err(|_| Refusal::PublicInput)? != 0 {
+        return Err(Refusal::PublicInput);
     }
     Ok(())
 }
@@ -504,10 +505,10 @@ impl VerifiedEvaluationTarget {
         inventory: ClassifiedClosedInventory,
         fields: Vec<CanonicalItem>,
         ciphertext: Option<Vec<u8>>,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, Refusal> {
         let body = CanonicalTuple::new(1, 1, fields)
             .encode()
-            .map_err(|_| Error::Encoding)?;
+            .map_err(|_| Refusal::Encoding)?;
         let identity = target_identity(&body, inventory.setup().profile().participants())?;
         Ok(Self {
             poll: inventory.poll().clone(),
@@ -540,9 +541,9 @@ impl VerifiedEvaluationTarget {
     /// Keys this target, which this instance evaluated, to the participant's
     /// credential: its body and ciphertext, so that a later visit of the same
     /// participant restores it instead of evaluating again.
-    pub fn retain(&self, credential: &Credential) -> Result<Vec<u8>, Error> {
+    pub fn retain(&self, credential: &Credential) -> Result<Vec<u8>, Refusal> {
         if self.classified.is_none() {
-            return Err(Error::Context);
+            return Err(Refusal::Context);
         }
         let ciphertext = self.ciphertext.as_deref().unwrap_or_default();
         let mut bytes = Vec::with_capacity(8 + self.body.len() + ciphertext.len() + 64);
@@ -563,37 +564,37 @@ impl VerifiedEvaluationTarget {
         poll: Arc<VerifiedPoll>,
         setup: Arc<VerifiedSetupAggregate>,
         retained: &[u8],
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, Refusal> {
         let split = retained
             .len()
             .checked_sub(RETAINED_TAG_BYTES)
-            .ok_or(Error::Encoding)?;
+            .ok_or(Refusal::Encoding)?;
         let (bytes, tag) = retained.split_at(split);
         credential
             .check_retained_tag(RETAINED_TARGET_LABEL, &poll, bytes, tag)
-            .map_err(|_| Error::Context)?;
+            .map_err(|_| Refusal::Context)?;
         if bytes.len() < 8 || &bytes[..4] != RETAINED_TARGET_MAGIC {
-            return Err(Error::Encoding);
+            return Err(Refusal::Encoding);
         }
         let length = u32::from_le_bytes(bytes[4..8].try_into().unwrap()) as usize;
         if length > MAXIMUM_TARGET_BODY_BYTES || bytes.len() < 8 + length {
-            return Err(Error::Encoding);
+            return Err(Refusal::Encoding);
         }
         let (body, ciphertext) = bytes[8..].split_at(length);
         let message = TargetMessage::parse(body, setup.profile().participants())
-            .map_err(|_| Error::Encoding)?;
+            .map_err(|_| Refusal::Encoding)?;
         if message.poll() != &poll.identity() || message.setup_identity() != &setup.identity() {
-            return Err(Error::Context);
+            return Err(Refusal::Context);
         }
         let ciphertext = match message.ciphertext_identity() {
             Some(identity) => {
                 if identity != &ciphertext_identity(ciphertext)? {
-                    return Err(Error::Context);
+                    return Err(Refusal::Context);
                 }
                 Some(ciphertext.to_vec())
             }
             None if ciphertext.is_empty() => None,
-            None => return Err(Error::Encoding),
+            None => return Err(Refusal::Encoding),
         };
         Ok(Self {
             poll,
@@ -607,10 +608,10 @@ impl VerifiedEvaluationTarget {
 }
 
 // A target body's identity, which the finality message it parses as names.
-fn target_identity(body: &[u8], participants: usize) -> Result<[u8; 64], Error> {
+fn target_identity(body: &[u8], participants: usize) -> Result<[u8; 64], Refusal> {
     if body.len() > MAXIMUM_TARGET_BODY_BYTES {
-        return Err(Error::Encoding);
+        return Err(Refusal::Encoding);
     }
-    let message = TargetMessage::parse(body, participants).map_err(|_| Error::Encoding)?;
+    let message = TargetMessage::parse(body, participants).map_err(|_| Refusal::Encoding)?;
     Ok(*message.identity())
 }

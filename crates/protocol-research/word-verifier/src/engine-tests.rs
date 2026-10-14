@@ -7,8 +7,8 @@ use supported_profile::{
 };
 
 // A statement that refuses every byte, so no proof it opens completes.
-struct Refused;
-impl Statement for Refused {
+struct RefusingStatement;
+impl Statement for RefusingStatement {
     fn push(&mut self, _bytes: &[u8]) -> bool {
         false
     }
@@ -16,12 +16,12 @@ impl Statement for Refused {
         None
     }
 }
-fn open(role: &[u8], bytes: &[u8]) -> Result<Verifier<Refused>, Refusal> {
+fn open(role: &[u8], bytes: &[u8]) -> Result<Verifier<RefusingStatement>, Refusal> {
     Verifier::open(
         ballot_relation(Profile::new(3, 2).unwrap()),
         role,
         bytes,
-        |_, _, _| Some(Refused),
+        |_, _, _| Some(RefusingStatement),
     )
 }
 fn header() -> Vec<u8> {
@@ -45,7 +45,7 @@ fn malformed_headers_and_unfinished_streams_cannot_verify() {
             ballot_relation(Profile::new(3, 2).unwrap()),
             b"role",
             &declared,
-            |statement, _, _| (statement == [7; 64]).then_some(Refused),
+            |statement, _, _| (statement == [7; 64]).then_some(RefusingStatement),
         )
         .is_ok()
     );
@@ -54,7 +54,7 @@ fn malformed_headers_and_unfinished_streams_cannot_verify() {
     other[..4].copy_from_slice(b"SWP3");
     assert!(matches!(open(b"role", &other), Err(Refusal::Encoding)));
     assert!(matches!(
-        Verifier::<Refused>::open(
+        Verifier::<RefusingStatement>::open(
             ballot_relation(Profile::new(3, 2).unwrap()),
             b"role",
             &bytes,
@@ -68,12 +68,12 @@ fn malformed_headers_and_unfinished_streams_cannot_verify() {
         assert!(matches!(open(b"role", &changed), Err(Refusal::Encoding)));
     }
     let mut verifier = open(b"role", &bytes).unwrap();
-    assert!(matches!(verifier.push_proof(&[0]), Err(Refusal::Stage)));
+    assert!(matches!(verifier.push_proof(&[0]), Err(Refusal::Phase)));
     assert!(matches!(
         verifier.push_statement(&[0]),
         Err(Refusal::Encoding)
     ));
-    assert!(matches!(verifier.finish_statement(), Err(Refusal::Stage)));
+    assert!(matches!(verifier.finish_statement(), Err(Refusal::Phase)));
     assert!(!verifier.finish());
 }
 // The table-driven values at a point equal direct powers of the point

@@ -1,4 +1,4 @@
-use crate::release::{Error, ReleaseContext};
+use crate::release::{Refusal, ReleaseContext};
 use fips204::{
     ml_dsa_65,
     traits::{SerDes, Verifier as SignatureVerifier},
@@ -24,27 +24,27 @@ impl AuthenticatedReleaseEnvelope {
     }
 }
 impl ReleaseContext {
-    pub fn authenticate(&self, packet: &[u8]) -> Result<AuthenticatedReleaseEnvelope, Error> {
+    pub fn authenticate(&self, packet: &[u8]) -> Result<AuthenticatedReleaseEnvelope, Refusal> {
         if packet.len() != RELEASE_ENVELOPE_BYTES + SIGNATURE_BYTES {
-            return Err(Error::Encoding);
+            return Err(Refusal::Encoding);
         }
         let envelope = ReleaseEnvelope::decode(self.profile(), &packet[..RELEASE_ENVELOPE_BYTES])
-            .map_err(|_| Error::Encoding)?;
+            .map_err(|_| Refusal::Encoding)?;
         let target = self.certificate().target();
         if envelope.poll() != &target.poll().identity()
             || envelope.setup_identity() != &target.setup().identity()
             || envelope.target() != target.identity()
             || envelope.position() != self.position()
         {
-            return Err(Error::Context);
+            return Err(Refusal::Context);
         }
         let public = target.setup().roster().proposal().records()[self.position()]
             .header()
             .signing_public;
-        let key = ml_dsa_65::PublicKey::try_from_bytes(public).map_err(|_| Error::Context)?;
+        let key = ml_dsa_65::PublicKey::try_from_bytes(public).map_err(|_| Refusal::Context)?;
         let signature = packet[RELEASE_ENVELOPE_BYTES..].try_into().unwrap();
         if !key.verify(envelope.bytes(), &signature, RELEASE_SIGNATURE_CONTEXT) {
-            return Err(Error::Signature);
+            return Err(Refusal::Signature);
         }
         Ok(AuthenticatedReleaseEnvelope { envelope })
     }
@@ -62,16 +62,16 @@ pub struct ReleaseBodyVerifier {
     failed: bool,
 }
 impl ReleaseBodyVerifier {
-    pub fn new(context: Arc<ReleaseContext>, header: &[u8]) -> Result<Self, Error> {
+    pub fn new(context: Arc<ReleaseContext>, header: &[u8]) -> Result<Self, Refusal> {
         let profile = context.profile();
-        let proof_bytes = proof_length(profile, header).map_err(|_| Error::Encoding)?;
+        let proof_bytes = proof_length(profile, header).map_err(|_| Refusal::Encoding)?;
         if header[12..] != *context.header() {
-            return Err(Error::Context);
+            return Err(Refusal::Context);
         }
         let partial_bytes = partial_bytes(profile);
         let length = RELEASE_BODY_HEADER_BYTES + partial_bytes + proof_bytes;
-        let mut hash = body_hasher(profile, length).map_err(|_| Error::Encoding)?;
-        hash.push(header).map_err(|_| Error::Encoding)?;
+        let mut hash = body_hasher(profile, length).map_err(|_| Refusal::Encoding)?;
+        hash.push(header).map_err(|_| Refusal::Encoding)?;
         Ok(Self {
             context,
             hash,
@@ -84,9 +84,9 @@ impl ReleaseBodyVerifier {
             failed: false,
         })
     }
-    pub fn push(&mut self, bytes: &[u8]) -> Result<(), Error> {
+    pub fn push(&mut self, bytes: &[u8]) -> Result<(), Refusal> {
         if self.failed {
-            return Err(Error::Proof);
+            return Err(Refusal::Proof);
         }
         let result = self.push_inner(bytes);
         if result.is_err() {
@@ -95,11 +95,11 @@ impl ReleaseBodyVerifier {
         }
         result
     }
-    fn push_inner(&mut self, mut bytes: &[u8]) -> Result<(), Error> {
+    fn push_inner(&mut self, mut bytes: &[u8]) -> Result<(), Refusal> {
         if bytes.is_empty() || bytes.len() > CHUNK_LIMIT || bytes.len() > self.remaining {
-            return Err(Error::Encoding);
+            return Err(Refusal::Encoding);
         }
-        self.hash.push(bytes).map_err(|_| Error::Encoding)?;
+        self.hash.push(bytes).map_err(|_| Refusal::Encoding)?;
         self.remaining -= bytes.len();
         if self.partial.len() < self.partial_bytes {
             let count = (self.partial_bytes - self.partial.len()).min(bytes.len());
@@ -120,30 +120,30 @@ impl ReleaseBodyVerifier {
                     &self.context.proof_role()?,
                     &self.proof_prefix,
                 )
-                .map_err(|_| Error::Proof)?;
+                .map_err(|_| Refusal::Proof)?;
                 for values in std::iter::once(&statement.header).chain(&statement.polynomials) {
                     for chunk in values.chunks(CHUNK_LIMIT) {
-                        verifier.push_statement(chunk).map_err(|_| Error::Proof)?;
+                        verifier.push_statement(chunk).map_err(|_| Refusal::Proof)?;
                     }
                 }
-                verifier.finish_statement().map_err(|_| Error::Proof)?;
+                verifier.finish_statement().map_err(|_| Refusal::Proof)?;
                 self.verifier = Some(verifier);
             }
         }
         if !bytes.is_empty() {
             self.verifier
                 .as_mut()
-                .ok_or(Error::Proof)?
+                .ok_or(Refusal::Proof)?
                 .push_proof(bytes)
-                .map_err(|_| Error::Proof)?;
+                .map_err(|_| Refusal::Proof)?;
         }
         Ok(())
     }
-    pub fn finish(self) -> Result<VerifiedReleaseBody, Error> {
-        if self.failed || self.remaining != 0 || !self.verifier.ok_or(Error::Proof)?.finish() {
-            return Err(Error::Proof);
+    pub fn finish(self) -> Result<VerifiedReleaseBody, Refusal> {
+        if self.failed || self.remaining != 0 || !self.verifier.ok_or(Refusal::Proof)?.finish() {
+            return Err(Refusal::Proof);
         }
-        let identity = self.hash.finish().map_err(|_| Error::Encoding)?;
+        let identity = self.hash.finish().map_err(|_| Refusal::Encoding)?;
         let profile = self.context.profile();
         let partial = super::release::decode_polynomial(
             &self.partial,
@@ -197,9 +197,9 @@ impl VerifiedReleaseBody {
     pub fn authenticate(
         self,
         authentication: AuthenticatedReleaseEnvelope,
-    ) -> Result<VerifiedReleaseShare, Error> {
+    ) -> Result<VerifiedReleaseShare, Refusal> {
         if authentication.envelope.bytes() != self.envelope().bytes() {
-            return Err(Error::Context);
+            return Err(Refusal::Context);
         }
         Ok(VerifiedReleaseShare { body: self })
     }

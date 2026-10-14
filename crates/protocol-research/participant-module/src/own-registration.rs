@@ -1,5 +1,5 @@
 use protocol_foundations::{
-    Error, SIGNATURE_BYTES,
+    Refusal, SIGNATURE_BYTES,
     poll::{MAXIMUM_POLL_BYTES, VerifiedPoll, verify_poll},
     registration::{CHUNK_LIMIT, RegistrationVerifier, VerifiedRegistration},
 };
@@ -36,15 +36,15 @@ impl State {
             verified: None,
         }
     }
-    fn begin(&mut self, bytes: &[u8]) -> Result<(), Error> {
+    fn begin(&mut self, bytes: &[u8]) -> Result<(), Refusal> {
         if bytes.len() < 132 {
-            return Err(Error::Shape);
+            return Err(Refusal::Shape);
         }
         let definition_bytes = u32::from_le_bytes(bytes[128..132].try_into().unwrap()) as usize;
         if definition_bytes > MAXIMUM_POLL_BYTES
             || bytes.len() < 132 + definition_bytes + SIGNATURE_BYTES + 4
         {
-            return Err(Error::Shape);
+            return Err(Refusal::Shape);
         }
         let end = 132 + definition_bytes;
         let poll = verify_poll(
@@ -59,7 +59,7 @@ impl State {
         if header_bytes > MAXIMUM_HEADER_BYTES
             || bytes.len() != header_start + header_bytes + SIGNATURE_BYTES
         {
-            return Err(Error::Shape);
+            return Err(Refusal::Shape);
         }
         self.pending = Some(RegistrationVerifier::new(
             &poll,
@@ -70,39 +70,39 @@ impl State {
         self.poll = Some(poll);
         Ok(())
     }
-    pub(crate) fn command(&mut self, operation: u32, length: usize) -> Result<(), Error> {
+    pub(crate) fn command(&mut self, operation: u32, length: usize) -> Result<(), Refusal> {
         let operation = OwnRegistrationStep::from_code(operation);
         if length > self.input.len()
             || (operation != Some(OwnRegistrationStep::Begin) && length > CHUNK_LIMIT)
         {
-            return Err(Error::Shape);
+            return Err(Refusal::Shape);
         }
         if operation == Some(OwnRegistrationStep::Begin) {
             // Only a refused begin leaves another begin open.
             if self.poll.is_some() {
-                return Err(Error::Consumed);
+                return Err(Refusal::Consumed);
             }
             let bytes = self.input[..length].to_vec();
             return self.begin(&bytes);
         }
         if self.verified.is_some() {
-            return Err(Error::Consumed);
+            return Err(Refusal::Consumed);
         }
         match operation {
             Some(OwnRegistrationStep::Key) => self
                 .pending
                 .as_mut()
-                .ok_or(Error::Consumed)?
+                .ok_or(Refusal::Consumed)?
                 .push_key(&self.input[..length]),
             Some(OwnRegistrationStep::KeyFinish) if length == 0 => {
-                self.pending.as_mut().ok_or(Error::Consumed)?.finish_key()
+                self.pending.as_mut().ok_or(Refusal::Consumed)?.finish_key()
             }
             Some(OwnRegistrationStep::Finish) if length == 0 => {
-                let verified = self.pending.take().ok_or(Error::Consumed)?.finish()?;
+                let verified = self.pending.take().ok_or(Refusal::Consumed)?.finish()?;
                 self.verified = Some(Arc::new(verified));
                 Ok(())
             }
-            _ => Err(Error::Shape),
+            _ => Err(Refusal::Shape),
         }
     }
 }

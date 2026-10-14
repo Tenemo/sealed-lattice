@@ -1,5 +1,5 @@
 use participant_module::close_work::CloseOperation;
-use protocol_foundations::{Error, close_signing::CloseResponseMessage, poll::VerifiedPoll};
+use protocol_foundations::{Refusal, close_signing::CloseResponseMessage, poll::VerifiedPoll};
 use setup_aggregate::verified::VerifiedSetupAggregate;
 use std::sync::Arc;
 
@@ -41,7 +41,7 @@ pub(super) fn exercise_body_delivery(
             0,
             arrivals[0]
         ),
-        Err(Error::Context)
+        Err(Refusal::Context)
     ));
     let mut probe = close_work(&enrollments[0], poll, setup, 0);
     let mut hashed = 0;
@@ -61,7 +61,7 @@ pub(super) fn exercise_body_delivery(
                 0,
                 &control(&equivocated.second_on_time)
             ),
-            Err(Error::Consumed)
+            Err(Refusal::Consumed)
         ));
     }
     probe
@@ -80,7 +80,7 @@ pub(super) fn exercise_body_delivery(
                 0,
                 &control(&equivocated.late)
             ),
-            Err(Error::Context)
+            Err(Refusal::Context)
         ));
         deliver(
             &mut probe,
@@ -127,7 +127,7 @@ pub(super) fn exercise_body_delivery(
             0,
             &[0]
         ),
-        Err(Error::Shape)
+        Err(Refusal::Shape)
     ));
     probe
         .command(
@@ -144,7 +144,7 @@ pub(super) fn exercise_body_delivery(
             0,
             &[]
         ),
-        Err(Error::Context)
+        Err(Refusal::Context)
     ));
     deliver(
         &mut probe,
@@ -169,7 +169,7 @@ pub(super) fn exercise_body_delivery(
             0,
             &control(known)
         ),
-        Err(Error::Consumed)
+        Err(Refusal::Consumed)
     ));
     let missing: Vec<u8> = common[1..]
         .iter()
@@ -189,7 +189,7 @@ pub(super) fn exercise_body_delivery(
                 0,
                 &[arrivals[0].as_slice(), &missing, &control(extra)].concat()
             ),
-            Err(Error::Context)
+            Err(Refusal::Context)
         ));
     }
     probe
@@ -207,7 +207,7 @@ pub(super) fn exercise_body_delivery(
             0,
             arrivals[0]
         ),
-        Err(Error::Consumed)
+        Err(Refusal::Consumed)
     ));
     let mut lacking = close_work(&enrollments[0], poll, setup, 0);
     lacking
@@ -271,7 +271,7 @@ pub(super) fn exercise_body_delivery(
     ] {
         assert!(matches!(
             lacking.command(&mut enrollments[0].credential, operation, 0, &[]),
-            Err(Error::Context)
+            Err(Refusal::Context)
         ));
     }
 

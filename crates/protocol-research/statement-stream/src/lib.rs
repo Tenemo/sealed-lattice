@@ -93,7 +93,7 @@ fn check_parameters(
     degree: usize,
     radix_bits: usize,
     alpha: Element,
-) -> Result<(), Error> {
+) -> Result<(), Refusal> {
     if !degree.is_power_of_two()
         || !(2..=65_536).contains(&degree)
         || modulus.is_empty()
@@ -102,7 +102,7 @@ fn check_parameters(
         || (8 * modulus.len()).div_ceil(radix_bits) > MAXIMUM_PRODUCTS
         || alpha.iter().any(|value| *value >= MODULUS)
     {
-        return Err(Error::Parameters);
+        return Err(Refusal::Parameters);
     }
     Ok(())
 }
@@ -114,7 +114,7 @@ fn adjoint_of(
     total: Element,
     alpha: Element,
     limb_weight: Element,
-) -> Result<Vec<Element>, Error> {
+) -> Result<Vec<Element>, Refusal> {
     // Reverse first so each original fingerprint can be overwritten after
     // its only remaining use; a second full-degree vector is unnecessary.
     coefficients.reverse();
@@ -126,7 +126,7 @@ fn adjoint_of(
         value = next;
     }
     if value != minus(ZERO, total) {
-        return Err(Error::Arithmetic);
+        return Err(Refusal::Arithmetic);
     }
     Ok(coefficients)
 }
@@ -146,7 +146,7 @@ fn power(mut value: Element, mut exponent: usize) -> Element {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub enum Error {
+pub enum Refusal {
     Parameters,
     Length,
     Encoding,
@@ -183,7 +183,7 @@ impl PolynomialStream {
         degree: usize,
         radix_bits: usize,
         alpha: Element,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, Refusal> {
         check_parameters(modulus, degree, radix_bits, alpha)?;
         let limb_weight = power(alpha, degree);
         Ok(Self {
@@ -204,9 +204,9 @@ impl PolynomialStream {
         })
     }
 
-    fn coefficient(&self) -> Result<Element, Error> {
+    fn coefficient(&self) -> Result<Element, Refusal> {
         if !self.codec.is_canonical(&self.record) {
-            return Err(Error::Encoding);
+            return Err(Refusal::Encoding);
         }
         Ok(record_fingerprint(
             &self.record,
@@ -215,13 +215,13 @@ impl PolynomialStream {
         ))
     }
 
-    pub fn push(&mut self, mut bytes: &[u8]) -> Result<(), Error> {
+    pub fn push(&mut self, mut bytes: &[u8]) -> Result<(), Refusal> {
         if self.failed {
-            return Err(Error::Encoding);
+            return Err(Refusal::Encoding);
         }
         if bytes.len() > CHUNK_LIMIT || bytes.len() > self.degree * self.width - self.consumed {
             self.failed = true;
-            return Err(Error::Length);
+            return Err(Refusal::Length);
         }
         self.consumed += bytes.len();
         while !bytes.is_empty() {
@@ -247,25 +247,25 @@ impl PolynomialStream {
         Ok(())
     }
 
-    fn complete(&self) -> Result<(), Error> {
+    fn complete(&self) -> Result<(), Refusal> {
         if self.failed {
-            return Err(Error::Encoding);
+            return Err(Refusal::Encoding);
         }
         if self.consumed != self.degree * self.width
             || self.record_length != 0
             || self.coefficients.len() != self.degree
         {
-            return Err(Error::Incomplete);
+            return Err(Refusal::Incomplete);
         }
         Ok(())
     }
 
-    pub fn finish_value(self) -> Result<Element, Error> {
+    pub fn finish_value(self) -> Result<Element, Refusal> {
         self.complete()?;
         Ok(self.total)
     }
 
-    pub fn adjoint(self) -> Result<Vec<Element>, Error> {
+    pub fn adjoint(self) -> Result<Vec<Element>, Refusal> {
         self.complete()?;
         adjoint_of(self.coefficients, self.total, self.alpha, self.limb_weight)
     }
@@ -289,7 +289,7 @@ impl PolynomialRecords {
         degree: usize,
         radix_bits: usize,
         alpha: Element,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, Refusal> {
         check_parameters(modulus, degree, radix_bits, alpha)?;
         let width = modulus.len() + 1;
         let run = (CHUNK_LIMIT / width).clamp(1, degree);
@@ -315,11 +315,11 @@ impl PolynomialRecords {
     pub(crate) fn push(
         &mut self,
         mut bytes: &[u8],
-        mut take: impl FnMut(usize, &[u8], bool) -> Result<(), Error>,
-    ) -> Result<(), Error> {
+        mut take: impl FnMut(usize, &[u8], bool) -> Result<(), Refusal>,
+    ) -> Result<(), Refusal> {
         let whole = self.run.min(self.degree - self.taken) * self.width;
         if bytes.len() > self.remaining() || (whole > 0 && self.buffer.len() == whole) {
-            return Err(Error::Length);
+            return Err(Refusal::Length);
         }
         while !bytes.is_empty() {
             let records = self.run.min(self.degree - self.taken);
@@ -332,7 +332,7 @@ impl PolynomialRecords {
                     .chunks_exact(self.width)
                     .all(|record| self.codec.is_canonical(record))
                 {
-                    return Err(Error::Encoding);
+                    return Err(Refusal::Encoding);
                 }
                 take(
                     self.taken,

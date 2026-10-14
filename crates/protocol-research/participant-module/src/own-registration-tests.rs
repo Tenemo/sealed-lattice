@@ -4,7 +4,7 @@
 use super::{CONTROL_BYTES, State};
 use crate::registration_fixture::{RUNTIME, Record, registration};
 use protocol_foundations::{
-    Error,
+    Refusal,
     poll::{MAXIMUM_POLL_BYTES, SignedPoll},
     registration::CHUNK_LIMIT,
 };
@@ -24,7 +24,7 @@ fn begin_input(packet: &SignedPoll, record: &Record) -> Vec<u8> {
 }
 
 // Writes the bytes to the input buffer and runs the command over them.
-fn run(state: &mut State, operation: u32, bytes: &[u8]) -> Result<(), Error> {
+fn run(state: &mut State, operation: u32, bytes: &[u8]) -> Result<(), Refusal> {
     state.input[..bytes.len()].copy_from_slice(bytes);
     state.command(operation, bytes.len())
 }
@@ -34,24 +34,33 @@ fn refuses_malformed_and_early_commands() {
     let mut state = State::new();
     // A begin shorter than its fixed prefix, or naming a poll beyond the
     // poll bound.
-    assert!(matches!(run(&mut state, 0, &[0; 131]), Err(Error::Shape)));
+    assert!(matches!(run(&mut state, 0, &[0; 131]), Err(Refusal::Shape)));
     let mut oversized = vec![0; 132];
     oversized[128..].copy_from_slice(&(MAXIMUM_POLL_BYTES as u32 + 1).to_le_bytes());
-    assert!(matches!(run(&mut state, 0, &oversized), Err(Error::Shape)));
+    assert!(matches!(
+        run(&mut state, 0, &oversized),
+        Err(Refusal::Shape)
+    ));
     // A length beyond the input buffer.
     assert!(matches!(
         state.command(0, CONTROL_BYTES + 1),
-        Err(Error::Shape)
+        Err(Refusal::Shape)
     ));
     // Key and finish commands before any begin.
-    assert!(matches!(run(&mut state, 1, &[1; 16]), Err(Error::Consumed)));
-    assert!(matches!(run(&mut state, 2, &[]), Err(Error::Consumed)));
-    assert!(matches!(run(&mut state, 4, &[]), Err(Error::Consumed)));
+    assert!(matches!(
+        run(&mut state, 1, &[1; 16]),
+        Err(Refusal::Consumed)
+    ));
+    assert!(matches!(run(&mut state, 2, &[]), Err(Refusal::Consumed)));
+    assert!(matches!(run(&mut state, 4, &[]), Err(Refusal::Consumed)));
     // Unknown operations, and finishing with input.
     for operation in [3, 5] {
-        assert!(matches!(run(&mut state, operation, &[]), Err(Error::Shape)));
+        assert!(matches!(
+            run(&mut state, operation, &[]),
+            Err(Refusal::Shape)
+        ));
     }
-    assert!(matches!(run(&mut state, 2, &[0]), Err(Error::Shape)));
+    assert!(matches!(run(&mut state, 2, &[0]), Err(Refusal::Shape)));
     assert!(state.poll.is_none() && state.pending.is_none() && state.verified.is_none());
 }
 
@@ -67,13 +76,13 @@ fn verifies_the_registration_once_against_its_signed_poll() {
     assert!(run(&mut state, 0, &changed).is_err());
     assert!(matches!(
         run(&mut state, 0, &[input.as_slice(), &[0]].concat()),
-        Err(Error::Shape)
+        Err(Refusal::Shape)
     ));
     assert!(state.poll.is_none());
     run(&mut state, 0, &input).unwrap();
     assert_eq!(state.options, poll.manifest().option_count());
     // No later begin replaces the poll.
-    assert!(matches!(run(&mut state, 0, &input), Err(Error::Consumed)));
+    assert!(matches!(run(&mut state, 0, &input), Err(Refusal::Consumed)));
     for part in record.key.chunks(CHUNK_LIMIT) {
         run(&mut state, 1, part).unwrap();
     }
@@ -85,7 +94,7 @@ fn verifies_the_registration_once_against_its_signed_poll() {
     for operation in [0, 1, 2, 4] {
         assert!(matches!(
             run(&mut state, operation, &[]),
-            Err(Error::Consumed)
+            Err(Refusal::Consumed)
         ));
     }
 }

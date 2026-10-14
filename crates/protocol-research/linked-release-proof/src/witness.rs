@@ -140,7 +140,7 @@ pub struct PreparedRelease {
     pub(crate) columns: Zeroizing<Vec<Vec<u16>>>,
 }
 #[derive(Debug)]
-pub enum ReleaseInputError {
+pub enum ReleaseInputRefusal {
     Shape,
     Key,
     Share,
@@ -154,7 +154,7 @@ impl ReleaseInputs {
         encrypted_linear: Vec<BigInt>,
         target_linear: Vec<BigInt>,
         secret: Zeroizing<Vec<i128>>,
-    ) -> Result<Self, ReleaseInputError> {
+    ) -> Result<Self, ReleaseInputRefusal> {
         let share_half = statement::share_modulus() >> 1usize;
         let release_half = statement::release_modulus(profile) >> 1usize;
         let half_support = RECIPIENT_SECRET_SUPPORT / 2;
@@ -170,7 +170,7 @@ impl ReleaseInputs {
             || secret.iter().filter(|value| **value == -1).count() != half_support
             || secret.iter().any(|value| !(-1..=1).contains(value))
         {
-            return Err(ReleaseInputError::Shape);
+            return Err(ReleaseInputRefusal::Shape);
         }
         Ok(Self {
             profile,
@@ -187,14 +187,14 @@ impl ReleaseInputs {
 pub fn prepare_release(
     inputs: ReleaseInputs,
     header: [u8; RELEASE_HEADER_BYTES],
-) -> Result<PreparedRelease, ReleaseInputError> {
-    release_header_position(inputs.profile, &header).ok_or(ReleaseInputError::Shape)?;
+) -> Result<PreparedRelease, ReleaseInputRefusal> {
+    release_header_position(inputs.profile, &header).ok_or(ReleaseInputRefusal::Shape)?;
     derive_inner(inputs, header)
 }
 fn derive_inner(
     inputs: ReleaseInputs,
     header: [u8; RELEASE_HEADER_BYTES],
-) -> Result<PreparedRelease, ReleaseInputError> {
+) -> Result<PreparedRelease, ReleaseInputRefusal> {
     let profile = inputs.profile;
     let (starts, words) = release_variable_starts(profile);
     let layout = Layout {
@@ -229,7 +229,7 @@ fn derive_inner(
         let raw_key = reconstruct(&key_product, position) + &inputs.public_key[position];
         let error = center(raw_key.clone(), &modulus);
         if error < -&key_error_radius || error >= key_error_radius {
-            return Err(ReleaseInputError::Key);
+            return Err(ReleaseInputRefusal::Key);
         }
         let quotient = (&raw_key - &error) / &modulus;
         assert!(
@@ -261,7 +261,7 @@ fn derive_inner(
             || error < -&decoding_error_radius
             || error >= decoding_error_radius
         {
-            return Err(ReleaseInputError::Share);
+            return Err(ReleaseInputRefusal::Share);
         }
         let quotient = (&raw_phase - scale * &share - &error) / &modulus;
         assert!(

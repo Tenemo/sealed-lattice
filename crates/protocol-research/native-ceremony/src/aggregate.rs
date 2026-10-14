@@ -508,12 +508,12 @@ pub fn classify_ballot(
     path: &Path,
     keys: &Path,
     mode: &str,
-) -> Result<ballot_proof::body::BallotBodyClassification, ballot_proof::body::Error> {
-    use ballot_proof::body::{BallotBodyClassifier, Error};
+) -> Result<ballot_proof::body::BallotBodyClassification, ballot_proof::body::Refusal> {
+    use ballot_proof::body::{BallotBodyClassifier, Refusal};
     let profile = setup.profile();
     let authentication =
         ballot_proof::submission::authenticate_envelope(&setup, envelope, signature)
-            .map_err(|_| Error::Context)?;
+            .map_err(|_| Refusal::Context)?;
     let mut file = File::open(path).unwrap();
     let mut header = [0; protocol_foundations::ballot_body::HEADER_BYTES];
     file.read_exact(&mut header).unwrap();

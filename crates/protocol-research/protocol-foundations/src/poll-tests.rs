@@ -21,7 +21,7 @@ fn manifest(title: &str, first: &str, second: &str, count: u16) -> Manifest {
     }
     Manifest::new(label(title), options).unwrap()
 }
-fn draft(top_count: u16) -> Result<PollDraft, Error> {
+fn draft(top_count: u16) -> Result<PollDraft, Refusal> {
     PollDraft::new(manifest("Question", "First", "Second", 10), top_count, 10)
 }
 #[test]
@@ -83,7 +83,7 @@ fn every_supported_option_count_and_top_count_can_be_created() {
                 count + 1,
                 10
             ),
-            Err(Error::Shape)
+            Err(Refusal::Shape)
         ));
     }
     assert_eq!(Profile::option_range(), 2..=20);
@@ -104,7 +104,7 @@ fn every_supported_participant_maximum_can_be_created() {
     for maximum in [0, 2, 21] {
         assert!(matches!(
             PollDraft::new(manifest("Question", "First", "Second", 2), 1, maximum),
-            Err(Error::Shape)
+            Err(Refusal::Shape)
         ));
     }
     assert_eq!(Profile::participant_range(), 3..=20);
@@ -155,6 +155,6 @@ fn valid_signatures_do_not_authorize_invalid_poll_fields() {
             &vec![0; MAXIMUM_POLL_BYTES + 1],
             &packet.signature
         ),
-        Err(Error::Shape)
+        Err(Refusal::Shape)
     ));
 }

@@ -29,9 +29,9 @@ const _: () = assert!(
     sealing::KEY_BYTES + first_oracle_checkpoint::RECORD_BYTES + sealing::TAG_BYTES
         <= CONTRIBUTION_INPUT_BYTES
 );
-/// A refused contribution step.
+/// The refusal of a contribution step.
 #[derive(Debug)]
-pub struct Refused;
+pub struct Refusal;
 protocol_foundations::operation_codes! {
     /// The contribution proof's commands.
     pub enum ProverOperation {
@@ -80,15 +80,15 @@ pub fn import_checkpoint(
     context: &RetainedContributionContext,
     position: usize,
     bytes: &[u8],
-) -> Result<first_oracle_checkpoint::Import, word_proof::setup_prover::Error> {
-    use word_proof::setup_prover::Error;
-    let prefix = bytes.get(..128).ok_or(Error::Operation)?;
+) -> Result<first_oracle_checkpoint::Import, word_proof::setup_prover::Refusal> {
+    use word_proof::setup_prover::Refusal as ProverRefusal;
+    let prefix = bytes.get(..128).ok_or(ProverRefusal::Operation)?;
     let import = first_oracle_checkpoint::Import::begin(&bytes[128..])?;
     let expected = context
         .checkpoint_role(prefix, position, import.profile())
-        .map_err(|_| Error::Operation)?;
+        .map_err(|_| ProverRefusal::Operation)?;
     if import.role() != expected {
-        return Err(Error::Operation);
+        return Err(ProverRefusal::Operation);
     }
     Ok(import)
 }
@@ -388,18 +388,22 @@ impl ContributionSession {
         proposal: &RosterProposal,
         position: usize,
         source: setup_witness::fhe_key_source::FheKeySource,
-    ) -> Result<(), protocol_foundations::Error> {
-        use protocol_foundations::Error;
+    ) -> Result<(), protocol_foundations::Refusal> {
+        use protocol_foundations::Refusal as FoundationRefusal;
         if self.stopped
             || self.work.is_some()
             || self.public_chunk.is_none()
             || self.checkpoint_import.is_some()
             || self.checkpoint_export.is_some()
         {
-            return Err(Error::Consumed);
+            return Err(FoundationRefusal::Consumed);
         }
-        let mut work = Work::new(proposal, position, source).map_err(|_| Error::Context)?;
-        let public_chunk = self.public_chunk.take().ok_or(Error::Consumed)?;
+        let mut work =
+            Work::new(proposal, position, source).map_err(|_| FoundationRefusal::Context)?;
+        let public_chunk = self
+            .public_chunk
+            .take()
+            .ok_or(FoundationRefusal::Consumed)?;
         work.public = Some(PublicOutput::new(work.profile, &work.role, public_chunk));
         self.output.clear();
         self.work = Some(work);
@@ -428,10 +432,10 @@ impl ContributionSession {
         position: usize,
         length: usize,
         retained: &RetainedContributionContext,
-    ) -> Result<(), Refused> {
+    ) -> Result<(), Refusal> {
         let operation = CheckpointOperation::from_code(operation);
         if self.stopped || (operation != Some(CheckpointOperation::Import) && position != 0) {
-            return Err(Refused);
+            return Err(Refusal);
         }
         // The previous output may hold a checkpoint record's key.
         self.output.zeroize();
@@ -538,7 +542,7 @@ impl ContributionSession {
             restore_keys.clear();
             *stopped = true;
         }
-        result.map_err(|()| Refused)
+        result.map_err(|()| Refusal)
     }
     pub fn output(&self) -> &[u8] {
         &self.output
@@ -558,9 +562,9 @@ impl ContributionSession {
         self.output.clear();
         self.stopped = true;
     }
-    pub fn command(&mut self, code: u32, argument: usize, length: usize) -> Result<(), Refused> {
+    pub fn command(&mut self, code: u32, argument: usize, length: usize) -> Result<(), Refusal> {
         self.advance(
-            ProverOperation::from_code(code).ok_or(Refused)?,
+            ProverOperation::from_code(code).ok_or(Refusal)?,
             argument,
             length,
         )
@@ -572,12 +576,12 @@ impl ContributionSession {
         operation: ProverOperation,
         argument: usize,
         length: usize,
-    ) -> Result<(), Refused> {
+    ) -> Result<(), Refusal> {
         if self.checkpoint_export.is_some() || self.checkpoint_import.is_some() {
-            return Err(Refused);
+            return Err(Refusal);
         }
         if length > CHUNK {
-            return Err(Refused);
+            return Err(Refusal);
         }
         self.output.clear();
         let Self {
@@ -614,28 +618,28 @@ impl ContributionSession {
             input.zeroize();
             output.clear();
         }
-        result.map_err(|()| Refused)
+        result.map_err(|()| Refusal)
     }
-    pub fn checkpoint_key(&mut self, position: usize, length: usize) -> Result<(), Refused> {
+    pub fn checkpoint_key(&mut self, position: usize, length: usize) -> Result<(), Refusal> {
         if self.stopped
             || self.work.is_some()
             || length != KEY_BYTES
             || position >= self.restore_keys.len()
             || self.restore_keys[position].is_some()
         {
-            return Err(Refused);
+            return Err(Refusal);
         }
         let Some(import) = self.checkpoint_import.as_ref() else {
-            return Err(Refused);
+            return Err(Refusal);
         };
         let Some(expected) = import.input_hashes().get(position) else {
-            return Err(Refused);
+            return Err(Refusal);
         };
         let Some(bytes) = self.input.get(..length) else {
-            return Err(Refused);
+            return Err(Refusal);
         };
         if ProtocolHash::digest(bytes) != *expected {
-            return Err(Refused);
+            return Err(Refusal);
         }
         let key = bytes.to_vec();
         self.restore_keys[position] = Some(key);

@@ -3,7 +3,7 @@
 //! parameters with the refusals of a direct evaluation before it submits the
 //! job, so a job's output is a function of its input bytes.
 use super::{
-    Element, Error, ZERO, adjoint_of, limb_powers, plus, power, query, record_fingerprint, setup,
+    Element, Refusal, ZERO, adjoint_of, limb_powers, plus, power, query, record_fingerprint, setup,
     times,
 };
 use parallel_work::{Job, Part, Pipeline, Ticket, submit};
@@ -77,7 +77,7 @@ pub(crate) fn queries_job(
     values: &[Element],
     indices: &[u32],
     systematic_size: usize,
-) -> Result<Ticket, Error> {
+) -> Result<Ticket, Refusal> {
     query::check_in(values.len(), indices, systematic_size)?;
     let mut input = Vec::with_capacity(8 + 4 * indices.len() + ELEMENT_BYTES * values.len());
     push_queries(&mut input, indices, systematic_size);
@@ -164,7 +164,7 @@ pub(crate) fn adjoint_job(
     alpha: Element,
     indices: &[u32],
     systematic_size: usize,
-) -> Result<Ticket, Error> {
+) -> Result<Ticket, Refusal> {
     query::check_in(fingerprints.len() / ELEMENT_BYTES, indices, systematic_size)?;
     let mut header = Vec::with_capacity(8 + 4 * indices.len() + 2 * ELEMENT_BYTES);
     push_queries(&mut header, indices, systematic_size);
@@ -198,10 +198,10 @@ fn adjoint(input: &[u8]) -> Vec<u8> {
     output
 }
 /// An adjoint job's query values, refused when the adjoint does not close.
-pub(crate) fn decode_adjoint(output: &[u8]) -> Result<Vec<Element>, Error> {
+pub(crate) fn decode_adjoint(output: &[u8]) -> Result<Vec<Element>, Refusal> {
     match output[0] {
         0 => Ok(decode_values(&output[1..])),
-        _ => Err(Error::Arithmetic),
+        _ => Err(Refusal::Arithmetic),
     }
 }
 
@@ -211,7 +211,7 @@ pub(crate) fn geometry_job(
     alpha: Element,
     indices: &[u32],
     systematic_size: usize,
-) -> Result<Ticket, Error> {
+) -> Result<Ticket, Refusal> {
     query::check_in(key.degree, indices, systematic_size)?;
     let mut input = Vec::new();
     for value in [key.degree, key.automorphism, key.shift] {
@@ -258,7 +258,7 @@ pub(crate) fn decode_geometry(output: &[u8]) -> (Element, Vec<Element>) {
 pub fn evaluate_public_columns(
     columns: Vec<Vec<Element>>,
     indices: &[u32],
-) -> Result<Vec<Element>, Error> {
+) -> Result<Vec<Element>, Refusal> {
     let mut output = Vec::with_capacity(columns.len() * indices.len());
     if parallel_work::helpers() == 0 {
         for column in columns {

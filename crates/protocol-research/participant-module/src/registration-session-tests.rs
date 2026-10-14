@@ -5,7 +5,7 @@ use crate::contribution_session::{ContributionSession, checkpoint_layout, import
 use crate::registration_fixture::{Record, registration};
 use parallel_work::sealing;
 use protocol_foundations::{
-    Credential, Error,
+    Credential, Refusal,
     foundation::{
         CanonicalItem, CanonicalTuple, participant_identity::derive_participant_identity,
     },
@@ -17,7 +17,7 @@ use supported_profile::Profile;
 
 const CHUNK: usize = 1 << 20;
 
-fn direct(poll: &VerifiedPoll, record: &Record) -> Result<VerifiedRegistration, Error> {
+fn direct(poll: &VerifiedPoll, record: &Record) -> Result<VerifiedRegistration, Refusal> {
     let mut verifier = RegistrationVerifier::new(poll, &record.header, &record.signature)?;
     for part in record.key.chunks(CHUNK) {
         verifier.push_key(part)?;
@@ -31,7 +31,7 @@ fn streamed(
     poll: &VerifiedPoll,
     record: &Record,
     division: usize,
-) -> Result<VerifiedRegistration, Error> {
+) -> Result<VerifiedRegistration, Refusal> {
     let mut session = RegistrationSession::open(poll, 0, &record.header, &record.signature)?;
     for part in record.key.chunks(division) {
         session.push_key(part)?;
@@ -93,7 +93,7 @@ fn sessions_verify_and_refuse_a_registration_as_its_verifier_does() {
         changed(|record| record.key[5] ^= 1),
         changed(|record| record.signature[0] ^= 1),
     ] {
-        let refusal = |result: Result<VerifiedRegistration, Error>| {
+        let refusal = |result: Result<VerifiedRegistration, Refusal>| {
             format!("{:?}", result.err().expect("A refusal"))
         };
         assert_eq!(

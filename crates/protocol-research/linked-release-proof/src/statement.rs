@@ -32,15 +32,15 @@ const RELEASE_CHUNK: usize = RELEASE_LIMB_BITS / 8;
 const SHARE_POLYNOMIALS: usize = 4;
 const POLYNOMIALS: usize = 6;
 #[derive(Debug)]
-pub enum Error {
+pub enum Refusal {
     Shape,
     Encoding,
     Binding,
     Arithmetic,
 }
-impl From<statement_stream::Error> for Error {
-    fn from(error: statement_stream::Error) -> Self {
-        use statement_stream::Error as Stream;
+impl From<statement_stream::Refusal> for Refusal {
+    fn from(error: statement_stream::Refusal) -> Self {
+        use statement_stream::Refusal as Stream;
         match error {
             Stream::Parameters | Stream::Length | Stream::Incomplete => Self::Shape,
             Stream::Encoding => Self::Encoding,
@@ -99,12 +99,12 @@ fn fingerprint(bytes: &[u8], chunk: usize, weight: Element) -> Element {
         )
     })
 }
-pub fn encode_polynomial(values: &[BigInt], width: usize) -> Result<Vec<u8>, Error> {
+pub fn encode_polynomial(values: &[BigInt], width: usize) -> Result<Vec<u8>, Refusal> {
     let mut output = Vec::with_capacity(values.len() * width);
     for value in values {
         let (sign, bytes) = value.to_bytes_le();
         if bytes.len() >= width {
-            return Err(Error::Encoding);
+            return Err(Refusal::Encoding);
         }
         output.push(u8::from(sign == Sign::Minus));
         output.extend(&bytes);
@@ -119,9 +119,9 @@ fn polynomial_stream(
     profile: Profile,
     index: usize,
     alpha: Element,
-) -> Result<PolynomialStream, Error> {
+) -> Result<PolynomialStream, Refusal> {
     if index >= POLYNOMIALS {
-        return Err(Error::Shape);
+        return Err(Refusal::Shape);
     }
     let (modulus, limb_bits) = if index < SHARE_POLYNOMIALS {
         (
@@ -238,7 +238,7 @@ impl Builder {
     }
 }
 impl OperatorBuilder for Builder {
-    type Error = Error;
+    type Refusal = Refusal;
     const HEADER_BYTES: usize = RELEASE_HEADER_BYTES;
     const POLYNOMIALS: usize = POLYNOMIALS;
     fn columns(profile: Profile) -> usize {
@@ -251,11 +251,11 @@ impl OperatorBuilder for Builder {
         profile: Profile,
         index: usize,
         alpha: Element,
-    ) -> Result<PolynomialStream, Error> {
+    ) -> Result<PolynomialStream, Refusal> {
         polynomial_stream(profile, index, alpha)
     }
-    fn begin(profile: Profile, alpha: Element, header: &[u8]) -> Result<Self, Error> {
-        release_header_position(profile, header).ok_or(Error::Shape)?;
+    fn begin(profile: Profile, alpha: Element, header: &[u8]) -> Result<Self, Refusal> {
+        release_header_position(profile, header).ok_or(Refusal::Shape)?;
         let (starts, words) = release_variable_starts(profile);
         let mut value = ONE;
         let mut powers_sum = ZERO;
@@ -280,9 +280,9 @@ impl OperatorBuilder for Builder {
             consumed: 0,
         })
     }
-    fn polynomial(&mut self, index: usize, polynomial: PolynomialStream) -> Result<(), Error> {
+    fn polynomial(&mut self, index: usize, polynomial: PolynomialStream) -> Result<(), Refusal> {
         if index != self.consumed {
-            return Err(Error::Shape);
+            return Err(Refusal::Shape);
         }
         self.consumed += 1;
         match index {
@@ -326,13 +326,13 @@ impl OperatorBuilder for Builder {
                     ),
                 )
             }
-            _ => return Err(Error::Shape),
+            _ => return Err(Refusal::Shape),
         }
         Ok(())
     }
-    fn finish(mut self) -> Result<Operator, Error> {
+    fn finish(mut self) -> Result<Operator, Refusal> {
         if self.consumed != POLYNOMIALS {
-            return Err(Error::Shape);
+            return Err(Refusal::Shape);
         }
         let limb_weight = self.limb_weight;
         let share_modulus = fingerprint(
@@ -462,7 +462,7 @@ impl PublicStatement {
         }
         hash.finalize()
     }
-    pub fn operator(&self, alpha: Element) -> Result<Operator, Error> {
+    pub fn operator(&self, alpha: Element) -> Result<Operator, Refusal> {
         affine::operator::<Builder>(self.profile, alpha, &self.header, &self.polynomials)
     }
 }

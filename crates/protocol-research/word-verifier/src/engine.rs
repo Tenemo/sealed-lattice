@@ -65,7 +65,7 @@ pub enum Refusal {
     Context,
     Authentication,
     Relation,
-    Stage,
+    Phase,
 }
 struct Row {
     words: Vec<u128>,
@@ -163,7 +163,7 @@ impl<S: Statement> Verifier<S> {
     }
     pub fn push_statement(&mut self, bytes: &[u8]) -> Result<(), Refusal> {
         if self.failed || self.statement_done {
-            return Err(Refusal::Stage);
+            return Err(Refusal::Phase);
         }
         if bytes.len() > CHUNK_LIMIT {
             self.failed = true;
@@ -171,9 +171,9 @@ impl<S: Statement> Verifier<S> {
         }
         self.context_hash
             .as_mut()
-            .ok_or(Refusal::Stage)?
+            .ok_or(Refusal::Phase)?
             .update(bytes);
-        if !self.statement.as_mut().ok_or(Refusal::Stage)?.push(bytes) {
+        if !self.statement.as_mut().ok_or(Refusal::Phase)?.push(bytes) {
             self.failed = true;
             return Err(Refusal::Encoding);
         }
@@ -181,9 +181,9 @@ impl<S: Statement> Verifier<S> {
     }
     pub fn finish_statement(&mut self) -> Result<(), Refusal> {
         if self.failed || self.statement_done {
-            return Err(Refusal::Stage);
+            return Err(Refusal::Phase);
         }
-        let computed = self.context_hash.take().ok_or(Refusal::Stage)?.finish();
+        let computed = self.context_hash.take().ok_or(Refusal::Phase)?.finish();
         if computed != self.header.context {
             self.failed = true;
             return Err(Refusal::Context);
@@ -191,7 +191,7 @@ impl<S: Statement> Verifier<S> {
         self.operator = Some(
             self.statement
                 .take()
-                .ok_or(Refusal::Stage)?
+                .ok_or(Refusal::Phase)?
                 .finish()
                 .ok_or(Refusal::Encoding)?,
         );
@@ -310,7 +310,7 @@ impl<S: Statement> Verifier<S> {
         let multiplicity = reader.base()?;
         let mut combined = reader.element()?;
         let point = &self.points[self.position];
-        let operator = self.operator.as_ref().ok_or(Refusal::Stage)?;
+        let operator = self.operator.as_ref().ok_or(Refusal::Phase)?;
         let mut linear = ZERO;
         for (column, value) in words.iter().enumerate() {
             linear = add(
@@ -442,7 +442,7 @@ impl<S: Statement> Verifier<S> {
                 table_residue,
             ),
         );
-        let operator = self.operator.as_ref().ok_or(Refusal::Stage)?;
+        let operator = self.operator.as_ref().ok_or(Refusal::Phase)?;
         let linear = add(
             row.linear,
             multiply(operator.lookup_weight, subtract(sum, table_inverse)),
@@ -546,7 +546,7 @@ impl<S: Statement> Verifier<S> {
     }
     pub fn push_proof(&mut self, mut bytes: &[u8]) -> Result<(), Refusal> {
         if self.failed || !self.statement_done {
-            return Err(Refusal::Stage);
+            return Err(Refusal::Phase);
         }
         if bytes.len() > CHUNK_LIMIT {
             self.failed = true;

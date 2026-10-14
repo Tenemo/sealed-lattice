@@ -1,4 +1,4 @@
-use crate::{Credential, Error, SIGNATURE_BYTES, SigningPurpose, roster::RosterProposal};
+use crate::{Credential, Refusal, SIGNATURE_BYTES, SigningPurpose, roster::RosterProposal};
 use fips204::{
     ml_dsa_65,
     traits::{SerDes, Verifier},
@@ -20,23 +20,26 @@ impl AuthenticatedRosterProposal {
 }
 
 impl Credential {
-    pub fn validate_roster_proposal_target(&self, proposal: &RosterProposal) -> Result<(), Error> {
+    pub fn validate_roster_proposal_target(
+        &self,
+        proposal: &RosterProposal,
+    ) -> Result<(), Refusal> {
         self.check_unlocked(SigningPurpose::RosterProposal)?;
         if self.proposal_signed {
-            return Err(Error::Consumed);
+            return Err(Refusal::Consumed);
         }
         let organizer = &proposal.records()[proposal.organizer_position()];
         if self.signing_public != organizer.header().signing_public
             || self.completed_body != Some(organizer.body_digest())
         {
-            return Err(Error::Context);
+            return Err(Refusal::Context);
         }
         Ok(())
     }
     pub fn sign_roster_proposal(
         &mut self,
         proposal: &RosterProposal,
-    ) -> Result<[u8; SIGNATURE_BYTES], Error> {
+    ) -> Result<[u8; SIGNATURE_BYTES], Refusal> {
         self.validate_roster_proposal_target(proposal)?;
         self.proposal_signed = true;
         self.sign_deterministically(&proposal.identity(), ROSTER_SIGNATURE_CONTEXT)
@@ -46,14 +49,14 @@ impl Credential {
 pub fn authenticate_roster_proposal(
     proposal: RosterProposal,
     signature: &[u8],
-) -> Result<AuthenticatedRosterProposal, Error> {
-    let signature: [u8; SIGNATURE_BYTES] = signature.try_into().map_err(|_| Error::Shape)?;
+) -> Result<AuthenticatedRosterProposal, Refusal> {
+    let signature: [u8; SIGNATURE_BYTES] = signature.try_into().map_err(|_| Refusal::Shape)?;
     let key = proposal.records()[proposal.organizer_position()]
         .header()
         .signing_public;
-    let public = ml_dsa_65::PublicKey::try_from_bytes(key).map_err(|_| Error::Shape)?;
+    let public = ml_dsa_65::PublicKey::try_from_bytes(key).map_err(|_| Refusal::Shape)?;
     if !public.verify(&proposal.identity(), &signature, ROSTER_SIGNATURE_CONTEXT) {
-        return Err(Error::Crypto);
+        return Err(Refusal::Crypto);
     }
     Ok(AuthenticatedRosterProposal {
         proposal,

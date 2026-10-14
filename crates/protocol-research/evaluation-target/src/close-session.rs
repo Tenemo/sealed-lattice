@@ -35,9 +35,9 @@ protocol_foundations::operation_codes! {
         DiscardBody = 10,
     }
 }
-/// A refused close operation.
+/// The refusal of a close operation.
 #[derive(Debug)]
-pub struct Refused;
+pub struct Refusal;
 /// Public close verification for one instance. Every listed envelope
 /// passes the owning envelope authentication before a response that lists it
 /// is authenticated; only the bodies of the proposal's usable slots stream
@@ -89,14 +89,14 @@ impl CloseSession {
         setup: impl FnOnce() -> Option<(Arc<VerifiedPoll>, Arc<VerifiedSetupAggregate>)>,
         operation: u32,
         length: usize,
-    ) -> Result<(), Refused> {
-        let operation = BarrierOperation::from_code(operation).ok_or(Refused)?;
+    ) -> Result<(), Refusal> {
+        let operation = BarrierOperation::from_code(operation).ok_or(Refusal)?;
         if operation == BarrierOperation::Begin {
             if length != 0 {
-                return Err(Refused);
+                return Err(Refusal);
             }
-            let (poll, setup) = setup().ok_or(Refused)?;
-            let context = CloseContext::new(poll, setup).map_err(|_| Refused)?;
+            let (poll, setup) = setup().ok_or(Refusal)?;
+            let context = CloseContext::new(poll, setup).map_err(|_| Refusal)?;
             *self = Self {
                 context: Some(context),
                 ..Self::with_input(std::mem::take(&mut self.input))
@@ -104,15 +104,15 @@ impl CloseSession {
             return Ok(());
         }
         if self.barrier.is_some() {
-            return Err(Refused);
+            return Err(Refusal);
         }
-        let context = self.context.as_ref().ok_or(Refused)?;
+        let context = self.context.as_ref().ok_or(Refusal)?;
         let count = context.participant_count();
-        let bytes = self.input.get(..length).ok_or(Refused)?;
+        let bytes = self.input.get(..length).ok_or(Refusal)?;
         match operation {
             BarrierOperation::Intent => {
                 if self.intent.is_some() {
-                    return Err(Refused);
+                    return Err(Refusal);
                 }
                 let (body, signature) = packet(
                     bytes,
@@ -121,7 +121,7 @@ impl CloseSession {
                 self.intent = Some(
                     context
                         .authenticate_intent(body, signature)
-                        .map_err(|_| Refused)?,
+                        .map_err(|_| Refusal)?,
                 );
             }
             // A listed envelope and its signature. The stored responses list
@@ -130,14 +130,14 @@ impl CloseSession {
                 if self.envelopes.len() >= MAXIMUM_LISTED_ENVELOPES_PER_SLOT * count * count
                     || bytes.len() != ENVELOPE_BYTES + SIGNATURE_BYTES
                 {
-                    return Err(Refused);
+                    return Err(Refusal);
                 }
                 let authentication = authenticate_envelope(
                     context.setup(),
                     &bytes[..ENVELOPE_BYTES],
                     &bytes[ENVELOPE_BYTES..],
                 )
-                .map_err(|_| Refused)?;
+                .map_err(|_| Refusal)?;
                 let identity = authentication.envelope().identity();
                 if !self
                     .envelopes
@@ -151,39 +151,39 @@ impl CloseSession {
             // its identity.
             BarrierOperation::BeginBody => {
                 if self.pending_body.is_some() || self.bodies.len() >= count {
-                    return Err(Refused);
+                    return Err(Refusal);
                 }
                 let authentication = self
                     .envelopes
                     .iter()
                     .find(|value| value.envelope().identity().as_slice() == bytes)
-                    .ok_or(Refused)?;
+                    .ok_or(Refusal)?;
                 self.pending_body = Some(
-                    BallotBodyAuthentication::new(authentication.clone()).map_err(|_| Refused)?,
+                    BallotBodyAuthentication::new(authentication.clone()).map_err(|_| Refusal)?,
                 );
             }
             BarrierOperation::PushBody => {
                 if self
                     .pending_body
                     .as_mut()
-                    .ok_or(Refused)?
+                    .ok_or(Refusal)?
                     .push(bytes)
                     .is_err()
                 {
                     self.pending_body = None;
-                    return Err(Refused);
+                    return Err(Refusal);
                 }
             }
             BarrierOperation::FinishBody => {
                 if !bytes.is_empty() {
-                    return Err(Refused);
+                    return Err(Refusal);
                 }
                 let body = self
                     .pending_body
                     .take()
-                    .ok_or(Refused)?
+                    .ok_or(Refusal)?
                     .finish()
-                    .map_err(|_| Refused)?;
+                    .map_err(|_| Refusal)?;
                 let identity = body.authentication().envelope().identity();
                 if !self
                     .bodies
@@ -195,7 +195,7 @@ impl CloseSession {
             }
             BarrierOperation::Response => {
                 if self.responses.len() >= count {
-                    return Err(Refused);
+                    return Err(Refusal);
                 }
                 let (body, signature) = packet(
                     bytes,
@@ -203,19 +203,19 @@ impl CloseSession {
                 )?;
                 let response = context
                     .authenticate_response(
-                        self.intent.as_ref().ok_or(Refused)?,
+                        self.intent.as_ref().ok_or(Refusal)?,
                         body,
                         signature,
                         &self.envelopes,
                     )
-                    .map_err(|_| Refused)?;
+                    .map_err(|_| Refusal)?;
                 // One response per signer; a duplicate never replaces the first.
                 if self
                     .responses
                     .iter()
                     .any(|value| value.message().responder() == response.message().responder())
                 {
-                    return Err(Refused);
+                    return Err(Refusal);
                 }
                 self.responses.push(response);
             }
@@ -227,14 +227,14 @@ impl CloseSession {
                     maximum_close_message_bytes(ClosePurpose::Proposal, count),
                 )?;
                 let proposal = CloseProposalMessage::parse(body, count, context.organizer())
-                    .map_err(|_| Refused)?;
+                    .map_err(|_| Refusal)?;
                 let required = context
                     .required_bodies(
-                        self.intent.as_ref().ok_or(Refused)?,
+                        self.intent.as_ref().ok_or(Refusal)?,
                         &proposal,
                         &self.responses,
                     )
-                    .map_err(|_| Refused)?;
+                    .map_err(|_| Refusal)?;
                 self.missing = required
                     .into_iter()
                     .filter(|(_, identity)| {
@@ -254,28 +254,28 @@ impl CloseSession {
                 self.barrier = Some(
                     context
                         .verify_proposal(
-                            self.intent.clone().ok_or(Refused)?,
+                            self.intent.clone().ok_or(Refusal)?,
                             body,
                             signature,
                             &self.responses,
                             &self.bodies,
                         )
-                        .map_err(|_| Refused)?,
+                        .map_err(|_| Refusal)?,
                 );
             }
             BarrierOperation::DiscardBody => {
                 if !bytes.is_empty() {
-                    return Err(Refused);
+                    return Err(Refusal);
                 }
                 self.pending_body = None;
             }
-            BarrierOperation::Begin => return Err(Refused),
+            BarrierOperation::Begin => return Err(Refusal),
         }
         Ok(())
     }
 }
-fn packet(bytes: &[u8], maximum: usize) -> Result<(&[u8], &[u8]), Refused> {
-    signed_packet::split(bytes, maximum).ok_or(Refused)
+fn packet(bytes: &[u8], maximum: usize) -> Result<(&[u8], &[u8]), Refusal> {
+    signed_packet::split(bytes, maximum).ok_or(Refusal)
 }
 impl Default for CloseSession {
     fn default() -> Self {

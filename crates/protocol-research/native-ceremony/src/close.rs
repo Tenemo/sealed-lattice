@@ -15,11 +15,11 @@ use work::{conclude, gather};
 use crate::scenario::Scenario;
 use ballot_proof::submission::{AuthenticatedBallotBody, AuthenticatedBallotEnvelope};
 use evaluation_target::close::{
-    CloseContext, ClosedSlot, Error as CloseError, VerifiedCloseBarrier,
+    CloseContext, ClosedSlot, Refusal as CloseRefusal, VerifiedCloseBarrier,
 };
 use participant_module::close_work::CloseOperation;
 use protocol_foundations::{
-    Credential, Error,
+    Credential, Refusal,
     ballot_authentication::{BallotEnvelope, RetainedSetupOwner},
     close_signing::{
         CloseIntentMessage, CloseMessage, ClosePurpose, CloseResponseMessage,
@@ -164,7 +164,7 @@ pub fn run(
                 0,
                 &control(&equivocated.late)
             ),
-            Err(Error::Consumed)
+            Err(Refusal::Consumed)
         ));
     }
     // Only the organizer closes, and only once.
@@ -179,7 +179,7 @@ pub fn run(
         .unwrap();
     assert!(matches!(
         sign(&mut other, &mut enrollments[1].credential, &body),
-        Err(Error::Context)
+        Err(Refusal::Context)
     ));
     let (intent_body, intent_signature) = open(&mut works, enrollments, close_time);
     let intent_packet = signed_packet::encode(&intent_body, &intent_signature);
@@ -194,7 +194,7 @@ pub fn run(
         .unwrap();
     assert!(matches!(
         sign(&mut repeated, &mut enrollments[0].credential, &later),
-        Err(Error::Consumed)
+        Err(Refusal::Consumed)
     ));
     let intent = context
         .authenticate_intent(&intent_body, &intent_signature)
@@ -203,14 +203,14 @@ pub fn run(
     changed[0] ^= 1;
     assert_eq!(
         context.authenticate_intent(&intent_body, &changed).err(),
-        Some(CloseError::Signature)
+        Some(CloseRefusal::Signature)
     );
     let unsigned = context.intent(close_time + 5).unwrap();
     assert_eq!(
         context
             .authenticate_intent(unsigned.body(), &intent_signature)
             .err(),
-        Some(CloseError::Signature)
+        Some(CloseRefusal::Signature)
     );
     let mut refused = close_work(&enrollments[first_honest], &poll, &setup, first_honest);
     assert!(
@@ -230,7 +230,7 @@ pub fn run(
             enrollments[nonvoter]
                 .credential
                 .reserve_ballot_attempt(&owner),
-            Err(Error::Consumed)
+            Err(Refusal::Consumed)
         ));
         let envelope = BallotEnvelope::new(
             profile,
@@ -246,7 +246,7 @@ pub fn run(
             enrollments[nonvoter]
                 .credential
                 .sign_retained_ballot_envelope(&owner, &envelope),
-            Err(Error::Consumed)
+            Err(Refusal::Consumed)
         ));
     }
     if let Some(equivocated) = &equivocated {
@@ -258,7 +258,7 @@ pub fn run(
                     0,
                     &control(&equivocated.late)
                 ),
-                Err(Error::Context)
+                Err(Refusal::Context)
             ));
         }
     }
@@ -306,7 +306,7 @@ pub fn run(
             0,
             &[]
         ),
-        Err(Error::Context)
+        Err(Refusal::Context)
     ));
     // A voter's response must list its own on-time ballot.
     let voter = scenario.omitted.unwrap_or(*scenario.voters.last().unwrap());
@@ -340,7 +340,7 @@ pub fn run(
         .unwrap();
     assert!(matches!(
         sign(&mut incomplete, &mut enrollments[voter].credential, &body),
-        Err(Error::Context)
+        Err(Refusal::Context)
     ));
     // Every other participant responds without waiting.
     let mut responses: Vec<Vec<u8>> = vec![Vec::new(); count];
@@ -398,7 +398,7 @@ pub fn run(
             context
                 .authenticate_response(&intent, late_listing.body(), &late_signature, &available)
                 .err(),
-            Some(CloseError::Context)
+            Some(CloseRefusal::Context)
         );
         assert!(
             works[0]
@@ -451,7 +451,7 @@ pub fn run(
             context
                 .authenticate_response(&intent, &three, &late_signature, &available)
                 .err(),
-            Some(CloseError::Shape)
+            Some(CloseRefusal::Shape)
         );
         late_response = Some(signed_packet::encode(late_listing.body(), &late_signature));
     }
@@ -473,7 +473,7 @@ pub fn run(
         context
             .authenticate_response(&intent, misdirected.body(), first_signature, &available)
             .err(),
-        Some(CloseError::Context)
+        Some(CloseRefusal::Context)
     );
     // A response stays pending until every listed envelope is available: the
     // first holder of the omitted ballot without it, or else the first
@@ -492,7 +492,7 @@ pub fn run(
         context
             .authenticate_response(&intent, body, signature, &without_pending)
             .err(),
-        Some(CloseError::Incomplete)
+        Some(CloseRefusal::Incomplete)
     );
     let mut changed = signature.to_vec();
     changed[1] ^= 1;
@@ -500,7 +500,7 @@ pub fn run(
         context
             .authenticate_response(&intent, body, &changed, &available)
             .err(),
-        Some(CloseError::Signature)
+        Some(CloseRefusal::Signature)
     );
     // An organizer that holds no body cannot answer: it wants a body for each
     // listed usable slot and none for a conflicting slot, whose two known
@@ -573,7 +573,7 @@ pub fn run(
         .unwrap();
     assert!(matches!(
         sign(&mut works[0], &mut enrollments[0].credential, &again),
-        Err(Error::Consumed)
+        Err(Refusal::Consumed)
     ));
     let listings: Vec<CloseResponseMessage> = responses
         .iter()
@@ -645,7 +645,7 @@ pub fn run(
                 &bodies
             )
             .err(),
-        Some(CloseError::Signature)
+        Some(CloseRefusal::Signature)
     );
     let without_last: Vec<_> = authenticated
         .iter()
@@ -662,7 +662,7 @@ pub fn run(
                 &bodies
             )
             .err(),
-        Some(CloseError::Incomplete)
+        Some(CloseRefusal::Incomplete)
     );
     assert_eq!(
         context
@@ -674,7 +674,7 @@ pub fn run(
                 &bodies[..bodies.len() - 1]
             )
             .err(),
-        Some(CloseError::Incomplete)
+        Some(CloseRefusal::Incomplete)
     );
     let barrier = context
         .verify_proposal(
@@ -734,7 +734,7 @@ pub fn run(
                 CloseMessage::Response(&response),
                 response_signature
             ),
-            Err(Error::Context)
+            Err(Refusal::Context)
         ));
         restored
             .lock_close_intent(&restored_owner, roster, intent.message(), &intent_signature)
@@ -766,11 +766,11 @@ pub fn run(
                 CloseMessage::Response(&response),
                 response_signature
             ),
-            Err(Error::Consumed)
+            Err(Refusal::Consumed)
         ));
         assert!(matches!(
             restored.sign_close_response(&restored_owner, roster, &response),
-            Err(Error::Consumed)
+            Err(Refusal::Consumed)
         ));
         late_fork = Some(fork);
     }
@@ -796,7 +796,7 @@ pub fn run(
     }
     assert!(matches!(
         organizer_restored.sign_close_proposal(&organizer_owner, roster, &proposal_message),
-        Err(Error::Consumed)
+        Err(Refusal::Consumed)
     ));
     let directory = output.join("close");
     let late_identity = equivocated

@@ -20,16 +20,16 @@ fn encode_release_proof_role(
     setup_identity: [u8; 64],
     target: [u8; 64],
     position: usize,
-) -> Result<Vec<u8>, Error> {
-    let position = u16::try_from(position).map_err(|_| Error::Context)?;
+) -> Result<Vec<u8>, Refusal> {
+    let position = u16::try_from(position).map_err(|_| Refusal::Context)?;
     CanonicalTuple::new(
         1,
         1,
         vec![
             CanonicalItem::nonempty_ascii("sealed-lattice/certified-release/v3")
-                .map_err(|_| Error::Encoding)?,
+                .map_err(|_| Refusal::Encoding)?,
             CanonicalItem::nonempty_ascii(&participant_identity.to_lowercase_hex())
-                .map_err(|_| Error::Encoding)?,
+                .map_err(|_| Refusal::Encoding)?,
             CanonicalItem::hash512(poll),
             CanonicalItem::hash512(setup_identity),
             CanonicalItem::hash512(target),
@@ -37,10 +37,10 @@ fn encode_release_proof_role(
         ],
     )
     .encode()
-    .map_err(|_| Error::Encoding)
+    .map_err(|_| Refusal::Encoding)
 }
 #[derive(Debug)]
-pub enum Error {
+pub enum Refusal {
     Context,
     NoResult,
     Encoding,
@@ -51,12 +51,12 @@ pub enum Error {
 
 /// The systematic coefficients of a polynomial of the little-endian
 /// modulus, in canonical records.
-pub(crate) fn decode_polynomial(bytes: &[u8], modulus: &[u8]) -> Result<Vec<BigInt>, Error> {
+pub(crate) fn decode_polynomial(bytes: &[u8], modulus: &[u8]) -> Result<Vec<BigInt>, Refusal> {
     let codec = CenteredCodec::new(modulus);
     if bytes.len() != SYSTEMATIC * codec.record_bytes() {
-        return Err(Error::Encoding);
+        return Err(Refusal::Encoding);
     }
-    codec.decode_all(bytes).ok_or(Error::Encoding)
+    codec.decode_all(bytes).ok_or(Refusal::Encoding)
 }
 
 /// Public operands and original participant position for one certified target.
@@ -77,11 +77,11 @@ impl ReleaseContext {
         position: usize,
         constant: VerifiedAggregatePolynomial,
         linear: VerifiedAggregatePolynomial,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, Refusal> {
         let target = certificate.target();
         let setup = target.setup();
         let profile = setup.profile();
-        let ciphertext = target.ciphertext().ok_or(Error::NoResult)?;
+        let ciphertext = target.ciphertext().ok_or(Refusal::NoResult)?;
         let records = setup.roster().proposal().records();
         let release_bytes = release_coefficient_bytes(profile);
         if position >= profile.participants()
@@ -93,7 +93,7 @@ impl ReleaseContext {
             || linear.index() != profile.share_linear_polynomial(position)
             || ciphertext.len() != 2 * SYSTEMATIC * release_bytes
         {
-            return Err(Error::Context);
+            return Err(Refusal::Context);
         }
         let public_key = decode_polynomial(
             records[position].public_key(),
@@ -132,7 +132,7 @@ impl ReleaseContext {
     pub fn certificate(&self) -> &Arc<VerifiedInventoryCertificate> {
         &self.certificate
     }
-    pub fn proof_role(&self) -> Result<Vec<u8>, Error> {
+    pub fn proof_role(&self) -> Result<Vec<u8>, Refusal> {
         let target = self.certificate.target();
         let original = target
             .setup()
@@ -140,10 +140,10 @@ impl ReleaseContext {
             .proposal()
             .records()
             .get(self.position)
-            .ok_or(Error::Context)?;
+            .ok_or(Refusal::Context)?;
         encode_release_proof_role(
             derive_participant_identity(&original.header().signing_public)
-                .map_err(|_| Error::Context)?,
+                .map_err(|_| Refusal::Context)?,
             target.poll().identity(),
             target.setup().identity(),
             *target.identity(),
@@ -162,7 +162,7 @@ impl ReleaseContext {
     pub fn target_linear(&self) -> &[BigInt] {
         &self.target_linear
     }
-    pub fn statement(&self, partial: &[u8]) -> Result<PublicStatement, Error> {
+    pub fn statement(&self, partial: &[u8]) -> Result<PublicStatement, Refusal> {
         // The parser checks the actual partial, not a producer's range claim.
         let profile = self.profile;
         let release_bytes = release_coefficient_bytes(profile);
@@ -171,7 +171,7 @@ impl ReleaseContext {
             profile,
             profile.share_common_polynomial(),
         )
-        .map_err(|_| Error::Context)?;
+        .map_err(|_| Refusal::Context)?;
         let mut polynomials = [
             common.as_slice(),
             self.public_key(),
@@ -190,7 +190,7 @@ impl ReleaseContext {
                     release_bytes
                 },
             )
-            .map_err(|_| Error::Encoding)
+            .map_err(|_| Refusal::Encoding)
         })
         .collect::<Result<Vec<_>, _>>()?;
         polynomials.push(partial.to_vec());

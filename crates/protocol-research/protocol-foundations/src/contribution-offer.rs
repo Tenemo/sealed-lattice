@@ -1,5 +1,5 @@
 use crate::{
-    Credential, Error, SIGNATURE_BYTES, contribution_body,
+    Credential, Refusal, SIGNATURE_BYTES, contribution_body,
     foundation::{CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple},
     identity::identity,
     roster::{RetainedContributionContext, RosterProposal},
@@ -45,7 +45,7 @@ impl OfferEnvelope {
         position: usize,
         body_length: usize,
         body_identity: [u8; 64],
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, Refusal> {
         Self::from_parts(
             roster.profile(),
             roster.identity(),
@@ -58,7 +58,7 @@ impl OfferEnvelope {
         context: &RetainedContributionContext,
         body_length: usize,
         body_identity: [u8; 64],
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, Refusal> {
         Self::from_parts(
             context.profile(),
             *context.identity(),
@@ -73,17 +73,17 @@ impl OfferEnvelope {
         position: usize,
         body_length: usize,
         body_identity: [u8; 64],
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, Refusal> {
         if position >= profile.setup_eligible_contributors()
             || !contribution_body::body_lengths(profile).contains(&body_length)
         {
-            return Err(Error::Shape);
+            return Err(Refusal::Shape);
         }
         let bytes = CanonicalTuple::new(
             1,
             1,
             vec![
-                CanonicalItem::nonempty_ascii(OFFER_PURPOSE).map_err(|_| Error::Shape)?,
+                CanonicalItem::nonempty_ascii(OFFER_PURPOSE).map_err(|_| Refusal::Shape)?,
                 CanonicalItem::hash512(roster),
                 CanonicalItem::unsigned16(position as u16),
                 CanonicalItem::unsigned64(body_length as u64),
@@ -91,7 +91,7 @@ impl OfferEnvelope {
             ],
         )
         .encode()
-        .map_err(|_| Error::Shape)?;
+        .map_err(|_| Refusal::Shape)?;
         Ok(Self {
             bytes,
             roster,
@@ -100,7 +100,7 @@ impl OfferEnvelope {
             body_identity,
         })
     }
-    pub fn decode(roster: &RosterProposal, bytes: &[u8]) -> Result<Self, Error> {
+    pub fn decode(roster: &RosterProposal, bytes: &[u8]) -> Result<Self, Refusal> {
         let limits = CanonicalDecodeLimits {
             maximum_tuple_byte_length: MAXIMUM_OFFER_BYTES,
             maximum_item_count: 5,
@@ -108,9 +108,9 @@ impl OfferEnvelope {
             maximum_nesting_depth: 0,
             ..CanonicalDecodeLimits::default()
         };
-        let tuple = CanonicalTuple::decode(bytes, &limits).map_err(|_| Error::Shape)?;
+        let tuple = CanonicalTuple::decode(bytes, &limits).map_err(|_| Refusal::Shape)?;
         if !tuple.has_header(5) {
-            return Err(Error::Shape);
+            return Err(Refusal::Shape);
         }
         let items = &tuple.items;
         let types = [
@@ -124,11 +124,13 @@ impl OfferEnvelope {
             .iter()
             .zip(types)
             .any(|(item, kind)| item.item_type() != kind)
-            || items[0].variable_value_bytes().map_err(|_| Error::Shape)?
+            || items[0]
+                .variable_value_bytes()
+                .map_err(|_| Refusal::Shape)?
                 != OFFER_PURPOSE.as_bytes()
             || items[1].canonical_bytes() != roster.identity()
         {
-            return Err(Error::Context);
+            return Err(Refusal::Context);
         }
         Self::new(
             roster,
@@ -136,19 +138,19 @@ impl OfferEnvelope {
                 items[2]
                     .canonical_bytes()
                     .try_into()
-                    .map_err(|_| Error::Shape)?,
+                    .map_err(|_| Refusal::Shape)?,
             ) as usize,
             usize::try_from(u64::from_le_bytes(
                 items[3]
                     .canonical_bytes()
                     .try_into()
-                    .map_err(|_| Error::Shape)?,
+                    .map_err(|_| Refusal::Shape)?,
             ))
-            .map_err(|_| Error::Shape)?,
+            .map_err(|_| Refusal::Shape)?,
             items[4]
                 .canonical_bytes()
                 .try_into()
-                .map_err(|_| Error::Shape)?,
+                .map_err(|_| Refusal::Shape)?,
         )
     }
     pub fn bytes(&self) -> &[u8] {
@@ -190,17 +192,17 @@ pub fn authenticate_offer(
     roster: Arc<AuthenticatedRosterProposal>,
     bytes: &[u8],
     signature: &[u8],
-) -> Result<AuthenticatedContributionOffer, Error> {
+) -> Result<AuthenticatedContributionOffer, Refusal> {
     let envelope = OfferEnvelope::decode(roster.proposal(), bytes)?;
-    let signature = signature.try_into().map_err(|_| Error::Shape)?;
+    let signature = signature.try_into().map_err(|_| Refusal::Shape)?;
     let key = ml_dsa_65::PublicKey::try_from_bytes(
         roster.proposal().records()[envelope.position()]
             .header()
             .signing_public,
     )
-    .map_err(|_| Error::Shape)?;
+    .map_err(|_| Refusal::Shape)?;
     if !key.verify(&envelope.identity(), &signature, OFFER_PURPOSE.as_bytes()) {
-        return Err(Error::Crypto);
+        return Err(Refusal::Crypto);
     }
     Ok(AuthenticatedContributionOffer {
         roster,
@@ -213,12 +215,12 @@ impl Credential {
         &mut self,
         context: &RetainedContributionContext,
         envelope: &OfferEnvelope,
-    ) -> Result<[u8; SIGNATURE_BYTES], Error> {
+    ) -> Result<[u8; SIGNATURE_BYTES], Refusal> {
         self.validate_offer_context(context)?;
         if envelope.roster_identity() != context.identity()
             || envelope.position() != context.position()
         {
-            return Err(Error::Context);
+            return Err(Refusal::Context);
         }
         self.offer_signed = Some(envelope.identity());
         self.sign_deterministically(&envelope.identity(), OFFER_PURPOSE.as_bytes())

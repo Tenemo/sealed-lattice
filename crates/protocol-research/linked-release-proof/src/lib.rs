@@ -4,7 +4,7 @@ pub mod statement;
 mod witness;
 use statement::StatementStream;
 use supported_profile::{Profile, relation::release_relation};
-pub use witness::{PreparedRelease, ReleaseInputError, ReleaseInputs, prepare_release};
+pub use witness::{PreparedRelease, ReleaseInputRefusal, ReleaseInputs, prepare_release};
 use word_verifier::engine;
 pub use word_verifier::engine::{CHUNK_LIMIT, HEADER_LENGTH, Refusal};
 

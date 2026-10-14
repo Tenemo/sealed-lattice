@@ -7,7 +7,7 @@ use participant_module::{
     close_work::{CloseOperation, CloseWork},
 };
 use protocol_foundations::{
-    Credential, Error, RETAINED_TAG_BYTES, ballot_authentication::RetainedSetupOwner,
+    Credential, RETAINED_TAG_BYTES, Refusal, ballot_authentication::RetainedSetupOwner,
     close_signing::CloseResponseMessage, poll::VerifiedPoll, roster::RetainedContributionContext,
 };
 use setup_aggregate::verified::VerifiedSetupAggregate;
@@ -148,7 +148,7 @@ pub fn replay(
     if let Some(proposal) = proposal {
         assert!(matches!(
             sign(&mut fresh, credential, &body),
-            Err(Error::Consumed)
+            Err(Refusal::Consumed)
         ));
         fresh
             .command(credential, CloseOperation::AdmitResponse, 0, response)
@@ -167,7 +167,7 @@ pub fn sign(
     work: &mut CloseWork,
     credential: &mut Credential,
     body: &[u8],
-) -> Result<Vec<u8>, Error> {
+) -> Result<Vec<u8>, Refusal> {
     work.command(credential, CloseOperation::Sign, 0, body)
 }
 
@@ -234,7 +234,7 @@ pub fn respond(
         .unwrap();
     assert!(matches!(
         sign(work, credential, &again),
-        Err(Error::Consumed)
+        Err(Refusal::Consumed)
     ));
     signed_packet::encode(&body, &signature)
 }
@@ -299,7 +299,7 @@ pub(super) fn conclude(work: &mut CloseWork, credential: &mut Credential) -> (Ve
         .unwrap();
     assert!(matches!(
         sign(work, credential, &again),
-        Err(Error::Consumed)
+        Err(Refusal::Consumed)
     ));
     work.command(credential, CloseOperation::AdmitResponse, 0, &own)
         .unwrap();

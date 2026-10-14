@@ -10,9 +10,9 @@ use protocol_foundations::poll::VerifiedPoll;
 use setup_aggregate::verified::VerifiedSetupAggregate;
 use std::sync::Arc;
 
-/// A refused classification step.
+/// The refusal of a classification step.
 #[derive(Debug)]
-pub struct Refused;
+pub struct Refusal;
 
 /// The classification of one ballot at a time under the instance's verified
 /// setup: its authenticated envelope, its key and body pieces and the
@@ -43,7 +43,7 @@ impl ClassificationSession {
         &mut self,
         setup: impl FnOnce() -> Option<(Arc<VerifiedPoll>, Arc<VerifiedSetupAggregate>)>,
         length: usize,
-    ) -> Result<(), Refused> {
+    ) -> Result<(), Refusal> {
         let Self {
             input,
             classifier,
@@ -54,10 +54,10 @@ impl ClassificationSession {
         *classification = None;
         let result = (|| {
             if length != ENVELOPE_BYTES + SIGNATURE_BYTES + HEADER_BYTES {
-                return Err(Refused);
+                return Err(Refusal);
             }
-            let bytes = input.get(..length).ok_or(Refused)?;
-            let (poll, setup) = setup().ok_or(Refused)?;
+            let bytes = input.get(..length).ok_or(Refusal)?;
+            let (poll, setup) = setup().ok_or(Refusal)?;
             // Another setup's inputs are released before this one reads its
             // own.
             if inputs.as_ref().is_some_and(|value| !value.serves(&setup)) {
@@ -68,7 +68,7 @@ impl ClassificationSession {
                 &bytes[..ENVELOPE_BYTES],
                 &bytes[ENVELOPE_BYTES..ENVELOPE_BYTES + SIGNATURE_BYTES],
             )
-            .map_err(|_| Refused)?;
+            .map_err(|_| Refusal)?;
             BallotBodyClassifier::new(
                 poll,
                 setup,
@@ -76,11 +76,11 @@ impl ClassificationSession {
                 &bytes[ENVELOPE_BYTES + SIGNATURE_BYTES..],
                 inputs.clone(),
             )
-            .map_err(|_| Refused)
+            .map_err(|_| Refusal)
         })();
         *classifier = result.ok();
         if classifier.is_none() {
-            Err(Refused)
+            Err(Refusal)
         } else {
             Ok(())
         }
@@ -90,24 +90,24 @@ impl ClassificationSession {
             .as_ref()
             .is_some_and(BallotBodyClassifier::requires_key)
     }
-    pub fn begin_key(&mut self, index: usize) -> Result<(), Refused> {
+    pub fn begin_key(&mut self, index: usize) -> Result<(), Refusal> {
         let result = self
             .classifier
             .as_mut()
-            .ok_or(Refused)
-            .and_then(|value| value.begin_key(index).map_err(|_| Refused));
+            .ok_or(Refusal)
+            .and_then(|value| value.begin_key(index).map_err(|_| Refusal));
         if result.is_err() {
             self.classifier = None;
             self.classification = None;
         }
         result
     }
-    pub fn finish_key(&mut self) -> Result<(), Refused> {
+    pub fn finish_key(&mut self) -> Result<(), Refusal> {
         let result = self
             .classifier
             .as_mut()
-            .ok_or(Refused)
-            .and_then(|value| value.finish_key().map_err(|_| Refused));
+            .ok_or(Refusal)
+            .and_then(|value| value.finish_key().map_err(|_| Refusal));
         if result.is_err() {
             self.classifier = None;
             self.classification = None;
@@ -122,7 +122,7 @@ impl ClassificationSession {
     }
     /// Feeds the input's first `length` bytes to the key, when `key` holds,
     /// or else to the body.
-    pub fn push(&mut self, length: usize, key: bool) -> Result<(), Refused> {
+    pub fn push(&mut self, length: usize, key: bool) -> Result<(), Refusal> {
         let Self {
             input,
             classifier,
@@ -130,14 +130,14 @@ impl ClassificationSession {
             ..
         } = self;
         let result = (|| {
-            let bytes = input.get(..length).ok_or(Refused)?;
-            let value = classifier.as_mut().ok_or(Refused)?;
+            let bytes = input.get(..length).ok_or(Refusal)?;
+            let value = classifier.as_mut().ok_or(Refusal)?;
             if key {
                 value.push_key(bytes)
             } else {
                 value.push(bytes)
             }
-            .map_err(|_| Refused)
+            .map_err(|_| Refusal)
         })();
         if result.is_err() {
             *classifier = None;
@@ -147,9 +147,9 @@ impl ClassificationSession {
     }
     /// Finishes the ballot's classification, which holds none when it
     /// failed.
-    pub fn finish(&mut self) -> Result<(), Refused> {
+    pub fn finish(&mut self) -> Result<(), Refusal> {
         self.classification = self.classifier.take().and_then(|value| value.finish().ok());
-        self.classification.as_ref().map(|_| ()).ok_or(Refused)
+        self.classification.as_ref().map(|_| ()).ok_or(Refusal)
     }
     /// Whether the finished classification holds a valid ballot.
     pub fn valid(&self) -> bool {

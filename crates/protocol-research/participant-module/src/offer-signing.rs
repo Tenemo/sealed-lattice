@@ -1,5 +1,5 @@
 use protocol_foundations::{
-    Credential, Error, SIGNATURE_BYTES,
+    Credential, Refusal, SIGNATURE_BYTES,
     contribution_body::{ContributionBodyHasher, ContributionBodyHeader},
     contribution_offer::OfferEnvelope,
     roster::RetainedContributionContext,
@@ -27,9 +27,9 @@ impl OfferSigning {
         credential: &Credential,
         context: RetainedContributionContext,
         header: &[u8],
-    ) -> Result<(), Error> {
+    ) -> Result<(), Refusal> {
         if self.context.is_some() || self.failed {
-            return Err(Error::Consumed);
+            return Err(Refusal::Consumed);
         }
         credential.validate_offer_owner(&context)?;
         let decoded = ContributionBodyHeader::decode(context.profile(), header)?;
@@ -40,30 +40,30 @@ impl OfferSigning {
         self.context = Some(context);
         Ok(())
     }
-    pub fn polynomial(&mut self, index: usize, offset: usize, bytes: &[u8]) -> Result<(), Error> {
+    pub fn polynomial(&mut self, index: usize, offset: usize, bytes: &[u8]) -> Result<(), Refusal> {
         if self.failed {
-            return Err(Error::Consumed);
+            return Err(Refusal::Consumed);
         }
         let result = (|| {
-            let context = self.context.as_ref().ok_or(Error::Consumed)?;
+            let context = self.context.as_ref().ok_or(Refusal::Consumed)?;
             self.body
                 .as_mut()
-                .ok_or(Error::Consumed)?
+                .ok_or(Refusal::Consumed)?
                 .push_polynomial(index, offset, bytes)?;
             if index == context.profile().fhe_polynomial(0, 1) {
                 self.source
                     .as_mut()
-                    .ok_or(Error::Consumed)?
+                    .ok_or(Refusal::Consumed)?
                     .push(offset, bytes)?;
                 if offset + bytes.len()
                     == context
                         .profile()
                         .setup_polynomial_bytes(index)
-                        .ok_or(Error::Shape)?
+                        .ok_or(Refusal::Shape)?
                 {
-                    let actual = self.source.take().ok_or(Error::Consumed)?.finish()?;
+                    let actual = self.source.take().ok_or(Refusal::Consumed)?.finish()?;
                     if &actual != context.fhe_key_commitment() {
-                        return Err(Error::Context);
+                        return Err(Refusal::Context);
                     }
                     self.source_matched = true;
                 }
@@ -75,27 +75,27 @@ impl OfferSigning {
         }
         result
     }
-    pub fn proof(&mut self, offset: usize, bytes: &[u8]) -> Result<(), Error> {
+    pub fn proof(&mut self, offset: usize, bytes: &[u8]) -> Result<(), Refusal> {
         if self.failed {
-            return Err(Error::Consumed);
+            return Err(Refusal::Consumed);
         }
         let result = self
             .body
             .as_mut()
-            .ok_or(Error::Consumed)?
+            .ok_or(Refusal::Consumed)?
             .push_proof(offset, bytes);
         if result.is_err() {
             self.failed = true;
         }
         result
     }
-    pub fn finish_body(&mut self) -> Result<(), Error> {
+    pub fn finish_body(&mut self) -> Result<(), Refusal> {
         if self.failed || !self.source_matched {
-            return Err(Error::Context);
+            return Err(Refusal::Context);
         }
-        let body = self.body.take().ok_or(Error::Consumed)?.finish()?;
+        let body = self.body.take().ok_or(Refusal::Consumed)?.finish()?;
         self.envelope = Some(OfferEnvelope::for_retained(
-            self.context.as_ref().ok_or(Error::Consumed)?,
+            self.context.as_ref().ok_or(Refusal::Consumed)?,
             body.length(),
             *body.identity(),
         )?);
@@ -104,13 +104,13 @@ impl OfferSigning {
     pub fn envelope(&self) -> Option<&OfferEnvelope> {
         self.envelope.as_ref()
     }
-    pub fn sign(&mut self, credential: &mut Credential) -> Result<(), Error> {
+    pub fn sign(&mut self, credential: &mut Credential) -> Result<(), Refusal> {
         if self.failed || self.signature.is_some() {
-            return Err(Error::Consumed);
+            return Err(Refusal::Consumed);
         }
         self.signature = Some(credential.sign_offer(
-            self.context.as_ref().ok_or(Error::Consumed)?,
-            self.envelope.as_ref().ok_or(Error::Consumed)?,
+            self.context.as_ref().ok_or(Refusal::Consumed)?,
+            self.envelope.as_ref().ok_or(Refusal::Consumed)?,
         )?);
         Ok(())
     }

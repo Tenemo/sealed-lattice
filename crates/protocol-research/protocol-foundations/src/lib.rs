@@ -85,7 +85,7 @@ macro_rules! operation_codes {
 }
 
 #[derive(Debug)]
-pub enum Error {
+pub enum Refusal {
     Shape,
     Context,
     Consumed,
@@ -153,12 +153,15 @@ impl Credential {
     pub fn signing_public(&self) -> &[u8; SIGNING_PUBLIC_KEY_BYTES] {
         &self.signing_public
     }
-    pub fn sign_registration(&mut self, body: BodyDigest) -> Result<[u8; SIGNATURE_BYTES], Error> {
+    pub fn sign_registration(
+        &mut self,
+        body: BodyDigest,
+    ) -> Result<[u8; SIGNATURE_BYTES], Refusal> {
         if self.signed {
-            return Err(Error::Consumed);
+            return Err(Refusal::Consumed);
         }
         if body.signing_public != self.signing_public {
-            return Err(Error::Context);
+            return Err(Refusal::Context);
         }
         self.signed = true;
         self.poll_creation_consumed = true;
@@ -174,11 +177,11 @@ impl Credential {
         &self,
         message: &[u8],
         context: &[u8],
-    ) -> Result<[u8; SIGNATURE_BYTES], Error> {
+    ) -> Result<[u8; SIGNATURE_BYTES], Refusal> {
         let (_, private) = ml_dsa_65::KG::keygen_from_seed(&self.signing_seed);
         private
             .try_sign_with_seed(&[0; 32], message, context)
-            .map_err(|_| Error::Crypto)
+            .map_err(|_| Refusal::Crypto)
     }
 
     pub fn check_retained(&self) -> bool {
@@ -214,7 +217,7 @@ impl Credential {
         poll: &VerifiedPoll,
         bytes: &[u8],
         tag: &[u8],
-    ) -> Result<(), Error> {
+    ) -> Result<(), Refusal> {
         let expected = self.retained_tag(label, poll, bytes);
         if tag.len() != expected.len()
             || tag
@@ -223,7 +226,7 @@ impl Credential {
                 .fold(0, |difference, (left, right)| difference | (left ^ right))
                 != 0
         {
-            return Err(Error::Crypto);
+            return Err(Refusal::Crypto);
         }
         Ok(())
     }
@@ -237,34 +240,34 @@ impl BodyDigest {
     pub fn bytes(&self) -> [u8; 64] {
         self.digest
     }
-    pub fn new(header: RegistrationHeader) -> Result<Self, Error> {
+    pub fn new(header: RegistrationHeader) -> Result<Self, Refusal> {
         check_header(&header)?;
         let encoded = header.encode()?;
         let digest = hash_foundation_tuple_512(
             "sealed-lattice/registration-body/v2",
-            &[CanonicalItem::variable_bytes(encoded).map_err(|_| Error::Shape)?],
+            &[CanonicalItem::variable_bytes(encoded).map_err(|_| Refusal::Shape)?],
         )
-        .map_err(|_| Error::Shape)?
+        .map_err(|_| Refusal::Shape)?
         .into_bytes();
         Ok(Self {
             digest,
             signing_public: header.signing_public,
         })
     }
-    pub fn from_header(bytes: &[u8], expected_poll: [u8; 64]) -> Result<Self, Error> {
+    pub fn from_header(bytes: &[u8], expected_poll: [u8; 64]) -> Result<Self, Refusal> {
         let (header, consumed) = RegistrationHeader::decode_prefix(bytes)?;
         if consumed != bytes.len() {
-            return Err(Error::Shape);
+            return Err(Refusal::Shape);
         }
         if header.poll != expected_poll {
-            return Err(Error::Context);
+            return Err(Refusal::Context);
         }
         Self::new(header)
     }
 }
 
-fn check_header(header: &RegistrationHeader) -> Result<(), Error> {
-    ml_dsa_65::PublicKey::try_from_bytes(header.signing_public).map_err(|_| Error::Shape)?;
+fn check_header(header: &RegistrationHeader) -> Result<(), Refusal> {
+    ml_dsa_65::PublicKey::try_from_bytes(header.signing_public).map_err(|_| Refusal::Shape)?;
     Ok(())
 }
 
@@ -273,15 +276,15 @@ fn check_header(header: &RegistrationHeader) -> Result<(), Error> {
 pub(crate) fn checked_header(
     bytes: &[u8],
     poll: &VerifiedPoll,
-) -> Result<RegistrationHeader, Error> {
+) -> Result<RegistrationHeader, Refusal> {
     let (header, consumed) = RegistrationHeader::decode_prefix(bytes)?;
     if consumed != bytes.len() {
-        return Err(Error::Shape);
+        return Err(Refusal::Shape);
     }
     if header.poll != poll.identity()
         || header.fhe_key_commitments.len() != source_binding::fhe_key_families(poll).len()
     {
-        return Err(Error::Context);
+        return Err(Refusal::Context);
     }
     check_header(&header)?;
     Ok(header)

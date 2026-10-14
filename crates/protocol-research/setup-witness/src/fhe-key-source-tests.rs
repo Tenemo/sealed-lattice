@@ -42,6 +42,6 @@ fn another_fhe_key_family_refuses_before_continuation() {
         .unwrap();
     assert!(matches!(
         contribution::Contribution::from_source(other, original),
-        Err(contribution::Error::SourceFamily)
+        Err(contribution::Refusal::SourceFamily)
     ));
 }

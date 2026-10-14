@@ -1,5 +1,5 @@
 use super::{
-    CHUNK_LIMIT, Element, Error, MODULUS, ONE, PolynomialRecords, PolynomialStream, ZERO,
+    CHUNK_LIMIT, Element, MODULUS, ONE, PolynomialRecords, PolynomialStream, Refusal, ZERO,
     fingerprint_in, jobs, minus, plus, power, proof_field, query, times,
 };
 use parallel_work::{HashStream, Pipeline, Sponge, Ticket};
@@ -42,7 +42,7 @@ fn family_stream(
     family: Family,
     degree: usize,
     alpha: Element,
-) -> Result<PolynomialStream, Error> {
+) -> Result<PolynomialStream, Refusal> {
     PolynomialStream::new(
         &profile.family_modulus(family),
         degree,
@@ -56,8 +56,8 @@ pub fn setup_polynomial_stream(
     profile: Profile,
     index: usize,
     alpha: Element,
-) -> Result<PolynomialStream, Error> {
-    let family = profile.setup_family(index).ok_or(Error::Parameters)?;
+) -> Result<PolynomialStream, Refusal> {
+    let family = profile.setup_family(index).ok_or(Refusal::Parameters)?;
     family_stream(profile, family, profile.family_degree(family), alpha)
 }
 
@@ -208,7 +208,7 @@ enum StatementJob {
     },
 }
 impl Accumulator {
-    fn new(layout: Layout, alpha: Element, indices: &[u32]) -> Result<Self, Error> {
+    fn new(layout: Layout, alpha: Element, indices: &[u32]) -> Result<Self, Refusal> {
         query::validate_indices_in(indices, 4 * layout.degree)?;
         // Jobs evaluate every geometry the terms use before the terms.
         let keys: Vec<GeometryKey> =
@@ -239,7 +239,7 @@ impl Accumulator {
         alpha: Element,
         indices: &[u32],
         record_terms: bool,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, Refusal> {
         Self::build_with(layout, alpha, indices, record_terms, false, Vec::new())
     }
     fn build_with(
@@ -249,7 +249,7 @@ impl Accumulator {
         record_terms: bool,
         planning: bool,
         geometries: Vec<(GeometryKey, Geometry)>,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, Refusal> {
         let profile = layout.profile;
         let shape = profile.setup_shape();
         let columns = shape.word_columns + shape.boolean_columns;
@@ -353,7 +353,7 @@ impl Accumulator {
             || result.next_boolean != columns
             || result.uses.iter().any(Vec::is_empty)
         {
-            return Err(Error::Arithmetic);
+            return Err(Refusal::Arithmetic);
         }
         Ok(result)
     }
@@ -391,7 +391,7 @@ impl Accumulator {
             degree,
         }
     }
-    fn geometry(&mut self, key: GeometryKey) -> Result<usize, Error> {
+    fn geometry(&mut self, key: GeometryKey) -> Result<usize, Refusal> {
         if let Some(index) = self
             .geometries
             .iter()
@@ -417,9 +417,14 @@ impl Accumulator {
         self.geometries.push((key, geometry));
         Ok(self.geometries.len() - 1)
     }
-    fn put(&mut self, variable: &Variable, key: GeometryKey, weight: Element) -> Result<(), Error> {
+    fn put(
+        &mut self,
+        variable: &Variable,
+        key: GeometryKey,
+        weight: Element,
+    ) -> Result<(), Refusal> {
         if variable.degree != key.degree {
-            return Err(Error::Arithmetic);
+            return Err(Refusal::Arithmetic);
         }
         let index = self.geometry(key)?;
         if self.planning {
@@ -459,9 +464,9 @@ impl Accumulator {
         value: usize,
         variable: &Variable,
         value_sign: i128,
-    ) -> Result<(), Error> {
+    ) -> Result<(), Refusal> {
         if variable.offset != 0 {
-            return Err(Error::Arithmetic);
+            return Err(Refusal::Arithmetic);
         }
         self.uses[common].push(PublicUse::Common(variable.clone(), self.weight));
         self.uses[value].push(PublicUse::Value(scale(self.weight, base(value_sign))));
@@ -473,7 +478,7 @@ impl Accumulator {
         value: usize,
         secret: &Variable,
         direct: Option<(&Variable, Element, usize)>,
-    ) -> Result<(), Error> {
+    ) -> Result<(), Refusal> {
         let degree = self.layout.degree;
         let limbs = self.layout.profile.fhe_limbs();
         let quotient = self.signed(SETUP_QUOTIENT_BITS, degree);
@@ -511,7 +516,7 @@ impl Accumulator {
         value: usize,
         ephemeral: &Variable,
         message: Option<ShareMessage<'_>>,
-    ) -> Result<(), Error> {
+    ) -> Result<(), Refusal> {
         let degree = self.layout.degree;
         let profile = self.layout.profile;
         let limb_bits = profile.share_limb_bits();
@@ -597,14 +602,14 @@ impl Accumulator {
         position: usize,
         records: &[u8],
         last: bool,
-    ) -> Result<(), Error> {
-        let (family, degree) = self.layout.polynomial(polynomial).ok_or(Error::Length)?;
+    ) -> Result<(), Refusal> {
+        let (family, degree) = self.layout.polynomial(polynomial).ok_or(Refusal::Length)?;
         let common = self.is_common(polynomial);
         if self.uses[polynomial]
             .iter()
             .any(|usage| matches!(usage, PublicUse::Common(_, _)) != common)
         {
-            return Err(Error::Arithmetic);
+            return Err(Refusal::Arithmetic);
         }
         let ticket = jobs::fingerprints_job(
             width,
@@ -631,7 +636,7 @@ impl Accumulator {
     // Takes the oldest statement job. A polynomial's last run subtracts its
     // weighted value from the target or starts its adjoint, whose weighted
     // query values are added to the coefficients.
-    fn take_oldest(&mut self) -> Result<(), Error> {
+    fn take_oldest(&mut self) -> Result<(), Refusal> {
         match self.pending.pop_front().unwrap() {
             StatementJob::Run {
                 polynomial,
@@ -685,7 +690,7 @@ impl Accumulator {
         }
         Ok(())
     }
-    fn settle(&mut self) -> Result<(), Error> {
+    fn settle(&mut self) -> Result<(), Refusal> {
         while !self.pending.is_empty() {
             self.take_oldest()?;
         }
@@ -707,9 +712,12 @@ pub struct ProverOperatorPlan {
     pub target_offset: Element,
     pub lookup_weight: Element,
 }
-pub fn prover_operator_plan(profile: Profile, alpha: Element) -> Result<ProverOperatorPlan, Error> {
+pub fn prover_operator_plan(
+    profile: Profile,
+    alpha: Element,
+) -> Result<ProverOperatorPlan, Refusal> {
     if alpha.iter().any(|value| *value >= MODULUS) {
-        return Err(Error::Parameters);
+        return Err(Refusal::Parameters);
     }
     let mut accumulator = Accumulator::build(Layout::full(profile), alpha, &[], true)?;
     let mut common_columns = vec![Vec::new(); profile.setup_polynomials()];
@@ -729,7 +737,10 @@ pub fn prover_operator_plan(profile: Profile, alpha: Element) -> Result<ProverOp
         }
     }
     Ok(ProverOperatorPlan {
-        fixed_terms: accumulator.recorded_terms.take().ok_or(Error::Arithmetic)?,
+        fixed_terms: accumulator
+            .recorded_terms
+            .take()
+            .ok_or(Refusal::Arithmetic)?,
         common_columns,
         value_weights,
         target_offset: accumulator.target,
@@ -766,7 +777,7 @@ impl SetupStatementStream {
         expected_digest: [u8; 64],
         alpha: Element,
         indices: &[u32],
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, Refusal> {
         Self::with_layout(Layout::full(profile), expected_digest, alpha, indices)
     }
     fn with_layout(
@@ -774,10 +785,10 @@ impl SetupStatementStream {
         expected_digest: [u8; 64],
         alpha: Element,
         indices: &[u32],
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, Refusal> {
         query::validate_indices_in(indices, 4 * layout.degree)?;
         if alpha.iter().any(|value| *value >= MODULUS) {
-            return Err(Error::Parameters);
+            return Err(Refusal::Parameters);
         }
         Ok(Self {
             layout,
@@ -795,15 +806,15 @@ impl SetupStatementStream {
             failed: false,
         })
     }
-    pub fn push(&mut self, bytes: &[u8]) -> Result<(), Error> {
+    pub fn push(&mut self, bytes: &[u8]) -> Result<(), Refusal> {
         if self.failed {
-            return Err(Error::Encoding);
+            return Err(Refusal::Encoding);
         }
         if bytes.len() > CHUNK_LIMIT || bytes.len() > self.encoded_length - self.consumed {
             self.failed = true;
             self.accumulator = None;
             self.records = None;
-            return Err(Error::Length);
+            return Err(Refusal::Length);
         }
         self.hasher.update(bytes);
         self.consumed += bytes.len();
@@ -815,7 +826,7 @@ impl SetupStatementStream {
         }
         result
     }
-    fn process(&mut self, mut bytes: &[u8]) -> Result<(), Error> {
+    fn process(&mut self, mut bytes: &[u8]) -> Result<(), Refusal> {
         let header_length = self.expected_header.len();
         if self.header.len() < header_length {
             let length = bytes.len().min(header_length - self.header.len());
@@ -825,7 +836,7 @@ impl SetupStatementStream {
                 return Ok(());
             }
             if self.header != self.expected_header {
-                return Err(Error::Parameters);
+                return Err(Refusal::Parameters);
             }
             self.accumulator = Some(Accumulator::new(self.layout, self.alpha, &self.indices)?);
         }
@@ -833,8 +844,8 @@ impl SetupStatementStream {
             let (family, degree) = self
                 .layout
                 .polynomial(self.polynomial)
-                .ok_or(Error::Length)?;
-            let accumulator = self.accumulator.as_mut().ok_or(Error::Incomplete)?;
+                .ok_or(Refusal::Length)?;
+            let accumulator = self.accumulator.as_mut().ok_or(Refusal::Incomplete)?;
             let profile = self.layout.profile;
             if self.records.is_none() {
                 self.records = Some(PolynomialRecords::new(
@@ -844,7 +855,7 @@ impl SetupStatementStream {
                     self.alpha,
                 )?);
             }
-            let records = self.records.as_mut().ok_or(Error::Incomplete)?;
+            let records = self.records.as_mut().ok_or(Refusal::Incomplete)?;
             let (polynomial, width) = (self.polynomial, records.width());
             let length = bytes.len().min(records.remaining());
             records.push(&bytes[..length], |position, run, last| {
@@ -858,21 +869,21 @@ impl SetupStatementStream {
         }
         Ok(())
     }
-    pub fn finish(self) -> Result<StatementOutput, Error> {
+    pub fn finish(self) -> Result<StatementOutput, Refusal> {
         if self.failed {
-            return Err(Error::Encoding);
+            return Err(Refusal::Encoding);
         }
         if self.consumed != self.encoded_length
             || self.polynomial != self.layout.profile.setup_polynomials()
             || self.records.is_some()
         {
-            return Err(Error::Incomplete);
+            return Err(Refusal::Incomplete);
         }
         let digest = self.hasher.finish();
         if digest != self.expected_digest {
-            return Err(Error::Binding);
+            return Err(Refusal::Binding);
         }
-        let mut accumulator = self.accumulator.ok_or(Error::Incomplete)?;
+        let mut accumulator = self.accumulator.ok_or(Refusal::Incomplete)?;
         accumulator.settle()?;
         Ok(StatementOutput {
             target: accumulator.target,

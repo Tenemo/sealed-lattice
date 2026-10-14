@@ -7,9 +7,9 @@ pub const SEALED_BYTES: usize = PLAIN_BYTES + TAG_BYTES;
 impl RecipientKey {
     /// Seals one completed recipient key under a fresh, single-use local
     /// key. The caller owns that key's confidential browser-local custody.
-    pub fn seal_retained(&mut self, associated: &[u8]) -> Result<Sealed, Error> {
+    pub fn seal_retained(&mut self, associated: &[u8]) -> Result<Sealed, Refusal> {
         if self.sealed || associated.is_empty() || associated.len() > 2048 {
-            return Err(Error::Consumed);
+            return Err(Refusal::Consumed);
         }
         self.sealed = true;
         self.validate_retained()?;
@@ -23,7 +23,7 @@ impl RecipientKey {
             }
         }
         if bytes.len() != PLAIN_BYTES {
-            return Err(Error::InvalidState);
+            return Err(Refusal::InvalidState);
         }
         Ok(sealing::seal(&bytes, associated))
     }
@@ -33,17 +33,17 @@ impl RecipientKey {
         key: &[u8; 32],
         associated: &[u8],
         sealed: &[u8],
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, Refusal> {
         if sealed.len() != SEALED_BYTES
             || associated.is_empty()
             || associated.len() > 2048
             || public.len() != DEGREE
         {
-            return Err(Error::InvalidState);
+            return Err(Refusal::InvalidState);
         }
-        let bytes = sealing::open(key, associated, sealed).ok_or(Error::InvalidState)?;
+        let bytes = sealing::open(key, associated, sealed).ok_or(Refusal::InvalidState)?;
         if bytes.len() != PLAIN_BYTES || &bytes[..4] != b"RKC1" {
-            return Err(Error::InvalidState);
+            return Err(Refusal::InvalidState);
         }
         let mut secret = Zeroizing::new(vec![0i8; DEGREE]);
         for (group, sign) in [1i8, -1].into_iter().enumerate() {
@@ -54,7 +54,7 @@ impl RecipientKey {
                     bytes[offset..offset + 2].try_into().unwrap(),
                 ));
                 if previous.is_some_and(|old| old >= position) || secret[position] != 0 {
-                    return Err(Error::InvalidState);
+                    return Err(Refusal::InvalidState);
                 }
                 secret[position] = sign;
                 previous = Some(position);

@@ -86,10 +86,10 @@ impl SetupProver {
         context: [u8; 64],
         header: Vec<u8>,
         columns: Vec<Vec<u16>>,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, Refusal> {
         let mut columns = Zeroizing::new(columns);
         if role.is_empty() || role.len() > 1024 || header != profile.setup_statement_header() {
-            return Err(Error::GeneratedInput);
+            return Err(Refusal::GeneratedInput);
         }
         let mut prover = Self::new(profile, role, statement_digest);
         prover.witness = Some(
@@ -98,7 +98,7 @@ impl SetupProver {
                 statement_digest,
                 std::mem::take(&mut *columns),
             )
-            .map_err(|_| Error::GeneratedInput)?,
+            .map_err(|_| Refusal::GeneratedInput)?,
         );
         prover.statement_header = header;
         let mut transcript = Transcript::new(role, context, prover.relation.message_bytes());
@@ -114,12 +114,12 @@ impl SetupProver {
         argument: usize,
         bytes: &[u8],
         output: &mut Vec<u8>,
-    ) -> Result<(), Error> {
+    ) -> Result<(), Refusal> {
         if bytes.len() > CHUNK
             || (step != ProverStep::BeginPolynomial && argument != 0)
             || (step != ProverStep::PushPolynomial && !bytes.is_empty())
         {
-            return Err(Error::Operation);
+            return Err(Refusal::Operation);
         }
         match step {
             ProverStep::Step => self.step(),
@@ -128,7 +128,7 @@ impl SetupProver {
             ProverStep::FinishPolynomial => self.finish_polynomial(),
             ProverStep::NextOutput => self.next_output(output),
         }
-        .map_err(|_| Error::Operation)
+        .map_err(|_| Refusal::Operation)
     }
     fn new(profile: Profile, role: &[u8], expected: [u8; 64]) -> Self {
         assert!(std::mem::size_of::<ProtocolHash>() <= 512);
@@ -401,11 +401,11 @@ impl SetupProver {
     }
 }
 #[derive(Debug)]
-pub enum Error {
+pub enum Refusal {
     GeneratedInput,
     Operation,
 }
-impl From<()> for Error {
+impl From<()> for Refusal {
     fn from(_: ()) -> Self {
         Self::Operation
     }

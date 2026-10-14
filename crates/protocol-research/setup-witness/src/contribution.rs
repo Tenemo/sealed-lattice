@@ -4,7 +4,7 @@ use supported_profile::{
     FHE_SECRET_SUPPORT, Family, SHARE_EPHEMERAL_SUPPORT, fixed_common_sample_bits, share_modulus,
 };
 #[derive(Debug)]
-pub enum Error {
+pub enum Refusal {
     Phase,
     PublicKey,
     SourceFamily,
@@ -35,13 +35,16 @@ pub fn common_share_polynomial() -> Vec<BigInt> {
     )
 }
 // The label, ring degree, modulus and sample bits of a common polynomial.
-fn common_source(profile: Profile, index: usize) -> Result<(String, usize, Vec<u8>, usize), Error> {
+fn common_source(
+    profile: Profile,
+    index: usize,
+) -> Result<(String, usize, Vec<u8>, usize), Refusal> {
     if let Some((gadget, component)) = profile.fhe_polynomial_position(index) {
         let name = match component {
             0 => "a",
             3 => "u",
             5 => "k",
-            _ => return Err(Error::Phase),
+            _ => return Err(Refusal::Phase),
         };
         Ok((
             format!("common-fhe-{name}-{gadget}"),
@@ -57,12 +60,12 @@ fn common_source(profile: Profile, index: usize) -> Result<(String, usize, Vec<u
             fixed_common_sample_bits(),
         ))
     } else {
-        Err(Error::Phase)
+        Err(Refusal::Phase)
     }
 }
 /// A common polynomial. An FHE one reduces its samples modulo the
 /// ciphertext modulus, a Proth prime, without dividing.
-pub fn common_polynomial(profile: Profile, index: usize) -> Result<Vec<BigInt>, Error> {
+pub fn common_polynomial(profile: Profile, index: usize) -> Result<Vec<BigInt>, Refusal> {
     let (label, degree, modulus, sample_bits) = common_source(profile, index)?;
     Ok(if profile.fhe_polynomial_position(index).is_some() {
         proth_public_polynomial(&label, degree, profile.ciphertext_modulus(), sample_bits)
@@ -72,7 +75,7 @@ pub fn common_polynomial(profile: Profile, index: usize) -> Result<Vec<BigInt>, 
 }
 /// The canonical records of a common polynomial: each coefficient's sign
 /// byte and its magnitude in the family's magnitude bytes.
-pub fn common_records(profile: Profile, index: usize) -> Result<Vec<u8>, Error> {
+pub fn common_records(profile: Profile, index: usize) -> Result<Vec<u8>, Refusal> {
     let (label, degree, modulus, sample_bits) = common_source(profile, index)?;
     Ok(if profile.fhe_polynomial_position(index).is_some() {
         proth_public_records(&label, degree, profile.ciphertext_modulus(), sample_bits)
@@ -95,7 +98,7 @@ fn run_common_records(input: &[u8]) -> Vec<u8> {
     common_records(profile, index).expect("Checked common polynomial")
 }
 /// Starts the canonical records of a common polynomial of the profile.
-pub fn common_records_job(profile: Profile, index: usize) -> Result<Ticket, Error> {
+pub fn common_records_job(profile: Profile, index: usize) -> Result<Ticket, Refusal> {
     let (_, degree, modulus, _) = common_source(profile, index)?;
     let input: Vec<u8> = [profile.participants(), profile.options(), index]
         .into_iter()
@@ -114,7 +117,7 @@ impl Contribution {
     pub fn from_source(
         profile: Profile,
         source: fhe_key_source::FheKeySource,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, Refusal> {
         source.check_profile(profile)?;
         Ok(Self::create(profile, source))
     }
@@ -190,13 +193,13 @@ impl Contribution {
         &mut self,
         gadget: usize,
         output: &mut impl PolynomialOutput,
-    ) -> Result<(), Error> {
+    ) -> Result<(), Refusal> {
         let profile = self.profile;
         if gadget != self.next_gadget
             || gadget >= profile.gadget_length()
             || self.common_share.is_some()
         {
-            return Err(Error::Phase);
+            return Err(Refusal::Phase);
         }
         let modulus = &self.modulus;
         let secret = &self.secret;
@@ -288,9 +291,9 @@ impl Contribution {
         self.next_gadget += 1;
         Ok(())
     }
-    pub fn begin_shares(&mut self, output: &mut impl PolynomialOutput) -> Result<(), Error> {
+    pub fn begin_shares(&mut self, output: &mut impl PolynomialOutput) -> Result<(), Refusal> {
         if self.next_gadget != self.profile.gadget_length() || self.common_share.is_some() {
-            return Err(Error::Phase);
+            return Err(Refusal::Phase);
         }
         let common = common_share_polynomial();
         output.polynomial(&common, &self.share_modulus, share_modulus().len());
@@ -302,17 +305,17 @@ impl Contribution {
         recipient: usize,
         public_key: &[BigInt],
         output: &mut impl PolynomialOutput,
-    ) -> Result<Vec<Vec<BigInt>>, Error> {
+    ) -> Result<Vec<Vec<BigInt>>, Refusal> {
         if self.common_share.is_none()
             || recipient != self.next_recipient
             || recipient >= self.profile.participants()
             || self.finished
         {
-            return Err(Error::Phase);
+            return Err(Refusal::Phase);
         }
         let half = &self.share_modulus >> 1usize;
         if public_key.len() != DEGREE || public_key.iter().any(|value| value.abs() > half) {
-            return Err(Error::PublicKey);
+            return Err(Refusal::PublicKey);
         }
         output.polynomial(public_key, &self.share_modulus, share_modulus().len());
         let ciphertexts = share_ciphertexts(
@@ -332,22 +335,22 @@ impl Contribution {
         self.next_recipient += 1;
         Ok(ciphertexts)
     }
-    pub fn finish(&mut self) -> Result<(), Error> {
+    pub fn finish(&mut self) -> Result<(), Refusal> {
         if self.next_recipient != self.profile.participants() || self.finished {
-            return Err(Error::Phase);
+            return Err(Refusal::Phase);
         }
         self.finished = true;
         Ok(())
     }
     /// The witness columns: every word column, then every Boolean column, in
     /// the profile's setup layout.
-    pub fn into_columns(mut self) -> Result<Vec<Vec<u16>>, Error> {
+    pub fn into_columns(mut self) -> Result<Vec<Vec<u16>>, Refusal> {
         let shape = self.profile.setup_shape();
         if !self.finished
             || self.witness.words.len() != shape.word_columns
             || self.witness.booleans.len() != shape.boolean_columns
         {
-            return Err(Error::Phase);
+            return Err(Refusal::Phase);
         }
         let mut columns = std::mem::take(&mut self.witness.words);
         columns.append(&mut self.witness.booleans);

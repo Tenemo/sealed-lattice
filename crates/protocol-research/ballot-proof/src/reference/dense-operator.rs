@@ -22,9 +22,9 @@ struct Builder {
     consumed: usize,
 }
 impl Builder {
-    fn new(profile: Profile, alpha: Element, header: &[u8]) -> Result<Self, Error> {
+    fn new(profile: Profile, alpha: Element, header: &[u8]) -> Result<Self, Refusal> {
         protocol_foundations::ballot_body::check_context(profile, header)
-            .map_err(|_| Error::Shape)?;
+            .map_err(|_| Refusal::Shape)?;
         Ok(Self {
             profile,
             columns: BallotColumns::new(profile),
@@ -52,9 +52,9 @@ impl Builder {
             );
         }
     }
-    fn polynomial(&mut self, index: usize, parser: PolynomialStream) -> Result<(), Error> {
+    fn polynomial(&mut self, index: usize, parser: PolynomialStream) -> Result<(), Refusal> {
         if self.consumed != index || index >= POLYNOMIALS {
-            return Err(Error::Shape);
+            return Err(Refusal::Shape);
         }
         self.consumed += 1;
         let auxiliary = family(index) == Family::Auxiliary;
@@ -73,7 +73,7 @@ impl Builder {
         );
         if local < 2 {
             let degree = self.profile.family_degree(family(index));
-            let adjoint = parser.adjoint().map_err(|_| Error::Encoding)?;
+            let adjoint = parser.adjoint().map_err(|_| Refusal::Encoding)?;
             let positive = if auxiliary {
                 self.columns.auxiliary_positive()
             } else {
@@ -90,14 +90,17 @@ impl Builder {
         } else {
             self.target = field::add(
                 self.target,
-                field::multiply(weight, parser.finish_value().map_err(|_| Error::Encoding)?),
+                field::multiply(
+                    weight,
+                    parser.finish_value().map_err(|_| Refusal::Encoding)?,
+                ),
             );
         }
         Ok(())
     }
-    fn finish(mut self) -> Result<Dense, Error> {
+    fn finish(mut self) -> Result<Dense, Refusal> {
         if self.consumed != POLYNOMIALS {
-            return Err(Error::Shape);
+            return Err(Refusal::Shape);
         }
         let columns = self.columns;
         let limb_weight = power(self.alpha, SYSTEMATIC);
@@ -156,10 +159,10 @@ impl Builder {
             SYSTEMATIC,
         );
         let options = self.profile.options();
-        let matrix = PackingMatrix::new(options).map_err(|_| Error::Shape)?;
+        let matrix = PackingMatrix::new(options).map_err(|_| Refusal::Shape)?;
         let geometric = powers(self.alpha, SYSTEMATIC);
         for option in 0..options {
-            let column = matrix.column(option).map_err(|_| Error::Shape)?;
+            let column = matrix.column(option).map_err(|_| Refusal::Shape)?;
             let value = column
                 .iter()
                 .zip(&geometric)
@@ -241,15 +244,15 @@ impl Builder {
 }
 
 /// The dense operator of the statement at the challenge.
-pub(crate) fn operator(statement: &PublicStatement, alpha: Element) -> Result<Dense, Error> {
+pub(crate) fn operator(statement: &PublicStatement, alpha: Element) -> Result<Dense, Refusal> {
     let mut builder = Builder::new(statement.profile, alpha, &statement.header)?;
     if statement.polynomials.len() != POLYNOMIALS {
-        return Err(Error::Shape);
+        return Err(Refusal::Shape);
     }
     for (index, bytes) in statement.polynomials.iter().enumerate() {
         let mut parser = polynomial_stream(statement.profile, index, alpha)?;
         for chunk in bytes.chunks(1 << 20) {
-            parser.push(chunk).map_err(|_| Error::Encoding)?;
+            parser.push(chunk).map_err(|_| Refusal::Encoding)?;
         }
         builder.polynomial(index, parser)?;
     }

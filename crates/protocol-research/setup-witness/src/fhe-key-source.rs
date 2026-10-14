@@ -60,9 +60,9 @@ impl FheKeySource {
         key_with_error(&mut Witness::new(), output, input, products, &self.error);
     }
 
-    pub(crate) fn check_profile(&self, profile: Profile) -> Result<(), contribution::Error> {
+    pub(crate) fn check_profile(&self, profile: Profile) -> Result<(), contribution::Refusal> {
         if !self.profile.same_fhe_key_family(profile) {
-            return Err(contribution::Error::SourceFamily);
+            return Err(contribution::Refusal::SourceFamily);
         }
         Ok(())
     }

@@ -1,4 +1,4 @@
-use super::{Element, Error, MODULUS, ZERO, minus, multiply, plus, proof_field};
+use super::{Element, MODULUS, Refusal, ZERO, minus, multiply, plus, proof_field};
 use supported_profile::relation::{QUERY_COUNT, SYSTEMATIC};
 
 pub(crate) const QUERY_LIMIT: usize = 2 * QUERY_COUNT;
@@ -114,13 +114,13 @@ impl Transform {
     }
 }
 
-pub(crate) fn validate_indices_in(indices: &[u32], domain_size: usize) -> Result<(), Error> {
+pub(crate) fn validate_indices_in(indices: &[u32], domain_size: usize) -> Result<(), Refusal> {
     if indices.is_empty()
         || indices.len() > QUERY_LIMIT
         || indices.iter().any(|index| *index as usize >= domain_size)
         || indices.windows(2).any(|pair| pair[0] >= pair[1])
     {
-        return Err(Error::Parameters);
+        return Err(Refusal::Parameters);
     }
     Ok(())
 }
@@ -130,13 +130,13 @@ pub(crate) fn check_in(
     degree: usize,
     indices: &[u32],
     systematic_size: usize,
-) -> Result<(), Error> {
+) -> Result<(), Refusal> {
     if !systematic_size.is_power_of_two() || !(2..=SYSTEMATIC).contains(&systematic_size) {
-        return Err(Error::Parameters);
+        return Err(Refusal::Parameters);
     }
     validate_indices_in(indices, 4 * systematic_size)?;
     if !degree.is_power_of_two() || degree < 2 || degree > systematic_size {
-        return Err(Error::Parameters);
+        return Err(Refusal::Parameters);
     }
     Ok(())
 }
@@ -145,7 +145,7 @@ pub(crate) fn evaluate_in(
     mut values: Vec<Element>,
     indices: &[u32],
     systematic_size: usize,
-) -> Result<Vec<Element>, Error> {
+) -> Result<Vec<Element>, Refusal> {
     check_in(values.len(), indices, systematic_size)?;
     let domain_size = 4 * systematic_size;
     let degree = values.len();

@@ -35,9 +35,9 @@ fn statements_refuse_non_canonical_coefficients() {
         };
         assert!(parse(0, &half).is_ok());
         assert!(parse(1, &half).is_ok());
-        assert!(matches!(parse(0, &(&half + 1)), Err(Error::Encoding)));
-        assert!(matches!(parse(1, &(&half + 1)), Err(Error::Encoding)));
-        assert!(matches!(parse(1, &BigInt::from(0)), Err(Error::Encoding)));
-        assert!(matches!(parse(2, &BigInt::from(1)), Err(Error::Encoding)));
+        assert!(matches!(parse(0, &(&half + 1)), Err(Refusal::Encoding)));
+        assert!(matches!(parse(1, &(&half + 1)), Err(Refusal::Encoding)));
+        assert!(matches!(parse(1, &BigInt::from(0)), Err(Refusal::Encoding)));
+        assert!(matches!(parse(2, &BigInt::from(1)), Err(Refusal::Encoding)));
     }
 }

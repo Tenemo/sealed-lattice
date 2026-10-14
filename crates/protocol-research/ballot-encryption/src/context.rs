@@ -5,7 +5,7 @@ use std::sync::Arc;
 use supported_profile::Profile;
 
 #[derive(Debug)]
-pub struct Error;
+pub struct Refusal;
 /// Fixed private-computation inputs. It is not a public setup capability.
 pub struct BallotComputationContext {
     poll: Arc<VerifiedPoll>,
@@ -19,14 +19,14 @@ impl BallotComputationContext {
         poll: Arc<VerifiedPoll>,
         owner: &RetainedSetupOwner,
         inputs: &RetainedSetupInputs,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, Refusal> {
         let profile = inputs.profile();
         if owner.poll() != &poll.identity()
             || owner.setup_identity() != inputs.setup_identity()
             || owner.position() >= profile.participants()
             || profile.options() != poll.manifest().option_count()
         {
-            return Err(Error);
+            return Err(Refusal);
         }
         Ok(Self {
             poll,

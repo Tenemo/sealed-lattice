@@ -111,7 +111,7 @@ fn refuses_invalid_query_sets_before_transform_work() {
     ] {
         assert_eq!(
             validate_indices_in(&indices, DOMAIN_SIZE),
-            Err(Error::Parameters)
+            Err(Refusal::Parameters)
         );
     }
     assert_eq!(

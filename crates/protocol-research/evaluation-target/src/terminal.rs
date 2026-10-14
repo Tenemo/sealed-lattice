@@ -1,7 +1,7 @@
 use crate::{
     certification::VerifiedInventoryCertificate,
     interpolation::cleared_weights,
-    release::{self, Error},
+    release::{self, Refusal},
     release_body::VerifiedReleaseShare,
 };
 use linked_release_proof::statement::release_modulus;
@@ -19,7 +19,7 @@ fn selected_positions(
     profile: Profile,
     coefficients: &[u32],
     top_count: usize,
-) -> Result<Vec<usize>, Error> {
+) -> Result<Vec<usize>, Refusal> {
     let options = profile.options();
     let window = profile.rank_window();
     if !(1..=options).contains(&top_count)
@@ -31,7 +31,7 @@ fn selected_positions(
             .step_by(2)
             .any(|value| *value != 0)
     {
-        return Err(Error::Encoding);
+        return Err(Refusal::Encoding);
     }
     let length = SYSTEMATIC / 2;
     let values = odd_power_values(coefficients);
@@ -45,17 +45,17 @@ fn selected_positions(
             && slot / window % options < top_count
         {
             if value > 1 {
-                return Err(Error::Encoding);
+                return Err(Refusal::Encoding);
             }
             if value == 1 {
                 let option = slot / (options * window);
                 let rank = slot / window % options;
                 if selected[rank].replace(option).is_some() {
-                    return Err(Error::Encoding);
+                    return Err(Refusal::Encoding);
                 }
             }
         } else if value != 0 {
-            return Err(Error::Encoding);
+            return Err(Refusal::Encoding);
         }
     }
     if values
@@ -63,16 +63,16 @@ fn selected_positions(
         .enumerate()
         .any(|(index, value)| !used[index] && *value != 0)
     {
-        return Err(Error::Encoding);
+        return Err(Refusal::Encoding);
     }
     let result = selected
         .into_iter()
         .collect::<Option<Vec<_>>>()
-        .ok_or(Error::Encoding)?;
+        .ok_or(Refusal::Encoding)?;
     let mut seen = vec![false; options];
     for position in &result {
         if seen[*position] {
-            return Err(Error::Encoding);
+            return Err(Refusal::Encoding);
         }
         seen[*position] = true;
     }
@@ -89,9 +89,9 @@ impl VerifiedNoResult {
 }
 pub fn verify_no_result(
     certificate: Arc<VerifiedInventoryCertificate>,
-) -> Result<VerifiedNoResult, Error> {
+) -> Result<VerifiedNoResult, Refusal> {
     if certificate.target().ciphertext().is_some() {
-        return Err(Error::Context);
+        return Err(Refusal::Context);
     }
     Ok(VerifiedNoResult { certificate })
 }
@@ -116,34 +116,34 @@ pub struct ReleaseCollector {
     shares: Vec<Option<Arc<VerifiedReleaseShare>>>,
 }
 impl ReleaseCollector {
-    pub fn new(certificate: Arc<VerifiedInventoryCertificate>) -> Result<Self, Error> {
+    pub fn new(certificate: Arc<VerifiedInventoryCertificate>) -> Result<Self, Refusal> {
         let target = certificate.target();
         if target.ciphertext().is_none() {
-            return Err(Error::NoResult);
+            return Err(Refusal::NoResult);
         }
         let profile = target.setup().profile();
         if target.setup().roster().proposal().records().len() != profile.participants()
             || target.poll().manifest().option_count() != profile.options()
             || !(1..=profile.options()).contains(&usize::from(target.poll().top_count()))
         {
-            return Err(Error::Context);
+            return Err(Refusal::Context);
         }
         Ok(Self {
             certificate,
             shares: (0..profile.participants()).map(|_| None).collect(),
         })
     }
-    pub fn insert(&mut self, share: Arc<VerifiedReleaseShare>) -> Result<bool, Error> {
+    pub fn insert(&mut self, share: Arc<VerifiedReleaseShare>) -> Result<bool, Refusal> {
         let target = share.body().certificate().target();
         if target.identity() != self.certificate.target().identity()
             || target.body() != self.certificate.target().body()
         {
-            return Err(Error::Context);
+            return Err(Refusal::Context);
         }
         let slot = self
             .shares
             .get_mut(share.body().position())
-            .ok_or(Error::Context)?;
+            .ok_or(Refusal::Context)?;
         if slot.is_some() {
             return Ok(false);
         }
@@ -155,7 +155,7 @@ impl ReleaseCollector {
     /// another, so the phase is c^2 times the target's; one c is removed
     /// modulo the release modulus and the other modulo the plaintext
     /// modulus.
-    pub fn result(&self) -> Result<VerifiedResult, Error> {
+    pub fn result(&self) -> Result<VerifiedResult, Refusal> {
         let profile = self.certificate.target().setup().profile();
         let threshold = profile.release_threshold();
         let chosen: Vec<_> = self
@@ -166,10 +166,10 @@ impl ReleaseCollector {
             .take(threshold)
             .collect();
         if chosen.len() != threshold {
-            return Err(Error::Incomplete);
+            return Err(Refusal::Incomplete);
         }
         let positions: Vec<usize> = chosen.iter().map(|(position, _)| *position).collect();
-        let weights = cleared_weights(profile, &positions).map_err(|_| Error::Context)?;
+        let weights = cleared_weights(profile, &positions).map_err(|_| Refusal::Context)?;
         let modulus = release_modulus(profile);
         let half = &modulus >> 1usize;
         let clearing = BigInt::from(profile.clearing_factor());
@@ -178,7 +178,7 @@ impl ReleaseCollector {
             .certificate
             .target()
             .ciphertext()
-            .ok_or(Error::NoResult)?;
+            .ok_or(Refusal::NoResult)?;
         let width = release_coefficient_bytes(profile);
         let constant = release::decode_polynomial(
             &ciphertext[..SYSTEMATIC * width],

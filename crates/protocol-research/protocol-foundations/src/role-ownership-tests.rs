@@ -3,7 +3,7 @@
 //! these controls exercise original credential authority.
 use crate::registration::CHUNK_LIMIT;
 use crate::{
-    BodyDigest, Credential, Error, SIGNATURE_BYTES,
+    BodyDigest, Credential, Refusal, SIGNATURE_BYTES,
     foundation::{
         CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple,
         RegistrationHeader, StabilizedDisplayText, derive_participant_identity,
@@ -537,7 +537,7 @@ fn retained_context_refuses_other_original_owners_and_positions_before_signing()
                 position,
                 fixture.proposal.body()
             ),
-            Err(Error::Context)
+            Err(Refusal::Context)
         ));
     }
     // The same signing key without the original completed enrollment, or
@@ -551,7 +551,7 @@ fn retained_context_refuses_other_original_owners_and_positions_before_signing()
             0,
             fixture.proposal.body()
         ),
-        Err(Error::Context)
+        Err(Refusal::Context)
     ));
     let (other_body, _) = signed_registration(&fixture.poll, &mut same_key, 19);
     assert_ne!(other_body.body_digest(), original.body_digest());
@@ -564,7 +564,7 @@ fn retained_context_refuses_other_original_owners_and_positions_before_signing()
                 0,
                 fixture.proposal.body()
             ),
-            Err(Error::Context)
+            Err(Refusal::Context)
         ));
     }
     for position in [fixture.proposal.records().len(), usize::MAX] {
@@ -586,7 +586,7 @@ fn retained_context_refuses_other_original_owners_and_positions_before_signing()
         .unwrap();
     assert!(matches!(
         fixture.credentials[0].sign_roster_proposal(&fixture.proposal),
-        Err(Error::Consumed)
+        Err(Refusal::Consumed)
     ));
     crate::roster_authentication::authenticate_roster_proposal(fixture.proposal, &signature)
         .unwrap();
@@ -608,7 +608,7 @@ fn retained_context_requires_the_original_poll() {
             1,
             &proposal.encode().unwrap(),
         ),
-        Err(Error::Context)
+        Err(Refusal::Context)
     ));
     // Another poll, of another nonce or of another runtime, refuses both
     // ways.
@@ -624,7 +624,7 @@ fn retained_context_requires_the_original_poll() {
                 1,
                 fixture.proposal.body(),
             ),
-            Err(Error::Context)
+            Err(Refusal::Context)
         ));
         assert!(matches!(
             RetainedContributionContext::parse(
@@ -634,7 +634,7 @@ fn retained_context_requires_the_original_poll() {
                 1,
                 foreign.proposal.body(),
             ),
-            Err(Error::Context)
+            Err(Refusal::Context)
         ));
     }
 }
@@ -648,11 +648,11 @@ fn retained_noneligible_members_keep_roster_context_without_offer_authority() {
     assert_eq!(context.profile(), fixture.proposal.profile());
     assert!(matches!(
         fixture.proposal.contribution_role(position),
-        Err(Error::Context)
+        Err(Refusal::Context)
     ));
     assert!(matches!(
         context.checkpoint_role(&checkpoint_prefix(&fixture), position, context.profile()),
-        Err(Error::Context)
+        Err(Refusal::Context)
     ));
     fixture.credentials[position]
         .confirm_roster(&context)
@@ -662,7 +662,7 @@ fn retained_noneligible_members_keep_roster_context_without_offer_authority() {
         .unwrap();
     assert!(matches!(
         fixture.credentials[position].validate_offer_context(&context),
-        Err(Error::Context)
+        Err(Refusal::Context)
     ));
 }
 

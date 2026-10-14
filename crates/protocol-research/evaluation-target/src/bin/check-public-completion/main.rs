@@ -6,7 +6,7 @@ use ballot_proof::{
 use encrypted_ranking::ranking::{Ciphertext, KEY_RECORD_BYTES, stored_bytes, stored_value_bytes};
 use evaluation_target::{
     close::{CloseContext, ClosedSlot},
-    target::{ClassifiedClosedInventory, Error, PublicInputs, WorkingStore},
+    target::{ClassifiedClosedInventory, PublicInputs, Refusal, WorkingStore},
 };
 use protocol_foundations::{
     SIGNATURE_BYTES,
@@ -146,22 +146,22 @@ impl Read for CountedReader<'_> {
     }
 }
 impl PublicInputs for Operands<'_> {
-    fn aggregate(&mut self, index: usize) -> Result<Box<dyn Read + '_>, Error> {
+    fn aggregate(&mut self, index: usize) -> Result<Box<dyn Read + '_>, Refusal> {
         Ok(Box::new(CountedReader {
             file: File::open(self.aggregate.join(polynomial_name(index)))
-                .map_err(|_| Error::PublicInput)?,
+                .map_err(|_| Refusal::PublicInput)?,
             work: self.work,
         }))
     }
-    fn ballot(&mut self, author: usize) -> Result<Box<dyn Read + '_>, Error> {
+    fn ballot(&mut self, author: usize) -> Result<Box<dyn Read + '_>, Refusal> {
         Ok(Box::new(CountedReader {
             file: File::open(
                 self.ballots
                     .get(author)
                     .and_then(Option::as_ref)
-                    .ok_or(Error::PublicInput)?,
+                    .ok_or(Refusal::PublicInput)?,
             )
-            .map_err(|_| Error::PublicInput)?,
+            .map_err(|_| Refusal::PublicInput)?,
             work: self.work,
         }))
     }
@@ -174,64 +174,64 @@ struct Spool {
     work: Work,
 }
 impl WorkingStore for Spool {
-    fn put(&mut self, index: usize, value: &Ciphertext) -> Result<(), Error> {
+    fn put(&mut self, index: usize, value: &Ciphertext) -> Result<(), Refusal> {
         if !self.indices.insert(index) {
-            return Err(Error::Storage);
+            return Err(Refusal::Storage);
         }
         self.work
             .save(
                 &self.directory.join(format!("{index}.bin")),
                 &stored_bytes(value),
             )
-            .map_err(|_| Error::Storage)
+            .map_err(|_| Refusal::Storage)
     }
-    fn get(&mut self, index: usize) -> Result<Vec<u8>, Error> {
+    fn get(&mut self, index: usize) -> Result<Vec<u8>, Refusal> {
         let bytes = bounded(
             self.directory.join(format!("{index}.bin")),
             self.value_bytes,
             &mut self.work,
         )
-        .map_err(|_| Error::Storage)?;
+        .map_err(|_| Refusal::Storage)?;
         if bytes.len() != self.value_bytes {
-            return Err(Error::Storage);
+            return Err(Refusal::Storage);
         }
         Ok(bytes)
     }
-    fn remove(&mut self, index: usize) -> Result<(), Error> {
+    fn remove(&mut self, index: usize) -> Result<(), Refusal> {
         if self.indices.remove(&index) {
             self.work
                 .remove(&self.directory.join(format!("{index}.bin")))
-                .map_err(|_| Error::Storage)?;
+                .map_err(|_| Refusal::Storage)?;
         }
         Ok(())
     }
-    fn put_record(&mut self, ordinal: usize, prime: usize, record: &[u8]) -> Result<(), Error> {
+    fn put_record(&mut self, ordinal: usize, prime: usize, record: &[u8]) -> Result<(), Refusal> {
         if !self.records.insert((ordinal, prime)) {
-            return Err(Error::Storage);
+            return Err(Refusal::Storage);
         }
         self.work
             .save(
                 &self.directory.join(format!("key-{ordinal}-{prime}.bin")),
                 record,
             )
-            .map_err(|_| Error::Storage)
+            .map_err(|_| Refusal::Storage)
     }
-    fn get_record(&mut self, ordinal: usize, prime: usize) -> Result<Vec<u8>, Error> {
+    fn get_record(&mut self, ordinal: usize, prime: usize) -> Result<Vec<u8>, Refusal> {
         if !self.records.contains(&(ordinal, prime)) {
-            return Err(Error::Storage);
+            return Err(Refusal::Storage);
         }
         bounded(
             self.directory.join(format!("key-{ordinal}-{prime}.bin")),
             KEY_RECORD_BYTES,
             &mut self.work,
         )
-        .map_err(|_| Error::Storage)
+        .map_err(|_| Refusal::Storage)
     }
-    fn clear_records(&mut self) -> Result<(), Error> {
+    fn clear_records(&mut self) -> Result<(), Refusal> {
         for (ordinal, prime) in std::mem::take(&mut self.records) {
             self.work
                 .remove(&self.directory.join(format!("key-{ordinal}-{prime}.bin")))
-                .map_err(|_| Error::Storage)?;
+                .map_err(|_| Refusal::Storage)?;
         }
         Ok(())
     }
@@ -666,7 +666,7 @@ fn main() -> io::Result<()> {
         .map_err(refusal)?;
     if !matches!(
         ClassifiedClosedInventory::new(unclassified, vec![]),
-        Err(Error::Incomplete)
+        Err(Refusal::Incomplete)
     ) {
         return Err(refusal("missing classifications authorized evaluation"));
     }

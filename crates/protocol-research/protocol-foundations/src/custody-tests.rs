@@ -48,13 +48,13 @@ fn restored_signing_keys_cannot_recreate_authority_the_root_does_not_unlock() {
         assert!(original.check_unlocked(purpose).is_ok());
         assert!(matches!(
             restored.check_unlocked(purpose),
-            Err(Error::Consumed)
+            Err(Refusal::Consumed)
         ));
     }
     for undefined in [SigningPurpose::Release.mask() << 1, u16::MAX] {
         assert!(matches!(
             restored.unlock_unused_purposes(undefined),
-            Err(Error::Shape)
+            Err(Refusal::Shape)
         ));
     }
     restored.unlock_unused_purposes(0).unwrap();

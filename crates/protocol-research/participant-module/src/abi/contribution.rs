@@ -21,8 +21,8 @@ fn offer_operation(
     operation: u32,
     argument: usize,
     length: usize,
-) -> Result<(), protocol_foundations::Error> {
-    use protocol_foundations::Error;
+) -> Result<(), protocol_foundations::Refusal> {
+    use protocol_foundations::Refusal;
     let operation = OfferSigningOperation::from_code(operation);
     if length > state.input.len()
         || (!matches!(
@@ -30,7 +30,7 @@ fn offer_operation(
             Some(OfferSigningOperation::Polynomial | OfferSigningOperation::Proof)
         ) && argument != 0)
     {
-        return Err(Error::Shape);
+        return Err(Refusal::Shape);
     }
     let input = Zeroizing::new(state.input[..length].to_vec());
     state.input[..length].zeroize();
@@ -41,15 +41,15 @@ fn offer_operation(
                 || usize::from(u16::from_le_bytes(input[..2].try_into().unwrap()))
                     != context.position()
             {
-                return Err(Error::Shape);
+                return Err(Refusal::Shape);
             }
             let proof_length = usize::try_from(u64::from_le_bytes(input[2..].try_into().unwrap()))
-                .map_err(|_| Error::Shape)?;
-            let enrollment = state.enrollment.as_ref().ok_or(Error::Context)?;
+                .map_err(|_| Refusal::Shape)?;
+            let enrollment = state.enrollment.as_ref().ok_or(Refusal::Context)?;
             enrollment.credential.validate_offer_owner(&context)?;
             let header = enrollment
                 .contribution_header(context.profile(), proof_length)
-                .map_err(|_| Error::Context)?;
+                .map_err(|_| Refusal::Context)?;
             if operation == Some(OfferSigningOperation::BeginBody) {
                 state
                     .offer
@@ -59,7 +59,7 @@ fn offer_operation(
         }
         Some(OfferSigningOperation::Polynomial) => {
             if !(5..=4 + (1 << 20)).contains(&input.len()) {
-                return Err(Error::Shape);
+                return Err(Refusal::Shape);
             }
             let offset = u32::from_le_bytes(input[..4].try_into().unwrap()) as usize;
             state.offer.polynomial(argument, offset, &input[4..])?;
@@ -67,26 +67,30 @@ fn offer_operation(
         Some(OfferSigningOperation::Proof) => state.offer.proof(argument, &input)?,
         Some(OfferSigningOperation::FinishBody) => {
             if !input.is_empty() {
-                return Err(Error::Shape);
+                return Err(Refusal::Shape);
             }
             state.offer.finish_body()?;
             state.participant_output = state
                 .offer
                 .envelope()
-                .ok_or(Error::Consumed)?
+                .ok_or(Refusal::Consumed)?
                 .bytes()
                 .to_vec();
         }
         Some(OfferSigningOperation::SignOffer) => {
             if !input.is_empty() {
-                return Err(Error::Shape);
+                return Err(Refusal::Shape);
             }
-            let credential = &mut state.enrollment.as_mut().ok_or(Error::Context)?.credential;
+            let credential = &mut state
+                .enrollment
+                .as_mut()
+                .ok_or(Refusal::Context)?
+                .credential;
             state.offer.sign(credential)?;
-            let (envelope, signature) = state.offer.offer().ok_or(Error::Consumed)?;
+            let (envelope, signature) = state.offer.offer().ok_or(Refusal::Consumed)?;
             state.participant_output = signed_packet::encode(envelope.bytes(), signature);
         }
-        None => return Err(Error::Shape),
+        None => return Err(Refusal::Shape),
     }
     Ok(())
 }

@@ -116,17 +116,17 @@ pub extern "C" fn poll_identity_pointer() -> usize {
 
 fn original_context(
     state: &Session,
-) -> Result<RetainedContributionContext, protocol_foundations::Error> {
-    use protocol_foundations::Error;
+) -> Result<RetainedContributionContext, protocol_foundations::Refusal> {
+    use protocol_foundations::Refusal;
     if let Some(context) = &state.retained_context {
         return Ok(context.clone());
     }
-    let enrollment = state.enrollment.as_ref().ok_or(Error::Context)?;
-    let original = own_registration::verified().ok_or(Error::Context)?;
+    let enrollment = state.enrollment.as_ref().ok_or(Refusal::Context)?;
+    let original = own_registration::verified().ok_or(Refusal::Context)?;
     let proposal = state
         .signed_proposal
         .as_ref()
-        .ok_or(Error::Context)?
+        .ok_or(Refusal::Context)?
         .proposal();
     let position = proposal
         .records()
@@ -135,7 +135,7 @@ fn original_context(
             record.body_digest() == original.body_digest()
                 && record.header().signing_public == *enrollment.credential.signing_public()
         })
-        .ok_or(Error::Context)?;
+        .ok_or(Refusal::Context)?;
     own_registration::with_poll(|poll| {
         RetainedContributionContext::parse(
             &enrollment.credential,
@@ -145,7 +145,7 @@ fn original_context(
             proposal.body(),
         )
     })
-    .ok_or(Error::Context)?
+    .ok_or(Refusal::Context)?
 }
 
 #[unsafe(no_mangle)]

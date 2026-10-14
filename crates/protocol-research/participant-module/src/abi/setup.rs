@@ -23,76 +23,76 @@ fn selection_operation(
     state: &mut Session,
     operation: u32,
     length: usize,
-) -> Result<(), protocol_foundations::Error> {
-    use protocol_foundations::{Error, setup_selection};
+) -> Result<(), protocol_foundations::Refusal> {
+    use protocol_foundations::{Refusal, setup_selection};
     let operation = SelectionOperation::from_code(operation);
     if length > state.input.len() {
-        return Err(Error::Shape);
+        return Err(Refusal::Shape);
     }
     let input = Zeroizing::new(state.input[..length].to_vec());
     state.input[..length].zeroize();
     let context = original_context(state)?;
-    let (_, roster) = super::setup_verification::roster_context().ok_or(Error::Context)?;
+    let (_, roster) = super::setup_verification::roster_context().ok_or(Refusal::Context)?;
     if roster.proposal().identity_bytes() != context.identity() {
-        return Err(Error::Context);
+        return Err(Refusal::Context);
     }
     match operation {
         Some(SelectionOperation::UnsignedBody) => {
             if !input.is_empty() {
-                return Err(Error::Shape);
+                return Err(Refusal::Shape);
             }
             let selection =
-                super::setup_verification::unsigned_selection().ok_or(Error::Context)?;
+                super::setup_verification::unsigned_selection().ok_or(Refusal::Context)?;
             if selection.roster_identity() != context.identity() {
-                return Err(Error::Context);
+                return Err(Refusal::Context);
             }
             state.participant_output = selection.body().to_vec();
             state.unsigned_selection = Some(selection);
         }
         Some(SelectionOperation::SignProposal) => {
             if !input.is_empty() {
-                return Err(Error::Shape);
+                return Err(Refusal::Shape);
             }
-            let selection = state.unsigned_selection.as_ref().ok_or(Error::Context)?;
+            let selection = state.unsigned_selection.as_ref().ok_or(Refusal::Context)?;
             let signature = state
                 .enrollment
                 .as_mut()
-                .ok_or(Error::Context)?
+                .ok_or(Refusal::Context)?
                 .credential
                 .sign_selection_proposal(&roster, selection)?;
             state.participant_output = signed_packet::encode(selection.body(), &signature);
         }
         Some(SelectionOperation::Endorse | SelectionOperation::EndorsementBody) => {
-            let inputs = super::setup_verification::selection_inputs().ok_or(Error::Context)?;
+            let inputs = super::setup_verification::selection_inputs().ok_or(Refusal::Context)?;
             if inputs.roster().proposal().identity_bytes() != context.identity() {
-                return Err(Error::Context);
+                return Err(Refusal::Context);
             }
             let selection = inputs.selection().selection();
             state.participant_output = if operation == Some(SelectionOperation::Endorse) {
                 if !input.is_empty() {
-                    return Err(Error::Shape);
+                    return Err(Refusal::Shape);
                 }
                 state
                     .enrollment
                     .as_mut()
-                    .ok_or(Error::Context)?
+                    .ok_or(Refusal::Context)?
                     .credential
                     .endorse_selection(&roster, selection, context.position())?
             } else {
                 if !input.is_empty() {
-                    return Err(Error::Shape);
+                    return Err(Refusal::Shape);
                 }
                 setup_selection::endorsement_body(selection.identity(), context.position())?
             };
         }
         Some(SelectionOperation::RestoreProposal) => {
             let (body, signature) =
-                signed_packet::split(&input, MAXIMUM_SELECTION_BYTES).ok_or(Error::Shape)?;
+                signed_packet::split(&input, MAXIMUM_SELECTION_BYTES).ok_or(Refusal::Shape)?;
             let proposal = setup_selection::authenticate_selection(roster, body, signature)?;
             state
                 .enrollment
                 .as_mut()
-                .ok_or(Error::Context)?
+                .ok_or(Refusal::Context)?
                 .credential
                 .restore_selection_proposal(&proposal)?;
         }
@@ -100,7 +100,7 @@ fn selection_operation(
             let (body, signature, endorsement) =
                 signed_packet::leading(&input, MAXIMUM_SELECTION_BYTES)
                     .filter(|(_, _, endorsement)| endorsement.len() == ENDORSEMENT_BYTES)
-                    .ok_or(Error::Shape)?;
+                    .ok_or(Refusal::Shape)?;
             let proposal =
                 setup_selection::authenticate_selection(roster.clone(), body, signature)?;
             let endorsement = setup_selection::authenticate_endorsement(
@@ -111,11 +111,11 @@ fn selection_operation(
             state
                 .enrollment
                 .as_mut()
-                .ok_or(Error::Context)?
+                .ok_or(Refusal::Context)?
                 .credential
                 .restore_selection_endorsement(&roster, &endorsement)?;
         }
-        None => return Err(Error::Shape),
+        None => return Err(Refusal::Shape),
     }
     Ok(())
 }

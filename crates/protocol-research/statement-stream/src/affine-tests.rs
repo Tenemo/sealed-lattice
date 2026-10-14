@@ -83,7 +83,7 @@ fn public_column_sums_add_their_values() {
 /// the only column on every row and the second's is the target.
 struct Sums(Vec<Element>, Element);
 impl OperatorBuilder for Sums {
-    type Error = Error;
+    type Refusal = Refusal;
     const HEADER_BYTES: usize = 2;
     const POLYNOMIALS: usize = 2;
     fn columns(_: Profile) -> usize {
@@ -92,20 +92,24 @@ impl OperatorBuilder for Sums {
     fn polynomial_bytes(_: Profile, _: usize) -> usize {
         4 * 2
     }
-    fn polynomial_stream(_: Profile, _: usize, alpha: Element) -> Result<PolynomialStream, Error> {
+    fn polynomial_stream(
+        _: Profile,
+        _: usize,
+        alpha: Element,
+    ) -> Result<PolynomialStream, Refusal> {
         PolynomialStream::new(&[251], 4, 17, alpha)
     }
-    fn begin(_: Profile, alpha: Element, header: &[u8]) -> Result<Self, Error> {
+    fn begin(_: Profile, alpha: Element, header: &[u8]) -> Result<Self, Refusal> {
         if header[0] != 1 {
-            return Err(Error::Encoding);
+            return Err(Refusal::Encoding);
         }
         Ok(Self(Vec::new(), alpha))
     }
-    fn polynomial(&mut self, _: usize, stream: PolynomialStream) -> Result<(), Error> {
+    fn polynomial(&mut self, _: usize, stream: PolynomialStream) -> Result<(), Refusal> {
         self.0.push(stream.finish_value()?);
         Ok(())
     }
-    fn finish(self) -> Result<Operator, Error> {
+    fn finish(self) -> Result<Operator, Refusal> {
         Ok(Operator {
             alpha: self.1,
             terms: vec![Term {

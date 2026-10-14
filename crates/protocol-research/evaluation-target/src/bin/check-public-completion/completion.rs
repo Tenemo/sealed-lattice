@@ -240,7 +240,7 @@ pub fn verify(
         if stage == Stage::Release {
             assert!(matches!(
                 collector.result(),
-                Err(evaluation_target::release::Error::Incomplete)
+                Err(evaluation_target::release::Refusal::Incomplete)
             ));
             return Ok(format!(
                 "{{\"kind\":\"verified-release\",\"releaseAuthor\":{position},\"certificateAuthors\":{certificate_authors:?},\"unavailableVotes\":{unavailable_votes:?},\"invalidVotes\":{invalid_votes:?},\"unavailableReleases\":{unavailable_releases:?},\"invalidReleases\":{invalid_releases:?}}}"
@@ -254,7 +254,7 @@ pub fn verify(
                     result.participants(),
                 ));
             }
-            Err(evaluation_target::release::Error::Incomplete) => {}
+            Err(evaluation_target::release::Refusal::Incomplete) => {}
             Err(error) => return Err(refusal(error)),
         }
     }

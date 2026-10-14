@@ -149,7 +149,7 @@ impl Screen {
                 ensure(
                     matches!(
                         Contribution::from_source(wrong, source),
-                        Err(crate::contribution::Error::SourceFamily)
+                        Err(crate::contribution::Refusal::SourceFamily)
                     ),
                     "Wrong family began contribution work",
                 )?;

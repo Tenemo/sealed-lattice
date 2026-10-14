@@ -38,7 +38,7 @@ fn verify_key(
     key: &[u8],
     seed: u8,
     chunk: usize,
-) -> Result<VerifiedRegistration, Error> {
+) -> Result<VerifiedRegistration, Refusal> {
     let mut credential = Credential::from_seed([seed; 32]);
     let header = RegistrationHeader {
         username: normalize_username(format!("Participant {seed}").as_bytes()).unwrap(),
@@ -147,7 +147,7 @@ fn roster_poll(maximum: usize) -> VerifiedPoll {
 fn roster_proposal(
     poll: &VerifiedPoll,
     credentials: &[&Credential],
-) -> Result<RosterProposal, Error> {
+) -> Result<RosterProposal, Refusal> {
     let records = credentials
         .iter()
         .map(|credential| {
@@ -188,13 +188,16 @@ fn every_supported_roster_size_up_to_the_poll_maximum_can_be_proposed() {
         assert_eq!((profile.participants(), profile.options()), (size, 10));
     }
     for size in [2, 21] {
-        assert!(matches!(proposal(&largest, size), Err(Error::Shape)));
+        assert!(matches!(proposal(&largest, size), Err(Refusal::Shape)));
     }
     // A roster above the poll's signed maximum is refused.
     for maximum in 3..20 {
         let poll = roster_poll(maximum);
         assert!(proposal(&poll, maximum).is_ok());
-        assert!(matches!(proposal(&poll, maximum + 1), Err(Error::Context)));
+        assert!(matches!(
+            proposal(&poll, maximum + 1),
+            Err(Refusal::Context)
+        ));
     }
     assert_eq!(Profile::participant_range(), 3..=20);
 }
@@ -215,7 +218,7 @@ fn a_roster_refuses_a_repeated_signing_key() {
     ] {
         assert!(matches!(
             roster_proposal(&poll, &credentials),
-            Err(Error::Shape)
+            Err(Refusal::Shape)
         ));
     }
 }

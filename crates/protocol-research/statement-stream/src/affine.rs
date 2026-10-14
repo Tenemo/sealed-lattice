@@ -1,5 +1,5 @@
 use crate::{
-    CHUNK_LIMIT, Element, Error, ONE, PolynomialStream, StatementOutput, ZERO,
+    CHUNK_LIMIT, Element, ONE, PolynomialStream, Refusal, StatementOutput, ZERO,
     evaluate_public_columns, plus, proof_field::MODULUS, query, times,
 };
 use parallel_work::{HashStream, Sponge};
@@ -57,7 +57,7 @@ impl Operator {
     /// column. The query evaluation is linear, so each column's values are
     /// the weighted sums of its public columns' values, and ones on every
     /// row are one at every query.
-    pub fn at_queries(self, columns: usize, queries: &[u32]) -> Result<Vec<Element>, Error> {
+    pub fn at_queries(self, columns: usize, queries: &[u32]) -> Result<Vec<Element>, Refusal> {
         let count = queries.len();
         let mut output = vec![ZERO; columns * count];
         let mut evaluated = Vec::new();
@@ -121,7 +121,7 @@ impl Operator {
 /// and then a fixed sequence of polynomials. It takes the header, then each
 /// polynomial's stream in order.
 pub trait OperatorBuilder: Sized {
-    type Error: From<Error>;
+    type Refusal: From<Refusal>;
     const HEADER_BYTES: usize;
     const POLYNOMIALS: usize;
     /// The relation's column count.
@@ -133,10 +133,10 @@ pub trait OperatorBuilder: Sized {
         profile: Profile,
         index: usize,
         alpha: Element,
-    ) -> Result<PolynomialStream, Self::Error>;
-    fn begin(profile: Profile, alpha: Element, header: &[u8]) -> Result<Self, Self::Error>;
-    fn polynomial(&mut self, index: usize, stream: PolynomialStream) -> Result<(), Self::Error>;
-    fn finish(self) -> Result<Operator, Self::Error>;
+    ) -> Result<PolynomialStream, Self::Refusal>;
+    fn begin(profile: Profile, alpha: Element, header: &[u8]) -> Result<Self, Self::Refusal>;
+    fn polynomial(&mut self, index: usize, stream: PolynomialStream) -> Result<(), Self::Refusal>;
+    fn finish(self) -> Result<Operator, Self::Refusal>;
 }
 
 /// The operator at the challenge of a statement's header and polynomials.
@@ -145,10 +145,10 @@ pub fn operator<B: OperatorBuilder>(
     alpha: Element,
     header: &[u8],
     polynomials: &[Vec<u8>],
-) -> Result<Operator, B::Error> {
+) -> Result<Operator, B::Refusal> {
     let mut builder = B::begin(profile, alpha, header)?;
     if polynomials.len() != B::POLYNOMIALS {
-        return Err(Error::Length.into());
+        return Err(Refusal::Length.into());
     }
     for (index, bytes) in polynomials.iter().enumerate() {
         let mut stream = B::polynomial_stream(profile, index, alpha)?;
@@ -183,9 +183,9 @@ impl<B: OperatorBuilder> HeaderThenPolynomials<B> {
         expected: [u8; 64],
         alpha: Element,
         queries: &[u32],
-    ) -> Result<Self, B::Error> {
+    ) -> Result<Self, B::Refusal> {
         if alpha.iter().any(|value| *value >= MODULUS) {
-            return Err(Error::Parameters.into());
+            return Err(Refusal::Parameters.into());
         }
         query::validate_indices_in(queries, EVALUATION_DOMAIN_SIZE)?;
         Ok(Self {
@@ -202,9 +202,9 @@ impl<B: OperatorBuilder> HeaderThenPolynomials<B> {
             failed: false,
         })
     }
-    pub fn push(&mut self, bytes: &[u8]) -> Result<(), B::Error> {
+    pub fn push(&mut self, bytes: &[u8]) -> Result<(), B::Refusal> {
         if self.failed {
-            return Err(Error::Binding.into());
+            return Err(Refusal::Binding.into());
         }
         let result = self.push_inner(bytes);
         if result.is_err() {
@@ -212,9 +212,9 @@ impl<B: OperatorBuilder> HeaderThenPolynomials<B> {
         }
         result
     }
-    fn push_inner(&mut self, mut bytes: &[u8]) -> Result<(), B::Error> {
+    fn push_inner(&mut self, mut bytes: &[u8]) -> Result<(), B::Refusal> {
         if bytes.len() > CHUNK_LIMIT {
-            return Err(Error::Length.into());
+            return Err(Refusal::Length.into());
         }
         self.hash.update(bytes);
         if self.header.len() < B::HEADER_BYTES {
@@ -227,7 +227,7 @@ impl<B: OperatorBuilder> HeaderThenPolynomials<B> {
         }
         while !bytes.is_empty() {
             if self.index == B::POLYNOMIALS {
-                return Err(Error::Length.into());
+                return Err(Refusal::Length.into());
             }
             let size = B::polynomial_bytes(self.profile, self.index);
             let stream = match &mut self.stream {
@@ -244,7 +244,7 @@ impl<B: OperatorBuilder> HeaderThenPolynomials<B> {
             if self.received == size {
                 let (Some(builder), Some(stream)) = (self.builder.as_mut(), self.stream.take())
                 else {
-                    return Err(Error::Incomplete.into());
+                    return Err(Refusal::Incomplete.into());
                 };
                 builder.polynomial(self.index, stream)?;
                 self.index += 1;
@@ -253,15 +253,15 @@ impl<B: OperatorBuilder> HeaderThenPolynomials<B> {
         }
         Ok(())
     }
-    pub fn finish(self) -> Result<StatementOutput, B::Error> {
+    pub fn finish(self) -> Result<StatementOutput, B::Refusal> {
         if self.failed || self.index != B::POLYNOMIALS || self.hash.finish() != self.expected {
-            return Err(Error::Binding.into());
+            return Err(Refusal::Binding.into());
         }
-        let operator = self.builder.ok_or(Error::Binding)?.finish()?;
+        let operator = self.builder.ok_or(Refusal::Binding)?.finish()?;
         let (target, lookup_weight) = (operator.target, operator.lookup_weight);
         let coefficients = operator
             .at_queries(B::columns(self.profile), &self.queries)
-            .map_err(|_| Error::Arithmetic)?;
+            .map_err(|_| Refusal::Arithmetic)?;
         Ok(StatementOutput {
             target,
             lookup_weight,

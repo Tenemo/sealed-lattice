@@ -1,4 +1,4 @@
-use crate::{Credential, Error, SIGNING_PUBLIC_KEY_BYTES};
+use crate::{Credential, Refusal, SIGNING_PUBLIC_KEY_BYTES};
 use parallel_work::sealing::{self, Sealed, TAG_BYTES};
 use zeroize::Zeroizing;
 
@@ -37,14 +37,14 @@ fn associated(body: [u8; 64]) -> Vec<u8> {
 
 impl Credential {
     /// Seals the completed signing seed under a fresh key, once.
-    pub fn seal_complete(&mut self) -> Result<Sealed, Error> {
+    pub fn seal_complete(&mut self) -> Result<Sealed, Refusal> {
         if self.sealed {
-            return Err(Error::Consumed);
+            return Err(Refusal::Consumed);
         }
-        let body = self.completed_body.ok_or(Error::Consumed)?;
+        let body = self.completed_body.ok_or(Refusal::Consumed)?;
         self.sealed = true;
         if !self.check_retained() {
-            return Err(Error::Crypto);
+            return Err(Refusal::Crypto);
         }
         let mut bytes = Zeroizing::new(Vec::with_capacity(4 + 32));
         bytes.extend(b"RCS1");
@@ -56,16 +56,16 @@ impl Credential {
         body: [u8; 64],
         key: &[u8; 32],
         sealed: &[u8],
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, Refusal> {
         if sealed.len() != SEALED_SIGNING_SEED_BYTES {
-            return Err(Error::Shape);
+            return Err(Refusal::Shape);
         }
-        let bytes = sealing::open(key, &associated(body), sealed).ok_or(Error::Crypto)?;
+        let bytes = sealing::open(key, &associated(body), sealed).ok_or(Refusal::Crypto)?;
         if bytes.len() != 36 || &bytes[..4] != b"RCS1" {
-            return Err(Error::Shape);
+            return Err(Refusal::Shape);
         }
         let value = Self {
-            signing_seed: Zeroizing::new(bytes[4..].try_into().map_err(|_| Error::Shape)?),
+            signing_seed: Zeroizing::new(bytes[4..].try_into().map_err(|_| Refusal::Shape)?),
             signing_public,
             signed: true,
             completed_body: Some(body),
@@ -90,23 +90,23 @@ impl Credential {
             locked_purposes: ALL_SIGNING_PURPOSES,
         };
         if !value.check_retained() {
-            return Err(Error::Crypto);
+            return Err(Refusal::Crypto);
         }
         Ok(value)
     }
     /// Unlocks the purposes that the authenticated participant root has shown
     /// unused. Completed messages are restored from their verified records
     /// instead, so a purpose left locked signs nothing new.
-    pub fn unlock_unused_purposes(&mut self, mask: u16) -> Result<(), Error> {
+    pub fn unlock_unused_purposes(&mut self, mask: u16) -> Result<(), Refusal> {
         if mask & !ALL_SIGNING_PURPOSES != 0 {
-            return Err(Error::Shape);
+            return Err(Refusal::Shape);
         }
         self.locked_purposes &= !mask;
         Ok(())
     }
-    pub(crate) fn check_unlocked(&self, purpose: SigningPurpose) -> Result<(), Error> {
+    pub(crate) fn check_unlocked(&self, purpose: SigningPurpose) -> Result<(), Refusal> {
         if self.locked_purposes & purpose.mask() != 0 {
-            return Err(Error::Consumed);
+            return Err(Refusal::Consumed);
         }
         Ok(())
     }

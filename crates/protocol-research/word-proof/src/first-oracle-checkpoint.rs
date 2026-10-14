@@ -1,4 +1,4 @@
-use super::{Error, Phase, SetupProver};
+use super::{Phase, Refusal, SetupProver};
 use crate::{
     field::{self, Element, MODULUS},
     oracles::{FirstOracle, Witness},
@@ -50,12 +50,12 @@ impl Header {
         }
         bytes
     }
-    fn decode(bytes: &[u8]) -> Result<Self, Error> {
+    fn decode(bytes: &[u8]) -> Result<Self, Refusal> {
         if bytes.len() < 12 || &bytes[..4] != MAGIC {
-            return Err(Error::Operation);
+            return Err(Refusal::Operation);
         }
         let profile = Profile::new(usize::from(bytes[4]), usize::from(bytes[5]))
-            .map_err(|_| Error::Operation)?;
+            .map_err(|_| Refusal::Operation)?;
         let statement = profile.setup_statement_header();
         let column = u32::from_le_bytes(bytes[6..10].try_into().unwrap()) as usize;
         let role_length = u16::from_le_bytes(bytes[10..12].try_into().unwrap()) as usize;
@@ -66,7 +66,7 @@ impl Header {
             || column > setup_relation(profile).columns() + 1
             || bytes.len() < input_start + 2
         {
-            return Err(Error::Operation);
+            return Err(Refusal::Operation);
         }
         let count =
             u16::from_le_bytes(bytes[input_start..input_start + 2].try_into().unwrap()) as usize;
@@ -74,7 +74,7 @@ impl Header {
             || bytes.len() != input_start + 2 + count * 64
             || bytes[start + 128..input_start] != statement
         {
-            return Err(Error::Operation);
+            return Err(Refusal::Operation);
         }
         Ok(Self {
             profile,
@@ -156,16 +156,16 @@ impl Export {
     pub fn begin_with_inputs(
         prover: &mut SetupProver,
         input_hashes: &[[u8; 64]],
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, Refusal> {
         let profile = prover.profile;
         // A header the import would refuse is never exported.
         if input_hashes.len() != profile.participants()
             || !(1..=MAXIMUM_ROLE_BYTES).contains(&prover.role.len())
         {
-            return Err(Error::Operation);
+            return Err(Refusal::Operation);
         }
         let Phase::FirstColumn(column) = prover.phase else {
-            return Err(Error::Operation);
+            return Err(Refusal::Operation);
         };
         let first = prover.first.as_mut().ok_or(())?;
         let transcript = prover.transcript.as_ref().ok_or(())?;
@@ -173,7 +173,7 @@ impl Export {
             || transcript.round != 1
             || !transcript.salts.is_empty()
         {
-            return Err(Error::Operation);
+            return Err(Refusal::Operation);
         }
         first.rows.as_ref().ok_or(())?;
         Ok(Self {
@@ -197,7 +197,7 @@ impl Export {
         self.next == record_count(&self.relation)
     }
     /// Seals the next record under a fresh key.
-    pub fn seal(&mut self, prover: &mut SetupProver) -> Result<Sealed, Error> {
+    pub fn seal(&mut self, prover: &mut SetupProver) -> Result<Sealed, Refusal> {
         let (field, start, count, width) = record_layout(&self.relation, self.next).ok_or(())?;
         if prover.profile != self.header.profile
             || prover.phase != Phase::FirstColumn(self.header.column)
@@ -209,7 +209,7 @@ impl Export {
                 .as_ref()
                 .is_none_or(|value| value.context != self.header.context)
         {
-            return Err(Error::Operation);
+            return Err(Refusal::Operation);
         }
         let mut bytes = Zeroizing::new(Vec::with_capacity(count * width));
         if field == 4 {
@@ -260,7 +260,7 @@ impl Import {
     pub fn relation(&self) -> &Relation {
         &self.relation
     }
-    pub fn begin(bytes: &[u8]) -> Result<Self, Error> {
+    pub fn begin(bytes: &[u8]) -> Result<Self, Refusal> {
         let header = Header::decode(bytes)?;
         Ok(Self {
             relation: setup_relation(header.profile),
@@ -277,9 +277,9 @@ impl Import {
     pub fn complete(&self) -> bool {
         !self.failed && self.next == record_count(&self.relation)
     }
-    pub fn open(&mut self, key: &[u8; 32], bytes: &[u8]) -> Result<(), Error> {
+    pub fn open(&mut self, key: &[u8; 32], bytes: &[u8]) -> Result<(), Refusal> {
         if self.failed {
-            return Err(Error::Operation);
+            return Err(Refusal::Operation);
         }
         let result = self.open_record(key, bytes);
         if result.is_err() {
@@ -287,10 +287,10 @@ impl Import {
         }
         result
     }
-    fn open_record(&mut self, key: &[u8; 32], bytes: &[u8]) -> Result<(), Error> {
+    fn open_record(&mut self, key: &[u8; 32], bytes: &[u8]) -> Result<(), Refusal> {
         let (field, start, count, width) = record_layout(&self.relation, self.next).ok_or(())?;
         if bytes.len() != count * width + TAG_BYTES {
-            return Err(Error::Operation);
+            return Err(Refusal::Operation);
         }
         let plaintext = sealing::open(key, &self.header.associated(self.next), bytes).ok_or(())?;
         for bytes in plaintext.chunks_exact(width) {
@@ -311,7 +311,7 @@ impl Import {
                 1 => {
                     let value = u128::from_le_bytes(bytes.try_into().unwrap());
                     if value >= MODULUS {
-                        return Err(Error::Operation);
+                        return Err(Refusal::Operation);
                     }
                     if self.masks.last().is_none_or(|values| values.len() == MASKS) {
                         self.masks.push(Vec::with_capacity(MASKS));
@@ -323,7 +323,7 @@ impl Import {
                         u128::from_le_bytes(bytes[16 * index..16 * (index + 1)].try_into().unwrap())
                     });
                     if value.iter().any(|value| *value >= MODULUS) {
-                        return Err(Error::Operation);
+                        return Err(Refusal::Operation);
                     }
                     self.degree_mask.push(value);
                 }
@@ -334,7 +334,7 @@ impl Import {
                             + 16 * self.header.column,
                     );
                     if usize::from(bytes[200]) != expected_cursor {
-                        return Err(Error::Operation);
+                        return Err(Refusal::Operation);
                     }
                     let encoded: &[u8; ProtocolHash::STATE_BYTES] =
                         bytes.try_into().map_err(|_| ())?;
@@ -351,9 +351,9 @@ impl Import {
         self.next += 1;
         Ok(())
     }
-    pub fn finish(mut self) -> Result<SetupProver, Error> {
+    pub fn finish(mut self) -> Result<SetupProver, Refusal> {
         if !self.complete() {
-            return Err(Error::Operation);
+            return Err(Refusal::Operation);
         }
         let witness = Witness::from_columns(
             &self.relation,

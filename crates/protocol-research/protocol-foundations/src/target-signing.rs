@@ -1,5 +1,5 @@
 use crate::{
-    Credential, Error, SIGNATURE_BYTES, SigningPurpose,
+    Credential, Refusal, SIGNATURE_BYTES, SigningPurpose,
     ballot_authentication::RetainedSetupOwner,
     foundation::{
         CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple,
@@ -33,9 +33,9 @@ pub struct TargetMessage {
     classifications: Vec<u8>,
 }
 impl TargetMessage {
-    pub fn parse(body: &[u8], participants: usize) -> Result<Self, Error> {
+    pub fn parse(body: &[u8], participants: usize) -> Result<Self, Refusal> {
         if !Profile::participant_range().contains(&participants) {
-            return Err(Error::Context);
+            return Err(Refusal::Context);
         }
         // Classification codes: 0 absent, 1 invalid, 2 accepted, 3 conflicting.
         let limits = CanonicalDecodeLimits {
@@ -45,16 +45,18 @@ impl TargetMessage {
             maximum_nesting_depth: 0,
             ..CanonicalDecodeLimits::default()
         };
-        let tuple = CanonicalTuple::decode(body, &limits).map_err(|_| Error::Shape)?;
+        let tuple = CanonicalTuple::decode(body, &limits).map_err(|_| Refusal::Shape)?;
         if !(tuple.has_header(6) || tuple.has_header(7)) {
-            return Err(Error::Shape);
+            return Err(Refusal::Shape);
         }
         let items = &tuple.items;
         if items[0].item_type() != CanonicalItemType::Ascii
-            || items[0].variable_value_bytes().map_err(|_| Error::Shape)?
+            || items[0]
+                .variable_value_bytes()
+                .map_err(|_| Refusal::Shape)?
                 != TARGET_PURPOSE.as_bytes()
         {
-            return Err(Error::Context);
+            return Err(Refusal::Context);
         }
         if items[1..4]
             .iter()
@@ -62,17 +64,19 @@ impl TargetMessage {
             || items[4].item_type() != CanonicalItemType::RawBytes
             || items[5].item_type() != CanonicalItemType::Unsigned16
         {
-            return Err(Error::Shape);
+            return Err(Refusal::Shape);
         }
-        let classifications = items[4].variable_value_bytes().map_err(|_| Error::Shape)?;
+        let classifications = items[4]
+            .variable_value_bytes()
+            .map_err(|_| Refusal::Shape)?;
         if classifications.len() != participants || classifications.iter().any(|value| *value > 3) {
-            return Err(Error::Shape);
+            return Err(Refusal::Shape);
         }
         let branch = u16::from_le_bytes(
             items[5]
                 .canonical_bytes()
                 .try_into()
-                .map_err(|_| Error::Shape)?,
+                .map_err(|_| Refusal::Shape)?,
         );
         let accepted = classifications.iter().filter(|value| **value == 2).count();
         let evaluated = accepted >= minimum_turnout(participants);
@@ -80,37 +84,37 @@ impl TargetMessage {
             0 if items.len() == 6 && !evaluated => None,
             1 if items.len() == 7 && evaluated => {
                 if items[6].item_type() != CanonicalItemType::Hash512 {
-                    return Err(Error::Shape);
+                    return Err(Refusal::Shape);
                 }
                 Some(
                     items[6]
                         .canonical_bytes()
                         .try_into()
-                        .map_err(|_| Error::Shape)?,
+                        .map_err(|_| Refusal::Shape)?,
                 )
             }
-            _ => return Err(Error::Shape),
+            _ => return Err(Refusal::Shape),
         };
         let identity = hash_foundation_tuple_512(
             TARGET_IDENTITY_DOMAIN,
-            &[CanonicalItem::variable_bytes(body).map_err(|_| Error::Shape)?],
+            &[CanonicalItem::variable_bytes(body).map_err(|_| Refusal::Shape)?],
         )
-        .map_err(|_| Error::Shape)?
+        .map_err(|_| Refusal::Shape)?
         .into_bytes();
         Ok(Self {
             body: body.to_vec(),
             poll: items[1]
                 .canonical_bytes()
                 .try_into()
-                .map_err(|_| Error::Shape)?,
+                .map_err(|_| Refusal::Shape)?,
             setup_identity: items[2]
                 .canonical_bytes()
                 .try_into()
-                .map_err(|_| Error::Shape)?,
+                .map_err(|_| Refusal::Shape)?,
             proposal: items[3]
                 .canonical_bytes()
                 .try_into()
-                .map_err(|_| Error::Shape)?,
+                .map_err(|_| Refusal::Shape)?,
             identity,
             participants,
             ciphertext,
@@ -160,14 +164,14 @@ pub struct TargetVote {
     signature: [u8; SIGNATURE_BYTES],
 }
 impl TargetVote {
-    pub fn parse(bytes: &[u8]) -> Result<Self, Error> {
+    pub fn parse(bytes: &[u8]) -> Result<Self, Refusal> {
         if bytes.len() != TARGET_VOTE_BYTES {
-            return Err(Error::Shape);
+            return Err(Refusal::Shape);
         }
         let position = u16::from_le_bytes(bytes[..2].try_into().unwrap()) as usize;
         // A position lies within the largest supported roster.
         if position >= *Profile::participant_range().end() {
-            return Err(Error::Shape);
+            return Err(Refusal::Shape);
         }
         Ok(Self {
             position,
@@ -198,10 +202,10 @@ impl Credential {
         owner: &RetainedSetupOwner,
         roster: &AuthenticatedRosterProposal,
         message: &TargetMessage,
-    ) -> Result<(), Error> {
+    ) -> Result<(), Refusal> {
         self.check_setup_owner(owner)?;
         let records = roster.proposal().records();
-        let record = records.get(owner.position()).ok_or(Error::Context)?;
+        let record = records.get(owner.position()).ok_or(Refusal::Context)?;
         if records.len() != message.participants
             || message.poll() != owner.poll()
             || message.setup_identity() != owner.setup_identity()
@@ -211,7 +215,7 @@ impl Credential {
                 .target_lock
                 .is_some_and(|target| target != *message.identity())
         {
-            return Err(Error::Context);
+            return Err(Refusal::Context);
         }
         Ok(())
     }
@@ -221,12 +225,12 @@ impl Credential {
         &self,
         owner: &RetainedSetupOwner,
         roster: &AuthenticatedRosterProposal,
-    ) -> Result<(), Error> {
+    ) -> Result<(), Refusal> {
         if self.close_response.is_none()
             || (owner.position() == roster.proposal().organizer_position()
                 && !self.close_proposal_signed)
         {
-            return Err(Error::Consumed);
+            return Err(Refusal::Consumed);
         }
         Ok(())
     }
@@ -238,12 +242,12 @@ impl Credential {
         owner: &RetainedSetupOwner,
         roster: &AuthenticatedRosterProposal,
         message: &TargetMessage,
-    ) -> Result<TargetVote, Error> {
+    ) -> Result<TargetVote, Refusal> {
         self.check_target_owner(owner, roster, message)?;
         self.check_target_predecessors(owner, roster)?;
         self.check_unlocked(SigningPurpose::Target)?;
         if self.target_signed {
-            return Err(Error::Consumed);
+            return Err(Refusal::Consumed);
         }
         self.target_signed = true;
         self.target_lock = Some(*message.identity());
@@ -263,20 +267,20 @@ impl Credential {
         roster: &AuthenticatedRosterProposal,
         message: &TargetMessage,
         packet: &[u8],
-    ) -> Result<(), Error> {
+    ) -> Result<(), Refusal> {
         self.check_target_owner(owner, roster, message)?;
         self.check_target_predecessors(owner, roster)?;
         if self.target_signed {
-            return Err(Error::Consumed);
+            return Err(Refusal::Consumed);
         }
         let vote = TargetVote::parse(packet)?;
-        let key =
-            ml_dsa_65::PublicKey::try_from_bytes(self.signing_public).map_err(|_| Error::Crypto)?;
+        let key = ml_dsa_65::PublicKey::try_from_bytes(self.signing_public)
+            .map_err(|_| Refusal::Crypto)?;
         if vote.position() != owner.position()
             || vote.target() != message.identity()
             || !key.verify(message.identity(), vote.signature(), CERTIFICATION_CONTEXT)
         {
-            return Err(Error::Crypto);
+            return Err(Refusal::Crypto);
         }
         self.target_signed = true;
         self.target_lock = Some(*message.identity());

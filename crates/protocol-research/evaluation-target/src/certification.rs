@@ -8,7 +8,7 @@ use protocol_foundations::target_signing::{CERTIFICATION_CONTEXT, TargetVote};
 use std::sync::Arc;
 
 #[derive(Debug, PartialEq, Eq)]
-pub enum Error {
+pub enum Refusal {
     Shape,
     Context,
     Signature,
@@ -19,15 +19,15 @@ fn authenticate_vote(
     identity: &[u8; 64],
     keys: &[[u8; SIGNING_PUBLIC_KEY_BYTES]],
     packet: &[u8],
-) -> Result<TargetVote, Error> {
-    let vote = TargetVote::parse(packet).map_err(|_| Error::Shape)?;
+) -> Result<TargetVote, Refusal> {
+    let vote = TargetVote::parse(packet).map_err(|_| Refusal::Shape)?;
     if vote.target() != identity {
-        return Err(Error::Context);
+        return Err(Refusal::Context);
     }
-    let public = keys.get(vote.position()).ok_or(Error::Context)?;
-    let public = ml_dsa_65::PublicKey::try_from_bytes(*public).map_err(|_| Error::Signature)?;
+    let public = keys.get(vote.position()).ok_or(Refusal::Context)?;
+    let public = ml_dsa_65::PublicKey::try_from_bytes(*public).map_err(|_| Refusal::Signature)?;
     if !public.verify(identity, vote.signature(), CERTIFICATION_CONTEXT) {
-        return Err(Error::Signature);
+        return Err(Refusal::Signature);
     }
     Ok(vote)
 }
@@ -63,7 +63,7 @@ impl CertificateCollector {
         self.votes.iter().filter(|value| value.is_some()).count()
     }
     /// Invalid and duplicate packets never replace an already verified vote.
-    pub fn insert(&mut self, packet: &[u8]) -> Result<bool, Error> {
+    pub fn insert(&mut self, packet: &[u8]) -> Result<bool, Refusal> {
         let vote = authenticate_vote(self.target.identity(), &self.keys, packet)?;
         let slot = &mut self.votes[vote.position()];
         if slot.is_some() {
@@ -72,9 +72,9 @@ impl CertificateCollector {
         *slot = Some(vote);
         Ok(true)
     }
-    pub fn certificate(&self) -> Result<VerifiedInventoryCertificate, Error> {
+    pub fn certificate(&self) -> Result<VerifiedInventoryCertificate, Refusal> {
         if self.accepted() < self.threshold() {
-            return Err(Error::Incomplete);
+            return Err(Refusal::Incomplete);
         }
         Ok(VerifiedInventoryCertificate {
             target: self.target.clone(),
