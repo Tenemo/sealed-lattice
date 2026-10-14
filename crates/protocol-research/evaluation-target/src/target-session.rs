@@ -1,17 +1,14 @@
 use crate::close::VerifiedCloseBarrier;
 use crate::target::{
-    ClassifiedClosedInventory, Error, EvaluationSession, VerifiedEvaluationTarget,
+    BallotReader, ClassifiedClosedInventory, Error, EvaluationSession, KeyReader,
+    VerifiedEvaluationTarget,
 };
 use ballot_proof::body::BallotBodyClassification;
 use encrypted_ranking::ranking::{
-    DEGREE, Engine, KEY_RECORD_BYTES, PolynomialDecoder, Progress, RecordRequest, Refusal,
-    StoredValueRead, stored_value_bytes,
+    DEGREE, Engine, KEY_RECORD_BYTES, Progress, RecordRequest, Refusal, StoredValueRead,
+    stored_value_bytes,
 };
-use protocol_foundations::{
-    ballot_body::{self, HEADER_BYTES},
-    identity::{BodyHasher, IdentityHasher, PUBLIC_POLYNOMIAL_DOMAIN},
-    poll::VerifiedPoll,
-};
+use protocol_foundations::poll::VerifiedPoll;
 use setup_aggregate::verified::VerifiedSetupAggregate;
 use std::sync::Arc;
 
@@ -50,23 +47,11 @@ pub trait EvaluationInputs {
     fn release_ballot_inputs(&mut self);
     fn take_barrier(&mut self) -> Option<VerifiedCloseBarrier>;
 }
-/// What an incoming stream becomes as its pieces arrive: a key polynomial
-/// of the ordinal, a ballot body of the author, whose FHE ciphertext's two
-/// components follow its header, or a stored value; each with the identity
-/// its bytes must have.
+/// What an incoming stream becomes as its pieces arrive: a setup aggregate
+/// key polynomial, an accepted ballot body or a stored value.
 enum Payload {
-    Key {
-        ordinal: usize,
-        hash: IdentityHasher,
-        expected: [u8; 64],
-        decoder: PolynomialDecoder,
-    },
-    Ballot {
-        author: usize,
-        hash: BodyHasher,
-        expected: [u8; 64],
-        components: [PolynomialDecoder; 2],
-    },
+    Key(KeyReader),
+    Ballot(BallotReader),
     Stored(StoredValueRead),
 }
 struct Incoming {
@@ -163,30 +148,9 @@ impl TargetSession {
             .and_then(|session| session.engine.as_ref())
             .ok_or(Error::Arithmetic)?;
         let bytes = &input[..length];
-        let received = value.received;
         match &mut value.payload {
-            Payload::Key { hash, decoder, .. } => {
-                hash.absorb(bytes).map_err(|_| Error::PublicInput)?;
-                engine
-                    .decode_into(decoder, bytes)
-                    .map_err(|_| Error::PublicInput)?;
-            }
-            Payload::Ballot {
-                hash, components, ..
-            } => {
-                hash.push(bytes).map_err(|_| Error::PublicInput)?;
-                let split = DEGREE * engine.coefficient_bytes();
-                for (index, component) in components.iter_mut().enumerate() {
-                    let start = HEADER_BYTES + index * split;
-                    let first = received.max(start);
-                    let last = (received + length).min(start + split);
-                    if first < last {
-                        engine
-                            .decode_into(component, &bytes[first - received..last - received])
-                            .map_err(|_| Error::PublicInput)?;
-                    }
-                }
-            }
+            Payload::Key(reader) => reader.push(engine, bytes)?,
+            Payload::Ballot(reader) => reader.push(engine, bytes)?,
             Payload::Stored(read) => engine
                 .push_read(read, bytes)
                 .map_err(|_| Error::PublicInput)?,
@@ -201,43 +165,8 @@ impl TargetSession {
         }
         let engine = self.engine()?;
         match incoming.payload {
-            Payload::Key {
-                ordinal,
-                hash,
-                expected,
-                decoder,
-            } => {
-                if hash.finish().map_err(|_| Error::PublicInput)? != expected {
-                    return Err(Error::PublicInput);
-                }
-                let polynomial = engine
-                    .finish_polynomial(decoder)
-                    .map_err(|_| Error::PublicInput)?;
-                engine
-                    .load_key(ordinal, polynomial)
-                    .map_err(|_| Error::Arithmetic)
-            }
-            Payload::Ballot {
-                author,
-                hash,
-                expected,
-                components: [first, second],
-            } => {
-                if hash.finish().map_err(|_| Error::PublicInput)? != expected {
-                    return Err(Error::PublicInput);
-                }
-                let value = [
-                    engine
-                        .finish_polynomial(first)
-                        .map_err(|_| Error::PublicInput)?,
-                    engine
-                        .finish_polynomial(second)
-                        .map_err(|_| Error::PublicInput)?,
-                ];
-                engine
-                    .load_input(author, value)
-                    .map_err(|_| Error::Arithmetic)
-            }
+            Payload::Key(reader) => reader.finish(engine),
+            Payload::Ballot(reader) => reader.finish(engine),
             Payload::Stored(read) => engine.finish_read(read).map_err(|_| Error::Storage),
         }
     }
@@ -345,50 +274,12 @@ impl TargetSession {
                 }
                 let session = self.session()?;
                 let engine = session.engine.as_mut().ok_or(Error::Arithmetic)?;
-                let required = engine.requirements().map_err(|_| Error::Arithmetic)?;
-                let ordinal = engine.key_count();
-                if ordinal >= required.key_count {
-                    return Err(Error::Incomplete);
-                }
-                let profile = engine.profile();
-                let width = engine.coefficient_bytes();
-                let (common, index) = Engine::key_identity(
-                    profile,
-                    required.cache.ok_or(Error::Arithmetic)?,
-                    ordinal,
-                )
-                .map_err(|_| Error::Arithmetic)?;
-                if common {
-                    let bytes = setup_witness::contribution::common_records(profile, index)
-                        .map_err(|_| Error::PublicInput)?;
-                    if bytes.len() != DEGREE * width {
-                        return Err(Error::PublicInput);
+                match session.inventory.next_key(engine)? {
+                    None => self.word(u32::MAX as usize),
+                    Some((index, reader)) => {
+                        self.begin(reader.length(), Payload::Key(reader))?;
+                        self.word(index);
                     }
-                    let value = engine
-                        .decode_polynomial(&bytes)
-                        .map_err(|_| Error::PublicInput)?;
-                    engine
-                        .load_key(ordinal, value)
-                        .map_err(|_| Error::Arithmetic)?;
-                    self.word(u32::MAX as usize);
-                } else {
-                    let metadata = session
-                        .inventory
-                        .setup
-                        .polynomials()
-                        .iter()
-                        .find(|value| value.index() == index)
-                        .ok_or(Error::Context)?;
-                    let bytes = metadata.bytes();
-                    let payload = Payload::Key {
-                        ordinal,
-                        hash: IdentityHasher::new(PUBLIC_POLYNOMIAL_DOMAIN, &[], bytes)
-                            .map_err(|_| Error::Context)?,
-                        expected: *metadata.digest(),
-                        decoder: engine.polynomial_decoder(),
-                    };
-                    self.begin(bytes, payload)?;
-                    self.word(index);
                 }
                 Ok(())
             }
@@ -414,35 +305,13 @@ impl TargetSession {
                 }
                 let session = self.session()?;
                 let engine = session.engine.as_mut().ok_or(Error::Arithmetic)?;
-                let required = engine.requirements().map_err(|_| Error::Arithmetic)?;
-                if required.input_position != Some(argument) {
-                    return Err(Error::Context);
-                }
-                if let Some(envelope) = session
-                    .inventory
-                    .accepted
-                    .get(argument)
-                    .ok_or(Error::Context)?
-                    .as_ref()
-                {
-                    let bytes = envelope.body_length();
-                    // The body carries the FHE ciphertext's two components
-                    // first.
-                    let payload = Payload::Ballot {
-                        author: argument,
-                        hash: ballot_body::body_hasher(engine.profile(), bytes)
-                            .map_err(|_| Error::PublicInput)?,
-                        expected: *envelope.body_identity(),
-                        components: [engine.polynomial_decoder(), engine.polynomial_decoder()],
-                    };
-                    self.begin(bytes, payload)?;
-                    self.word(bytes);
-                } else {
-                    let zero = engine.zero_value();
-                    engine
-                        .load_input(argument, zero)
-                        .map_err(|_| Error::Arithmetic)?;
-                    self.word(0);
+                match session.inventory.ballot_input(engine, argument)? {
+                    None => self.word(0),
+                    Some(reader) => {
+                        let bytes = reader.length();
+                        self.begin(bytes, Payload::Ballot(reader))?;
+                        self.word(bytes);
+                    }
                 }
                 Ok(())
             }

@@ -1,13 +1,15 @@
 use crate::close::{ClosedSlot, VerifiedCloseBarrier};
 use crate::program::RankingProgram;
 use ballot_proof::body::BallotBodyClassification;
-use encrypted_ranking::ranking::{Ciphertext, DEGREE, Engine, Progress, Refusal};
+use encrypted_ranking::ranking::{
+    Ciphertext, DEGREE, Engine, PolynomialDecoder, Progress, Refusal,
+};
 use protocol_foundations::{
     Credential, RETAINED_TAG_BYTES,
     ballot_authentication::BallotEnvelope,
     ballot_body::{self, HEADER_BYTES},
     foundation::{CanonicalItem, CanonicalTuple, hash_foundation_tuple_512},
-    identity::{PUBLIC_POLYNOMIAL_DOMAIN, identity},
+    identity::{BodyHasher, IdentityHasher, PUBLIC_POLYNOMIAL_DOMAIN},
     poll::VerifiedPoll,
     target_signing::{MAXIMUM_TARGET_BODY_BYTES, TARGET_PURPOSE, TargetMessage},
 };
@@ -132,6 +134,82 @@ impl ClassifiedClosedInventory {
             CanonicalItem::variable_bytes(&self.classifications).map_err(|_| Error::Encoding)?,
         ])
     }
+    /// Loads the next key polynomial the evaluation's cache requires when it
+    /// is a common polynomial, recomputed here. A setup aggregate polynomial
+    /// instead returns its index and the reader its bytes must pass.
+    pub(crate) fn next_key(
+        &self,
+        engine: &mut Engine,
+    ) -> Result<Option<(usize, KeyReader)>, Error> {
+        let required = engine.requirements().map_err(|_| Error::Arithmetic)?;
+        let ordinal = engine.key_count();
+        if ordinal >= required.key_count {
+            return Err(Error::Incomplete);
+        }
+        let profile = engine.profile();
+        let length = DEGREE * engine.coefficient_bytes();
+        let (common, index) =
+            Engine::key_identity(profile, required.cache.ok_or(Error::Arithmetic)?, ordinal)
+                .map_err(|_| Error::Arithmetic)?;
+        if common {
+            let bytes = setup_witness::contribution::common_records(profile, index)
+                .map_err(|_| Error::PublicInput)?;
+            if bytes.len() != length {
+                return Err(Error::PublicInput);
+            }
+            let polynomial = engine
+                .decode_polynomial(&bytes)
+                .map_err(|_| Error::PublicInput)?;
+            engine
+                .load_key(ordinal, polynomial)
+                .map_err(|_| Error::Arithmetic)?;
+            return Ok(None);
+        }
+        let metadata = self
+            .setup
+            .polynomials()
+            .iter()
+            .find(|value| value.index() == index)
+            .ok_or(Error::Context)?;
+        let reader = KeyReader {
+            ordinal,
+            length,
+            hash: IdentityHasher::new(PUBLIC_POLYNOMIAL_DOMAIN, &[], length)
+                .map_err(|_| Error::Context)?,
+            expected: *metadata.digest(),
+            decoder: engine.polynomial_decoder(),
+        };
+        Ok(Some((index, reader)))
+    }
+    /// Loads the zero value of the input author the evaluation requires when
+    /// no ballot of theirs was accepted. An accepted ballot instead returns
+    /// the reader its body must pass.
+    pub(crate) fn ballot_input(
+        &self,
+        engine: &mut Engine,
+        author: usize,
+    ) -> Result<Option<BallotReader>, Error> {
+        let required = engine.requirements().map_err(|_| Error::Arithmetic)?;
+        if required.input_position != Some(author) {
+            return Err(Error::Context);
+        }
+        let Some(envelope) = self.accepted.get(author).ok_or(Error::Context)?.as_ref() else {
+            let zero = engine.zero_value();
+            engine
+                .load_input(author, zero)
+                .map_err(|_| Error::Arithmetic)?;
+            return Ok(None);
+        };
+        Ok(Some(BallotReader {
+            author,
+            length: envelope.body_length(),
+            received: 0,
+            hash: ballot_body::body_hasher(engine.profile(), envelope.body_length())
+                .map_err(|_| Error::PublicInput)?,
+            expected: *envelope.body_identity(),
+            components: [engine.polynomial_decoder(), engine.polynomial_decoder()],
+        }))
+    }
     pub fn start(self) -> Result<EvaluationSession, Error> {
         let program = if self.accepted_authors().count() < minimum_turnout(self.accepted.len()) {
             None
@@ -208,66 +286,31 @@ impl ClassifiedClosedInventory {
                     .map_err(|_| Error::Storage)?;
                 engine.finish_read(read).map_err(|_| Error::Storage)?;
             }
-            if let Some(cache) = required.cache {
-                let profile = engine.profile();
-                let width = engine.coefficient_bytes();
+            if required.cache.is_some() {
                 // A new cache replaces the earlier cache's records.
                 if engine.key_count() == 0 {
                     store.clear_records()?;
                 }
                 while engine.key_count() < required.key_count {
                     let ordinal = engine.key_count();
-                    let (common, index) = Engine::key_identity(profile, cache, ordinal)
-                        .map_err(|_| Error::Arithmetic)?;
-                    let bytes = if common {
-                        let bytes = setup_witness::contribution::common_records(profile, index)
-                            .map_err(|_| Error::PublicInput)?;
-                        if bytes.len() != DEGREE * width {
-                            return Err(Error::PublicInput);
-                        }
-                        bytes
-                    } else {
-                        let metadata = session
-                            .inventory
-                            .setup
-                            .polynomials()
-                            .iter()
-                            .find(|value| value.index() == index)
-                            .ok_or(Error::Context)?;
-                        let bytes = exact_bytes(inputs.aggregate(index)?, DEGREE * width)?;
-                        if identity(PUBLIC_POLYNOMIAL_DOMAIN, &bytes).ok()
-                            != Some(*metadata.digest())
-                        {
-                            return Err(Error::PublicInput);
-                        }
-                        bytes
-                    };
-                    let polynomial = engine
-                        .decode_polynomial(&bytes)
-                        .map_err(|_| Error::PublicInput)?;
-                    engine
-                        .load_key(ordinal, polynomial)
-                        .map_err(|_| Error::Arithmetic)?;
+                    if let Some((index, mut reader)) = session.inventory.next_key(engine)? {
+                        read_exactly(inputs.aggregate(index)?, reader.length(), |bytes| {
+                            reader.push(engine, bytes)
+                        })?;
+                        reader.finish(engine)?;
+                    }
                     while let Some((prime, record)) = engine.take_record() {
                         store.put_record(ordinal, prime, &record)?;
                     }
                 }
             }
-            if let Some(author) = required.input_position {
-                let value = if let Some(envelope) = session
-                    .inventory
-                    .accepted
-                    .get(author)
-                    .ok_or(Error::Context)?
-                    .as_ref()
-                {
-                    read_ballot(inputs.ballot(author)?, envelope, engine)?
-                } else {
-                    engine.zero_value()
-                };
-                engine
-                    .load_input(author, value)
-                    .map_err(|_| Error::Arithmetic)?;
+            if let Some(author) = required.input_position
+                && let Some(mut reader) = session.inventory.ballot_input(engine, author)?
+            {
+                read_exactly(inputs.ballot(author)?, reader.length(), |bytes| {
+                    reader.push(engine, bytes)
+                })?;
+                reader.finish(engine)?;
             }
             loop {
                 match engine.execute() {
@@ -338,59 +381,109 @@ fn ciphertext_identity(ciphertext: &[u8]) -> Result<[u8; 64], Error> {
     .into_bytes())
 }
 
-fn exact_bytes(mut reader: Box<dyn Read + '_>, length: usize) -> Result<Vec<u8>, Error> {
-    let mut bytes = vec![0; length];
-    reader
-        .read_exact(&mut bytes)
-        .map_err(|_| Error::PublicInput)?;
+/// A setup aggregate key polynomial's stream, whose bytes must have the
+/// identity the verified setup binds.
+pub(crate) struct KeyReader {
+    ordinal: usize,
+    length: usize,
+    hash: IdentityHasher,
+    expected: [u8; 64],
+    decoder: PolynomialDecoder,
+}
+impl KeyReader {
+    pub(crate) fn length(&self) -> usize {
+        self.length
+    }
+    pub(crate) fn push(&mut self, engine: &Engine, bytes: &[u8]) -> Result<(), Error> {
+        self.hash.absorb(bytes).map_err(|_| Error::PublicInput)?;
+        engine
+            .decode_into(&mut self.decoder, bytes)
+            .map_err(|_| Error::PublicInput)
+    }
+    pub(crate) fn finish(self, engine: &mut Engine) -> Result<(), Error> {
+        if self.hash.finish().map_err(|_| Error::PublicInput)? != self.expected {
+            return Err(Error::PublicInput);
+        }
+        let polynomial = engine
+            .finish_polynomial(self.decoder)
+            .map_err(|_| Error::PublicInput)?;
+        engine
+            .load_key(self.ordinal, polynomial)
+            .map_err(|_| Error::Arithmetic)
+    }
+}
+
+/// An accepted ballot body's stream, whose bytes must have the identity its
+/// envelope names. The FHE ciphertext's two components follow the header.
+pub(crate) struct BallotReader {
+    author: usize,
+    length: usize,
+    received: usize,
+    hash: BodyHasher,
+    expected: [u8; 64],
+    components: [PolynomialDecoder; 2],
+}
+impl BallotReader {
+    pub(crate) fn length(&self) -> usize {
+        self.length
+    }
+    pub(crate) fn push(&mut self, engine: &Engine, bytes: &[u8]) -> Result<(), Error> {
+        self.hash.push(bytes).map_err(|_| Error::PublicInput)?;
+        let split = DEGREE * engine.coefficient_bytes();
+        let received = self.received;
+        for (index, component) in self.components.iter_mut().enumerate() {
+            let start = HEADER_BYTES + index * split;
+            let first = received.max(start);
+            let last = (received + bytes.len()).min(start + split);
+            if first < last {
+                engine
+                    .decode_into(component, &bytes[first - received..last - received])
+                    .map_err(|_| Error::PublicInput)?;
+            }
+        }
+        self.received += bytes.len();
+        Ok(())
+    }
+    pub(crate) fn finish(self, engine: &mut Engine) -> Result<(), Error> {
+        if self.hash.finish().map_err(|_| Error::PublicInput)? != self.expected {
+            return Err(Error::PublicInput);
+        }
+        let [first, second] = self.components;
+        let value = [
+            engine
+                .finish_polynomial(first)
+                .map_err(|_| Error::PublicInput)?,
+            engine
+                .finish_polynomial(second)
+                .map_err(|_| Error::PublicInput)?,
+        ];
+        engine
+            .load_input(self.author, value)
+            .map_err(|_| Error::Arithmetic)
+    }
+}
+
+/// Passes exactly the length's bytes of the reader to the receiver in parts
+/// of at most one mebibyte, and refuses a reader that holds more.
+fn read_exactly(
+    mut reader: Box<dyn Read + '_>,
+    length: usize,
+    mut receive: impl FnMut(&[u8]) -> Result<(), Error>,
+) -> Result<(), Error> {
+    let mut buffer = vec![0; length.min(1 << 20)];
+    let mut offset = 0;
+    while offset < length {
+        let part = buffer.len().min(length - offset);
+        reader
+            .read_exact(&mut buffer[..part])
+            .map_err(|_| Error::PublicInput)?;
+        receive(&buffer[..part])?;
+        offset += part;
+    }
     if reader.read(&mut [0]).map_err(|_| Error::PublicInput)? != 0 {
         return Err(Error::PublicInput);
     }
-    Ok(bytes)
-}
-fn read_ballot(
-    mut reader: Box<dyn Read + '_>,
-    envelope: &BallotEnvelope,
-    engine: &Engine,
-) -> Result<Ciphertext, Error> {
-    let mut hash = ballot_body::body_hasher(engine.profile(), envelope.body_length())
-        .map_err(|_| Error::PublicInput)?;
-    // The body carries the FHE ciphertext's two components first.
-    let split = DEGREE * engine.coefficient_bytes();
-    let end = HEADER_BYTES + 2 * split;
-    let mut ciphertext = Vec::with_capacity(end - HEADER_BYTES);
-    let mut buffer = vec![0; 1 << 20];
-    let mut offset = 0;
-    while offset < envelope.body_length() {
-        let length = buffer.len().min(envelope.body_length() - offset);
-        reader
-            .read_exact(&mut buffer[..length])
-            .map_err(|_| Error::PublicInput)?;
-        hash.push(&buffer[..length])
-            .map_err(|_| Error::PublicInput)?;
-        let first = offset.max(HEADER_BYTES);
-        let last = (offset + length).min(end);
-        if first < last {
-            ciphertext.extend(&buffer[first - offset..last - offset]);
-        }
-        offset += length;
-    }
-    if reader.read(&mut [0]).map_err(|_| Error::PublicInput)? != 0
-        || &hash.finish().map_err(|_| Error::PublicInput)? != envelope.body_identity()
-    {
-        return Err(Error::PublicInput);
-    }
-    if ciphertext.len() != end - HEADER_BYTES {
-        return Err(Error::PublicInput);
-    }
-    Ok([
-        engine
-            .decode_polynomial(&ciphertext[..split])
-            .map_err(|_| Error::PublicInput)?,
-        engine
-            .decode_polynomial(&ciphertext[split..])
-            .map_err(|_| Error::PublicInput)?,
-    ])
+    Ok(())
 }
 
 const RETAINED_TARGET_LABEL: &[u8] = b"sealed-lattice/retained-evaluation-target/v2";
