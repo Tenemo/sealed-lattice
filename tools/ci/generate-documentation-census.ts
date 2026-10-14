@@ -3,7 +3,7 @@ import path from 'node:path';
 
 import {
     renderSetupContributionOperatorCensus,
-    renderExactRNSArithmeticCensus,
+    renderExactRnsArithmeticCensus,
     renderFixedModulusBFVNoiseCensus,
     renderSupportedProfileCensus,
 } from '#tools/ci/census/arithmetic.js';
@@ -116,7 +116,7 @@ const renderCensusText = (): string => {
             ...renderLinkedReleaseRelationCensus(),
             ...renderSetupContributionOperatorCensus(),
             ...renderRelationIntegerLiftingCensus(),
-            ...renderExactRNSArithmeticCensus(),
+            ...renderExactRnsArithmeticCensus(),
             ...renderCommonAgreementDegreeCensus(),
             ...renderWideChallengeCompilerCensus(),
             ...renderProofCompilerChronology(),
@@ -201,22 +201,31 @@ export const findFirstCensusMismatch = (
     return undefined;
 };
 
-// The private link table, when present, lies beside the census.
+// The private link table, when present, lies beside the census and maps
+// each private link name to its target.
 const readPrivateLinkTargets = async (
     censusPath: string,
 ): Promise<Readonly<Record<string, string>> | undefined> => {
+    let text: string;
     try {
-        return JSON.parse(
-            await readFile(
-                path.join(path.dirname(censusPath), 'census-links.json'),
-                'utf8',
-            ),
-        ) as Record<string, string>;
+        text = await readFile(
+            path.join(path.dirname(censusPath), 'census-links.json'),
+            'utf8',
+        );
     } catch (error) {
         if ((error as NodeJS.ErrnoException).code === 'ENOENT')
             return undefined;
         throw error;
     }
+    const targets: unknown = JSON.parse(text);
+    if (
+        typeof targets !== 'object' ||
+        targets === null ||
+        Array.isArray(targets) ||
+        !Object.values(targets).every((target) => typeof target === 'string')
+    )
+        throw new Error('The census link table must map names to targets.');
+    return targets as Record<string, string>;
 };
 
 const usage =

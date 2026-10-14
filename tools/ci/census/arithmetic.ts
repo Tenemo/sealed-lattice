@@ -130,7 +130,7 @@ export const renderSetupContributionOperatorCensus = (): string[] => {
     ];
 };
 
-export const renderExactRNSArithmeticCensus = (): string[] => {
+export const renderExactRnsArithmeticCensus = (): string[] => {
     const completion = completionProfile();
     const rnsArithmetic = compileRnsArithmeticResourceCensus(completion);
     return [

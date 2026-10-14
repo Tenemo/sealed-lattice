@@ -77,7 +77,7 @@ export function compileCommonMatrixInitializationCensus(
     profile: SupportedProfile,
 ) {
     const matrix = compileCommonMatrixSamplingCensus(profile);
-    // Preserve the previously analysed one-pass fibre sampler's extra width.
+    // The extra width of the reused one-pass fibre sampler.
     const extraSamplingBits =
         256n + BigInt((matrix.coefficientCount - 1n).toString(2).length);
     const families = [
