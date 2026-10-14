@@ -338,6 +338,9 @@ export const runFheKeySourceInChrome = async ({
             eventType: screenKind + '-browser-output',
             details: { phase, ...result },
         });
+        // Stopping waits for the sample in flight, which a screen shorter
+        // than one process-table read would otherwise return without.
+        await guard.stop();
         assert.ok(
             samples > 0,
             'No Chrome process-tree memory sample was recorded.',
