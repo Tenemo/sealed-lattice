@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 
 import {
     closeInventory,
-    deriveCloseProfile,
     envelopeIdentity,
     listKnownEnvelopes,
     usableEnvelopes,
@@ -20,20 +19,20 @@ import {
     compileCloseVisitCensus,
     exploreJointCloseViews,
 } from '#tests/close-response-model.js';
+import { thresholdProfileFor } from '#tests/threshold-completion-model.js';
 
 // Product goals, maintained independently of the model: at most
 // f = floor((n - 1) / 3) participants are corrupt, closing needs n - f
-// responses including the organizer, at most f ballots can be left out, a
-// result needs f + 2 accepted ballots, release needs max(f + 1, 2) shares,
-// and more than ten productive visits is a product failure.
+// responses including the organizer, at most f ballots can be left out, and
+// more than ten productive visits is a product failure.
 const goalThresholds = (participantCount: number) => {
-    const faultBound = Math.floor((participantCount - 1) / 3);
+    const maximumCorruptParticipantCount = Math.floor(
+        (participantCount - 1) / 3,
+    );
     return {
         participantCount,
-        faultBound,
-        quorum: participantCount - faultBound,
-        minimumTurnout: faultBound + 2,
-        releaseThreshold: Math.max(faultBound + 1, 2),
+        maximumCorruptParticipantCount,
+        quorum: participantCount - maximumCorruptParticipantCount,
     };
 };
 const supportedParticipantCounts = Array.from(
@@ -71,13 +70,6 @@ const byIdentity = (values: readonly CloseEnvelope[]) =>
     );
 
 describe('close response model', () => {
-    it('derives the close thresholds from the goal formulas', () => {
-        for (const participantCount of supportedParticipantCounts)
-            expect(deriveCloseProfile(participantCount)).toEqual(
-                goalThresholds(participantCount),
-            );
-    });
-
     it.each([
         {
             name: 'threshold holders before the intent, with every excluded holder departing',
@@ -150,7 +142,7 @@ describe('close response model', () => {
             classification: 'invalid',
         },
     ])('honors the signed close intent receipt cutoff: $name', (scenario) => {
-        const profile = deriveCloseProfile(scenario.participantCount);
+        const profile = thresholdProfileFor(scenario.participantCount);
         const author = scenario.participantCount - 1;
         const ballot = envelope(author, 0, scenario.ballotTime, {
             validProof: scenario.validProof,
@@ -185,7 +177,7 @@ describe('close response model', () => {
             ),
         });
         const responses = Array.from(
-            { length: profile.quorum - 1 },
+            { length: profile.inventoryCertificateThreshold - 1 },
             (_, index) => respond(index + 1),
         );
         responses.push(respond(0));
@@ -299,7 +291,7 @@ describe('close response model', () => {
     });
 
     it('requires exactly q ordered distinct responses naming one intent, including the organizer', () => {
-        const profile = deriveCloseProfile(4);
+        const profile = thresholdProfileFor(4);
         const intents = new Map([
             [0, { variant: 0, closeTime: 5 }],
             [1, { variant: 1, closeTime: 9 }],
@@ -347,7 +339,7 @@ describe('close response model', () => {
     });
 
     it('requires the body of every usable slot and of no conflicting slot', () => {
-        const profile = deriveCloseProfile(4);
+        const profile = thresholdProfileFor(4);
         const intents = new Map([[0, { variant: 0, closeTime: 5 }]]);
         const withheld = envelope(3, 0, 1, { bodyAvailable: false });
         const other = envelope(3, 1, 1);
@@ -392,7 +384,7 @@ describe('close response model', () => {
     });
 
     it('classifies the union and derives the turnout branch at its boundary', () => {
-        const profile = deriveCloseProfile(10);
+        const profile = thresholdProfileFor(10);
         const intent = 0;
         const values = [
             envelope(0, 0, 1),
@@ -412,11 +404,14 @@ describe('close response model', () => {
                     envelopeIdentity(author, variant),
                 );
         const responses = (acceptedAuthors: readonly number[]) =>
-            Array.from({ length: profile.quorum }, (_unused, signer) => ({
-                signer,
-                intent,
-                listed: signer === 0 ? listing(acceptedAuthors) : [],
-            }));
+            Array.from(
+                { length: profile.inventoryCertificateThreshold },
+                (_unused, signer) => ({
+                    signer,
+                    intent,
+                    listed: signer === 0 ? listing(acceptedAuthors) : [],
+                }),
+            );
         const inventory = closeInventory(
             { intent, responses: responses([0, 1, 2, 3, 4, 5]) },
             envelopes,
@@ -449,14 +444,18 @@ describe('close response model', () => {
         for (const participantCount of supportedParticipantCounts.filter(
             (value) => value <= 10,
         )) {
-            const { faultBound } = goalThresholds(participantCount);
+            const { maximumCorruptParticipantCount } =
+                goalThresholds(participantCount);
             const census = bruteForceListerSets(participantCount);
             expect(census.minimumInclusionMargin).toBe(1);
-            expect(census.maximumOmittedAuthors).toBe(faultBound);
+            expect(census.maximumOmittedAuthors).toBe(
+                maximumCorruptParticipantCount,
+            );
             expect(census.tightOmissionWitness).toBe(true);
             expect(census.corruptionSets).toBe(
-                Array.from({ length: faultBound + 1 }, (_unused, size) =>
-                    binomial(participantCount, size),
+                Array.from(
+                    { length: maximumCorruptParticipantCount + 1 },
+                    (_unused, size) => binomial(participantCount, size),
                 ).reduce((sum, value) => sum + value, 0),
             );
         }
@@ -468,7 +467,8 @@ describe('close response model', () => {
         for (const census of [three, four]) {
             expect(census.findings).toEqual([]);
             expect(census.maximumHonestOmission).toBe(
-                goalThresholds(census.participantCount).faultBound,
+                goalThresholds(census.participantCount)
+                    .maximumCorruptParticipantCount,
             );
             expect(census.referenceCrossChecks).toBeGreaterThan(0);
             expect(census.noResultInventories).toBeGreaterThan(0);
@@ -479,14 +479,18 @@ describe('close response model', () => {
 
     it('keeps the contract in every completion-profile corruption set', () => {
         const census = exploreCompletionProfileExecutions();
-        const { faultBound, participantCount } = goalThresholds(10);
+        const { maximumCorruptParticipantCount, participantCount } =
+            goalThresholds(10);
         expect(census.corruptionSets).toBe(
-            Array.from({ length: faultBound + 1 }, (_unused, size) =>
-                binomial(participantCount, size),
+            Array.from(
+                { length: maximumCorruptParticipantCount + 1 },
+                (_unused, size) => binomial(participantCount, size),
             ).reduce((sum, value) => sum + value, 0),
         );
         expect(census.findings).toEqual([]);
-        expect(census.maximumHonestOmission).toBe(faultBound);
+        expect(census.maximumHonestOmission).toBe(
+            maximumCorruptParticipantCount,
+        );
         // Ten is 3f + 1, so omission with corrupt abstention forces no result.
         expect(census.forcedNoResultExecutions).toBeGreaterThan(0);
         expect(census.maximumListedEntries).toBeLessThanOrEqual(
@@ -526,9 +530,11 @@ describe('close response model', () => {
 
     it('closes when corrupt participants fill the organizer body slots and split the others', () => {
         for (const participantCount of [4, 7, 10, 13]) {
-            const { faultBound, quorum } = goalThresholds(participantCount);
+            const { maximumCorruptParticipantCount, quorum } =
+                goalThresholds(participantCount);
             const corrupt =
-                ((1 << faultBound) - 1) << (participantCount - faultBound);
+                ((1 << maximumCorruptParticipantCount) - 1) <<
+                (participantCount - maximumCorruptParticipantCount);
             const result = runCloseExecution({
                 participantCount,
                 corrupt,
@@ -554,7 +560,7 @@ describe('close response model', () => {
             // listing, and every honest ballot is accepted.
             expect(result.inventory!.slots).toEqual(
                 Array.from({ length: participantCount }, (_unused, author) =>
-                    author >= participantCount - faultBound
+                    author >= participantCount - maximumCorruptParticipantCount
                         ? 'conflicting'
                         : 'accepted',
                 ),
@@ -601,7 +607,7 @@ describe('close response model', () => {
         expect(census.refusalHonestSigners).toBeLessThan(census.refusalQuorum);
         expect(census.omittedSignerCertifiedTargets).toBe(1);
         expect(census.omittedSignerHonestOmission).toBe(
-            goalThresholds(10).faultBound,
+            goalThresholds(10).maximumCorruptParticipantCount,
         );
         expect(census.omittedSignerFindings).toEqual([]);
         expect(census.uncappedResponseEntries).toBe(census.equivocations);

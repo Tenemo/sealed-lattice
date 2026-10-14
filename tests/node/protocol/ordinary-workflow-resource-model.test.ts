@@ -34,7 +34,9 @@ describe('complete ordinary workflow resource graph', () => {
             const close = compileCloseWireCensus(profile);
             const release = compileParticipantReleaseCustody(profile);
             const offers =
-                mode === 'selected' ? wire.selectedCount : wire.eligibleCount;
+                mode === 'selected'
+                    ? wire.setupContributorCount
+                    : wire.eligibleContributorCount;
             const chunkBytes = 1_048_576n;
             const bodies = new Map<number, string[]>();
             const objects = new Map<string, bigint>();
@@ -191,7 +193,7 @@ describe('complete ordinary workflow resource graph', () => {
                 ['intent.bin', close.intentPacketBytes],
                 ['proposal.bin', close.proposalPacketBytes],
                 ...Array.from(
-                    { length: wire.quorum },
+                    { length: wire.inventoryCertificateThreshold },
                     (_unused, position): Entry => [
                         'response-' + identity(position) + '.bin',
                         response,

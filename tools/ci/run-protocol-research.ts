@@ -265,7 +265,7 @@ await runWithLocalRunLog(
                     : 0n) +
                 preparation.maximumEndorsementPacketBytes +
                 2n * preparation.certificateBytes +
-                64n * BigInt(preparation.eligibleCount) +
+                64n * BigInt(preparation.eligibleContributorCount) +
                 enrollment.maximumPollDefinitionBytes +
                 2n * enrollment.signatureBytes +
                 roster.proposalBytes +

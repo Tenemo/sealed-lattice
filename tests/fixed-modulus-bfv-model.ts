@@ -19,7 +19,7 @@ export const fixedModulusBfvInputs = {
 type NoiseParameters = Readonly<{
     // The setup contributors, whose secrets and key errors the aggregate
     // keys sum.
-    contributorCount: bigint;
+    setupContributorCount: bigint;
     polynomialDegree: bigint;
     plaintextSubringDegree: bigint;
     plaintextModulus: bigint;
@@ -59,7 +59,7 @@ export const createFixedModulusBfvNoiseModel = (
     parameters: NoiseParameters,
 ) => {
     const {
-        contributorCount,
+        setupContributorCount,
         polynomialDegree,
         plaintextSubringDegree,
         plaintextModulus,
@@ -71,7 +71,7 @@ export const createFixedModulusBfvNoiseModel = (
     assert.equal(ciphertextModulus % 2n, 1n);
     assert.equal(plaintextModulus % 2n, 1n);
     assert.equal(polynomialDegree % plaintextSubringDegree, 0n);
-    const secretOneNorm = contributorCount * secretSupportWeight;
+    const secretOneNorm = setupContributorCount * secretSupportWeight;
     const plaintextMaximumNorm = plaintextModulus / 2n;
     const plaintextOneNorm = plaintextSubringDegree * plaintextMaximumNorm;
     const plaintextProductMaximumNorm = plaintextOneNorm * plaintextMaximumNorm;
@@ -90,7 +90,7 @@ export const createFixedModulusBfvNoiseModel = (
     const externalProductError =
         gadgetLength *
         (gadgetBase - 1n) *
-        contributorCount *
+        setupContributorCount *
         polynomialDegree *
         errorBound;
     const relinearizationError =

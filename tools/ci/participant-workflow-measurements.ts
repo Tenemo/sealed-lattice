@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 
 import { preparationStagePath } from '#tests/setup-selection-model.js';
-import { compileThresholdCompletionProfile } from '#tests/threshold-completion-model.js';
+import { thresholdProfileFor } from '#tests/threshold-completion-model.js';
 
 export type ParticipantOperationMeasurement = Readonly<{
     id: number;
@@ -46,7 +46,7 @@ export const summarizeParticipantWorkflow = (
             Number.isSafeInteger(participants) &&
             participants >= 3,
     );
-    const thresholds = compileThresholdCompletionProfile(participants);
+    const thresholds = thresholdProfileFor(participants);
     const paths = Array.from({ length: participants }, (_, position) =>
         preparationStagePath('certified', position === 0),
     );

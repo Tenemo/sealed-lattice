@@ -1,5 +1,5 @@
 import { evaluateReferenceRanking } from '#tests/reference-ranking-model.js';
-import { compileThresholdCompletionProfile } from '#tests/threshold-completion-model.js';
+import { thresholdProfileFor } from '#tests/threshold-completion-model.js';
 
 // Release subsets and departure sets the ceremony checks after share
 // generation: every set when there are at most this many, otherwise this
@@ -38,7 +38,7 @@ export const deriveResearchScenario = (
     setupDeparture = false,
     selectionFork = false,
 ) => {
-    const thresholds = compileThresholdCompletionProfile(participantCount);
+    const thresholds = thresholdProfileFor(participantCount);
     const corrupt = thresholds.maximumCorruptParticipantCount;
     if (
         (setupDeparture && selectionFork) ||

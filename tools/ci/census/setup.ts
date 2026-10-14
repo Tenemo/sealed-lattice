@@ -620,9 +620,9 @@ export const renderSetupSelectionAndRegistrationBindingScreen =
                 const value = compileSetupSelectionCensus(participants);
                 return [
                     participants,
-                    value.eligibleCount,
-                    value.selectedCount,
-                    value.quorum,
+                    value.eligibleContributorCount,
+                    value.setupContributorCount,
+                    value.inventoryCertificateThreshold,
                     value.minimumHonestSelected,
                     value.minimumCertificateIntersection,
                     value.possibleSelectedSets,
@@ -776,9 +776,9 @@ export const renderSetupSelectionWireAndResources = ({
         selectionWires.map((wire) =>
             [
                 wire.participantCount,
-                wire.eligibleCount,
-                wire.selectedCount,
-                wire.quorum,
+                wire.eligibleContributorCount,
+                wire.setupContributorCount,
+                wire.inventoryCertificateThreshold,
                 wire.offerEnvelopeBytes,
                 wire.selectionBodyBytes,
                 wire.endorsementBodyBytes,

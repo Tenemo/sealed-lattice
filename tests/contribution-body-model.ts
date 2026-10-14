@@ -97,7 +97,7 @@ export const compileContributionBodyCensus = (profile: SupportedProfile) => {
     return {
         participantCount,
         setupContributorCount: profile.setupContributorCount,
-        eligibleContributorCount: selection.eligibleCount,
+        eligibleContributorCount: selection.eligibleContributorCount,
         polynomials,
         headerBytes,
         polynomialPayloadBytes,
@@ -117,6 +117,6 @@ export const compileContributionBodyCensus = (profile: SupportedProfile) => {
         maximumSelectedContributionBodies:
             BigInt(profile.setupContributorCount) * maximumBodyBytes,
         maximumEligibleOfferBodies:
-            BigInt(selection.eligibleCount) * maximumBodyBytes,
+            BigInt(selection.eligibleContributorCount) * maximumBodyBytes,
     };
 };

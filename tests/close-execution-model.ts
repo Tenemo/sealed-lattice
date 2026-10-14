@@ -3,7 +3,6 @@ import {
     capListing,
     checkCloseContract,
     closeInventory,
-    deriveCloseProfile,
     identityOf,
     knownSlots,
     listKnownEnvelopes,
@@ -34,6 +33,7 @@ import {
     retainReleaseShare,
     createHonestParticipant,
 } from '#tests/close-execution/participant.js';
+import { thresholdProfileFor } from '#tests/threshold-completion-model.js';
 
 // Message-level executions of the close-response contract. Messages are
 // the contract model's ideal authenticated objects; these executions
@@ -141,7 +141,7 @@ type CloseExecutionResult = Readonly<{
 export const runCloseExecution = (
     options: CloseExecutionOptions,
 ): CloseExecutionResult => {
-    const profile = deriveCloseProfile(options.participantCount);
+    const profile = thresholdProfileFor(options.participantCount);
     const n = options.participantCount;
     const random = createRandom(options.seed);
     const { corrupt } = options;
@@ -207,7 +207,7 @@ export const runCloseExecution = (
                 participant,
                 signer,
                 target,
-                profile.releaseThreshold,
+                profile.resultReleaseThreshold,
             )
         )
             work(participant);
@@ -326,7 +326,7 @@ export const runCloseExecution = (
         proposalsByTarget.set(inventory.target, proposal);
         if (
             participant.certified === undefined &&
-            signers.size >= profile.quorum
+            signers.size >= profile.inventoryCertificateThreshold
         ) {
             participant.certified = inventory.target;
             if (deliveries.certify()) {
@@ -480,13 +480,14 @@ export const runCloseExecution = (
         if (
             others.filter((response) => organizerReady(slots, held, response))
                 .length <
-            profile.quorum - 1
+            profile.inventoryCertificateThreshold - 1
         )
             return;
         respond(participant, intent);
         const selected = [participant.responses.get(organizer)!];
         for (const response of others) {
-            if (selected.length === profile.quorum) break;
+            if (selected.length === profile.inventoryCertificateThreshold)
+                break;
             if (
                 usableEnvelopes([...selected, response], envelopes).every(
                     (envelope) => held.has(identityOf(envelope)),
@@ -494,7 +495,7 @@ export const runCloseExecution = (
             )
                 selected.push(response);
         }
-        if (selected.length < profile.quorum)
+        if (selected.length < profile.inventoryCertificateThreshold)
             throw new Error('A ready organizer could not propose.');
         const proposal: CloseProposal = {
             intent: intent.variant,
@@ -787,7 +788,10 @@ export const runCloseExecution = (
                     responseValid(response)
                 )
                     bySigner.set(response.signer, response);
-            if (bySigner.size < profile.quorum || !bySigner.has(organizer))
+            if (
+                bySigner.size < profile.inventoryCertificateThreshold ||
+                !bySigner.has(organizer)
+            )
                 continue;
             corruptProposals.add(intent.variant);
             const own = bySigner.get(organizer)!;
@@ -796,9 +800,13 @@ export const runCloseExecution = (
             );
             const proposal: CloseProposal = {
                 intent: intent.variant,
-                responses: [own, ...others.slice(0, profile.quorum - 1)].sort(
-                    (left, right) => left.signer - right.signer,
-                ),
+                responses: [
+                    own,
+                    ...others.slice(
+                        0,
+                        profile.inventoryCertificateThreshold - 1,
+                    ),
+                ].sort((left, right) => left.signer - right.signer),
             };
             // A corrupt organizer publishes its closure with each proposal,
             // which lets honest participants sign whatever it proposes.
@@ -820,7 +828,10 @@ export const runCloseExecution = (
     }
 
     const certifiedTargets = [...signersByTarget.entries()]
-        .filter(([, signers]) => signers.size >= profile.quorum)
+        .filter(
+            ([, signers]) =>
+                signers.size >= profile.inventoryCertificateThreshold,
+        )
         .map(([target]) => target);
     const findings = new Set<string>();
     if (certifiedTargets.length > 1) findings.add('agreement');
@@ -874,7 +885,7 @@ export const runCloseExecution = (
         !organizerCorrupt &&
         (options.departedBeforeClose & bit(organizer)) === 0 &&
         memberCount(corrupt | options.departedBeforeClose) <=
-            profile.faultBound &&
+            profile.maximumCorruptParticipantCount &&
         !options.refuseAfterOwnOmission;
     if (closeLivenessExpected && certifiedTargets.length === 0)
         findings.add('close-liveness');

@@ -71,14 +71,16 @@ export const fullHolderRequirements = (
 
 export const compileCertificateCustodyCensus = () => {
     const participantCount = 10;
-    const corruptCount = Math.floor((participantCount - 1) / 3);
-    const quorum = participantCount - corruptCount;
+    const maximumCorruptParticipantCount = Math.floor(
+        (participantCount - 1) / 3,
+    );
+    const quorum = participantCount - maximumCorruptParticipantCount;
     const masks = Array.from(
         { length: 1 << participantCount },
         (_, mask) => mask,
     );
     const unavailableSets = masks.filter(
-        (mask) => countBits(mask) === corruptCount,
+        (mask) => countBits(mask) === maximumCorruptParticipantCount,
     );
     const holderSets = masks.filter((mask) => countBits(mask) === quorum);
     let checkedConfigurations = 0;
@@ -95,7 +97,7 @@ export const compileCertificateCustodyCensus = () => {
             }
     return {
         participantCount,
-        corruptCount,
+        maximumCorruptParticipantCount,
         fullHolderThreshold: quorum,
         checkedConfigurations,
         minimumSurvivingHonestFullHolders,

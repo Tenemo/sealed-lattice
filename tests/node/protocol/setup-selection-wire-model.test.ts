@@ -20,7 +20,7 @@ describe('setup selection wire census and semantic identity', () => {
         'counts canonical selection and exact certificate carriers at n=%i',
         (participants) => {
             const census = compileSetupSelectionWireCensus(participants);
-            const entries = selected(census.selectedCount);
+            const entries = selected(census.setupContributorCount);
             const body = encodeSetupSelectionModel(
                 participants,
                 roster,
@@ -29,7 +29,7 @@ describe('setup selection wire census and semantic identity', () => {
             expect(BigInt(body.length)).toBe(census.selectionBodyBytes);
             const signature = Buffer.alloc(signatureBytes, 17);
             const endorsements = Array.from(
-                { length: census.quorum },
+                { length: census.inventoryCertificateThreshold },
                 (_, position) => ({ position, signature }),
             );
             const carrier = encodeSetupCertificateModel(
@@ -48,7 +48,7 @@ describe('setup selection wire census and semantic identity', () => {
                     4 +
                     body.length +
                     signatureBytes +
-                    census.quorum * (2 + signatureBytes),
+                    census.inventoryCertificateThreshold * (2 + signatureBytes),
             );
             expect(census.endorsementPacketBytes).toBe(
                 2n + 64n + BigInt(signatureBytes),

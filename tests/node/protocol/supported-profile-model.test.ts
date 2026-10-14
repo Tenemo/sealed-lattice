@@ -19,7 +19,7 @@ import {
     primeSupportedProfiles,
     supportedProfileRules,
 } from '#tests/supported-profile-model.js';
-import { compileThresholdCompletionProfile } from '#tests/threshold-completion-model.js';
+import { thresholdProfileFor } from '#tests/threshold-completion-model.js';
 import { compileThresholdReleaseNoiseCensus } from '#tests/threshold-release-noise-model.js';
 import { compileWideShareLiftingCensus } from '#tests/wide-share-lifting-model.js';
 
@@ -139,7 +139,7 @@ describe('supported profile parameters', () => {
         const failedIdentities: string[] = [];
         for (const participantCount of census.participantCounts) {
             const { resultReleaseThreshold: threshold } =
-                compileThresholdCompletionProfile(participantCount);
+                thresholdProfileFor(participantCount);
             const degree = interpolationRingDegree(participantCount);
             expect(2 * degree).toBeGreaterThanOrEqual(participantCount);
             expect(degree).toBeLessThan(participantCount);

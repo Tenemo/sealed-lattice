@@ -10,7 +10,7 @@ import {
     listSupportedProfiles,
     type SupportedProfile,
 } from '#tests/supported-profile-model.js';
-import { compileThresholdCompletionProfile } from '#tests/threshold-completion-model.js';
+import { thresholdProfileFor } from '#tests/threshold-completion-model.js';
 
 // Structural comparison counts start at an original retained contribution
 // intent's first private generation, including work that never publishes an
@@ -98,7 +98,7 @@ export const compilePreparationPollPopulations = (
     );
     const thresholds = Array.from(
         { length: pollMaximumParticipants - 2 },
-        (_, index) => compileThresholdCompletionProfile(index + 3),
+        (_, index) => thresholdProfileFor(index + 3),
     );
     const minimumHonestEndorsersPerCertificate = BigInt(
         Math.min(
@@ -141,9 +141,7 @@ export const compilePreparationLedger = (
     assert.ok(originalHonestRegistrations >= 0n);
     assert.ok(pollMaximumParticipants >= profile.participantCount);
     const participants = BigInt(profile.participantCount);
-    const thresholds = compileThresholdCompletionProfile(
-        profile.participantCount,
-    );
+    const thresholds = thresholdProfileFor(profile.participantCount);
     const corrupt = BigInt(thresholds.maximumCorruptParticipantCount);
     const selection = compileSetupSelectionCensus(profile.participantCount);
     const coordinateCount = registrationCoordinateCount(
@@ -165,8 +163,8 @@ export const compilePreparationLedger = (
     const maximumHonestRecipientRows =
         participants * maximumHonestContributionScopes;
     const selectedPositionSets = binomial(
-        selection.eligibleCount,
-        selection.selectedCount,
+        selection.eligibleContributorCount,
+        selection.setupContributorCount,
     );
     // The embedding precedes private generation and guesses the ordinal of a
     // roster's first honest generation, the selected positions and (where

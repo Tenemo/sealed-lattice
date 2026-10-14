@@ -2,9 +2,9 @@ import { describe, expect, it } from 'vitest';
 
 import {
     compileSupportedThresholdCompletionProfiles,
-    compileThresholdCompletionProfile,
     deriveLifecycleAvailability,
     lifecycleAvailabilityStages,
+    thresholdProfileFor,
 } from '#tests/threshold-completion-model.js';
 
 // Product goals, maintained independently of the model: a poll has 3 to 20
@@ -56,12 +56,13 @@ const participantSets = (
 
 describe('threshold completion model', () => {
     it('derives the thresholds and the current candidate post-setup census independently', () => {
-        expect(compileThresholdCompletionProfile(10)).toMatchObject({
+        expect(thresholdProfileFor(10)).toMatchObject({
             participantCount: 10,
             maximumCorruptParticipantCount: 3,
             inventoryCertificateThreshold: 7,
             resultReleaseThreshold: 4,
             setupContributorCount: 4,
+            eligibleContributorCount: 7,
             minimumTurnout: 5,
             noResultForceableAtFullHonestTurnout: true,
             guaranteedHonestResponderCount: 4,
@@ -75,19 +76,21 @@ describe('threshold completion model', () => {
     });
 
     it('derives release and turnout thresholds at the roster extremes', () => {
-        expect(compileThresholdCompletionProfile(3)).toMatchObject({
+        expect(thresholdProfileFor(3)).toMatchObject({
             maximumCorruptParticipantCount: 0,
             inventoryCertificateThreshold: 3,
             resultReleaseThreshold: 2,
             setupContributorCount: 2,
+            eligibleContributorCount: 2,
             minimumTurnout: 2,
             noResultForceableAtFullHonestTurnout: false,
             mandatoryReleaseParticipantCount: 0,
         });
-        expect(compileThresholdCompletionProfile(20)).toMatchObject({
+        expect(thresholdProfileFor(20)).toMatchObject({
             maximumCorruptParticipantCount: 6,
             resultReleaseThreshold: 7,
             setupContributorCount: 7,
+            eligibleContributorCount: 13,
             minimumTurnout: 8,
             noResultForceableAtFullHonestTurnout: false,
         });
@@ -174,7 +177,7 @@ describe('threshold completion model', () => {
                 resultReleaseThreshold,
                 inventoryCertificateThreshold,
             } = goalThresholds(participantCount);
-            const profile = compileThresholdCompletionProfile(participantCount);
+            const profile = thresholdProfileFor(participantCount);
 
             const certificates = participantSets(
                 participantCount,
@@ -234,9 +237,9 @@ describe('threshold completion model', () => {
 
     it('refuses participant counts outside the supported range', () => {
         for (const participantCount of [0, 1, 2, 21, 3.5, Number.NaN]) {
-            expect(() =>
-                compileThresholdCompletionProfile(participantCount),
-            ).toThrow(/outside the supported range/u);
+            expect(() => thresholdProfileFor(participantCount)).toThrow(
+                /outside the supported range/u,
+            );
         }
     });
 });
@@ -244,7 +247,9 @@ describe('threshold completion model', () => {
 describe('availability from roster fixing', () => {
     it('keeps at least n - f participants at every cut in every permitted single-failure schedule', () => {
         for (const participantCount of supportedParticipantCounts) {
-            const faultBound = Math.floor((participantCount - 1) / 3);
+            const maximumCorruptParticipantCount = Math.floor(
+                (participantCount - 1) / 3,
+            );
             const roster = Array.from(
                 { length: participantCount },
                 (_unused, participant) => participant,
@@ -255,11 +260,11 @@ describe('availability from roster fixing', () => {
                 [],
             );
             expect(uninterrupted.requiredContinuerCount).toBe(
-                participantCount - faultBound,
+                participantCount - maximumCorruptParticipantCount,
             );
             for (const stage of uninterrupted.stages)
                 expect(stage.availableParticipants).toEqual(roster);
-            if (faultBound === 0) continue;
+            if (maximumCorruptParticipantCount === 0) continue;
             for (const [cut, before] of lifecycleAvailabilityStages.entries()) {
                 for (const participant of roster) {
                     if (participant === 0 && cut <= 5) continue;
@@ -282,7 +287,9 @@ describe('availability from roster fixing', () => {
                         );
                         expect(
                             stage.availableParticipants.length,
-                        ).toBeGreaterThanOrEqual(participantCount - faultBound);
+                        ).toBeGreaterThanOrEqual(
+                            participantCount - maximumCorruptParticipantCount,
+                        );
                     }
                 }
             }

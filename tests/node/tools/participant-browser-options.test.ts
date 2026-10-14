@@ -49,8 +49,8 @@ describe('participant browser cohort selection', () => {
         for (let participants = 4; participants <= 20; participants++) {
             // The frozen thresholds, independent of the profile model.
             const faults = Math.floor((participants - 1) / 3);
-            const selectedCount = Math.max(faults + 1, 2);
-            const eligibleCount = selectedCount + faults;
+            const setupContributorCount = Math.max(faults + 1, 2);
+            const eligibleContributorCount = setupContributorCount + faults;
             const { departures, selectedPositions } =
                 scheduleParticipantDepartures(participants, 2);
             expect(departures).toHaveLength(faults);
@@ -80,18 +80,23 @@ describe('participant browser cohort selection', () => {
                 )
                 .map(({ position }) => position);
             expect(selectedPositions).toEqual(
-                Array.from({ length: eligibleCount }, (_, position) => position)
+                Array.from(
+                    { length: eligibleContributorCount },
+                    (_, position) => position,
+                )
                     .filter((position) => !unoffered.includes(position))
-                    .slice(0, selectedCount),
+                    .slice(0, setupContributorCount),
             );
-            expect(selectedPositions).toHaveLength(selectedCount);
+            expect(selectedPositions).toHaveLength(setupContributorCount);
             for (const { boundary, position } of departures)
                 expect(selectedPositions.includes(position), boundary).toBe(
                     boundary === 'before-selection' ||
                         boundary === 'before-target-vote',
                 );
             expect(
-                unoffered.every((position) => position < eligibleCount),
+                unoffered.every(
+                    (position) => position < eligibleContributorCount,
+                ),
             ).toBe(true);
         }
     });

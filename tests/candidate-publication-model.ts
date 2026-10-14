@@ -132,7 +132,7 @@ export const compileCandidatePublicationCensus = (
     if (
         !Number.isSafeInteger(offers) ||
         offers < profile.setupContributorCount ||
-        offers > selection.eligibleCount
+        offers > selection.eligibleContributorCount
     )
         throw new RangeError('Invalid offer population.');
     const identity = (position: number) =>
@@ -238,8 +238,10 @@ export const compileCandidatePublicationCensus = (
     publish(0, 'close-proposal', [
         file('intent.bin', close.intentPacketBytes),
         file('proposal.bin', close.proposalPacketBytes),
-        ...Array.from({ length: selection.quorum }, (_, position) =>
-            file('response-' + identity(position) + '.bin', responseBytes),
+        ...Array.from(
+            { length: selection.inventoryCertificateThreshold },
+            (_, position) =>
+                file('response-' + identity(position) + '.bin', responseBytes),
         ),
         ...Array.from({ length: n }, (_, position) =>
             file(

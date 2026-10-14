@@ -164,7 +164,9 @@ describe('authentication frame accounting', () => {
                 organizer.firstEvaluatedIntentBound +
                 BigInt(count - 1) * participant.firstEvaluatedIntentBound -
                 BigInt(
-                    count - compileSetupSelectionCensus(count).eligibleCount,
+                    count -
+                        compileSetupSelectionCensus(count)
+                            .eligibleContributorCount,
                 );
             expect(
                 compileCompletedAuthenticationCensus(
@@ -252,7 +254,8 @@ describe('authentication frame accounting', () => {
                     for (
                         let position = 0;
                         position <
-                        compileSetupSelectionCensus(participants).eligibleCount;
+                        compileSetupSelectionCensus(participants)
+                            .eligibleContributorCount;
                         position++
                     )
                         records.push('contribution-offer');

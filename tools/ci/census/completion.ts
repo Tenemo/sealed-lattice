@@ -204,8 +204,8 @@ export const renderCertificateCustodyCensus = ({
                 formatCount(
                     fullHolderRequirements(
                         certificateCustody.participantCount,
-                        certificateCustody.corruptCount,
-                        certificateCustody.corruptCount,
+                        certificateCustody.maximumCorruptParticipantCount,
+                        certificateCustody.maximumCorruptParticipantCount,
                         1,
                     ).requiredHolders,
                 ),
@@ -215,9 +215,9 @@ export const renderCertificateCustodyCensus = ({
                 formatCount(
                     fullHolderRequirements(
                         certificateCustody.participantCount,
-                        certificateCustody.corruptCount,
-                        certificateCustody.corruptCount,
-                        certificateCustody.corruptCount + 1,
+                        certificateCustody.maximumCorruptParticipantCount,
+                        certificateCustody.maximumCorruptParticipantCount,
+                        certificateCustody.maximumCorruptParticipantCount + 1,
                     ).requiredHolders,
                 ),
             ],
@@ -250,8 +250,8 @@ export const renderCloseResponseCensus = ({
         ],
         closeResponses.profiles.map((profile) => [
             formatCount(profile.participantCount),
-            formatCount(profile.faultBound),
-            formatCount(profile.quorum),
+            formatCount(profile.maximumCorruptParticipantCount),
+            formatCount(profile.inventoryCertificateThreshold),
             formatCount(profile.inclusionHolderThreshold),
             formatCount(profile.maximumHonestOmission),
             formatCount(profile.acceptedAtFullHonestTurnoutAfterOmission),

@@ -23,8 +23,8 @@ describe('preparation public resource bounds', () => {
             const selected = Math.max(faults + 1, 2);
             const eligible = selected + faults;
             const quorum = participants - faults;
-            expect(result.eligibleCount).toBe(eligible);
-            expect(result.selectedCount).toBe(selected);
+            expect(result.eligibleContributorCount).toBe(eligible);
+            expect(result.setupContributorCount).toBe(selected);
             expect(result.quorum).toBe(quorum);
             expect(result.maximumEligibleBodyBytes).toBe(
                 BigInt(eligible) * body.maximumBodyBytes,

@@ -22,7 +22,8 @@ export const operationSeedBytes = 64n;
 export const operationSeedCount = (profile: SupportedProfile) =>
     2n *
         BigInt(
-            compileSetupSelectionCensus(profile.participantCount).eligibleCount,
+            compileSetupSelectionCensus(profile.participantCount)
+                .eligibleContributorCount,
         ) +
     2n * BigInt(profile.participantCount);
 

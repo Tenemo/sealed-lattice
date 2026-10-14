@@ -2,7 +2,6 @@ import {
     bit,
     checkCloseContract,
     closeInventory,
-    deriveCloseProfile,
     identityOf,
     listKnownEnvelopes,
     maskOf,
@@ -17,7 +16,6 @@ import {
     verifyCloseProposal,
     type CloseEnvelope,
     type CloseIntent,
-    type CloseProfile,
     type CloseProposal,
     type CloseResponse,
     type SlotClassification,
@@ -28,6 +26,10 @@ import {
     type CloseExecutionOptions,
 } from '#tests/close-execution-model.js';
 import { preparationStagePath } from '#tests/setup-selection-model.js';
+import {
+    thresholdProfileFor,
+    type ThresholdCompletionProfile,
+} from '#tests/threshold-completion-model.js';
 
 // Analyses of the close-response contract over the contract model and its
 // message-level executions: exhaustive joint views, every honest lister set,
@@ -82,10 +84,12 @@ const corruptVariantChoices: readonly (readonly boolean[])[] = [
 export const exploreJointCloseViews = (
     participantCount: 3 | 4,
 ): JointCloseCensus => {
-    const profile = deriveCloseProfile(participantCount);
+    const profile = thresholdProfileFor(participantCount);
     const everyone = (1 << participantCount) - 1;
     const corruptionCases =
-        profile.faultBound === 0 ? [0] : [0, bit(organizer), bit(1)];
+        profile.maximumCorruptParticipantCount === 0
+            ? [0]
+            : [0, bit(organizer), bit(1)];
     const findings = new Set<string>();
     let views = 0;
     let inventories = 0;
@@ -155,7 +159,7 @@ export const exploreJointCloseViews = (
 };
 
 const checkJointEnvelopeSet = (
-    profile: CloseProfile,
+    profile: ThresholdCompletionProfile,
     corrupt: number,
     honest: readonly number[],
     closeTimes: readonly number[],
@@ -179,9 +183,10 @@ const checkJointEnvelopeSet = (
         ),
     );
     const honestMask = maskOf(honest);
-    const signerSets = masksOfSize(n, profile.quorum).filter(
-        (mask) => (mask & bit(organizer)) !== 0,
-    );
+    const signerSets = masksOfSize(
+        n,
+        profile.inventoryCertificateThreshold,
+    ).filter((mask) => (mask & bit(organizer)) !== 0);
     // Every held subset of other envelopes, for every intent.
     type HonestOption = Readonly<{
         intent: number;
@@ -323,7 +328,7 @@ type JointOutcome = Readonly<{
 }>;
 
 const checkJointInventory = (
-    profile: CloseProfile,
+    profile: ThresholdCompletionProfile,
     corrupt: number,
     envelopes: readonly JointEnvelope[],
     slotMasks: readonly number[],
@@ -347,7 +352,10 @@ const checkJointInventory = (
         if ((onTime & bit(index)) === 0 || (union & bit(index)) !== 0) return;
         const covered = slots[envelope.author] === 'conflicting';
         const honestHolders = holders[index] & ~corrupt;
-        if (!covered && memberCount(honestHolders) > profile.faultBound)
+        if (
+            !covered &&
+            memberCount(honestHolders) > profile.maximumCorruptParticipantCount
+        )
             findings.push('inclusion');
         if (
             !covered &&
@@ -362,7 +370,8 @@ const checkJointInventory = (
         if ((honestHolders & signers) !== 0)
             findings.push('omission-inside-proposal');
     });
-    if (omittedHonest > profile.faultBound) findings.push('omission-bound');
+    if (omittedHonest > profile.maximumCorruptParticipantCount)
+        findings.push('omission-bound');
     let acceptedCount = 0;
     let acceptedHonest = 0;
     let conflictingSlots = 0;
@@ -385,7 +394,7 @@ const checkJointInventory = (
 
 // The bitmask exploration and the reference semantics must agree.
 const crossCheckReference = (
-    profile: CloseProfile,
+    profile: ThresholdCompletionProfile,
     corrupt: number,
     jointEnvelopes: readonly JointEnvelope[],
     closeTimes: readonly number[],
@@ -492,17 +501,21 @@ type ListerBruteForceCensus = Readonly<{
 export const bruteForceListerSets = (
     participantCount: number,
 ): ListerBruteForceCensus => {
-    const profile = deriveCloseProfile(participantCount);
+    const profile = thresholdProfileFor(participantCount);
     const everyone = (1 << participantCount) - 1;
-    const proposals = masksOfSize(participantCount, profile.quorum).filter(
-        (mask) => (mask & bit(organizer)) !== 0,
-    );
+    const proposals = masksOfSize(
+        participantCount,
+        profile.inventoryCertificateThreshold,
+    ).filter((mask) => (mask & bit(organizer)) !== 0);
     let listerSetChecks = 0n;
     let minimumInclusionMargin = participantCount;
     let maximumOmittedAuthors = 0;
-    let tightOmissionWitness = profile.faultBound === 0;
+    let tightOmissionWitness = profile.maximumCorruptParticipantCount === 0;
     let corruptionSets = 0;
-    for (const corrupt of masksAtMost(participantCount, profile.faultBound)) {
+    for (const corrupt of masksAtMost(
+        participantCount,
+        profile.maximumCorruptParticipantCount,
+    )) {
         corruptionSets += 1;
         const honest = everyone & ~corrupt;
         for (const proposal of proposals) {
@@ -514,14 +527,17 @@ export const bruteForceListerSets = (
                 listerSetChecks += 1n;
                 const inside = listers & proposal;
                 const size = memberCount(listers);
-                if (size > profile.faultBound) {
+                if (size > profile.maximumCorruptParticipantCount) {
                     if (inside === 0)
                         throw new Error('An f + 1 lister set was omitted.');
                     minimumInclusionMargin = Math.min(
                         minimumInclusionMargin,
                         memberCount(inside),
                     );
-                } else if (size === profile.faultBound && inside === 0)
+                } else if (
+                    size === profile.maximumCorruptParticipantCount &&
+                    inside === 0
+                )
                     tightOmissionWitness = true;
                 if ((listers & bit(organizer)) !== 0 && inside === 0)
                     throw new Error('An honest organizer listing was omitted.');
@@ -529,7 +545,7 @@ export const bruteForceListerSets = (
             }
         }
     }
-    if (maximumOmittedAuthors > profile.faultBound)
+    if (maximumOmittedAuthors > profile.maximumCorruptParticipantCount)
         throw new Error('A proposal leaves more than f honest authors out.');
     return {
         participantCount,
@@ -547,7 +563,7 @@ export const bruteForceListerSets = (
 // organizer. Each shows the violation under the variant and confirms the
 // maintained rule avoids it.
 export const compileCloseObligationCounterexamples = () => {
-    const four = deriveCloseProfile(4);
+    const four = thresholdProfileFor(4);
     const ballot: CloseEnvelope = {
         author: 3,
         variant: 0,
@@ -634,7 +650,7 @@ export const compileCloseObligationCounterexamples = () => {
     // with a body the organizer lacks, and the one-at-a-time selection stays
     // below q. Answering at the proposal lists the two smallest known
     // envelopes, which makes 9 conflicting.
-    const ten = deriveCloseProfile(10);
+    const ten = thresholdProfileFor(10);
     const stallIntent: CloseIntent = { variant: 0, closeTime: 5 };
     const fillingVariants = [0, 1].map((variant): CloseEnvelope => ({
         author: 9,
@@ -669,7 +685,7 @@ export const compileCloseObligationCounterexamples = () => {
         ];
         for (const response of otherResponses)
             if (
-                selected.length < ten.quorum &&
+                selected.length < ten.inventoryCertificateThreshold &&
                 usableEnvelopes([...selected, response], stallEnvelopes).every(
                     (value) => organizerHeld.has(identityOf(value)),
                 )
@@ -760,7 +776,7 @@ export const compileCloseObligationCounterexamples = () => {
         durableRetentionFindings,
         refusalCertifiedTargets: refusal.certifiedTargets,
         refusalHonestSigners: refusal.honestSigners,
-        refusalQuorum: deriveCloseProfile(10).quorum,
+        refusalQuorum: thresholdProfileFor(10).inventoryCertificateThreshold,
         omittedSignerCertifiedTargets: omittedSigner.certifiedTargets,
         omittedSignerHonestOmission: omittedSigner.omittedHonest,
         omittedSignerFindings: omittedSigner.findings,
@@ -776,7 +792,7 @@ export const compileCloseObligationCounterexamples = () => {
             new Set(),
             intent,
         ).length,
-        organizerStallQuorum: ten.quorum,
+        organizerStallQuorum: ten.inventoryCertificateThreshold,
         earlyOrganizerSelection: organizerSelection(earlyOwnListing),
         lateOrganizerSelection: organizerSelection(lateOwnListing),
         lateOwnListing,
@@ -788,7 +804,8 @@ export const compileCloseObligationCounterexamples = () => {
         authorBodyCertifiedTargets: authorBodies.certifiedTargets,
         forwardingFindings: forwardedBodies.findings,
         forwardingCertifiedTargets: forwardedBodies.certifiedTargets,
-        supportRuleIncludesEnvelope: supportCount >= four.quorum,
+        supportRuleIncludesEnvelope:
+            supportCount >= four.inventoryCertificateThreshold,
         unionRuleIncludesEnvelope: closeInventory(
             { intent: 0, responses: supportResponses },
             envelopes,
@@ -880,7 +897,7 @@ const tracePreparationVisits = (
 export const compileCloseVisitCensus = (
     participantCount: number,
 ): CloseVisitCensus => {
-    const profile = deriveCloseProfile(participantCount);
+    const profile = thresholdProfileFor(participantCount);
     const preparation = tracePreparationVisits(participantCount);
     const preparationVisits = Math.max(
         ...Array.from(
@@ -892,7 +909,7 @@ export const compileCloseVisitCensus = (
     const everyone = (1 << participantCount) - 1;
     const lastF = maskOf(
         Array.from(
-            { length: profile.faultBound },
+            { length: profile.maximumCorruptParticipantCount },
             (_unused, index) => participantCount - 1 - index,
         ),
     );
@@ -968,15 +985,18 @@ export const compileCloseResponseCensus = () => {
     const rosters = Array.from({ length: 18 }, (_unused, index) => index + 3);
     return {
         profiles: rosters.map((participantCount) => {
-            const profile = deriveCloseProfile(participantCount);
+            const profile = thresholdProfileFor(participantCount);
             return {
                 ...profile,
-                inclusionHolderThreshold: profile.faultBound + 1,
-                maximumHonestOmission: profile.faultBound,
+                inclusionHolderThreshold:
+                    profile.maximumCorruptParticipantCount + 1,
+                maximumHonestOmission: profile.maximumCorruptParticipantCount,
                 acceptedAtFullHonestTurnoutAfterOmission:
-                    participantCount - 2 * profile.faultBound,
+                    participantCount -
+                    2 * profile.maximumCorruptParticipantCount,
                 noResultForceableAtFullHonestTurnout:
-                    participantCount - 2 * profile.faultBound <
+                    participantCount -
+                        2 * profile.maximumCorruptParticipantCount <
                     profile.minimumTurnout,
                 maximumListedEntriesPerResponse:
                     maximumListedEnvelopesPerSlot * participantCount,

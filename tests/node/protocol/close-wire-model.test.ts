@@ -53,13 +53,18 @@ describe('close wire census', () => {
             const ballot = compileBallotBodyCensus(profile);
             expect(ballot.envelopeBytes).toBe(214n);
             const value = compileCloseWireCensus(profile);
-            const faultBound = BigInt(Math.floor((participants - 1) / 3));
-            const quorum = BigInt(participants) - faultBound;
+            const maximumCorruptParticipantCount = BigInt(
+                Math.floor((participants - 1) / 3),
+            );
+            const quorum =
+                BigInt(participants) - maximumCorruptParticipantCount;
             expect(value.maximumResponseEntries).toBe(
                 2n * BigInt(participants),
             );
             expect(value.maximumUnionEnvelopes).toBe(
-                BigInt(participants) - faultBound + faultBound * 2n * quorum,
+                BigInt(participants) -
+                    maximumCorruptParticipantCount +
+                    maximumCorruptParticipantCount * 2n * quorum,
             );
             // The union never exceeds the q used responses' entries.
             expect(value.maximumUnionEnvelopes).toBeLessThanOrEqual(
@@ -68,8 +73,8 @@ describe('close wire census', () => {
             expect(value.submissionBytes).toBe(214n + signatureBytes);
             expect(value.maximumRosterListedEnvelopes).toBe(
                 BigInt(participants) -
-                    faultBound +
-                    faultBound * 2n * BigInt(participants),
+                    maximumCorruptParticipantCount +
+                    maximumCorruptParticipantCount * 2n * BigInt(participants),
             );
             expect(value.maximumRosterCloseMetadataBytes).toBe(
                 value.intentPacketBytes +
@@ -84,12 +89,14 @@ describe('close wire census', () => {
                 quorum + 2n + value.maximumUnionEnvelopes,
             );
             expect(value.maximumHeldBodies).toBe(
-                BigInt(participants) + faultBound,
+                BigInt(participants) + maximumCorruptParticipantCount,
             );
             // One body per honest slot; two before and two after the intent
             // lock for each corrupt slot.
             expect(value.maximumReceivedBodies).toBe(
-                BigInt(participants) - faultBound + 4n * faultBound,
+                BigInt(participants) -
+                    maximumCorruptParticipantCount +
+                    4n * maximumCorruptParticipantCount,
             );
             expect(value.maximumReceivedBodyBytes).toBe(
                 value.maximumReceivedBodies * ballot.maximumSignedBodyBytes,
@@ -98,12 +105,14 @@ describe('close wire census', () => {
             // for a corrupt one; each of the other n - 1 responses the
             // organizer retains adds two for every corrupt slot.
             expect(value.maximumKnownEnvelopes).toBe(
-                BigInt(participants) + faultBound,
+                BigInt(participants) + maximumCorruptParticipantCount,
             );
             expect(value.maximumOrganizerKnownEnvelopes).toBe(
                 BigInt(participants) +
-                    faultBound +
-                    (BigInt(participants) - 1n) * 2n * faultBound,
+                    maximumCorruptParticipantCount +
+                    (BigInt(participants) - 1n) *
+                        2n *
+                        maximumCorruptParticipantCount,
             );
             // Every response the organizer learns from is one of the roster's.
             expect(value.maximumOrganizerKnownEnvelopes).toBe(

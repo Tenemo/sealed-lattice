@@ -56,7 +56,7 @@ export const compileParticipantRuntimeProfile = (
         participantCount,
         optionCount,
         setupContributorCount: profile.setupContributorCount,
-        eligibleContributorCount: authentication.eligibleCount,
+        eligibleContributorCount: authentication.eligibleContributorCount,
         proposalBytes: number(
             compileRosterProposalCensus(participantCount).proposalBytes,
         ),

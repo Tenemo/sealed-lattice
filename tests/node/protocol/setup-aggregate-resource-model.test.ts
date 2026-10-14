@@ -44,10 +44,12 @@ describe('setup aggregate cache resources', () => {
         );
         // Every recipient's share sums the certified selection's d entries,
         // with d = max(f + 1, 2) and f = floor((n - 1) / 3).
-        const contributorCount = BigInt(
+        const setupContributorCount = BigInt(
             Math.max(Math.floor((profile.participantCount - 1) / 3) + 1, 2),
         );
-        expect(value.contributionReadBytes).toBe(contributorCount * expected);
+        expect(value.contributionReadBytes).toBe(
+            setupContributorCount * expected,
+        );
         expect(value.previousCacheReadBytes + value.completeReadbackBytes).toBe(
             value.contributionReadBytes,
         );

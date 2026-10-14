@@ -29,10 +29,8 @@ export const scheduleParticipantDepartures = (
     participantCount: number,
     optionCount: number,
 ) => {
-    const {
-        maximumCorruptParticipantCount: faults,
-        setupContributorCount: selectedCount,
-    } = deriveSupportedProfile(participantCount, optionCount);
+    const { maximumCorruptParticipantCount: faults, setupContributorCount } =
+        deriveSupportedProfile(participantCount, optionCount);
     const last = participantDepartureBoundaries.length - 1;
     assert.ok(
         faults >= 1 && faults <= participantDepartureBoundaries.length,
@@ -45,9 +43,9 @@ export const scheduleParticipantDepartures = (
                 faults === 1 ? last : Math.round((index * last) / (faults - 1))
             ],
     );
-    const eligibleCount = selectedCount + faults;
+    const eligibleContributorCount = setupContributorCount + faults;
     const eligible = Array.from(
-        { length: eligibleCount },
+        { length: eligibleContributorCount },
         (_unused, position) => position,
     );
     const leavesBeforeOffer = (boundary: ParticipantDepartureBoundary) =>
@@ -56,16 +54,18 @@ export const scheduleParticipantDepartures = (
     const unoffered = boundaries
         .filter(leavesBeforeOffer)
         .map((_unused, index) => 2 + 2 * index);
-    assert.ok(unoffered.every((position) => position < eligibleCount));
+    assert.ok(
+        unoffered.every((position) => position < eligibleContributorCount),
+    );
     const selectedPositions = eligible
         .filter((position) => !unoffered.includes(position))
-        .slice(0, selectedCount);
+        .slice(0, setupContributorCount);
     const selectedAuthors = selectedPositions.filter(
         (position) => position !== 0,
     );
     const later = Array.from(
-        { length: participantCount - eligibleCount },
-        (_unused, index) => eligibleCount + index,
+        { length: participantCount - eligibleContributorCount },
+        (_unused, index) => eligibleContributorCount + index,
     );
     const unselected = eligible.filter(
         (position) =>

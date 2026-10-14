@@ -307,7 +307,7 @@ const readModuleProfile = (
         minimumBallotBodyBytes: take(),
         maximumBallotBodyBytes: take(),
         quorum: take(),
-        faultBound: take(),
+        maximumCorruptParticipantCount: take(),
         setupContributorCount: take(),
         eligibleContributorCount: take(),
         maximumResponseBodyBytes: take(),
@@ -512,7 +512,7 @@ const closeBounds = (
 ) => {
     const { close } = moduleLimits;
     const participants = profile.participantCount;
-    const corrupt = profile.faultBound;
+    const corrupt = profile.maximumCorruptParticipantCount;
     const listed = close.maximumListedEnvelopesPerSlot;
     // An honest author's one body arrives once; a corrupt slot can deliver
     // two before the intent lock and two on-time bodies after it, and

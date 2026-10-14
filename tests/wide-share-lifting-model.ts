@@ -33,7 +33,7 @@ export const shareEncryptionParameters = {
 
 type WideShareLiftingInput = Readonly<{
     // The setup contributors, whose shares each aggregate share sums.
-    contributorCount: bigint;
+    setupContributorCount: bigint;
     sharingDegree: number;
 }>;
 
@@ -45,10 +45,10 @@ const wideShareLiftingBounds = (
     input: WideShareLiftingInput,
     limbBits: number,
 ) => {
-    const { contributorCount, sharingDegree } = input;
+    const { setupContributorCount, sharingDegree } = input;
     const radix = 1n << BigInt(limbBits);
     const privacyNumerator =
-        contributorCount *
+        setupContributorCount *
         ((1n << BigInt(sharingDegree)) - 1n) *
         2n *
         sharedSecretSupportWeight;
@@ -84,7 +84,8 @@ const wideShareLiftingBounds = (
         sharingCoefficientBits,
         sharingRadius,
         aggregateSharingMaximum:
-            contributorCount * (1n + BigInt(sharingDegree) * sharingRadius),
+            setupContributorCount *
+            (1n + BigInt(sharingDegree) * sharingRadius),
         trueQuotientBound,
         trueCarryBound,
         carryBound,
@@ -102,8 +103,8 @@ const wideShareLiftingBounds = (
 
 // The widest limb, at most maximumLimbBits, whose bounds hold.
 export const deriveWideShareLiftingLayout = (input: WideShareLiftingInput) => {
-    const { contributorCount, sharingDegree } = input;
-    assert.ok(contributorCount > 0n && sharingDegree > 0);
+    const { setupContributorCount, sharingDegree } = input;
+    assert.ok(setupContributorCount > 0n && sharingDegree > 0);
     for (let limbBits = maximumLimbBits; limbBits > 0; limbBits--) {
         const bounds = wideShareLiftingBounds(input, limbBits);
         if (!bounds.holds) continue;
@@ -115,7 +116,7 @@ export const deriveWideShareLiftingLayout = (input: WideShareLiftingInput) => {
         );
         assert.ok(2n * bounds.aggregateSharingMaximum < proofPrime);
         assert.ok(
-            contributorCount *
+            setupContributorCount *
                 (2n * encryptionSupportWeight + 1n) *
                 errorBound <
                 aggregateDecryptionErrorRadius,

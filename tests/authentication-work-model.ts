@@ -414,7 +414,7 @@ export const compileCompletedAuthenticationCensus = (
         throw new RangeError('Invalid completed authentication population.');
     const participants = BigInt(participantCount);
     const eligible = BigInt(
-        compileSetupSelectionCensus(participantCount).eligibleCount,
+        compileSetupSelectionCensus(participantCount).eligibleContributorCount,
     );
     const counts: Record<AuthenticationPurpose, bigint> = {
         'poll-definition': 1n,

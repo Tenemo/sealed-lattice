@@ -40,12 +40,12 @@ export const encodeSetupSelectionModel = (
 ) => {
     const profile = compileSetupSelectionCensus(participants);
     if (
-        selected.length !== profile.selectedCount ||
+        selected.length !== profile.setupContributorCount ||
         selected.some(
             (entry, index) =>
                 !Number.isSafeInteger(entry.position) ||
                 entry.position < 0 ||
-                entry.position >= profile.eligibleCount ||
+                entry.position >= profile.eligibleContributorCount ||
                 (index > 0 && selected[index - 1].position >= entry.position),
         )
     )
@@ -100,7 +100,7 @@ export const encodeSetupCertificateModel = (
     const census = compileSetupSelectionWireCensus(participants);
     if (
         BigInt(organizerSignature.length) !== census.signatureBytes ||
-        endorsements.length !== census.quorum ||
+        endorsements.length !== census.inventoryCertificateThreshold ||
         endorsements.some(
             (entry, index) =>
                 !Number.isSafeInteger(entry.position) ||
@@ -149,7 +149,7 @@ export const compileSetupSelectionWireCensus = (participants: number) => {
         64n +
         4n +
         4n +
-        BigInt(profile.selectedCount) * (2n + 64n);
+        BigInt(profile.setupContributorCount) * (2n + 64n);
     const endorsementBodyBytes =
         8n +
         3n * 6n +
@@ -171,12 +171,14 @@ export const compileSetupSelectionWireCensus = (participants: number) => {
             4n +
             selectionBodyBytes +
             signatureBytes +
-            BigInt(profile.quorum) * (2n + signatureBytes),
+            BigInt(profile.inventoryCertificateThreshold) *
+                (2n + signatureBytes),
         allEligibleOfferPacketBytes:
-            BigInt(profile.eligibleCount) *
+            BigInt(profile.eligibleContributorCount) *
             (4n + offerEnvelopeBytes + signatureBytes),
         quorumEndorsementPacketBytes:
-            BigInt(profile.quorum) * (2n + 64n + signatureBytes),
+            BigInt(profile.inventoryCertificateThreshold) *
+            (2n + 64n + signatureBytes),
         // Ordinary body identity: domain and variable-byte body, no sender,
         // whole-body salt, role or predecessor copied into this hash input.
         bodyHashPrefixBytes:

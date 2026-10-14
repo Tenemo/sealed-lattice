@@ -1,6 +1,5 @@
 import {
     bit,
-    deriveCloseProfile,
     maskOf,
     masksAtMost,
     memberCount,
@@ -8,6 +7,7 @@ import {
     organizer,
 } from '#tests/close-contract-model.js';
 import { runCloseExecution } from '#tests/close-execution-model.js';
+import { thresholdProfileFor } from '#tests/threshold-completion-model.js';
 
 type CompletionProfileExecutionCensus = Readonly<{
     participantCount: number;
@@ -43,7 +43,7 @@ type CompletionProfileExecutionCensus = Readonly<{
 export const exploreCompletionProfileExecutions = (
     participantCount = 10,
 ): CompletionProfileExecutionCensus => {
-    const profile = deriveCloseProfile(participantCount);
+    const profile = thresholdProfileFor(participantCount);
     const everyone = (1 << participantCount) - 1;
     const findings = new Set<string>();
     let corruptionSets = 0;
@@ -64,13 +64,23 @@ export const exploreCompletionProfileExecutions = (
     let maximumOrganizerRequestsPerSlot = 0;
     let maximumForwardedPerResponder = 0;
     let maximumForwardedToHonestOrganizer = 0;
-    for (const corrupt of masksAtMost(participantCount, profile.faultBound)) {
+    for (const corrupt of masksAtMost(
+        participantCount,
+        profile.maximumCorruptParticipantCount,
+    )) {
         corruptionSets += 1;
         const honest = everyone & ~corrupt;
         const others = members(honest & ~bit(organizer), participantCount);
-        const budget = profile.faultBound - memberCount(corrupt);
-        const firstF = maskOf(others.slice(0, profile.faultBound));
-        const lastF = maskOf(others.slice(others.length - profile.faultBound));
+        const budget =
+            profile.maximumCorruptParticipantCount - memberCount(corrupt);
+        const firstF = maskOf(
+            others.slice(0, profile.maximumCorruptParticipantCount),
+        );
+        const lastF = maskOf(
+            others.slice(
+                others.length - profile.maximumCorruptParticipantCount,
+            ),
+        );
         const cases = [
             { isolated: 0, before: 0, after: 0, voters: honest },
             { isolated: firstF, before: 0, after: 0, voters: honest },

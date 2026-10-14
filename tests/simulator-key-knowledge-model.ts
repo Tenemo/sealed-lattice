@@ -1,4 +1,4 @@
-import { compileThresholdCompletionProfile } from '#tests/threshold-completion-model.js';
+import { thresholdProfileFor } from '#tests/threshold-completion-model.js';
 
 type RecoveryKey = 'fhe' | 'auxiliary';
 type Reduction = Readonly<{
@@ -80,8 +80,7 @@ export const availableExtractionRecipients = (
         [...unknown].some((index) => corrupt.has(index))
     )
         throw new RangeError('Invalid recipient-key challenge profile.');
-    const threshold =
-        compileThresholdCompletionProfile(count).resultReleaseThreshold;
+    const threshold = thresholdProfileFor(count).resultReleaseThreshold;
     const knownHonest = Array.from(
         { length: count },
         (_, index) => index,
@@ -93,7 +92,7 @@ export const availableExtractionRecipients = (
 export const compileSimulatorKeyKnowledgeCensus = () =>
     Array.from({ length: 18 }, (_, index) => {
         const participants = index + 3;
-        const profile = compileThresholdCompletionProfile(participants);
+        const profile = thresholdProfileFor(participants);
         const faults = profile.maximumCorruptParticipantCount;
         const threshold = profile.resultReleaseThreshold;
         return {

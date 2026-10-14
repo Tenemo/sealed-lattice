@@ -54,13 +54,16 @@ describe('participant close custody layout', () => {
             const profile = deriveSupportedProfile(participants, options);
             const value = compileParticipantCloseCustody(profile);
             const body = compileBallotBodyCensus(profile);
-            const faultBound = BigInt(Math.floor((participants - 1) / 3));
+            const maximumCorruptParticipantCount = BigInt(
+                Math.floor((participants - 1) / 3),
+            );
             const count = BigInt(participants);
             const bodyRecords =
                 (body.maximumBodyBytes + recordBytes - 1n) / recordBytes;
             expect(value.maximumBodyRecords).toBe(bodyRecords);
-            const held = count + faultBound;
-            const organizerKnown = held + (count - 1n) * 2n * faultBound;
+            const held = count + maximumCorruptParticipantCount;
+            const organizerKnown =
+                held + (count - 1n) * 2n * maximumCorruptParticipantCount;
             const envelopeRecord = envelopeBytes + signatureBytes + 16n;
             const bodyBytes = body.maximumBodyBytes + 16n * bodyRecords;
             expect(value.maximumEncryptedRecordBytes).toBe(

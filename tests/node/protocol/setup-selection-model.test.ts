@@ -41,11 +41,11 @@ describe('contribution selection candidate', () => {
         for (const participants of [4, 5, 6, 7]) {
             const profile = compileSetupSelectionCensus(participants);
             const corrupt = Array.from(
-                { length: profile.faultBound },
+                { length: profile.maximumCorruptParticipantCount },
                 (_unused, index) => index,
             );
             const first = Array.from(
-                { length: profile.selectedCount },
+                { length: profile.setupContributorCount },
                 (_unused, index) => index,
             );
             const second = first.map((value) => value + 1);
@@ -86,20 +86,22 @@ describe('contribution selection candidate', () => {
             expect(result.originalPlaintext).toEqual(result.scores);
             expect(result.changedSetupPlaintext).not.toEqual(result.scores);
             expect(result.honestHolders).toHaveLength(
-                result.profile.faultBound + 1,
+                result.profile.maximumCorruptParticipantCount + 1,
             );
             expect(
                 result.honestHolders.every(
-                    (position) => position >= result.profile.faultBound,
+                    (position) =>
+                        position >=
+                        result.profile.maximumCorruptParticipantCount,
                 ),
             ).toBe(true);
             expect(result.firstTargetSigners).toHaveLength(
-                result.profile.quorum,
+                result.profile.inventoryCertificateThreshold,
             );
             expect(result.firstTargetSigners).not.toContain(result.author);
             expect(
                 result.secondSelection[result.secondSelection.length - 1],
-            ).toBeLessThan(result.profile.eligibleCount);
+            ).toBeLessThan(result.profile.eligibleContributorCount);
         },
     );
 
@@ -135,20 +137,22 @@ describe('contribution selection candidate', () => {
         'derives fixed-pool availability and honest quorum intersection at n=%i',
         (count) => {
             const census = compileSetupSelectionCensus(count);
-            expect(census.remainingEligibleCount).toBe(census.selectedCount);
+            expect(census.remainingEligibleCount).toBe(
+                census.setupContributorCount,
+            );
             expect(census.minimumHonestSelected).toBeGreaterThan(0);
             expect(census.minimumCertificateIntersection).toBeGreaterThan(
-                census.faultBound,
+                census.maximumCorruptParticipantCount,
             );
             const model = new SetupSelectionModel(count);
             const selected = Array.from(
-                { length: census.selectedCount },
+                { length: census.setupContributorCount },
                 (_unused, index) => index,
             );
             // Cooperative corrupt parties remain valid continuers while a
             // disjoint set of honest parties uses the departure allowance.
             const continuers = Array.from(
-                { length: census.quorum },
+                { length: census.inventoryCertificateThreshold },
                 (_unused, index) => index,
             );
             for (const signer of continuers)

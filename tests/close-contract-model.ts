@@ -1,4 +1,4 @@
-import { compileThresholdCompletionProfile } from '#tests/threshold-completion-model.js';
+import type { ThresholdCompletionProfile } from '#tests/threshold-completion-model.js';
 
 // Close responses under the bounded-omission contract. The organizer
 // is roster position zero. Messages are ideal authenticated objects: a model
@@ -7,25 +7,6 @@ import { compileThresholdCompletionProfile } from '#tests/threshold-completion-m
 
 export const organizer = 0;
 export const maximumListedEnvelopesPerSlot = 2;
-
-export type CloseProfile = Readonly<{
-    participantCount: number;
-    faultBound: number;
-    quorum: number;
-    minimumTurnout: number;
-    releaseThreshold: number;
-}>;
-
-export const deriveCloseProfile = (participantCount: number): CloseProfile => {
-    const profile = compileThresholdCompletionProfile(participantCount);
-    return {
-        participantCount,
-        faultBound: profile.maximumCorruptParticipantCount,
-        quorum: profile.inventoryCertificateThreshold,
-        minimumTurnout: profile.minimumTurnout,
-        releaseThreshold: profile.resultReleaseThreshold,
-    };
-};
 
 export const bit = (position: number): number => 1 << position;
 
@@ -247,12 +228,12 @@ export const verifyCloseProposal = (
     proposal: CloseProposal,
     intents: ReadonlyMap<number, CloseIntent>,
     envelopes: ReadonlyMap<string, CloseEnvelope>,
-    profile: CloseProfile,
+    profile: ThresholdCompletionProfile,
 ): boolean => {
     const signers = proposal.responses.map(({ signer }) => signer);
     return (
         intents.has(proposal.intent) &&
-        proposal.responses.length === profile.quorum &&
+        proposal.responses.length === profile.inventoryCertificateThreshold &&
         signers.every(
             (signer, index) => index === 0 || signers[index - 1] < signer,
         ) &&
@@ -278,7 +259,7 @@ export const verifyCloseProposal = (
 export const closeInventory = (
     proposal: CloseProposal,
     envelopes: ReadonlyMap<string, CloseEnvelope>,
-    profile: CloseProfile,
+    profile: ThresholdCompletionProfile,
 ): ClosedInventory => {
     const listed = new Set(
         proposal.responses.flatMap((response) => response.listed),
@@ -327,7 +308,7 @@ type CloseContractFinding =
     | 'turnout-branch';
 
 type CloseContractView = Readonly<{
-    profile: CloseProfile;
+    profile: ThresholdCompletionProfile;
     corrupt: number;
     envelopes: ReadonlyMap<string, CloseEnvelope>;
     intents: ReadonlyMap<number, CloseIntent>;
@@ -358,7 +339,10 @@ export const checkCloseContract = (
         const covered = inventory.slots[envelope.author] === 'conflicting';
         const honestHolders =
             (view.heldBeforeResponding.get(identity) ?? 0) & ~corrupt;
-        if (!covered && memberCount(honestHolders) > profile.faultBound)
+        if (
+            !covered &&
+            memberCount(honestHolders) > profile.maximumCorruptParticipantCount
+        )
             findings.add('inclusion');
         if (
             !covered &&
@@ -375,7 +359,8 @@ export const checkCloseContract = (
         if ((honestHolders & inventory.responders) !== 0)
             findings.add('omission-inside-proposal');
     }
-    if (omittedHonest > profile.faultBound) findings.add('omission-bound');
+    if (omittedHonest > profile.maximumCorruptParticipantCount)
+        findings.add('omission-bound');
     for (const [author, slot] of inventory.slots.entries())
         if (slot === 'conflicting' && (corrupt & bit(author)) === 0)
             findings.add('honest-conflict');

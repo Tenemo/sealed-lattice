@@ -9,12 +9,12 @@ import type { SupportedProfile } from '#tests/supported-profile-model.js';
 export const compilePreparationResources = (profile: SupportedProfile) => {
     const body = compileContributionBodyCensus(profile);
     const wire = compileSetupSelectionWireCensus(profile.participantCount);
-    const eligible = BigInt(wire.eligibleCount);
-    const selected = BigInt(wire.selectedCount);
+    const eligible = BigInt(wire.eligibleContributorCount);
+    const selected = BigInt(wire.setupContributorCount);
     const participants = BigInt(profile.participantCount);
     const transport = compileCandidatePublicationCensus(
         profile,
-        wire.eligibleCount,
+        wire.eligibleContributorCount,
     ).preparation;
     const manifest = (prefix: string) =>
         transport.publications.find((publication) =>
@@ -80,9 +80,9 @@ export const compilePreparationResources = (profile: SupportedProfile) => {
     const maximumCleanTotalUploadBytes = transport.uploadedPayloadBytes;
     const transferPlanningBytes = 2_147_483_648n;
     return {
-        eligibleCount: wire.eligibleCount,
-        selectedCount: wire.selectedCount,
-        quorum: wire.quorum,
+        eligibleContributorCount: wire.eligibleContributorCount,
+        setupContributorCount: wire.setupContributorCount,
+        quorum: wire.inventoryCertificateThreshold,
         maximumEligibleBodyBytes: eligible * body.maximumBodyBytes,
         maximumSelectedBodyBytes: selected * body.maximumBodyBytes,
         maximumEligibleOfferBytes:
@@ -93,7 +93,8 @@ export const compilePreparationResources = (profile: SupportedProfile) => {
         maximumEndorsementPacketBytes:
             BigInt(profile.participantCount) * wire.endorsementPacketBytes,
         quorumEndorsementPacketBytes:
-            BigInt(wire.quorum) * wire.endorsementPacketBytes,
+            BigInt(wire.inventoryCertificateThreshold) *
+            wire.endorsementPacketBytes,
         // All bytes that must remain public for selected contribution and
         // certificate retrieval, beside the previously published registrations.
         maximumCertifiedSetupBytes:

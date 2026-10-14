@@ -66,15 +66,15 @@ type OfferCandidate = Readonly<{
 // This discovers inputs only; the caller's Rust builder still requires its
 // own complete verified-offer capabilities before creating a selection.
 export const discoverContributionOffers = async (
-    eligibleCount: number,
-    selectedCount: number,
+    eligibleContributorCount: number,
+    setupContributorCount: number,
     readPage: (
         position: number,
         offset: number,
     ) => Promise<Readonly<{ identities: Uint8Array[]; total: number }>>,
     verify: (candidate: OfferCandidate) => Promise<void>,
 ): Promise<OfferCandidate[]> => {
-    const readers = Array.from({ length: eligibleCount }, () => ({
+    const readers = Array.from({ length: eligibleContributorCount }, () => ({
         offset: 0,
         total: undefined as number | undefined,
         entries: [] as Uint8Array[],
@@ -125,7 +125,7 @@ export const discoverContributionOffers = async (
             }
             reader.accepted = true;
             offers.push(offer);
-            if (offers.length === selectedCount)
+            if (offers.length === setupContributorCount)
                 return offers.sort(
                     (left, right) => left.position - right.position,
                 );

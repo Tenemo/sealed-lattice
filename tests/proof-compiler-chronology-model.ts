@@ -19,7 +19,7 @@ const provingPositions = (
     purpose === 'setup'
         ? BigInt(
               compileSetupSelectionCensus(Number(participantCount))
-                  .eligibleCount,
+                  .eligibleContributorCount,
           )
         : participantCount;
 

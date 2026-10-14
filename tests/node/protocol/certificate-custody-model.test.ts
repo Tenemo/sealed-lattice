@@ -24,7 +24,8 @@ describe('certificate custody after disappearance', () => {
         // of a seven-position full-holder set.
         expect(census.checkedConfigurations).toBe(120 ** 3);
         expect(census.minimumSurvivingHonestFullHolders).toBe(
-            census.fullHolderThreshold - 2 * census.corruptCount,
+            census.fullHolderThreshold -
+                2 * census.maximumCorruptParticipantCount,
         );
         expect(census.minimumSurvivingHonestFullHolders).toBe(1);
     });
