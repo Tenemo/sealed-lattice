@@ -15,6 +15,7 @@ import {
     encodeManifest,
 } from '#packages/sdk/src/participant/worker/storage/root.js';
 import { rootManifestLayout } from '#packages/sdk/tests/node/participant-worker/stored-layouts.js';
+import { expectEveryTruncationStops } from '#packages/sdk/tests/node/participant-worker/stored-state-refusal.js';
 import { compileParticipantRuntimeLimits } from '#tests/participant-runtime-bounds-model.js';
 
 const filled = (length: number, value: number) =>
@@ -213,6 +214,13 @@ describe('participant root manifest decoding', () => {
             Uint8Array.of(...bytes, 0),
             1,
             'Participant root manifest has trailing bytes.',
+        );
+    });
+
+    it('stops on every truncation of a registered root', () => {
+        expectEveryTruncationStops(
+            stored(manifestAt(1, records(enrollment))),
+            (prefix) => decodeManifest(prefix, 1, limits),
         );
     });
 

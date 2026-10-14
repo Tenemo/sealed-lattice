@@ -1,9 +1,26 @@
-import { expect, it } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
 
-import { discoverContributionOffers } from '#packages/sdk/src/participant/worker/relay/offer-discovery.js';
+import {
+    discoverContributionOffers,
+    readOfferAnnouncements,
+} from '#packages/sdk/src/participant/worker/relay/offer-discovery.js';
 import { PublicInputFailure } from '#packages/sdk/src/participant/worker/shared/failures.js';
 
 const identity = (marker: number) => new Uint8Array(64).fill(marker);
+
+afterEach(() => vi.unstubAllGlobals());
+
+it('reads a truncated or unfilled offer page as unavailable public input', async () => {
+    const unfilled = new Uint8Array(12 + 64);
+    new DataView(unfilled.buffer).setBigUint64(0, 3n, true);
+    new DataView(unfilled.buffer).setUint32(8, 1, true);
+    for (const page of [new Uint8Array(11), unfilled]) {
+        vi.stubGlobal('fetch', () => Promise.resolve(new Response(page)));
+        await expect(
+            readOfferAnnouncements({ base: 'https://relay.invalid/' }, 0, 0),
+        ).rejects.toBeInstanceOf(PublicInputFailure);
+    }
+});
 
 it('does not let an endless invalid author starve two ready authors', async () => {
     const pages: [number, number][] = [],

@@ -83,6 +83,23 @@ afterEach(async () => {
     }
 });
 
+describe('enrollment storage room', () => {
+    it('refuses an enrollment one byte beyond the estimated room and writes no record', async () => {
+        const context = await fixture();
+        vi.spyOn(navigator.storage, 'estimate').mockResolvedValue({
+            usage: 1,
+            quota: 2 * context.limits.registration.publicKeyBytes,
+        });
+        const started = vi.fn();
+        await expect(
+            createEnrollment(context, enrollment, started),
+        ).resolves.toBe('insufficient storage');
+        expect(started).not.toHaveBeenCalled();
+        const { counts } = await snapshotParticipant(context.database);
+        expect(Object.values(counts).every((count) => count === 0)).toBe(true);
+    });
+});
+
 // Validation, identity hashing, intent encryption and persistence use the
 // real module, WebCrypto and IndexedDB. Only private credential generation
 // is intercepted, so these boundary tests do not run a full enrollment proof.

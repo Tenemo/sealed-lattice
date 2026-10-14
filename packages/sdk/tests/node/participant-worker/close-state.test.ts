@@ -17,6 +17,7 @@ import {
     closeStateLayout,
     type CloseRetained,
 } from '#packages/sdk/tests/node/participant-worker/stored-layouts.js';
+import { expectEveryTruncationStops } from '#packages/sdk/tests/node/participant-worker/stored-state-refusal.js';
 import { compileParticipantRuntimeProfile } from '#tests/participant-runtime-bounds-model.js';
 
 const profile = compileParticipantRuntimeProfile(3, 2);
@@ -139,6 +140,14 @@ describe('participant close state', () => {
                 decode(generation, isOrganizer, Uint8Array.of(...bytes, 0)),
             ).toThrow();
         }
+    });
+
+    it('stops on every truncation of each phase', () => {
+        for (const [generation, isOrganizer, value] of phases)
+            expectEveryTruncationStops(
+                encodeCloseState(generation, isOrganizer, value),
+                (prefix) => decode(generation, isOrganizer, prefix),
+            );
     });
 
     it('refuses a log that disagrees with its phase or role', () => {

@@ -21,6 +21,7 @@ import {
     preparationJournalLayout,
     preparationStateLayout,
 } from '#packages/sdk/tests/node/participant-worker/stored-layouts.js';
+import { expectEveryTruncationStops } from '#packages/sdk/tests/node/participant-worker/stored-state-refusal.js';
 import { compileParticipantRuntimeProfile } from '#tests/participant-runtime-bounds-model.js';
 
 const profile = compileParticipantRuntimeProfile(4, 2);
@@ -175,6 +176,16 @@ describe('independent preparation authority journal', () => {
             ).toBe(6);
         },
     );
+
+    it('stops on every truncation of a journal with both signed purposes', () => {
+        expectEveryTruncationStops(
+            encodePreparationState({
+                selection: selection('signed'),
+                endorsement: endorsement('signed'),
+            }),
+            (prefix) => decodePreparationState(prefix, profile),
+        );
+    });
 
     it('does not require any own contribution or organizer selection to endorse', () => {
         const state = { endorsement: endorsement('signed') };

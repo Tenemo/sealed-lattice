@@ -15,6 +15,7 @@ import type { BallotState } from '#packages/sdk/src/participant/worker/stages/ba
 import type { RecordContext } from '#packages/sdk/src/participant/worker/storage/private-records.js';
 import { ballotPhase } from '#packages/sdk/src/participant/worker/storage/root-generation.js';
 import { ballotStateLayout } from '#packages/sdk/tests/node/participant-worker/stored-layouts.js';
+import { expectEveryTruncationStops } from '#packages/sdk/tests/node/participant-worker/stored-state-refusal.js';
 import { compileParticipantBallotCustody } from '#tests/participant-ballot-custody-model.js';
 import { compileParticipantRuntimeProfile } from '#tests/participant-runtime-bounds-model.js';
 import { deriveSupportedProfile } from '#tests/supported-profile-model.js';
@@ -110,6 +111,17 @@ describe('participant ballot state', () => {
                     state,
                 );
             }
+    });
+
+    it('stops on every truncation of each phase', () => {
+        for (const phase of phases)
+            expectEveryTruncationStops(
+                encodeBallotState(
+                    phase,
+                    stateAt(phase, bounds.minimumBodyBytes),
+                ),
+                (prefix) => decode(phase, prefix),
+            );
     });
 
     it('bounds each phase by the census', () => {

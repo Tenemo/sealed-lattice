@@ -11,6 +11,7 @@ import {
     targetPhase,
 } from '#packages/sdk/src/participant/worker/storage/root-generation.js';
 import { targetStateLayout } from '#packages/sdk/tests/node/participant-worker/stored-layouts.js';
+import { expectEveryTruncationStops } from '#packages/sdk/tests/node/participant-worker/stored-state-refusal.js';
 import { compileParticipantRuntimeProfile } from '#tests/participant-runtime-bounds-model.js';
 import { compileTargetSigningStateCensus } from '#tests/target-signing-state-model.js';
 
@@ -73,6 +74,16 @@ describe('participant target signing state', () => {
                     ),
                 ).toEqual(value);
             }
+    });
+
+    it('stops on every truncation of both phases', () => {
+        for (const isOrganizer of [false, true])
+            for (const phase of [targetPhase.locked, targetPhase.signed])
+                expectEveryTruncationStops(
+                    encodeTargetState(phase, state(isOrganizer, 1)),
+                    (prefix) =>
+                        decodeTargetState(profile, phase, isOrganizer, prefix),
+                );
     });
 
     it('retains every own ballot inclusion through both phases', () => {

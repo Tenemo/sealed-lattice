@@ -15,6 +15,7 @@ import {
     targetPhase,
 } from '#packages/sdk/src/participant/worker/storage/root-generation.js';
 import { releaseStateLayout } from '#packages/sdk/tests/node/participant-worker/stored-layouts.js';
+import { expectEveryTruncationStops } from '#packages/sdk/tests/node/participant-worker/stored-state-refusal.js';
 import { compileParticipantReleaseCustody } from '#tests/participant-release-custody-model.js';
 import { compileParticipantRuntimeProfile } from '#tests/participant-runtime-bounds-model.js';
 import { deriveSupportedProfile } from '#tests/supported-profile-model.js';
@@ -89,6 +90,25 @@ describe('participant release state', () => {
                                 ),
                             ).toEqual(state);
                         }
+    });
+
+    it('stops on every truncation of each phase', () => {
+        for (const isOrganizer of [false, true])
+            for (const phase of phases)
+                expectEveryTruncationStops(
+                    encodeReleaseState(
+                        phase,
+                        stateAt(
+                            phase,
+                            7,
+                            bounds.minimumBodyBytes,
+                            targetPhase.signed,
+                            ballotInclusions[0],
+                        ),
+                    ),
+                    (prefix) =>
+                        decodeReleaseState(profile, phase, isOrganizer, prefix),
+                );
     });
 
     it('bounds each phase by the census', () => {

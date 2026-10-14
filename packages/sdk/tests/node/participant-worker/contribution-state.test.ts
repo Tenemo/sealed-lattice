@@ -9,6 +9,7 @@ import type {
     ContributionState,
 } from '#packages/sdk/src/participant/worker/stages/contribution/contribution-state.js';
 import { contributionStateLayout } from '#packages/sdk/tests/node/participant-worker/stored-layouts.js';
+import { expectEveryTruncationStops } from '#packages/sdk/tests/node/participant-worker/stored-state-refusal.js';
 import { compileParticipantRuntimeProfile } from '#tests/participant-runtime-bounds-model.js';
 
 const profile = compileParticipantRuntimeProfile(4, 2);
@@ -109,6 +110,14 @@ describe('independent contribution state framing', () => {
                 decode(stateAt(phase, bounds.minimumProofBytes, 3)),
             ).toThrow();
         }
+    });
+
+    it('stops on every truncation of each phase', () => {
+        for (const phase of [4, 5, 6, 7, 8, 9] as const)
+            expectEveryTruncationStops(
+                encodeContributionState(stateAt(phase)),
+                (prefix) => decodeContributionState(prefix, profile),
+            );
     });
 
     it('retains the same maximum proof slot inventory for varied logical lengths', () => {
