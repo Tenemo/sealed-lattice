@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 
 import { auxiliaryInputEncryptionParameters } from '#tests/auxiliary-input-encryption-parameters.js';
+import { unsigned } from '#tests/node/protocol/reference/canonical-tuple.js';
 import { setupGaussianParameters } from '#tests/setup-randomness-model.js';
 import {
     encodeSupportedProfileTable,
@@ -10,15 +11,6 @@ import {
 } from '#tests/supported-profile-table-model.js';
 import { shareEncryptionParameters } from '#tests/wide-share-lifting-model.js';
 
-const unsigned = (value: bigint, bytes: number) => {
-    const encoded = Buffer.alloc(bytes);
-    for (let index = 0; index < bytes; index++) {
-        encoded[index] = Number(value & 255n);
-        value >>= 8n;
-    }
-    expect(value).toBe(0n);
-    return encoded;
-};
 type Fraction = readonly [bigint, bigint];
 const fraction = (numerator: bigint, denominator: bigint): Fraction => {
     let a = numerator,

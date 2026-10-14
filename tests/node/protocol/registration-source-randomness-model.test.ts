@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
+import {
+    ascii,
+    item,
+    itemType,
+    tuple,
+    unsigned,
+    variable,
+} from '#tests/node/protocol/reference/canonical-tuple.js';
 import { operationSeedCount } from '#tests/operation-seed-model.js';
 import {
     compileRegistrationSourceRandomness,
@@ -7,29 +15,6 @@ import {
 } from '#tests/registration-source-randomness-model.js';
 import { completionProfile } from '#tests/supported-profile-model.js';
 
-const unsigned = (bytes: number, value: bigint) => {
-    const result = Buffer.alloc(bytes);
-    for (let index = 0; index < bytes; index++) {
-        result[index] = Number(value & 255n);
-        value >>= 8n;
-    }
-    return result;
-};
-const variable = (value: Buffer) =>
-    Buffer.concat([unsigned(4, BigInt(value.length)), value]);
-const item = (type: number, value: Buffer) =>
-    Buffer.concat([
-        unsigned(2, BigInt(type)),
-        unsigned(4, BigInt(value.length)),
-        value,
-    ]);
-const tuple = (items: Buffer[]) =>
-    Buffer.concat([
-        unsigned(2, 1n),
-        unsigned(2, 1n),
-        unsigned(4, BigInt(items.length)),
-        ...items,
-    ]);
 const permutations = (input: number, output: number) => {
     // SHAKE padding always starts another absorption block, even at an
     // exact boundary; the first output block is already that permutation.
@@ -125,22 +110,15 @@ describe('original registration source randomness and hash work', () => {
             const value = compileRegistrationSourceRandomness(maximum, options);
             for (const family of value.families) {
                 const source = tuple([
+                    ascii('sealed-lattice/fhe-source-randomness/v2'),
+                    item(itemType.rawBytes, Buffer.alloc(1952)),
+                    item(itemType.hash512, Buffer.alloc(64)),
                     item(
-                        2,
-                        variable(
-                            Buffer.from(
-                                'sealed-lattice/fhe-source-randomness/v2',
-                            ),
-                        ),
-                    ),
-                    item(1, Buffer.alloc(1952)),
-                    item(6, Buffer.alloc(64)),
-                    item(
-                        1,
+                        itemType.rawBytes,
                         variable(Buffer.alloc(Number(family.modulusBytes))),
                     ),
-                    item(4, unsigned(8, BigInt(family.sampleBits))),
-                    item(1, Buffer.alloc(64)),
+                    item(itemType.unsigned64, unsigned(family.sampleBits, 8)),
+                    item(itemType.rawBytes, Buffer.alloc(64)),
                 ]);
                 expect(family.sourceInputBytes).toBe(BigInt(source.length));
                 // The source's seed is fixed bytes, unlike the operation
@@ -158,21 +136,16 @@ describe('original registration source randomness and hash work', () => {
                     ),
                 );
                 const commitmentPrefix = tuple([
+                    ascii('sealed-lattice/registered-fhe-key/v2'),
+                    item(itemType.rawBytes, Buffer.alloc(1952)),
+                    item(itemType.rawBytes, Buffer.alloc(64)),
+                    item(itemType.hash512, Buffer.alloc(64)),
                     item(
-                        2,
-                        variable(
-                            Buffer.from('sealed-lattice/registered-fhe-key/v2'),
-                        ),
-                    ),
-                    item(1, Buffer.alloc(1952)),
-                    item(1, Buffer.alloc(64)),
-                    item(6, Buffer.alloc(64)),
-                    item(
-                        1,
+                        itemType.rawBytes,
                         variable(Buffer.alloc(Number(family.modulusBytes))),
                     ),
-                    item(4, unsigned(8, BigInt(family.sampleBits))),
-                    item(1, variable(Buffer.alloc(0))),
+                    item(itemType.unsigned64, unsigned(family.sampleBits, 8)),
+                    item(itemType.rawBytes, variable(Buffer.alloc(0))),
                 ]);
                 const commitmentBytes =
                     BigInt(commitmentPrefix.length) +
@@ -183,7 +156,7 @@ describe('original registration source randomness and hash work', () => {
                 );
                 const commonInput = Buffer.concat([
                     Buffer.from('synthetic-full-setup-witness/1'),
-                    unsigned(4, 14n),
+                    unsigned(14, 4),
                     Buffer.from('common-fhe-a-0'),
                 ]);
                 expect(family.commonInputBytes).toBe(

@@ -16,6 +16,13 @@ import {
     unsigned32,
 } from '#packages/sdk/src/participant/worker/shared/bytes.js';
 import { dataKind } from '#packages/sdk/src/participant/worker/storage/root.js';
+import {
+    ascii,
+    item,
+    itemType,
+    tuple,
+    variable,
+} from '#tests/node/protocol/reference/canonical-tuple.js';
 
 // The packaged participant module, fed public input that no honest relay or
 // participant produces. A command must refuse such input and return: a trap
@@ -182,22 +189,14 @@ export const rosterBegin = (count: number) =>
 
 export const recordBegin = concatenate(
     unsigned16(0),
-    (() => {
-        const variable = (type: number, bytes: Uint8Array) =>
-            concatenate(
-                unsigned16(type),
-                unsigned32(bytes.length + 4),
-                unsigned32(bytes.length),
-                bytes,
-            );
-        return createHash('shake256', { outputLength: 64 })
-            .update(concatenate(unsigned16(1), unsigned16(1), unsigned32(2)))
-            .update(
-                variable(2, encodeText('sealed-lattice/registration-body/v2')),
-            )
-            .update(variable(1, organizer.header))
-            .digest();
-    })(),
+    createHash('shake256', { outputLength: 64 })
+        .update(
+            tuple([
+                ascii('sealed-lattice/registration-body/v2'),
+                item(itemType.rawBytes, variable(organizer.header)),
+            ]),
+        )
+        .digest(),
     unsigned32(organizer.header.length),
     organizer.header,
     organizer.signature,

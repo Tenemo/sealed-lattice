@@ -188,6 +188,41 @@ export default defineConfig(
         },
     },
     {
+        files: ['tests/**/*.ts'],
+        ignores: ['tests/node/**'],
+        rules: {
+            'no-restricted-imports': [
+                'error',
+                {
+                    patterns: [
+                        {
+                            regex: '^(?:#tests/node/|(?:\\.\\.?/)+node/)',
+                            message:
+                                'A model must not depend on the tests that check it.',
+                        },
+                    ],
+                },
+            ],
+        },
+    },
+    {
+        files: ['tests/node/protocol/reference/**/*.ts'],
+        rules: {
+            'no-restricted-imports': [
+                'error',
+                {
+                    patterns: [
+                        {
+                            regex: '^(?!node:|#tests/node/rust-source\\.js$)',
+                            message:
+                                'A test reference imports only Node built-ins and the Rust source reader.',
+                        },
+                    ],
+                },
+            ],
+        },
+    },
+    {
         files: ['packages/sdk/tests/node/public-api.test.ts'],
         rules: {
             'import-x/extensions': [

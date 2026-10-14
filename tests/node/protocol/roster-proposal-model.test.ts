@@ -1,33 +1,24 @@
 import { describe, expect, it } from 'vitest';
 
+import {
+    ascii,
+    item,
+    itemType,
+    tuple,
+    unsigned,
+} from '#tests/node/protocol/reference/canonical-tuple.js';
 import { compileRosterProposalCensus } from '#tests/roster-proposal-model.js';
 
 describe('verified registration roster proposal', () => {
     it('counts the owner as a length-framed ASCII identity in the five-item role', () => {
-        const ascii = (text: string) => {
-            const bytes = Buffer.from(text, 'ascii');
-            const length = Buffer.alloc(4);
-            length.writeUInt32LE(bytes.length);
-            return Buffer.concat([length, bytes]);
-        };
-        const item = (type: number, value: Buffer) => {
-            const header = Buffer.alloc(6);
-            header.writeUInt16LE(type, 0);
-            header.writeUInt32LE(value.length, 2);
-            return Buffer.concat([header, value]);
-        };
-        const tuple = Buffer.from([1, 0, 1, 0, 5, 0, 0, 0]);
         for (const owner of ['00'.repeat(64), 'a5'.repeat(64)]) {
             for (const position of [0, 1, 19]) {
-                const slot = Buffer.alloc(2);
-                slot.writeUInt16LE(position);
-                const encoded = Buffer.concat([
-                    tuple,
-                    item(2, ascii('sealed-lattice/setup-contribution/v3')),
-                    item(2, ascii(owner)),
-                    item(6, Buffer.alloc(64, 1)),
-                    item(6, Buffer.alloc(64, 2)),
-                    item(3, slot),
+                const encoded = tuple([
+                    ascii('sealed-lattice/setup-contribution/v3'),
+                    ascii(owner),
+                    item(itemType.hash512, Buffer.alloc(64, 1)),
+                    item(itemType.hash512, Buffer.alloc(64, 2)),
+                    item(itemType.unsigned16, unsigned(position, 2)),
                 ]);
                 expect(compileRosterProposalCensus(20).roleBytes).toBe(
                     BigInt(encoded.length),

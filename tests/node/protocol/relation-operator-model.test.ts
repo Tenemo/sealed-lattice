@@ -9,6 +9,7 @@ import {
     compileLinkedReleaseColumnLayout,
     createLinkedReleaseRelationModel,
 } from '#tests/linked-release-relation-model.js';
+import { unsigned } from '#tests/node/protocol/reference/canonical-tuple.js';
 import {
     applyRelationOperator,
     evaluateRelationOperator,
@@ -44,12 +45,6 @@ const alpha: Extension = [
     0x2c85_e4b7_19a0_d36fn,
 ];
 const byteLength = (value: bigint) => Math.ceil(value.toString(2).length / 8);
-const littleEndian = (value: bigint, bytes: number) => {
-    const output = Buffer.alloc(bytes);
-    for (let index = 0, rest = value; index < bytes; index++, rest >>= 8n)
-        output[index] = Number(rest & 255n);
-    return output;
-};
 // Each coefficient as a sign byte and its little-endian magnitude in the
 // modulus's byte length.
 const encode = (values: readonly bigint[], modulus: bigint) =>
@@ -57,7 +52,7 @@ const encode = (values: readonly bigint[], modulus: bigint) =>
         values.map((value) =>
             Buffer.concat([
                 Buffer.of(value < 0n ? 1 : 0),
-                littleEndian(value < 0n ? -value : value, byteLength(modulus)),
+                unsigned(value < 0n ? -value : value, byteLength(modulus)),
             ]),
         ),
     );
@@ -154,7 +149,7 @@ const reducedBallot = (profile: SupportedProfile) => {
         Buffer.from('LBS1', 'latin1'),
         Buffer.alloc(64, 1),
         Buffer.alloc(64, 7),
-        littleEndian(BigInt(profile.participantCount - 1), 2),
+        unsigned(BigInt(profile.participantCount - 1), 2),
         Buffer.of(profile.optionCount, 1),
     ]);
     const statement = Buffer.concat([
@@ -200,7 +195,7 @@ const reducedRelease = (profile: SupportedProfile, seed: bigint) => {
     const statement = Buffer.concat([
         Buffer.from('LRS1', 'latin1'),
         Buffer.alloc(3 * 64, 5),
-        littleEndian(0n, 2),
+        unsigned(0n, 2),
         ...[
             model.common,
             model.publicKey,
@@ -266,9 +261,9 @@ const reducedSetup = (profile: SupportedProfile) => {
     ];
     const header = Buffer.concat([
         Buffer.from('SCO2', 'latin1'),
-        littleEndian(BigInt(setupLayout.degree), 4),
-        littleEndian(modulus, byteLength(modulus)),
-        littleEndian(shareModulus, byteLength(shareModulus)),
+        unsigned(BigInt(setupLayout.degree), 4),
+        unsigned(modulus, byteLength(modulus)),
+        unsigned(shareModulus, byteLength(shareModulus)),
     ]);
     const statement = Buffer.concat([
         header,
@@ -563,9 +558,9 @@ describe('relation operator model', () => {
         const width = 1 + byteLength(profile.ciphertext.modulus);
         const half = (profile.ciphertext.modulus - 1n) / 2n;
         for (const record of [
-            Buffer.concat([Buffer.of(2), littleEndian(1n, width - 1)]),
-            Buffer.concat([Buffer.of(1), littleEndian(0n, width - 1)]),
-            Buffer.concat([Buffer.of(0), littleEndian(half + 1n, width - 1)]),
+            Buffer.concat([Buffer.of(2), unsigned(1n, width - 1)]),
+            Buffer.concat([Buffer.of(1), unsigned(0n, width - 1)]),
+            Buffer.concat([Buffer.of(0), unsigned(half + 1n, width - 1)]),
         ]) {
             const copy = Buffer.from(statement);
             record.copy(copy, header.length + 3 * width);
@@ -573,7 +568,7 @@ describe('relation operator model', () => {
         }
         // A magnitude of exactly half the modulus is canonical.
         const edge = Buffer.from(statement);
-        Buffer.concat([Buffer.of(1), littleEndian(half, width - 1)]).copy(
+        Buffer.concat([Buffer.of(1), unsigned(half, width - 1)]).copy(
             edge,
             header.length,
         );

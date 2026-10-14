@@ -3,6 +3,14 @@ import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 
 import {
+    ascii,
+    item,
+    itemType,
+    tuple,
+    unsigned,
+    variable,
+} from '#tests/node/protocol/reference/canonical-tuple.js';
+import {
     proofRelationCatalogueEntry,
     type ProofRelationCatalogueEntry,
 } from '#tests/proof-relation-catalogue-model.js';
@@ -17,36 +25,19 @@ import { deriveSupportedProfile } from '#tests/supported-profile-model.js';
 // These are raw hash transcripts, not proof fixtures. The zero polynomial
 // statements have canonical encodings; no arithmetic truth or protocol
 // authentication is supplied, and no verifier is called or overridden.
-const integer = (value: bigint | number, length: number) => {
-    let remaining = BigInt(value);
-    const output = Buffer.alloc(length);
-    for (let index = 0; index < length; index++) {
-        output[index] = Number(remaining & 255n);
-        remaining >>= 8n;
-    }
-    expect(remaining).toBe(0n);
-    return output;
-};
-const item = (type: number, value: Buffer) =>
-    Buffer.concat([integer(type, 2), integer(value.length, 4), value]);
-const ascii = (value: string) =>
-    item(2, Buffer.concat([integer(value.length, 4), Buffer.from(value)]));
 const domains = {
     setup: 'sealed-lattice/setup-contribution/v3',
     ballot: 'sealed-lattice/ballot-proof/v3',
     release: 'sealed-lattice/certified-release/v3',
 };
 const originalRole = (purpose: keyof typeof domains, owner = 'ab'.repeat(64)) =>
-    Buffer.concat([
-        integer(1, 2),
-        integer(1, 2),
-        integer(purpose === 'release' ? 6 : 5, 4),
+    tuple([
         ascii(domains[purpose]),
         ascii(owner),
         ...Array.from({ length: purpose === 'release' ? 3 : 2 }, (_, index) =>
-            item(6, Buffer.alloc(64, index + 1)),
+            item(itemType.hash512, Buffer.alloc(64, index + 1)),
         ),
-        item(3, integer(0, 2)),
+        item(itemType.unsigned16, unsigned(0, 2)),
     ]);
 const frame = (
     role: Buffer,
@@ -58,8 +49,8 @@ const frame = (
     prefix.write('sealed-lattice/fixed-hash/v1');
     return Buffer.concat([
         ...(fixed ? [prefix] : []),
-        ...[Buffer.from(`bounded-proof/${family}`), role, ...fields].flatMap(
-            (field) => [integer(field.length, 4), field],
+        ...[Buffer.from(`bounded-proof/${family}`), role, ...fields].map(
+            (field) => variable(field),
         ),
     ]);
 };
@@ -108,11 +99,11 @@ const fixture = (entry: ProofRelationCatalogueEntry, rounds = 21) => {
     };
     const context = record(true, 'statement', [
         Buffer.from(entry.relationTag),
-        integer(2, 16),
-        integer(field.transformRoot, 16),
-        integer(7, 16),
+        unsigned(2, 16),
+        unsigned(field.transformRoot, 16),
+        unsigned(7, 16),
         entry.encodedParameters,
-        integer(field.modulus - 1n, 16),
+        unsigned(field.modulus - 1n, 16),
         statement,
     ]);
     const leaves: {
@@ -124,10 +115,10 @@ const fixture = (entry: ProofRelationCatalogueEntry, rounds = 21) => {
     }[] = [];
     const tree = (stage: number, position: number, width: number) => {
         const data = Buffer.alloc(width);
-        integer(field.modulus - 1n, 16).copy(data);
+        unsigned(field.modulus - 1n, 16).copy(data);
         const leaf = record(true, 'leaf', [
-            integer(stage, 4),
-            integer(position, 4),
+            unsigned(stage, 4),
+            unsigned(position, 4),
             Buffer.alloc(128, 19),
             data,
         ]);
@@ -138,8 +129,8 @@ const fixture = (entry: ProofRelationCatalogueEntry, rounds = 21) => {
             const sibling = Buffer.alloc(64, level + stage + 31);
             const pair = node % 2 === 0 ? [digest, sibling] : [sibling, digest];
             const next = record(true, 'node', [
-                integer(stage, 4),
-                integer(level, 4),
+                unsigned(stage, 4),
+                unsigned(level, 4),
                 ...pair,
             ]);
             if (level === 1) parent = next;
@@ -162,7 +153,7 @@ const fixture = (entry: ProofRelationCatalogueEntry, rounds = 21) => {
         const verifier = record(
             false,
             'verifier-message',
-            [context.output, state, integer(round, 4)],
+            [context.output, state, unsigned(round, 4)],
             524288,
         );
         verifiers.push(verifier);
@@ -178,7 +169,7 @@ const fixture = (entry: ProofRelationCatalogueEntry, rounds = 21) => {
                     : [Buffer.alloc(64, round + 79)];
         const response = record(true, 'message-root', [
             context.output,
-            integer(round, 4),
+            unsigned(round, 4),
             Buffer.alloc(128, round),
             ...parts,
         ]);
@@ -217,8 +208,8 @@ describe('raw proof transcript backward extraction', () => {
         const role = originalRole('setup');
         const records = [3, 4].map((value) => {
             const input = frame(role, true, 'node', [
-                integer(0, 4),
-                integer(1, 4),
+                unsigned(0, 4),
+                unsigned(1, 4),
                 Buffer.alloc(64, value),
                 Buffer.alloc(64, 11),
             ]);
@@ -388,7 +379,7 @@ describe('raw proof transcript backward extraction', () => {
         const nonzeroInitial = Buffer.alloc(width);
         nonzeroInitial[width - 1] = 1;
         const scalar = Buffer.concat([
-            integer(field.modulus, 16),
+            unsigned(field.modulus, 16),
             Buffer.alloc(32),
         ]);
         const changed: [RawProofHashRecord, Buffer][] = [
@@ -426,7 +417,7 @@ describe('raw proof transcript backward extraction', () => {
                 frame(value.role, false, 'verifier-message', [
                     value.context.output,
                     stateBeforeSecond,
-                    integer(3, 4),
+                    unsigned(3, 4),
                 ]),
             ],
             [
@@ -434,14 +425,14 @@ describe('raw proof transcript backward extraction', () => {
                 frame(value.role, false, 'verifier-message', [
                     value.context.output,
                     nonzeroInitial,
-                    integer(1, 4),
+                    unsigned(1, 4),
                 ]),
             ],
             [
                 value.messageRoots[1],
                 frame(value.role, true, 'message-root', [
                     value.context.output,
-                    integer(1, 4),
+                    unsigned(1, 4),
                     Buffer.alloc(128, 2),
                     ...value.responses[1],
                 ]),
@@ -450,7 +441,7 @@ describe('raw proof transcript backward extraction', () => {
                 value.messageRoots[1],
                 frame(value.role, true, 'message-root', [
                     value.context.output,
-                    integer(2, 4),
+                    unsigned(2, 4),
                     Buffer.alloc(128, 2),
                     value.responses[1][0],
                 ]),
@@ -459,7 +450,7 @@ describe('raw proof transcript backward extraction', () => {
                 value.messageRoots[1],
                 frame(value.role, true, 'message-root', [
                     value.context.output,
-                    integer(2, 4),
+                    unsigned(2, 4),
                     Buffer.alloc(128, 2),
                     value.responses[1][0],
                     scalar,
@@ -478,8 +469,8 @@ describe('raw proof transcript backward extraction', () => {
         const honestRole = originalRole('release', honestOwner);
         const collision = [0, 1].map((stage) => ({
             input: frame(honestRole, true, 'node', [
-                integer(stage, 4),
-                integer(1, 4),
+                unsigned(stage, 4),
+                unsigned(1, 4),
                 Buffer.alloc(64),
                 Buffer.alloc(64),
             ]),
@@ -517,13 +508,13 @@ describe('raw proof transcript backward extraction', () => {
             );
         const leafWith = (stage: number, position: number, data: Buffer) =>
             frame(value.role, true, 'leaf', [
-                integer(stage, 4),
-                integer(position, 4),
+                unsigned(stage, 4),
+                unsigned(position, 4),
                 Buffer.alloc(128, 19),
                 data,
             ]);
         const noncanonical = Buffer.from(leaf.data);
-        integer(field.modulus, 16).copy(noncanonical);
+        unsigned(field.modulus, 16).copy(noncanonical);
         for (const input of [
             leafWith(1, leaf.position, leaf.data),
             leafWith(0, leaf.position + 1, leaf.data),
@@ -554,8 +545,8 @@ describe('raw proof transcript backward extraction', () => {
             )?.oracles[0].leaf(leaf.position),
         ).toBeUndefined();
         const unusable = frame(value.role, true, 'node', [
-            integer(0xffffffff, 4),
-            integer(0, 4),
+            unsigned(0xffffffff, 4),
+            unsigned(0, 4),
             Buffer.alloc(64),
             Buffer.alloc(64),
         ]);
@@ -572,7 +563,12 @@ describe('raw proof transcript backward extraction', () => {
             originalRole('release', 'cd'.repeat(64)),
             true,
             'node',
-            [integer(0, 4), integer(1, 4), Buffer.alloc(64), Buffer.alloc(64)],
+            [
+                unsigned(0, 4),
+                unsigned(1, 4),
+                Buffer.alloc(64),
+                Buffer.alloc(64),
+            ],
         );
         expect(
             extractRawProofPrefix(

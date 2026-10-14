@@ -3,6 +3,14 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 import {
+    ascii,
+    item,
+    itemType,
+    tuple,
+    unsigned,
+    variable,
+} from '#tests/node/protocol/reference/canonical-tuple.js';
+import {
     compileProofHashDomainCensus,
     hasProofHashLayout,
     isProofChallengeInput,
@@ -18,27 +26,15 @@ import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-
 import { deriveSupportedProfile } from '#tests/supported-profile-model.js';
 
 const field = compileSmallLimbProofFieldCensus();
-const integer = (value: number, bytes = 4) => {
-    const result = Buffer.alloc(bytes);
-    result.writeUIntLE(value, 0, bytes);
-    return result;
-};
-const item = (type: number, value: Buffer) =>
-    Buffer.concat([integer(type, 2), integer(value.length), value]);
-const ascii = (value: string) =>
-    item(2, Buffer.concat([integer(value.length), Buffer.from(value)]));
 const owner = 'ab'.repeat(64);
 const role = (purpose: string, release = false) =>
-    Buffer.concat([
-        integer(1, 2),
-        integer(1, 2),
-        integer(release ? 6 : 5),
+    tuple([
         ascii(purpose),
         ascii(owner),
         ...Array.from({ length: release ? 3 : 2 }, () =>
-            item(6, Buffer.alloc(64)),
+            item(itemType.hash512, Buffer.alloc(64)),
         ),
-        item(3, integer(1, 2)),
+        item(itemType.unsigned16, unsigned(1, 2)),
     ]);
 const roles = {
     setup: role('sealed-lattice/setup-contribution/v3'),
@@ -59,7 +55,7 @@ const frame = (
             Buffer.from(`bounded-proof/${domain}`),
             roles[purpose],
             ...parts,
-        ].flatMap((part) => [integer(part.length), part]),
+        ].map((part) => variable(part)),
     ]);
 };
 
@@ -86,7 +82,7 @@ describe('fixed three-purpose raw-domain catalogue', () => {
                 const input = frame(entry.role, false, 'verifier-message', [
                     Buffer.alloc(64),
                     Buffer.alloc(Number(entry.messageBytes)),
-                    integer(1),
+                    unsigned(1, 4),
                 ]);
                 const parsed = parseProofHashInput(input)!;
                 expect(parsed.purpose).toBe(entry.role);
@@ -132,7 +128,7 @@ describe('fixed three-purpose raw-domain catalogue', () => {
             frame('release', false, 'verifier-message', [
                 Buffer.alloc(64),
                 Buffer.alloc(262144),
-                integer(0xffffffff),
+                unsigned(0xffffffff, 4),
             ]),
         )!;
         expect(hasProofHashLayout(malformed)).toBe(false);
@@ -178,14 +174,14 @@ describe('fixed three-purpose raw-domain catalogue', () => {
                 [
                     65536, 704, 1409, 262144, 131071, 2, 262144, 65536, 331, 24,
                     375, 1024, 256, 112, 96, 16, 7, 32,
-                ].map((value) => integer(value)),
+                ].map((value) => unsigned(value, 4)),
             ),
         );
         expect(completion[1].encodedParameters.subarray(28, 80)).toEqual(
             Buffer.concat(
                 [
                     27, 5, 32, 1024, 256, 32768, 65536, 27, 28, 29, 30, 20, 31,
-                ].map((value) => integer(value)),
+                ].map((value) => unsigned(value, 4)),
             ),
         );
         expect(completion[2].encodedParameters.subarray(28, 128)).toEqual(
@@ -216,14 +212,14 @@ describe('fixed three-purpose raw-domain catalogue', () => {
                     998244353,
                     20,
                     Number((field.modulus * 998244353n) & 0xffffffffn),
-                ].map((value) => integer(value)),
+                ].map((value) => unsigned(value, 4)),
             ),
         );
         expect(source).toContain('pub zero_product_pairs: Vec<(usize, usize)>');
         expect(source).toContain('pub narrow: Vec<(usize, u128)>');
         expect(
             completion[0].encodedParameters.subarray(-44 * 8, -43 * 8),
-        ).toEqual(Buffer.concat([integer(30), integer(512)]));
+        ).toEqual(Buffer.concat([unsigned(30, 4), unsigned(512, 4)]));
         // Those generic fields are not a public constructor input here.
         expect(
             new Set(proofRelationCatalogue().map((entry) => entry.role)),

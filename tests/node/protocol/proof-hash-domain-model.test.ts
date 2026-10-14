@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+    ascii,
+    item,
+    itemType,
+    tuple,
+    unsigned,
+    variable,
+} from '#tests/node/protocol/reference/canonical-tuple.js';
+import {
     extractProofGraphPrefix,
     hasProofHashLayout,
     isProofChallengeInput,
@@ -15,40 +23,22 @@ import {
 // Independently maintained completion-profile ballot operands from the Rust relation descriptor,
 // original-PID role and native hash framing.
 // This builder shares no framing code with the recognizer under test.
-const number = (value: number) => {
-    const bytes = Buffer.alloc(4);
-    bytes.writeUInt32LE(value);
-    return bytes;
-};
-const item = (type: number, value: Buffer) => {
-    const header = Buffer.alloc(6);
-    header.writeUInt16LE(type);
-    header.writeUInt32LE(value.length, 2);
-    return Buffer.concat([header, value]);
-};
-const ascii = (value: string) =>
-    item(2, Buffer.concat([number(value.length), Buffer.from(value)]));
-const roleHeader = Buffer.alloc(8);
-roleHeader.writeUInt16LE(1);
-roleHeader.writeUInt16LE(1, 2);
-roleHeader.writeUInt32LE(5, 4);
-const role = Buffer.concat([
-    roleHeader,
+const role = tuple([
     ascii('sealed-lattice/ballot-proof/v3'),
     ascii('ab'.repeat(64)),
-    item(6, Buffer.alloc(64, 1)),
-    item(6, Buffer.alloc(64, 2)),
-    item(3, Buffer.alloc(2)),
+    item(itemType.hash512, Buffer.alloc(64, 1)),
+    item(itemType.hash512, Buffer.alloc(64, 2)),
+    item(itemType.unsigned16, Buffer.alloc(2)),
 ]);
 const fixedPrefix = Buffer.alloc(64);
 fixedPrefix.write('sealed-lattice/fixed-hash/v1');
-const frame = (fixed: boolean, name: string, fields: readonly Buffer[]) => {
-    const parts = [Buffer.from(`bounded-proof/${name}`), role, ...fields];
-    return Buffer.concat([
+const frame = (fixed: boolean, name: string, fields: readonly Buffer[]) =>
+    Buffer.concat([
         ...(fixed ? [fixedPrefix] : []),
-        ...parts.flatMap((part) => [number(part.length), part]),
+        ...[Buffer.from(`bounded-proof/${name}`), role, ...fields].map((part) =>
+            variable(part),
+        ),
     ]);
-};
 const context = Buffer.alloc(64, 11);
 const state = Buffer.concat([
     Buffer.alloc(64, 12),
@@ -71,8 +61,8 @@ describe('ballot hash domain correspondence model', () => {
             [
                 'leaf',
                 frame(true, 'leaf', [
-                    number(0),
-                    number(9),
+                    unsigned(0, 4),
+                    unsigned(9, 4),
                     Buffer.alloc(128),
                     Buffer.alloc(576),
                 ]),
@@ -81,8 +71,8 @@ describe('ballot hash domain correspondence model', () => {
             [
                 'node',
                 frame(true, 'node', [
-                    number(2),
-                    number(4),
+                    unsigned(2, 4),
+                    unsigned(4, 4),
                     Buffer.alloc(64, 21),
                     Buffer.alloc(64, 22),
                 ]),
@@ -92,7 +82,7 @@ describe('ballot hash domain correspondence model', () => {
                 'message-root',
                 frame(true, 'message-root', [
                     context,
-                    number(2),
+                    unsigned(2, 4),
                     Buffer.alloc(128),
                     Buffer.alloc(64, 23),
                     Buffer.alloc(48),
@@ -102,7 +92,11 @@ describe('ballot hash domain correspondence model', () => {
             ['statement', frame(true, 'statement', contextFields()), []],
             [
                 'verifier-message',
-                frame(false, 'verifier-message', [context, state, number(21)]),
+                frame(false, 'verifier-message', [
+                    context,
+                    state,
+                    unsigned(21, 4),
+                ]),
                 [11, 12, 13],
             ],
             [
@@ -143,8 +137,8 @@ describe('ballot hash domain correspondence model', () => {
         ]) {
             const parsed = parseProofHashInput(
                 frame(true, 'leaf', [
-                    number(stage),
-                    number(index),
+                    unsigned(stage, 4),
+                    unsigned(index, 4),
                     Buffer.alloc(128),
                     Buffer.alloc(width),
                 ]),
@@ -160,8 +154,8 @@ describe('ballot hash domain correspondence model', () => {
         ]) {
             const parsed = parseProofHashInput(
                 frame(true, 'leaf', [
-                    number(stage),
-                    number(index),
+                    unsigned(stage, 4),
+                    unsigned(index, 4),
                     Buffer.alloc(128),
                     Buffer.alloc(width),
                 ]),
@@ -174,24 +168,24 @@ describe('ballot hash domain correspondence model', () => {
     it('keeps opaque malformed fields inside the raw domain but refuses wrong layouts separately', () => {
         for (const input of [
             frame(true, 'leaf', [
-                number(0xffffffff),
-                number(0xffffffff),
+                unsigned(0xffffffff, 4),
+                unsigned(0xffffffff, 4),
                 Buffer.alloc(128),
                 Buffer.alloc(576, 255),
             ]),
             frame(true, 'node', [
-                number(0),
-                number(0),
+                unsigned(0, 4),
+                unsigned(0, 4),
                 Buffer.alloc(64),
                 Buffer.alloc(64),
             ]),
             frame(true, 'message-root', [
                 context,
-                number(2),
+                unsigned(2, 4),
                 Buffer.alloc(128),
                 Buffer.alloc(64),
             ]),
-            frame(false, 'verifier-message', [context, state, number(0)]),
+            frame(false, 'verifier-message', [context, state, unsigned(0, 4)]),
         ]) {
             const parsed = parseProofHashInput(input);
             expect(parsed).toBeDefined();
@@ -200,7 +194,7 @@ describe('ballot hash domain correspondence model', () => {
         const terminal = parseProofHashInput(
             frame(true, 'message-root', [
                 context,
-                number(20),
+                unsigned(20, 4),
                 Buffer.alloc(128),
                 Buffer.alloc(48, 255),
             ]),
@@ -231,8 +225,8 @@ describe('ballot hash domain correspondence model', () => {
 
     it('refuses framing and ASCII aliases without interpreting their caller', () => {
         const good = frame(true, 'leaf', [
-            number(0),
-            number(0),
+            unsigned(0, 4),
+            unsigned(0, 4),
             Buffer.alloc(128),
             Buffer.alloc(576),
         ]);
@@ -250,14 +244,14 @@ describe('ballot hash domain correspondence model', () => {
             Buffer.concat([good, Buffer.from([0])]),
             good.subarray(1),
             frame(false, 'leaf', [
-                number(0),
-                number(0),
+                unsigned(0, 4),
+                unsigned(0, 4),
                 Buffer.alloc(128),
                 Buffer.alloc(576),
             ]),
             frame(true, 'leaf', [
-                number(0),
-                number(0),
+                unsigned(0, 4),
+                unsigned(0, 4),
                 Buffer.alloc(128),
                 Buffer.alloc(145),
             ]),
@@ -284,7 +278,7 @@ describe('ballot hash domain correspondence model', () => {
 
     it('exposes the exact chain references rather than the hexadecimal owner encoding', () => {
         const verifier = parseProofHashInput(
-            frame(false, 'verifier-message', [context, state, number(4)]),
+            frame(false, 'verifier-message', [context, state, unsigned(4, 4)]),
         )!;
         expect(verifier.references.map((value) => value[0])).toEqual([
             11, 12, 13,

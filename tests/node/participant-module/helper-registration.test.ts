@@ -33,6 +33,13 @@ import {
     failureOf,
     shake,
 } from '#tests/node/participant-module/packaged-participant-fixture.js';
+import {
+    ascii,
+    item,
+    itemType,
+    tuple,
+    variable,
+} from '#tests/node/protocol/reference/canonical-tuple.js';
 import { participantRelayFixture } from '#tests/participant-relay-fixture.js';
 
 const registrationHelpers = useHelperWorkers();
@@ -137,25 +144,18 @@ const pollText = concatenate(
 );
 
 // Independent foundation tuple framing of the exact signed registration body.
-const registrationIdentity = (records: ReadonlyMap<number, Uint8Array>) => {
-    const variable = (type: number, bytes: Uint8Array) =>
-        concatenate(
-            unsigned16(type),
-            unsigned32(bytes.length + 4),
-            unsigned32(bytes.length),
-            bytes,
-        );
-    return createHash('shake256', { outputLength: 64 })
-        .update(concatenate(unsigned16(1), unsigned16(1), unsigned32(2)))
+const registrationIdentity = (records: ReadonlyMap<number, Uint8Array>) =>
+    createHash('shake256', { outputLength: 64 })
         .update(
-            variable(
-                2,
-                new TextEncoder().encode('sealed-lattice/registration-body/v2'),
-            ),
+            tuple([
+                ascii('sealed-lattice/registration-body/v2'),
+                item(
+                    itemType.rawBytes,
+                    variable(records.get(dataKind.header)!),
+                ),
+            ]),
         )
-        .update(variable(1, records.get(dataKind.header)!))
         .digest('hex');
-};
 
 // A roster verifier's verdict on the registrations, streamed as the worker
 // streams them from its relay: the proposal body it accepts, or undefined
