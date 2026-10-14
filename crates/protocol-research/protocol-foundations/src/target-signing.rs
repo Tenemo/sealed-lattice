@@ -235,7 +235,7 @@ impl Credential {
     }
     /// Volatile one-shot signing beneath the authenticated participant root.
     /// The enrollment bridge supplies a genuinely evaluated target and commits
-    /// its exact exact body before reaching this method.
+    /// its exact body before reaching this method.
     pub fn sign_target(
         &mut self,
         owner: &RetainedSetupOwner,

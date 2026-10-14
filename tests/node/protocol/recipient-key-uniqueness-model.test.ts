@@ -95,7 +95,7 @@ const differenceCollisions = (
 };
 
 describe('recipient key uniqueness under uniform common randomness', () => {
-    it('uses the current registration ring instead of the historical sharing ring', () => {
+    it('uses the registration ring, not the sharing ring', () => {
         const bound = compileRecipientKeyUniquenessBound();
         expect(bound.polynomialModulusDegree).toBe(65_536n);
         expect(bound.primeModulus).toBe((1n << 128n) - 133n * (1n << 64n) + 1n);

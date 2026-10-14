@@ -11,7 +11,7 @@ import {
     uniformSelectedKeyEmbedding,
 } from '#tests/setup-selection-model.js';
 
-describe('contribution selection candidate', () => {
+describe('setup selection', () => {
     it('preserves the complete uniform prefix for each fixed guess before adaptive selection', () => {
         for (const modulus of [5, 17, 31]) {
             const result = uniformSelectedKeyEmbedding(modulus);

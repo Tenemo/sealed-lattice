@@ -171,7 +171,8 @@ pub struct SetupShape {
     pub sparse_supports: Vec<(usize, usize)>,
 }
 
-/// Coefficient families of the setup statement.
+/// Coefficient families of the setup and ballot statements, each with its own
+/// modulus and ring degree.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Family {
     Fhe,

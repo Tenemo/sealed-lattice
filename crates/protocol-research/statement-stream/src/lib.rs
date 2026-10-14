@@ -155,8 +155,8 @@ pub enum Error {
     Binding,
 }
 
-// This public-data experiment computes one full-degree affine convolution
-// adjoint. It does not verify a setup proof or create voting authority.
+// Computes one full-degree affine convolution adjoint of a streamed
+// polynomial. It verifies no proof and creates no voting authority.
 // Each canonical coefficient is fingerprinted in limbs of radix_bits bits,
 // the limbs of the equations that use it.
 pub struct PolynomialStream {

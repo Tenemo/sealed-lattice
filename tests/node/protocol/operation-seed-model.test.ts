@@ -139,7 +139,7 @@ describe('original private-randomness scope populations', () => {
         expect(worst.maximumReadScopes).toBeGreaterThan(worst.maximumSeedDraws);
     });
 
-    it('binds the domain and seed-width operands to the current source owners', async () => {
+    it('binds the domain and seed-width operands to their source owners', async () => {
         const operation = await readRustSource(
             'crates/protocol-research/participant-module/src/operation-random.rs',
         );

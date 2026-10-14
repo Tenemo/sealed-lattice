@@ -144,7 +144,7 @@ describe('prover Merkle opening work', () => {
         expect(opened.saltExpansions).toBe(opened.restoredLeaves + 1);
     });
 
-    it('binds the omission and retention policy to the current producer', async () => {
+    it('binds the omission and retention policy to its producer', async () => {
         const [tree, oracles, linear, fri] = await Promise.all([
             readRustSource('crates/protocol-research/word-proof/src/tree.rs'),
             readRustSource(

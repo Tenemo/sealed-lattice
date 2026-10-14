@@ -1,4 +1,4 @@
-//! Purpose-labelled identities through the sole foundation SHAKE256 framing.
+//! Purpose-labelled SHAKE256 identities over the foundation's canonical tuple framing.
 
 use crate::{
     Error,

@@ -19,7 +19,7 @@ import {
 } from '#tests/word-proof-reference/transcript.js';
 
 describe('wide verifier messages and short authentication tags', () => {
-    it('derives the current three source families separately before taking a round-error maximum', () => {
+    it('derives the three source families separately before taking a round-error maximum', () => {
         const value = compileProofRoundErrorCensus(completionProfile());
         expect(
             value.roles.map((role) => [

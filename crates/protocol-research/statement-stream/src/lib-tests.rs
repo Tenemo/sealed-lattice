@@ -75,7 +75,7 @@ fn refuses_moduli_whose_limbs_exceed_the_column_sum_bound() {
 }
 
 #[test]
-fn rejects_partial_records_and_forbidden_lengths_without_output() {
+fn refuses_partial_records_and_forbidden_lengths_without_output() {
     let mut stream = auxiliary_stream();
     stream.push(&[0; 5]).unwrap();
     assert_eq!(stream.finish_value(), Err(Error::Incomplete));

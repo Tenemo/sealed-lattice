@@ -37,7 +37,7 @@ pub const PROOF_HEADER_BYTES: usize = 4
     + EXTENSION_BYTES;
 /// Challenges fill messages of this many bytes unless a relation needs more.
 const MESSAGE_BYTES: usize = 262_144;
-/// Registration, ballot and release statement headers.
+/// Ballot and release statement header bytes.
 pub const BALLOT_HEADER_BYTES: usize = 4 + 2 * DIGEST_BYTES + 2 + 1 + 1;
 pub const RELEASE_HEADER_BYTES: usize = 4 + 3 * DIGEST_BYTES + 2;
 /// The magic that opens a release statement's header.

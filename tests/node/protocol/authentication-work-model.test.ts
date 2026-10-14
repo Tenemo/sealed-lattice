@@ -304,7 +304,7 @@ describe('authentication frame accounting', () => {
 });
 
 describe('complete participant authentication accounting', () => {
-    it('keeps all actual signature purposes in the current hash-input inventory', () => {
+    it('lists every signature purpose in the hash-input inventory', () => {
         expect(
             compileSignatureHashInputs()
                 .rows.slice(8)

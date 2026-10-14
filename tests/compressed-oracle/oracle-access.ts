@@ -105,8 +105,8 @@ export function compileOracleCellController(
     );
     const inputLengthBits = Number(work.inputLengthBits),
         outputLengthBits = Number(work.outputLengthBits),
-        cx = Number(work.inputComparisonBits),
-        cy = Number(work.outputComparisonBits),
+        inputComparisonBits = Number(work.inputComparisonBits),
+        outputComparisonBits = Number(work.outputComparisonBits),
         prefixLengthBits = Number(work.prefixLengthBits),
         builder = new Builder(Number(work.inputBits)),
         one = builder.not(builder.zero);
@@ -114,10 +114,10 @@ export function compileOracleCellController(
         Array.from({ length: width }, (_, bit) =>
             Math.floor(value / 2 ** bit) % 2 ? one : builder.zero,
         );
-    const inputLength = Array.from({ length: cx }, (_, bit) =>
+    const inputLength = Array.from({ length: inputComparisonBits }, (_, bit) =>
             bit < inputLengthBits ? inputCapacity + bit : builder.zero,
         ),
-        outputLength = Array.from({ length: cy }, (_, bit) =>
+        outputLength = Array.from({ length: outputComparisonBits }, (_, bit) =>
             bit < outputLengthBits
                 ? inputCapacity + inputLengthBits + bit
                 : builder.zero,
@@ -125,21 +125,27 @@ export function compileOracleCellController(
     const lower = inputClassUpper === 1 ? 0 : inputClassUpper / 2 + 1;
     const validInput = builder.less(
             inputLength,
-            constant(inputCapacity + 1, cx),
+            constant(inputCapacity + 1, inputComparisonBits),
         ),
         aboveLower = builder.not(
-            builder.less(inputLength, constant(lower, cx)),
+            builder.less(inputLength, constant(lower, inputComparisonBits)),
         ),
         belowUpper = builder.less(
             inputLength,
-            constant(inputClassUpper + 1, cx),
+            constant(inputClassUpper + 1, inputComparisonBits),
         ),
         inside = builder.and(builder.and(validInput, aboveLower), belowUpper);
     const key = [];
     for (let bit = 0; bit <= inputClassUpper; bit++) {
         if (bit < inputCapacity) {
-            const atEnd = builder.equal(inputLength, constant(bit, cx)),
-                beforeEnd = builder.less(constant(bit, cx), inputLength);
+            const atEnd = builder.equal(
+                    inputLength,
+                    constant(bit, inputComparisonBits),
+                ),
+                beforeEnd = builder.less(
+                    constant(bit, inputComparisonBits),
+                    inputLength,
+                );
             key.push(
                 builder.and(
                     inside,
@@ -150,22 +156,28 @@ export function compileOracleCellController(
             key.push(
                 builder.and(
                     inside,
-                    builder.equal(inputLength, constant(bit, cx)),
+                    builder.equal(
+                        inputLength,
+                        constant(bit, inputComparisonBits),
+                    ),
                 ),
             );
         else key.push(builder.zero);
     }
     const validOutput = builder.less(
             outputLength,
-            constant(outputCapacity + 1, cy),
+            constant(outputCapacity + 1, outputComparisonBits),
         ),
         pastEnd = builder.not(
-            builder.less(outputLength, constant(outputStart + outputSize, cy)),
+            builder.less(
+                outputLength,
+                constant(outputStart + outputSize, outputComparisonBits),
+            ),
         ),
-        start = constant(outputStart, cy),
+        start = constant(outputStart, outputComparisonBits),
         difference: number[] = [];
     let borrow = builder.zero;
-    for (let bit = 0; bit < cy; bit++) {
+    for (let bit = 0; bit < outputComparisonBits; bit++) {
         difference.push(
             builder.xor(builder.xor(outputLength[bit], start[bit]), borrow),
         );
@@ -233,14 +245,24 @@ export function oracleSliceRoutingWork(
     );
     const inputLengthBits = integerWidth(inputCapacity),
         outputLengthBits = integerWidth(outputCapacity),
-        cx = integerWidth(inputCapacity + 1n),
-        cy = integerWidth(outputCapacity + 1n);
-    let computeGates = 6n + 7n * cx + 7n * cy + outputLengthBits,
-        cleanWorkQubits = 5n + 4n * cx + 4n * cy + outputLengthBits;
+        inputComparisonBits = integerWidth(inputCapacity + 1n),
+        outputComparisonBits = integerWidth(outputCapacity + 1n);
+    let computeGates =
+            6n +
+            7n * inputComparisonBits +
+            7n * outputComparisonBits +
+            outputLengthBits,
+        cleanWorkQubits =
+            5n +
+            4n * inputComparisonBits +
+            4n * outputComparisonBits +
+            outputLengthBits;
     for (const length of prefixLengths)
         if (length <= inputCapacity) {
-            computeGates += 11n + 5n * length + 7n * cx + outputLengthBits;
-            cleanWorkQubits += 7n + 3n * length + 4n * cx + outputLengthBits;
+            computeGates +=
+                11n + 5n * length + 7n * inputComparisonBits + outputLengthBits;
+            cleanWorkQubits +=
+                7n + 3n * length + 4n * inputComparisonBits + outputLengthBits;
         }
     const inputBits = inputCapacity + inputLengthBits + outputLengthBits,
         outputBits = BigInt(prefixLengths.length + 1) * outputLengthBits;
@@ -291,23 +313,29 @@ export function compileOracleSliceRouting(
         ),
         builder = new Builder(Number(work.inputBits)),
         one = builder.not(builder.zero),
-        cx = Number(integerWidth(BigInt(inputCapacity + 1))),
-        cy = Number(integerWidth(BigInt(outputCapacity + 1))),
+        inputComparisonBits = Number(integerWidth(BigInt(inputCapacity + 1))),
+        outputComparisonBits = Number(integerWidth(BigInt(outputCapacity + 1))),
         a = Number(work.inputLengthBits),
         b = Number(work.outputLengthBits),
         constant = (value: number, width: number) =>
             Array.from({ length: width }, (_, bit) =>
                 Math.floor(value / 2 ** bit) % 2 ? one : builder.zero,
             ),
-        inputLength = Array.from({ length: cx }, (_, bit) =>
+        inputLength = Array.from({ length: inputComparisonBits }, (_, bit) =>
             bit < a ? inputCapacity + bit : builder.zero,
         ),
-        outputLength = Array.from({ length: cy }, (_, bit) =>
+        outputLength = Array.from({ length: outputComparisonBits }, (_, bit) =>
             bit < b ? inputCapacity + a + bit : builder.zero,
         ),
         valid = builder.and(
-            builder.less(inputLength, constant(inputCapacity + 1, cx)),
-            builder.less(outputLength, constant(outputCapacity + 1, cy)),
+            builder.less(
+                inputLength,
+                constant(inputCapacity + 1, inputComparisonBits),
+            ),
+            builder.less(
+                outputLength,
+                constant(outputCapacity + 1, outputComparisonBits),
+            ),
         );
     const outputs: number[][] = [];
     let seen = builder.zero;
@@ -321,7 +349,12 @@ export function compileOracleSliceRouting(
                 Array.from({ length: prefix.length }, (_, bit) => bit),
                 Array.from(prefix, (bit) => (bit ? one : builder.zero)),
             ),
-            builder.not(builder.less(inputLength, constant(prefix.length, cx))),
+            builder.not(
+                builder.less(
+                    inputLength,
+                    constant(prefix.length, inputComparisonBits),
+                ),
+            ),
         );
         seen = builder.or(seen, match);
         const selected = builder.and(valid, match);
@@ -381,10 +414,18 @@ export function oracleMaskRoutingWork(
     assert.ok(inputCapacity >= 0n && outputCapacity >= 0n);
     const inputLengthBits = integerWidth(inputCapacity);
     const outputLengthBits = integerWidth(outputCapacity);
-    const cx = integerWidth(inputCapacity + 1n);
-    const cy = integerWidth(outputCapacity + 1n);
-    let computeGates = 6n + 7n * cx + 7n * cy + outputLengthBits;
-    let cleanWorkQubits = 5n + 4n * cx + 4n * cy + outputLengthBits;
+    const inputComparisonBits = integerWidth(inputCapacity + 1n);
+    const outputComparisonBits = integerWidth(outputCapacity + 1n);
+    let computeGates =
+        6n +
+        7n * inputComparisonBits +
+        7n * outputComparisonBits +
+        outputLengthBits;
+    let cleanWorkQubits =
+        5n +
+        4n * inputComparisonBits +
+        4n * outputComparisonBits +
+        outputLengthBits;
     for (const mask of masks) {
         assert.ok(
             mask.inputLength >= 0n &&
@@ -393,9 +434,15 @@ export function oracleMaskRoutingWork(
         );
         if (mask.inputLength <= inputCapacity) {
             computeGates +=
-                11n + 5n * mask.comparedBits + 5n * cx + outputLengthBits;
+                11n +
+                5n * mask.comparedBits +
+                5n * inputComparisonBits +
+                outputLengthBits;
             cleanWorkQubits +=
-                7n + 3n * mask.comparedBits + 3n * cx + outputLengthBits;
+                7n +
+                3n * mask.comparedBits +
+                3n * inputComparisonBits +
+                outputLengthBits;
         }
     }
     const inputBits = inputCapacity + inputLengthBits + outputLengthBits;
@@ -464,23 +511,32 @@ export function compileOracleMaskRouting(
     );
     const builder = new Builder(Number(work.inputBits));
     const one = builder.not(builder.zero);
-    const cx = Number(integerWidth(BigInt(inputCapacity + 1)));
-    const cy = Number(integerWidth(BigInt(outputCapacity + 1)));
+    const inputComparisonBits = Number(integerWidth(BigInt(inputCapacity + 1)));
+    const outputComparisonBits = Number(
+        integerWidth(BigInt(outputCapacity + 1)),
+    );
     const a = Number(work.inputLengthBits);
     const b = Number(work.outputLengthBits);
     const constant = (value: number, width: number) =>
         Array.from({ length: width }, (_, bit) =>
             Math.floor(value / 2 ** bit) % 2 ? one : builder.zero,
         );
-    const inputLength = Array.from({ length: cx }, (_, bit) =>
+    const inputLength = Array.from({ length: inputComparisonBits }, (_, bit) =>
         bit < a ? inputCapacity + bit : builder.zero,
     );
-    const outputLength = Array.from({ length: cy }, (_, bit) =>
-        bit < b ? inputCapacity + a + bit : builder.zero,
+    const outputLength = Array.from(
+        { length: outputComparisonBits },
+        (_, bit) => (bit < b ? inputCapacity + a + bit : builder.zero),
     );
     const valid = builder.and(
-        builder.less(inputLength, constant(inputCapacity + 1, cx)),
-        builder.less(outputLength, constant(outputCapacity + 1, cy)),
+        builder.less(
+            inputLength,
+            constant(inputCapacity + 1, inputComparisonBits),
+        ),
+        builder.less(
+            outputLength,
+            constant(outputCapacity + 1, outputComparisonBits),
+        ),
     );
     const outputs: number[][] = [];
     let seen = builder.zero;
@@ -494,7 +550,10 @@ export function compileOracleMaskRouting(
                 mask.positions,
                 Array.from(mask.values, (bit) => (bit ? one : builder.zero)),
             ),
-            builder.equal(inputLength, constant(mask.inputLength, cx)),
+            builder.equal(
+                inputLength,
+                constant(mask.inputLength, inputComparisonBits),
+            ),
         );
         seen = builder.or(seen, match);
         const selected = builder.and(valid, match);
@@ -592,21 +651,27 @@ export function compileOraclePrefixReplacement(
             Array.from({ length: width }, (_, bit) =>
                 Math.floor(value / 2 ** bit) % 2 ? one : builder.zero,
             ),
-        cx = Number(work.inputComparisonBits),
-        cy = Number(work.outputComparisonBits),
-        inputLength = Array.from({ length: cx }, (_, bit) =>
+        inputComparisonBits = Number(work.inputComparisonBits),
+        outputComparisonBits = Number(work.outputComparisonBits),
+        inputLength = Array.from({ length: inputComparisonBits }, (_, bit) =>
             bit < Number(work.inputLengthBits)
                 ? inputCapacity + bit
                 : builder.zero,
         ),
-        outputLength = Array.from({ length: cy }, (_, bit) =>
+        outputLength = Array.from({ length: outputComparisonBits }, (_, bit) =>
             bit < Number(work.outputLengthBits)
                 ? inputCapacity + Number(work.inputLengthBits) + bit
                 : builder.zero,
         ),
         valid = builder.and(
-            builder.less(inputLength, constant(inputCapacity + 1, cx)),
-            builder.less(outputLength, constant(outputCapacity + 1, cy)),
+            builder.less(
+                inputLength,
+                constant(inputCapacity + 1, inputComparisonBits),
+            ),
+            builder.less(
+                outputLength,
+                constant(outputCapacity + 1, outputComparisonBits),
+            ),
         ),
         sourceStart =
             inputCapacity +
@@ -618,7 +683,10 @@ export function compileOraclePrefixReplacement(
     for (const replacement of replacements) {
         if (replacement.input.length > inputCapacity) continue;
         const match = builder.and(
-            builder.equal(inputLength, constant(replacement.input.length, cx)),
+            builder.equal(
+                inputLength,
+                constant(replacement.input.length, inputComparisonBits),
+            ),
             builder.equal(
                 Array.from(
                     { length: replacement.input.length },
@@ -644,7 +712,10 @@ export function compileOraclePrefixReplacement(
             builder.and(
                 valid,
                 builder.and(
-                    builder.less(constant(bit, cy), outputLength),
+                    builder.less(
+                        constant(bit, outputComparisonBits),
+                        outputLength,
+                    ),
                     value,
                 ),
             ),

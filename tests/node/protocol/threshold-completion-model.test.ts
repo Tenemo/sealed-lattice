@@ -38,7 +38,7 @@ const participantSets = (
     ).filter((participantSet) => admitsSize(memberCount(participantSet)));
 
 describe('threshold completion model', () => {
-    it('derives the thresholds and the current candidate post-setup census independently', () => {
+    it('derives the thresholds and the candidate post-setup census independently', () => {
         expect(thresholdProfileFor(10)).toMatchObject({
             participantCount: 10,
             maximumCorruptParticipantCount: 3,

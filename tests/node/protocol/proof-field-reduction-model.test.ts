@@ -39,7 +39,7 @@ describe('bounded proof-field reduction', () => {
         expect(failures).toEqual([]);
     });
 
-    it('derives the machine-width bounds from the current field owner', () => {
+    it('derives the machine-width bounds from the field owner', () => {
         const value = compileProofFieldReductionCensus();
         expect(value.maximumSmallFactor).toBe(17688n);
         expect(value.maximumFirstHigh).toBe(17821n);

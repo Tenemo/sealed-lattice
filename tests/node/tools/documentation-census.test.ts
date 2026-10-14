@@ -12,7 +12,7 @@ describe('documentation census generator', () => {
         rendered = renderDocumentationCensus();
     });
 
-    it('renders the current model owners', () => {
+    it('renders the section of each model owner', () => {
         for (const heading of [
             '## Threshold completion census',
             '## Threshold key-aggregation structural census',

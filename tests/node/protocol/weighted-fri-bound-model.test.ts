@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { compileWeightedFriBound } from '#tests/weighted-fri-bound-model.js';
 
 describe('weighted FRI transition arithmetic', () => {
-    it('checks the agreement premise exactly at the current threshold', () => {
+    it('checks the agreement premise exactly at its threshold', () => {
         const value = compileWeightedFriBound(1n << 18n, 193n, 256n);
         expect(value.analysisParameter).toBe(8n);
         expect(193n ** 2n * 512n).toBeGreaterThan(289n * 256n ** 2n);

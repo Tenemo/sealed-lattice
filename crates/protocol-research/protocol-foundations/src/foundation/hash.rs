@@ -53,7 +53,7 @@ impl fmt::Display for Hash512 {
     }
 }
 
-/// Hashes typed items through the sole foundation SHAKE256 framing.
+/// Hashes typed items with SHAKE256 over the foundation's canonical tuple framing.
 pub fn hash_foundation_tuple_512(
     domain: &str,
     items: &[CanonicalItem],

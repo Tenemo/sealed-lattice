@@ -737,8 +737,8 @@ pub fn prover_operator_plan(profile: Profile, alpha: Element) -> Result<ProverOp
     })
 }
 
-// Arithmetic output for one fully parsed statement. This is not setup proof
-// acceptance and cannot create a voting capability.
+// Arithmetic output for one fully parsed statement. It is not proof
+// acceptance and creates no voting capability.
 pub struct StatementOutput {
     pub target: Element,
     pub lookup_weight: Element,
