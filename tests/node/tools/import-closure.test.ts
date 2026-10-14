@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -95,4 +95,25 @@ describe('import closure', () => {
                 );
             },
         ));
+
+    // The type checker and the test runner resolve the subpath imports
+    // through the TypeScript paths, which must name the same targets.
+    it('mirrors the subpath imports in the TypeScript paths', async () => {
+        const read = async (file: string) =>
+            JSON.parse(await readFile(file, 'utf8')) as Record<string, unknown>;
+        const { imports } = (await read('package.json')) as {
+            imports: Record<string, string>;
+        };
+        const { compilerOptions } = (await read('tsconfig.base.json')) as {
+            compilerOptions: { paths: Record<string, readonly string[]> };
+        };
+        expect(compilerOptions.paths).toEqual(
+            Object.fromEntries(
+                Object.entries(imports).map(([pattern, target]) => [
+                    pattern,
+                    [target],
+                ]),
+            ),
+        );
+    });
 });

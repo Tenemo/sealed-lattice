@@ -88,25 +88,9 @@ for (const diagnosticDirectoryPath of [
     }
 }
 
-const rootPrivateAliases = [
-    {
-        find: '#packages',
-        replacement: resolveFromRepoRoot('packages'),
-    },
-    {
-        find: '#tests',
-        replacement: resolveFromRepoRoot('tests'),
-    },
-    {
-        find: '#tools',
-        replacement: resolveFromRepoRoot('tools'),
-    },
-] as const;
-
-const testResolve = {
-    alias: rootPrivateAliases,
-    tsconfigPaths: true,
-} as const;
+// The repository-private subpath imports resolve through the TypeScript
+// paths that mirror them.
+const testResolve = { tsconfigPaths: true } as const;
 
 // A run log keeps each project's attachments, including failure screenshots,
 // inside its run directory instead of the default repository-root directory.
@@ -196,11 +180,6 @@ const makeBrowserProject = ({
                 provider: playwright(),
                 headless: true,
                 instances,
-                // Playwright writes active .network chunks to one project-level
-                // directory before Vitest can add worker identity. Routine
-                // coverage therefore keeps tracing off. Each manual evidence
-                // command selects one isolated instance.
-                trace: 'off' as const,
                 ...(projectAttachmentDirectoryPath === undefined
                     ? {}
                     : {

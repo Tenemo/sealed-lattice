@@ -4,7 +4,6 @@
         ".": {
             "entry": [
                 "tests/**/*.test.ts",
-                "tools/ci/sdk-package-tsdown.config.ts",
                 // Browser entry bundled by the guarded preparation runner.
                 "tools/ci/participant-preparation-storage.ts",
                 // Workers the bounded output screens start by path.

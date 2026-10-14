@@ -49,10 +49,8 @@ const packageSourceImportPatterns = [
 
 export default defineConfig(
     globalIgnores([
-        '.tmp*/**',
         'logs/**',
         'temp/**',
-        'node_modules/**',
         'reference-projects/**',
         '**/dist/**',
         '**/target/**',
@@ -108,17 +106,7 @@ export default defineConfig(
                     argsIgnorePattern: '^_',
                 },
             ],
-            'prettier/prettier': [
-                'error',
-                {
-                    useTabs: false,
-                    semi: true,
-                    singleQuote: true,
-                    trailingComma: 'all',
-                    arrowParens: 'always',
-                    endOfLine: 'lf',
-                },
-            ],
+            'prettier/prettier': 'error',
             'import-x/no-extraneous-dependencies': [
                 'error',
                 { devDependencies: true },
@@ -185,11 +173,6 @@ export default defineConfig(
         },
         plugins: {
             vitest: vitestPlugin,
-        },
-        settings: {
-            vitest: {
-                typecheck: true,
-            },
         },
         rules: {
             ...vitestPlugin.configs.recommended.rules,

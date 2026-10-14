@@ -6,7 +6,6 @@
     "javascript.validate.enable": false,
 
     "eslint.format.enable": true,
-    "eslint.useFlatConfig": true,
     "[javascript]": {
         "editor.defaultFormatter": "dbaeumer.vscode-eslint"
     },

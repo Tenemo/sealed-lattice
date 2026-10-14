@@ -46,28 +46,28 @@ pnpm add sealed-lattice
 ## Usage
 
 ```typescript
-import { openParticipant } from "sealed-lattice";
+import { openParticipant } from 'sealed-lattice';
 
 const participant = openParticipant({
-    namespace: "board-vote",
-    relay: "https://relay.example/polls/",
+    namespace: 'board-vote',
+    relay: 'https://relay.example/polls/',
 });
 const created = await participant.run({
-    operation: "create",
+    operation: 'create',
     parameters: {
-        role: "organizer",
-        question: "Which proposals should be adopted?",
+        role: 'organizer',
+        question: 'Which proposals should be adopted?',
         options: Array.from(
             { length: 10 },
             (_unused, optionIndex) => `Proposal ${optionIndex + 1}`,
         ),
         topCount: 3,
         maximumParticipants: 10,
-        username: "Organizer",
+        username: 'Organizer',
     },
 });
 
-if (created.status === "completed") {
+if (created.status === 'completed') {
     console.log(created.details.poll, created.details.options);
 }
 ```
@@ -122,12 +122,12 @@ The relay is an untrusted HTTP service at the given base URL, which ends with a 
 | Route | Request body | Response |
 | --- | --- | --- |
 | `POST chunks` | At most one mebibyte | The stored chunk's 16-byte locator |
-| `GET chunk/<locator>` | | The chunk's bytes |
+| `GET chunk/<locator>` |  | The chunk's bytes |
 | `POST candidates/<key>` | A manifest of at most one mebibyte | The stored candidate's 16-byte locator, then its entry index in the key's list as a little-endian unsigned 64-bit integer |
-| `GET candidate/<locator>` | | The candidate's manifest |
-| `GET candidates/<key>?offset=<index>` | | The list's total entry count as a little-endian unsigned 64-bit integer, the page's entry count as a little-endian unsigned 32-bit integer, and at most 64 candidate locators in insertion order from the index |
+| `GET candidate/<locator>` |  | The candidate's manifest |
+| `GET candidates/<key>?offset=<index>` |  | The list's total entry count as a little-endian unsigned 64-bit integer, the page's entry count as a little-endian unsigned 32-bit integer, and at most 64 candidate locators in insertion order from the index |
 | `POST offers/<position>` | One 64-byte body identity | Success; an identical announcement is idempotent |
-| `GET offers/<position>?offset=<index>` | | The same page form, whose entries are at most 64 body identities |
+| `GET offers/<position>?offset=<index>` |  | The same page form, whose entries are at most 64 body identities |
 
 A locator appears in a path as 32 lower-case hexadecimal digits. A key has at most 256 characters in slash-separated segments of lower-case letters and digits with inner dots and hyphens. A relay on another origin must allow the page's cross-origin requests. Any failed or malformed response leaves the operation pending. A publishing participant reads back every chunk, manifest and discovery entry it publishes and treats a different readback as a failure.
 
