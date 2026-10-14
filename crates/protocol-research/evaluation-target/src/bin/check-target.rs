@@ -249,20 +249,24 @@ impl WorkingStore for Spool {
 }
 fn main() -> io::Result<()> {
     let arguments: Vec<_> = std::env::args().skip(1).collect();
-    if !(3..=5).contains(&arguments.len())
+    if !(4..=6).contains(&arguments.len())
         || arguments
-            .get(4)
+            .get(5)
             .is_some_and(|value| value != "certificate" && value != "release")
     {
         return Err(refusal(
-            "supply the ceremony directory, a new scratch directory, a new result directory, an optional public completion directory and an optional certificate or release selector",
+            "supply the ceremony directory, the runtime identity file, a new scratch directory, a new result directory, an optional public completion directory and an optional certificate or release selector",
         ));
     }
     let started = Instant::now();
     let mut work = Work::default();
     let ceremony = Path::new(&arguments[0]);
-    let scratch = Path::new(&arguments[1]);
-    let output = Path::new(&arguments[2]);
+    let runtime = bounded(Path::new(&arguments[1]), 64, &mut work)?;
+    if runtime.len() != 64 {
+        return Err(refusal("runtime length"));
+    }
+    let scratch = Path::new(&arguments[2]);
+    let output = Path::new(&arguments[3]);
     fs::create_dir(output)?;
     fs::create_dir(scratch)?;
     let count = (0..=*Profile::participant_range().end())
@@ -271,10 +275,13 @@ fn main() -> io::Result<()> {
     if !Profile::participant_range().contains(&count) {
         return Err(refusal("participant count"));
     }
-    let mut control = bounded(ceremony.join("context.bin"), 128, &mut work)?;
-    if control.len() != 128 {
+    // The ceremony supplies only its poll identity, which the definition
+    // must verify under the runtime the caller names.
+    let context = bounded(ceremony.join("context.bin"), 128, &mut work)?;
+    if context.len() != 128 {
         return Err(refusal("context length"));
     }
+    let mut control = [&context[..64], &runtime[..]].concat();
     let definition = bounded(ceremony.join("poll-definition.bin"), 1 << 20, &mut work)?;
     control.extend((count as u16).to_le_bytes());
     control.extend((definition.len() as u32).to_le_bytes());
@@ -716,8 +723,8 @@ fn main() -> io::Result<()> {
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect::<String>();
-    if let Some(directory) = arguments.get(3) {
-        let stage = match arguments.get(4).map(String::as_str) {
+    if let Some(directory) = arguments.get(4) {
+        let stage = match arguments.get(5).map(String::as_str) {
             Some("certificate") => completion::Stage::Certificate,
             Some("release") => completion::Stage::Release,
             _ => completion::Stage::Terminal,

@@ -6,6 +6,7 @@ import { readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 
+import { participantRuntimeIdentity } from '#tools/ci/build-participant-module.js';
 import { repositoryRoot, toolArguments } from '#tools/ci/command-line.js';
 import {
     readEvidenceRenewalRecord,
@@ -17,7 +18,10 @@ import {
     lifecycleMatrixStepNames,
     stepScriptArguments,
 } from '#tools/ci/evidence-renewal-steps.js';
-import { runWithLocalRunLog } from '#tools/ci/local-run-log.js';
+import {
+    runArtifactDirectoryPath,
+    runWithLocalRunLog,
+} from '#tools/ci/local-run-log.js';
 import { readParticipantArtifactResources } from '#tools/ci/participant-artifact-resources.js';
 import {
     participantOperationEvents,
@@ -447,13 +451,47 @@ const auditCase = async (
     }
 };
 
-// The renewed runtime's archived files beside the built package files they
-// must equal.
-const runtimeFiles = [
-    ['participant.wasm', 'participant.wasm'],
-    ['worker.js', 'participant-worker.js'],
-    ['index.js', 'index.js'],
-] as const;
+// A run ran the renewed checkout's runtime when its own source manifest and
+// archived module and worker recompute the checkout's runtime identity and
+// its archived SDK entry has the checkout's digest.
+export const auditArchivedRuntime = async (
+    runDirectoryPath: string,
+    checkout: Readonly<{
+        identity: Readonly<{ runtime: string }>;
+        sdkDigest: string;
+    }>,
+) => {
+    const run = path.basename(runDirectoryPath),
+        artifacts = runArtifactDirectoryPath(runDirectoryPath);
+    const [manifest, module, worker, entry] = await Promise.all([
+        readFile(path.join(runDirectoryPath, 'source-manifest.json')),
+        ...['participant.wasm', 'worker.js', 'index.js'].map((file) =>
+            readFile(path.join(artifacts, file)),
+        ),
+    ]);
+    assert.equal(
+        participantRuntimeIdentity(manifest, module, worker).runtime,
+        checkout.identity.runtime,
+        `${run} ran another runtime than the renewed checkout's.`,
+    );
+    assert.equal(
+        digest(entry),
+        checkout.sdkDigest,
+        `${run} ran another SDK entry than the renewed checkout's.`,
+    );
+    return {
+        compiledInputs: (
+            JSON.parse(manifest.toString('utf8')) as {
+                files: readonly unknown[];
+            }
+        ).files.length,
+        runtime: [
+            { file: 'participant.wasm', sha512: digest(module) },
+            { file: 'worker.js', sha512: digest(worker) },
+            { file: 'index.js', sha512: digest(entry) },
+        ],
+    };
+};
 
 type VitestResults = Readonly<{
     numFailedTests: number;
@@ -496,9 +534,9 @@ const main = async (): Promise<void> => {
                 );
                 return record.run;
             };
-            const identity = readParticipantArtifactResources((file) =>
+            const resources = readParticipantArtifactResources((file) =>
                 readFileSync(path.join(checkout, file)),
-            ).identity.runtime;
+            );
             const reports = [];
             for (const name of lifecycleMatrixStepNames) {
                 const step = evidenceRenewalSteps.find(
@@ -521,7 +559,6 @@ const main = async (): Promise<void> => {
                 );
                 const events = await readRunEvents(runDirectoryPath);
                 assert.equal(summary.result, 'passed');
-                assert.equal(result.runtimeIdentity, identity);
                 assert.equal(result.scalar, true);
                 // The run is the step's case, with the runs it names.
                 assert.deepEqual(
@@ -536,38 +573,10 @@ const main = async (): Promise<void> => {
                     metadata,
                     events,
                 );
-                const manifest = await readRunJson<{
-                    files: readonly { file: string; sha512: string }[];
-                }>(runDirectoryPath, 'source-manifest.json');
-                for (const item of manifest.files)
-                    assert.equal(
-                        digest(await readFile(path.join(checkout, item.file))),
-                        item.sha512,
-                        `The renewed checkout's ${item.file} differs from the ${name} run's.`,
-                    );
-                const runtime = [];
-                for (const [archived, built] of runtimeFiles) {
-                    const sha512 = digest(
-                        await readFile(
-                            path.join(
-                                repositoryRoot,
-                                'temp/run-artifacts',
-                                path.relative('logs', run),
-                                archived,
-                            ),
-                        ),
-                    );
-                    assert.equal(
-                        digest(
-                            await readFile(
-                                path.join(checkout, 'packages/sdk/dist', built),
-                            ),
-                        ),
-                        sha512,
-                        `The ${name} run's ${archived} differs from the renewed build's.`,
-                    );
-                    runtime.push({ file: archived, sha512 });
-                }
+                const { compiledInputs, runtime } = await auditArchivedRuntime(
+                    runDirectoryPath,
+                    resources,
+                );
                 // Chrome's backing-store opening histograms per launch; an
                 // open status other than an on-disk success is reported.
                 const openStatuses = events
@@ -595,7 +604,7 @@ const main = async (): Promise<void> => {
                     name: step.description,
                     run,
                     sourceCommit: summary.repositoryCommitHash,
-                    compiledInputs: manifest.files.length,
+                    compiledInputs,
                     runtime,
                     backingStoreOpeningEvents: openStatuses.length,
                     backingStoreOpenFailures: openStatuses.filter((status) =>
@@ -638,7 +647,7 @@ const main = async (): Promise<void> => {
                             cwd: checkout,
                             encoding: 'utf8',
                         }).trim(),
-                        runtimeIdentity: identity,
+                        runtimeIdentity: resources.identity.runtime,
                         check,
                         tests,
                         reports,

@@ -457,6 +457,8 @@ pub fn run(
         .collect();
     let threshold = profile.release_threshold();
     let checked = crate::scenario::checked_subsets(active.len(), threshold);
+    // The verified result's identifiers, which the run records.
+    let mut verified = Vec::new();
     for subset in &checked {
         let mut result = ReleaseCollector::new(certificate.clone()).unwrap();
         assert!(result.result().is_err());
@@ -464,7 +466,8 @@ pub fn run(
             assert!(result.insert(shares[&active[*index]].clone()).unwrap());
             assert!(!result.insert(shares[&active[*index]].clone()).unwrap());
         }
-        assert_eq!(result.result().unwrap().identifiers(), expected);
+        verified = result.result().unwrap().identifiers().to_vec();
+        assert_eq!(verified, expected);
     }
     let subsets = checked.len();
     let departure_sets = scenario.departed.map_or_else(
@@ -508,7 +511,7 @@ pub fn run(
         .iter()
         .map(|(position, _)| *position)
         .collect();
-    crate::write(directory.join("result.json"),format!("{{\"kind\":\"result\",\"accepted\":{accepted:?},\"invalid\":{invalid:?},\"conflicting\":{conflicting:?},\"signers\":{signers:?},\"identifiers\":{expected:?},\"releaseSubsets\":{subsets},\"departureSets\":{departures},\"departed\":{departed:?},\"corrupt\":{corrupt:?},\"selectedAuthors\":{selected_authors:?},\"milliseconds\":{}}}\n",started.elapsed().as_secs_f64()*1000.0).as_bytes());
+    crate::write(directory.join("result.json"),format!("{{\"kind\":\"result\",\"accepted\":{accepted:?},\"invalid\":{invalid:?},\"conflicting\":{conflicting:?},\"signers\":{signers:?},\"identifiers\":{verified:?},\"releaseSubsets\":{subsets},\"departureSets\":{departures},\"departed\":{departed:?},\"corrupt\":{corrupt:?},\"selectedAuthors\":{selected_authors:?},\"milliseconds\":{}}}\n",started.elapsed().as_secs_f64()*1000.0).as_bytes());
     println!(
         "Verified original ballot-to-result path, {subsets} release subsets and {departures} bounded departure sets"
     );

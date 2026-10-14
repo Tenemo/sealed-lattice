@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import {
     mkdir,
     mkdtemp,
@@ -14,9 +15,11 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
+    auditArchivedRuntime,
     desktopCompletionChecks,
     receivedByAction,
 } from '#tools/ci/audit-renewed-lifecycle-matrix.js';
+import { participantRuntimeIdentity } from '#tools/ci/build-participant-module.js';
 import {
     listChildRuns,
     readEvidenceRenewalRecord,
@@ -47,6 +50,8 @@ import { removeDirectoryLinks } from '#tools/ci/renewal-worktree.js';
 import { planEvidenceRenewal } from '#tools/ci/run-evidence-renewal.js';
 
 const commit = 'a'.repeat(40);
+const digest = (bytes: Uint8Array) =>
+    createHash('sha512').update(bytes).digest('hex');
 const runOfStep = (name: string) =>
     `logs/2026-10-12/2026-10-12T00-00-00.000Z-${name}`;
 const stepRecord = (
@@ -472,6 +477,79 @@ describe('evidence renewal records', () => {
         );
         expect(await readFile(path.join(replaced, 'own.txt'), 'utf8')).toBe(
             'own',
+        );
+    });
+
+    it('accepts a run whose archived runtime recomputes the checkout runtime, and refuses an added source, another worker and another SDK entry', async () => {
+        const run = path.join(root, 'logs', '2026-10-12', 'run');
+        const artifacts = path.join(
+            root,
+            'temp',
+            'run-artifacts',
+            '2026-10-12',
+            'run',
+        );
+        const manifest = (files: readonly string[]) =>
+            Buffer.from(
+                JSON.stringify({
+                    files: files.map((file) => ({
+                        file,
+                        sha512: digest(Buffer.from(file)),
+                        bytes: file.length,
+                    })),
+                }),
+            );
+        const [module, worker, entry] = ['module', 'worker', 'entry'].map(
+            (text) => Buffer.from(text),
+        );
+        await mkdir(run, { recursive: true });
+        await mkdir(artifacts, { recursive: true });
+        await writeFile(
+            path.join(run, 'source-manifest.json'),
+            manifest(['a.ts', 'b.ts']),
+        );
+        for (const [file, bytes] of [
+            ['participant.wasm', module],
+            ['worker.js', worker],
+            ['index.js', entry],
+        ] as const)
+            await writeFile(path.join(artifacts, file), bytes);
+        const checkout = (
+            sources: readonly string[],
+            checkoutWorker = worker,
+            checkoutEntry = entry,
+        ) => ({
+            identity: participantRuntimeIdentity(
+                manifest(sources),
+                module,
+                checkoutWorker,
+            ),
+            sdkDigest: digest(checkoutEntry),
+        });
+        expect(
+            await auditArchivedRuntime(run, checkout(['a.ts', 'b.ts'])),
+        ).toEqual({
+            compiledInputs: 2,
+            runtime: [
+                { file: 'participant.wasm', sha512: digest(module) },
+                { file: 'worker.js', sha512: digest(worker) },
+                { file: 'index.js', sha512: digest(entry) },
+            ],
+        });
+        for (const other of [
+            checkout(['a.ts', 'b.ts', 'c.ts']),
+            checkout(['a.ts', 'b.ts'], Buffer.from('other worker')),
+        ])
+            await expect(auditArchivedRuntime(run, other)).rejects.toThrow(
+                "run ran another runtime than the renewed checkout's.",
+            );
+        await expect(
+            auditArchivedRuntime(
+                run,
+                checkout(['a.ts', 'b.ts'], worker, Buffer.from('other entry')),
+            ),
+        ).rejects.toThrow(
+            "run ran another SDK entry than the renewed checkout's.",
         );
     });
 });

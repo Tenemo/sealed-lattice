@@ -21,7 +21,10 @@ import {
 } from '#tools/ci/local-run-log.js';
 import { guardProcessTreeMemory } from '#tools/ci/process-tree-memory.js';
 import { acquireProtocolResearchLock } from '#tools/ci/protocol-research-lock.js';
-import { selectPublicCompletionCase } from '#tools/ci/protocol-research-registry.js';
+import {
+    selectProtocolResearchCase,
+    selectPublicCompletionCase,
+} from '#tools/ci/protocol-research-registry.js';
 import { deriveResearchScenario } from '#tools/ci/protocol-research-scenario.js';
 import {
     rustToolchain,
@@ -29,12 +32,12 @@ import {
 } from '#tools/ci/rust-toolchain.js';
 
 // A passed research run. The ceremony directory among its artifacts holds
-// the public setup, close and completion records the reader verifies.
+// the public setup, close and completion records the reader verifies, and
+// its runtime identity file names the runtime they must be verified under.
 type ResearchRun = {
     case: string;
     participantCount: number;
     optionCount: number;
-    result: { kind: 'result' | 'no-result'; identifiers?: string[] };
 };
 type TerminalResult = {
     kind: 'result' | 'no-result';
@@ -94,11 +97,16 @@ await runWithLocalRunLog(
             );
             assert.ok((await stat(path.join(ceremony, 'close'))).isDirectory());
             const scenario = deriveResearchScenario(
-                run.participantCount,
-                run.optionCount,
-                run.case === 'native-setup-departure',
-                run.case === 'native-selection-fork',
-            );
+                    run.participantCount,
+                    run.optionCount,
+                    run.case === 'native-setup-departure',
+                    run.case === 'native-selection-fork',
+                ),
+                { noResult } = selectProtocolResearchCase([run.case]),
+                runtime = path.join(
+                    runArtifactDirectoryPath(source),
+                    'runtime.bin',
+                );
             // Release shares from positions spread evenly over the roster,
             // so no two are adjacent, and a bad share just after the first.
             const releaseAuthors = Array.from(
@@ -127,7 +135,7 @@ await runWithLocalRunLog(
                       : scenario.corrupt.slice(0, 1);
             let directory: string;
             if (selected.name === 'available-records') {
-                assert.equal(run.result.kind, 'result');
+                assert.equal(noResult, false);
                 const original = path.join(ceremony, 'completion');
                 directory = path.join(
                     log.artifactDirectoryPath,
@@ -275,16 +283,15 @@ await runWithLocalRunLog(
                     await readFile(file),
                     { flag: 'wx' },
                 );
-            // One reader process over a ceremony and completion directory,
-            // inside the process-tree memory guard. The reader verifies one
-            // setup contribution per participant, which dominates its
-            // duration.
+            // One reader process over the ceremony and completion directory
+            // under a named runtime, inside the process-tree memory guard.
+            // The reader verifies one setup contribution per participant,
+            // which dominates its duration.
             const verificationTimeout = 900_000 * scenario.participantCount;
             const verifyRecords = async (
-                ceremonyDirectory: string,
-                completionDirectory: string,
+                runtimeFile: string,
                 outputDirectory: string,
-                scratchDirectory: string,
+                description: string,
                 slug: string,
             ) => {
                 // The reader's scratch holds only its working values.
@@ -298,18 +305,18 @@ await runWithLocalRunLog(
                             {
                                 command: executable,
                                 args: [
-                                    ceremonyDirectory,
-                                    scratchDirectory,
+                                    ceremony,
+                                    runtimeFile,
+                                    scratch,
                                     outputDirectory,
-                                    completionDirectory,
+                                    directory,
                                     ...(selected.stage !== 'terminal'
                                         ? [selected.stage]
                                         : []),
                                 ],
                                 env: environment,
                                 workingDirectoryPath: workspace,
-                                description:
-                                    'Verify only available completion records',
+                                description,
                                 logFileSlug: slug,
                             },
                         ],
@@ -361,23 +368,39 @@ await runWithLocalRunLog(
                         false,
                         String(controller.signal.reason),
                     );
-                    assert.ok(samples > 0);
                     return { exitCode, peakMemory, samples };
                 } finally {
-                    await rm(scratchDirectory, {
-                        recursive: true,
-                        force: true,
-                    });
+                    await rm(scratch, { recursive: true, force: true });
                 }
             };
+            // The records verify only under the runtime the run names, so
+            // the reader refuses them under any other.
+            const otherRuntime = path.join(
+                log.artifactDirectoryPath,
+                'other-runtime.bin',
+            );
+            const otherBytes = await readFile(runtime);
+            otherBytes[0] ^= 1;
+            await writeFile(otherRuntime, otherBytes, { flag: 'wx' });
+            assert.notEqual(
+                (
+                    await verifyRecords(
+                        otherRuntime,
+                        path.join(log.artifactDirectoryPath, 'other-runtime'),
+                        'Refuse the records under another runtime',
+                        'other-runtime',
+                    )
+                ).exitCode,
+                0,
+            );
             const { exitCode, peakMemory, samples } = await verifyRecords(
-                ceremony,
-                directory,
+                runtime,
                 output,
-                scratch,
+                'Verify only available completion records',
                 'verification',
             );
             assert.equal(exitCode, 0);
+            assert.ok(samples > 0);
             const verified = JSON.parse(
                 await readFile(
                     path.join(output, selected.stage + '.json'),
@@ -388,8 +411,9 @@ await runWithLocalRunLog(
                 await readFile(path.join(output, 'result.json'), 'utf8'),
             ) as Record<string, unknown> & { participantCount: number };
             const emptyCase = report.ciphertextBytes === 0;
-            const participantCount = report.participantCount;
-            assert.equal(emptyCase, run.result.kind === 'no-result');
+            const { participantCount } = scenario;
+            assert.equal(report.participantCount, participantCount);
+            assert.equal(emptyCase, noResult);
             assert.ok(
                 verified.certificateAuthors.length >=
                     participantCount - Math.floor((participantCount - 1) / 3),
@@ -409,11 +433,11 @@ await runWithLocalRunLog(
                 assert.ok(
                     verified.kind === 'result' || verified.kind === 'no-result',
                 );
-                assert.equal(verified.kind, run.result.kind);
-                if (!emptyCase)
+                assert.equal(verified.kind, noResult ? 'no-result' : 'result');
+                if (!noResult)
                     assert.deepEqual(
                         verified.identifiers,
-                        run.result.identifiers,
+                        scenario.identifiers,
                     );
             }
             if (selected.name === 'available-records') {
