@@ -4,20 +4,17 @@ pub mod hash;
 pub mod manifest;
 #[path = "foundation/participant-identity.rs"]
 pub mod participant_identity;
-pub mod refusal;
 pub(crate) mod schemas;
 pub mod text;
 
 use crate::SIGNING_PUBLIC_KEY_BYTES;
 pub use canonical_tuple::{
-    CANONICAL_TUPLE_SCHEMA_IDENTIFIER, CANONICAL_TUPLE_VERSION, CanonicalCodecError,
-    CanonicalCodecErrorKind, CanonicalDecodeLimits, CanonicalItem, CanonicalItemType,
-    CanonicalTuple,
+    CANONICAL_TUPLE_SCHEMA_IDENTIFIER, CANONICAL_TUPLE_VERSION, CanonicalCodecRefusal,
+    CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple,
 };
 pub use hash::{Hash512, hash_foundation_tuple_512};
 pub(crate) use participant_identity::derive_participant_identity;
-pub use refusal::RefusalReason;
-pub(crate) use schemas::FoundationSchemaError;
+pub(crate) use schemas::FoundationSchemaRefusal;
 pub use text::StabilizedDisplayText;
 
 pub(crate) const MAXIMUM_USERNAME_BYTES: usize = 128;
