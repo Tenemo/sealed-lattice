@@ -71,6 +71,41 @@ fn frames_each_stream_as_the_foundation_hash_of_its_domain_and_seed() {
     assert_eq!(domains.len(), 5);
 }
 
+// SHAKE256 prefixes computed outside this crate from the canonical tuple of
+// each domain and the seed 3 + 29i. A retained seed must keep deriving the
+// same bytes, so no change to the framing may alter them.
+#[test]
+fn keeps_every_stream_prefix_byte_identical() {
+    let seed = seed(3);
+    for (domain, prefix) in [
+        (
+            "sealed-lattice/contribution-witness-randomness/v1",
+            "2297d650533fa5fbb4375d4079f7c2c93021294f1af2e8a87e8c726fcde00485",
+        ),
+        (
+            "sealed-lattice/contribution-proof-randomness/v1",
+            "6f1b400635987db4ec310467d3c18504a8c20f10db97b3ce363fbd6ab31619e9",
+        ),
+        (
+            "sealed-lattice/ballot-encryption-randomness/v1",
+            "6217f66dc66ad2d96f479d088afc2bfa3c3de796225f151400878c8427816cb6",
+        ),
+        (
+            "sealed-lattice/ballot-proof-randomness/v1",
+            "2a797736edb78035078707cc60556bc6c4e13cc97c7baae2b89be4cb3f9a3ecc",
+        ),
+        (
+            "sealed-lattice/release-proof-randomness/v1",
+            "21623b8240dbaa983801f07031793a9f99024e41941237cf253e01b42539bb3c",
+        ),
+    ] {
+        let mut bytes = [0; 32];
+        stream(domain, &seed).read(&mut bytes);
+        let actual: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
+        assert_eq!(actual, prefix, "{domain}");
+    }
+}
+
 #[test]
 fn replays_the_same_bytes_whatever_the_draw_lengths_and_interleaving() {
     let seed = seed(11);

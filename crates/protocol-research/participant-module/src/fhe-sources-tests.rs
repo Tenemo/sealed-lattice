@@ -113,6 +113,21 @@ fn source_stream_matches_canonical_tuple_and_binds_each_original_context() {
     assert_ne!(output([3; 64], &owner, other, &seed), expected);
 }
 
+// A SHAKE256 prefix computed outside this crate from the canonical source
+// tuple of the (3, 2) profile's family. A retained source seed must keep
+// deriving its registered key, so no change to the framing may alter it.
+#[test]
+fn keeps_the_source_stream_prefix_byte_identical() {
+    let profile = Profile::new(3, 2).unwrap();
+    let mut bytes = [0; 32];
+    stream([3; 64], &[23; SIGNING_PUBLIC_KEY_BYTES], profile, &[29; 64]).read(&mut bytes);
+    let actual: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
+    assert_eq!(
+        actual,
+        "20ff86d3db9892f9355ecf0df7d85f4b32ebb05fb150760cc67a56013ed68415"
+    );
+}
+
 #[test]
 fn source_capsule_restores_original_entries_and_refuses_damage_or_resealing() {
     let (poll, credential) = poll();
