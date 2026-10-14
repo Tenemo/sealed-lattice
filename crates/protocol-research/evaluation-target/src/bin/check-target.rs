@@ -297,7 +297,7 @@ fn main() -> io::Result<()> {
         &proposed,
         &CanonicalDecodeLimits {
             maximum_tuple_byte_length: MAXIMUM_PROPOSAL_BYTES,
-            maximum_item_count: 4,
+            maximum_item_count: 3,
             maximum_item_byte_length: MAXIMUM_PROPOSAL_BYTES,
             ..CanonicalDecodeLimits::default()
         },
@@ -305,7 +305,7 @@ fn main() -> io::Result<()> {
     .map_err(refusal)?;
     let identities = tuple
         .items
-        .get(3)
+        .get(2)
         .filter(|item| item.item_type() == CanonicalItemType::RawBytes)
         .ok_or_else(|| refusal("proposal record identities"))?
         .variable_value_bytes()
