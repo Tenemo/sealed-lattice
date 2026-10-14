@@ -20,18 +20,22 @@ pub enum Refusal {
     Proof,
 }
 
+/// Verifies a proof, given as its header and the rest of its bytes, over
+/// the expanded statement.
 fn verify_expanded(
     context: &ballot_encryption::context::BallotComputationContext,
     public: &PublicStatement,
+    proof_header: &[u8],
     proof: &[u8],
 ) -> Result<(), Refusal> {
     let profile = context.profile();
-    if !ballot_body::proof_lengths(profile).contains(&proof.len()) {
+    if proof_header.len() != PROOF_HEADER_BYTES
+        || !ballot_body::proof_lengths(profile).contains(&(PROOF_HEADER_BYTES + proof.len()))
+    {
         return Err(Refusal::Encoding);
     }
     let role = private_proof_role(context).map_err(|_| Refusal::Context)?;
-    let mut verifier = crate::verifier(profile, &role, &proof[..PROOF_HEADER_BYTES])
-        .map_err(|_| Refusal::Proof)?;
+    let mut verifier = crate::verifier(profile, &role, proof_header).map_err(|_| Refusal::Proof)?;
     verifier
         .push_statement(&public.header)
         .map_err(|_| Refusal::Proof)?;
@@ -41,7 +45,7 @@ fn verify_expanded(
         }
     }
     verifier.finish_statement().map_err(|_| Refusal::Proof)?;
-    for bytes in proof[PROOF_HEADER_BYTES..].chunks(crate::CHUNK_LIMIT) {
+    for bytes in proof.chunks(crate::CHUNK_LIMIT) {
         verifier.push_proof(bytes).map_err(|_| Refusal::Proof)?;
     }
     if !verifier.finish() {
@@ -113,16 +117,17 @@ pub fn create(
     let mut proof_bytes = Vec::with_capacity(*ballot_body::proof_lengths(profile).end());
     proof.write(&mut proof_bytes);
     drop(proof);
+    let (proof_header, proof) = proof_bytes.split_at(PROOF_HEADER_BYTES);
     if !FALSE_STATEMENT {
-        verify_expanded(&context, &public, &proof_bytes)?;
+        verify_expanded(&context, &public, proof_header, proof)?;
     }
-    let mut body = ballot_body::header(profile, &public.header, proof_bytes.len())
+    let mut body = ballot_body::header(profile, &public.header, &proof_bytes)
         .map_err(|_| Refusal::Encoding)?;
-    body.reserve_exact(ballot_body::ciphertext_bytes(profile) + proof_bytes.len());
+    body.reserve_exact(ballot_body::body_length(profile, proof_bytes.len()) - body.len());
     for (index, _) in ballot_body::polynomials(profile) {
         body.extend(&public.polynomials[index]);
     }
-    body.extend(proof_bytes);
+    body.extend(proof);
     let envelope = envelope(&context, ballot_time, &body)?;
     Ok((body, envelope))
 }
@@ -139,13 +144,11 @@ pub fn verify(
     let header = body
         .get(..ballot_body::HEADER_BYTES)
         .ok_or(Refusal::Encoding)?;
-    let proof_length = ballot_body::proof_length(profile, header).map_err(|_| Refusal::Encoding)?;
-    if body.len()
-        != ballot_body::HEADER_BYTES + ballot_body::ciphertext_bytes(profile) + proof_length
-    {
+    let header = ballot_body::parse_header(profile, header).map_err(|_| Refusal::Encoding)?;
+    if body.len() != ballot_body::body_length(profile, header.proof_length) {
         return Err(Refusal::Encoding);
     }
-    let statement = &header[12..];
+    let statement = header.context;
     if statement[4..68] != context.poll().identity()
         || statement[68..132] != *context.setup_identity()
         || u16::from_le_bytes(statement[132..134].try_into().unwrap()) as usize
@@ -192,6 +195,6 @@ pub fn verify(
         header: statement.to_vec(),
         polynomials,
     };
-    verify_expanded(context, &public, &body[offset..])?;
+    verify_expanded(context, &public, header.proof_header, &body[offset..])?;
     envelope(context, ballot_time, body)
 }

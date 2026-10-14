@@ -36,13 +36,13 @@ fn invalid_source(
         usize::from(poll.top_count()),
     )
     .unwrap();
-    let proof_bytes = *ballot_body::proof_lengths(profile).start();
-    let header = ballot_body::header(profile, &relation, proof_bytes).unwrap();
+    let proof = vec![0; *ballot_body::proof_lengths(profile).start()];
+    let header = ballot_body::header(profile, &relation, &proof).unwrap();
     let mut hash = ballot_body::header_body_hasher(profile, &header).unwrap();
     let mut file = crate::public_output::PublicOutput::create(&path).unwrap();
     file.write_all(&header).unwrap();
     let zeros = vec![0; 1 << 20];
-    let remaining = ballot_body::ciphertext_bytes(profile) + proof_bytes;
+    let remaining = ballot_body::body_length(profile, proof.len()) - header.len();
     for offset in (0..remaining).step_by(zeros.len()) {
         let bytes = &zeros[..zeros.len().min(remaining - offset)];
         file.write_all(bytes).unwrap();

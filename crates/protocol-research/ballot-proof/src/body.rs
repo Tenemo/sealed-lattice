@@ -75,20 +75,19 @@ impl BallotInputs {
 
 /// Verifies a ballot body's proof over the statement the body implies: the
 /// statement header this poll, setup and position expect, the setup's
-/// inputs and the body's ciphertexts.
+/// inputs and the body's ciphertexts, which stream into the statement as
+/// they arrive.
 struct BallotBodyRelationVerifier {
     profile: Profile,
     setup: Arc<VerifiedSetupAggregate>,
-    role: Vec<u8>,
-    // The statement header, which the body header carries after its prefix.
-    statement_header: Vec<u8>,
     relation: VerifiedBallotRelation,
-    ciphertexts: Vec<Vec<u8>>,
+    // The ciphertext being read and its bytes so far.
     ordinal: usize,
-    proof_prefix: Vec<u8>,
+    received: usize,
     proof_length: usize,
+    // The proof's bytes after its header.
     proof_bytes: usize,
-    verifier: Option<Verifier>,
+    verifier: Verifier,
     // The complete shared inputs, or the FHE aggregate key being read.
     inputs: Option<Arc<BallotInputs>>,
     key: Option<Vec<u8>>,
@@ -106,8 +105,7 @@ impl BallotBodyRelationVerifier {
         inputs: Option<Arc<BallotInputs>>,
     ) -> Result<Self, Refusal> {
         let profile = setup.profile();
-        let proof_length =
-            ballot_body::proof_length(profile, header).map_err(|_| Refusal::Shape)?;
+        let header = ballot_body::parse_header(profile, header).map_err(|_| Refusal::Shape)?;
         // The role names a position of the setup's roster for this poll.
         let role = context::proof_role(poll, &setup, position).map_err(|_| Refusal::Context)?;
         let relation = VerifiedBallotRelation {
@@ -123,22 +121,26 @@ impl BallotBodyRelationVerifier {
             usize::from(poll.top_count()),
         )
         .map_err(|_| Refusal::Context)?;
-        if header[12..] != statement_header {
+        if header.context != statement_header {
             return Err(Refusal::Context);
         }
+        // The statement stream recomputes the statement digest the proof
+        // declares from the statement that follows and refuses a mismatch.
+        let mut verifier =
+            verifier(profile, &role, header.proof_header).map_err(|_| Refusal::Proof)?;
+        verifier
+            .push_statement(&statement_header)
+            .map_err(|_| Refusal::Context)?;
         let inputs = inputs.filter(|value| value.serves(&setup));
         Ok(Self {
             profile,
             setup,
-            role,
-            statement_header,
             relation,
-            ciphertexts: (0..4).map(|_| Vec::new()).collect(),
             ordinal: 0,
-            proof_prefix: Vec::new(),
-            proof_length,
+            received: 0,
+            proof_length: header.proof_length,
             proof_bytes: 0,
-            verifier: None,
+            verifier,
             inputs,
             key: None,
             key_reader: None,
@@ -221,90 +223,63 @@ impl BallotBodyRelationVerifier {
         let result = self.push_inner(bytes);
         if result.is_err() {
             self.failed = true;
-            self.verifier = None;
         }
         result
     }
     fn push_inner(&mut self, mut bytes: &[u8]) -> Result<(), Refusal> {
-        if self.inputs.is_none()
-            || self.key_reader.is_some()
-            || bytes.is_empty()
-            || bytes.len() > CHUNK_LIMIT
-        {
+        if self.key_reader.is_some() || bytes.is_empty() || bytes.len() > CHUNK_LIMIT {
             return Err(Refusal::Phase);
         }
+        let inputs = self.inputs.as_ref().ok_or(Refusal::Phase)?;
         while !bytes.is_empty() && self.ordinal < 4 {
+            // Each slot's common polynomial and key precede its ciphertext
+            // pair in the statement.
+            if self.ordinal.is_multiple_of(2) && self.received == 0 {
+                let slot = self.ordinal / 2;
+                for polynomial in [&inputs.commons[slot], &inputs.keys[slot]] {
+                    for chunk in polynomial.chunks(CHUNK_LIMIT) {
+                        self.verifier
+                            .push_statement(chunk)
+                            .map_err(|_| Refusal::Context)?;
+                    }
+                }
+            }
             let (_, length) =
                 ballot_body::polynomial(self.profile, self.ordinal).ok_or(Refusal::Shape)?;
-            let count = bytes
-                .len()
-                .min(length - self.ciphertexts[self.ordinal].len());
-            self.ciphertexts[self.ordinal].extend(&bytes[..count]);
+            let count = bytes.len().min(length - self.received);
+            self.verifier
+                .push_statement(&bytes[..count])
+                .map_err(|_| Refusal::Context)?;
             bytes = &bytes[count..];
-            if self.ciphertexts[self.ordinal].len() == length {
+            self.received += count;
+            if self.received == length {
                 self.ordinal += 1;
+                self.received = 0;
+                if self.ordinal == 4 {
+                    self.verifier
+                        .finish_statement()
+                        .map_err(|_| Refusal::Proof)?;
+                }
             }
         }
         if bytes.is_empty() {
             return Ok(());
         }
         self.proof_bytes += bytes.len();
-        if self.proof_bytes > self.proof_length {
+        if self.proof_bytes > self.proof_length - HEADER_LENGTH {
             return Err(Refusal::Shape);
         }
-        if self.proof_prefix.len() < HEADER_LENGTH {
-            let count = bytes.len().min(HEADER_LENGTH - self.proof_prefix.len());
-            self.proof_prefix.extend(&bytes[..count]);
-            bytes = &bytes[count..];
-            if self.proof_prefix.len() == HEADER_LENGTH {
-                self.initialize_proof()?;
-            }
-        }
-        if !bytes.is_empty() {
-            self.verifier
-                .as_mut()
-                .ok_or(Refusal::Phase)?
-                .push_proof(bytes)
-                .map_err(|_| Refusal::Proof)?;
-        }
-        Ok(())
-    }
-    fn initialize_proof(&mut self) -> Result<(), Refusal> {
-        let inputs = self.inputs.clone().ok_or(Refusal::Phase)?;
-        let ciphertexts = std::mem::take(&mut self.ciphertexts);
-        // The statement stream recomputes the statement digest the proof
-        // declares from the statement below and refuses a mismatch.
-        let mut verifier =
-            verifier(self.profile, &self.role, &self.proof_prefix).map_err(|_| Refusal::Context)?;
-        verifier
-            .push_statement(&self.statement_header)
-            .map_err(|_| Refusal::Context)?;
-        for slot in 0..2 {
-            for polynomial in [
-                &inputs.commons[slot],
-                &inputs.keys[slot],
-                &ciphertexts[2 * slot],
-                &ciphertexts[2 * slot + 1],
-            ] {
-                for chunk in polynomial.chunks(CHUNK_LIMIT) {
-                    verifier
-                        .push_statement(chunk)
-                        .map_err(|_| Refusal::Context)?;
-                }
-            }
-        }
-        verifier.finish_statement().map_err(|_| Refusal::Proof)?;
-        self.verifier = Some(verifier);
-        Ok(())
+        self.verifier.push_proof(bytes).map_err(|_| Refusal::Proof)
     }
     fn inputs_ready(&self) -> bool {
         !self.failed && self.inputs.is_some() && self.key_reader.is_none()
     }
     pub fn finish(self) -> Result<VerifiedBallotRelation, Refusal> {
-        if self.failed || self.proof_bytes != self.proof_length {
+        if self.failed || self.ordinal < 4 || self.proof_bytes != self.proof_length - HEADER_LENGTH
+        {
             return Err(Refusal::Phase);
         }
-        if !self.verifier.ok_or(Refusal::Phase)?.finish() {
+        if !self.verifier.finish() {
             return Err(Refusal::Proof);
         }
         Ok(self.relation)
@@ -325,9 +300,7 @@ impl BallotBodyVerifier {
     ) -> Result<Self, Refusal> {
         let profile = setup.profile();
         let relation = BallotBodyRelationVerifier::new(&poll, setup, position, header, None)?;
-        let length = ballot_body::HEADER_BYTES
-            + ballot_body::ciphertext_bytes(profile)
-            + relation.proof_length;
+        let length = ballot_body::body_length(profile, relation.proof_length);
         let hash = ballot_body::header_body_hasher(profile, header).map_err(|_| Refusal::Shape)?;
         Ok(Self {
             relation,

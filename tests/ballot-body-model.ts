@@ -48,12 +48,17 @@ export const compileBallotBodyCensus = (profile: SupportedProfile) => {
         participantIdentityAsciiBytes +
         2n * 64n +
         2n;
-    const headerBytes = 4n + 8n + contextBytes;
+    // The magic, the complete proof length, the context and the proof
+    // header; the rest of the proof follows the ciphertexts.
+    const headerBytes = 4n + 8n + contextBytes + proof.headerBytes;
     const ciphertextBytes = 2n * fheBytes + 2n * auxiliaryBytes;
     const signatureBytes = compileRegistrationEnrollmentCensus().signatureBytes;
     const envelopeBytes = ballotEnvelopeBytes;
     const maximumBodyBytes =
-        headerBytes + ciphertextBytes + proof.maximumMultiproofBytes;
+        headerBytes +
+        ciphertextBytes +
+        proof.maximumMultiproofBytes -
+        proof.headerBytes;
     const hashPrefixBytes =
         8n +
         2n * 6n +
@@ -74,6 +79,7 @@ export const compileBallotBodyCensus = (profile: SupportedProfile) => {
         maximumProofBytes: proof.maximumMultiproofBytes,
         signatureBytes,
         envelopeBytes,
+        minimumBodyBytes: headerBytes + ciphertextBytes,
         maximumBodyBytes,
         maximumSignedBodyBytes:
             maximumBodyBytes + envelopeBytes + signatureBytes,

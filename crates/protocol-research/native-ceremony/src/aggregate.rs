@@ -544,9 +544,7 @@ pub fn classify_ballot(
     let total = file.metadata().unwrap().len() as usize - usize::from(mode == "truncated");
     let mut offset = header.len();
     let mut buffer = vec![0; 65521];
-    let changed = header.len()
-        + protocol_foundations::ballot_body::ciphertext_bytes(profile)
-        + PROOF_HEADER_BYTES;
+    let changed = header.len() + protocol_foundations::ballot_body::ciphertext_bytes(profile);
     while offset < total {
         let count = buffer.len().min(total - offset);
         file.read_exact(&mut buffer[..count]).unwrap();

@@ -33,7 +33,10 @@ describe('ballot body framing', () => {
         expect(layout.proofRoleBytes).toBe(
             8n + 30n + 4n + 30n + 4n + 128n + 128n + 2n,
         );
-        expect(layout.headerBytes).toBe(148n);
+        // The magic, the proof length and the context, then the proof
+        // header from the separately tested proof layout model.
+        const proofLayout = compileBallotWordProofLayout(completionProfile());
+        expect(layout.headerBytes).toBe(148n + proofLayout.headerBytes);
         expect(layout.envelopeBytes).toBe(214n);
         expect(layout.ciphertextBytes).toBe(polynomialPairPerFamilyBytes);
         expect(layout.reconstructedInputBytes).toBe(
@@ -41,13 +44,13 @@ describe('ballot body framing', () => {
         );
         // ML-DSA-65 signature size, FIPS 204 Table 2.
         expect(layout.signatureBytes).toBe(3309n);
-        // The proof maximum comes from the separately tested proof layout
-        // model.
-        const maximumProofBytes =
-            compileBallotWordProofLayout(
-                completionProfile(),
-            ).maximumMultiproofBytes;
+        // The rest of the proof follows the ciphertexts, so a body holds
+        // the header and ciphertexts and then the proof after its header.
+        const maximumProofBytes = proofLayout.maximumMultiproofBytes;
         expect(layout.maximumProofBytes).toBe(maximumProofBytes);
+        expect(layout.minimumBodyBytes).toBe(
+            148n + proofLayout.headerBytes + polynomialPairPerFamilyBytes,
+        );
         expect(layout.maximumBodyBytes).toBe(
             148n + polynomialPairPerFamilyBytes + maximumProofBytes,
         );

@@ -26,7 +26,7 @@ use std::{
     path::{Path, PathBuf},
     sync::Arc,
 };
-use supported_profile::{MAXIMUM_SCORE, Profile};
+use supported_profile::{MAXIMUM_SCORE, Profile, relation::PROOF_HEADER_BYTES};
 
 /// The public body file of each ballot source. The wrong-position source
 /// reuses position zero's body.
@@ -491,6 +491,9 @@ pub(crate) fn run(
     .unwrap();
     let mut proof_file =
         public_output::PublicOutput::create(ballot_directory.join("proof.bin")).unwrap();
+    proof_file
+        .write_all(&header[header.len() - PROOF_HEADER_BYTES..])
+        .unwrap();
     std::io::copy(&mut body_input, &mut proof_file).unwrap();
     proof_file.finish().unwrap();
     let body =

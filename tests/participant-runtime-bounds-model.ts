@@ -127,11 +127,7 @@ export const compileParticipantRuntimeProfile = (
             recordBytes: number(ballotCustody.recordBytes),
             maximumStateBytes: number(ballotCustody.maximumStateBytes),
             headerBytes: number(ballotBody.headerBytes),
-            minimumBodyBytes: number(
-                ballotBody.headerBytes +
-                    ballotBody.ciphertextBytes +
-                    ballotBody.minimumProofBytes,
-            ),
+            minimumBodyBytes: number(ballotBody.minimumBodyBytes),
             maximumBodyBytes: number(ballotBody.maximumBodyBytes),
             envelopeBytes: number(ballotBody.envelopeBytes),
             keyIndex: ballotBody.setupKeyPolynomials[0].expandedIndex,
