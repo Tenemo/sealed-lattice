@@ -15,6 +15,21 @@ export class UnrecognizedState extends Error {}
 // pending; it never stops the participant or replaces retained state.
 export class PublicInputFailure extends Error {}
 
+// Runs a decoding of public bytes. A codec refuses malformed bytes with a
+// RangeError, which ends the decoding as a public input failure with the
+// message.
+export const decodePublicInput = async <Value>(
+    decode: () => Value | Promise<Value>,
+    message: string,
+): Promise<Value> => {
+    try {
+        return await decode();
+    } catch (error) {
+        if (error instanceof RangeError) throw new PublicInputFailure(message);
+        throw error;
+    }
+};
+
 // A storage request, transaction or record read that the browser fails, a
 // transition whose exact predecessor still authenticates after its write
 // failed, and staged records the origin has no room for leave the

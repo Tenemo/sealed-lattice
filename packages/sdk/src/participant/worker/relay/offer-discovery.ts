@@ -1,4 +1,4 @@
-import { PublicInputFailure } from '../shared/failures.js';
+import { PublicInputFailure, decodePublicInput } from '../shared/failures.js';
 
 import { decodeDiscoveryPage, fillsDiscoveryPage } from './candidate-codec.js';
 import { postPublic, readBounded } from './relay.js';
@@ -32,16 +32,10 @@ export const readOfferAnnouncements = async (
         relay.base + 'offers/' + String(position) + '?offset=' + String(offset),
         12 + offerDiscoveryPageEntries * 64,
     );
-    let page;
-    try {
-        page = decodeDiscoveryPage(bytes, 64, offerDiscoveryPageEntries);
-    } catch (error) {
-        if (error instanceof RangeError)
-            throw new PublicInputFailure(
-                'The offer discovery page is malformed.',
-            );
-        throw error;
-    }
+    const page = await decodePublicInput(
+        () => decodeDiscoveryPage(bytes, 64, offerDiscoveryPageEntries),
+        'The offer discovery page is malformed.',
+    );
     if (
         !fillsDiscoveryPage(
             page.entries.length,

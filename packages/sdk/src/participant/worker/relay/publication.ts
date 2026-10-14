@@ -1,5 +1,5 @@
 import { equalBytes, hexadecimal } from '../shared/bytes.js';
-import { PublicInputFailure } from '../shared/failures.js';
+import { PublicInputFailure, decodePublicInput } from '../shared/failures.js';
 import type { Delivery } from '../storage/delivery.js';
 
 import {
@@ -193,22 +193,17 @@ export const createCandidatePublication = (
             if (completed) throw new Error('Publication already completed.');
             const bytes = encodeCandidateManifest({ files });
             await delivery.transfer(async () => {
-                let receipt;
-                try {
-                    receipt = decodeCandidateReceipt(
-                        await readBounded(
-                            relay.base + 'candidates/' + key,
-                            candidateLocatorBytes + 8,
-                            bytes,
+                const receipt = await decodePublicInput(
+                    async () =>
+                        decodeCandidateReceipt(
+                            await readBounded(
+                                relay.base + 'candidates/' + key,
+                                candidateLocatorBytes + 8,
+                                bytes,
+                            ),
                         ),
-                    );
-                } catch (error) {
-                    if (error instanceof RangeError)
-                        throw new PublicInputFailure(
-                            'Malformed candidate publication receipt.',
-                        );
-                    throw error;
-                }
+                    'Malformed candidate publication receipt.',
+                );
                 const stored = await readBounded(
                     relay.base + 'candidate/' + receipt.locator,
                     candidateManifestBytes,
@@ -217,16 +212,10 @@ export const createCandidatePublication = (
                     throw new PublicInputFailure(
                         'Published manifest readback differs.',
                     );
-                let page;
-                try {
-                    page = await readCandidatePage(relay, key, receipt.index);
-                } catch (error) {
-                    if (error instanceof RangeError)
-                        throw new PublicInputFailure(
-                            'Malformed candidate discovery readback.',
-                        );
-                    throw error;
-                }
+                const page = await decodePublicInput(
+                    () => readCandidatePage(relay, key, receipt.index),
+                    'Malformed candidate discovery readback.',
+                );
                 if (
                     page.locators[0] !== receipt.locator ||
                     page.total <= receipt.index ||

@@ -616,7 +616,7 @@ export const writeProofInput = (module: ParticipantModule, bytes: Uint8Array) =>
     );
 
 // The completion verifier's, close barrier verifier's, ballot classifier's
-// and // evaluation's input buffers, by the exports that give each one's address
+// and evaluation's input buffers, by the exports that give each one's address
 // and the capacity the module reports for it.
 const inputBuffers = {
     completion: ['completion_input_pointer', 'completion_input_capacity'],
