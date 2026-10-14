@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 
 import { compilePrivateRandomnessScopes } from '#tests/operation-seed-model.js';
 import { compilePreparationLedger } from '#tests/preparation-ledger-model.js';
@@ -114,8 +114,12 @@ const populationsUpTo = (limit: bigint) =>
     [0n, 1n, 2n, 1_000n, 1n << 30n, limit].filter((value) => value <= limit);
 
 describe('security ledger', () => {
-    const ledger = compileSecurityLedger();
-    const fheLimits = compileFhePopulationLimits();
+    let ledger: ReturnType<typeof compileSecurityLedger>;
+    let fheLimits: ReturnType<typeof compileFhePopulationLimits>;
+    beforeAll(() => {
+        ledger = compileSecurityLedger();
+        fheLimits = compileFhePopulationLimits();
+    });
     const profiles = listSupportedProfiles();
     const sampleProfiles = [
         deriveSupportedProfile(3, 2),

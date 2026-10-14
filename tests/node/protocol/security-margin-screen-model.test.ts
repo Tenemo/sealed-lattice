@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 
 import { compileSourceDomainOracleBudget } from '#tests/oracle-budget-model.js';
 import { compileRegistrationSourceExtractionWork } from '#tests/registration-source-randomness-model.js';
@@ -96,8 +96,12 @@ const profilesOf = (participantCount: number): readonly SupportedProfile[] =>
     );
 
 describe('FHE security margin screen', () => {
-    const screen = compileSecurityMarginScreen();
-    const limits = compileFhePopulationLimits();
+    let screen: ReturnType<typeof compileSecurityMarginScreen>;
+    let limits: ReturnType<typeof compileFhePopulationLimits>;
+    beforeAll(() => {
+        screen = compileSecurityMarginScreen();
+        limits = compileFhePopulationLimits();
+    });
 
     it('rounds base-two logarithms up exactly at and around powers of two', () => {
         expect(ceilingLog2(1n)).toBe(0n);

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 
 import {
     findFirstCensusMismatch,
@@ -7,7 +7,10 @@ import {
 } from '#tools/ci/generate-documentation-census.js';
 
 describe('documentation census generator', () => {
-    const rendered = renderDocumentationCensus();
+    let rendered: string;
+    beforeAll(() => {
+        rendered = renderDocumentationCensus();
+    });
 
     it('renders the current model owners', () => {
         for (const heading of [
