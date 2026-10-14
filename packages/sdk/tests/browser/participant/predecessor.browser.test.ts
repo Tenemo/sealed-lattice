@@ -216,7 +216,7 @@ describe('required predecessor records', () => {
         expect(await value.generation()).toBe(17);
     });
 
-    it('rejects a shifted root view even when its backing allocation contains the original', async () => {
+    it('refuses a shifted root view even when its backing allocation contains the original', async () => {
         const value = await fixture();
         const allocation = new Uint8Array(value.root.length + 6).fill(223);
         allocation.set(value.root, 3);

@@ -95,9 +95,9 @@ describe('participant module public input', () => {
         expect(module.setup_roster_begin(begin.length)).toBe(0);
     });
 
-    it('refuses a creator input whose poll the module cannot frame', async () => {
+    it('refuses an organizer input whose poll the module cannot frame', async () => {
         const { module } = await instantiate();
-        const creatorInput = (
+        const organizerInput = (
             question: string,
             labels: readonly string[],
             topCount: number,
@@ -116,36 +116,36 @@ describe('participant module public input', () => {
             return module.validate_organizer(input.length) === 0;
         };
         const question = 'Which option leads?';
-        const genuine = creatorInput(question, ['Option 0', 'Option 1'], 2);
+        const genuine = organizerInput(question, ['Option 0', 'Option 1'], 2);
         expect(validates(genuine)).toBe(true);
         const counted = (count: number) =>
             Array.from(
                 { length: count },
                 (_unused, index) => `Option ${String(index)}`,
             );
-        expect(validates(creatorInput(question, counted(20), 20))).toBe(true);
+        expect(validates(organizerInput(question, counted(20), 20))).toBe(true);
         for (const [label, input] of [
-            ['empty question', creatorInput('', counted(2), 1)],
-            ['one option', creatorInput(question, counted(1), 1)],
-            ['too many options', creatorInput(question, counted(21), 1)],
-            ['empty label', creatorInput(question, ['Option 0', ''], 1)],
+            ['empty question', organizerInput('', counted(2), 1)],
+            ['one option', organizerInput(question, counted(1), 1)],
+            ['too many options', organizerInput(question, counted(21), 1)],
+            ['empty label', organizerInput(question, ['Option 0', ''], 1)],
             [
                 'repeated label',
-                creatorInput(question, ['Option 0', 'Option 0'], 1),
+                organizerInput(question, ['Option 0', 'Option 0'], 1),
             ],
             // Canonically equivalent labels are one label.
             [
                 'equivalent labels',
-                creatorInput(question, ['Caf\u00e9', 'Cafe\u0301'], 1),
+                organizerInput(question, ['Caf\u00e9', 'Cafe\u0301'], 1),
             ],
             [
                 'private-use label',
-                creatorInput(question, ['Option 0', '\ue000'], 1),
+                organizerInput(question, ['Option 0', '\ue000'], 1),
             ],
-            ['no result', creatorInput(question, counted(2), 0)],
+            ['no result', organizerInput(question, counted(2), 0)],
             [
                 'result longer than the options',
-                creatorInput(question, counted(2), 3),
+                organizerInput(question, counted(2), 3),
             ],
             ['truncated', genuine.subarray(0, -1)],
             ['extended', concatenate(genuine, Uint8Array.of(0))],

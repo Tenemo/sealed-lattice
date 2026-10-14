@@ -267,7 +267,7 @@ describe('authenticated participant state transactions', () => {
         expect(await head()).toBe(18);
     });
 
-    it('rejects an asynchronous write callback and observes its later failure', async () => {
+    it('refuses an asynchronous write callback and observes its later failure', async () => {
         const { commit, validate, head } = await fixture();
         const invalidWrite: unknown = async (transaction: IDBTransaction) => {
             transaction.objectStore('head').put(19, 0);

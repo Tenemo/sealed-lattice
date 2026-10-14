@@ -632,7 +632,7 @@ return key;`,
     });
     // The stopped participant, and the registrant left out of the
     // roster, which holds no part in the poll, verify the outcome
-    // with the standalone verifier from the poll's identity and the
+    // with the standalone outcome verifier from the poll's identity and the
     // relay's public records alone.
     for (const position of [stoppedPosition, leftOut]) {
         const started = performance.now();
@@ -698,7 +698,7 @@ return key;`,
             : [
                   `Relay views that serve another poll's ${prose(foreignProbes.filter(({ detail }) => detail !== undefined).map(({ family }) => family))} under this poll's names leave a participant pending, and its ${prose(unreadOutcomes.map(({ family }) => family))}, which a result visit that restores the verified setup and the evaluated target does not read, leave that visit the same outcome.`,
               ]),
-        "Once its altered retained state stops a participant, that participant and the registrant left out of the roster each verify the same outcome with the standalone verifier from the poll's identity and the relay's public records alone.",
+        "Once its altered retained state stops a participant, that participant and the registrant left out of the roster each verify the same outcome with the standalone outcome verifier from the poll's identity and the relay's public records alone.",
     ].join(' ');
     await writeFile(
         path.join(log.runDirectoryPath, 'result.json'),

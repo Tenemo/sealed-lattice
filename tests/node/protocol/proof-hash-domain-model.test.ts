@@ -171,7 +171,7 @@ describe('ballot hash domain correspondence model', () => {
         }
     });
 
-    it('keeps opaque malformed fields inside the raw domain but rejects wrong layouts separately', () => {
+    it('keeps opaque malformed fields inside the raw domain but refuses wrong layouts separately', () => {
         for (const input of [
             frame(true, 'leaf', [
                 number(0xffffffff),

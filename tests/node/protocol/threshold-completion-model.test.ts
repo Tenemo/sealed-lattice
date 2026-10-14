@@ -232,7 +232,7 @@ describe('threshold completion model', () => {
         }
     });
 
-    it('rejects participant counts outside the supported range', () => {
+    it('refuses participant counts outside the supported range', () => {
         for (const participantCount of [0, 1, 2, 21, 3.5, Number.NaN]) {
             expect(() =>
                 compileThresholdCompletionProfile(participantCount),
@@ -313,7 +313,7 @@ describe('availability from roster fixing', () => {
             expect(() =>
                 deriveLifecycleAvailability(4, 0, [{ participant: 0, before }]),
             ).toThrow('organizer is required');
-        // The creator's identity, rather than a hard-coded position, owns
+        // The organizer's identity, rather than a hard-coded position, owns
         // the closing exception.
         expect(() =>
             deriveLifecycleAvailability(4, 3, [

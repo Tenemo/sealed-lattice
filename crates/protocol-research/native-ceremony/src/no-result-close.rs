@@ -15,7 +15,7 @@ use protocol_foundations::{
 use setup_aggregate::verified::VerifiedSetupAggregate;
 use std::{io::Write, path::Path, sync::Arc};
 
-// One statically corrupt creator signs a complete, correctly framed body
+// One statically corrupt organizer signs a complete, correctly framed body
 // whose minimum-length proof is malformed. No honest ballot is generated.
 fn invalid_source(
     output: &Path,
@@ -96,7 +96,7 @@ fn invalid_source(
 
 /// Every other participant responds; the organizer then answers and proposes
 /// responses 0 to `n - f - 1`. Without ballots every slot is absent; the corrupt
-/// creator's invalid ballot, held by everyone, is the only usable slot.
+/// organizer's invalid ballot, held by everyone, is the only usable slot.
 pub fn run(
     output: &Path,
     poll: Arc<VerifiedPoll>,

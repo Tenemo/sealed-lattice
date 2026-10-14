@@ -15,7 +15,7 @@ describe('release version preparation', () => {
         expect(incrementPrototypeVersion('0.9.73', 'minor')).toBe('0.10.0');
     });
 
-    it('rejects prerelease, malformed, leading-zero, and post-1.0 versions', () => {
+    it('refuses prerelease, malformed, leading-zero, and post-1.0 versions', () => {
         for (const version of [
             '0.1.0-beta.1',
             '0.01.0',
@@ -65,7 +65,7 @@ describe('release version preparation', () => {
         }
     });
 
-    it('rejects unrelated and malformed manifests without rewriting them', async () => {
+    it('refuses unrelated and malformed manifests without rewriting them', async () => {
         const temporaryDirectoryPath = await mkdtemp(
             path.join(tmpdir(), 'sealed-lattice-release-invalid-'),
         );

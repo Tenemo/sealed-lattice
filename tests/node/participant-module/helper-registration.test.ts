@@ -122,7 +122,7 @@ const enroll = async (
         joining,
     );
 
-// The poll's question and its two option labels as the creator input frames
+// The poll's question and its two option labels as the organizer input frames
 // them: each text after its four-byte length, the labels after their count.
 const framedText = (value: string) => {
     const bytes = new TextEncoder().encode(value);
@@ -279,27 +279,27 @@ const changed = (
 describe('participant helpers with registration work', () => {
     it('generate the registration the worker generates alone, and verify true and false rosters as it does', async () => {
         const alone = await enroll(noParallelHelpers, 'Organizer');
-        const creator = await withHelpers((helpers) =>
+        const organizer = await withHelpers((helpers) =>
             enroll(helpers, 'Organizer'),
         );
-        expect(creator.requests).toBe(alone.requests);
-        expect(creator.poll).toEqual(alone.poll);
-        expect([...creator.records.keys()].sort()).toEqual(
+        expect(organizer.requests).toBe(alone.requests);
+        expect(organizer.poll).toEqual(alone.poll);
+        expect([...organizer.records.keys()].sort()).toEqual(
             [...alone.records.keys()].sort(),
         );
         for (const [kind, bytes] of alone.records)
             expect(
-                Buffer.from(creator.records.get(kind)!).equals(
+                Buffer.from(organizer.records.get(kind)!).equals(
                     Buffer.from(bytes),
                 ),
                 'staged record ' + String(kind),
             ).toBe(true);
         const poll = {
-            poll: creator.poll,
-            definition: creator.records.get(dataKind.pollDefinition)!,
-            signature: creator.records.get(dataKind.pollSignature)!,
+            poll: organizer.poll,
+            definition: organizer.records.get(dataKind.pollDefinition)!,
+            signature: organizer.records.get(dataKind.pollSignature)!,
         };
-        const registrations = [creator.records];
+        const registrations = [organizer.records];
         for (const name of ['First voter', 'Second voter'])
             registrations.push(
                 (await withHelpers((helpers) => enroll(helpers, name, poll)))

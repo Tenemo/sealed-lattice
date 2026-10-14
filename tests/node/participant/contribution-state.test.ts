@@ -148,7 +148,7 @@ describe('independent contribution state framing', () => {
         }
     });
 
-    it('rejects phase substitution instead of reviving or discarding private work', () => {
+    it('refuses phase substitution instead of reviving or discarding private work', () => {
         for (const phase of [4, 5, 6, 7, 8, 9] as const) {
             const encoded = encodeContributionState(stateAt(phase));
             for (const changedPhase of [0, 3, 4, 5, 6, 7, 8, 9, 10, 255]) {
@@ -174,7 +174,7 @@ describe('independent contribution state framing', () => {
         }
     });
 
-    it('rejects missing, extra, shortened and displaced body or proof records', () => {
+    it('refuses missing, extra, shortened and displaced body or proof records', () => {
         for (const phase of [5, 6, 7, 8, 9] as const) {
             const state = stateAt(phase);
             const last = state.publicRecords.length - 1;
@@ -221,7 +221,7 @@ describe('independent contribution state framing', () => {
         }
     });
 
-    it('rejects wrong seed and offer record shapes at their actual phases', () => {
+    it('refuses wrong seed and offer record shapes at their actual phases', () => {
         for (const phase of [4, 5, 6, 7, 8, 9] as const) {
             const state = stateAt(phase);
             for (const seed of [new Uint8Array(63), new Uint8Array(65)])

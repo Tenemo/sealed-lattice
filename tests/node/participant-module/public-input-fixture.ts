@@ -91,7 +91,7 @@ export const call = (
 // The organizer's enrollment, whose public records every case changes.
 export const runtimeIdentity = shake('runtime', 64);
 
-// The poll's question and its two option labels as the creator input frames
+// The poll's question and its two option labels as the organizer input frames
 // them: each text after its four-byte length, the labels after their count.
 // The second label is not in NFC, which the module applies once at ingress.
 export const framedText = (value: string) => {

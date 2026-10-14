@@ -100,7 +100,7 @@ export const participantDatabase =
 // An honest participant's page runs every operation through the SDK's
 // participant API, which carries the packaged worker; the relay serves it
 // beside the packaged module. The page also runs the SDK's
-// standalone verifier for the poll the runner names, from the same relay.
+// standalone outcome verifier for the poll the runner names, from the same relay.
 const participantPage = harnessPage(
     'Participant',
     `

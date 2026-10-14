@@ -302,7 +302,7 @@ describe('fixed private contribution proof storage', () => {
         ).rejects.toThrow();
     });
 
-    it('rejects malformed body framing before reading private records', async () => {
+    it('refuses malformed body framing before reading private records', async () => {
         const fixed = await fixture();
         const header = await fixed.retain(proofBytes(17), [17]);
         const wrongMagic = header.slice();

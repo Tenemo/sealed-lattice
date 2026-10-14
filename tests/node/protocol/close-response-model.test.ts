@@ -80,9 +80,9 @@ describe('close response model', () => {
 
     it.each([
         {
-            name: 'threshold holders before the request, with every excluded holder departing',
+            name: 'threshold holders before the intent, with every excluded holder departing',
             participantCount: 10,
-            beforeRequest: [6, 7, 8, 9],
+            beforeIntent: [6, 7, 8, 9],
             beforeResponse: [],
             afterResponse: [],
             ballotTime: 5,
@@ -90,9 +90,9 @@ describe('close response model', () => {
             classification: 'accepted',
         },
         {
-            name: 'the honest organizer before the request below the holder threshold',
+            name: 'the honest organizer before the intent below the holder threshold',
             participantCount: 10,
-            beforeRequest: [0, 9],
+            beforeIntent: [0, 9],
             beforeResponse: [],
             afterResponse: [],
             ballotTime: 5,
@@ -100,9 +100,9 @@ describe('close response model', () => {
             classification: 'accepted',
         },
         {
-            name: 'only excluded holders before the request',
+            name: 'only excluded holders before the intent',
             participantCount: 10,
-            beforeRequest: [7, 8, 9],
+            beforeIntent: [7, 8, 9],
             beforeResponse: [],
             afterResponse: [],
             ballotTime: 5,
@@ -110,9 +110,9 @@ describe('close response model', () => {
             classification: 'absent',
         },
         {
-            name: 'delivery after the request but before the recipient responds',
+            name: 'delivery after the intent but before the recipient responds',
             participantCount: 4,
-            beforeRequest: [3],
+            beforeIntent: [3],
             beforeResponse: [1],
             afterResponse: [],
             ballotTime: 5,
@@ -122,7 +122,7 @@ describe('close response model', () => {
         {
             name: 'delivery after the recipient responds',
             participantCount: 4,
-            beforeRequest: [3],
+            beforeIntent: [3],
             beforeResponse: [],
             afterResponse: [1],
             ballotTime: 5,
@@ -130,9 +130,9 @@ describe('close response model', () => {
             classification: 'absent',
         },
         {
-            name: 'late signed time despite threshold holders before the request',
+            name: 'late signed time despite threshold holders before the intent',
             participantCount: 10,
-            beforeRequest: [0, 6, 7, 8, 9],
+            beforeIntent: [0, 6, 7, 8, 9],
             beforeResponse: [],
             afterResponse: [],
             ballotTime: 6,
@@ -142,14 +142,14 @@ describe('close response model', () => {
         {
             name: 'a protected submission whose inner proof is invalid',
             participantCount: 10,
-            beforeRequest: [0, 9],
+            beforeIntent: [0, 9],
             beforeResponse: [],
             afterResponse: [],
             ballotTime: 5,
             validProof: false,
             classification: 'invalid',
         },
-    ])('honors the signed request receipt cutoff: $name', (scenario) => {
+    ])('honors the signed close intent receipt cutoff: $name', (scenario) => {
         const profile = deriveCloseProfile(scenario.participantCount);
         const author = scenario.participantCount - 1;
         const ballot = envelope(author, 0, scenario.ballotTime, {
@@ -164,10 +164,10 @@ describe('close response model', () => {
         const deliver = (recipients: readonly number[]) => {
             for (const recipient of recipients) held[recipient].add(identity);
         };
-        deliver(scenario.beforeRequest);
+        deliver(scenario.beforeIntent);
 
-        // This event is the signed request. Its close time classifies ballot
-        // timestamps; it is not the time when a recipient sees the request.
+        // This event is the signed close intent. Its close time classifies
+        // ballot timestamps; it is not the time when a recipient sees the intent.
         const intent: CloseIntent = { variant: 0, closeTime: 5 };
         const intents = new Map([[intent.variant, intent]]);
         deliver(scenario.beforeResponse);

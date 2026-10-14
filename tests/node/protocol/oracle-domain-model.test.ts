@@ -252,7 +252,7 @@ describe('full-domain oracle adapter', () => {
         expect(queries * 24n * 1600n).toBeLessThan(1n << 80n);
     });
 
-    it('rejects invalid shapes instead of changing the domain', () => {
+    it('refuses invalid shapes instead of changing the domain', () => {
         expect(() => oracleDomainCells(-1n, 1n, 1n)).toThrow();
         expect(() => oracleDomainCells(1n, -1n, 1n)).toThrow();
         expect(() => oracleDomainCells(1n, 1n, 0n)).toThrow();

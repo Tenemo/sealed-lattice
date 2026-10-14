@@ -372,7 +372,7 @@ describe('shared participant custody', () => {
         expect(value.statisticalDenominator).toBe(2n ** 128n);
     });
 
-    it('rejects encryption nonce reuse while allowing verification-only and empty histories', () => {
+    it('refuses encryption nonce reuse while allowing verification-only and empty histories', () => {
         const empty = {
             nonce: (1n << 96n) - 1n,
             plaintextBytes: 0n,

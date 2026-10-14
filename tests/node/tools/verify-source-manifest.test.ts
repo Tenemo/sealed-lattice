@@ -71,7 +71,7 @@ describe('source manifest verifier', () => {
         ]);
     });
 
-    it('rejects malformed rows and duplicate identifiers', () => {
+    it('refuses malformed rows and duplicate identifiers', () => {
         expect(() =>
             parseSourceManifestRows(
                 manifestFor([row('A1', 'pinned.txt', 'x', pinnedDigest)]),

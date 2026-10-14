@@ -200,7 +200,7 @@ describe('FHE key source report and source intake', () => {
             ),
         ).toEqual(fixture.expected);
     });
-    it('rejects altered shape, context-independent digest disagreement and noncanonical public samples', () => {
+    it('refuses altered shape, context-independent digest disagreement and noncanonical public samples', () => {
         const { bytes, offsets, width, model } = reportFixture();
         const changes: ((copy: Buffer) => void)[] = [
             (copy) => {
@@ -292,7 +292,7 @@ describe('FHE key source report and source intake', () => {
             assertFheKeySourceStable(source, fixture.root),
         ).rejects.toThrow();
     });
-    it('rejects failed runs, missing compiled owners and unrecorded artifacts', async () => {
+    it('refuses failed runs, missing compiled owners and unrecorded artifacts', async () => {
         const fixture = await nativeFixture();
         fixture.summary.result = 'failed';
         await fixture.save();

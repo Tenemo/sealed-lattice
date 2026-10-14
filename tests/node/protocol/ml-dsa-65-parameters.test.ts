@@ -66,7 +66,7 @@ describe('the ML-DSA-65 operand transcription', () => {
         );
     });
 
-    it('rejects a mistranscribed operand through the published sizes', () => {
+    it('refuses a mistranscribed operand through the published sizes', () => {
         // gamma1 = 2^17 and eta = 2 are entries of other Table 1 columns.
         expect(
             encodedSizes({ ...mlDsa65Parameters, maskingBound: 1n << 17n })

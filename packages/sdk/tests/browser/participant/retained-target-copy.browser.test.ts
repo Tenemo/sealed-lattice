@@ -157,7 +157,7 @@ describe('retained target bounded copies', () => {
         ]);
     });
 
-    it('rejects an excessive length before reading or appending any bytes', async () => {
+    it('refuses an excessive length before reading or appending any bytes', async () => {
         const fixed = await fixture();
         await storeCopy(
             fixed.database,

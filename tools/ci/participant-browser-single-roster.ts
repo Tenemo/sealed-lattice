@@ -471,7 +471,7 @@ export const runSingleRoster = async (cohort: ParticipantCohort) => {
                         : []),
                     ...(publicationFaults
                         ? [
-                              'Every publication key receives an empty and a corrupted candidate before the genuine carrier. The organizer retains a signed ballot whose publication is refused and closes without retrying that ballot. Its closure publishes the exact required body, and a fresh standalone verifier retrieves the result after every original participant has departed.',
+                              'Every publication key receives an empty and a corrupted candidate before the genuine carrier. The organizer retains a signed ballot whose publication is refused and closes without retrying that ballot. Its closure publishes the exact required body, and a fresh outcome verifier retrieves the result after every original participant has departed.',
                           ]
                         : []),
                 ].join(' '),

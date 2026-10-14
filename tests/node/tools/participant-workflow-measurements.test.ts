@@ -278,7 +278,7 @@ describe('explicit participant productive-visit trace', () => {
             measured.operations[measured.operations.length - 1].dependencies,
         ).toEqual([]);
     });
-    it('preserves instance-memory accounting and rejects overlap, ambiguous sessions and malformed measurements', () => {
+    it('preserves instance-memory accounting and refuses overlap, ambiguous sessions and malformed measurements', () => {
         const operations = ordinary();
         const final = operations[operations.length - 1];
         operations[operations.length - 1] = {

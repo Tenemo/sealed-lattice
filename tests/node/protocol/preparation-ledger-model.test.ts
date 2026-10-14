@@ -232,7 +232,7 @@ describe('preparation comparison populations', () => {
     });
 
     it('keeps stalled and losing views outside the certified-roster denominator', () => {
-        // One corrupt creator can show these six distinct four-member rosters.
+        // One corrupt organizer can show these six distinct four-member rosters.
         // Each honest owner confirms only its own row and publishes one offer;
         // the other named honest members need not confirm that row.
         const honest = Array.from({ length: 6 }, (_, position) => position + 1);
@@ -289,7 +289,7 @@ describe('preparation comparison populations', () => {
     });
 
     it('counts private starts before the first published offer and does not count replays twice', () => {
-        // One corrupt creator shows three losing views to different honest
+        // One corrupt organizer shows three losing views to different honest
         // owners. Their generation fails before publication; other named
         // registrants never confirm those views. Only the last roster closes.
         const rosters = [

@@ -93,7 +93,7 @@ describe('exact raw-input oracle slice masks', () => {
             }
     });
 
-    it('rejects overlapping masks and ambiguous wire selections', () => {
+    it('refuses overlapping masks and ambiguous wire selections', () => {
         const mask = {
             inputLength: 3,
             positions: [0],

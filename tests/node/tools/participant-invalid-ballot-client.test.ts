@@ -22,7 +22,7 @@ globalThis.verify = async () => {
 };`);
 
 describe('corrupt participant module selection', () => {
-    it('patches the built operation path while preserving the standalone verifier', async () => {
+    it('patches the built operation path while preserving the outcome verifier', async () => {
         const source = await readFile(
             path.resolve('packages/sdk/dist/participant-worker.js'),
         );

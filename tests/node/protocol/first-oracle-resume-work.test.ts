@@ -121,7 +121,7 @@ describe('first-oracle hash resume work', () => {
         }
     });
 
-    it('rejects checkpoint cuts and widths the original first oracle cannot have', () => {
+    it('refuses checkpoint cuts and widths the original first oracle cannot have', () => {
         for (const [width, role, column] of [
             [48n, 340n, 0n],
             [65n, 340n, 0n],

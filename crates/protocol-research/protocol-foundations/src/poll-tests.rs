@@ -25,10 +25,10 @@ fn draft(top_count: u16) -> Result<PollDraft, Error> {
     PollDraft::new(manifest("Question", "First", "Second", 10), top_count, 10)
 }
 #[test]
-fn poll_identity_binds_creator_definition_and_runtime_without_a_future_key() {
-    let mut creator = Credential::from_seed([7; 32]);
-    let original = *creator.signing_public();
-    let packet = creator
+fn poll_identity_binds_organizer_definition_and_runtime_without_a_future_key() {
+    let mut organizer = Credential::from_seed([7; 32]);
+    let original = *organizer.signing_public();
+    let packet = organizer
         .create_poll(draft(2).unwrap(), [2; 64], [3; 32])
         .unwrap();
     let verified = verify_poll(packet.identity, [2; 64], &packet.body, &packet.signature).unwrap();
@@ -46,7 +46,7 @@ fn poll_identity_binds_creator_definition_and_runtime_without_a_future_key() {
                 .len()
     );
     assert!(
-        creator
+        organizer
             .create_poll(draft(1).unwrap(), [2; 64], [4; 32])
             .is_err()
     );
@@ -112,8 +112,8 @@ fn every_supported_participant_maximum_can_be_created() {
 
 #[test]
 fn valid_signatures_do_not_authorize_invalid_poll_fields() {
-    let mut creator = Credential::from_seed([7; 32]);
-    let packet = creator
+    let mut organizer = Credential::from_seed([7; 32]);
+    let packet = organizer
         .create_poll(draft(10).unwrap(), [2; 64], [3; 32])
         .unwrap();
     let original = CanonicalTuple::decode(&packet.body, &CanonicalDecodeLimits::default()).unwrap();

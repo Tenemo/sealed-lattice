@@ -324,7 +324,7 @@ describe('independent preparation authority journal', () => {
         ).toThrow();
     });
 
-    it('rejects malformed framing before using any authority phase', () => {
+    it('refuses malformed framing before using any authority phase', () => {
         const encoded = encodePreparationState({
             endorsement: endorsement('intent'),
         });

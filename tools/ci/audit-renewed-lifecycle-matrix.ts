@@ -385,7 +385,7 @@ const auditCase = async (
         case 'largest-departures': {
             // Members other than the organizer, as many as the roster
             // tolerates, leave for good at distinct stages; the remaining
-            // members complete and a fresh reader verifies the outcome.
+            // members complete and a fresh outcome verifier checks the outcome.
             const participantCount = name === 'departures' ? 7 : 20;
             const tolerated = Math.floor((participantCount - 1) / 3);
             const schedule = result.departureSchedule ?? [];

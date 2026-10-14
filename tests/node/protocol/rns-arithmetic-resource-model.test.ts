@@ -41,7 +41,7 @@ const isPrime = (value: bigint): boolean => {
 };
 
 describe('exact RNS arithmetic resource floor', () => {
-    it('rejects recursively duplicated transform tables before materialization', () => {
+    it('refuses recursively duplicated transform tables before materialization', () => {
         const census = compileRnsArithmeticResourceCensus(completionProfile());
         const layers = Array.from({ length: 30 }, (_, index) =>
             BigInt(index + 1),

@@ -285,7 +285,7 @@ describe('hidden-slice oracle routing', () => {
                 );
             }
     });
-    it('rejects overlapping scopes, including an empty prefix beside another scope', () => {
+    it('refuses overlapping scopes, including an empty prefix beside another scope', () => {
         expect(() =>
             compileOracleSliceRouting(4, 2, [
                 Uint8Array.of(0),

@@ -76,7 +76,7 @@ it('preserves concurrent untrusted announcements, deduplicates retries and pagin
     }
 });
 
-it('accepts cross-origin hints over HTTP and rejects malformed discovery pages in the real reader', async () => {
+it('accepts cross-origin hints over HTTP and refuses malformed discovery pages in the real reader', async () => {
     const scratch = path.resolve('temp');
     await mkdir(scratch, { recursive: true });
     const directory = await mkdtemp(

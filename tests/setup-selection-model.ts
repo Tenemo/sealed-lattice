@@ -295,7 +295,7 @@ export const preparationStagePath = (
     prefix.push('setup-and-optional-ballot');
     const names = [
         ...prefix,
-        organizer ? 'close-request-and-collection' : 'close-response',
+        organizer ? 'close-intent-and-collection' : 'close-response',
         organizer ? 'close-proposal-and-target' : 'target',
         'release',
         'outcome-verification',

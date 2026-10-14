@@ -173,7 +173,7 @@ describe('bounded scalar output transport', () => {
         expect(sink).not.toHaveBeenCalled();
     });
 
-    it('rejects stale, reordered and partial acknowledgments without acknowledging the pending span', async () => {
+    it('refuses stale, reordered and partial acknowledgments without acknowledging the pending span', async () => {
         for (const wrong of [
             { index: 1, offset: 0, length: 5 },
             { index: 0, offset: 1, length: 5 },

@@ -155,7 +155,7 @@ describe.each(['status', 'verify-outcome'] as const)(
             expect(downstream.database).not.toHaveBeenCalled();
         });
 
-        it('rejects a module digest mismatch before runtime derivation or execution', async () => {
+        it('refuses a module digest mismatch before runtime derivation or execution', async () => {
             const hashing = vi.spyOn(crypto.subtle, 'digest');
             const compiling = vi.spyOn(WebAssembly, 'compile');
             expect(
@@ -174,7 +174,7 @@ describe.each(['status', 'verify-outcome'] as const)(
             expect(downstream.database).not.toHaveBeenCalled();
         });
 
-        it('rejects oversized delivery before hashing or compilation', async () => {
+        it('refuses oversized delivery before hashing or compilation', async () => {
             const hashing = vi.spyOn(crypto.subtle, 'digest');
             const compiling = vi.spyOn(WebAssembly, 'compile');
             expect(
@@ -190,7 +190,7 @@ describe.each(['status', 'verify-outcome'] as const)(
             expect(downstream.database).not.toHaveBeenCalled();
         });
 
-        it('rejects malformed pinned identity bytes before compilation', async () => {
+        it('refuses malformed pinned identity bytes before compilation', async () => {
             const compiling = vi.spyOn(WebAssembly, 'compile');
             expect(
                 await runWorker(operation, moduleBytes, {

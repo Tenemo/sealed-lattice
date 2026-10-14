@@ -43,7 +43,7 @@ describe('release linked to the original encrypted aggregate share', () => {
             expect(firstOutside * factor).toBe(65536n);
         }
     });
-    it('rejects high-limb aliases in every public polynomial family', () => {
+    it('refuses high-limb aliases in every public polynomial family', () => {
         const model = createLinkedReleaseRelationModel(completionProfile());
         for (const [coefficients, bits] of [
             [model.common, 192],
@@ -94,7 +94,7 @@ describe('release linked to the original encrypted aggregate share', () => {
         }
     });
 
-    it('rejects a valid partial decryption of a different hidden share, including its attempted noise repair', () => {
+    it('refuses a valid partial decryption of a different hidden share, including its attempted noise repair', () => {
         const model = createLinkedReleaseRelationModel(completionProfile());
         const sharing = shareEncryptionParameters;
         model.share[0] += 1n;
@@ -107,7 +107,7 @@ describe('release linked to the original encrypted aggregate share', () => {
         expect(model.verify()).toBe(false);
     });
 
-    it('rejects another bounded recipient key and a changed release target', () => {
+    it('refuses another bounded recipient key and a changed release target', () => {
         const model = createLinkedReleaseRelationModel(
             completionProfile(),
             31n,

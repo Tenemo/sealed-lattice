@@ -71,7 +71,7 @@ describe('full word-proof layout and theorem operands', () => {
             census.batchingAndFirstFoldNumerator,
         );
     });
-    it('exhibits the degree alias that full-domain verification must reject', () => {
+    it('exhibits the degree alias that full-domain verification must refuse', () => {
         const result = proverInterpolationAlias();
         expect(new Set(result.points).size).toBe(32);
         expect(result.evenAgreement).toBe(true);

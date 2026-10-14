@@ -14,7 +14,7 @@ import {
 } from '#tests/supported-profile-model.js';
 
 describe('complete setup contribution relation in a reduced ring', () => {
-    it('rejects public limbs outside the canonical modulus even when the lifted equations are unchanged', () => {
+    it('refuses public limbs outside the canonical modulus even when the lifted equations are unchanged', () => {
         const model = createSetupContributionRelationModel(completionProfile());
         for (const equation of model.equations) {
             for (const coefficients of [
@@ -37,7 +37,7 @@ describe('complete setup contribution relation in a reduced ring', () => {
         expect(model.verify()).toBe(true);
     });
 
-    it('rejects incomplete public polynomials before evaluating the relation', () => {
+    it('refuses incomplete public polynomials before evaluating the relation', () => {
         const model = createSetupContributionRelationModel(completionProfile());
         model.equations[0].publicValue.pop();
         expect(model.verify()).toBe(false);
@@ -162,7 +162,7 @@ describe('complete setup contribution relation in a reduced ring', () => {
         );
     });
 
-    it('rejects full resident affine coefficients at the absolute WASM bound', () => {
+    it('refuses full resident affine coefficients at the absolute WASM bound', () => {
         const census =
             compileSetupContributionRelationCensus(completionProfile());
         expect(census.fullAffineCoefficientByteLength).toBeGreaterThan(
@@ -227,7 +227,7 @@ describe('complete setup contribution relation in a reduced ring', () => {
         }
     });
 
-    it('rejects an altered shared constant and an altered wide coefficient', () => {
+    it('refuses an altered shared constant and an altered wide coefficient', () => {
         const model = createSetupContributionRelationModel(completionProfile());
         for (const name of [
             'FHE secret/positive',
@@ -245,7 +245,7 @@ describe('complete setup contribution relation in a reduced ring', () => {
         expect(model.verify()).toBe(true);
     });
 
-    it('rejects range violations and overlapping signs in the retained FHE auxiliary secret', () => {
+    it('refuses range violations and overlapping signs in the retained FHE auxiliary secret', () => {
         const model = createSetupContributionRelationModel(completionProfile());
         const error = model.columns.find((column) => column.bits === 7)!;
         const originalError = error.values[0];
