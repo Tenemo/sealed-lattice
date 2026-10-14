@@ -1,6 +1,6 @@
 //! The participant's contribution proof: its generation from the verified
 //! proposal, its proof rounds and its sealed checkpoints.
-use num_bigint::{BigInt, Sign};
+use num_bigint::BigInt;
 use parallel_work::ProtocolHash;
 use parallel_work::{HashStream, Sponge, sealing};
 use protocol_foundations::{
@@ -12,6 +12,7 @@ use setup_witness::{
     contribution::{Contribution, common_records},
 };
 
+use statement_stream::coefficient::{self, CenteredCodec};
 use std::sync::Arc;
 use supported_profile::{Profile, relation::setup_relation, share_modulus};
 use word_proof::{
@@ -135,7 +136,7 @@ impl PolynomialOutput for PublicOutput {
         let mut encoded = vec![0u8; 1 + width];
         for value in values {
             assert!(value.magnitude() <= half.magnitude());
-            setup_witness::encode_coefficient(value, &mut encoded);
+            coefficient::encode(value, &mut encoded);
             self.append(&encoded);
         }
         self.flush();
@@ -318,21 +319,11 @@ impl Work {
     }
 }
 /// The share coefficients of a roster member's recipient key, whose committed
-/// hash and canonical coefficients its registration's verifier checked: a
-/// sign byte of zero or one before a magnitude within half the share modulus.
+/// hash and canonical coefficients its registration's verifier checked.
 pub fn recipient_key_values(record: &VerifiedRegistration) -> Vec<BigInt> {
-    record
-        .public_key()
-        .chunks_exact(1 + share_modulus().len())
-        .map(|coefficient| {
-            let magnitude = BigInt::from_bytes_le(Sign::Plus, &coefficient[1..]);
-            if coefficient[0] == 1 {
-                -magnitude
-            } else {
-                magnitude
-            }
-        })
-        .collect()
+    CenteredCodec::new(share_modulus())
+        .decode_all(record.public_key())
+        .expect("A verified recipient key is canonical.")
 }
 /// The participant's contribution proof, from the verified proposal or
 /// from an imported checkpoint. A failed proof step, a checkpoint record that

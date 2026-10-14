@@ -109,6 +109,7 @@ dependencies = [
  "parallel-work",
  "protocol-foundations",
  "setup-witness",
+ "statement-stream",
  "supported-profile",
  "word-proof",
  "zeroize",
@@ -189,6 +190,7 @@ dependencies = [
  "protocol-foundations",
  "setup-aggregate",
  "setup-witness",
+ "statement-stream",
  "supported-profile",
 ]
 
@@ -405,6 +407,7 @@ dependencies = [
  "parallel-work",
  "serde_json",
  "sha3",
+ "statement-stream",
  "supported-profile",
  "unicode-normalization",
  "zeroize",
@@ -481,6 +484,7 @@ dependencies = [
  "parallel-work",
  "protocol-foundations",
  "setup-witness",
+ "statement-stream",
  "supported-profile",
  "word-verifier",
 ]

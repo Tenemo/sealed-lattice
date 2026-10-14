@@ -180,8 +180,10 @@ impl ReleaseCollector {
             .ciphertext()
             .ok_or(Error::NoResult)?;
         let width = release_coefficient_bytes(profile);
-        let constant =
-            release::decode_polynomial(&ciphertext[..SYSTEMATIC * width], width, &modulus)?;
+        let constant = release::decode_polynomial(
+            &ciphertext[..SYSTEMATIC * width],
+            &profile.release_modulus().to_bytes(),
+        )?;
         let mut phase: Vec<_> = constant
             .into_iter()
             .map(|value| value * &clearing * &clearing)

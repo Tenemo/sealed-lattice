@@ -148,8 +148,7 @@ impl ReleaseBodyVerifier {
         let profile = self.context.profile();
         let partial = super::release::decode_polynomial(
             &self.partial,
-            supported_profile::relation::release_coefficient_bytes(profile),
-            &linked_release_proof::statement::release_modulus(profile),
+            &profile.release_modulus().to_bytes(),
         )?;
         Ok(VerifiedReleaseBody {
             certificate: self.context.certificate().clone(),

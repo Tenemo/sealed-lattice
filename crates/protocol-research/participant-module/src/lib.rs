@@ -340,23 +340,16 @@ impl Enrollment {
         data_keys: &[u8; 64],
         records: [&[u8]; 2],
     ) -> Result<Self, Error> {
-        use num_bigint::{BigInt, Sign};
+        use statement_stream::coefficient::CenteredCodec;
         if poll.identity() != header.poll
             || public_bytes.len() != 65536 * 21
             || ProtocolHash::digest(public_bytes) != header.recipient_key_hash
         {
             return Err(Error::Shape);
         }
-        let modulus = BigInt::from_bytes_le(Sign::Plus, supported_profile::share_modulus());
-        let half = modulus >> 1usize;
-        let mut public = Vec::with_capacity(65536);
-        for bytes in public_bytes.chunks_exact(21) {
-            let value = BigInt::from_bytes_le(Sign::Plus, &bytes[1..]);
-            if bytes[0] > 1 || value > half || (bytes[0] == 1 && value == BigInt::from(0)) {
-                return Err(Error::Shape);
-            }
-            public.push(if bytes[0] == 1 { -value } else { value });
-        }
+        let public = CenteredCodec::new(supported_profile::share_modulus())
+            .decode_all(public_bytes)
+            .ok_or(Error::Shape)?;
         let credential = Credential::open_complete(
             header.signing_public,
             body_digest,

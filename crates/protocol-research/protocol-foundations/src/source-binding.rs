@@ -8,6 +8,7 @@ use crate::{
     poll::VerifiedPoll,
     roster::{RetainedContributionContext, RosterProposal},
 };
+use statement_stream::coefficient::CenteredCodec;
 use supported_profile::{DEGREE, Profile};
 
 pub const SOURCE_SALT_BYTES: usize = 64;
@@ -67,7 +68,7 @@ pub struct FheKeyCommitmentHasher {
     hash: Option<IdentityHasher>,
     length: usize,
     received: usize,
-    half_modulus: Vec<u8>,
+    codec: CenteredCodec,
     coefficient: Vec<u8>,
 }
 
@@ -133,19 +134,13 @@ impl FheKeyCommitmentHasher {
             CanonicalItem::unsigned64(profile.fhe_common_sample_bits() as u64),
         ];
         let hash = IdentityHasher::local("sealed-lattice/registered-fhe-key/v2", &prefix, length)?;
-        let mut half_modulus = modulus;
-        let mut carry = 0;
-        for byte in half_modulus.iter_mut().rev() {
-            let next = (*byte & 1) << 7;
-            *byte = (*byte >> 1) | carry;
-            carry = next;
-        }
+        let codec = CenteredCodec::new(&modulus);
         Ok(Self {
             hash: Some(hash),
             length,
             received: 0,
-            coefficient: Vec::with_capacity(1 + half_modulus.len()),
-            half_modulus,
+            coefficient: Vec::with_capacity(codec.record_bytes()),
+            codec,
         })
     }
 
@@ -161,21 +156,13 @@ impl FheKeyCommitmentHasher {
             return Err(Error::Shape);
         }
         let mut remaining = bytes;
-        let width = 1 + self.half_modulus.len();
+        let width = self.codec.record_bytes();
         while !remaining.is_empty() {
             let count = remaining.len().min(width - self.coefficient.len());
             self.coefficient.extend_from_slice(&remaining[..count]);
             remaining = &remaining[count..];
             if self.coefficient.len() == width {
-                let magnitude = &self.coefficient[1..];
-                if self.coefficient[0] > 1
-                    || (self.coefficient[0] == 1 && magnitude.iter().all(|byte| *byte == 0))
-                    || magnitude
-                        .iter()
-                        .rev()
-                        .cmp(self.half_modulus.iter().rev())
-                        .is_gt()
-                {
+                if !self.codec.is_canonical(&self.coefficient) {
                     return Err(Error::Shape);
                 }
                 self.coefficient.clear();

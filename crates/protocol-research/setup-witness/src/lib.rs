@@ -1,6 +1,3 @@
-#[path = "coefficient-encoding.rs"]
-mod coefficient_encoding;
-pub use coefficient_encoding::encode_coefficient;
 pub mod contribution;
 pub mod convolution;
 #[path = "fhe-key-source.rs"]

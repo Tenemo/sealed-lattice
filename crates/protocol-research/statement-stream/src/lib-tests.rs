@@ -87,6 +87,7 @@ fn rejects_partial_records_and_forbidden_lengths_without_output() {
 
 #[test]
 fn record_runs_and_their_jobs_match_one_stream() {
+    use num_bigint::{BigInt, Sign};
     use supported_profile::{DEGREE, FHE_LIMB_BITS, Family, Profile};
     // The widest full-degree records span several runs, and parts of
     // 1,000 bytes split them.
@@ -95,7 +96,10 @@ fn record_runs_and_their_jobs_match_one_stream() {
         .max_by_key(Vec::len)
         .unwrap();
     let (width, alpha) = (modulus.len() + 1, [17, 37, 91]);
-    let half = half_modulus(&modulus);
+    let mut half = (BigInt::from_bytes_le(Sign::Plus, &modulus) >> 1usize)
+        .to_bytes_le()
+        .1;
+    half.resize(modulus.len(), 0);
     let mut state = 0x9e37_79b9_7f4a_7c15u64;
     let mut bytes = Vec::with_capacity(DEGREE * width);
     for index in 0..DEGREE {

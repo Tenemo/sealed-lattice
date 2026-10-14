@@ -1,10 +1,12 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 
 pub mod arithmetic;
+pub mod coefficient;
 mod jobs;
 mod query;
 mod setup;
 use arithmetic::{Columns, MODULUS, add, multiply, subtract};
+use coefficient::CenteredCodec;
 pub use setup::{
     ProverFixedTerm, ProverOperatorPlan, SetupStatementStream, StatementOutput,
     prover_operator_plan, setup_polynomial_stream,
@@ -79,26 +81,6 @@ fn record_fingerprint(record: &[u8], radix_bits: usize, powers: &[Element]) -> E
     } else {
         result
     }
-}
-// Half an odd little-endian modulus, rounded down, in its byte length.
-fn half_modulus(modulus: &[u8]) -> Vec<u8> {
-    (0..modulus.len())
-        .map(|index| {
-            (modulus[index] >> 1) | ((modulus.get(index + 1).copied().unwrap_or(0) & 1) << 7)
-        })
-        .collect()
-}
-// Whether a coefficient record is canonical: a sign byte of zero or one, a
-// magnitude at most half the modulus, and no negative zero.
-fn canonical(record: &[u8], half_modulus: &[u8]) -> bool {
-    let magnitude = &record[1..];
-    record[0] <= 1
-        && magnitude
-            .iter()
-            .rev()
-            .cmp(half_modulus.iter().rev())
-            .is_le()
-        && !(record[0] == 1 && magnitude.iter().all(|byte| *byte == 0))
 }
 // The refusals of a polynomial's parameters. A coefficient's fingerprint
 // sums one product for each limb of the modulus's length, within the
@@ -178,7 +160,7 @@ pub struct PolynomialStream {
     degree: usize,
     width: usize,
     radix_bits: usize,
-    half_modulus: Vec<u8>,
+    codec: CenteredCodec,
     alpha: Element,
     limb_weight: Element,
     // The powers of the limb weight, one for each limb of a magnitude.
@@ -200,13 +182,12 @@ impl PolynomialStream {
         alpha: Element,
     ) -> Result<Self, Error> {
         check_parameters(modulus, degree, radix_bits, alpha)?;
-        let half_modulus = half_modulus(modulus);
         let limb_weight = power(alpha, degree);
         Ok(Self {
             degree,
             width: modulus.len() + 1,
             radix_bits,
-            half_modulus,
+            codec: CenteredCodec::new(modulus),
             alpha,
             limb_weight,
             limb_powers: limb_powers(modulus.len(), radix_bits, limb_weight),
@@ -221,7 +202,7 @@ impl PolynomialStream {
     }
 
     fn coefficient(&self) -> Result<Element, Error> {
-        if !canonical(&self.record, &self.half_modulus) {
+        if !self.codec.is_canonical(&self.record) {
             return Err(Error::Encoding);
         }
         Ok(record_fingerprint(
@@ -291,7 +272,7 @@ impl PolynomialStream {
 /// runs of whole records that each fit one chunk.
 pub(crate) struct PolynomialRecords {
     width: usize,
-    half_modulus: Vec<u8>,
+    codec: CenteredCodec,
     degree: usize,
     // The records of each run but the last.
     run: usize,
@@ -311,7 +292,7 @@ impl PolynomialRecords {
         let run = (CHUNK_LIMIT / width).clamp(1, degree);
         Ok(Self {
             width,
-            half_modulus: half_modulus(modulus),
+            codec: CenteredCodec::new(modulus),
             degree,
             run,
             taken: 0,
@@ -346,7 +327,7 @@ impl PolynomialRecords {
                 if !self
                     .buffer
                     .chunks_exact(self.width)
-                    .all(|record| canonical(record, &self.half_modulus))
+                    .all(|record| self.codec.is_canonical(record))
                 {
                     return Err(Error::Encoding);
                 }

@@ -1,11 +1,12 @@
 use crate::certification::VerifiedInventoryCertificate;
 use linked_release_proof::statement::{self, PublicStatement};
-use num_bigint::{BigInt, Sign};
+use num_bigint::BigInt;
 use protocol_foundations::foundation::participant_identity::{
     ParticipantIdentity, derive_participant_identity,
 };
 use protocol_foundations::foundation::{CanonicalItem, CanonicalTuple};
 use setup_aggregate::VerifiedAggregatePolynomial;
+use statement_stream::coefficient::CenteredCodec;
 use std::sync::Arc;
 use supported_profile::{
     Profile,
@@ -48,32 +49,14 @@ pub enum Error {
     Incomplete,
 }
 
-pub(crate) fn decode_polynomial(
-    bytes: &[u8],
-    width: usize,
-    modulus: &BigInt,
-) -> Result<Vec<BigInt>, Error> {
-    if bytes.len() != SYSTEMATIC * width {
+/// The systematic coefficients of a polynomial of the little-endian
+/// modulus, in canonical records.
+pub(crate) fn decode_polynomial(bytes: &[u8], modulus: &[u8]) -> Result<Vec<BigInt>, Error> {
+    let codec = CenteredCodec::new(modulus);
+    if bytes.len() != SYSTEMATIC * codec.record_bytes() {
         return Err(Error::Encoding);
     }
-    let half = modulus >> 1usize;
-    bytes
-        .chunks_exact(width)
-        .map(|coefficient| {
-            let magnitude = BigInt::from_bytes_le(Sign::Plus, &coefficient[1..]);
-            if coefficient[0] > 1
-                || magnitude > half
-                || (coefficient[0] == 1 && magnitude == BigInt::from(0))
-            {
-                return Err(Error::Encoding);
-            }
-            Ok(if coefficient[0] == 1 {
-                -magnitude
-            } else {
-                magnitude
-            })
-        })
-        .collect()
+    codec.decode_all(bytes).ok_or(Error::Encoding)
 }
 
 /// Public operands and original participant position for one certified target.
@@ -114,13 +97,11 @@ impl ReleaseContext {
         }
         let public_key = decode_polynomial(
             records[position].public_key(),
-            statement::share_coefficient_bytes(),
-            &statement::share_modulus(),
+            supported_profile::share_modulus(),
         )?;
         let target_linear = decode_polynomial(
             &ciphertext[SYSTEMATIC * release_bytes..],
-            release_bytes,
-            &statement::release_modulus(profile),
+            &profile.release_modulus().to_bytes(),
         )?;
         let mut header = [0; RELEASE_HEADER_BYTES];
         header[..4].copy_from_slice(b"LRS1");
@@ -185,7 +166,7 @@ impl ReleaseContext {
         // The parser checks the actual partial, not a producer's range claim.
         let profile = self.profile;
         let release_bytes = release_coefficient_bytes(profile);
-        decode_polynomial(partial, release_bytes, &statement::release_modulus(profile))?;
+        decode_polynomial(partial, &profile.release_modulus().to_bytes())?;
         let common = setup_witness::contribution::common_polynomial(
             profile,
             profile.share_common_polynomial(),

@@ -21,6 +21,7 @@ use sha3::{
     Shake256, Shake256Reader,
     digest::{ExtendableOutput, Update},
 };
+use statement_stream::coefficient;
 use supported_profile::Profile;
 use zeroize::Zeroizing;
 
@@ -101,11 +102,11 @@ impl PolynomialOutput for CoordinateHash {
         let mut bytes = vec![0; count * coefficient_bytes];
         for chunk in values.chunks(count) {
             let encoded = &mut bytes[..chunk.len() * coefficient_bytes];
-            for (value, coefficient) in chunk
+            for (value, record) in chunk
                 .iter()
                 .zip(encoded.chunks_exact_mut(coefficient_bytes))
             {
-                setup_witness::encode_coefficient(value, coefficient);
+                coefficient::encode(value, record);
             }
             hash.push(offset, encoded)
                 .expect("Canonical FHE coordinate");

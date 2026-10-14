@@ -11,6 +11,7 @@ ballot-proof = { path = "../ballot-proof" }
 protocol-foundations = { path = "../protocol-foundations" }
 setup-aggregate = { path = "../setup-aggregate" }
 setup-witness = { path = "../setup-witness" }
+statement-stream = { path = "../statement-stream" }
 encrypted-ranking = { path = "../encrypted-ranking" }
 parallel-work = { path = "../parallel-work" }
 linked-release-proof = { path = "../linked-release-proof" }
