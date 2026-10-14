@@ -649,7 +649,7 @@ export const completeRoster = async (
         const receivedResponses = (
             concluded.closeEvents as { kind: string }[]
         ).filter((event) => event.kind === 'response').length;
-        assert.equal(receivedResponses, bounds.close.quorum);
+        assert.equal(receivedResponses, bounds.quorum);
         const proposal = await readFile(
             path.join(publicDirectory, 'close/proposal.bin'),
         );
@@ -660,19 +660,17 @@ export const completeRoster = async (
                 bounds.registration.signatureBytes,
         );
         const proposalResponders = Array.from(
-            { length: bounds.close.quorum },
+            { length: bounds.quorum },
             (_, ordinal) =>
                 proposal.readUInt16LE(
                     4 +
                         bounds.close.proposalBodyBytes -
-                        (bounds.close.quorum - ordinal) * 66,
+                        (bounds.quorum - ordinal) * 66,
                 ),
         );
         assert.deepEqual(
             proposalResponders,
-            active
-                .slice(0, bounds.close.quorum)
-                .map(({ position }) => position),
+            active.slice(0, bounds.quorum).map(({ position }) => position),
         );
         const evidence = {
             unavailableResponder: incompleteResponder,
@@ -687,7 +685,7 @@ export const completeRoster = async (
     }
     markStage([5]);
     await each(
-        measureWorkflow ? active : active.slice(0, bounds.close.quorum),
+        measureWorkflow ? active : active.slice(0, bounds.quorum),
         async ({ member, position }) => {
             if (measureRecovery && position === 0)
                 await interrupt(

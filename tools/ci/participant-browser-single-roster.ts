@@ -193,7 +193,7 @@ export const runSingleRoster = async (cohort: ParticipantCohort) => {
             certificate.readUInt32LE(4) +
             bounds.registration.signatureBytes;
         assert.deepEqual(
-            Array.from({ length: bounds.close.quorum }, (_, ordinal) =>
+            Array.from({ length: bounds.quorum }, (_, ordinal) =>
                 certificate.readUInt16LE(
                     endorsementOffset +
                         ordinal * (2 + bounds.registration.signatureBytes),
@@ -201,7 +201,7 @@ export const runSingleRoster = async (cohort: ParticipantCohort) => {
             ),
             positions
                 .filter((position) => !departed.has(position))
-                .slice(0, bounds.close.quorum),
+                .slice(0, bounds.quorum),
         );
         independentOutcome = (await inBrowser(leftOut, undefined, (chrome) =>
             chrome.evaluate(
@@ -254,7 +254,7 @@ export const runSingleRoster = async (cohort: ParticipantCohort) => {
             certificate.readUInt32LE(4) +
             bounds.registration.signatureBytes;
         certificateEndorsers = Array.from(
-            { length: bounds.close.quorum },
+            { length: bounds.quorum },
             (_, ordinal) =>
                 certificate.readUInt16LE(
                     endorsementOffset +
@@ -269,7 +269,7 @@ export const runSingleRoster = async (cohort: ParticipantCohort) => {
                     boundary === 'before-selection',
             )
             .map(({ position }) => position);
-        assert.equal(new Set(certificateEndorsers).size, bounds.close.quorum);
+        assert.equal(new Set(certificateEndorsers).size, bounds.quorum);
         assert.ok(
             certificateEndorsers.every(
                 (position) =>

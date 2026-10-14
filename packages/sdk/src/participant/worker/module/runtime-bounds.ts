@@ -86,6 +86,9 @@ export type ParticipantProfile = Readonly<{
     // Exactly d contributions are selected from the first k eligible positions.
     setupContributorCount: number;
     eligibleContributorCount: number;
+    // The inventory certificate threshold n - f: the endorsements, close
+    // responses and target votes that a certificate lists.
+    quorum: number;
     proposalBytes: number;
     registration: ParticipantLimits['registration'];
     root: Readonly<{
@@ -147,7 +150,6 @@ export type ParticipantProfile = Readonly<{
         requiredStorageBytes: number;
     }>;
     close: Readonly<{
-        quorum: number;
         // An envelope and its signature.
         submissionBytes: number;
         intentBodyBytes: number;
@@ -531,7 +533,6 @@ const closeBounds = (
         profile.proposalPacketBytes;
     const collectingBytes = closePrefixBytes + deliveryEventBytes;
     return {
-        quorum: profile.quorum,
         submissionBytes: close.submissionBytes,
         intentBodyBytes: close.intentBodyBytes,
         minimumResponseBodyBytes: close.minimumResponseBodyBytes,
@@ -680,6 +681,7 @@ const profileBounds = (
         optionCount: profile.optionCount,
         setupContributorCount: profile.setupContributorCount,
         eligibleContributorCount: profile.eligibleContributorCount,
+        quorum: profile.quorum,
         proposalBytes: profile.proposalBytes,
         registration: limits.registration,
         root: {

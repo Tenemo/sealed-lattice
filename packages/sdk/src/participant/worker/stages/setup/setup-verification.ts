@@ -641,7 +641,7 @@ export const readSetupCertificate = async (
                     }
                 },
                 () =>
-                    endorsements >= context.profile.close.quorum
+                    endorsements >= context.profile.quorum
                         ? endorsements
                         : undefined,
             );

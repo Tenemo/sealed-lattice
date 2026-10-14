@@ -563,7 +563,7 @@ export const closeFaultBallots = async (
     const responseEvents = (concluded.closeEvents as { kind: string }[]).filter(
         (event) => event.kind === 'response',
     );
-    assert.ok(responseEvents.length >= bounds.close.quorum - 1);
+    assert.ok(responseEvents.length >= bounds.quorum - 1);
     assert.ok(responseEvents.length <= responders.length);
     assert.deepEqual(
         (concluded.closeEvents as { kind: string }[]).filter(
@@ -652,17 +652,16 @@ export const closeFaultBallots = async (
         4 + closeBounds.proposalBodyBytes + signatureBytes,
     );
     const named = [];
-    for (let index = 0; index < closeBounds.quorum; index++)
+    for (let index = 0; index < bounds.quorum; index++)
         named.push(
             proposal.readUInt16LE(
                 4 +
                     closeBounds.proposalBodyBytes -
-                    (closeBounds.quorum - index) * 66,
+                    (bounds.quorum - index) * 66,
             ),
         );
-    assert.deepEqual(named, [0, ...responders].slice(0, closeBounds.quorum));
+    assert.deepEqual(named, [0, ...responders].slice(0, bounds.quorum));
     return {
-        closeBounds,
         probeLast,
         onTime,
         ballotAuthors,

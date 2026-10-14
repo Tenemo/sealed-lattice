@@ -114,7 +114,8 @@ export const proposalResponses = (
     profile: ParticipantProfile,
     proposal: Uint8Array,
 ) => {
-    const { proposalBodyBytes, quorum } = profile.close;
+    const { quorum } = profile;
+    const { proposalBodyBytes } = profile.close;
     return Array.from({ length: quorum }, (_unused, index) => {
         const offset =
             4 + proposalBodyBytes - (quorum - index) * listedEntryBytes;

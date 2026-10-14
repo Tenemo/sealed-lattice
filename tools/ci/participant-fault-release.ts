@@ -36,7 +36,6 @@ export const releaseFaultTarget = async (
     >,
     closed: Pick<
         FaultClose,
-        | 'closeBounds'
         | 'probeLast'
         | 'onTime'
         | 'ballotAuthors'
@@ -71,7 +70,6 @@ export const releaseFaultTarget = async (
         expectStatus,
     } = cohort;
     const {
-        closeBounds,
         probeLast,
         onTime,
         ballotAuthors,
@@ -88,13 +86,13 @@ export const releaseFaultTarget = async (
     const nonvoters = positions.slice(
         1 +
             maximumCorruptParticipantCount -
-            (participantCount - departed.size - closeBounds.quorum),
+            (participantCount - departed.size - bounds.quorum),
         1 + maximumCorruptParticipantCount,
     );
     const voters = positions.filter(
         (position) => !nonvoters.includes(position) && !departed.has(position),
     );
-    assert.equal(voters.length, closeBounds.quorum);
+    assert.equal(voters.length, bounds.quorum);
     // Every voter verifies the barrier, classifies each usable
     // ballot, evaluates the target and signs its vote. Every on-time
     // ballot but the equivocator's and the omitted one is usable,

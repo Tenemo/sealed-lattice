@@ -57,6 +57,7 @@ export const compileParticipantRuntimeProfile = (
         optionCount,
         setupContributorCount: profile.setupContributorCount,
         eligibleContributorCount: authentication.eligibleContributorCount,
+        quorum: number(closeWire.closeQuorum),
         proposalBytes: number(
             compileRosterProposalCensus(participantCount).proposalBytes,
         ),
@@ -141,7 +142,6 @@ export const compileParticipantRuntimeProfile = (
             ),
         },
         close: {
-            quorum: number(closeWire.closeQuorum),
             submissionBytes: number(closeWire.submissionBytes),
             intentBodyBytes: number(closeWire.intentBodyBytes),
             minimumResponseBodyBytes: number(
