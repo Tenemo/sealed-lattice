@@ -151,6 +151,7 @@ const makeNodeProject = ({
             : { execArgv: nodeDiagnosticReportArguments }),
         setupFiles: [
             resolveFromRepoRoot('tools/ci/test-process-exit-diagnostics.ts'),
+            resolveFromRepoRoot('tools/ci/supported-profile-setup.ts'),
         ],
         testTimeout,
         hookTimeout: nodeHookTimeoutMilliseconds,
@@ -233,6 +234,9 @@ export default defineConfig({
     resolve: testResolve,
     test: {
         sequence: { sequencer: HeavyProjectsFirstSequencer },
+        globalSetup: [
+            resolveFromRepoRoot('tools/ci/supported-profile-global-setup.ts'),
+        ],
         reporters: [
             'default' as const,
             ...(process.env.GITHUB_ACTIONS === 'true'

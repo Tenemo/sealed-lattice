@@ -568,6 +568,40 @@ export const listSupportedProfiles = (): readonly SupportedProfile[] =>
         ),
     );
 
+// Fills the empty caches with every supported profile, as this model listed
+// them earlier in the same test run, so a test file skips the derivation.
+export const primeSupportedProfiles = (
+    profiles: readonly SupportedProfile[],
+): void => {
+    assert.ok(
+        supportedProfiles.size === 0 &&
+            interpolations.size === 0 &&
+            shareLiftings.size === 0,
+        'Only empty profile caches can be primed.',
+    );
+    assert.deepStrictEqual(
+        profiles.map(({ participantCount, optionCount }) => [
+            participantCount,
+            optionCount,
+        ]),
+        supportedParticipantCounts().flatMap((participantCount) =>
+            supportedOptionCountRange().map((optionCount) => [
+                participantCount,
+                optionCount,
+            ]),
+        ),
+        'The primed profiles differ from the supported profile grid.',
+    );
+    for (const profile of profiles) {
+        supportedProfiles.set(
+            `${profile.participantCount}:${profile.optionCount}`,
+            profile,
+        );
+        interpolations.set(profile.participantCount, profile.interpolation);
+        shareLiftings.set(profile.participantCount, profile.shareLifting);
+    }
+};
+
 // The noise census of one profile's ranking graph and flooded release.
 export const compileProfileBfvCensus = (profile: SupportedProfile) => {
     const ranking = deriveRankingNoise(

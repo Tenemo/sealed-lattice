@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
     fixedModulusBfvInputs,
@@ -15,6 +15,8 @@ import {
     deriveSupportedProfile,
     interpolationRingDegree,
     largestTransformPrimeBelow,
+    listSupportedProfiles,
+    primeSupportedProfiles,
     supportedProfileRules,
 } from '#tests/supported-profile-model.js';
 import { compileThresholdCompletionProfile } from '#tests/threshold-completion-model.js';
@@ -334,5 +336,33 @@ describe('supported profile parameters', () => {
         expect(() => deriveSupportedProfile(10, 1)).toThrow();
         expect(() => deriveSupportedProfile(10, 21)).toThrow();
         expect(() => deriveSupportedProfile(10, 2.5)).toThrow();
+    });
+
+    it('primes only empty caches, and only with the complete supported grid', async () => {
+        const listed = listSupportedProfiles();
+        expect(() => primeSupportedProfiles(listed)).toThrow(
+            'Only empty profile caches can be primed.',
+        );
+        vi.resetModules();
+        const fresh = await import('#tests/supported-profile-model.js');
+        for (const altered of [
+            listed.slice(1),
+            [...listed, listed[0]],
+            listed.map((profile, index) =>
+                index === 0 ? { ...profile, optionCount: 21 } : profile,
+            ),
+        ])
+            expect(() => fresh.primeSupportedProfiles(altered)).toThrow(
+                'The primed profiles differ from the supported profile grid.',
+            );
+        fresh.primeSupportedProfiles(listed);
+        const completion = listed.find(
+            ({ participantCount, optionCount }) =>
+                participantCount === 10 && optionCount === 10,
+        );
+        expect(fresh.deriveSupportedProfile(10, 10)).toBe(completion);
+        expect(fresh.deriveReleaseInterpolation(10)).toBe(
+            completion?.interpolation,
+        );
     });
 });
