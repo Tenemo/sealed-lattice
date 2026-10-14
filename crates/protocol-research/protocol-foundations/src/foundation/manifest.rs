@@ -8,8 +8,8 @@ use super::schemas::{
     read_u16, read_variable_item, require_header,
 };
 use super::{
-    CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple, FoundationSchemaError,
-    RefusalReason, StabilizedDisplayText,
+    CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple,
+    FoundationSchemaRefusal, StabilizedDisplayText,
 };
 
 const MANIFEST_SCHEMA_IDENTIFIER: u16 = 0x0110;
@@ -45,17 +45,11 @@ impl OptionDefinition {
 
     fn validate(&self) -> SchemaResult<()> {
         if usize::from(self.option_index) >= *Profile::option_range().end() {
-            return Err(FoundationSchemaError::new(
-                RefusalReason::OutsideSupportedProfile,
-                "option index is outside the supported profile",
-            ));
+            return Err(FoundationSchemaRefusal);
         }
         CanonicalItem::nonempty_ascii(self.option_identifier())?;
         if self.display_label().as_str().is_empty() {
-            return Err(FoundationSchemaError::new(
-                RefusalReason::WrongTypeOrLength,
-                "option display label must be nonempty",
-            ));
+            return Err(FoundationSchemaRefusal);
         }
         CanonicalItem::display_text(self.display_label())?;
         Ok(())
@@ -116,40 +110,25 @@ impl Manifest {
 
     fn validate_components(&self) -> SchemaResult<()> {
         if !Profile::option_range().contains(&self.option_count()) {
-            return Err(FoundationSchemaError::new(
-                RefusalReason::OutsideSupportedProfile,
-                "manifest option count is outside the configurable range",
-            ));
+            return Err(FoundationSchemaRefusal);
         }
         if self.display_title().as_str().is_empty() {
-            return Err(FoundationSchemaError::new(
-                RefusalReason::WrongTypeOrLength,
-                "manifest display title must be nonempty",
-            ));
+            return Err(FoundationSchemaRefusal);
         }
         CanonicalItem::display_text(self.display_title())?;
         let mut option_identifiers = BTreeSet::new();
         let mut display_labels = BTreeSet::new();
         for (option_position, option) in self.options().iter().enumerate() {
             if usize::from(option.option_index) != option_position {
-                return Err(FoundationSchemaError::new(
-                    RefusalReason::WrongTypeOrLength,
-                    "manifest option indexes must be consecutive and canonically ordered",
-                ));
+                return Err(FoundationSchemaRefusal);
             }
             if !option_identifiers.insert(option.option_identifier.as_str()) {
-                return Err(FoundationSchemaError::new(
-                    RefusalReason::DuplicateIdentity,
-                    "manifest option identifiers must be unique",
-                ));
+                return Err(FoundationSchemaRefusal);
             }
             // Stabilized labels are NFC, so canonically equivalent input
             // spellings compare equal here.
             if !display_labels.insert(option.display_label.as_str()) {
-                return Err(FoundationSchemaError::new(
-                    RefusalReason::DuplicateIdentity,
-                    "manifest option display labels must be unique",
-                ));
+                return Err(FoundationSchemaRefusal);
             }
         }
         Ok(())
@@ -190,9 +169,7 @@ impl Manifest {
 
 fn read_display_text(item: &CanonicalItem) -> SchemaResult<StabilizedDisplayText> {
     let bytes = read_variable_item(item, CanonicalItemType::DisplayText)?;
-    StabilizedDisplayText::from_canonical_utf8(bytes).map_err(|error| {
-        FoundationSchemaError::new(error.refusal_reason(), "display text is not canonical")
-    })
+    StabilizedDisplayText::from_canonical_utf8(bytes).map_err(|_| FoundationSchemaRefusal)
 }
 
 #[cfg(test)]

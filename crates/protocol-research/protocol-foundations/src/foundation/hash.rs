@@ -1,8 +1,8 @@
 use core::fmt;
 
 use super::{
-    CANONICAL_TUPLE_SCHEMA_IDENTIFIER, CANONICAL_TUPLE_VERSION, CanonicalCodecError, CanonicalItem,
-    CanonicalTuple,
+    CANONICAL_TUPLE_SCHEMA_IDENTIFIER, CANONICAL_TUPLE_VERSION, CanonicalCodecRefusal,
+    CanonicalItem, CanonicalTuple,
 };
 use sha3::{
     Shake256,
@@ -57,7 +57,7 @@ impl fmt::Display for Hash512 {
 pub fn hash_foundation_tuple_512(
     domain: &str,
     items: &[CanonicalItem],
-) -> Result<Hash512, CanonicalCodecError> {
+) -> Result<Hash512, CanonicalCodecRefusal> {
     let hasher = foundation_tuple_hasher(domain, items)?;
     let mut reader = hasher.finalize_xof();
     let mut output = [0u8; Hash512::BYTE_LENGTH];
@@ -68,7 +68,7 @@ pub fn hash_foundation_tuple_512(
 fn foundation_tuple_hasher(
     domain: &str,
     items: &[CanonicalItem],
-) -> Result<Shake256, CanonicalCodecError> {
+) -> Result<Shake256, CanonicalCodecRefusal> {
     let framed_bytes = canonical_foundation_tuple_hash_preimage(domain, items)?;
 
     let mut hasher = Shake256::default();
@@ -79,7 +79,7 @@ fn foundation_tuple_hasher(
 fn canonical_foundation_tuple_hash_preimage(
     domain: &str,
     items: &[CanonicalItem],
-) -> Result<Vec<u8>, CanonicalCodecError> {
+) -> Result<Vec<u8>, CanonicalCodecRefusal> {
     let mut framed_items = Vec::with_capacity(items.len().saturating_add(1));
     framed_items.push(CanonicalItem::nonempty_ascii(domain)?);
     framed_items.extend_from_slice(items);

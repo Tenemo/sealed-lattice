@@ -2,7 +2,7 @@ use super::super::StabilizedDisplayText;
 use super::value::{CanonicalItem, CanonicalItemType, CanonicalTuple, decode_variable_value};
 use super::{
     ABSOLUTE_MAXIMUM_NESTING_DEPTH, CANONICAL_ITEM_LOGICAL_ALLOCATION_BYTE_LENGTH,
-    CanonicalCodecError, CanonicalCodecErrorKind, CanonicalDecodeBudget, CanonicalDecodeLimits,
+    CanonicalCodecRefusal, CanonicalDecodeBudget, CanonicalDecodeLimits,
 };
 
 pub(super) fn decode_tuple_at(
@@ -10,96 +10,47 @@ pub(super) fn decode_tuple_at(
     limits: &CanonicalDecodeLimits,
     budget: &mut CanonicalDecodeBudget,
     nesting_depth: u16,
-    base_offset: usize,
-) -> Result<(CanonicalTuple, usize), CanonicalCodecError> {
+) -> Result<(CanonicalTuple, usize), CanonicalCodecRefusal> {
     if nesting_depth > limits.maximum_nesting_depth
         || nesting_depth > ABSOLUTE_MAXIMUM_NESTING_DEPTH
+        || bytes.len() > limits.maximum_tuple_byte_length
+        || bytes.len() < 8
     {
-        return Err(CanonicalCodecError::new(
-            CanonicalCodecErrorKind::LimitExceeded,
-            base_offset,
-            "tuple nesting depth exceeds the configured limit",
-        ));
-    }
-    if bytes.len() > limits.maximum_tuple_byte_length {
-        return Err(CanonicalCodecError::new(
-            CanonicalCodecErrorKind::LimitExceeded,
-            base_offset,
-            "tuple byte length exceeds the configured limit",
-        ));
-    }
-    if bytes.len() < 8 {
-        return Err(CanonicalCodecError::new(
-            CanonicalCodecErrorKind::Truncated,
-            base_offset + bytes.len(),
-            "tuple header is truncated",
-        ));
+        return Err(CanonicalCodecRefusal);
     }
     let schema_identifier = u16::from_le_bytes([bytes[0], bytes[1]]);
     let schema_version = u16::from_le_bytes([bytes[2], bytes[3]]);
     let item_count = u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]) as usize;
     if item_count > limits.maximum_item_count {
-        return Err(CanonicalCodecError::new(
-            CanonicalCodecErrorKind::LimitExceeded,
-            base_offset + 4,
-            "tuple item count exceeds the configured limit",
-        ));
+        return Err(CanonicalCodecRefusal);
     }
+    // The declared item headers must fit before any is read.
     let minimum_length = item_count
         .checked_mul(6)
         .and_then(|value| value.checked_add(8))
-        .ok_or_else(|| {
-            CanonicalCodecError::new(
-                CanonicalCodecErrorKind::LengthOverflow,
-                base_offset + 4,
-                "tuple item headers overflow the address space",
-            )
-        })?;
+        .ok_or(CanonicalCodecRefusal)?;
     if minimum_length > bytes.len() {
-        return Err(CanonicalCodecError::new(
-            CanonicalCodecErrorKind::Truncated,
-            base_offset + bytes.len(),
-            "tuple cannot contain its declared item headers",
-        ));
+        return Err(CanonicalCodecRefusal);
     }
-    budget.charge_work(minimum_length, base_offset)?;
-    let item_allocation_byte_length = item_count
-        .checked_mul(CANONICAL_ITEM_LOGICAL_ALLOCATION_BYTE_LENGTH)
-        .ok_or_else(|| {
-            CanonicalCodecError::new(
-                CanonicalCodecErrorKind::LengthOverflow,
-                base_offset + 4,
-                "tuple item allocation accounting overflows the address space",
-            )
-        })?;
-    budget.charge_allocation(item_allocation_byte_length, base_offset + 4)?;
+    budget.charge_work(minimum_length)?;
+    budget.charge_allocation(
+        item_count
+            .checked_mul(CANONICAL_ITEM_LOGICAL_ALLOCATION_BYTE_LENGTH)
+            .ok_or(CanonicalCodecRefusal)?,
+    )?;
 
     let mut items = Vec::with_capacity(item_count);
     let mut offset = 8usize;
     for _ in 0..item_count {
-        let header_end = offset.checked_add(6).ok_or_else(|| {
-            CanonicalCodecError::new(
-                CanonicalCodecErrorKind::LengthOverflow,
-                base_offset + offset,
-                "tuple item header offset overflows",
-            )
-        })?;
+        let header_end = offset.checked_add(6).ok_or(CanonicalCodecRefusal)?;
         if header_end > bytes.len() {
-            return Err(CanonicalCodecError::new(
-                CanonicalCodecErrorKind::Truncated,
-                base_offset + offset,
-                "tuple item header is truncated",
-            ));
+            return Err(CanonicalCodecRefusal);
         }
-        let item_type_code = u16::from_le_bytes([bytes[offset], bytes[offset + 1]]);
-        let item_type =
-            CanonicalItemType::from_canonical_code(item_type_code).ok_or_else(|| {
-                CanonicalCodecError::new(
-                    CanonicalCodecErrorKind::UnknownItemType,
-                    base_offset + offset,
-                    "tuple item type is unassigned",
-                )
-            })?;
+        let item_type = CanonicalItemType::from_canonical_code(u16::from_le_bytes([
+            bytes[offset],
+            bytes[offset + 1],
+        ]))
+        .ok_or(CanonicalCodecRefusal)?;
         let byte_length = u32::from_le_bytes([
             bytes[offset + 2],
             bytes[offset + 3],
@@ -107,41 +58,26 @@ pub(super) fn decode_tuple_at(
             bytes[offset + 5],
         ]) as usize;
         if byte_length > limits.maximum_item_byte_length {
-            return Err(CanonicalCodecError::new(
-                CanonicalCodecErrorKind::LimitExceeded,
-                base_offset + offset + 2,
-                "tuple item byte length exceeds the configured limit",
-            ));
+            return Err(CanonicalCodecRefusal);
         }
-        let value_start = header_end;
-        let value_end = value_start.checked_add(byte_length).ok_or_else(|| {
-            CanonicalCodecError::new(
-                CanonicalCodecErrorKind::LengthOverflow,
-                base_offset + offset + 2,
-                "tuple item end offset overflows",
-            )
-        })?;
+        let value_end = header_end
+            .checked_add(byte_length)
+            .ok_or(CanonicalCodecRefusal)?;
         if value_end > bytes.len() {
-            return Err(CanonicalCodecError::new(
-                CanonicalCodecErrorKind::Truncated,
-                base_offset + value_start,
-                "tuple item is truncated",
-            ));
+            return Err(CanonicalCodecRefusal);
         }
-        let borrowed_canonical_bytes = &bytes[value_start..value_end];
+        let borrowed_canonical_bytes = &bytes[header_end..value_end];
         validate_item_bytes(
             item_type,
             borrowed_canonical_bytes,
             limits,
             budget,
             nesting_depth,
-            base_offset + value_start,
         )?;
-        budget.charge_allocation(borrowed_canonical_bytes.len(), base_offset + value_start)?;
-        let canonical_bytes = borrowed_canonical_bytes.to_vec();
+        budget.charge_allocation(borrowed_canonical_bytes.len())?;
         items.push(CanonicalItem {
             item_type,
-            canonical_bytes,
+            canonical_bytes: borrowed_canonical_bytes.to_vec(),
         });
         offset = value_end;
     }
@@ -161,18 +97,13 @@ pub(in crate::foundation) fn validate_item_bytes(
     limits: &CanonicalDecodeLimits,
     budget: &mut CanonicalDecodeBudget,
     nesting_depth: u16,
-    base_offset: usize,
-) -> Result<(), CanonicalCodecError> {
+) -> Result<(), CanonicalCodecRefusal> {
     if nesting_depth > limits.maximum_nesting_depth
         || nesting_depth > ABSOLUTE_MAXIMUM_NESTING_DEPTH
     {
-        return Err(CanonicalCodecError::new(
-            CanonicalCodecErrorKind::LimitExceeded,
-            base_offset,
-            "item nesting depth exceeds the configured limit",
-        ));
+        return Err(CanonicalCodecRefusal);
     }
-    budget.charge_work(bytes.len(), base_offset)?;
+    budget.charge_work(bytes.len())?;
     let expected_length = match item_type {
         CanonicalItemType::Unsigned16 => Some(2),
         CanonicalItemType::Unsigned64 => Some(8),
@@ -182,80 +113,41 @@ pub(in crate::foundation) fn validate_item_bytes(
     if let Some(expected_length) = expected_length
         && bytes.len() != expected_length
     {
-        return Err(CanonicalCodecError::new(
-            CanonicalCodecErrorKind::InvalidItem,
-            base_offset,
-            "tuple item has the wrong fixed byte length",
-        ));
+        return Err(CanonicalCodecRefusal);
     }
     match item_type {
         CanonicalItemType::Ascii => {
-            let value = decode_variable_value(bytes, base_offset)?;
+            let value = decode_variable_value(bytes)?;
             if value.iter().any(|byte| !(0x20..=0x7e).contains(byte)) {
-                return Err(CanonicalCodecError::new(
-                    CanonicalCodecErrorKind::InvalidItem,
-                    base_offset,
-                    "ASCII item contains a non-printable byte",
-                ));
+                return Err(CanonicalCodecRefusal);
             }
         }
         CanonicalItemType::DisplayText => {
-            let value = decode_variable_value(bytes, base_offset)?;
-            budget.charge_allocation(value.len(), base_offset + 4)?;
-            StabilizedDisplayText::from_canonical_utf8(value).map_err(|_| {
-                CanonicalCodecError::new(
-                    CanonicalCodecErrorKind::InvalidItem,
-                    base_offset,
-                    "display-text item is not canonical Unicode 17 stabilized NFC",
-                )
-            })?;
+            let value = decode_variable_value(bytes)?;
+            budget.charge_allocation(value.len())?;
+            StabilizedDisplayText::from_canonical_utf8(value).map_err(|_| CanonicalCodecRefusal)?;
         }
         CanonicalItemType::NestedTuple => {
             let (_, consumed) = decode_tuple_at(
                 bytes,
                 limits,
                 budget,
-                nesting_depth.checked_add(1).ok_or_else(|| {
-                    CanonicalCodecError::new(
-                        CanonicalCodecErrorKind::LengthOverflow,
-                        base_offset,
-                        "tuple nesting depth overflows",
-                    )
-                })?,
-                base_offset,
+                nesting_depth.checked_add(1).ok_or(CanonicalCodecRefusal)?,
             )?;
             if consumed != bytes.len() {
-                return Err(CanonicalCodecError::new(
-                    CanonicalCodecErrorKind::TrailingBytes,
-                    base_offset + consumed,
-                    "nested tuple contains trailing bytes",
-                ));
+                return Err(CanonicalCodecRefusal);
             }
         }
         CanonicalItemType::HomogeneousList => {
             if bytes.len() < 6 {
-                return Err(CanonicalCodecError::new(
-                    CanonicalCodecErrorKind::Truncated,
-                    base_offset + bytes.len(),
-                    "homogeneous-list header is truncated",
-                ));
+                return Err(CanonicalCodecRefusal);
             }
-            let element_type_code = u16::from_le_bytes([bytes[0], bytes[1]]);
-            let element_type = CanonicalItemType::from_canonical_code(element_type_code)
-                .ok_or_else(|| {
-                    CanonicalCodecError::new(
-                        CanonicalCodecErrorKind::UnknownItemType,
-                        base_offset,
-                        "homogeneous-list element type is unassigned",
-                    )
-                })?;
+            let element_type =
+                CanonicalItemType::from_canonical_code(u16::from_le_bytes([bytes[0], bytes[1]]))
+                    .ok_or(CanonicalCodecRefusal)?;
             let count = u32::from_le_bytes([bytes[2], bytes[3], bytes[4], bytes[5]]) as usize;
             if count > limits.maximum_item_count {
-                return Err(CanonicalCodecError::new(
-                    CanonicalCodecErrorKind::LimitExceeded,
-                    base_offset + 2,
-                    "homogeneous-list count exceeds the configured limit",
-                ));
+                return Err(CanonicalCodecRefusal);
             }
             validate_list_payload(
                 element_type,
@@ -264,7 +156,6 @@ pub(in crate::foundation) fn validate_item_bytes(
                 limits,
                 budget,
                 nesting_depth,
-                base_offset + 6,
             )?;
         }
         _ => {}
@@ -272,6 +163,7 @@ pub(in crate::foundation) fn validate_item_bytes(
     Ok(())
 }
 
+/// A homogeneous list holds exactly its count of hashes or of nested tuples.
 pub(super) fn validate_list_payload(
     element_type: CanonicalItemType,
     count: usize,
@@ -279,55 +171,25 @@ pub(super) fn validate_list_payload(
     limits: &CanonicalDecodeLimits,
     budget: &mut CanonicalDecodeBudget,
     nesting_depth: u16,
-    base_offset: usize,
-) -> Result<(), CanonicalCodecError> {
+) -> Result<(), CanonicalCodecRefusal> {
     if element_type == CanonicalItemType::Hash512 {
-        if count.checked_mul(64) != Some(bytes.len()) {
-            return Err(CanonicalCodecError::new(
-                CanonicalCodecErrorKind::InvalidItem,
-                base_offset,
-                "hash-list payload has the wrong length",
-            ));
-        }
-        return Ok(());
+        return if count.checked_mul(64) == Some(bytes.len()) {
+            Ok(())
+        } else {
+            Err(CanonicalCodecRefusal)
+        };
     }
     if element_type != CanonicalItemType::NestedTuple {
-        return Err(CanonicalCodecError::new(
-            CanonicalCodecErrorKind::InvalidItem,
-            base_offset,
-            "foundation homogeneous lists contain only nested tuples",
-        ));
+        return Err(CanonicalCodecRefusal);
     }
-    let next_depth = nesting_depth.checked_add(1).ok_or_else(|| {
-        CanonicalCodecError::new(
-            CanonicalCodecErrorKind::LengthOverflow,
-            base_offset,
-            "tuple nesting depth overflows",
-        )
-    })?;
+    let next_depth = nesting_depth.checked_add(1).ok_or(CanonicalCodecRefusal)?;
     let mut offset = 0usize;
     for _ in 0..count {
-        let (_, consumed) = decode_tuple_at(
-            &bytes[offset..],
-            limits,
-            budget,
-            next_depth,
-            base_offset + offset,
-        )?;
-        offset = offset.checked_add(consumed).ok_or_else(|| {
-            CanonicalCodecError::new(
-                CanonicalCodecErrorKind::LengthOverflow,
-                base_offset,
-                "homogeneous-list offset overflows",
-            )
-        })?;
+        let (_, consumed) = decode_tuple_at(&bytes[offset..], limits, budget, next_depth)?;
+        offset = offset.checked_add(consumed).ok_or(CanonicalCodecRefusal)?;
     }
     if offset != bytes.len() {
-        return Err(CanonicalCodecError::new(
-            CanonicalCodecErrorKind::TrailingBytes,
-            base_offset + offset,
-            "homogeneous-list contains trailing bytes",
-        ));
+        return Err(CanonicalCodecRefusal);
     }
     Ok(())
 }

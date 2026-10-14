@@ -1,7 +1,7 @@
 use crate::SIGNING_PUBLIC_KEY_BYTES;
 use core::fmt;
 
-use super::{CanonicalCodecError, CanonicalItem, hash_foundation_tuple_512 as hash512};
+use super::{CanonicalCodecRefusal, CanonicalItem, hash_foundation_tuple_512 as hash512};
 
 const PARTICIPANT_IDENTITY_BYTE_LENGTH: usize = 64;
 
@@ -52,7 +52,7 @@ impl fmt::Display for ParticipantIdentity {
 
 pub fn derive_participant_identity(
     signing_verification_key: &[u8; SIGNING_PUBLIC_KEY_BYTES],
-) -> Result<ParticipantIdentity, CanonicalCodecError> {
+) -> Result<ParticipantIdentity, CanonicalCodecRefusal> {
     let participant_identity_hash = hash512(
         "sealed-lattice/foundation/participant-identity/v1",
         &[CanonicalItem::fixed_bytes(*signing_verification_key)?],

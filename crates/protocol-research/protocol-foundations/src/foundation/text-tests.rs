@@ -1,4 +1,4 @@
-use super::{DisplayTextError, REQUIRED_UNICODE_VERSION, StabilizedDisplayText};
+use super::{DisplayTextRefusal, REQUIRED_UNICODE_VERSION, StabilizedDisplayText};
 
 #[test]
 fn unicode_version_is_pinned_to_seventeen() {
@@ -17,7 +17,7 @@ fn ingress_normalizes_once_and_canonical_validation_does_not() {
 
     assert_eq!(
         StabilizedDisplayText::from_canonical_utf8(decomposed.as_bytes()),
-        Err(DisplayTextError::NotStabilizedNfc)
+        Err(DisplayTextRefusal)
     );
     assert_eq!(
         StabilizedDisplayText::from_canonical_utf8(normalized.as_str().as_bytes())
@@ -30,21 +30,19 @@ fn ingress_normalizes_once_and_canonical_validation_does_not() {
 fn malformed_surrogate_noncharacter_and_unassigned_inputs_are_rejected() {
     assert_eq!(
         StabilizedDisplayText::from_ingress_utf8(&[0xed, 0xa0, 0x80]),
-        Err(DisplayTextError::InvalidUtf8)
+        Err(DisplayTextRefusal)
     );
     assert_eq!(
         StabilizedDisplayText::from_ingress_utf8("\u{fdd0}".as_bytes()),
-        Err(DisplayTextError::Noncharacter { code_point: 0xfdd0 })
+        Err(DisplayTextRefusal)
     );
     assert_eq!(
         StabilizedDisplayText::from_ingress_utf8("\u{10ffff}".as_bytes()),
-        Err(DisplayTextError::Noncharacter {
-            code_point: 0x10ffff
-        })
+        Err(DisplayTextRefusal)
     );
     assert_eq!(
         StabilizedDisplayText::from_ingress_utf8("\u{378}".as_bytes()),
-        Err(DisplayTextError::UnassignedCodePoint { code_point: 0x378 })
+        Err(DisplayTextRefusal)
     );
 }
 
@@ -55,11 +53,11 @@ fn private_use_code_points_are_rejected_across_all_three_ranges() {
         let text = format!("label-{character}");
         assert_eq!(
             StabilizedDisplayText::from_ingress_utf8(text.as_bytes()),
-            Err(DisplayTextError::PrivateUseCodePoint { code_point })
+            Err(DisplayTextRefusal)
         );
         assert_eq!(
             StabilizedDisplayText::from_canonical_utf8(text.as_bytes()),
-            Err(DisplayTextError::PrivateUseCodePoint { code_point })
+            Err(DisplayTextRefusal)
         );
     }
 }
@@ -72,8 +70,6 @@ fn unicode_seventeen_assignment_boundary_is_enforced() {
 
     assert_eq!(
         StabilizedDisplayText::from_ingress_utf8("\u{16eb9}".as_bytes()),
-        Err(DisplayTextError::UnassignedCodePoint {
-            code_point: 0x16eb9
-        })
+        Err(DisplayTextRefusal)
     );
 }
