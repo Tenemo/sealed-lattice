@@ -8,6 +8,7 @@ import {
     type ProofRelationCatalogueEntry,
 } from '#tests/proof-relation-catalogue-model.js';
 import { compileProofVerifierQueryCensus } from '#tests/proof-verifier-query-model.js';
+import { protocolHashPrefix } from '#tests/word-proof-reference/transcript.js';
 
 // Independent raw-input recognizer for the three fixed proof purposes. It does
 // not verify a proof, authenticate an identity or observe native hash calls.
@@ -17,8 +18,6 @@ const agreement = compileCommonAgreementDegreeCensus();
 const tagBytes = 64;
 const saltBytes = 128;
 const elementBytes = 48;
-const fixedPrefix = Buffer.alloc(64);
-fixedPrefix.write('sealed-lattice/fixed-hash/v1');
 type Purpose = ProofRelationCatalogueEntry['role'];
 const purposeCatalogues = new Map<
     Purpose,
@@ -105,8 +104,10 @@ export const parseProofHashInput = (
     input: Uint8Array,
 ): ProofHashInput | undefined => {
     const bytes = Buffer.from(input.buffer, input.byteOffset, input.byteLength);
-    const fixed = bytes.subarray(0, fixedPrefix.length).equals(fixedPrefix);
-    let position = fixed ? fixedPrefix.length : 0;
+    const fixed = bytes
+        .subarray(0, protocolHashPrefix.length)
+        .equals(protocolHashPrefix);
+    let position = fixed ? protocolHashPrefix.length : 0;
     const part = () => {
         if (position + 4 > bytes.length) return undefined;
         const length = bytes.readUInt32LE(position);

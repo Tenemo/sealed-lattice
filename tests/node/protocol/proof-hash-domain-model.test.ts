@@ -19,6 +19,7 @@ import {
     type ProofGraphEntry,
     type ProofGraphInput,
 } from '#tests/proof-hash-domain-model.js';
+import { protocolHashPrefix } from '#tests/word-proof-reference/transcript.js';
 
 // Independently maintained completion-profile ballot operands from the Rust relation descriptor,
 // original-PID role and native hash framing.
@@ -30,11 +31,9 @@ const role = tuple([
     item(itemType.hash512, Buffer.alloc(64, 2)),
     item(itemType.unsigned16, Buffer.alloc(2)),
 ]);
-const fixedPrefix = Buffer.alloc(64);
-fixedPrefix.write('sealed-lattice/fixed-hash/v1');
 const frame = (fixed: boolean, name: string, fields: readonly Buffer[]) =>
     Buffer.concat([
-        ...(fixed ? [fixedPrefix] : []),
+        ...(fixed ? [protocolHashPrefix] : []),
         ...[Buffer.from(`bounded-proof/${name}`), role, ...fields].map((part) =>
             variable(part),
         ),

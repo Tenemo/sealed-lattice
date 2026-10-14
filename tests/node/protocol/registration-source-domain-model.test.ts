@@ -20,6 +20,7 @@ import {
     minimumRegistrationSourceInputBytes,
 } from '#tests/registration-source-domain-model.js';
 import { compileRegistrationSourceRandomness } from '#tests/registration-source-randomness-model.js';
+import { protocolHashPrefix } from '#tests/word-proof-reference/transcript.js';
 
 // The item types of a registration source commitment, in order.
 const sourceItemTypes = [
@@ -75,8 +76,7 @@ it('separates the credential hash inputs from the source language by exact lengt
     }
     // Custody's ProtocolHash prefix is distinct before any secret or body
     // bytes. Unbounded retained-body length cannot change that distinction.
-    const retainedPrefix = Buffer.alloc(64);
-    retainedPrefix.write('sealed-lattice/fixed-hash/v1');
+    const retainedPrefix = protocolHashPrefix;
     expect(retainedPrefix[0]).not.toBe(encoded[0]);
     expect(
         smallest.matches(

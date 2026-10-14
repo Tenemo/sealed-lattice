@@ -194,13 +194,12 @@ export const framed = (parts: readonly Uint8Array[]) =>
 
 // The fixed-length protocol digest: 64 bytes of SHAKE256 after a 64-byte
 // domain prefix.
-const protocolPrefix = Buffer.alloc(64);
-
-protocolPrefix.write('sealed-lattice/fixed-hash/v1', 'ascii');
+export const protocolHashPrefix = Buffer.alloc(64);
+protocolHashPrefix.write('sealed-lattice/fixed-hash/v1', 'ascii');
 
 export const protocolHash = (domain: string, parts: readonly Uint8Array[]) =>
     createHash('shake256', { outputLength: 64 })
-        .update(protocolPrefix)
+        .update(protocolHashPrefix)
         .update(framed([Buffer.from(domain, 'ascii'), ...parts]))
         .digest();
 
@@ -245,7 +244,7 @@ export const contextHash = (
     role: Uint8Array,
 ) =>
     createHash('shake256', { outputLength: 64 })
-        .update(protocolPrefix)
+        .update(protocolHashPrefix)
         .update(
             framed([
                 Buffer.from('bounded-proof/statement', 'ascii'),

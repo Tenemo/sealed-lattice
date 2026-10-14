@@ -24,6 +24,7 @@ import {
 } from '#tests/proof-relation-catalogue-model.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
 import { deriveSupportedProfile } from '#tests/supported-profile-model.js';
+import { protocolHashPrefix } from '#tests/word-proof-reference/transcript.js';
 
 const field = compileSmallLimbProofFieldCensus();
 const owner = 'ab'.repeat(64);
@@ -47,10 +48,8 @@ const frame = (
     domain: string,
     parts: Buffer[],
 ) => {
-    const prefix = Buffer.alloc(64);
-    prefix.write('sealed-lattice/fixed-hash/v1');
     return Buffer.concat([
-        ...(fixed ? [prefix] : []),
+        ...(fixed ? [protocolHashPrefix] : []),
         ...[
             Buffer.from(`bounded-proof/${domain}`),
             roles[purpose],

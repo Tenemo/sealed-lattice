@@ -17,6 +17,7 @@ import {
     participantModule,
     failureOf,
 } from '#packages/sdk/tests/node/participant-module/packaged-participant-fixture.js';
+import { protocolHashPrefix } from '#tests/word-proof-reference/transcript.js';
 
 const helperWorkers = useHelperWorkers();
 
@@ -144,8 +145,7 @@ describe('parallel job host', () => {
         expect(helpers.count).toBe(2);
         try {
             const { memory, host } = standInHost(helpers);
-            const prefix = Buffer.alloc(64);
-            prefix.write('sealed-lattice/fixed-hash/v1', 'ascii');
+            const prefix = protocolHashPrefix;
             for (const length of [0, 1, 71, 72, 73, 135, 136, 137, 4097]) {
                 const input = payload(length);
                 const job = new Uint8Array(10 + input.length);

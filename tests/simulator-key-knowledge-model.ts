@@ -1,4 +1,7 @@
-import { thresholdProfileFor } from '#tests/threshold-completion-model.js';
+import {
+    compileSupportedThresholdCompletionProfiles,
+    thresholdProfileFor,
+} from '#tests/threshold-completion-model.js';
 
 type RecoveryKey = 'fhe' | 'auxiliary';
 type Reduction = Readonly<{
@@ -90,9 +93,8 @@ export const availableExtractionRecipients = (
 };
 
 export const compileSimulatorKeyKnowledgeCensus = () =>
-    Array.from({ length: 18 }, (_, index) => {
-        const participants = index + 3;
-        const profile = thresholdProfileFor(participants);
+    compileSupportedThresholdCompletionProfiles().map((profile) => {
+        const participants = profile.participantCount;
         const faults = profile.maximumCorruptParticipantCount;
         const threshold = profile.resultReleaseThreshold;
         return {

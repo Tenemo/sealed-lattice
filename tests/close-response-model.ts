@@ -27,6 +27,7 @@ import {
 } from '#tests/close-execution-model.js';
 import { preparationStagePath } from '#tests/setup-selection-model.js';
 import {
+    compileSupportedThresholdCompletionProfiles,
     thresholdProfileFor,
     type ThresholdCompletionProfile,
 } from '#tests/threshold-completion-model.js';
@@ -982,10 +983,10 @@ export const compileCloseVisitCensus = (
 };
 
 export const compileCloseResponseCensus = () => {
-    const rosters = Array.from({ length: 18 }, (_unused, index) => index + 3);
+    const profiles = compileSupportedThresholdCompletionProfiles();
     return {
-        profiles: rosters.map((participantCount) => {
-            const profile = thresholdProfileFor(participantCount);
+        profiles: profiles.map((profile) => {
+            const { participantCount } = profile;
             return {
                 ...profile,
                 inclusionHolderThreshold:
@@ -1003,7 +1004,8 @@ export const compileCloseResponseCensus = () => {
                 visits: compileCloseVisitCensus(participantCount),
             };
         }),
-        bruteForce: rosters
+        bruteForce: profiles
+            .map((profile) => profile.participantCount)
             .filter((participantCount) => participantCount <= 10)
             .map(bruteForceListerSets),
         joint: [exploreJointCloseViews(3), exploreJointCloseViews(4)],

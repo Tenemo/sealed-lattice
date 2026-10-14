@@ -227,6 +227,25 @@ describe('threshold completion model', () => {
     });
 });
 
+describe('goal claims', () => {
+    it('forces no result at full honest turnout exactly when n = 3f + 1, and raises d above f + 1 only at n = 3', () => {
+        for (const participantCount of supportedParticipantCounts) {
+            const {
+                maximumCorruptParticipantCount,
+                minimumTurnout,
+                resultReleaseThreshold,
+            } = goalThresholds(participantCount);
+            expect(
+                participantCount - 2 * maximumCorruptParticipantCount <
+                    minimumTurnout,
+            ).toBe(participantCount === 3 * maximumCorruptParticipantCount + 1);
+            expect(
+                resultReleaseThreshold > maximumCorruptParticipantCount + 1,
+            ).toBe(participantCount === 3);
+        }
+    });
+});
+
 describe('availability from roster fixing', () => {
     it('keeps at least n - f participants at every cut in every permitted single-failure schedule', () => {
         for (const participantCount of supportedParticipantCounts) {

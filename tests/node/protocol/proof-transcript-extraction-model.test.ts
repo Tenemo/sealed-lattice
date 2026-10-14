@@ -21,6 +21,7 @@ import {
 } from '#tests/proof-transcript-extraction-model.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
 import { deriveSupportedProfile } from '#tests/supported-profile-model.js';
+import { protocolHashPrefix } from '#tests/word-proof-reference/transcript.js';
 
 // These are raw hash transcripts, not proof fixtures. The zero polynomial
 // statements have canonical encodings; no arithmetic truth or protocol
@@ -45,10 +46,8 @@ const frame = (
     family: string,
     fields: readonly Buffer[],
 ) => {
-    const prefix = Buffer.alloc(64);
-    prefix.write('sealed-lattice/fixed-hash/v1');
     return Buffer.concat([
-        ...(fixed ? [prefix] : []),
+        ...(fixed ? [protocolHashPrefix] : []),
         ...[Buffer.from(`bounded-proof/${family}`), role, ...fields].map(
             (field) => variable(field),
         ),
