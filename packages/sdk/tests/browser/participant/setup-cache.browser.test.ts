@@ -4,6 +4,7 @@ import type { PublicProfileContext } from '#packages/sdk/src/participant/worker/
 import {
     ModuleFailure,
     PublicInputFailure,
+    StorageFailure,
 } from '#packages/sdk/src/participant/worker/shared/failures.js';
 import { streamBallotKey } from '#packages/sdk/src/participant/worker/stages/ballot/ballot.js';
 import {
@@ -116,7 +117,7 @@ describe('bounded public aggregate cache reads', () => {
         expect(seen).toEqual([0]);
     });
 
-    it('refuses missing, wrong-type and wrong-length chunks without delivering a later chunk', async () => {
+    it('fails on storage for missing, wrong-type and wrong-length chunks without delivering a later chunk', async () => {
         for (const invalid of [
             undefined,
             'bytes',
@@ -130,7 +131,7 @@ describe('bounded public aggregate cache reads', () => {
             const seen: number[] = [];
             await expect(
                 readFinalAggregate(context, 7, (offset) => seen.push(offset)),
-            ).rejects.toBeInstanceOf(PublicInputFailure);
+            ).rejects.toBeInstanceOf(StorageFailure);
             expect(seen).toEqual([0]);
         }
     });
