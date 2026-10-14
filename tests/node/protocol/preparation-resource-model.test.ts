@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { encodeCandidateManifest } from '#packages/sdk/src/participant/worker/relay/candidate-codec.js';
 import { compileContributionBodyCensus } from '#tests/contribution-body-model.js';
+import { goalThresholds } from '#tests/node/protocol/reference/product-goals.js';
 import { compilePreparationResources } from '#tests/preparation-resource-model.js';
 import { compileSetupSelectionWireCensus } from '#tests/setup-selection-wire-model.js';
 import { deriveSupportedProfile } from '#tests/supported-profile-model.js';
@@ -19,10 +20,12 @@ describe('preparation public resource bounds', () => {
             const body = compileContributionBodyCensus(profile);
             const wire = compileSetupSelectionWireCensus(participants);
             const result = compilePreparationResources(profile);
-            const faults = Math.floor((participants - 1) / 3);
-            const selected = Math.max(faults + 1, 2);
+            const {
+                maximumCorruptParticipantCount: faults,
+                resultReleaseThreshold: selected,
+                inventoryCertificateThreshold: quorum,
+            } = goalThresholds(participants);
             const eligible = selected + faults;
-            const quorum = participants - faults;
             expect(result.eligibleContributorCount).toBe(eligible);
             expect(result.setupContributorCount).toBe(selected);
             expect(result.quorum).toBe(quorum);

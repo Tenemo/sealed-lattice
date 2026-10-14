@@ -7,6 +7,7 @@ import {
     tuple,
     unsigned,
 } from '#tests/node/protocol/reference/canonical-tuple.js';
+import { supportedParticipantCounts } from '#tests/node/protocol/reference/product-goals.js';
 import { compileRosterProposalCensus } from '#tests/roster-proposal-model.js';
 
 describe('verified registration roster proposal', () => {
@@ -30,7 +31,7 @@ describe('verified registration roster proposal', () => {
         }
     });
     it('bounds the complete public record corpus and recipient key live set', () => {
-        for (let count = 3; count <= 20; count++) {
+        for (const count of supportedParticipantCounts) {
             const value = compileRosterProposalCensus(count);
             expect(value.roleBytes).toBeLessThanOrEqual(1024n);
             expect(value.proposalBytes).toBeLessThan(2048n);

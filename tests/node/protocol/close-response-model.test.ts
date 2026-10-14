@@ -19,26 +19,14 @@ import {
     compileCloseVisitCensus,
     exploreJointCloseViews,
 } from '#tests/close-response-model.js';
+import {
+    goalThresholds,
+    supportedParticipantCounts,
+} from '#tests/node/protocol/reference/product-goals.js';
 import { thresholdProfileFor } from '#tests/threshold-completion-model.js';
 
-// Product goals, maintained independently of the model: at most
-// f = floor((n - 1) / 3) participants are corrupt, closing needs n - f
-// responses including the organizer, at most f ballots can be left out, and
-// more than ten productive visits is a product failure.
-const goalThresholds = (participantCount: number) => {
-    const maximumCorruptParticipantCount = Math.floor(
-        (participantCount - 1) / 3,
-    );
-    return {
-        participantCount,
-        maximumCorruptParticipantCount,
-        quorum: participantCount - maximumCorruptParticipantCount,
-    };
-};
-const supportedParticipantCounts = Array.from(
-    { length: 18 },
-    (_unused, index) => index + 3,
-);
+// Further product goals: the n - f closing responses include the
+// organizer, and more than ten productive visits is a product failure.
 const mandatoryVisitCeiling = 10;
 const memberCount = (mask: number): number =>
     [...mask.toString(2)].filter((digit) => digit === '1').length;
@@ -479,8 +467,9 @@ describe('close response model', () => {
 
     it('keeps the contract in every completion-profile corruption set', () => {
         const census = exploreCompletionProfileExecutions();
-        const { maximumCorruptParticipantCount, participantCount } =
-            goalThresholds(10);
+        const participantCount = 10;
+        const { maximumCorruptParticipantCount } =
+            goalThresholds(participantCount);
         expect(census.corruptionSets).toBe(
             Array.from(
                 { length: maximumCorruptParticipantCount + 1 },
@@ -530,8 +519,10 @@ describe('close response model', () => {
 
     it('closes when corrupt participants fill the organizer body slots and split the others', () => {
         for (const participantCount of [4, 7, 10, 13]) {
-            const { maximumCorruptParticipantCount, quorum } =
-                goalThresholds(participantCount);
+            const {
+                maximumCorruptParticipantCount,
+                inventoryCertificateThreshold,
+            } = goalThresholds(participantCount);
             const corrupt =
                 ((1 << maximumCorruptParticipantCount) - 1) <<
                 (participantCount - maximumCorruptParticipantCount);
@@ -565,7 +556,9 @@ describe('close response model', () => {
                         : 'accepted',
                 ),
             );
-            expect(memberCount(result.inventory!.responders)).toBe(quorum);
+            expect(memberCount(result.inventory!.responders)).toBe(
+                inventoryCertificateThreshold,
+            );
             // The organizer receives two late bodies, discarded at its lock,
             // and requests at most the one known body before a second
             // envelope for the slot is known.

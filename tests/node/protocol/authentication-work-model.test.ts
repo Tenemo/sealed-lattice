@@ -14,6 +14,7 @@ import {
     compileBallotSignatureHashWork,
     pureSignatureFrame,
 } from '#tests/authentication-work-model.js';
+import { supportedParticipantCounts } from '#tests/node/protocol/reference/product-goals.js';
 import { readRustSource, rustStringConstant } from '#tests/node/rust-source.js';
 import {
     framedProofHashBytes,
@@ -158,7 +159,7 @@ describe('authentication frame accounting', () => {
             'setup-selection-endorsement',
             'ballot-envelope',
         ]);
-        for (let count = 3; count <= 20; count++) {
+        for (const count of supportedParticipantCounts) {
             const intentBound =
                 organizer.firstEvaluatedIntentBound +
                 BigInt(count - 1) * participant.firstEvaluatedIntentBound -
@@ -234,7 +235,7 @@ describe('authentication frame accounting', () => {
     });
 
     it('enumerates signatures without equating the enrollment set with the roster', () => {
-        for (let participants = 3; participants <= 20; participants++) {
+        for (const participants of supportedParticipantCounts) {
             for (const extraRegistrations of [0, 1, 21]) {
                 for (const ballots of [0, 1, participants]) {
                     const records = [

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { supportedParticipantCounts } from '#tests/node/protocol/reference/product-goals.js';
 import { PreparationLifecycleModel } from '#tests/preparation-lifecycle-model.js';
 import { compileSetupSelectionCensus } from '#tests/setup-selection-model.js';
 
@@ -32,7 +33,7 @@ const endorse = (
 };
 
 describe('preparation lifecycle under original custody', () => {
-    it.each(Array.from({ length: 18 }, (_, index) => index + 3))(
+    it.each(supportedParticipantCounts)(
         'finishes after eligible honest departures before any setup message at n=%i',
         (participants) => {
             const profile = compileSetupSelectionCensus(participants);

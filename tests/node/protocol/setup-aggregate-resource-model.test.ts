@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
+import { goalThresholds } from '#tests/node/protocol/reference/product-goals.js';
 import { compileRecipientKeyCensus } from '#tests/recipient-key-model.js';
 import {
     compileSetupAggregateResources,
@@ -43,9 +44,9 @@ describe('setup aggregate cache resources', () => {
             expected + maximumReplacement,
         );
         // Every recipient's share sums the certified selection's d entries,
-        // with d = max(f + 1, 2) and f = floor((n - 1) / 3).
+        // with d the release threshold.
         const setupContributorCount = BigInt(
-            Math.max(Math.floor((profile.participantCount - 1) / 3) + 1, 2),
+            goalThresholds(profile.participantCount).resultReleaseThreshold,
         );
         expect(value.contributionReadBytes).toBe(
             setupContributorCount * expected,

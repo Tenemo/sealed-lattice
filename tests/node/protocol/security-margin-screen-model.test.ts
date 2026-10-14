@@ -1,5 +1,9 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 
+import {
+    goalThresholds,
+    supportedParticipantCounts,
+} from '#tests/node/protocol/reference/product-goals.js';
 import { compileSourceDomainOracleBudget } from '#tests/oracle-budget-model.js';
 import { compileRegistrationSourceExtractionWork } from '#tests/registration-source-randomness-model.js';
 import {
@@ -121,12 +125,14 @@ describe('FHE security margin screen', () => {
             ),
         );
         expect(screen.map((row) => row.participantCount)).toEqual(
-            Array.from({ length: 18 }, (_, index) => index + 3),
+            supportedParticipantCounts,
         );
         for (const row of screen) {
             const participants = row.participantCount;
-            const faults = Math.floor((participants - 1) / 3);
-            const selected = Math.max(faults + 1, 2);
+            const {
+                maximumCorruptParticipantCount: faults,
+                resultReleaseThreshold: selected,
+            } = goalThresholds(participants);
             // f departures must leave d eligible authors.
             const eligible = selected + faults;
             const sets = triangle[eligible][selected];

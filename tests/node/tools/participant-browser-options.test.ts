@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { goalThresholds } from '#tests/node/protocol/reference/product-goals.js';
 import {
     participantDepartureBoundaries,
     scheduleParticipantDepartures,
@@ -47,9 +48,10 @@ describe('participant browser cohort selection', () => {
 
     it('spreads every tolerated departure so that exactly the quorum remains', () => {
         for (let participants = 4; participants <= 20; participants++) {
-            // The frozen thresholds, independent of the profile model.
-            const faults = Math.floor((participants - 1) / 3);
-            const setupContributorCount = Math.max(faults + 1, 2);
+            const {
+                maximumCorruptParticipantCount: faults,
+                resultReleaseThreshold: setupContributorCount,
+            } = goalThresholds(participants);
             const eligibleContributorCount = setupContributorCount + faults;
             const { departures, selectedPositions } =
                 scheduleParticipantDepartures(participants, 2);

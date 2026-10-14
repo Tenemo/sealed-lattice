@@ -1,15 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
+import { goalThresholds } from '#tests/node/protocol/reference/product-goals.js';
 import { completionProfileCounts } from '#tests/supported-profile-model.js';
 import { verifyThresholdKeyAggregationModel } from '#tests/threshold-key-aggregation-model.js';
 
 const participantCount = completionProfileCounts.participantCount;
-// Release needs shares from at least f + 1 participants, for
-// f = floor((n - 1) / 3), and never fewer than 2.
-const releaseThreshold = Math.max(
-    Math.floor((participantCount - 1) / 3) + 1,
-    2,
-);
+const releaseThreshold =
+    goalThresholds(participantCount).resultReleaseThreshold;
 
 // KLLPS26 Section 4.2 interpolates at the monomials x^0, ..., x^(n - 1) and
 // assumes n <= 2N; this is the smallest power-of-two degree allowing that.

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { supportedParticipantCounts } from '#tests/node/protocol/reference/product-goals.js';
 import {
     SetupSelectionModel,
     closeOnlySelectionCounterexample,
@@ -133,7 +134,7 @@ describe('contribution selection candidate', () => {
         expect(model.endorse(1, [0, 1])).toBe(true);
     });
 
-    it.each(Array.from({ length: 18 }, (_unused, index) => index + 3))(
+    it.each(supportedParticipantCounts)(
         'derives fixed-pool availability and honest quorum intersection at n=%i',
         (count) => {
             const census = compileSetupSelectionCensus(count);

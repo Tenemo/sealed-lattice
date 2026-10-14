@@ -4,6 +4,7 @@ import { encodeCandidateManifest } from '#packages/sdk/src/participant/worker/re
 import { compileBallotBodyCensus } from '#tests/ballot-body-model.js';
 import { compileCloseWireCensus } from '#tests/close-wire-model.js';
 import { compileContributionBodyCensus } from '#tests/contribution-body-model.js';
+import { goalThresholds } from '#tests/node/protocol/reference/product-goals.js';
 import { compileOrdinaryWorkflowResources } from '#tests/ordinary-workflow-resource-model.js';
 import { compileParticipantReleaseCustody } from '#tests/participant-release-custody-model.js';
 import { compileRecipientKeyCensus } from '#tests/recipient-key-model.js';
@@ -235,9 +236,10 @@ describe('complete ordinary workflow resource graph', () => {
         (count) => {
             const profile = deriveSupportedProfile(count, count);
             const result = compileOrdinaryWorkflowResources(profile, artifact);
+            const thresholds = goalThresholds(count);
             const n = BigInt(count),
-                d = BigInt(Math.floor((count - 1) / 3) + 1),
-                f = BigInt(Math.floor((count - 1) / 3));
+                d = BigInt(thresholds.resultReleaseThreshold),
+                f = BigInt(thresholds.maximumCorruptParticipantCount);
             expect(result.rows.map((row) => row.offers)).toEqual([d, d + f]);
             expect(
                 result.rows[1].publicCorpusBytes -

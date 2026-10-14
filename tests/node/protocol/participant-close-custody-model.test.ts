@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { compileBallotBodyCensus } from '#tests/ballot-body-model.js';
+import { goalThresholds } from '#tests/node/protocol/reference/product-goals.js';
 import { compileParticipantCloseCustody } from '#tests/participant-close-custody-model.js';
 import {
     completionProfile,
@@ -55,7 +56,7 @@ describe('participant close custody layout', () => {
             const value = compileParticipantCloseCustody(profile);
             const body = compileBallotBodyCensus(profile);
             const maximumCorruptParticipantCount = BigInt(
-                Math.floor((participants - 1) / 3),
+                goalThresholds(participants).maximumCorruptParticipantCount,
             );
             const count = BigInt(participants);
             const bodyRecords =

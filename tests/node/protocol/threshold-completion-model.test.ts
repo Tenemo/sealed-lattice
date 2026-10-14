@@ -1,36 +1,19 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+    goalThresholds,
+    supportedParticipantCounts,
+} from '#tests/node/protocol/reference/product-goals.js';
+import {
     compileSupportedThresholdCompletionProfiles,
     deriveLifecycleAvailability,
     lifecycleAvailabilityStages,
     thresholdProfileFor,
 } from '#tests/threshold-completion-model.js';
 
-// Product goals, maintained independently of the model: a poll has 3 to 20
-// participants, at most f = floor((n - 1) / 3) of them are corrupt, and at
-// most f ballots can be left out. Release needs shares from at least f + 1
-// participants and never fewer than 2, a result needs at least f + 2 accepted
-// ballots, and closing needs n - f participants. From roster fixing, a total
-// of at most f participants may become unavailable; only the organizer is
-// indispensable before closure, and no participant is indispensable after it.
-const supportedParticipantCounts = Array.from(
-    { length: 20 - 3 + 1 },
-    (_unused, index) => 3 + index,
-);
-
-const goalThresholds = (participantCount: number) => {
-    const maximumCorruptParticipantCount = Math.floor(
-        (participantCount - 1) / 3,
-    );
-    return {
-        maximumCorruptParticipantCount,
-        resultReleaseThreshold: Math.max(maximumCorruptParticipantCount + 1, 2),
-        minimumTurnout: maximumCorruptParticipantCount + 2,
-        inventoryCertificateThreshold:
-            participantCount - maximumCorruptParticipantCount,
-    };
-};
+// A further product goal: from roster fixing, a total of at most f
+// participants may become unavailable; only the organizer is indispensable
+// before closure, and no participant is indispensable after it.
 
 const memberCount = (participantSet: number): number => {
     let count = 0;

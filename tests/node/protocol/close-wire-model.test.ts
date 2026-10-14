@@ -6,6 +6,10 @@ import {
     compileCloseWireCensus,
 } from '#tests/close-wire-model.js';
 import {
+    goalThresholds,
+    supportedParticipantCounts,
+} from '#tests/node/protocol/reference/product-goals.js';
+import {
     completionProfile,
     completionProfileCounts,
     deriveSupportedProfile,
@@ -13,10 +17,6 @@ import {
 
 // FIPS 204 Table 2: an ML-DSA-65 signature has 3309 bytes.
 const signatureBytes = 3309n;
-const supportedParticipantCounts = Array.from(
-    { length: 18 },
-    (_unused, index) => index + 3,
-);
 const rosterProfile = (participantCount: number) =>
     deriveSupportedProfile(
         participantCount,
@@ -53,11 +53,11 @@ describe('close wire census', () => {
             const ballot = compileBallotBodyCensus(profile);
             expect(ballot.envelopeBytes).toBe(214n);
             const value = compileCloseWireCensus(profile);
+            const thresholds = goalThresholds(participants);
             const maximumCorruptParticipantCount = BigInt(
-                Math.floor((participants - 1) / 3),
+                thresholds.maximumCorruptParticipantCount,
             );
-            const quorum =
-                BigInt(participants) - maximumCorruptParticipantCount;
+            const quorum = BigInt(thresholds.inventoryCertificateThreshold);
             expect(value.maximumResponseEntries).toBe(
                 2n * BigInt(participants),
             );

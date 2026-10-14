@@ -1,5 +1,6 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 
+import { goalThresholds } from '#tests/node/protocol/reference/product-goals.js';
 import { compilePrivateRandomnessScopes } from '#tests/operation-seed-model.js';
 import { compilePreparationLedger } from '#tests/preparation-ledger-model.js';
 import {
@@ -90,9 +91,6 @@ const organizerPurposes = [
     ['target-certification', 'v1'],
     ['release-envelope', 'v1'],
 ] as const;
-
-const maximumCorrupt = (participantCount: number) =>
-    BigInt(Math.floor((participantCount - 1) / 3));
 
 // Whether value/experiment <= bound, compared exactly.
 const ratioWithin = (value: Rational, experiment: bigint, bound: Rational) =>
@@ -227,7 +225,10 @@ describe('security ledger', () => {
 
     it('bounds every lattice group comparison count by its affine growth', () => {
         for (const profile of sampleProfiles) {
-            const corrupt = maximumCorrupt(profile.participantCount);
+            const corrupt = BigInt(
+                goalThresholds(profile.participantCount)
+                    .maximumCorruptParticipantCount,
+            );
             const participants = BigInt(profile.participantCount);
             const endorsers = participants - 2n * corrupt;
             const growth = compileComparisonGrowth(profile);
