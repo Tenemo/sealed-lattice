@@ -22,7 +22,7 @@ type Element = [u128; 3];
 const ZERO: Element = [0, 0, 0];
 const ONE: Element = [1, 0, 0];
 const FOLDS: usize = (EVALUATION_DOMAIN_SIZE / 2).ilog2() as usize;
-pub const HEADER_LENGTH: usize = 4 + 64 + 3 * 64 + 48 + (FOLDS + 3) * 128 + (FOLDS - 1) * 64 + 48;
+pub const HEADER_LENGTH: usize = 64 + 3 * 64 + 48 + (FOLDS + 3) * 128 + (FOLDS - 1) * 64 + 48;
 pub use parallel_work::CHUNK_LIMIT;
 
 /// The public statement parser of one relation. It yields the relation's
@@ -110,7 +110,7 @@ impl<S: Statement> Verifier<S> {
         if role.is_empty() || role.len() > 1024 {
             return Err(Refusal::Context);
         }
-        let header = Header::parse(proof_header, relation.proof_magic)?;
+        let header = Header::parse(proof_header)?;
         let shape = Shape::new(&relation);
         let context = context(&relation, role, &header.statement);
         let challenges = challenges(&shape, role, &context, &header);

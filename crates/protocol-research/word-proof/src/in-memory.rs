@@ -86,7 +86,6 @@ impl InMemoryProof {
     pub fn write(&self, output: &mut impl Write) {
         write_header(
             output,
-            &self.witness.relation,
             &self.witness.statement,
             &self.transcript,
             [
@@ -125,19 +124,17 @@ impl InMemoryProof {
     }
 }
 
-/// Writes a proof's header: the relation's magic, the statement digest, the
-/// three oracle roots and the mask sum, every round's salt, and the folding
-/// layers' roots with the terminal value.
+/// Writes a proof's header: the statement digest, the three oracle roots and
+/// the mask sum, every round's salt, and the folding layers' roots with the
+/// terminal value.
 pub(crate) fn write_header(
     output: &mut impl Write,
-    relation: &Relation,
     statement: &[u8; 64],
     transcript: &Transcript,
     roots: [[u8; 64]; 3],
     mask_sum: Element,
     folding: &Fri,
 ) {
-    output.write_all(relation.proof_magic).unwrap();
     output.write_all(statement).unwrap();
     for root in roots {
         output.write_all(&root).unwrap();

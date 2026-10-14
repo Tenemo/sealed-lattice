@@ -40,7 +40,7 @@ export const wordProofDomain = (systematic: number, queries: number) => {
         maximumDegree: 2 * systematic - 1,
         witnessDegree: systematic + masks - 1,
         headerBytes:
-            4 + 64 + 3 * 64 + 48 + (folds + 3) * 128 + (folds - 1) * 64 + 48,
+            64 + 3 * 64 + 48 + (folds + 3) * 128 + (folds - 1) * 64 + 48,
     };
 };
 
@@ -61,10 +61,9 @@ export const productionWordProofDomain = () => {
 
 // A relation as the verifier reads it: its word and Boolean columns, every
 // lookup's column and scale, whole words first, its zero-product column
-// pairs, its proof magic, and the byte encodings its proofs bind.
+// pairs, and the byte encodings its proofs bind.
 export type WordRelation = Readonly<{
     tag: Uint8Array;
-    magic: Uint8Array;
     words: number;
     booleans: number;
     lookups: readonly Readonly<{ column: number; factor: bigint }>[];
@@ -73,13 +72,6 @@ export type WordRelation = Readonly<{
     // The relation parameters after the shared proof parameters.
     parameters: readonly (number | bigint)[];
 }>;
-
-// The proof magic of each supported purpose's proofs.
-const supportedProofMagic = {
-    setup: 'SWP3',
-    ballot: 'LBP1',
-    release: 'LRP1',
-} as const;
 
 // A supported relation from its catalogue entry. Setup's positive and
 // negative sparse-support columns lead its Boolean columns, one pair for
@@ -114,7 +106,6 @@ export const catalogueWordRelation = (
     }
     return {
         tag: Buffer.from(entry.relationTag, 'ascii'),
-        magic: Buffer.from(supportedProofMagic[entry.role], 'ascii'),
         words: entry.wordColumns,
         booleans: entry.booleanColumns,
         lookups: entry.lookups,
@@ -319,7 +310,6 @@ const readExtension = (
 
 export const parseHeader = (
     bytes: Uint8Array,
-    magic: Uint8Array,
     domain: WordProofDomain,
 ): Header => {
     if (bytes.length !== domain.headerBytes)
@@ -327,8 +317,6 @@ export const parseHeader = (
     let position = 0;
     const take = (length: number) =>
         Buffer.from(bytes.subarray(position, (position += length)));
-    if (!take(4).equals(Buffer.from(magic)))
-        throw new Refused('Encoding', 'open');
     const statement = take(64);
     const roots = [take(64), take(64), take(64)];
     const maskSum = readExtension(take(48), 'open');

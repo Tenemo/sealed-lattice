@@ -416,7 +416,6 @@ export const proveWordRelation = (
         (_, index) => final.readUInt32LE(4 * index) % (domain.domain / 2),
     );
     const header = Buffer.concat([
-        relation.magic,
         input.statementDigest,
         first.root,
         second.root,

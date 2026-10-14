@@ -47,7 +47,6 @@ const statementBytes = 4 + 16 * systematic + 16;
 const relation: WordRelation = (() => {
     const shape = {
         tag: Buffer.from('reference-toy/1'),
-        magic: Buffer.from('TPR1'),
         words: 3,
         booleans: 2,
         lookups: [
@@ -268,7 +267,7 @@ describe('reference word verifier', () => {
             folds: 17,
             maximumDegree: 131071,
             witnessDegree: 66944,
-            headerBytes: 3940,
+            headerBytes: 3936,
         });
         for (const [size, queries] of [
             [63, 1],
@@ -312,7 +311,7 @@ describe('reference word verifier', () => {
                 );
             }
             expect(source).toContain(
-                `proof_magic: b"${Buffer.from(supported.magic).toString('ascii')}"`,
+                `tag: b"${Buffer.from(supported.tag).toString('ascii')}"`,
             );
         }
         for (const [participants, options] of [
@@ -398,14 +397,9 @@ describe('reference word verifier', () => {
         expect(verify(proof, { header: proof.header.subarray(0, -1) })).toEqual(
             refused('Length', 'open'),
         );
-        expect(
-            verify(proof, {
-                header: changed(proof.header, (copy) => (copy[0] ^= 1)),
-            }),
-        ).toEqual(refused('Encoding', 'open'));
-        // The mask sum follows the magic, the statement digest and three
-        // roots; the terminal ends the header.
-        for (const offset of [4 + 64 + 3 * 64, domain.headerBytes - 48])
+        // The mask sum follows the statement digest and three roots; the
+        // terminal ends the header.
+        for (const offset of [64 + 3 * 64, domain.headerBytes - 48])
             expect(
                 verify(proof, {
                     header: changed(proof.header, (copy) =>
@@ -416,7 +410,7 @@ describe('reference word verifier', () => {
         // The parser recomputes the statement digest the header declares.
         expect(
             verify(proof, {
-                header: changed(proof.header, (copy) => (copy[4] ^= 1)),
+                header: changed(proof.header, (copy) => (copy[0] ^= 1)),
             }),
         ).toEqual(refused('Encoding', 'statement'));
         expect(verify(proof, { openStatement: () => undefined })).toEqual(
@@ -441,7 +435,7 @@ describe('reference word verifier', () => {
         ).toEqual(refused('Encoding', 0));
         expect(
             verify(proof, {
-                header: changed(proof.header, (copy) => (copy[4 + 64] ^= 1)),
+                header: changed(proof.header, (copy) => (copy[64] ^= 1)),
             }),
         ).toEqual(refused('Encoding', 0));
         // A statement whose digest the proof binds but which its parser

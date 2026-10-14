@@ -307,7 +307,6 @@ impl SetupProver {
             let second = self.second.as_ref().unwrap();
             write_header(
                 output,
-                &self.relation,
                 &self.expected,
                 self.transcript.as_ref().unwrap(),
                 [

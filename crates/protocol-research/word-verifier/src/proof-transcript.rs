@@ -215,14 +215,11 @@ pub(super) struct Header {
     pub(super) terminal: Element,
 }
 impl Header {
-    pub(super) fn parse(bytes: &[u8], magic: &[u8; 4]) -> Result<Self, Refusal> {
+    pub(super) fn parse(bytes: &[u8]) -> Result<Self, Refusal> {
         if bytes.len() != HEADER_LENGTH {
             return Err(Refusal::Length);
         }
         let mut reader = Reader::new(bytes);
-        if reader.take(4)? != magic {
-            return Err(Refusal::Encoding);
-        }
         let statement = reader.take(64)?.try_into().unwrap();
         let mut roots = [[0; 64]; 3];
         for root in &mut roots {

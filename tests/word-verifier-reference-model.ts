@@ -79,7 +79,7 @@ const verifyStages = (input: WordProofInput) => {
     const { relation, domain, role } = input;
     if (role.length === 0 || role.length > 1024)
         throw new Refused('Context', 'open');
-    const header = parseHeader(input.header, relation.magic, domain);
+    const header = parseHeader(input.header, domain);
     const shape = wordRelationShape(relation, domain);
     const challenges = deriveWordProofChallenges(
         relation,

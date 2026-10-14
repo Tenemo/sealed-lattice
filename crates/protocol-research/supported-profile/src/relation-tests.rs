@@ -69,7 +69,7 @@ fn completion_relations_keep_their_bound_parameters() {
     );
     expected.extend([24, 1, 0, 0, 0, 0, 65_537 * 65_445]);
     assert_eq!(release.relation_parameters()[7..], expected);
-    assert_eq!(PROOF_HEADER_BYTES, 3_940);
+    assert_eq!(PROOF_HEADER_BYTES, 3_936);
 }
 
 // Word, lookup and narrow counts and the largest proofs of the model
@@ -91,7 +91,7 @@ fn layouts_match_the_model_census() {
                 (53, 256),
                 (58, 256),
             ],
-            14_123_808,
+            14_123_804,
         ),
         (
             10,
@@ -108,7 +108,7 @@ fn layouts_match_the_model_census() {
                 (53, 256),
                 (58, 256),
             ],
-            14_191_392,
+            14_191_388,
         ),
         (
             16,
@@ -126,7 +126,7 @@ fn layouts_match_the_model_census() {
                 (54, 256),
                 (59, 256),
             ],
-            14_349_088,
+            14_349_084,
         ),
         (
             20,
@@ -144,7 +144,7 @@ fn layouts_match_the_model_census() {
                 (62, 256),
                 (67, 256),
             ],
-            15_069_984,
+            15_069_980,
         ),
     ] {
         let release = release_relation(Profile::new(participants, options).unwrap());
@@ -158,7 +158,7 @@ fn layouts_match_the_model_census() {
             21,
             [(6, 512), (13, 512), (18, 512), (20, 512), (16, 7_281)],
             [(21, 22), (23, 24), (14, 25)],
-            10_564_384,
+            10_564_380,
         ),
         (
             10,
@@ -166,7 +166,7 @@ fn layouts_match_the_model_census() {
             27,
             [(9, 512), (19, 512), (24, 512), (26, 512), (22, 7_281)],
             [(27, 28), (29, 30), (20, 31)],
-            11_105_056,
+            11_105_052,
         ),
         (
             16,
@@ -174,7 +174,7 @@ fn layouts_match_the_model_census() {
             25,
             [(8, 512), (17, 512), (22, 512), (24, 512), (20, 7_281)],
             [(25, 26), (27, 28), (18, 29)],
-            10_924_832,
+            10_924_828,
         ),
         (
             20,
@@ -182,7 +182,7 @@ fn layouts_match_the_model_census() {
             29,
             [(10, 512), (21, 512), (26, 512), (28, 512), (24, 7_281)],
             [(29, 30), (31, 32), (22, 33)],
-            11_285_280,
+            11_285_276,
         ),
     ] {
         let ballot = ballot_relation(Profile::new(participants, options).unwrap());

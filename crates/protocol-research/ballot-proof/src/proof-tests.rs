@@ -123,10 +123,9 @@ fn edited_ballot_proofs_are_refused() {
     prove(role, &statement, witness, false).write(&mut bytes);
     random::release();
     assert!(verify(profile, role, &statement, &bytes));
-    // The header holds the magic, the statement and context digests, three
-    // roots, the mask sum, twenty message salts, the fold roots and the
-    // terminal value.
-    let first_root = 4 + 64 + 64;
+    // The header holds the statement digest, three roots, the mask sum,
+    // twenty message salts, the fold roots and the terminal value.
+    let first_root = 64;
     let first_fold_root = first_root + 3 * 64 + 48 + 20 * 128;
     for offset in [
         first_root,

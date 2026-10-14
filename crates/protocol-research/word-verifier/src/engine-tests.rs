@@ -25,9 +25,7 @@ fn open(role: &[u8], bytes: &[u8]) -> Result<Verifier<RefusingStatement>, Refusa
     )
 }
 fn header() -> Vec<u8> {
-    let mut bytes = vec![0; HEADER_LENGTH];
-    bytes[..4].copy_from_slice(ballot_relation(Profile::new(3, 2).unwrap()).proof_magic);
-    bytes
+    vec![0; HEADER_LENGTH]
 }
 #[test]
 fn malformed_headers_and_unfinished_streams_cannot_verify() {
@@ -39,7 +37,7 @@ fn malformed_headers_and_unfinished_streams_cannot_verify() {
     // The statement parser receives the digest the header declares, which
     // it must recompute.
     let mut declared = bytes.clone();
-    declared[4..68].fill(7);
+    declared[..64].fill(7);
     assert!(
         Verifier::open(
             ballot_relation(Profile::new(3, 2).unwrap()),
@@ -50,9 +48,6 @@ fn malformed_headers_and_unfinished_streams_cannot_verify() {
         .is_ok()
     );
     assert!(open(b"role", &bytes[..HEADER_LENGTH - 1]).is_err());
-    let mut other = bytes.clone();
-    other[..4].copy_from_slice(b"SWP3");
-    assert!(matches!(open(b"role", &other), Err(Refusal::Encoding)));
     assert!(matches!(
         Verifier::<RefusingStatement>::open(
             ballot_relation(Profile::new(3, 2).unwrap()),
@@ -62,7 +57,7 @@ fn malformed_headers_and_unfinished_streams_cannot_verify() {
         ),
         Err(Refusal::Context)
     ));
-    for offset in [260, HEADER_LENGTH - 48] {
+    for offset in [256, HEADER_LENGTH - 48] {
         let mut changed = bytes.clone();
         changed[offset..offset + 16].copy_from_slice(&MODULUS.to_le_bytes());
         assert!(matches!(open(b"role", &changed), Err(Refusal::Encoding)));
