@@ -1,5 +1,5 @@
 use super::*;
-use protocol_foundations::foundation::hash_foundation_tuple_512;
+use protocol_foundations::foundation::{CanonicalItem, hash_foundation_tuple_512};
 
 const PURPOSES: [(u32, Purpose); 3] = [
     (0, Purpose::Contribution),

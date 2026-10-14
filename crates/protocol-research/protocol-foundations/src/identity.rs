@@ -3,7 +3,8 @@
 use crate::{
     Error,
     foundation::{
-        CANONICAL_TUPLE_SCHEMA_IDENTIFIER, CANONICAL_TUPLE_VERSION, CanonicalItem, CanonicalTuple,
+        CANONICAL_TUPLE_SCHEMA_IDENTIFIER, CANONICAL_TUPLE_VERSION, CanonicalItem,
+        CanonicalItemType, CanonicalTuple,
     },
 };
 use parallel_work::{HashStream, PendingDigest, Sponge};
@@ -36,7 +37,7 @@ impl IdentityHasher {
         prefix: &[CanonicalItem],
         length: usize,
     ) -> Result<Self, Error> {
-        hash.update(&framing(domain, prefix, length)?);
+        hash.update(&framing(domain, prefix, Trailing::Variable(length))?);
         Ok(Self {
             hash,
             remaining: length,
@@ -84,19 +85,28 @@ impl BodyHasher {
     }
 }
 
-/// The canonical tuple framing that precedes a payload of the length: the
-/// tuple of the domain, the prefix items and an empty raw-byte item, whose
-/// two trailing length words become the payload's.
-fn framing(domain: &str, prefix: &[CanonicalItem], length: usize) -> Result<Vec<u8>, Error> {
-    let item_length = length
-        .checked_add(4)
-        .and_then(|value| u32::try_from(value).ok())
-        .ok_or(Error::Shape)?;
-    let payload_length = u32::try_from(length).map_err(|_| Error::Shape)?;
-    let mut items = Vec::with_capacity(prefix.len() + 2);
+/// The raw-byte item a framed payload fills: a fixed item of exactly the
+/// payload's length, or a variable one whose value leads with that length.
+#[derive(Clone, Copy, Debug)]
+pub enum Trailing {
+    Fixed(usize),
+    Variable(usize),
+}
+
+/// The canonical tuple framing that precedes a payload: the tuple of the
+/// domain, the prefix items and the trailing raw-byte item, up to the point
+/// where the payload's own bytes begin. A caller absorbs the framing and then
+/// the payload, so a private payload is never copied.
+pub fn framing(
+    domain: &str,
+    prefix: &[CanonicalItem],
+    trailing: Trailing,
+) -> Result<Vec<u8>, Error> {
+    let word = |value: usize| u32::try_from(value).map_err(|_| Error::Shape);
+    let mut items = Vec::with_capacity(prefix.len() + 1);
     items.push(CanonicalItem::nonempty_ascii(domain).map_err(|_| Error::Shape)?);
     items.extend_from_slice(prefix);
-    items.push(CanonicalItem::variable_bytes([]).map_err(|_| Error::Shape)?);
+    let count = word(items.len() + 1)?;
     let mut framing = CanonicalTuple::new(
         CANONICAL_TUPLE_SCHEMA_IDENTIFIER,
         CANONICAL_TUPLE_VERSION,
@@ -104,9 +114,16 @@ fn framing(domain: &str, prefix: &[CanonicalItem], length: usize) -> Result<Vec<
     )
     .encode()
     .map_err(|_| Error::Shape)?;
-    let end = framing.len();
-    framing[end - 8..end - 4].copy_from_slice(&item_length.to_le_bytes());
-    framing[end - 4..].copy_from_slice(&payload_length.to_le_bytes());
+    framing[4..8].copy_from_slice(&count.to_le_bytes());
+    framing.extend_from_slice(&CanonicalItemType::RawBytes.canonical_code().to_le_bytes());
+    match trailing {
+        Trailing::Fixed(length) => framing.extend_from_slice(&word(length)?.to_le_bytes()),
+        Trailing::Variable(length) => {
+            let item_length = length.checked_add(4).ok_or(Error::Shape)?;
+            framing.extend_from_slice(&word(item_length)?.to_le_bytes());
+            framing.extend_from_slice(&word(length)?.to_le_bytes());
+        }
+    }
     Ok(framing)
 }
 

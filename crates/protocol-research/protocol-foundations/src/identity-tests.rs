@@ -55,3 +55,34 @@ fn refuses_a_short_long_or_empty_domain_payload() {
     assert!(short.finish_later().is_err());
     assert!(IdentityHasher::new("", &[], 0).is_err());
 }
+
+#[test]
+fn frames_a_fixed_or_variable_payload_as_its_canonical_raw_byte_item() {
+    let prefix = [CanonicalItem::hash512([7; 64])];
+    let payload = [5; 70];
+    for (trailing, item) in [
+        (
+            Trailing::Fixed(payload.len()),
+            CanonicalItem::fixed_bytes(payload).unwrap(),
+        ),
+        (
+            Trailing::Variable(payload.len()),
+            CanonicalItem::variable_bytes(payload).unwrap(),
+        ),
+    ] {
+        let mut framed = framing(PUBLIC_POLYNOMIAL_DOMAIN, &prefix, trailing).unwrap();
+        framed.extend_from_slice(&payload);
+        let mut items = vec![CanonicalItem::nonempty_ascii(PUBLIC_POLYNOMIAL_DOMAIN).unwrap()];
+        items.extend_from_slice(&prefix);
+        items.push(item);
+        let canonical = CanonicalTuple::new(
+            CANONICAL_TUPLE_SCHEMA_IDENTIFIER,
+            CANONICAL_TUPLE_VERSION,
+            items,
+        )
+        .encode()
+        .unwrap();
+        assert_eq!(framed, canonical);
+    }
+    assert!(framing("", &prefix, Trailing::Fixed(1)).is_err());
+}

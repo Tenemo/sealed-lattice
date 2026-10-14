@@ -8,7 +8,8 @@ use parallel_work::sealing::{self, Sealed, TAG_BYTES};
 use protocol_foundations::{
     Credential, SIGNING_PUBLIC_KEY_BYTES,
     contribution_body::{BODY_HEADER_BYTES, body_header},
-    foundation::{CanonicalItem, CanonicalItemType, CanonicalTuple},
+    foundation::{CanonicalItem, CanonicalTuple},
+    identity::{self, Trailing},
     poll::VerifiedPoll,
     source_binding::{
         FheKeyCommitmentHasher, SOURCE_SALT_BYTES as SALT_BYTES, fhe_key_families,
@@ -62,31 +63,27 @@ fn associated(body: [u8; 64]) -> Vec<u8> {
     .unwrap()
 }
 
-// Absorb a canonical tuple without allocating a copy of the private seed.
+// Absorbs the canonical tuple of the original context and the seed as one
+// fixed raw byte item, without allocating a copy of the private seed.
 fn stream(
     poll: [u8; 64],
     owner: &[u8; SIGNING_PUBLIC_KEY_BYTES],
     profile: Profile,
     seed: &[u8; SEED_BYTES],
 ) -> Shake256Reader {
-    let mut prefix = CanonicalTuple::new(
-        1,
-        1,
-        vec![
-            CanonicalItem::nonempty_ascii("sealed-lattice/fhe-source-randomness/v2").unwrap(),
+    let framing = identity::framing(
+        "sealed-lattice/fhe-source-randomness/v2",
+        &[
             CanonicalItem::fixed_bytes(owner).unwrap(),
             CanonicalItem::hash512(poll),
             CanonicalItem::variable_bytes(profile.ciphertext_modulus().to_bytes()).unwrap(),
             CanonicalItem::unsigned64(profile.fhe_common_sample_bits() as u64),
         ],
+        Trailing::Fixed(SEED_BYTES),
     )
-    .encode()
     .unwrap();
-    prefix[4..8].copy_from_slice(&6u32.to_le_bytes());
     let mut hash = Shake256::default();
-    hash.update(&prefix);
-    hash.update(&CanonicalItemType::RawBytes.canonical_code().to_le_bytes());
-    hash.update(&(SEED_BYTES as u32).to_le_bytes());
+    hash.update(&framing);
     hash.update(seed);
     hash.finalize_xof()
 }
