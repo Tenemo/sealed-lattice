@@ -43,14 +43,15 @@ pub struct RetainedSetupInputs {
     setup_identity: [u8; 64],
     polynomials: Vec<AggregatePolynomial>,
 }
+/// A retained reference: the setup or selection identity and each
+/// contribution polynomial's digest. The credential's tag on it names which
+/// of the two it is.
 pub(crate) fn encode_reference(
-    magic: &[u8; 4],
     profile: Profile,
     identity: [u8; 64],
     polynomials: &[AggregatePolynomial],
 ) -> Result<Vec<u8>, Refusal> {
-    let mut bytes = magic.to_vec();
-    bytes.extend(identity);
+    let mut bytes = identity.to_vec();
     let indices = profile.contribution_body_polynomials();
     if polynomials.len() != indices.len() {
         return Err(Refusal::Incomplete);
@@ -69,12 +70,7 @@ impl RetainedSetupInputs {
     /// Encodes the reference from the owning verifier's result in the fixed
     /// contribution-polynomial order that `parse` consumes.
     pub fn reference(setup: &VerifiedSetupAggregate) -> Result<Vec<u8>, Refusal> {
-        encode_reference(
-            b"SAV1",
-            setup.profile(),
-            setup.identity(),
-            setup.polynomials(),
-        )
+        encode_reference(setup.profile(), setup.identity(), setup.polynomials())
     }
     /// The profile is the one of the setup that owns the expected setup identity.
     pub fn parse(
@@ -82,24 +78,13 @@ impl RetainedSetupInputs {
         bytes: &[u8],
         expected_setup_identity: [u8; 64],
     ) -> Result<Self, Refusal> {
-        Self::parse_with_magic(b"SAV1", profile, bytes, expected_setup_identity)
-    }
-    pub(crate) fn parse_with_magic(
-        magic: &[u8; 4],
-        profile: Profile,
-        bytes: &[u8],
-        expected_setup_identity: [u8; 64],
-    ) -> Result<Self, Refusal> {
         let indices = profile.contribution_body_polynomials();
-        if bytes.len() != 4 + 64 + 64 * indices.len()
-            || &bytes[..4] != magic
-            || bytes[4..68] != expected_setup_identity
-        {
+        if bytes.len() != 64 + 64 * indices.len() || bytes[..64] != expected_setup_identity {
             return Err(Refusal::Context);
         }
         let polynomials = indices
             .into_iter()
-            .zip(bytes[68..].chunks_exact(64))
+            .zip(bytes[64..].chunks_exact(64))
             .map(|(index, digest)| AggregatePolynomial {
                 index,
                 bytes: profile.setup_polynomial_bytes(index).unwrap(),

@@ -10,11 +10,10 @@ export const compileRetainedEvaluationResources = (
         1n + BigInt(Math.ceil(profile.release.modulus.toString(2).length / 8));
     const ciphertextBytes =
         2n * fixedModulusBfvInputs.polynomialDegree * coefficientBytes;
-    // RET1 is unchanged: marker, body length, body, switched ciphertext and
+    // The retained copy: body length, body, switched ciphertext and
     // original-credential tag. Bounded SDK slices do not shrink the Rust Vec
     // or the single stored Blob, nor establish allocator/physical storage.
-    const maximumRetainedBytes =
-        4n + 4n + targetBodyBytes + ciphertextBytes + 64n;
+    const maximumRetainedBytes = 4n + targetBodyBytes + ciphertextBytes + 64n;
     const maximumSliceBytes = 1_048_576n;
     return {
         ciphertextBytes,

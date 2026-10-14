@@ -10,7 +10,7 @@ import {
 
 // FIPS 204 Table 2: an ML-DSA-65 signature has 3309 bytes.
 const signatureBytes = 3309n;
-const envelopeBytes = 214n;
+const envelopeBytes = 210n;
 const recordBytes = 1n << 20n;
 
 describe('participant close custody layout', () => {

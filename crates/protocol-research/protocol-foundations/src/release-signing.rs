@@ -11,8 +11,11 @@ use supported_profile::{
 };
 
 pub const RELEASE_SIGNATURE_CONTEXT: &[u8] = b"sealed-lattice/release-envelope/v1";
-pub const RELEASE_ENVELOPE_BYTES: usize = 4 + 3 * 64 + 2 + 8 + 64;
-pub const RELEASE_BODY_HEADER_BYTES: usize = 12 + RELEASE_HEADER_BYTES;
+/// The poll, setup and target identities, the author's position, the body
+/// length and the body identity.
+pub const RELEASE_ENVELOPE_BYTES: usize = 3 * 64 + 2 + 8 + 64;
+/// The complete proof length and the release statement header.
+pub const RELEASE_BODY_HEADER_BYTES: usize = 8 + RELEASE_HEADER_BYTES;
 
 /// Bytes of a partial decryption: one release-modulus coefficient per row.
 pub fn partial_bytes(profile: Profile) -> usize {
@@ -50,8 +53,7 @@ impl ReleaseEnvelope {
         if position >= profile.participants() || !body_lengths(profile).contains(&length) {
             return Err(Refusal::Shape);
         }
-        let mut bytes = Vec::from(b"LRE1".as_slice());
-        bytes.extend(poll);
+        let mut bytes = poll.to_vec();
         bytes.extend(setup_identity);
         bytes.extend(target);
         bytes.extend((position as u16).to_le_bytes());
@@ -68,19 +70,19 @@ impl ReleaseEnvelope {
         })
     }
     pub fn decode(profile: Profile, bytes: &[u8]) -> Result<Self, Refusal> {
-        if bytes.len() != RELEASE_ENVELOPE_BYTES || &bytes[..4] != b"LRE1" {
+        if bytes.len() != RELEASE_ENVELOPE_BYTES {
             return Err(Refusal::Shape);
         }
-        let length = usize::try_from(u64::from_le_bytes(bytes[198..206].try_into().unwrap()))
+        let length = usize::try_from(u64::from_le_bytes(bytes[194..202].try_into().unwrap()))
             .map_err(|_| Refusal::Shape)?;
         Self::new(
             profile,
-            bytes[4..68].try_into().unwrap(),
-            bytes[68..132].try_into().unwrap(),
-            bytes[132..196].try_into().unwrap(),
-            u16::from_le_bytes(bytes[196..198].try_into().unwrap()) as usize,
+            bytes[..64].try_into().unwrap(),
+            bytes[64..128].try_into().unwrap(),
+            bytes[128..192].try_into().unwrap(),
+            u16::from_le_bytes(bytes[192..194].try_into().unwrap()) as usize,
             length,
-            bytes[206..].try_into().unwrap(),
+            bytes[202..].try_into().unwrap(),
         )
     }
     pub fn bytes(&self) -> &[u8] {
@@ -118,18 +120,17 @@ pub fn body_header(
     {
         return Err(Refusal::Shape);
     }
-    let mut bytes = Vec::from(b"LRB1".as_slice());
-    bytes.extend((proof_bytes as u64).to_le_bytes());
+    let mut bytes = (proof_bytes as u64).to_le_bytes().to_vec();
     bytes.extend(context);
     Ok(bytes)
 }
 pub fn proof_length(profile: Profile, header: &[u8]) -> Result<usize, Refusal> {
-    if header.len() != RELEASE_BODY_HEADER_BYTES || &header[..4] != b"LRB1" {
+    if header.len() != RELEASE_BODY_HEADER_BYTES {
         return Err(Refusal::Shape);
     }
-    let proof = usize::try_from(u64::from_le_bytes(header[4..12].try_into().unwrap()))
+    let proof = usize::try_from(u64::from_le_bytes(header[..8].try_into().unwrap()))
         .map_err(|_| Refusal::Shape)?;
-    if body_header(profile, header[12..].try_into().unwrap(), proof)? != header {
+    if body_header(profile, header[8..].try_into().unwrap(), proof)? != header {
         return Err(Refusal::Shape);
     }
     Ok(proof)

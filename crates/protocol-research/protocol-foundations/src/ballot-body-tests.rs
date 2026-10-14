@@ -41,7 +41,7 @@ fn framing_refuses_contexts_and_proof_lengths_outside_the_profile() {
         }
         let mut declared = header(profile, &context, &proof(*proofs.start())).unwrap();
         for length in [proofs.start() - 1, proofs.end() + 1, usize::MAX] {
-            declared[4..12].copy_from_slice(&(length as u64).to_le_bytes());
+            declared[..8].copy_from_slice(&(length as u64).to_le_bytes());
             assert!(parse_header(profile, &declared).is_err());
         }
         let minimal = proof(*proofs.start());

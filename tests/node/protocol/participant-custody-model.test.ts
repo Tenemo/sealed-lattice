@@ -66,10 +66,10 @@ describe('shared participant custody', () => {
         expect(value.maximumRootRecords).toBe(
             compileRegistrationEnrollmentCensus().maximumRecords + 1n,
         );
-        // The marker, inventory identity, and public-polynomial identities of
-        // the 44 aggregate polynomials, followed by a 64-byte protocol tag.
+        // The inventory identity and the public-polynomial identities of the
+        // 44 aggregate polynomials, followed by a 64-byte protocol tag.
         expect(body.polynomials).toHaveLength(44);
-        expect(value.setupReferenceBytes).toBe(4n + 64n + 44n * 64n + 64n);
+        expect(value.setupReferenceBytes).toBe(64n + 44n * 64n + 64n);
         expect(value.publicRecords.some((record) => record.object === 0)).toBe(
             false,
         );
@@ -175,8 +175,7 @@ describe('shared participant custody', () => {
                 values.reduce((largest, value) =>
                     value > largest ? value : largest,
                 );
-            const reference =
-                4n + 64n + BigInt(body.polynomials.length) * 64n + 64n;
+            const reference = 64n + BigInt(body.polynomials.length) * 64n + 64n;
             const selectionSlot = 1n + wire.selectionBodyBytes + 3309n;
             const endorsementSlot =
                 1n +

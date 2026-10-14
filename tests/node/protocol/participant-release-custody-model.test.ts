@@ -17,11 +17,11 @@ describe('participant release custody layout', () => {
         // fills 16 records of 1 MiB; the runtime bounds test checks its
         // length against the participant module's.
         const attempt = 14n + 2048n;
-        const envelope = 4n + 3n * 64n + 2n + 8n + 64n;
+        const envelope = 3n * 64n + 2n + 8n + 64n;
         const records = 16n;
         expect(value.prefixBytes).toBe(14n);
         expect(value.envelopeBytes).toBe(envelope);
-        expect(value.maximumBodyBytes).toBe(15_829_998n);
+        expect(value.maximumBodyBytes).toBe(15_829_994n);
         expect(value.maximumBodyRecords).toBe(records);
         expect(value.phaseBytes).toEqual([
             { phase: 25, bytes: attempt },
@@ -30,9 +30,9 @@ describe('participant release custody layout', () => {
 
             { phase: 29, bytes: attempt + 32n * records + envelope + 3309n },
         ]);
-        expect(value.maximumStateBytes).toBe(6153n);
+        expect(value.maximumStateBytes).toBe(6149n);
         expect(value.maximumEncryptedBodyBytes).toBe(
-            15_829_998n + 16n * records,
+            15_829_994n + 16n * records,
         );
     });
 });

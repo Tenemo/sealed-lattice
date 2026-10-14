@@ -7,9 +7,9 @@ import {
 } from '#tests/registration-enrollment-model.js';
 import type { SupportedProfile } from '#tests/supported-profile-model.js';
 
-// Marker, poll, inventory, author position, ballot time, body length and
-// body identity; the same for every profile.
-export const ballotEnvelopeBytes = 4n + 64n + 64n + 2n + 8n + 8n + 64n;
+// Poll, inventory, author position, ballot time, body length and body
+// identity; the same for every profile.
+export const ballotEnvelopeBytes = 64n + 64n + 2n + 8n + 8n + 64n;
 
 export const compileBallotBodyCensus = (profile: SupportedProfile) => {
     const proof = compileBallotWordProofLayout(profile);
@@ -48,9 +48,9 @@ export const compileBallotBodyCensus = (profile: SupportedProfile) => {
         participantIdentityAsciiBytes +
         2n * 64n +
         2n;
-    // The magic, the complete proof length, the context and the proof
-    // header; the rest of the proof follows the ciphertexts.
-    const headerBytes = 4n + 8n + contextBytes + proof.headerBytes;
+    // The complete proof length, the context and the proof header; the
+    // rest of the proof follows the ciphertexts.
+    const headerBytes = 8n + contextBytes + proof.headerBytes;
     const ciphertextBytes = 2n * fheBytes + 2n * auxiliaryBytes;
     const signatureBytes = compileRegistrationEnrollmentCensus().signatureBytes;
     const envelopeBytes = ballotEnvelopeBytes;

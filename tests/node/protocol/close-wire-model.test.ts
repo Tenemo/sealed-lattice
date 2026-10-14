@@ -51,7 +51,7 @@ describe('close wire census', () => {
         for (const participants of supportedParticipantCounts) {
             const profile = rosterProfile(participants);
             const ballot = compileBallotBodyCensus(profile);
-            expect(ballot.envelopeBytes).toBe(214n);
+            expect(ballot.envelopeBytes).toBe(210n);
             const value = compileCloseWireCensus(profile);
             const thresholds = goalThresholds(participants);
             const maximumCorruptParticipantCount = BigInt(
@@ -70,7 +70,7 @@ describe('close wire census', () => {
             expect(value.maximumUnionEnvelopes).toBeLessThanOrEqual(
                 quorum * value.maximumResponseEntries,
             );
-            expect(value.submissionBytes).toBe(214n + signatureBytes);
+            expect(value.submissionBytes).toBe(210n + signatureBytes);
             expect(value.maximumRosterListedEnvelopes).toBe(
                 BigInt(participants) -
                     maximumCorruptParticipantCount +

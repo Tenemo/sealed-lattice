@@ -65,7 +65,7 @@ impl ReleaseBodyVerifier {
     pub fn new(context: Arc<ReleaseContext>, header: &[u8]) -> Result<Self, Refusal> {
         let profile = context.profile();
         let proof_bytes = proof_length(profile, header).map_err(|_| Refusal::Encoding)?;
-        if header[12..] != *context.header() {
+        if header[8..] != *context.header() {
             return Err(Refusal::Context);
         }
         let partial_bytes = partial_bytes(profile);

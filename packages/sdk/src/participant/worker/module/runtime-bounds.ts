@@ -24,16 +24,15 @@ export const recordKeyBytes = 32;
 export const identityBytes = 64;
 const chunks = (bytes: number) => Math.ceil(bytes / chunkBytes);
 
-// A ballot envelope's fields after its marker: the poll, the setup
-// identity, the author's position, the ballot time and the body length.
-// The worker reads them to route public records and checks these offsets
-// against the module's.
+// A ballot envelope's fields: the poll, the setup identity, the author's
+// position, the ballot time and the body length. The worker reads them to
+// route public records and checks these offsets against the module's.
 export const ballotEnvelopeOffset = {
-    poll: 4,
-    setupIdentity: 68,
-    author: 132,
-    ballotTime: 134,
-    bodyLength: 142,
+    poll: 0,
+    setupIdentity: 64,
+    author: 128,
+    ballotTime: 130,
+    bodyLength: 138,
 } as const;
 const maximum = (...values: number[]) => Math.max(...values);
 

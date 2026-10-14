@@ -33,7 +33,7 @@ const storedCopy = (database: IDBDatabase) =>
 
 // Transport stand-ins, not target verification: they record the actual
 // begin/append/finish calls and copied bytes. Only the real Rust lifecycle
-// gate can establish RET1 authentication or a verified evaluation capability.
+// gate can authenticate the copy or establish a verified evaluation capability.
 const fixture = async (length = 2 * chunkBytes + 37) => {
     const namespace = 'retained-target-' + crypto.randomUUID();
     const name = namespacedName(evaluatedTargetName, namespace);
@@ -46,7 +46,6 @@ const fixture = async (length = 2 * chunkBytes + 37) => {
         { length },
         (_, index) => (index * 17 + 3) % 251,
     );
-    bytes.set(new TextEncoder().encode('RET1'));
     const memory = new WebAssembly.Memory({
         initial: Math.ceil((length + 32) / 65536),
     });

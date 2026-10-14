@@ -257,7 +257,7 @@ describe('complete ordinary workflow resource graph', () => {
                 );
             expect(result.cleanResponseBytes).toBe(278n + 66n * n + 4n + 3309n);
             expect(result.responderListedCopyBytes).toBe(
-                n * n * (214n + 3309n),
+                n * n * (210n + 3309n),
             );
             expect(result.ordinaryForwardedBodyUploadBytes).toBe(0n);
             expect(result.ordinaryReferencedBodyBytes).toBe(
@@ -286,8 +286,10 @@ describe('complete ordinary workflow resource graph', () => {
             expect(result.retainedTarget.ciphertextBytes).toBe(
                 2n * 65536n * 25n,
             );
+            // The body length, the largest target body, the switched
+            // ciphertext and the credential tag.
             expect(result.retainedTarget.maximumRetainedBytes).toBe(
-                4n + 4n + 2048n + 2n * 65536n * 25n + 64n,
+                4n + 2048n + 2n * 65536n * 25n + 64n,
             );
             expect(result.retainedTarget.maximumSliceBytes).toBe(1048576n);
             expect(result.retainedTarget.maximumSlices).toBe(4n);

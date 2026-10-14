@@ -149,7 +149,7 @@ type VerifiedSetup = Readonly<{
 }>;
 
 const referenceSetupIdentity = (reference: Uint8Array) =>
-    reference.subarray(4, 68);
+    reference.subarray(0, 64);
 
 const certifyRetainedSelection = (
     session: ParticipantSession,

@@ -211,7 +211,7 @@ describe('authentication frame accounting', () => {
             64n,
             64n,
             64n,
-            214n,
+            210n,
         ]);
         for (const role of roles) {
             const frame = pureSignatureFrame(
@@ -334,17 +334,17 @@ describe('complete participant authentication accounting', () => {
             64n,
             64n,
             64n,
-            214n,
+            210n,
             64n,
             64n,
             64n,
             64n,
-            270n,
+            266n,
         ]);
         for (const role of roles.slice(7)) {
             const context = Buffer.from(role.context);
             const message = Buffer.alloc(
-                role.purpose === 'release-envelope' ? 270 : 64,
+                role.purpose === 'release-envelope' ? 266 : 64,
                 7,
             );
             const expected = Buffer.concat([

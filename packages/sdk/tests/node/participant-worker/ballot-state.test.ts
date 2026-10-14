@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 
 import {
     concatenate,
-    encodeText,
     unsigned16,
     unsigned64,
 } from '#packages/sdk/src/participant/worker/shared/bytes.js';
@@ -51,7 +50,6 @@ const envelopeFor = (
     time = ballotTime,
 ) => {
     const fields = concatenate(
-        encodeText('LBE2'),
         records.poll,
         records.setupIdentity,
         unsigned16(records.position),

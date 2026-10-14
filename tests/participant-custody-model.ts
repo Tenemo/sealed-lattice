@@ -148,10 +148,11 @@ export const compileParticipantCustodyCensus = (profile: SupportedProfile) => {
         maximumCheckpointMetadataBytes > maximumCompletedMetadataBytes
             ? maximumCheckpointMetadataBytes
             : maximumCompletedMetadataBytes;
-    // SAV1 and SPI1 contain the semantic selection identity, ordered aggregate
-    // polynomial identities and the owning verifier's credential-keyed tag.
+    // The setup and selection references contain the semantic selection
+    // identity, ordered aggregate polynomial identities and the owning
+    // verifier's credential-keyed tag, whose label names which they are.
     const setupReferenceBytes =
-        4n + 64n + 64n * BigInt(body.polynomials.length) + 64n;
+        64n + 64n * BigInt(body.polynomials.length) + 64n;
     const selectionReferenceBytes = setupReferenceBytes;
     const setupCertificateBytes = wire.certificateBytes;
     const emptyPreparationBytes = 4n + 3n * 4n;

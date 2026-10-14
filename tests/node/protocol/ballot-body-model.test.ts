@@ -33,11 +33,11 @@ describe('ballot body framing', () => {
         expect(layout.proofRoleBytes).toBe(
             8n + 30n + 4n + 30n + 4n + 128n + 128n + 2n,
         );
-        // The magic, the proof length and the context, then the proof
-        // header from the separately tested proof layout model.
+        // The proof length and the context, then the proof header from the
+        // separately tested proof layout model.
         const proofLayout = compileBallotWordProofLayout(completionProfile());
-        expect(layout.headerBytes).toBe(148n + proofLayout.headerBytes);
-        expect(layout.envelopeBytes).toBe(214n);
+        expect(layout.headerBytes).toBe(144n + proofLayout.headerBytes);
+        expect(layout.envelopeBytes).toBe(210n);
         expect(layout.ciphertextBytes).toBe(polynomialPairPerFamilyBytes);
         expect(layout.reconstructedInputBytes).toBe(
             polynomialPairPerFamilyBytes,
@@ -49,16 +49,16 @@ describe('ballot body framing', () => {
         const maximumProofBytes = proofLayout.maximumMultiproofBytes;
         expect(layout.maximumProofBytes).toBe(maximumProofBytes);
         expect(layout.minimumBodyBytes).toBe(
-            148n + proofLayout.headerBytes + polynomialPairPerFamilyBytes,
+            144n + proofLayout.headerBytes + polynomialPairPerFamilyBytes,
         );
         expect(layout.maximumBodyBytes).toBe(
-            148n + polynomialPairPerFamilyBytes + maximumProofBytes,
+            144n + polynomialPairPerFamilyBytes + maximumProofBytes,
         );
         expect(layout.maximumSignedBodyBytes).toBe(
-            148n +
+            144n +
                 polynomialPairPerFamilyBytes +
                 maximumProofBytes +
-                214n +
+                210n +
                 3309n,
         );
         expect(layout.maximumBodyBytes).toBeLessThan(1n << 32n);

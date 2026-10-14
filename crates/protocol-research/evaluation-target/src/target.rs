@@ -484,7 +484,6 @@ fn read_exactly(
 }
 
 const RETAINED_TARGET_LABEL: &[u8] = b"sealed-lattice/retained-evaluation-target/v2";
-const RETAINED_TARGET_MAGIC: &[u8; 4] = b"RET1";
 
 /// Only completed deterministic evaluation (or an accepted set below the
 /// minimum turnout) creates this value, or its restoration from the copy the
@@ -546,8 +545,7 @@ impl VerifiedEvaluationTarget {
             return Err(Refusal::Context);
         }
         let ciphertext = self.ciphertext.as_deref().unwrap_or_default();
-        let mut bytes = Vec::with_capacity(8 + self.body.len() + ciphertext.len() + 64);
-        bytes.extend(RETAINED_TARGET_MAGIC);
+        let mut bytes = Vec::with_capacity(4 + self.body.len() + ciphertext.len() + 64);
         bytes.extend((self.body.len() as u32).to_le_bytes());
         bytes.extend(&self.body);
         bytes.extend(ciphertext);
@@ -573,14 +571,14 @@ impl VerifiedEvaluationTarget {
         credential
             .check_retained_tag(RETAINED_TARGET_LABEL, &poll, bytes, tag)
             .map_err(|_| Refusal::Context)?;
-        if bytes.len() < 8 || &bytes[..4] != RETAINED_TARGET_MAGIC {
+        if bytes.len() < 4 {
             return Err(Refusal::Encoding);
         }
-        let length = u32::from_le_bytes(bytes[4..8].try_into().unwrap()) as usize;
-        if length > MAXIMUM_TARGET_BODY_BYTES || bytes.len() < 8 + length {
+        let length = u32::from_le_bytes(bytes[..4].try_into().unwrap()) as usize;
+        if length > MAXIMUM_TARGET_BODY_BYTES || bytes.len() < 4 + length {
             return Err(Refusal::Encoding);
         }
-        let (body, ciphertext) = bytes[8..].split_at(length);
+        let (body, ciphertext) = bytes[4..].split_at(length);
         let message = TargetMessage::parse(body, setup.profile().participants())
             .map_err(|_| Refusal::Encoding)?;
         if message.poll() != &poll.identity() || message.setup_identity() != &setup.identity() {

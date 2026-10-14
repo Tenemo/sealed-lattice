@@ -29,8 +29,7 @@ fn retained_key(profile: Profile, index: usize, seed: u64) -> RetainedAggregateP
         })
         .collect();
     let bytes = encode_polynomial(&values, coefficient_bytes(profile, family)).unwrap();
-    let mut record = b"SAV1".to_vec();
-    record.extend([7; 64]);
+    let mut record = vec![7; 64];
     for body_index in profile.contribution_body_polynomials() {
         record.extend(if body_index == index {
             identity(PUBLIC_POLYNOMIAL_DOMAIN, &bytes).unwrap()

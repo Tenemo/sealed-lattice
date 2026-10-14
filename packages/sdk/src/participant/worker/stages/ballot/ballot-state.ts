@@ -34,7 +34,6 @@ import {
 // participant without a ballot keeps an empty suffix.
 
 const marker = encodeText('BST3');
-const envelopeMarker = encodeText('LBE2');
 
 export type BallotState = Readonly<{
     scores: Uint8Array;
@@ -94,10 +93,6 @@ export const ballotEnvelopeMatches = (
     bodyLength: number,
     ballotTime?: bigint,
 ) =>
-    equalBytes(
-        envelope.subarray(0, ballotEnvelopeOffset.poll),
-        envelopeMarker,
-    ) &&
     equalBytes(
         envelope.subarray(
             ballotEnvelopeOffset.poll,

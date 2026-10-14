@@ -758,9 +758,9 @@ pub(crate) fn run(
         let mut source = File::open(&body_path).unwrap();
         let mut modified_header = [0; protocol_foundations::ballot_body::HEADER_BYTES];
         source.read_exact(&mut modified_header).unwrap();
-        // The statement position follows the body header's magic, proof
-        // length, statement magic, poll and setup identity.
-        let position = 12 + 4 + 64 + 64;
+        // The statement position follows the body header's proof length and
+        // the statement's magic, poll and setup identity.
+        let position = 8 + 4 + 64 + 64;
         modified_header[position..position + 2].copy_from_slice(&(author as u16).to_le_bytes());
         let mut destination = public_output::PublicOutput::create(&invalid_proof_path).unwrap();
         let mut hash =

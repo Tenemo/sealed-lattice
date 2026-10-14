@@ -28,11 +28,7 @@ const profile = compileParticipantRuntimeProfile(4, 2);
 const bounds = profile.preparation;
 const filled = (length: number, value: number) =>
     new Uint8Array(length).fill(value);
-const originalReference = () => {
-    const bytes = filled(bounds.selectionReferenceBytes, 19);
-    bytes.set(new TextEncoder().encode('SPI1'));
-    return bytes;
-};
+const originalReference = () => filled(bounds.selectionReferenceBytes, 19);
 const signatureAt = (
     stage: 'intent' | 'signed',
     length: number,
@@ -140,11 +136,6 @@ describe('independent preparation authority journal', () => {
                 expect(decoded.endorsement!.reference).toEqual(
                     originalReference(),
                 );
-                expect(
-                    new TextDecoder().decode(
-                        decoded.endorsement!.reference.subarray(0, 4),
-                    ),
-                ).toBe('SPI1');
                 expect(decoded.endorsement!.selection).toEqual(
                     endorsement('signed').selection,
                 );

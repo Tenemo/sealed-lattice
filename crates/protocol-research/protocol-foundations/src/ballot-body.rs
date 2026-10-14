@@ -6,11 +6,11 @@ use supported_profile::{
 };
 
 pub(crate) const CONTEXT_BYTES: usize = BALLOT_HEADER_BYTES;
-/// The body header: its magic, the complete proof length, the statement
-/// context and the proof header. It opens the proof's verification, so the
-/// ciphertexts that follow it stream into the statement as they arrive, and
-/// the rest of the proof ends the body.
-pub const HEADER_BYTES: usize = 12 + CONTEXT_BYTES + PROOF_HEADER_BYTES;
+/// The body header: the complete proof length, the statement context and
+/// the proof header. It opens the proof's verification, so the ciphertexts
+/// that follow it stream into the statement as they arrive, and the rest of
+/// the proof ends the body.
+pub const HEADER_BYTES: usize = 8 + CONTEXT_BYTES + PROOF_HEADER_BYTES;
 pub(crate) const BODY_DOMAIN: &str = "sealed-lattice/ballot-body/v1";
 
 /// The body's ciphertext polynomials, by ballot statement index, with their
@@ -61,8 +61,7 @@ pub fn header(profile: Profile, context: &[u8], proof: &[u8]) -> Result<Vec<u8>,
     if !proof_lengths(profile).contains(&proof.len()) {
         return Err(Refusal::Shape);
     }
-    let mut bytes = Vec::from(b"LBB1".as_slice());
-    bytes.extend((proof.len() as u64).to_le_bytes());
+    let mut bytes = (proof.len() as u64).to_le_bytes().to_vec();
     bytes.extend(context);
     bytes.extend(&proof[..PROOF_HEADER_BYTES]);
     Ok(bytes)
@@ -74,12 +73,12 @@ pub struct BodyHeader<'a> {
     pub proof_header: &'a [u8],
 }
 pub fn parse_header(profile: Profile, bytes: &[u8]) -> Result<BodyHeader<'_>, Refusal> {
-    if bytes.len() != HEADER_BYTES || &bytes[..4] != b"LBB1" {
+    if bytes.len() != HEADER_BYTES {
         return Err(Refusal::Shape);
     }
-    let proof_length = usize::try_from(u64::from_le_bytes(bytes[4..12].try_into().unwrap()))
+    let proof_length = usize::try_from(u64::from_le_bytes(bytes[..8].try_into().unwrap()))
         .map_err(|_| Refusal::Shape)?;
-    let (context, proof_header) = bytes[12..].split_at(CONTEXT_BYTES);
+    let (context, proof_header) = bytes[8..].split_at(CONTEXT_BYTES);
     check_context(profile, context)?;
     if !proof_lengths(profile).contains(&proof_length) {
         return Err(Refusal::Shape);
