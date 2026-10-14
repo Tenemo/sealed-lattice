@@ -581,54 +581,56 @@ export const renderCloseWireCensus = ({
 }: Pick<
     CensusInputs,
     'ballotBody' | 'completion' | 'thresholdProfiles'
->): string[] => [
-    '## Close wire census',
-    '',
-    'Exact canonical lengths of the signed close messages and bounds on the closure of one close barrier. A response lists at most two envelopes for one slot, and a proposal names exactly `q` responses. A response is authenticated against its listed envelopes alone; only a usable slot needs its complete body, so conflicting corrupt envelopes add envelope metadata but no body. An honest author signs one envelope, so only the `f` corrupt slots can exceed one union envelope. A participant holds at most two complete bodies for one slot; its intent lock discards late bodies and refuses later ones, so a corrupt slot can deliver at most two bodies before the lock and two after it. Delivery adds a new envelope to a slot only while fewer than two are known, and the lock also discards late envelopes. The organizer answers only when it can propose, lists two known envelopes of a slot without their bodies, and requests at most one body for a slot. Only the organizer takes responses; it retains the first of each responder with exactly the listed envelopes it did not know. Packets add a four-byte body length and the signature. The bounds exclude setup bytes, target evaluation, certificates, release shares and storage-engine overhead.',
-    '',
-    table(
-        ['Property', 'Value'],
-        [
-            ['Envelope bytes', formatCount(ballotBody.envelopeBytes)],
+>): string[] => {
+    const completionWire = compileCloseWireCensus(completion);
+    const rosterWires = thresholdProfiles.map(({ participantCount }) => ({
+        participantCount,
+        value: compileCloseWireCensus(
+            deriveSupportedProfile(
+                participantCount,
+                completionProfileCounts.optionCount,
+            ),
+        ),
+    }));
+    return [
+        '## Close wire census',
+        '',
+        'Exact canonical lengths of the signed close messages and bounds on the closure of one close barrier. A response lists at most two envelopes for one slot, and a proposal names exactly `q` responses. A response is authenticated against its listed envelopes alone; only a usable slot needs its complete body, so conflicting corrupt envelopes add envelope metadata but no body. An honest author signs one envelope, so only the `f` corrupt slots can exceed one union envelope. A participant holds at most two complete bodies for one slot; its intent lock discards late bodies and refuses later ones, so a corrupt slot can deliver at most two bodies before the lock and two after it. Delivery adds a new envelope to a slot only while fewer than two are known, and the lock also discards late envelopes. The organizer answers only when it can propose, lists two known envelopes of a slot without their bodies, and requests at most one body for a slot. Only the organizer takes responses; it retains the first of each responder with exactly the listed envelopes it did not know. Packets add a four-byte body length and the signature. The bounds exclude setup bytes, target evaluation, certificates, release shares and storage-engine overhead.',
+        '',
+        table(
+            ['Property', 'Value'],
             [
-                'Closure submission bytes',
-                formatCount(compileCloseWireCensus(completion).submissionBytes),
+                ['Envelope bytes', formatCount(ballotBody.envelopeBytes)],
+                [
+                    'Closure submission bytes',
+                    formatCount(completionWire.submissionBytes),
+                ],
+                [
+                    'Close intent body bytes',
+                    formatCount(completionWire.intentBodyBytes),
+                ],
+                [
+                    'Empty response body bytes',
+                    formatCount(completionWire.minimumResponseBodyBytes),
+                ],
             ],
+        ),
+        '',
+        table(
             [
-                'Close intent body bytes',
-                formatCount(compileCloseWireCensus(completion).intentBodyBytes),
+                'Participants',
+                'Close quorum',
+                'Maximum response body bytes',
+                'Proposal body bytes',
+                'Maximum union envelopes',
+                'Maximum barrier metadata bytes',
+                'Barrier signature checks',
+                'Maximum held bodies',
+                'Maximum received bodies',
+                'Maximum known envelopes',
+                'Maximum organizer known envelopes',
             ],
-            [
-                'Empty response body bytes',
-                formatCount(
-                    compileCloseWireCensus(completion).minimumResponseBodyBytes,
-                ),
-            ],
-        ],
-    ),
-    '',
-    table(
-        [
-            'Participants',
-            'Close quorum',
-            'Maximum response body bytes',
-            'Proposal body bytes',
-            'Maximum union envelopes',
-            'Maximum barrier metadata bytes',
-            'Barrier signature checks',
-            'Maximum held bodies',
-            'Maximum received bodies',
-            'Maximum known envelopes',
-            'Maximum organizer known envelopes',
-        ],
-        thresholdProfiles.map(({ participantCount }) => {
-            const value = compileCloseWireCensus(
-                deriveSupportedProfile(
-                    participantCount,
-                    completionProfileCounts.optionCount,
-                ),
-            );
-            return [
+            rosterWires.map(({ participantCount, value }) => [
                 formatCount(participantCount),
                 formatCount(value.closeQuorum),
                 formatCount(value.maximumResponseBodyBytes),
@@ -640,32 +642,24 @@ export const renderCloseWireCensus = ({
                 formatCount(value.maximumReceivedBodies),
                 formatCount(value.maximumKnownEnvelopes),
                 formatCount(value.maximumOrganizerKnownEnvelopes),
-            ];
-        }),
-    ),
-    '',
-    'Each response carries its listed envelopes in order and a retrievable body for each singly listed slot, including its author. The organizer publishes every usable body in its proposal closure. Body locators are reused only after complete byte comparison with authenticated custody; unavailable originals are uploaded from that same custody. The following payload bounds are separate from the routing records and readback costs in the complete workflow screen.',
-    '',
-    table(
-        [
-            'Participants',
-            'Listed envelope copy bytes',
-            'Most forwarded bodies',
-            'Most forwarded body bytes',
-        ],
-        thresholdProfiles.map(({ participantCount }) => {
-            const value = compileCloseWireCensus(
-                deriveSupportedProfile(
-                    participantCount,
-                    completionProfileCounts.optionCount,
-                ),
-            );
-            return [
+            ]),
+        ),
+        '',
+        'Each response carries its listed envelopes in order and a retrievable body for each singly listed slot, including its author. The organizer publishes every usable body in its proposal closure. Body locators are reused only after complete byte comparison with authenticated custody; unavailable originals are uploaded from that same custody. The following payload bounds are separate from the routing records and readback costs in the complete workflow screen.',
+        '',
+        table(
+            [
+                'Participants',
+                'Listed envelope copy bytes',
+                'Most forwarded bodies',
+                'Most forwarded body bytes',
+            ],
+            rosterWires.map(({ participantCount, value }) => [
                 formatCount(participantCount),
                 formatCount(value.maximumListedCopyBytes),
                 formatCount(value.maximumForwardedBodies),
                 formatCount(value.maximumForwardedBodyBytes),
-            ];
-        }),
-    ),
-];
+            ]),
+        ),
+    ];
+};

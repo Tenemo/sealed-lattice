@@ -505,7 +505,7 @@ export const renderSupportedProfileCensus = ({
         ]),
     ),
     '',
-    'Only the first `d` roster positions contribute to the setup. Every participant verifies all contributions of its roster. The mobile runtime sets the public corpus variance ceiling fifty percent above its planning target. A participant count is listed when some option count exceeds the ceiling.',
+    'The first `d + f` roster positions are eligible to contribute, and the setup selects `d` of them. Every participant verifies all contributions of its roster. The mobile runtime sets the public corpus variance ceiling fifty percent above its planning target. A participant count is listed when some option count exceeds the ceiling.',
     '',
     table(
         ['Property', 'Value'],

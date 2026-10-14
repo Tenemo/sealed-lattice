@@ -109,20 +109,23 @@ export const renderCompressedOracleCircuitWork = ({
             [1n, 2n, 1n, 1n],
             [2n, 2n, 1n, 1n],
             [3n, 64n, 512n, 16n],
-        ].map(([capacity, input, output, label]) =>
-            [
+        ].map(([capacity, input, output, label]) => {
+            const work = labelledHashExtractionWork(
                 capacity,
                 input,
                 output,
                 label,
-                labelledHashExtractionWork(capacity, input, output, label)
-                    .extractionGates,
-                labelledHashExtractionWork(capacity, input, output, label)
-                    .measuredQubits,
-                labelledHashExtractionWork(capacity, input, output, label)
-                    .extractionQubits,
-            ].map(formatCount),
-        ),
+            );
+            return [
+                capacity,
+                input,
+                output,
+                label,
+                work.extractionGates,
+                work.measuredQubits,
+                work.extractionQubits,
+            ].map(formatCount);
+        }),
     ),
     '',
     'The following supplied-width prefix examples include both full-value calls, clean prefix-copy work and its extra workspace. They do not assign a maximum stream width or a complete participant/reduction total.',
