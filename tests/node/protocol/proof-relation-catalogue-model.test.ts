@@ -112,7 +112,7 @@ describe('fixed three-purpose raw-domain catalogue', () => {
         expect(
             new Set(parsed.candidates.map((entry) => entry.arithmeticKey)).size,
         ).toBeGreaterThan(1);
-        expect(resolveProofContext(parsed.fields)).toEqual([]);
+        expect(resolveProofContext(parsed.fields, Buffer.alloc(0))).toEqual([]);
         expect(
             parseProofHashInput(
                 frame('ballot', false, 'chain-state', [
@@ -137,10 +137,10 @@ describe('fixed three-purpose raw-domain catalogue', () => {
         const census = compileProofHashDomainCensus();
         expect(census.rows).toHaveLength(342 * 3);
         expect(census.sentinelCount).toBe(1n);
-        expect(census.maximumAcceptedExpansionQueries).toBe(97827n);
+        expect(census.maximumAcceptedExpansionQueries).toBe(97828n);
         expect(census.minimumMessageBits).toBe(8n * 131072n);
         expect(census.maximumMessageBits).toBe(8n * 524288n);
-        // The maximum is a full setup context, not its short identifier.
+        // The maximum is a full setup statement, which its digest hashes.
         const maximum = census.rows.find(
             (row) => row.maximumInputBits === census.maximumInputBits,
         )!;
@@ -242,7 +242,7 @@ describe('fixed three-purpose raw-domain catalogue', () => {
         ).toBe(true);
     });
 
-    it('resolves complete canonical contexts, retains profile aliases and refuses field/header/encoding changes', () => {
+    it('resolves canonical contexts and statements, retains profile aliases and refuses field/header/encoding changes', () => {
         const entries = proofRelationCatalogueEntry(
             deriveSupportedProfile(3, 2),
         );
@@ -260,9 +260,9 @@ describe('fixed three-purpose raw-domain catalogue', () => {
                 proofCatalogueInteger(7n, 16),
                 entry.encodedParameters,
                 proofCatalogueInteger(field.modulus - 1n, 16),
-                statement,
+                Buffer.alloc(64, 25),
             ];
-            const aliases = resolveProofContext(fields);
+            const aliases = resolveProofContext(fields, statement);
             expect(
                 new Set(aliases.map((candidate) => candidate.arithmeticKey)),
             ).toEqual(new Set([entry.arithmeticKey]));
@@ -278,6 +278,7 @@ describe('fixed three-purpose raw-domain catalogue', () => {
                     fields.map((value, index) =>
                         index === 4 ? changedParameters : value,
                     ),
+                    statement,
                 ),
             ).toEqual([]);
             expect(
@@ -285,7 +286,11 @@ describe('fixed three-purpose raw-domain catalogue', () => {
                     fields.map((value, index) =>
                         index === 6 ? value.subarray(0, -1) : value,
                     ),
+                    statement,
                 ),
+            ).toEqual([]);
+            expect(
+                resolveProofContext(fields, statement.subarray(0, -1)),
             ).toEqual([]);
             const coefficientOffset =
                 entry.role === 'ballot'
@@ -294,12 +299,12 @@ describe('fixed three-purpose raw-domain catalogue', () => {
                       ? 198
                       : entry.header.length;
             statement[coefficientOffset] = 1; // Negative zero is not canonical.
-            expect(resolveProofContext(fields)).toEqual([]);
+            expect(resolveProofContext(fields, statement)).toEqual([]);
             statement[coefficientOffset] = 2;
-            expect(resolveProofContext(fields)).toEqual([]);
+            expect(resolveProofContext(fields, statement)).toEqual([]);
             statement[coefficientOffset] = 0;
             statement[0] ^= 1;
-            expect(resolveProofContext(fields)).toEqual([]);
+            expect(resolveProofContext(fields, statement)).toEqual([]);
         }
     });
 
@@ -344,9 +349,9 @@ describe('fixed three-purpose raw-domain catalogue', () => {
                 proofCatalogueInteger(7n, 16),
                 first.encodedParameters,
                 proofCatalogueInteger(field.modulus - 1n, 16),
-                statement,
+                Buffer.alloc(64),
             ];
-            const resolved = resolveProofContext(fields);
+            const resolved = resolveProofContext(fields, statement);
             expect(
                 resolved.some((entry) => entry.profile === first.profile),
             ).toBe(false);

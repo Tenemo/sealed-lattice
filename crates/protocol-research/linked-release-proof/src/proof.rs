@@ -14,8 +14,6 @@ pub fn prove(role: &[u8], mut prepared: PreparedRelease) -> (PublicStatement, In
     let proof = InMemoryProof::create(
         role,
         witness,
-        &statement.header,
-        &statement.polynomials,
         |alpha| statement.operator(alpha).unwrap(),
         false,
     );

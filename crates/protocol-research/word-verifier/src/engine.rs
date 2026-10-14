@@ -3,13 +3,10 @@ mod query_domain;
 #[path = "proof-transcript.rs"]
 mod transcript;
 use query_domain::{Coset, Point};
-pub(crate) use transcript::context_parameters;
-use transcript::{
-    Challenges, Header, Reader, Shape, challenges, hash_after, prefix, requested, stream_part,
-};
+pub(crate) use transcript::context;
+use transcript::{Challenges, Header, Reader, Shape, challenges, hash_after, prefix, requested};
 
 use parallel_work::ProtocolHash;
-use parallel_work::{HashStream, Sponge};
 use statement_stream::StatementOutput;
 use statement_stream::proof_field::{
     MODULUS, add as add_base, multiply as multiply_base, power as power_base,
@@ -25,8 +22,7 @@ type Element = [u128; 3];
 const ZERO: Element = [0, 0, 0];
 const ONE: Element = [1, 0, 0];
 const FOLDS: usize = (EVALUATION_DOMAIN_SIZE / 2).ilog2() as usize;
-pub const HEADER_LENGTH: usize =
-    4 + 64 + 64 + 3 * 64 + 48 + (FOLDS + 3) * 128 + (FOLDS - 1) * 64 + 48;
+pub const HEADER_LENGTH: usize = 4 + 64 + 3 * 64 + 48 + (FOLDS + 3) * 128 + (FOLDS - 1) * 64 + 48;
 pub use parallel_work::CHUNK_LIMIT;
 
 /// The public statement parser of one relation. It yields the relation's
@@ -81,8 +77,6 @@ pub struct Verifier<S> {
     header: Header,
     challenges: Challenges,
     statement: Option<S>,
-    // The statement's context, which a helper hashes when there are helpers.
-    context_hash: Option<HashStream>,
     operator: Option<StatementOutput>,
     statement_done: bool,
     indices: Vec<usize>,
@@ -103,9 +97,10 @@ pub struct Verifier<S> {
     complete: bool,
 }
 impl<S: Statement> Verifier<S> {
-    /// Opens a proof of the relation. The statement parser opens only after
-    /// the proof header fixes its challenges, and must recompute the
-    /// statement digest the header declares.
+    /// Opens a proof of the relation. The proof's context binds the
+    /// statement digest the header declares, so the header fixes the
+    /// challenges before the statement parser opens, and the parser must
+    /// recompute that digest from the statement.
     pub fn open(
         relation: Relation,
         role: &[u8],
@@ -117,32 +112,18 @@ impl<S: Statement> Verifier<S> {
         }
         let header = Header::parse(proof_header, relation.proof_magic)?;
         let shape = Shape::new(&relation);
-        let challenges = challenges(&shape, role, &header);
+        let context = context(&relation, role, &header.statement);
+        let challenges = challenges(&shape, role, &context, &header);
         let indices = requested(&challenges.queries, EVALUATION_DOMAIN_SIZE);
         let selected: Vec<u32> = indices.iter().map(|index| *index as u32).collect();
         let statement = open_statement(header.statement, challenges.alpha, &selected)
             .ok_or(Refusal::Context)?;
-        let mut context_hash = HashStream::new(Sponge::ProtocolHash);
-        stream_part(&mut context_hash, b"bounded-proof/statement");
-        for value in [
-            role,
-            relation.tag,
-            &2u128.to_le_bytes(),
-            &root(1 << 20).to_le_bytes(),
-            &7u128.to_le_bytes(),
-            &context_parameters(&relation),
-            &(MODULUS - 1).to_le_bytes(),
-        ] {
-            stream_part(&mut context_hash, value);
-        }
-        context_hash.update(&(relation.statement_bytes as u32).to_le_bytes());
         Ok(Self {
             shape,
             role: role.to_vec(),
             header,
             challenges,
             statement: Some(statement),
-            context_hash: Some(context_hash),
             operator: None,
             statement_done: false,
             indices,
@@ -169,10 +150,6 @@ impl<S: Statement> Verifier<S> {
             self.failed = true;
             return Err(Refusal::Length);
         }
-        self.context_hash
-            .as_mut()
-            .ok_or(Refusal::Phase)?
-            .update(bytes);
         if !self.statement.as_mut().ok_or(Refusal::Phase)?.push(bytes) {
             self.failed = true;
             return Err(Refusal::Encoding);
@@ -182,11 +159,6 @@ impl<S: Statement> Verifier<S> {
     pub fn finish_statement(&mut self) -> Result<(), Refusal> {
         if self.failed || self.statement_done {
             return Err(Refusal::Phase);
-        }
-        let computed = self.context_hash.take().ok_or(Refusal::Phase)?.finish();
-        if computed != self.header.context {
-            self.failed = true;
-            return Err(Refusal::Context);
         }
         self.operator = Some(
             self.statement

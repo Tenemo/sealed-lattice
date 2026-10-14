@@ -96,6 +96,15 @@ const fixture = (entry: ProofRelationCatalogueEntry, rounds = 21) => {
         records.push(value);
         return value;
     };
+    // The statement's digest is the fixed hash of its raw bytes.
+    const statementInput = Buffer.concat([protocolHashPrefix, statement]);
+    const statementRecord = {
+        input: statementInput,
+        output: createHash('shake256', { outputLength: 64 })
+            .update(statementInput)
+            .digest(),
+    };
+    records.push(statementRecord);
     const context = record(true, 'statement', [
         Buffer.from(entry.relationTag),
         unsigned(2, 16),
@@ -103,7 +112,7 @@ const fixture = (entry: ProofRelationCatalogueEntry, rounds = 21) => {
         unsigned(7, 16),
         entry.encodedParameters,
         unsigned(field.modulus - 1n, 16),
-        statement,
+        statementRecord.output,
     ]);
     const leaves: {
         stage: number;
@@ -190,6 +199,8 @@ const fixture = (entry: ProofRelationCatalogueEntry, rounds = 21) => {
     return {
         records,
         query: verifiers[rounds - 1].input,
+        statement,
+        statementRecord,
         context,
         role,
         messages,
@@ -268,6 +279,7 @@ describe('raw proof transcript backward extraction', () => {
             expect(sameMessages(result!.messages, value.messages)).toBe(true);
             expect(result!.responses).toEqual(value.responses);
             expect(result!.relation.arithmeticKey).toBe(entry.arithmeticKey);
+            expect(result!.statement.equals(value.statement)).toBe(true);
             expect(result!.oracles).toHaveLength(19);
             for (const leaf of value.leaves) {
                 expect(result!.oracles[leaf.stage].leaf(leaf.position)).toEqual(
@@ -285,7 +297,7 @@ describe('raw proof transcript backward extraction', () => {
         }
     });
 
-    it('requires the full context, complete messages and chain tails without demanding unused suffixes', () => {
+    it('requires the context, its statement, complete messages and chain tails without demanding unused suffixes', () => {
         const value = fixture(descriptors[2]);
         const replace = (
             original: RawProofHashRecord,
@@ -295,6 +307,7 @@ describe('raw proof transcript backward extraction', () => {
                 record === original ? replacement : record,
             );
         for (const missing of [
+            value.statementRecord,
             value.context,
             value.verifiers[3],
             value.chains[3],
@@ -360,6 +373,56 @@ describe('raw proof transcript backward extraction', () => {
                 value.query,
             ),
         ).toThrow('Inconsistent');
+    });
+
+    it('resolves the statement only through the unique canonical input with its digest', () => {
+        const value = fixture(descriptors[1], 3);
+        const withStatement = (input: Buffer) =>
+            value.records.map((record) =>
+                record === value.statementRecord
+                    ? { input, output: record.output }
+                    : record,
+            );
+        // Another statement under the same digest is a collision, whichever
+        // of the two the context meant.
+        const other = Buffer.from(value.statementRecord.input);
+        other[other.length - 1] ^= 1;
+        const colliding = [
+            ...value.records,
+            { input: other, output: value.statementRecord.output },
+        ];
+        expect(rawProofHashHasCollision(colliding, new Set())).toBe(true);
+        expect(extractRawProofPrefix(colliding, value.query)).toBeUndefined();
+        expect(
+            rawProofHashHasCollision(colliding, new Set(['ab'.repeat(64)])),
+        ).toBe(true);
+        // A digest whose input is no canonical statement of the relation
+        // resolves no instance.
+        const changedHeader = Buffer.from(value.statementRecord.input);
+        changedHeader[64] ^= 1;
+        const truncated = value.statementRecord.input.subarray(0, -1);
+        for (const input of [changedHeader, truncated])
+            expect(
+                extractRawProofPrefix(withStatement(input), value.query),
+            ).toBeUndefined();
+        // The digest of another statement leaves the context unresolved.
+        const otherOutput = Buffer.from(value.statementRecord.output);
+        otherOutput[0] ^= 1;
+        expect(
+            extractRawProofPrefix(
+                value.records.map((record) =>
+                    record === value.statementRecord
+                        ? { input: record.input, output: otherOutput }
+                        : record,
+                ),
+                value.query,
+            ),
+        ).toBeUndefined();
+        expect(
+            extractRawProofPrefix(value.records, value.query)?.statement.equals(
+                value.statement,
+            ),
+        ).toBe(true);
     });
 
     it('binds every chain edge to its original role, context, round and canonical response', () => {

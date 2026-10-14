@@ -15,10 +15,7 @@ use setup_witness::{
 use statement_stream::coefficient::{self, CenteredCodec};
 use std::sync::Arc;
 use supported_profile::{Profile, relation::setup_relation, share_modulus};
-use word_proof::{
-    setup_prover::{ProverStep, SetupProver, first_oracle_checkpoint},
-    transcript::context_stream,
-};
+use word_proof::setup_prover::{ProverStep, SetupProver, first_oracle_checkpoint};
 use zeroize::Zeroize;
 
 const CHUNK: usize = 1 << 20;
@@ -104,10 +101,8 @@ pub fn checkpoint_layout(profile: Profile) -> (usize, Vec<usize>) {
 
 struct PublicOutput {
     profile: Profile,
-    // The statement's digest and context, which helpers hash when there are
-    // helpers.
+    // The statement's digest, which a helper hashes when there are helpers.
     hash: HashStream,
-    context: HashStream,
     next: usize,
     total: usize,
     offset: usize,
@@ -115,11 +110,10 @@ struct PublicOutput {
     public_chunk: PublicChunk,
 }
 impl PublicOutput {
-    fn new(profile: Profile, role: &[u8], public_chunk: PublicChunk) -> Self {
+    fn new(profile: Profile, public_chunk: PublicChunk) -> Self {
         let mut output = Self {
             profile,
             hash: HashStream::new(Sponge::ProtocolHash),
-            context: context_stream(&setup_relation(profile), role),
             next: 0,
             total: 0,
             offset: 0,
@@ -148,7 +142,6 @@ impl PublicOutput {
             return;
         }
         self.hash.update(&self.buffer);
-        self.context.update(&self.buffer);
         // Only canonical public polynomial/header bytes cross this callback.
         (self.public_chunk)(self.next, self.offset, &self.buffer);
         self.offset += self.buffer.len();
@@ -273,7 +266,6 @@ impl Work {
                     profile,
                     &self.role,
                     public.hash.finish(),
-                    public.context.finish(),
                     profile.setup_statement_header(),
                     columns,
                 )
@@ -404,7 +396,7 @@ impl ContributionSession {
             .public_chunk
             .take()
             .ok_or(FoundationRefusal::Consumed)?;
-        work.public = Some(PublicOutput::new(work.profile, &work.role, public_chunk));
+        work.public = Some(PublicOutput::new(work.profile, public_chunk));
         self.output.clear();
         self.work = Some(work);
         Ok(())

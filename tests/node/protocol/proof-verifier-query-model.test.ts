@@ -39,6 +39,7 @@ describe('proof verifier query accounting', () => {
         expect(census.chainStateQueries).toBe(20);
         expect(census.messageRootQueries).toBe(20);
         expect(census.contextQueries).toBe(1);
-        expect(census.maximumCoreQueries).toBe(97827);
+        expect(census.statementDigestQueries).toBe(1);
+        expect(census.maximumCoreQueries).toBe(97828);
     });
 });

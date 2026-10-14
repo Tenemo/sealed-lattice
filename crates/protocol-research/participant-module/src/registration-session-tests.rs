@@ -161,7 +161,7 @@ fn checkpoint_import_preserves_the_verified_original_owner(
         bytes.extend(0u32.to_le_bytes());
         bytes.extend((role.len() as u16).to_le_bytes());
         bytes.extend(role);
-        bytes.extend([0; 128]);
+        bytes.extend([0; 64]);
         bytes.extend(profile.setup_statement_header());
         bytes.extend((input_hashes as u16).to_le_bytes());
         for _ in 0..input_hashes {

@@ -75,8 +75,6 @@ fn release_proofs_verify_only_for_their_role_and_true_partial() {
     let proof = InMemoryProof::create(
         role,
         witness,
-        &statement.header,
-        &statement.polynomials,
         |alpha| statement.operator(alpha).unwrap(),
         true,
     );
@@ -85,10 +83,9 @@ fn release_proofs_verify_only_for_their_role_and_true_partial() {
     assert!(!verify(profile, role, &prepared.statement, &bytes));
 }
 
-// The statement and proof digest of the seed-one release below, recorded
-// while the setup witness still prepared the release's inputs.
-const REPLAYED_RELEASE: &str = "9cd4a46a493e88376e9a28a084330ff19a45d423ddf11094334ac8df02615e63\
-                                69429f806e19a8106298d565b4d567cfe9235b06a83502acbbdd78be8b86e46c";
+// The digest of the seed-one release's statement digest and proof below.
+const REPLAYED_RELEASE: &str = "b60bedae9374b4d1e051f352134b2e895c4f4140f8fe1067ce3adac15c59c4a9\
+                                935b016d2c433fe53a287397bc32a66e7203470edeae6c31499e95a76f0e6f7b";
 
 thread_local! {
     // The fixture's witness and proof streams, which serve the key's and

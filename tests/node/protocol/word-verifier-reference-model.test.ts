@@ -57,7 +57,6 @@ const relation: WordRelation = (() => {
             { column: 2, factor: 8n },
         ],
         zeroProducts: [[3, 4]] as const,
-        statementBytes,
         parameters: [3, 2, 4],
     };
     const oracles = wordRelationShape(
@@ -269,7 +268,7 @@ describe('reference word verifier', () => {
             folds: 17,
             maximumDegree: 131071,
             witnessDegree: 66944,
-            headerBytes: 4004,
+            headerBytes: 3940,
         });
         for (const [size, queries] of [
             [63, 1],
@@ -383,7 +382,7 @@ describe('reference word verifier', () => {
         expect(verify(other)).toEqual({ accepted: true });
     });
 
-    it('refuses malformed headers and contexts before the openings', () => {
+    it('refuses malformed headers, contexts and statements before the openings', () => {
         const proof = prove(toyWitness(3));
         const refused = (refusal: string, stage: string | number) => ({
             accepted: false,
@@ -404,9 +403,9 @@ describe('reference word verifier', () => {
                 header: changed(proof.header, (copy) => (copy[0] ^= 1)),
             }),
         ).toEqual(refused('Encoding', 'open'));
-        // The mask sum follows the magic, both digests and three roots; the
-        // terminal ends the header.
-        for (const offset of [4 + 64 + 64 + 3 * 64, domain.headerBytes - 48])
+        // The mask sum follows the magic, the statement digest and three
+        // roots; the terminal ends the header.
+        for (const offset of [4 + 64 + 3 * 64, domain.headerBytes - 48])
             expect(
                 verify(proof, {
                     header: changed(proof.header, (copy) =>
@@ -434,23 +433,19 @@ describe('reference word verifier', () => {
                     changed(proof.statement, (copy) => (copy[10] ^= 1)),
                 ],
             }),
-        ).toEqual(refused('Context', 'statement'));
+        ).toEqual(refused('Encoding', 'statement'));
+        // Another role or a changed root draws other challenges, so the
+        // openings name positions the verifier did not request.
         expect(
             verify(proof, { role: Buffer.from('another-word-proof/role') }),
-        ).toEqual(refused('Context', 'statement'));
+        ).toEqual(refused('Encoding', 0));
         expect(
             verify(proof, {
                 header: changed(proof.header, (copy) => (copy[4 + 64] ^= 1)),
             }),
-        ).toEqual(refused('Context', 'statement'));
-        // A changed root draws other challenges, so the openings name
-        // positions the verifier did not request.
-        expect(
-            verify(proof, {
-                header: changed(proof.header, (copy) => (copy[4 + 128] ^= 1)),
-            }),
         ).toEqual(refused('Encoding', 0));
-        // A statement whose context matches but which its parser refuses.
+        // A statement whose digest the proof binds but which its parser
+        // refuses.
         const toy = toyWitness(3);
         const noncanonical = encodeStatement(toy);
         littleEndianPrime().copy(noncanonical, 4);

@@ -22,25 +22,21 @@ pub struct InMemoryProof {
     inverses: Vec<Element>,
 }
 impl InMemoryProof {
-    /// Proves the witness's statement. The context hashes the statement's
-    /// header and polynomials in order, and the operator function gives the
-    /// statement's affine operator at the linear challenge.
+    /// Proves the witness's statement, whose digest the witness carries. The
+    /// operator function gives the statement's affine operator at the linear
+    /// challenge.
     pub fn create(
         role: &[u8],
         witness: Witness,
-        header: &[u8],
-        polynomials: &[Vec<u8>],
         operator: impl FnOnce(Element) -> Operator,
         adversarial_affine: bool,
     ) -> Self {
         let relation = &witness.relation;
-        let mut context_hash = transcript::context_hasher(relation, role);
-        context_hash.update(header);
-        for polynomial in polynomials {
-            context_hash.update(polynomial);
-        }
-        let mut transcript =
-            Transcript::new(role, context_hash.finalize(), relation.message_bytes());
+        let mut transcript = Transcript::new(
+            role,
+            transcript::context(relation, role, &witness.statement),
+            relation.message_bytes(),
+        );
         transcript.next();
         let first = FirstOracle::create(role, &witness);
         transcript.respond(&[&first.tree.root()]);
@@ -129,9 +125,9 @@ impl InMemoryProof {
     }
 }
 
-/// Writes a proof's header: the relation's magic, the statement digest and
-/// the context, the three oracle roots and the mask sum, every round's salt,
-/// and the folding layers' roots with the terminal value.
+/// Writes a proof's header: the relation's magic, the statement digest, the
+/// three oracle roots and the mask sum, every round's salt, and the folding
+/// layers' roots with the terminal value.
 pub(crate) fn write_header(
     output: &mut impl Write,
     relation: &Relation,
@@ -143,7 +139,6 @@ pub(crate) fn write_header(
 ) {
     output.write_all(relation.proof_magic).unwrap();
     output.write_all(statement).unwrap();
-    output.write_all(&transcript.context).unwrap();
     for root in roots {
         output.write_all(&root).unwrap();
     }

@@ -167,6 +167,10 @@ export const renderProofVerifierQueryBounds = (): string[] => {
                     formatCount(proofVerifierQueries.contextQueries),
                 ],
                 [
+                    'Statement digest',
+                    formatCount(proofVerifierQueries.statementDigestQueries),
+                ],
+                [
                     'Proof-core subtotal',
                     formatCount(proofVerifierQueries.maximumCoreQueries),
                 ],

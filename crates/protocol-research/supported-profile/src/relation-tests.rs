@@ -22,10 +22,6 @@ fn completion_relations_keep_their_bound_parameters() {
             112, 96, 16, 7, 32
         ]
     );
-    assert_eq!(
-        setup.statement_bytes(),
-        136 + 42 * 65_536 * 109 + 31 * 65_536 * 21
-    );
     assert_eq!(setup.zero_product_columns(11), (353, 354));
     assert_eq!(setup.support(11), (1, 128));
     let ballot = ballot_relation(completion);
@@ -34,10 +30,6 @@ fn completion_relations_keep_their_bound_parameters() {
         [
             27, 5, 32, 1_024, 256, 32_768, 65_536, 27, 28, 29, 30, 20, 31
         ]
-    );
-    assert_eq!(
-        ballot.statement_bytes(),
-        136 + 4 * 65_536 * 109 + 4 * 4_096 * 6
     );
     assert_eq!(ballot.supports, [(1, 512), (16, 128)]);
     let release = release_relation(completion);
@@ -77,11 +69,7 @@ fn completion_relations_keep_their_bound_parameters() {
     );
     expected.extend([24, 1, 0, 0, 0, 0, 65_537 * 65_445]);
     assert_eq!(release.relation_parameters()[7..], expected);
-    assert_eq!(
-        release.statement_bytes(),
-        198 + 4 * 65_536 * 21 + 2 * 65_536 * 25
-    );
-    assert_eq!(PROOF_HEADER_BYTES, 4_004);
+    assert_eq!(PROOF_HEADER_BYTES, 3_940);
 }
 
 // Word, lookup and narrow counts and the largest proofs of the model
@@ -103,7 +91,7 @@ fn layouts_match_the_model_census() {
                 (53, 256),
                 (58, 256),
             ],
-            14_123_872,
+            14_123_808,
         ),
         (
             10,
@@ -120,7 +108,7 @@ fn layouts_match_the_model_census() {
                 (53, 256),
                 (58, 256),
             ],
-            14_191_456,
+            14_191_392,
         ),
         (
             16,
@@ -138,7 +126,7 @@ fn layouts_match_the_model_census() {
                 (54, 256),
                 (59, 256),
             ],
-            14_349_152,
+            14_349_088,
         ),
         (
             20,
@@ -156,7 +144,7 @@ fn layouts_match_the_model_census() {
                 (62, 256),
                 (67, 256),
             ],
-            15_070_048,
+            15_069_984,
         ),
     ] {
         let release = release_relation(Profile::new(participants, options).unwrap());
@@ -170,7 +158,7 @@ fn layouts_match_the_model_census() {
             21,
             [(6, 512), (13, 512), (18, 512), (20, 512), (16, 7_281)],
             [(21, 22), (23, 24), (14, 25)],
-            10_564_448,
+            10_564_384,
         ),
         (
             10,
@@ -178,7 +166,7 @@ fn layouts_match_the_model_census() {
             27,
             [(9, 512), (19, 512), (24, 512), (26, 512), (22, 7_281)],
             [(27, 28), (29, 30), (20, 31)],
-            11_105_120,
+            11_105_056,
         ),
         (
             16,
@@ -186,7 +174,7 @@ fn layouts_match_the_model_census() {
             25,
             [(8, 512), (17, 512), (22, 512), (24, 512), (20, 7_281)],
             [(25, 26), (27, 28), (18, 29)],
-            10_924_896,
+            10_924_832,
         ),
         (
             20,
@@ -194,7 +182,7 @@ fn layouts_match_the_model_census() {
             29,
             [(10, 512), (21, 512), (26, 512), (28, 512), (24, 7_281)],
             [(29, 30), (31, 32), (22, 33)],
-            11_285_344,
+            11_285_280,
         ),
     ] {
         let ballot = ballot_relation(Profile::new(participants, options).unwrap());

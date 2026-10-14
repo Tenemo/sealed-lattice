@@ -324,13 +324,6 @@ export const renderReleaseVerificationAttempts = (): string[] => {
                     ),
                 ],
                 [
-                    'Plain statement-digest passes outside the core',
-                    formatCount(
-                        releaseVerification.perAttempt
-                            .plainStatementDigestPasses,
-                    ),
-                ],
-                [
                     'Completed release-body digest passes outside the core',
                     formatCount(
                         releaseVerification.perAttempt

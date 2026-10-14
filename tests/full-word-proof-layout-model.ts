@@ -36,9 +36,11 @@ export const compileWordProofLayout = (
         randomReadBytes;
     const firstWidth = BigInt(wordCount + 1) * baseBytes + extensionBytes;
     const secondWidth = BigInt(lookupCount + 2) * extensionBytes;
+    // The magic, the statement digest, the three oracle roots, the mask
+    // sum, every round's salt, the fold roots and the terminal value.
     const headerBytes =
         4n +
-        2n * tagBytes +
+        tagBytes +
         3n * tagBytes +
         extensionBytes +
         BigInt(foldCount + 3) * saltBytes +

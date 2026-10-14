@@ -28,12 +28,10 @@ export const compileReleaseVerificationWorkload = (
         proof.verifierMessageQueries +
             proof.chainStateQueries +
             proof.messageRootQueries +
-            proof.contextQueries,
+            proof.contextQueries +
+            proof.statementDigestQueries,
     );
     const maximumProofCoreQueries = BigInt(proof.maximumCoreQueries);
-    // The statement stream recomputes the raw statement digest the proof
-    // declares. The role-bound context hash is already in the core.
-    const plainStatementDigestPasses = 1n;
     const completedBodyDigestPasses = 1n;
     // Every attempt's calls are oracle calls of the experiment, which the
     // query cap bounds together with the adversary's.
@@ -44,23 +42,16 @@ export const compileReleaseVerificationWorkload = (
         perAttempt: {
             minimumProofCoreQueries,
             maximumProofCoreQueries,
-            plainStatementDigestPasses,
             completedBodyDigestPasses,
             minimumKnownHashCalls:
-                minimumProofCoreQueries +
-                plainStatementDigestPasses +
-                completedBodyDigestPasses,
+                minimumProofCoreQueries + completedBodyDigestPasses,
         },
         totals: {
             minimumProofCoreQueries: count * minimumProofCoreQueries,
             maximumProofCoreQueries: count * maximumProofCoreQueries,
-            plainStatementDigestPasses: count * plainStatementDigestPasses,
             completedBodyDigestPasses: count * completedBodyDigestPasses,
             minimumKnownHashCalls:
-                count *
-                (minimumProofCoreQueries +
-                    plainStatementDigestPasses +
-                    completedBodyDigestPasses),
+                count * (minimumProofCoreQueries + completedBodyDigestPasses),
             envelopeVerificationCalls: count,
             commonPolynomialCalls: count,
         },

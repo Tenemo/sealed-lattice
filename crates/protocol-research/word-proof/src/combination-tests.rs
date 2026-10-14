@@ -12,7 +12,6 @@ fn secret_job_inputs_have_their_exact_length() {
         zero_product_pairs: vec![(3, 4), (5, 6)],
         supports: vec![(1, 512)],
         message_bytes: 1,
-        statement_bytes: 1,
         parameters: Vec::new(),
     };
     let witness = Witness {
@@ -58,7 +57,6 @@ fn collected_reciprocal_terms_equal_the_direct_constraint_for_every_lookup_scale
             zero_product_pairs: vec![(27, 28), (29, 30), (20, 31)],
             supports: vec![(1, 512), (16, 128)],
             message_bytes: 1 << 18,
-            statement_bytes: 1,
             parameters: Vec::new(),
         };
         let (words_count, lookups) = (relation.words(), relation.lookups());

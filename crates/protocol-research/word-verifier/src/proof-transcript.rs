@@ -1,5 +1,5 @@
-use super::{Element, FOLDS, HEADER_LENGTH, Refusal, ZERO, encode};
-use parallel_work::{HashStream, ProtocolHash};
+use super::{Element, FOLDS, HEADER_LENGTH, Refusal, ZERO, encode, root};
+use parallel_work::ProtocolHash;
 use sha3::{
     Shake256,
     digest::{ExtendableOutput, Update, XofReader},
@@ -64,7 +64,7 @@ fn degree(shape: &Shape, index: usize) -> usize {
 }
 /// The relation parameters, oracle degrees and lookups that a proof's
 /// context binds.
-pub(crate) fn context_parameters(relation: &Relation) -> Vec<u8> {
+fn context_parameters(relation: &Relation) -> Vec<u8> {
     let shape = &Shape::new(relation);
     let mut bytes: Vec<u8> = [
         SYSTEMATIC,
@@ -85,6 +85,23 @@ pub(crate) fn context_parameters(relation: &Relation) -> Vec<u8> {
         bytes.extend((*scale as u32).to_le_bytes());
     }
     bytes
+}
+/// The statement context: the role, the proof system's constants, the
+/// relation parameters and the statement digest.
+pub(crate) fn context(relation: &Relation, role: &[u8], statement: &[u8; 64]) -> [u8; 64] {
+    hash(
+        b"bounded-proof/statement",
+        &[
+            role,
+            relation.tag,
+            &2u128.to_le_bytes(),
+            &root(1 << 20).to_le_bytes(),
+            &7u128.to_le_bytes(),
+            &context_parameters(relation),
+            &(MODULUS - 1).to_le_bytes(),
+            statement,
+        ],
+    )
 }
 pub(super) fn hash(domain: &[u8], parts: &[&[u8]]) -> [u8; 64] {
     let mut hash = ProtocolHash::new();
@@ -115,10 +132,6 @@ pub(super) fn hash_after(prefix: &ProtocolHash, parts: &[&[u8]]) -> [u8; 64] {
         part(&mut hash, value);
     }
     hash.finalize()
-}
-pub(super) fn stream_part(stream: &mut HashStream, bytes: &[u8]) {
-    stream.update(&(bytes.len() as u32).to_le_bytes());
-    stream.update(bytes);
 }
 fn wide(domain: &[u8], parts: &[&[u8]], length: usize) -> Vec<u8> {
     let mut hash = Shake256::default();
@@ -195,7 +208,6 @@ impl<'a> Reader<'a> {
 
 pub(super) struct Header {
     pub(super) statement: [u8; 64],
-    pub(super) context: [u8; 64],
     pub(super) roots: [[u8; 64]; 3],
     pub(super) mask_sum: Element,
     pub(super) salts: Vec<[u8; 128]>,
@@ -212,7 +224,6 @@ impl Header {
             return Err(Refusal::Encoding);
         }
         let statement = reader.take(64)?.try_into().unwrap();
-        let context = reader.take(64)?.try_into().unwrap();
         let mut roots = [[0; 64]; 3];
         for root in &mut roots {
             *root = reader.take(64)?.try_into().unwrap();
@@ -229,7 +240,6 @@ impl Header {
         let terminal = reader.element()?;
         Ok(Self {
             statement,
-            context,
             roots,
             mask_sum,
             salts,
@@ -247,7 +257,12 @@ pub(super) struct Challenges {
     pub(super) folds: Vec<Element>,
     pub(super) queries: Vec<usize>,
 }
-pub(super) fn challenges(shape: &Shape, role: &[u8], header: &Header) -> Challenges {
+pub(super) fn challenges(
+    shape: &Shape,
+    role: &[u8],
+    context: &[u8; 64],
+    header: &Header,
+) -> Challenges {
     let length = shape.message_bytes;
     let mut state = vec![0; length];
     let mut beta = ZERO;
@@ -258,7 +273,7 @@ pub(super) fn challenges(shape: &Shape, role: &[u8], header: &Header) -> Challen
     for round in 1..=FOLDS + 3 {
         let message = wide(
             b"bounded-proof/verifier-message",
-            &[role, &header.context, &state, &(round as u32).to_le_bytes()],
+            &[role, context, &state, &(round as u32).to_le_bytes()],
             length,
         );
         if round == 2 {
@@ -297,7 +312,7 @@ pub(super) fn challenges(shape: &Shape, role: &[u8], header: &Header) -> Challen
         let round_bytes = (round as u32).to_le_bytes();
         let mut input = vec![
             role,
-            header.context.as_slice(),
+            context.as_slice(),
             round_bytes.as_slice(),
             header.salts[round - 1].as_slice(),
         ];
@@ -305,7 +320,7 @@ pub(super) fn challenges(shape: &Shape, role: &[u8], header: &Header) -> Challen
         let root = hash(b"bounded-proof/message-root", &input);
         let digest = wide(
             b"bounded-proof/chain-state",
-            &[role, &header.context, &message, &root],
+            &[role, context, &message, &root],
             length,
         );
         state[..64].copy_from_slice(&root);
@@ -313,12 +328,7 @@ pub(super) fn challenges(shape: &Shape, role: &[u8], header: &Header) -> Challen
     }
     let message = wide(
         b"bounded-proof/verifier-message",
-        &[
-            role,
-            &header.context,
-            &state,
-            &((FOLDS + 4) as u32).to_le_bytes(),
-        ],
+        &[role, context, &state, &((FOLDS + 4) as u32).to_le_bytes()],
         length,
     );
     let queries = (0..QUERY_COUNT)

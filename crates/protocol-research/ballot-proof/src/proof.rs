@@ -12,8 +12,6 @@ pub fn prove(
     InMemoryProof::create(
         role,
         witness,
-        &public.header,
-        &public.polynomials,
         |alpha| public.operator(alpha).unwrap(),
         adversarial_affine,
     )

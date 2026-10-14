@@ -49,7 +49,7 @@ fn framing_refuses_contexts_and_proof_lengths_outside_the_profile() {
         ciphertext_bytes(completion),
         2 * 65_536 * 109 + 2 * 4_096 * 6
     );
-    assert_eq!(*proof_lengths(completion).end(), 11_105_120);
+    assert_eq!(*proof_lengths(completion).end(), 11_105_056);
 }
 #[test]
 fn incomplete_oversized_and_excess_streams_cannot_return_a_digest() {

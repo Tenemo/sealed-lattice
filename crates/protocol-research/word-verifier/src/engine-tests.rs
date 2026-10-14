@@ -62,7 +62,7 @@ fn malformed_headers_and_unfinished_streams_cannot_verify() {
         ),
         Err(Refusal::Context)
     ));
-    for offset in [324, HEADER_LENGTH - 48] {
+    for offset in [260, HEADER_LENGTH - 48] {
         let mut changed = bytes.clone();
         changed[offset..offset + 16].copy_from_slice(&MODULUS.to_le_bytes());
         assert!(matches!(open(b"role", &changed), Err(Refusal::Encoding)));

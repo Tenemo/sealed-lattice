@@ -21,7 +21,7 @@ describe('participant release custody layout', () => {
         const records = 16n;
         expect(value.prefixBytes).toBe(14n);
         expect(value.envelopeBytes).toBe(envelope);
-        expect(value.maximumBodyBytes).toBe(15_830_066n);
+        expect(value.maximumBodyBytes).toBe(15_830_002n);
         expect(value.maximumBodyRecords).toBe(records);
         expect(value.phaseBytes).toEqual([
             { phase: 25, bytes: attempt },
@@ -32,7 +32,7 @@ describe('participant release custody layout', () => {
         ]);
         expect(value.maximumStateBytes).toBe(6153n);
         expect(value.maximumEncryptedBodyBytes).toBe(
-            15_830_066n + 16n * records,
+            15_830_002n + 16n * records,
         );
     });
 });

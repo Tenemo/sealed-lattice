@@ -450,7 +450,7 @@ export const compileProofHashWork = (
         16n,
         profile.parameterBytes,
         16n,
-        profile.statementBytes,
+        64n,
     ]);
     const transcript = total([
         work(

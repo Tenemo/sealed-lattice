@@ -12,6 +12,7 @@ import {
     extractProofGraphPrefix,
     hasProofHashLayout,
     isProofChallengeInput,
+    isRawStatementInput,
     parseProofHashInput,
     proofGraphHasCollision,
     proofGraphPrefix,
@@ -51,7 +52,7 @@ const contextFields = () => [
     Buffer.alloc(16),
     Buffer.alloc(776),
     Buffer.alloc(16),
-    Buffer.alloc(28672136),
+    Buffer.alloc(64, 25),
 ];
 
 describe('ballot hash domain correspondence model', () => {
@@ -88,7 +89,7 @@ describe('ballot hash domain correspondence model', () => {
                 ]),
                 [11, 23],
             ],
-            ['statement', frame(true, 'statement', contextFields()), []],
+            ['statement', frame(true, 'statement', contextFields()), [25]],
             [
                 'verifier-message',
                 frame(false, 'verifier-message', [
@@ -204,22 +205,46 @@ describe('ballot hash domain correspondence model', () => {
         // Layout acceptance does not assert that these all-ones scalars decode.
     });
 
-    it('routes partial contexts to the auxiliary function even though a generic verifier can hash them', () => {
+    it('refuses truncated contexts and challenges raw statements outside the framed families', () => {
         const complete = frame(true, 'statement', contextFields());
-        const prefixBytes = complete.length - 28672136;
-        for (const suffixLength of [0, 1, 1275, 28672136 - 1]) {
-            const partial = complete.subarray(0, prefixBytes + suffixLength);
-            expect(parseProofHashInput(partial)).toBeUndefined();
-        }
+        for (const suffixLength of [0, 1, 63])
+            expect(
+                parseProofHashInput(
+                    complete.subarray(0, complete.length - 64 + suffixLength),
+                ),
+            ).toBeUndefined();
         const changedDeclaration = contextFields();
-        changedDeclaration[6] = Buffer.alloc(1275);
+        changedDeclaration[6] = Buffer.alloc(65);
         expect(
             parseProofHashInput(frame(true, 'statement', changedDeclaration)),
         ).toBeUndefined();
-        // A recipient-key API name cannot change the classification of bytes
-        // imitating a partial context, and cannot make it a resolved instance.
-        const keyDigestInput = complete.subarray(0, 64 + 65536 * 21);
-        expect(isProofChallengeInput(keyDigestInput, new Set())).toBe(false);
+        // The digest a context binds hashes the raw statement, whose literal
+        // marker exceeds the input as a framed length. Every raw statement is
+        // challenged, whatever owner proves it.
+        const statement = Buffer.alloc(28672136);
+        statement.write('LBS1', 'ascii');
+        const statementDigestInput = Buffer.concat([
+            protocolHashPrefix,
+            statement,
+        ]);
+        expect(parseProofHashInput(statementDigestInput)).toBeUndefined();
+        expect(isRawStatementInput(statementDigestInput)).toBe(true);
+        expect(
+            isProofChallengeInput(
+                statementDigestInput,
+                new Set(['ab'.repeat(64)]),
+            ),
+        ).toBe(true);
+        for (const input of [
+            statementDigestInput.subarray(0, -1),
+            statementDigestInput.subarray(protocolHashPrefix.length),
+            Buffer.concat([statementDigestInput, Buffer.alloc(1)]),
+        ])
+            expect(isProofChallengeInput(input, new Set())).toBe(false);
+        statement.write('LRS1', 'ascii');
+        expect(
+            isRawStatementInput(Buffer.concat([protocolHashPrefix, statement])),
+        ).toBe(false);
     });
 
     it('refuses framing and ASCII aliases without interpreting their caller', () => {
@@ -296,13 +321,13 @@ const entry = (
     prefix: number,
     tail = 0,
 ): ProofGraphEntry => ({ input, output: word(prefix, tail) });
-const firstQuery: ProofGraphInput = {
+const firstQuery = {
     kind: 'verifier',
     role: 'corrupt-a',
     context: 1,
     state: [0, 0],
     round: 1,
-};
+} satisfies ProofGraphInput;
 const nextQuery: ProofGraphInput = {
     kind: 'verifier',
     role: 'corrupt-a',
@@ -315,7 +340,7 @@ const graph = (): ProofGraphEntry[] => [
         {
             kind: 'context',
             role: 'corrupt-a',
-            instance: 'false-a',
+            statement: 9,
             canonical: true,
         },
         1,
@@ -373,6 +398,7 @@ const graph = (): ProofGraphEntry[] => [
         7,
         11,
     ),
+    entry({ kind: 'statement', instance: 'false-a', canonical: true }, 9),
     entry(nextQuery, 8, 0),
 ];
 const without = (database: readonly ProofGraphEntry[], prefix: number) =>
@@ -398,11 +424,11 @@ describe('reduced ballot reference closure', () => {
             [...proofGraphReferences(graph(), nextQuery, alphabet)].sort(
                 (a, b) => a - b,
             ),
-        ).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8]);
+        ).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
     });
 
-    it('requires a complete canonical context and every prior challenge link', () => {
-        for (const missing of [1, 2, 3, 7])
+    it('requires a complete canonical context, its statement and every prior challenge link', () => {
+        for (const missing of [1, 2, 3, 7, 9])
             expect(
                 extractProofGraphPrefix(
                     without(graph(), missing),
@@ -415,13 +441,21 @@ describe('reduced ballot reference closure', () => {
             {
                 kind: 'context',
                 role: 'corrupt-a',
-                instance: 'false-a',
+                statement: 9,
                 canonical: false,
             },
             1,
         );
         expect(
             extractProofGraphPrefix(malformed, nextQuery, alphabet),
+        ).toBeUndefined();
+        const malformedStatement = graph();
+        malformedStatement[7] = entry(
+            { kind: 'statement', instance: 'false-a', canonical: false },
+            9,
+        );
+        expect(
+            extractProofGraphPrefix(malformedStatement, nextQuery, alphabet),
         ).toBeUndefined();
         const unresolved = without(graph(), 1);
         // An input naming the context is insufficient: this would be the
@@ -440,7 +474,7 @@ describe('reduced ballot reference closure', () => {
 
     it('checks role, context, round, complete message and initial state bindings', () => {
         const changes: [number, ProofGraphInput][] = [
-            [1, { ...graph()[1].input, role: 'corrupt-b' }],
+            [1, { ...firstQuery, role: 'corrupt-b' }],
             [1, { ...firstQuery, context: 9 }],
             [1, { ...firstQuery, round: 2 }],
             [1, { ...firstQuery, state: [0, 1] }],
@@ -476,7 +510,14 @@ describe('reduced ballot reference closure', () => {
 
     it('cannot replace an indexed leaf with another role, stage or position', () => {
         for (const input of [
-            { ...graph()[4].input, role: 'corrupt-b' },
+            {
+                kind: 'leaf',
+                role: 'corrupt-b',
+                stage: 0,
+                index: 0,
+                value: 7,
+                canonical: true,
+            },
             {
                 kind: 'leaf',
                 role: 'corrupt-a',
@@ -533,12 +574,12 @@ describe('reduced ballot reference closure', () => {
         ).toEqual([[null, null]]);
     });
 
-    it('permits cross-role prefix reuse but detects ambiguity inside one role', () => {
+    it('permits cross-role prefix reuse but detects ambiguity inside one role or between statements', () => {
         const foreign = entry(
             {
                 kind: 'context',
                 role: 'corrupt-b',
-                instance: 'false-b',
+                statement: 19,
                 canonical: true,
             },
             1,
@@ -563,28 +604,60 @@ describe('reduced ballot reference closure', () => {
                 alphabet,
             ),
         ).toBeUndefined();
+        // Statements share one scope whatever role binds their digest, and a
+        // statement's digest may equal a role-scoped label.
+        const otherStatement = entry(
+            { kind: 'statement', instance: 'false-b', canonical: true },
+            9,
+        );
+        expect(
+            proofGraphHasCollision([...graph(), otherStatement], alphabet),
+        ).toBe(true);
+        expect(
+            extractProofGraphPrefix(
+                [...graph(), otherStatement],
+                nextQuery,
+                alphabet,
+            ),
+        ).toBeUndefined();
+        const labelAlias = entry(
+            { kind: 'statement', instance: 'false-b', canonical: true },
+            1,
+        );
+        expect(proofGraphHasCollision([...graph(), labelAlias], alphabet)).toBe(
+            false,
+        );
+        expect(
+            extractProofGraphPrefix(
+                [...graph(), labelAlias],
+                nextQuery,
+                alphabet,
+            ),
+        ).toEqual(extractProofGraphPrefix(graph(), nextQuery, alphabet));
     });
 
     it('exhausts every new output word and preserves all earlier extractions outside references', () => {
         const databases = [
             [],
             graph(),
-            ...[1, 2, 3, 4, 5, 7].map((prefix) => without(graph(), prefix)),
+            ...[1, 2, 3, 4, 5, 7, 9].map((prefix) => without(graph(), prefix)),
         ];
         const additions: ProofGraphInput[] = [
             ...graph().map((record) => record.input),
             {
                 kind: 'context',
                 role: 'corrupt-a',
-                instance: 'false-b',
+                statement: 19,
                 canonical: true,
             },
             {
                 kind: 'context',
                 role: 'corrupt-b',
-                instance: 'false-a',
+                statement: 9,
                 canonical: true,
             },
+            { kind: 'statement', instance: 'false-b', canonical: true },
+            { kind: 'statement', instance: 'false-a', canonical: false },
             {
                 kind: 'verifier',
                 role: 'corrupt-a',
@@ -709,10 +782,10 @@ describe('mixed-width finite-family reference closure', () => {
         }));
     const longGraph = () =>
         shortGraph().map((record, index) => {
-            let input: ProofGraphInput = {
-                ...record.input,
-                role: 'corrupt-long',
-            };
+            let input: ProofGraphInput =
+                record.input.kind === 'statement'
+                    ? record.input
+                    : { ...record.input, role: 'corrupt-long' };
             if (input.kind === 'context')
                 input = {
                     ...input,
@@ -804,7 +877,7 @@ describe('mixed-width finite-family reference closure', () => {
             input: {
                 kind: 'context',
                 role: 'corrupt-long',
-                instance: 'false-a',
+                statement: 9,
                 canonical: true,
                 messageTags: 2,
             },
@@ -825,6 +898,45 @@ describe('mixed-width finite-family reference closure', () => {
                 maximumTags,
             ).has(0),
         ).toBe(true);
+        // A statement arriving after its context resolves the same instance;
+        // the context's digest label is the reference it hits.
+        const statement = database.find(
+            (record) => record.input.kind === 'statement',
+        )!;
+        const withoutStatement = database.filter(
+            (record) => record !== statement,
+        );
+        expect(
+            extractProofGraphPrefix(
+                withoutStatement,
+                query(database),
+                alphabet,
+                maximumTags,
+            ),
+        ).toBeUndefined();
+        expect(
+            proofGraphReferences(
+                withoutStatement,
+                statement.input,
+                alphabet,
+                maximumTags,
+            ).has(9),
+        ).toBe(true);
+        expect(
+            extractProofGraphPrefix(
+                [...withoutStatement, statement],
+                query(database),
+                alphabet,
+                maximumTags,
+            ),
+        ).toEqual(
+            extractProofGraphPrefix(
+                database,
+                query(database),
+                alphabet,
+                maximumTags,
+            ),
+        );
     });
 
     it('keeps duplicate queries idempotent and counts collisions only between distinct inputs in one role', () => {
@@ -851,7 +963,7 @@ describe('mixed-width finite-family reference closure', () => {
             input: {
                 kind: 'context',
                 role: 'corrupt-long',
-                instance: 'different',
+                statement: 19,
                 canonical: true,
             } satisfies ProofGraphInput,
         };
@@ -906,7 +1018,7 @@ describe('mixed-width finite-family reference closure', () => {
             input: {
                 kind: 'context',
                 role: 'corrupt-a',
-                instance: 'different',
+                statement: 19,
                 canonical: true,
             } satisfies ProofGraphInput,
             output: complete[0].output,
@@ -926,6 +1038,7 @@ describe('mixed-width finite-family reference closure', () => {
             complete,
             missing,
             complete.filter((record) => record.input.kind !== 'context'),
+            complete.filter((record) => record.input.kind !== 'statement'),
         ]) {
             const input: ProofGraphInput = {
                 kind: 'leaf',

@@ -40,14 +40,7 @@ export const wordProofDomain = (systematic: number, queries: number) => {
         maximumDegree: 2 * systematic - 1,
         witnessDegree: systematic + masks - 1,
         headerBytes:
-            4 +
-            64 +
-            64 +
-            3 * 64 +
-            48 +
-            (folds + 3) * 128 +
-            (folds - 1) * 64 +
-            48,
+            4 + 64 + 3 * 64 + 48 + (folds + 3) * 128 + (folds - 1) * 64 + 48,
     };
 };
 
@@ -77,7 +70,6 @@ export type WordRelation = Readonly<{
     lookups: readonly Readonly<{ column: number; factor: bigint }>[];
     zeroProducts: readonly (readonly [number, number])[];
     messageBytes: number;
-    statementBytes: number;
     // The relation parameters after the shared proof parameters.
     parameters: readonly (number | bigint)[];
 }>;
@@ -128,7 +120,6 @@ export const catalogueWordRelation = (
         lookups: entry.lookups,
         zeroProducts,
         messageBytes: Number(entry.messageBytes),
-        statementBytes: Number(entry.statementBytes),
         parameters: entry.relationParameters,
     };
 };
@@ -236,39 +227,24 @@ export const wordContextParameters = (
         ]),
     ]);
 
-// The protocol digest of a statement's complete public input, which a proof
-// header binds as its context.
-export const contextHash = (
+// The statement context: the role, the proof system's constants, the
+// relation parameters and the statement digest a proof header declares.
+export const statementContext = (
     relation: WordRelation,
     domain: WordProofDomain,
     role: Uint8Array,
+    statementDigest: Uint8Array,
 ) =>
-    createHash('shake256', { outputLength: 64 })
-        .update(protocolHashPrefix)
-        .update(
-            framed([
-                Buffer.from('bounded-proof/statement', 'ascii'),
-                role,
-                relation.tag,
-                littleEndian(2n, 16),
-                littleEndian(power(shift, (modulus - 1n) / (1n << 20n)), 16),
-                littleEndian(shift, 16),
-                wordContextParameters(relation, domain),
-                littleEndian(modulus - 1n, 16),
-            ]),
-        )
-        .update(word32(relation.statementBytes));
-
-export const wordStatementContext = (
-    relation: WordRelation,
-    domain: WordProofDomain,
-    role: Uint8Array,
-    statement: Iterable<Uint8Array>,
-) => {
-    const hash = contextHash(relation, domain, role);
-    for (const chunk of statement) hash.update(chunk);
-    return hash.digest();
-};
+    protocolHash('bounded-proof/statement', [
+        role,
+        relation.tag,
+        littleEndian(2n, 16),
+        littleEndian(power(shift, (modulus - 1n) / (1n << 20n)), 16),
+        littleEndian(shift, 16),
+        wordContextParameters(relation, domain),
+        littleEndian(modulus - 1n, 16),
+        statementDigest,
+    ]);
 
 // A field element from 32 uniform bytes, little-endian, reduced modulo the
 // prime; a lookup challenge's last coordinate is reduced modulo p-1 and
@@ -295,7 +271,6 @@ export const sample = (
 
 type Header = Readonly<{
     statement: Buffer;
-    context: Buffer;
     roots: readonly Buffer[];
     maskSum: Extension;
     salts: readonly Buffer[];
@@ -355,13 +330,12 @@ export const parseHeader = (
     if (!take(4).equals(Buffer.from(magic)))
         throw new Refused('Encoding', 'open');
     const statement = take(64);
-    const context = take(64);
     const roots = [take(64), take(64), take(64)];
     const maskSum = readExtension(take(48), 'open');
     const salts = Array.from({ length: domain.folds + 3 }, () => take(128));
     const foldRoots = Array.from({ length: domain.folds - 1 }, () => take(64));
     const terminal = readExtension(take(48), 'open');
-    return { statement, context, roots, maskSum, salts, foldRoots, terminal };
+    return { statement, roots, maskSum, salts, foldRoots, terminal };
 };
 
 export const encodeExtension = (value: Extension) =>
@@ -472,7 +446,11 @@ export const deriveWordProofChallenges = (
     role: Uint8Array,
     header: Header,
 ) => {
-    const chain = transcript(role, header.context, relation.messageBytes);
+    const chain = transcript(
+        role,
+        statementContext(relation, domain, role, header.statement),
+        relation.messageBytes,
+    );
     return challengesFrom(
         wordRelationShape(relation, domain).oracles,
         domain.folds,

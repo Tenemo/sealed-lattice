@@ -37,7 +37,7 @@ import {
     word32,
     readLittleEndian,
     framed,
-    wordStatementContext,
+    statementContext,
     sample,
     encodeExtension,
     transcript,
@@ -147,11 +147,11 @@ export const proveWordRelation = (
             else if (mode !== 'false-statement')
                 throw new RangeError('A lookup entry is outside its table.');
         }
-    const context = wordStatementContext(
+    const context = statementContext(
         relation,
         domain,
         role,
-        statement.bytes,
+        input.statementDigest,
     );
     const chain = transcript(role, context, relation.messageBytes);
     const salts = Array.from({ length: domain.folds + 3 }, () =>
@@ -418,7 +418,6 @@ export const proveWordRelation = (
     const header = Buffer.concat([
         relation.magic,
         input.statementDigest,
-        context,
         first.root,
         second.root,
         linear.root,

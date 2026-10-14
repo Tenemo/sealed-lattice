@@ -181,6 +181,8 @@ export const parseProofHashInput = (
             fields[0],
             ...fields.slice(3, 4).filter((field) => field.length === tagBytes),
         ]);
+    // A statement context ends with the digest of its statement, a
+    // role-free fixed hash of the raw statement bytes.
     if (
         fixed &&
         named('statement') &&
@@ -193,11 +195,11 @@ export const parseProofHashInput = (
                     16,
                     Number(entry.parameterBytes),
                     16,
-                    Number(entry.statementBytes),
+                    tagBytes,
                 ) && fields[0].equals(Buffer.from(entry.relationTag)),
         )
     )
-        return result('statement');
+        return result('statement', [fields[6]]);
     if (
         !fixed &&
         named('verifier-message') &&
@@ -226,12 +228,33 @@ export const parseProofHashInput = (
     return undefined;
 };
 
+// A raw statement after the fixed-hash domain: its relation's literal
+// header, whose marker no framed input begins with, and its exact length.
+// The digest a context binds hashes it.
+export const isRawStatementInput = (input: Uint8Array) => {
+    const bytes = Buffer.from(input.buffer, input.byteOffset, input.byteLength);
+    if (
+        !bytes.subarray(0, protocolHashPrefix.length).equals(protocolHashPrefix)
+    )
+        return false;
+    const statement = bytes.subarray(protocolHashPrefix.length);
+    return proofRelationCatalogue().some(
+        (entry) =>
+            BigInt(statement.length) === entry.statementBytes &&
+            statement.subarray(0, entry.header.length).equals(entry.header),
+    );
+};
+
+// Corrupt owners' proof inputs and every raw statement, which no role scopes,
+// form the challenged domain.
 export const isProofChallengeInput = (
     input: Uint8Array,
     honestOwners: ReadonlySet<string>,
 ) => {
     const parsed = parseProofHashInput(input);
-    return parsed !== undefined && !honestOwners.has(parsed.owner);
+    return parsed === undefined
+        ? isRawStatementInput(input)
+        : !honestOwners.has(parsed.owner);
 };
 
 // Semantic layouts are separate from raw namespace membership. These checks
@@ -316,8 +339,10 @@ export const compileProofHashDomainCensus = () => {
                     16n,
                     entry.parameterBytes,
                     16n,
-                    entry.statementBytes,
+                    64n,
                 ]),
+            // The statement digest the context binds.
+            64n + entry.statementBytes,
             framedProofHashBytes('bounded-proof/verifier-message', [
                 entry.roleBytes,
                 64n,
@@ -373,40 +398,53 @@ export const compileProofHashDomainCensus = () => {
 // Reduced-label structural model, independent of cryptographic execution.
 // Every database output is a maximumTags-digit word; a resolved context fixes
 // its own (at least two) messageTags. Prefix equality includes its entire word,
-// while unused maximum-word suffixes are deliberately irrelevant.
+// while unused maximum-word suffixes are deliberately irrelevant. A context
+// names its statement by the statement's digest, which no role scopes.
 type Scope = { role: string };
-export type ProofGraphInput = Scope &
-    (
-        | {
-              kind: 'context';
-              instance: string;
-              canonical: boolean;
-              messageTags?: number;
-              arithmeticKey?: string;
-          }
-        | {
-              kind: 'verifier';
-              context: number;
-              state: readonly number[];
-              round: number;
-          }
-        | { kind: 'message'; context: number; round: number; tree: number }
-        | { kind: 'chain'; context: number; message: number; root: number }
-        | {
-              kind: 'node';
-              stage: number;
-              level: number;
-              left: number;
-              right: number;
-          }
-        | {
-              kind: 'leaf';
-              stage: number;
-              index: number;
-              value: number;
-              canonical: boolean;
-          }
-    );
+export type ProofGraphInput =
+    | { kind: 'statement'; instance: string; canonical: boolean }
+    | (Scope &
+          (
+              | {
+                    kind: 'context';
+                    statement: number;
+                    canonical: boolean;
+                    messageTags?: number;
+                    arithmeticKey?: string;
+                }
+              | {
+                    kind: 'verifier';
+                    context: number;
+                    state: readonly number[];
+                    round: number;
+                }
+              | {
+                    kind: 'message';
+                    context: number;
+                    round: number;
+                    tree: number;
+                }
+              | {
+                    kind: 'chain';
+                    context: number;
+                    message: number;
+                    root: number;
+                }
+              | {
+                    kind: 'node';
+                    stage: number;
+                    level: number;
+                    left: number;
+                    right: number;
+                }
+              | {
+                    kind: 'leaf';
+                    stage: number;
+                    index: number;
+                    value: number;
+                    canonical: boolean;
+                }
+          ));
 export type ProofGraphEntry = {
     input: ProofGraphInput;
     output: number;
@@ -416,6 +454,11 @@ type ProofGraphPrefix = {
     messages: number[];
     oracles: (number | null)[][];
 };
+
+// Statements share one role-free scope; every other input is scoped by its
+// role.
+const graphScope = (input: ProofGraphInput) =>
+    input.kind === 'statement' ? 'statement' : `role:${input.role}`;
 
 export const proofGraphPrefix = (
     word: number,
@@ -445,7 +488,7 @@ export const proofGraphHasCollision = (
             continue;
         }
         inputs.set(input, entry.output);
-        const key = `${entry.input.role}:${proofGraphPrefix(entry.output, alphabet, maximumTags)}`;
+        const key = `${graphScope(entry.input)}:${proofGraphPrefix(entry.output, alphabet, maximumTags)}`;
         if (seen.has(key)) return true;
         seen.add(key);
     }
@@ -465,14 +508,18 @@ export const extractProofGraphPrefix = (
         proofGraphHasCollision(database, alphabet, maximumTags)
     )
         return undefined;
-    const find = (tag: number) =>
+    const findIn = (scope: string, tag: number) =>
         database.find(
             (entry) =>
-                entry.input.role === query.role &&
+                graphScope(entry.input) === scope &&
                 proofGraphPrefix(entry.output, alphabet, maximumTags) === tag,
         );
+    const find = (tag: number) => findIn(graphScope(query), tag);
     const context = find(query.context)?.input;
     if (context?.kind !== 'context' || !context.canonical) return undefined;
+    const statement = findIn('statement', context.statement)?.input;
+    if (statement?.kind !== 'statement' || !statement.canonical)
+        return undefined;
     const messageTags = context.messageTags ?? 2;
     if (
         !Number.isInteger(messageTags) ||
@@ -544,7 +591,7 @@ export const extractProofGraphPrefix = (
         state = previous.input.state;
     }
     if (state.some((tag) => tag !== 0)) return undefined;
-    return { instance: context.instance, messages, oracles };
+    return { instance: statement.instance, messages, oracles };
 };
 
 export const proofGraphReferences = (
@@ -581,6 +628,9 @@ export const proofGraphReferences = (
                 references.add(input.right);
                 break;
             case 'context':
+                references.add(input.statement);
+                break;
+            case 'statement':
             case 'leaf':
                 break;
         }

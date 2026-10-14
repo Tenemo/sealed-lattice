@@ -77,13 +77,12 @@ impl SetupProver {
         &self.relation
     }
     /// Starts a proof of generated witness columns for the profile's setup
-    /// statement, whose digest and context the generator computed while it
-    /// emitted the statement.
+    /// statement, whose digest the generator computed while it emitted the
+    /// statement.
     pub fn from_generated(
         profile: Profile,
         role: &[u8],
         statement_digest: [u8; 64],
-        context: [u8; 64],
         header: Vec<u8>,
         columns: Vec<Vec<u16>>,
     ) -> Result<Self, Refusal> {
@@ -101,7 +100,11 @@ impl SetupProver {
             .map_err(|_| Refusal::GeneratedInput)?,
         );
         prover.statement_header = header;
-        let mut transcript = Transcript::new(role, context, prover.relation.message_bytes());
+        let mut transcript = Transcript::new(
+            role,
+            transcript::context(&prover.relation, role, &statement_digest),
+            prover.relation.message_bytes(),
+        );
         transcript.next();
         prover.transcript = Some(transcript);
         Ok(prover)

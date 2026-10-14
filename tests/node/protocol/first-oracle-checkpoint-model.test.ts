@@ -148,7 +148,6 @@ describe('complete first-oracle proof checkpoint', () => {
                 2n +
                 1024n +
                 64n +
-                64n +
                 (4n + 4n + 108n + 20n) +
                 2n +
                 10n * 64n,
@@ -159,7 +158,6 @@ describe('complete first-oracle proof checkpoint', () => {
             Buffer.alloc(4),
             Buffer.from([84, 1]),
             Buffer.alloc(340),
-            Buffer.alloc(64),
             Buffer.alloc(64),
             Buffer.concat([
                 Buffer.from('SCO2'),

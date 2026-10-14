@@ -21,7 +21,6 @@ import {
     type WordRelation,
     wordRelationShape,
     readLittleEndian,
-    contextHash,
     type WordVerifierVerdict,
     Refused,
     canonical,
@@ -32,7 +31,8 @@ import {
 } from '#tests/word-proof-reference/transcript.js';
 
 // An independent reading of the bounded word proof from the protocol's
-// description: its header, the salted wide verifier-message chain, the
+// description: its header, the statement context that binds the declared
+// statement digest, the salted wide verifier-message chain, the
 // salted Merkle openings of every stage, the combined rational word at
 // every queried point, and each fold down to the terminal constant. The
 // statement parser is an input: it receives the statement digest the
@@ -58,7 +58,7 @@ export type WordProofInput = Readonly<{
 }>;
 
 // Verifies one proof. Refusals follow the order of the stages: the header
-// and its statement, the statement's chunks and context, then the proof's
+// and its statement, the statement's chunks and digest, then the proof's
 // opening stages.
 export const verifyWordProof = (input: WordProofInput): WordVerifierVerdict => {
     try {
@@ -97,13 +97,8 @@ const verifyStages = (input: WordProofInput) => {
         firstPositions,
     );
     if (parser === undefined) throw new Refused('Context', 'open');
-    const context = contextHash(relation, domain, role);
-    for (const chunk of input.statement) {
-        context.update(chunk);
+    for (const chunk of input.statement)
         if (!parser.push(chunk)) throw new Refused('Encoding', 'statement');
-    }
-    if (!context.digest().equals(header.context))
-        throw new Refused('Context', 'statement');
     const operator = parser.finish();
     if (operator === undefined) throw new Refused('Encoding', 'statement');
     if (
