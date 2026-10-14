@@ -330,7 +330,7 @@ export const retainSetup = async (
     // Both storage and live private sources retire only after the exact
     // predecessor and committed successor have authenticated.
     root.manifest.dataKeys.subarray(64).fill(0);
-    root.plaintext.subarray(4 + 64, 4 + 96).fill(0);
+    root.plaintext.subarray(64, 96).fill(0);
     if (context.module.retire_contribution_sources() !== 0)
         throw new Error('The original key sources could not be retired.');
     session.root = retained;

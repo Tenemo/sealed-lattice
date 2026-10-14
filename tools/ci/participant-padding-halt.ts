@@ -9,7 +9,8 @@ export type PreparationCut = Readonly<{
     phase: number;
 }>;
 
-// The root generation stays four while independent PRE2 authorities advance.
+// The root generation stays four while the preparation journal's independent
+// authorities advance.
 // Observe the actual authenticated journal after commit/readback, never an
 // uncommitted producer flag. This hook exists only in the guarded worker copy.
 export const preparationHaltingClient = (
@@ -45,12 +46,12 @@ export const preparationHaltingClient = (
         (matched) => `
         if (head.generation === 4) {
             const journal = manifest.suffixes.preparation;
-            let journalOffset = 4;
-            if (journal && journal[0] === 80 && journal[1] === 82 && journal[2] === 69 && journal[3] === 50) {
+            let journalOffset = 0;
+            if (journal) {
                 for (let journalField = 0; journalField < 3; journalField++) {
                     const journalLength = new DataView(journal.buffer, journal.byteOffset + journalOffset, 4).getUint32(0, true);
                     journalOffset += 4;
-                    if (journalField === ${String(field)} && journalLength > 0 && journal[journalOffset + ${cut.kind === 'contribution' ? '4' : '0'}] === ${String(cut.phase)}) {
+                    if (journalField === ${String(field)} && journalLength > 0 && journal[journalOffset] === ${String(cut.phase)}) {
                         self.postMessage({type:'participant-preparation-halt',kind:${JSON.stringify(cut.kind)},phase:${String(cut.phase)}});
                         await new Promise(() => undefined);
                     }

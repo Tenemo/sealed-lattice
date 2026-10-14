@@ -104,12 +104,8 @@ describe('instrumented participant padding boundaries', () => {
         };`);
         const journal = (field: number, phase: number) => {
             const fields = [Buffer.alloc(0), Buffer.alloc(0), Buffer.alloc(0)];
-            fields[field] =
-                field === 0
-                    ? Buffer.from([80, 67, 83, 53, phase])
-                    : Buffer.from([phase]);
+            fields[field] = Buffer.from([phase]);
             return Buffer.concat([
-                Buffer.from('PRE2'),
                 ...fields.flatMap((bytes) => {
                     const length = Buffer.alloc(4);
                     length.writeUInt32LE(bytes.length);

@@ -19,28 +19,29 @@ describe('participant close custody layout', () => {
         // Ten participants, three corrupt: thirteen held bodies, nine other
         // responders and twenty-five body records. An event opens with an
         // 11-byte header: kind, record count, serial and payload length. The
-        // locked intent is one event without records.
+        // locked intent is one event without records, and the suffix opens
+        // with its event count.
         expect(value.maximumBodyRecords).toBe(25n);
         const delivery = 13n * (11n + 32n * 26n);
         const events = delivery + 11n + 9n * (11n + 32n);
         const intent = 4n + 202n + signatureBytes;
         const response = 4n + (280n + 20n * 66n - 2n) + signatureBytes;
         const proposal = 4n + 732n + signatureBytes;
-        expect(value.collectingBytes).toBe(8n + delivery);
+        expect(value.collectingBytes).toBe(4n + delivery);
         expect(value.phaseBytes).toEqual([
-            { phase: 18, bytes: 8n + 202n + delivery },
-            { phase: 19, bytes: 8n + intent + events },
+            { phase: 18, bytes: 4n + 202n + delivery },
+            { phase: 19, bytes: 4n + intent + events },
             {
                 phase: 20,
-                bytes: 8n + intent + events + 4n + 1598n,
+                bytes: 4n + intent + events + 4n + 1598n,
             },
             {
                 phase: 21,
-                bytes: 8n + intent + events + response + 732n,
+                bytes: 4n + intent + events + response + 732n,
             },
-            { phase: 22, bytes: 8n + intent + events + response + proposal },
+            { phase: 22, bytes: 4n + intent + events + response + proposal },
         ]);
-        expect(value.maximumStateBytes).toBe(23_836n);
+        expect(value.maximumStateBytes).toBe(23_832n);
         expect(value.maximumEvents).toBe(13n + 1n + 9n);
         expect(value.maximumRecords).toBe(13n * 26n + 9n);
     });

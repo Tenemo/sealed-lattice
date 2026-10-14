@@ -13,7 +13,6 @@ import { participantStores } from '#packages/sdk/src/participant/worker/storage/
 import type { ParticipantStore } from '#packages/sdk/src/participant/worker/storage/database.js';
 import {
     createRootKey,
-    rootAssociatedData,
     sealRoot,
 } from '#packages/sdk/src/participant/worker/storage/root-sealing.js';
 import {
@@ -106,12 +105,7 @@ const fixture = async (
     const plaintext = encodeManifest(manifest, generation);
     const runtime = new Uint8Array(64).fill(13);
     const key = await createRootKey();
-    const sealed = await sealRoot(
-        key,
-        generation,
-        rootAssociatedData(runtime),
-        plaintext,
-    );
+    const sealed = await sealRoot(key, generation, runtime, plaintext);
     const head = {
         generation,
         runtime: hexadecimal(runtime),

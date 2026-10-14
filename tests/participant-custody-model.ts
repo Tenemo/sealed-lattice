@@ -132,8 +132,9 @@ export const compileParticipantCustodyCensus = (profile: SupportedProfile) => {
         return lengths;
     });
     const maximumProofRecords = chunks(body.maximumProofBytes);
-    // PCS5 owns its phase independently of global preparation generation.
-    const metadataPrefixBytes = 4n + 1n + 2n + 4n * 4n;
+    // The own offer's state carries its phase independently of the global
+    // preparation generation.
+    const metadataPrefixBytes = 1n + 2n + 4n * 4n;
     const maximumCheckpointMetadataBytes =
         metadataPrefixBytes +
         checkpoint.maximumHeaderBytes +
@@ -156,7 +157,7 @@ export const compileParticipantCustodyCensus = (profile: SupportedProfile) => {
         64n + 64n * BigInt(body.polynomials.length) + 64n;
     const selectionReferenceBytes = setupReferenceBytes;
     const setupCertificateBytes = wire.certificateBytes;
-    const emptyPreparationBytes = 4n + 3n * 4n;
+    const emptyPreparationBytes = 3n * 4n;
     const maximumSelectionSlotBytes =
         1n + wire.selectionBodyBytes + wire.signatureBytes;
     const maximumEndorsementSlotBytes =
@@ -405,7 +406,7 @@ export const compileParticipantVaultKeyClasses = (
             name: 'Initial root',
             maximumPerCompletedCorpus: 1n,
             encryptions: [
-                invocation(68n, enrollment.rootAssociatedBytes),
+                invocation(64n, enrollment.rootAssociatedBytes),
                 invocation(
                     enrollment.maximumEnrollmentManifestBytes,
                     enrollment.rootAssociatedBytes,

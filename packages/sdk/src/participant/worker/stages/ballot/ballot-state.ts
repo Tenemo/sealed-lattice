@@ -33,8 +33,6 @@ import {
 // ballot stays retained unchanged through the later generations, and a
 // participant without a ballot keeps an empty suffix.
 
-const marker = encodeText('BST3');
-
 export type BallotState = Readonly<{
     scores: Uint8Array;
     ballotTime: bigint;
@@ -42,7 +40,6 @@ export type BallotState = Readonly<{
     bodyLength: number;
     bodyKeys: readonly Uint8Array[];
     envelope: Uint8Array;
-
     signature: Uint8Array;
 }>;
 
@@ -71,7 +68,6 @@ export const ballotRecordLength = (
 
 export const encodeBallotState = (generation: number, state: BallotState) =>
     concatenate(
-        marker,
         Uint8Array.of(state.scores.length),
         state.scores,
         generation < ballotPhase.signed
@@ -82,7 +78,6 @@ export const encodeBallotState = (generation: number, state: BallotState) =>
         unsigned16(state.bodyKeys.length),
         ...state.bodyKeys,
         state.envelope,
-
         state.signature,
     );
 
@@ -128,11 +123,10 @@ export const decodeBallotState = (
         phase < ballotPhase.locked ||
         phase > ballotPhase.signed ||
         !isRootGeneration(phase) ||
-        bytes.length > bounds.maximumStateBytes ||
-        !equalBytes(bytes.subarray(0, marker.length), marker)
+        bytes.length > bounds.maximumStateBytes
     )
         throw new Error('The ballot state is malformed.');
-    let offset = marker.length;
+    let offset = 0;
     const take = (length: number) => {
         if (length > bytes.length - offset)
             throw new Error('The ballot state is truncated.');

@@ -1,12 +1,6 @@
 import type { ParticipantProfile } from '../../module/runtime-bounds.js';
 import { targetPrefixBytes } from '../../module/runtime-bounds.js';
-import {
-    concatenate,
-    encodeText,
-    equalBytes,
-    readUnsigned16,
-    unsigned16,
-} from '../../shared/bytes.js';
+import { concatenate, readUnsigned16, unsigned16 } from '../../shared/bytes.js';
 import {
     completedClosePhase,
     targetPhase,
@@ -18,8 +12,6 @@ import {
 // its signing intent before the signature exists; generation 24 retains the
 // body, the status and the completed vote, which later generations keep
 // unchanged.
-
-const marker = encodeText('TST3');
 
 // The own ballot's status in the target, by the finality work's code.
 export const ballotInclusions = [
@@ -41,7 +33,6 @@ export type TargetState = Readonly<{
 
 export const encodeTargetState = (generation: number, state: TargetState) =>
     concatenate(
-        marker,
         Uint8Array.of(
             state.predecessor,
             ballotInclusions.indexOf(state.ballotInclusion),
@@ -62,12 +53,11 @@ export const decodeTargetState = (
     if (
         generation < targetPhase.locked ||
         bytes.length < targetPrefixBytes ||
-        !equalBytes(bytes.subarray(0, marker.length), marker) ||
-        bytes[marker.length] !== completedClosePhase(isOrganizer) ||
-        bytes[marker.length + 1] >= ballotInclusions.length
+        bytes[0] !== completedClosePhase(isOrganizer) ||
+        bytes[1] >= ballotInclusions.length
     )
         throw new Error('The target state is malformed.');
-    const length = readUnsigned16(bytes, marker.length + 2);
+    const length = readUnsigned16(bytes, 2);
     const start = targetPrefixBytes;
     const tail = signed ? votePacketBytes : 0;
     if (
@@ -78,8 +68,8 @@ export const decodeTargetState = (
         throw new Error('The target state has another length.');
     const rest = bytes.slice(start + length);
     return {
-        predecessor: bytes[marker.length],
-        ballotInclusion: ballotInclusions[bytes[marker.length + 1]],
+        predecessor: bytes[0],
+        ballotInclusion: ballotInclusions[bytes[1]],
         body: bytes.slice(start, start + length),
         vote: signed ? rest : new Uint8Array(),
     };

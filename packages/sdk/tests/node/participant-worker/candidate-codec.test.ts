@@ -19,9 +19,8 @@ describe('bounded candidate transport framing', () => {
                 { name: 'empty.bin', length: 0, chunks: [] },
             ],
         });
-        const fixed = Buffer.alloc(6);
-        fixed.write('RCM1');
-        fixed.writeUInt16LE(2, 4);
+        const fixed = Buffer.alloc(2);
+        fixed.writeUInt16LE(2);
         const file = (name: string, length: bigint, chunk?: string) => {
             const bytes = Buffer.alloc(2 + name.length + 8);
             bytes.writeUInt16LE(name.length);
@@ -96,17 +95,17 @@ describe('bounded candidate transport framing', () => {
         ).toThrow();
         const changedLength = encodeCandidateManifest({ files: [wide] });
         new DataView(changedLength.buffer).setBigUint64(
-            8 + wide.name.length,
+            4 + wide.name.length,
             BigInt(maximum) + 1n,
             true,
         );
         expect(() => decodeCandidateManifest(changedLength)).toThrow();
 
-        // The descriptor bytes are 6 + 16*21 + 10; 65514 references then
+        // The descriptor bytes are 2 + 16*21 + 14; 65514 references then
         // fill the manifest exactly, without materializing their payloads.
         const full = Array.from({ length: 16 }, (_, index) => ({
             name:
-                (index === 0 ? 'a'.repeat(10) : '') +
+                (index === 0 ? 'a'.repeat(14) : '') +
                 'body-' +
                 String(index).padStart(2, '0') +
                 '.bin',

@@ -10,7 +10,7 @@ import { compileSetupSelectionWireCensus } from '#tests/setup-selection-wire-mod
 import type { SupportedProfile } from '#tests/supported-profile-model.js';
 import { compileTargetSigningStateCensus } from '#tests/target-signing-state-model.js';
 
-// Independently maintained wire operands: RCM1/u16 count, u16 name length,
+// Independently maintained wire operands: u16 file count, u16 name length,
 // ASCII name, u64 payload length and one 16-byte locator per fixed chunk.
 const candidateTransportParameters = {
     chunkBytes: 1_048_576n,
@@ -50,7 +50,7 @@ const compileCandidatePublication = (
         referencedChunks = 0n,
         referenceMetadataBytes = 0n,
         referenceFiles = 0n;
-    let manifestBytes = 4n + 2n;
+    let manifestBytes = 2n;
     for (const file of files) {
         const name = BigInt(Buffer.byteLength(file.name));
         if (

@@ -6,7 +6,6 @@ import {
 import {
     concatenate,
     encodeText,
-    equalBytes,
     readUnsigned16,
     readUnsigned32,
     unsigned16,
@@ -31,8 +30,6 @@ import {
 // response and, for the organizer, its proposal exact body, and 22 the
 // organizer's signed proposal. No event is added from generation 20 on, and
 // later generations keep the completed close unchanged.
-
-const marker = encodeText('CST2');
 
 // The participant's own signed ballot and the locked intent reference other
 // retained state and add no record. A held body has one record with its
@@ -123,7 +120,6 @@ export const encodeCloseState = (
     state: CloseState,
 ) =>
     concatenate(
-        marker,
         unsigned32(state.events.length),
         ...state.events.flatMap((event) => [
             Uint8Array.of(event.kind),
@@ -217,11 +213,10 @@ export const decodeCloseState = (
         generation < rootGeneration.setupRetained ||
         (!isOrganizer &&
             (phase === closePhase.intent || phase === closePhase.proposed)) ||
-        bytes.length > close.maximumStateBytes ||
-        !equalBytes(bytes.subarray(0, marker.length), marker)
+        bytes.length > close.maximumStateBytes
     )
         throw new Error('The close state is malformed.');
-    let offset = marker.length;
+    let offset = 0;
     const take = (length: number) => {
         if (length > bytes.length - offset)
             throw new Error('The close state is truncated.');

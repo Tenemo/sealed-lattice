@@ -23,7 +23,6 @@ import { sealRecord } from '#packages/sdk/src/participant/worker/storage/private
 import {
     createRootKey,
     openRoot,
-    rootAssociatedData,
     sealRoot,
 } from '#packages/sdk/src/participant/worker/storage/root-sealing.js';
 import {
@@ -123,12 +122,7 @@ const fixture = async () => {
     };
     const plaintext = encodeManifest(manifest, 4);
     const key = await createRootKey();
-    const sealed = await sealRoot(
-        key,
-        4,
-        rootAssociatedData(runtime),
-        plaintext,
-    );
+    const sealed = await sealRoot(key, 4, runtime, plaintext);
     const head = {
         generation: 4,
         runtime: hexadecimal(runtime),
@@ -169,7 +163,7 @@ const fixture = async () => {
         const reopened = await openRoot(
             snapshot.key as CryptoKey,
             4,
-            rootAssociatedData(runtime),
+            runtime,
             snapshot.root as Uint8Array,
         );
         expect(reopened).toEqual(plaintext);

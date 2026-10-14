@@ -159,7 +159,7 @@ describe('shared participant custody', () => {
                 0n,
             );
             const proofRecords = (body.maximumProofBytes + chunk - 1n) / chunk;
-            const ownPrefix = 4n + 1n + 2n + 4n * 4n;
+            const ownPrefix = 1n + 2n + 4n * 4n;
             const checkpointBytes =
                 ownPrefix +
                 checkpoint.maximumHeaderBytes +
@@ -185,13 +185,11 @@ describe('shared participant custody', () => {
                 wire.endorsementBodyBytes +
                 3309n;
             const journal =
-                4n +
                 3n * 4n +
                 maximum(checkpointBytes, completedBytes) +
                 selectionSlot +
                 endorsementSlot;
             const earlyRoot =
-                4n +
                 96n +
                 64n +
                 4n +
@@ -203,13 +201,12 @@ describe('shared participant custody', () => {
                 (value) => value.phase === 17,
             )!.bytes;
             const lateRoot =
-                4n +
                 64n +
                 64n +
                 4n +
                 73n * (enrollment.maximumRecords + 1n) +
                 4n +
-                (4n + 3n * 4n) +
+                3n * 4n +
                 maximum(
                     2n * 4n + ballot.maximumStateBytes + close.collectingBytes,
                     4n * 4n +
@@ -225,7 +222,7 @@ describe('shared participant custody', () => {
             );
             expect(current.maximumCompletedMetadataBytes).toBe(completedBytes);
             expect(current.maximumPreparationBytes).toBe(journal);
-            expect(current.emptyPreparationBytes).toBe(16n);
+            expect(current.emptyPreparationBytes).toBe(12n);
             expect(current.maximumSelectionSlotBytes).toBe(selectionSlot);
             expect(current.maximumEndorsementSlotBytes).toBe(endorsementSlot);
             expect(current.selectionReferenceBytes).toBe(reference);
@@ -336,11 +333,10 @@ describe('shared participant custody', () => {
         const value = compileParticipantCustodyCensus(completionProfile());
         const checkpoint =
             compileFirstOracleCheckpointCensus(completionProfile());
-        // The marker, own phase, position and four counts, the checkpoint header,
+        // The own phase, position and four counts, the checkpoint header,
         // each body record's object, offset, length, key and hash, each
         // checkpoint record's key and hash, and the 512-bit seed.
         const expected =
-            4n +
             1n +
             2n +
             16n +

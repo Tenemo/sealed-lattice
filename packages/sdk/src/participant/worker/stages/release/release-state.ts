@@ -7,7 +7,6 @@ import {
 import {
     concatenate,
     encodeText,
-    equalBytes,
     readUnsigned16,
     readUnsigned32,
     unsigned16,
@@ -34,8 +33,6 @@ import type { BallotInclusion } from '../target-vote/target-state.js';
 // that same transaction locks signing, and generation 29 retains the
 // signature.
 
-const marker = encodeText('RST4');
-
 export type ReleaseState = Readonly<{
     // The signed-target or completed-close generation the release follows.
     predecessor: number;
@@ -54,7 +51,6 @@ export type ReleaseState = Readonly<{
 
 export const encodeReleaseState = (generation: number, state: ReleaseState) => {
     return concatenate(
-        marker,
         Uint8Array.of(
             state.predecessor,
             ballotInclusions.indexOf(state.ballotInclusion),
@@ -96,15 +92,14 @@ export const decodeReleaseState = (
         !isRootGeneration(generation) ||
         bytes.length < releasePrefixBytes ||
         bytes.length > bounds.maximumStateBytes ||
-        !equalBytes(bytes.subarray(0, marker.length), marker) ||
-        (bytes[marker.length] !== targetPhase.signed &&
-            bytes[marker.length] !== completedClosePhase(isOrganizer)) ||
-        bytes[marker.length + 1] >= ballotInclusions.length
+        (bytes[0] !== targetPhase.signed &&
+            bytes[0] !== completedClosePhase(isOrganizer)) ||
+        bytes[1] >= ballotInclusions.length
     )
         throw new Error('The release state is malformed.');
-    const targetLength = readUnsigned16(bytes, marker.length + 2);
-    const bodyLength = readUnsigned32(bytes, marker.length + 4);
-    const bodyCount = readUnsigned16(bytes, marker.length + 8);
+    const targetLength = readUnsigned16(bytes, 2);
+    const bodyLength = readUnsigned32(bytes, 4);
+    const bodyCount = readUnsigned16(bytes, 8);
     const seedLength =
         generation === releasePhase.ready ? operationSeedBytes : 0;
     const withBody = generation >= releasePhase.body;
@@ -130,8 +125,8 @@ export const decodeReleaseState = (
         throw new Error('The release state has another length.');
     const envelopeEnd = tailStart + (withBody ? bounds.envelopeBytes : 0);
     return {
-        predecessor: bytes[marker.length],
-        ballotInclusion: ballotInclusions[bytes[marker.length + 1]],
+        predecessor: bytes[0],
+        ballotInclusion: ballotInclusions[bytes[1]],
         target: bytes.slice(releasePrefixBytes, seedStart),
         seed: bytes.slice(seedStart, keysStart),
         bodyLength,

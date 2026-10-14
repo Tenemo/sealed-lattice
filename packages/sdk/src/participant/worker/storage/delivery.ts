@@ -9,7 +9,7 @@ import {
     snapshotParticipant,
 } from './database.js';
 import type { ParticipantHead, ParticipantStore } from './database.js';
-import { openRoot, rootAssociatedData } from './root-sealing.js';
+import { openRoot } from './root-sealing.js';
 import type { AuthenticatedRoot } from './root.js';
 
 // Delivery of a completed message's retained, already signed parts. The
@@ -123,7 +123,7 @@ export const openDelivery = async (
     const expected: RetainedAuthority = {
         head: root.head,
         plaintext: root.plaintext,
-        rootContext: rootAssociatedData(context.runtime),
+        rootContext: context.runtime,
         counts,
     };
     return guardDelivery(() =>

@@ -136,15 +136,11 @@ describe('participant target signing state', () => {
         refused(targetPhase.locked - 1, false, intent);
         refused(targetPhase.locked, false, intent.subarray(0, -1));
         refused(targetPhase.locked, false, Uint8Array.of(...intent, 0));
-        const marker = intent.slice();
-        marker[0] ^= 1;
-        refused(targetPhase.locked, false, marker);
-        // The state before the retained status is another shape.
-        const unversioned = intent.slice();
-        unversioned[3] = '1'.charCodeAt(0);
-        refused(targetPhase.locked, false, unversioned);
+        const otherPredecessor = intent.slice();
+        otherPredecessor[0] ^= 1;
+        refused(targetPhase.locked, false, otherPredecessor);
         const unknownStatus = intent.slice();
-        unknownStatus[5] = ballotInclusions.length;
+        unknownStatus[1] = ballotInclusions.length;
         refused(targetPhase.locked, false, unknownStatus);
         const empty = encodeTargetState(targetPhase.locked, state(false, 0));
         refused(targetPhase.locked, false, empty);

@@ -37,7 +37,6 @@ type CandidatePage = Readonly<{ total: number; locators: readonly string[] }>;
 
 const malformed = () => new RangeError('Malformed candidate transport record.');
 const safeLength = (value: number) => Number.isSafeInteger(value) && value >= 0;
-const magic = encodeText('RCM1');
 
 export const encodeCandidateManifest = (manifest: CandidateManifest) => {
     const files = [...manifest.files].sort((left, right) =>
@@ -45,7 +44,7 @@ export const encodeCandidateManifest = (manifest: CandidateManifest) => {
     );
     if (files.length === 0 || files.length > candidateMaximumFiles)
         throw malformed();
-    let length = 6;
+    let length = 2;
     for (const [index, file] of files.entries()) {
         if (
             !isCandidateFileName(file.name) ||
@@ -66,9 +65,8 @@ export const encodeCandidateManifest = (manifest: CandidateManifest) => {
     }
     const bytes = new Uint8Array(length);
     const view = new DataView(bytes.buffer);
-    bytes.set(magic);
-    view.setUint16(4, files.length, true);
-    let offset = 6;
+    view.setUint16(0, files.length, true);
+    let offset = 2;
     for (const file of files) {
         view.setUint16(offset, file.name.length, true);
         offset += 2;
@@ -87,17 +85,13 @@ export const encodeCandidateManifest = (manifest: CandidateManifest) => {
 export const decodeCandidateManifest = (
     bytes: Uint8Array,
 ): CandidateManifest => {
-    if (
-        bytes.length < 6 ||
-        bytes.length > candidateManifestBytes ||
-        magic.some((byte, index) => bytes[index] !== byte)
-    )
+    if (bytes.length < 2 || bytes.length > candidateManifestBytes)
         throw malformed();
     const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-    const count = view.getUint16(4, true);
+    const count = view.getUint16(0, true);
     if (count === 0 || count > candidateMaximumFiles) throw malformed();
     const files: CandidateFile[] = [];
-    let offset = 6;
+    let offset = 2;
     for (let index = 0; index < count; index++) {
         if (bytes.length - offset < 2) throw malformed();
         const nameLength = view.getUint16(offset, true);

@@ -44,11 +44,7 @@ import {
     rootGeneration,
     targetPhase,
 } from '../../storage/root-generation.js';
-import {
-    createRootKey,
-    rootAssociatedData,
-    sealRoot,
-} from '../../storage/root-sealing.js';
+import { createRootKey, sealRoot } from '../../storage/root-sealing.js';
 import type { AuthenticatedRoot, RecordReference } from '../../storage/root.js';
 import {
     authenticateRoot,
@@ -220,16 +216,16 @@ export const createEnrollment = async (
         }
         if (!(await hasStorageRoom(2 * limits.registration.publicKeyBytes)))
             return 'insufficient storage';
-        const associatedData = rootAssociatedData(runtime);
         const key = await createRootKey();
-        const intentPlaintext = concatenate(
-            encodeText('INI2'),
-            custodyIdentity(module, custodyPurpose.enrollmentInput, input),
+        const intentPlaintext = custodyIdentity(
+            module,
+            custodyPurpose.enrollmentInput,
+            input,
         );
         const intent = await sealRoot(
             key,
             rootGeneration.enrollmentIntent,
-            associatedData,
+            runtime,
             intentPlaintext,
         );
         const intentHead = {
@@ -385,7 +381,7 @@ export const createEnrollment = async (
         const sealed = await sealRoot(
             key,
             rootGeneration.registered,
-            associatedData,
+            runtime,
             plaintext,
         );
         plaintext.fill(0);
@@ -404,7 +400,7 @@ export const createEnrollment = async (
                 validateParticipantPredecessor(reader, {
                     head: intentHead,
                     manifest: intentPlaintext,
-                    rootContext: associatedData,
+                    rootContext: runtime,
                     maximumRootBytes: limits.root.maximumEnrollmentRootBytes,
                     recordStores: participantRecordStores,
                     records: [],

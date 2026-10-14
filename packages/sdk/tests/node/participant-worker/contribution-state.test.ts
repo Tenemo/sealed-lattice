@@ -97,9 +97,6 @@ describe('independent contribution state framing', () => {
                     position,
                 );
                 const bytes = encodeContributionState(state);
-                expect(new TextDecoder().decode(bytes.subarray(0, 4))).toBe(
-                    'PCS5',
-                );
                 expect(decodeContributionState(bytes, profile)).toEqual(state);
                 expect(bytes.length).toBeLessThanOrEqual(
                     bounds.maximumStateBytes,
@@ -157,7 +154,7 @@ describe('independent contribution state framing', () => {
             for (const changedPhase of [0, 3, 4, 5, 6, 7, 8, 9, 10, 255]) {
                 if (changedPhase === phase) continue;
                 const changed = encoded.slice();
-                changed[4] = changedPhase;
+                changed[0] = changedPhase;
                 expect(() =>
                     decodeContributionState(changed, profile),
                 ).toThrow();
@@ -266,11 +263,6 @@ describe('independent contribution state framing', () => {
             }),
         ])
             expect(() => decode({ ...state, header })).toThrow();
-        for (const marker of ['PCS2', 'PCS3', 'PRC1']) {
-            const previous = encodeContributionState(state);
-            previous.set(new TextEncoder().encode(marker));
-            expect(() => decodeContributionState(previous, profile)).toThrow();
-        }
     });
 
     it('stores every own phase in its layout', () => {

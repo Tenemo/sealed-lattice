@@ -414,7 +414,7 @@ export const renderSharedParticipantCustodyCensus = (): string[] => {
             ],
         ),
         '',
-        'Preparation and later roots have distinct inventories. PRE2 frames independent own-offer, selection and endorsement slots; PCS5 carries its own phase. Activation authenticates the complete predecessor before clearing all slots and retiring source material. Later roots therefore retain an empty preparation journal beside ballot, close, target and release state.',
+        'Preparation and later roots have distinct inventories. The preparation journal frames independent own-offer, selection and endorsement slots, and the own offer carries its own phase. Activation authenticates the complete predecessor before clearing all slots and retiring source material. Later roots therefore retain an empty preparation journal beside ballot, close, target and release state.',
         '',
         table(
             ['Authenticated journal property', 'Bytes'],

@@ -32,7 +32,6 @@ import {
     openRecord,
     sealRecord,
 } from '#packages/sdk/src/participant/worker/storage/private-records.js';
-import { rootAssociatedData } from '#packages/sdk/src/participant/worker/storage/root-sealing.js';
 import {
     authenticateRoot,
     commitRoot,
@@ -170,7 +169,7 @@ export const mutateParticipantPadding = async (
                     validateParticipantPredecessor(reader, {
                         head: root.head,
                         manifest: root.plaintext,
-                        rootContext: rootAssociatedData(context.runtime),
+                        rootContext: context.runtime,
                         maximumRootBytes: context.profile.root.maximumRootBytes,
                         recordStores: participantRecordStores,
                         records: predecessorRecords,

@@ -277,12 +277,8 @@ describe('participant close state', () => {
         ).toThrow();
         // The log names at most its bound of events.
         const header = encodeCloseState(12, false, collectingCloseState());
-        new DataView(header.buffer).setUint32(4, close.maximumEvents + 1, true);
+        new DataView(header.buffer).setUint32(0, close.maximumEvents + 1, true);
         expect(() => decode(12, false, header)).toThrow();
-        // Another marker is refused.
-        const marked = encodeCloseState(12, false, collectingCloseState());
-        marked[0] ^= 1;
-        expect(() => decode(12, false, marked)).toThrow();
     });
 
     it('lists every record at its serial with its own binding', () => {

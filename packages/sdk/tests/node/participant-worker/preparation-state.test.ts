@@ -152,10 +152,7 @@ describe('independent preparation authority journal', () => {
                     },
                     4,
                 );
-                expect(new TextDecoder().decode(root.subarray(0, 4))).toBe(
-                    'ERM9',
-                );
-                expect(root.subarray(168 + 4)).toEqual(
+                expect(root.subarray(164 + 4)).toEqual(
                     encodePreparationState(state),
                 );
             }
@@ -188,7 +185,8 @@ describe('independent preparation authority journal', () => {
         expect(decoded.contribution).toBeUndefined();
         expect(decoded.selection).toBeUndefined();
         // This helper is for active preparation; retirement generation burns
-        // all preparation purposes in enrollment/root, not from empty PRE2.
+        // all preparation purposes in enrollment/root, not from an empty
+        // journal.
         expect(
             decodePreparationState(encodePreparationState({}), profile),
         ).toEqual({});
@@ -203,12 +201,13 @@ describe('independent preparation authority journal', () => {
                     'intent',
                     'signed',
                 ] as const) {
-                    // The pre-profile mask reads only PCS5's authenticated
-                    // structural phase; complete restore additionally decodes it.
+                    // The pre-profile mask reads only the own offer's
+                    // authenticated structural phase; complete restore
+                    // additionally decodes it.
                     const contribution =
                         ownPhase === undefined
                             ? new Uint8Array()
-                            : Uint8Array.of(80, 67, 83, 53, ownPhase);
+                            : Uint8Array.of(ownPhase);
                     const state: PreparationState = {
                         ...(selected === undefined
                             ? {}

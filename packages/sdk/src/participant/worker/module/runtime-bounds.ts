@@ -36,9 +36,9 @@ export const ballotEnvelopeOffset = {
 } as const;
 const maximum = (...values: number[]) => Math.max(...values);
 
-// The encrypted root manifest: its marker, data keys, poll and record
-// count, then one reference per data record. Generation two retains the
-// organizer's proposal intent, and each suffix has a length.
+// The encrypted root manifest: its data keys, poll and record count, then
+// one reference per data record. Generation two retains the organizer's
+// proposal intent, and each suffix has a length.
 // The reservation includes the source key retained before setup. Later
 // roots retire that key and its capsule and use a shorter actual prefix.
 export const requiresFheKeySources = (generation: number) =>
@@ -46,7 +46,7 @@ export const requiresFheKeySources = (generation: number) =>
 export const rootDataKeyBytes = (generation: number) =>
     recordKeyBytes * (requiresFheKeySources(generation) ? 3 : 2);
 export const rootPrefixBytes = (generation: number) =>
-    4 + rootDataKeyBytes(generation) + identityBytes + 4;
+    rootDataKeyBytes(generation) + identityBytes + 4;
 // A root reference: its kind, ordinal, length and identity.
 export const rootReferenceBytes = 1 + 4 + 4 + identityBytes;
 const suffixLengthBytes = 4;
@@ -389,11 +389,11 @@ const enrollmentPayloadBytes = (
     registration.maximumProposalBytes +
     registration.signatureBytes;
 
-// The contribution suffix: its marker, own phase, position and counts, the
+// The contribution suffix: its own phase, position and counts, the
 // checkpoint header, a reference per public and private record, each
 // signing record, and the seed of an interrupted generation or
 // continuation.
-export const contributionPrefixBytes = 4 + 1 + 2 + 16;
+export const contributionPrefixBytes = 1 + 2 + 16;
 export const publicEntryBytes = 2 + 4 + 4 + recordKeyBytes + identityBytes;
 export const privateEntryBytes = recordKeyBytes + identityBytes;
 export const signingEntryBytes = 2 + 4 + recordKeyBytes + identityBytes;
@@ -457,11 +457,11 @@ const contributionBounds = (
     };
 };
 
-// The ballot suffix: its marker, score count, body length and key count,
+// The ballot suffix: its score count, body length and key count,
 // the scores, the attempt's ballot time until the envelope carries it, the
 // randomness seed until the body is retained, a key per body record, the
 // envelope and the signature.
-const ballotPrefixBytes = 4 + 1 + 4 + 2;
+const ballotPrefixBytes = 1 + 4 + 2;
 const ballotTimeBytes = 8;
 
 const ballotBounds = (
@@ -497,12 +497,12 @@ const ballotBounds = (
     };
 };
 
-// The close suffix: its marker and event count, then the accepted close
+// The close suffix: its event count, then the accepted close
 // inputs in arrival order. Each event holds its kind, its record count, the
 // serial that locates its records, its payload length and a key per
 // record: a held body has its envelope and body records, and a response the
 // organizer takes one record.
-const closePrefixBytes = 4 + 4;
+const closePrefixBytes = 4;
 export const closeEventHeaderBytes = 1 + 2 + 4 + 4;
 const eventBytes = (records: number) =>
     closeEventHeaderBytes + recordKeyBytes * records;
@@ -555,9 +555,10 @@ const closeBounds = (
     };
 };
 
-// The target suffix: its marker, the close phase it follows, the own
-// ballot's status and the body length, the target body, then the signed vote once completed.
-export const targetPrefixBytes = 4 + 1 + 1 + 2;
+// The target suffix: the close phase it follows, the own ballot's status
+// and the body length, the target body, then the signed vote once
+// completed.
+export const targetPrefixBytes = 1 + 1 + 2;
 const targetBounds = (moduleLimits: ModuleLimits) => {
     const { target } = moduleLimits;
     return {
@@ -569,10 +570,10 @@ const targetBounds = (moduleLimits: ModuleLimits) => {
     };
 };
 
-// The release suffix: its marker, predecessor, own ballot inclusion, target
-// length, body length and key count, the target body, the randomness seed until the body exists,
-// a key per body record, the envelope and the signature.
-export const releasePrefixBytes = 4 + 1 + 1 + 2 + 4 + 2;
+// The release suffix: its predecessor, own ballot inclusion, target length,
+// body length and key count, the target body, the randomness seed until the
+// body exists, a key per body record, the envelope and the signature.
+export const releasePrefixBytes = 1 + 1 + 2 + 4 + 2;
 const releaseBounds = (moduleLimits: ModuleLimits, profile: ModuleProfile) => {
     const { release } = moduleLimits;
     const bodyRecords = Math.ceil(
@@ -614,9 +615,9 @@ const profileBounds = (
     );
     const target = targetBounds(moduleLimits);
     const release = releaseBounds(moduleLimits, profile);
-    // The setup reference has the selection reference's layout: a marker, the
-    // setup identity, one digest per aggregate polynomial and the
-    // credential-keyed tag that the ballot step checks before parsing.
+    // The setup reference has the selection reference's layout: the setup
+    // identity, one digest per aggregate polynomial and the credential-keyed
+    // tag that the ballot step checks before parsing.
     const setupReference = profile.retainedReferenceBytes;
     const setupCertificate = profile.certificateBytes;
     const preparation = {
@@ -625,9 +626,10 @@ const profileBounds = (
         selectionReferenceBytes: profile.retainedReferenceBytes,
         certificateBytes: profile.certificateBytes,
     };
-    // PRE2 frames three independent slots. Each signing slot retains the locked body,
-    // followed by the signature on completion. At activation all slots empty.
-    const emptyPreparationBytes = 4 + 3 * suffixLengthBytes;
+    // The preparation journal frames three independent slots. Each signing
+    // slot retains the locked body, followed by the signature on completion.
+    // At activation all slots empty.
+    const emptyPreparationBytes = 3 * suffixLengthBytes;
     const selectionSlotBytes =
         1 +
         preparation.selectionBodyBytes +

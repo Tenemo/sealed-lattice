@@ -9,7 +9,7 @@ export const compileParticipantBallotCustody = (profile: SupportedProfile) => {
     // The attempt lock fixes the ballot time until the envelope carries it.
     const ballotTimeBytes = 8n;
     const keyBytes = 32n;
-    const prefixBytes = 4n + 1n + 4n + 2n;
+    const prefixBytes = 1n + 4n + 2n;
     const maximumBodyRecords =
         (body.maximumBodyBytes + recordBytes - 1n) / recordBytes;
     const attempt = prefixBytes + maximumScores + ballotTimeBytes;
@@ -19,7 +19,6 @@ export const compileParticipantBallotCustody = (profile: SupportedProfile) => {
         { phase: 13, bytes: attempt },
         { phase: 14, bytes: attempt + operationSeedBytes },
         { phase: 15, bytes: attempt + retainedBody },
-
         {
             phase: 17,
             bytes: prefixBytes + retainedBody + body.signatureBytes,

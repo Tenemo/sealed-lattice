@@ -11,7 +11,6 @@ import {
 import {
     concatenate,
     encodeText,
-    equalBytes,
     readUnsigned16,
     readUnsigned32,
     unsigned16,
@@ -113,7 +112,6 @@ const encodeSigningRecord = (record: ContributionRecord) =>
 
 export const encodeContributionState = (state: ContributionState) =>
     concatenate(
-        encodeText('PCS5'),
         new Uint8Array([state.phase]),
         unsigned16(state.position),
         unsigned32(state.header.length),
@@ -174,18 +172,17 @@ export const decodeContributionState = (
 ): ContributionState => {
     const bounds = profile.contribution;
     const prefix = contributionPrefixBytes;
-    const phase = bytes[4];
+    const phase = bytes[0];
     if (
         phase === undefined ||
         phase < contributionPhase.generationIntent ||
         phase > contributionPhase.signed ||
         bytes.length < prefix ||
-        bytes.length > bounds.maximumStateBytes ||
-        !equalBytes(bytes.subarray(0, 4), encodeText('PCS5'))
+        bytes.length > bounds.maximumStateBytes
     )
         throw new Error('Invalid contribution state.');
-    const position = readUnsigned16(bytes, 5);
-    const counts = 7;
+    const position = readUnsigned16(bytes, 1);
+    const counts = 3;
     const headerLength = readUnsigned32(bytes, counts);
     const publicCount = readUnsigned32(bytes, counts + 4);
     const privateCount = readUnsigned32(bytes, counts + 8);

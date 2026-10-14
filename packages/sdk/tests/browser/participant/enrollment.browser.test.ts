@@ -8,10 +8,7 @@ import {
 import { noParallelHelpers } from '#packages/sdk/src/participant/worker/module/parallel-helpers.js';
 import { instantiateParticipantModule } from '#packages/sdk/src/participant/worker/module/participant-module.js';
 import { readParticipantLimits } from '#packages/sdk/src/participant/worker/module/runtime-bounds.js';
-import {
-    encodeText,
-    hexadecimal,
-} from '#packages/sdk/src/participant/worker/shared/bytes.js';
+import { hexadecimal } from '#packages/sdk/src/participant/worker/shared/bytes.js';
 import {
     ModuleFailure,
     ResourceFailure,
@@ -24,10 +21,7 @@ import {
     openParticipantDatabase,
     snapshotParticipant,
 } from '#packages/sdk/src/participant/worker/storage/database.js';
-import {
-    openRoot,
-    rootAssociatedData,
-} from '#packages/sdk/src/participant/worker/storage/root-sealing.js';
+import { openRoot } from '#packages/sdk/src/participant/worker/storage/root-sealing.js';
 
 const databases: IDBDatabase[] = [];
 const compiledModule = await WebAssembly.compile(
@@ -183,11 +177,10 @@ describe('enrollment interruption custody', () => {
             const intent = await openRoot(
                 snapshot.key,
                 0,
-                rootAssociatedData(context.runtime),
+                context.runtime,
                 snapshot.root,
             );
-            expect(intent.subarray(0, 4)).toEqual(encodeText('INI2'));
-            expect(intent.length).toBe(68);
+            expect(intent.length).toBe(64);
             expect(snapshot.counts.data).toBe(0);
 
             // The failed attempt cannot create a replacement credential.

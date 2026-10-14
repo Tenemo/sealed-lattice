@@ -1,11 +1,10 @@
 import { unsigned } from '#tests/node/protocol/reference/canonical-tuple.js';
 
 // The participant's stored formats, written field by field. Nothing here
-// comes from the SDK, so an encoder that changes a field's order, width or
-// marker fails its test, and a deliberate format change edits the field it
-// changes here.
+// comes from the SDK, so an encoder that changes a field's order or width
+// fails its test, and a deliberate format change edits the field it changes
+// here.
 
-const marker = (text: string) => Buffer.from(text, 'ascii');
 const empty = Buffer.alloc(0);
 
 type Reference = Readonly<{
@@ -15,7 +14,7 @@ type Reference = Readonly<{
     hash: Uint8Array;
 }>;
 
-// ERM9: the data keys, the poll, the reference count and each reference's
+// The root manifest: the data keys, the poll, the reference count and each reference's
 // kind, offset, length and identity, then each present suffix after its
 // length.
 export const rootManifestLayout = (
@@ -27,7 +26,6 @@ export const rootManifestLayout = (
     }>,
 ) =>
     Buffer.concat([
-        marker('ERM9'),
         manifest.dataKeys,
         manifest.poll,
         unsigned(manifest.references.length, 4),
@@ -43,7 +41,7 @@ export const rootManifestLayout = (
         ]),
     ]);
 
-// BST3: the score count and scores, the ballot time until the signature is
+// The ballot state: the score count and scores, the ballot time until the signature is
 // retained, the seed, the body length, the body key count and keys, the
 // envelope and the signature.
 export const ballotStateLayout = (
@@ -58,7 +56,6 @@ export const ballotStateLayout = (
     }>,
 ) =>
     Buffer.concat([
-        marker('BST3'),
         unsigned(state.scores.length, 1),
         state.scores,
         state.ballotTime === undefined ? empty : unsigned(state.ballotTime, 8),
@@ -80,7 +77,7 @@ export type CloseRetained = Readonly<{
     proposalPacket?: Uint8Array;
 }>;
 
-// CST2: the event count and each event's kind, key count, serial, payload
+// The close state: the event count and each event's kind, key count, serial, payload
 // length and keys, then the retained close messages. Only the response body
 // carries its length.
 export const closeStateLayout = (
@@ -93,7 +90,6 @@ export const closeStateLayout = (
     retained: CloseRetained,
 ) =>
     Buffer.concat([
-        marker('CST2'),
         unsigned(events.length, 4),
         ...events.flatMap((event) => [
             unsigned(event.kind, 1),
@@ -117,7 +113,7 @@ export const closeStateLayout = (
 
 type StoredRecord = Readonly<{ key: Uint8Array; hash: Uint8Array }>;
 
-// PCS5: the phase, the position, the header length and the public, private
+// The contribution state: the phase, the position, the header length and the public, private
 // and signing record counts; then the header, each public record's object,
 // offset, length, key and identity, each private record's key and identity,
 // each signing record's object, length, key and identity, and the seed.
@@ -135,7 +131,6 @@ export const contributionStateLayout = (
     }>,
 ) =>
     Buffer.concat([
-        marker('PCS5'),
         unsigned(state.phase, 1),
         unsigned(state.position, 2),
         unsigned(state.header.length, 4),
@@ -160,10 +155,9 @@ export const contributionStateLayout = (
         state.seed,
     ]);
 
-// PRE2: each field after its length.
+// The preparation journal: each field after its length.
 export const preparationJournalLayout = (fields: readonly Uint8Array[]) =>
     Buffer.concat([
-        marker('PRE2'),
         ...fields.flatMap((field) => [unsigned(field.length, 4), field]),
     ]);
 
@@ -228,7 +222,7 @@ const inclusionCode = {
     omitted: 3,
 } as const;
 
-// RST4: the predecessor generation, the ballot inclusion code, the target
+// The release state: the predecessor generation, the ballot inclusion code, the target
 // length, the body length and the body key count; then the target, the seed,
 // the body keys, the envelope and the signature.
 export const releaseStateLayout = (
@@ -244,7 +238,6 @@ export const releaseStateLayout = (
     }>,
 ) =>
     Buffer.concat([
-        marker('RST4'),
         unsigned(state.predecessor, 1),
         unsigned(inclusionCode[state.ballotInclusion], 1),
         unsigned(state.target.length, 2),
@@ -257,7 +250,7 @@ export const releaseStateLayout = (
         state.signature,
     ]);
 
-// TST3: the predecessor generation, the ballot inclusion code and the body
+// The target state: the predecessor generation, the ballot inclusion code and the body
 // length, then the body and, once signed, the vote.
 export const targetStateLayout = (
     state: Readonly<{
@@ -268,7 +261,6 @@ export const targetStateLayout = (
     }>,
 ) =>
     Buffer.concat([
-        marker('TST3'),
         unsigned(state.predecessor, 1),
         unsigned(inclusionCode[state.ballotInclusion], 1),
         unsigned(state.body.length, 2),

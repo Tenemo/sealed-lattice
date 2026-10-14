@@ -96,7 +96,7 @@ export const compileRegistrationEnrollmentCensus = () => {
         ceiling(key.publicKeyBytes, 1_048_576n) + 7n;
     // The proposal and its signature.
     const maximumRecords = maximumEnrollmentRecords + 2n;
-    const manifestPrefixBytes = 4n + 3n * 32n + 64n + 4n;
+    const manifestPrefixBytes = 3n * 32n + 64n + 4n;
     const preparedManifestPrefixBytes = manifestPrefixBytes - 32n;
     const maximumEnrollmentManifestBytes =
         manifestPrefixBytes + maximumEnrollmentRecords * 73n;
@@ -189,7 +189,7 @@ export const compileRegistrationEnrollmentCensus = () => {
             4n +
             bytes('sealed-lattice/fhe-source-custody/v1') +
             64n,
-        rootAssociatedBytes: 4n + 64n,
+        rootAssociatedBytes: 64n,
         // The restore control ends with the two-byte mask of signing
         // purposes that the authenticated root shows unused.
         maximumRestoreInputBytes:
@@ -219,7 +219,7 @@ export const compileRegistrationEnrollmentCensus = () => {
         initialRootDistinctBlockInputs:
             1n +
             2n +
-            ceiling(68n, 16n) +
+            ceiling(64n, 16n) +
             ceiling(maximumEnrollmentManifestBytes, 16n),
         // Proposal transitions each use a fresh root key for one encryption.
         rootDistinctBlockInputs: 2n + ceiling(maximumManifestBytes, 16n),

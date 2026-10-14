@@ -186,11 +186,8 @@ describe('participant root manifest decoding', () => {
             ...manifest,
             suffixes: {},
         });
-        const marker = bytes.slice();
-        marker[3] ^= 1;
         for (const [input, generation] of [
             [bytes, 16],
-            [marker, 1],
             [bytes.slice(0, rootPrefixBytes(1) - 1), 1],
         ] as const)
             expectRefused(
