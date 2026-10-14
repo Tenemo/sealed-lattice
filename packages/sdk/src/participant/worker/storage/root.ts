@@ -63,7 +63,7 @@ const suffixStarts = {
     preparation: rootGeneration.preparation,
     ballot: rootGeneration.setupRetained,
     close: rootGeneration.setupRetained,
-    target: targetPhase.intent,
+    target: targetPhase.locked,
     release: releasePhase.locked,
 } as const;
 type ManifestSuffix = keyof typeof suffixStarts;
@@ -84,8 +84,8 @@ export const dataKind = {
     signingCapsule: 4,
     pollDefinition: 5,
     pollSignature: 6,
-    proposal: 7,
-    proposalSignature: 8,
+    rosterProposal: 7,
+    rosterProposalSignature: 8,
     setupReference: 9,
     // The setup certificate the setup was verified against.
     setupCertificate: 10,
@@ -210,9 +210,9 @@ const checkReferences = (
         lengths[dataKind.pollDefinition] === 0 ||
         !exact(dataKind.pollSignature, registration.signatureBytes) ||
         generation >= rootGeneration.rosterLocked !==
-            lengths[dataKind.proposal] > 0 ||
+            lengths[dataKind.rosterProposal] > 0 ||
         !exact(
-            dataKind.proposalSignature,
+            dataKind.rosterProposalSignature,
             generation >= rootGeneration.rosterSigned
                 ? registration.signatureBytes
                 : 0,

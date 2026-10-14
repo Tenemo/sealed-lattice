@@ -228,7 +228,7 @@ const inclusionCode = {
     omitted: 3,
 } as const;
 
-// RST4: the predecessor generation, the ballot status code, the target
+// RST4: the predecessor generation, the ballot inclusion code, the target
 // length, the body length and the body key count; then the target, the seed,
 // the body keys, the envelope and the signature.
 export const releaseStateLayout = (
@@ -257,7 +257,7 @@ export const releaseStateLayout = (
         state.signature,
     ]);
 
-// TST3: the predecessor generation, the ballot status code and the body
+// TST3: the predecessor generation, the ballot inclusion code and the body
 // length, then the body and, once signed, the vote.
 export const targetStateLayout = (
     state: Readonly<{

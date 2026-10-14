@@ -456,7 +456,7 @@ export const advanceRelease = async (
         session.state !== undefined &&
         session.state.ballotInclusion !== ballotInclusion
     )
-        throw new Error('The release names another ballot status.');
+        throw new Error('The release names another ballot inclusion.');
     if (!encrypted) return { encrypted, ballotInclusion };
     // A release that follows the completed close takes the certified target.
     session.target ??= {

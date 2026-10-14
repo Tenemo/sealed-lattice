@@ -98,7 +98,7 @@ export const releaseFaultTarget = async (
     // Every voter verifies the barrier, classifies each usable
     // ballot, evaluates the target and signs its vote. Every on-time
     // ballot but the equivocator's and the omitted one is usable,
-    // every usable ballot but the invalid author's is valid, the
+    // every usable submission but the invalid author's is valid, the
     // omitted voter's ballot is reported omitted, a late one late,
     // and a participant without a ballot has none cast.
     // The equivocator and the invalid author are nonvoters.

@@ -123,7 +123,7 @@ export const holdsFinalAggregate = async (context: PublicProfileContext) => {
 // bytes are not the ones the retained setup reference names, so the cache
 // is discarded and the next operation verifies the setup again, which rewrites
 // it.
-export const deliverFinalAggregate = async (
+export const streamFinalAggregate = async (
     context: PublicProfileContext,
     deliver: () => Promise<void>,
 ) => {

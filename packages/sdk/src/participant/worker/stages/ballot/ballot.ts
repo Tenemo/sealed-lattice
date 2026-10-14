@@ -46,7 +46,7 @@ import {
 } from '../close/close-state.js';
 import type { ParticipantSession } from '../participant-session.js';
 import {
-    deliverFinalAggregate,
+    streamFinalAggregate,
     readFinalAggregate,
 } from '../setup/setup-cache.js';
 import { ensureFinalAggregate, retainedRecordContext } from '../setup/setup.js';
@@ -161,7 +161,7 @@ export const retainedBallotRecords = (
         : ballotRecordInventory(participant.context.profile, records, state);
 };
 
-// The close records the root lists while a ballot is pending; the close log
+// The close records the root lists while a ballot is pending; the close state
 // only collects through the ballot phases.
 const collectedCloseRecords = (
     participant: Pick<ParticipantSession, 'context' | 'root'>,
@@ -351,11 +351,8 @@ const ballotCommand = (
 // public aggregate. A refused chunk or finish is not the key the retained
 // setup reference names, so it leaves the participant pending and discards
 // the cache; any other failure keeps its own outcome.
-export const deliverBallotKey = (
-    context: PublicProfileContext,
-    index: number,
-) =>
-    deliverFinalAggregate(context, async () => {
+export const streamBallotKey = (context: PublicProfileContext, index: number) =>
+    streamFinalAggregate(context, async () => {
         const deliver = (operation: number, offset = 0, bytes?: Uint8Array) => {
             if (
                 tryBallotCommand(context, operation, offset, bytes) ===
@@ -384,7 +381,7 @@ const startBallotWork = async (session: BallotSession) => {
     );
     const index = context.profile.ballot.keyIndex;
     ballotCommand(context, ballotOperation.beginKey, index);
-    await deliverBallotKey(context, index);
+    await streamBallotKey(context, index);
 };
 
 // Creates the ballot from the locked scores and ballot time. Its encryption

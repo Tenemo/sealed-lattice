@@ -147,7 +147,7 @@ export const streamRegistrations = async (
                                 recordStep.key,
                                 position,
                                 bytes,
-                                'A registration key was refused.',
+                                'A recipient key was refused.',
                             );
                         },
                     );
@@ -155,7 +155,7 @@ export const streamRegistrations = async (
                         recordStep.keyFinish,
                         position,
                         new Uint8Array(),
-                        'A registration key is incomplete.',
+                        'A recipient key is incomplete.',
                     );
                     run(
                         recordStep.finish,
@@ -216,7 +216,7 @@ export const validRegistrationBodyDigests = (
     new Set(registrationBodyDigests).size === registrationBodyDigests.length &&
     registrationBodyDigests.every(isDigest);
 
-export type VerifiedProposal = Readonly<{
+export type VerifiedRosterProposal = Readonly<{
     body: Uint8Array;
     identity: Uint8Array;
     registrationBodyDigests: readonly string[];
@@ -270,7 +270,7 @@ const finishProposal = async (
     relay: PublicRelay,
     enrollment: RestoredEnrollment,
     registrationBodyDigests: readonly string[],
-): Promise<VerifiedProposal> => {
+): Promise<VerifiedRosterProposal> => {
     const { module, limits } = context;
     await streamRegistrations(
         relay,
@@ -325,7 +325,7 @@ const verifyProposalInputs = async (
     root: AuthenticatedRoot,
     enrollment: RestoredEnrollment,
     registrationBodyDigests: readonly string[],
-): Promise<VerifiedProposal> => {
+): Promise<VerifiedRosterProposal> => {
     // The module verified the poll with the participant's own registration,
     // and the poll's signed maximum bounds the roster.
     if (
@@ -388,7 +388,7 @@ export const proposeRoster = async (
         registrationBodyDigests,
     );
     if (context.module.validate_roster_signer() !== 0) return undefined;
-    const added = [{ kind: dataKind.proposal, bytes: proposal.body }];
+    const added = [{ kind: dataKind.rosterProposal, bytes: proposal.body }];
     const locked = await commitRoot(context, root, {
         generation: rootGeneration.rosterLocked,
         manifest: {
@@ -411,7 +411,7 @@ export const proposeRoster = async (
 export const signRoster = async (
     context: ParticipantContext,
     root: AuthenticatedRoot,
-    proposal: VerifiedProposal,
+    proposal: VerifiedRosterProposal,
 ): Promise<AuthenticatedRoot> => {
     if (root.head.generation !== rootGeneration.rosterLocked)
         throw new Error('No locked roster proposal exists.');
@@ -439,11 +439,13 @@ export const signRoster = async (
         manifest: {
             ...manifest,
             references: addedReferences(context, manifest.references, [
-                { kind: dataKind.proposalSignature, bytes: signature },
+                { kind: dataKind.rosterProposalSignature, bytes: signature },
             ]),
         },
         predecessorRecords: dataRecordInventory(root.manifest),
-        addedData: [{ kind: dataKind.proposalSignature, bytes: signature }],
+        addedData: [
+            { kind: dataKind.rosterProposalSignature, bytes: signature },
+        ],
     });
 };
 
@@ -495,8 +497,8 @@ export const acceptRoster = async (
         },
     );
     const added = [
-        { kind: dataKind.proposal, bytes: proposal.body },
-        { kind: dataKind.proposalSignature, bytes: signature },
+        { kind: dataKind.rosterProposal, bytes: proposal.body },
+        { kind: dataKind.rosterProposalSignature, bytes: signature },
     ];
     return {
         root: await commitRoot(context, root, {
@@ -524,11 +526,11 @@ export const reverifyRoster = async (
     relay: PublicRelay,
     root: AuthenticatedRoot,
     enrollment: RestoredEnrollment,
-): Promise<VerifiedProposal> => {
+): Promise<VerifiedRosterProposal> => {
     const stored = await readDataKind(
         context,
         root.manifest,
-        dataKind.proposal,
+        dataKind.rosterProposal,
     );
     const registrationBodyDigests = proposalRegistrationBodyDigests(stored);
     const begin = rosterBegin(
@@ -553,7 +555,7 @@ export const reverifyRoster = async (
         const signature = await readDataKind(
             context,
             root.manifest,
-            dataKind.proposalSignature,
+            dataKind.rosterProposalSignature,
         );
         if (!verifySignature(context, signature))
             throw new Error('The retained proposal signature failed.');
@@ -574,7 +576,7 @@ export const retainedProfile = async (
     const proposal = await readDataKind(
         context,
         root.manifest,
-        dataKind.proposal,
+        dataKind.rosterProposal,
     );
     const profile = readParticipantProfile(
         context.module,

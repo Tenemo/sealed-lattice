@@ -17,7 +17,7 @@ import {
 } from '../../shared/bytes.js';
 import { PublicInputFailure } from '../../shared/failures.js';
 import {
-    deliverFinalAggregate,
+    streamFinalAggregate,
     readFinalAggregate,
 } from '../setup/setup-cache.js';
 import { discardEvaluation } from '../target-vote/evaluation.js';
@@ -171,7 +171,7 @@ export const establishReleaseContext = async (
             position,
         ),
     )[0];
-    await deliverFinalAggregate(context, async () => {
+    await streamFinalAggregate(context, async () => {
         await stream(constant);
         await stream(words(finish())[0]);
         finish();

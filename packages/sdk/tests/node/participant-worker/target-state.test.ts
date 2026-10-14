@@ -37,14 +37,14 @@ describe('participant target signing state', () => {
         for (const isOrganizer of [false, true])
             for (const bodyLength of [1, profile.target.maximumBodyBytes]) {
                 const value = state(isOrganizer, bodyLength);
-                const intent = encodeTargetState(targetPhase.intent, value);
+                const intent = encodeTargetState(targetPhase.locked, value);
                 expect(intent.length).toBe(
                     Number(census.prefixBytes) + bodyLength,
                 );
                 expect(
                     decodeTargetState(
                         profile,
-                        targetPhase.intent,
+                        targetPhase.locked,
                         isOrganizer,
                         intent,
                     ),
@@ -75,11 +75,11 @@ describe('participant target signing state', () => {
             }
     });
 
-    it('retains every own ballot status through both phases', () => {
+    it('retains every own ballot inclusion through both phases', () => {
         for (const ballotInclusion of ballotInclusions) {
             const value = state(false, 40, ballotInclusion);
             for (const generation of [
-                targetPhase.intent,
+                targetPhase.locked,
                 targetPhase.signed,
                 targetPhase.signed + 5,
             ])
@@ -107,7 +107,7 @@ describe('participant target signing state', () => {
 
     it('refuses a state of another shape, role or phase', () => {
         const value = state(false, 40);
-        const intent = encodeTargetState(targetPhase.intent, value);
+        const intent = encodeTargetState(targetPhase.locked, value);
         const signed = encodeTargetState(targetPhase.signed, value);
         const refused = (
             generation: number,
@@ -119,29 +119,29 @@ describe('participant target signing state', () => {
             ).toThrow();
         // Each phase carries its own tail.
         refused(targetPhase.signed, false, intent);
-        refused(targetPhase.intent, false, signed);
+        refused(targetPhase.locked, false, signed);
         // The organizer follows its signed proposal, not a response.
-        refused(targetPhase.intent, true, intent);
-        refused(targetPhase.intent - 1, false, intent);
-        refused(targetPhase.intent, false, intent.subarray(0, -1));
-        refused(targetPhase.intent, false, Uint8Array.of(...intent, 0));
+        refused(targetPhase.locked, true, intent);
+        refused(targetPhase.locked - 1, false, intent);
+        refused(targetPhase.locked, false, intent.subarray(0, -1));
+        refused(targetPhase.locked, false, Uint8Array.of(...intent, 0));
         const marker = intent.slice();
         marker[0] ^= 1;
-        refused(targetPhase.intent, false, marker);
+        refused(targetPhase.locked, false, marker);
         // The state before the retained status is another shape.
         const unversioned = intent.slice();
         unversioned[3] = '1'.charCodeAt(0);
-        refused(targetPhase.intent, false, unversioned);
+        refused(targetPhase.locked, false, unversioned);
         const unknownStatus = intent.slice();
         unknownStatus[5] = ballotInclusions.length;
-        refused(targetPhase.intent, false, unknownStatus);
-        const empty = encodeTargetState(targetPhase.intent, state(false, 0));
-        refused(targetPhase.intent, false, empty);
+        refused(targetPhase.locked, false, unknownStatus);
+        const empty = encodeTargetState(targetPhase.locked, state(false, 0));
+        refused(targetPhase.locked, false, empty);
         const oversized = encodeTargetState(
-            targetPhase.intent,
+            targetPhase.locked,
             state(false, profile.target.maximumBodyBytes + 1),
         );
-        refused(targetPhase.intent, false, oversized);
+        refused(targetPhase.locked, false, oversized);
     });
 
     it('stores both phases for both roles and every status in its layout', () => {
@@ -149,7 +149,7 @@ describe('participant target signing state', () => {
             for (const ballotInclusion of ballotInclusions) {
                 const value = state(isOrganizer, 1, ballotInclusion);
                 expect(
-                    Buffer.from(encodeTargetState(targetPhase.intent, value)),
+                    Buffer.from(encodeTargetState(targetPhase.locked, value)),
                 ).toEqual(targetStateLayout({ ...value, vote: undefined }));
                 expect(
                     Buffer.from(encodeTargetState(targetPhase.signed, value)),

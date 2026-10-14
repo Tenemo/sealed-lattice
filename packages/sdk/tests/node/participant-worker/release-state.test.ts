@@ -140,7 +140,7 @@ describe('participant release state', () => {
         // A release follows a signed target or the participant's own
         // completed close, never a pending signature or another role's close.
         const predecessor = body.slice();
-        predecessor[4] = targetPhase.intent;
+        predecessor[4] = targetPhase.locked;
         refused(releasePhase.body, predecessor);
         for (const isOrganizer of [false, true]) {
             predecessor[4] = completedClosePhase(!isOrganizer);

@@ -25,8 +25,8 @@ import {
     startCloseWork,
 } from './close-custody.js';
 import {
-    deliverOwnBallot,
-    deliverBallot,
+    holdOwnBallot,
+    collectBallot,
     takeResponses,
 } from './close-delivery.js';
 import { closeIntentCandidateKey } from './close-records.js';
@@ -274,14 +274,14 @@ export const advanceClose = async (
     if (collecting()) {
         // Every other roster position's published ballot, so that an honest
         // participant holds every ballot it can read before it responds.
-        await deliverOwnBallot(session);
+        await holdOwnBallot(session);
         for (
             let author = 0;
             author < session.participant.context.profile.participantCount;
             author++
         )
             if (author !== session.records.position)
-                await deliverBallot(session, relay, author);
+                await collectBallot(session, relay, author);
     }
     // A locked ballot attempt completes before any intent is locked.
     const unlocked =

@@ -57,7 +57,7 @@ export const product = <Value>(
         [[]],
     );
 
-// Reference semantics. The Rust close verifier must implement these rules.
+// Reference semantics. The Rust close barrier verifier must implement these rules.
 
 export type CloseEnvelope = Readonly<{
     author: number;

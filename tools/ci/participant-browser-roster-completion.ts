@@ -694,7 +694,7 @@ export const completeRoster = async (
                     member.origin,
                     'sign-target',
                     {},
-                    targetPhase.intent,
+                    targetPhase.locked,
                 );
             const voted = await act(member, 'sign-target');
             assert.equal(voted.generation, 24);

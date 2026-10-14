@@ -28,14 +28,14 @@ import {
     responseListing,
 } from '../close/close-records.js';
 import {
-    deliverFinalAggregate,
+    streamFinalAggregate,
     readFinalAggregate,
 } from '../setup/setup-cache.js';
 
 // The close barrier verifier. From the public close records, and the copies
-// of them that a participant's close log holds, it authenticates the
+// of them that a participant's close state holds, it authenticates the
 // organizer's intent, the proposal, the responses the proposal names and each
-// usable slot's body, and classifies each usable ballot as valid or invalid.
+// usable slot's body, and classifies each usable submission as valid or invalid.
 
 export const unusedWord = 0xff_ff_ff_ff;
 
@@ -64,7 +64,7 @@ const readCandidate = async (
 };
 
 // The close records a barrier verification reads, beside the copies of
-// them that a participant's close log holds, which it takes before their
+// them that a participant's close state holds, which it takes before their
 // public routes. A verifier without participant state holds none.
 export type CloseRecordSource = Readonly<{
     context: PublicProfileContext;
@@ -285,7 +285,9 @@ export const verifyCloseBarrier = async (
         closeProposalCandidateKey,
         async (publication) => {
             if (!barrierCommand(context, barrierOperation.begin))
-                throw new Error('The close verifier has no verified setup.');
+                throw new Error(
+                    'The close barrier verifier has no verified setup.',
+                );
             requireBarrier(
                 context,
                 barrierOperation.intent,
@@ -373,7 +375,7 @@ export const verifyCloseBarrier = async (
                 const slot = listed.get(hexadecimal(identity));
                 if (slot === undefined)
                     throw new Error(
-                        'The close verifier needs an unlisted body.',
+                        'The close barrier verifier needs an unlisted body.',
                     );
                 usable.set(slot.author, {
                     submission: slot.submission,
@@ -418,12 +420,12 @@ const beginClassification = async (
             classifierInput(context, concatenate(submission, header)),
         ) !== 0
     )
-        throw new PublicInputFailure('A usable ballot was refused.');
+        throw new PublicInputFailure('A usable submission was refused.');
     if (module.ballot_classification_requires_key() === 1) {
         const index = context.profile.ballot.keyIndex;
         if (module.ballot_classification_key_begin(index) !== 0)
             throw new Error('The ballot classifier refused its key.');
-        await deliverFinalAggregate(context, async () => {
+        await streamFinalAggregate(context, async () => {
             await readFinalAggregate(context, index, (_offset, bytes) => {
                 if (
                     module.ballot_classification_key_chunk(
@@ -438,7 +440,7 @@ const beginClassification = async (
     }
 };
 
-// Classifies one usable ballot as valid or invalid. The body must be the one
+// Classifies one usable submission as valid or invalid. The body must be the one
 // the barrier authenticated, or the classifier refuses it.
 export const classifyBallot = async (
     records: CloseRecordSource,
@@ -471,13 +473,15 @@ export const classifyBallot = async (
                     classifierInput(context, rest),
                 ) !== 0
             )
-                throw new PublicInputFailure('A usable ballot was refused.');
+                throw new PublicInputFailure(
+                    'A usable submission was refused.',
+                );
         },
     );
     if (
         header.length !== headerBytes ||
         module.ballot_classification_finish() !== 0
     )
-        throw new PublicInputFailure('A usable ballot changed.');
+        throw new PublicInputFailure('A usable submission changed.');
     return module.ballot_classification_is_valid() === 1;
 };

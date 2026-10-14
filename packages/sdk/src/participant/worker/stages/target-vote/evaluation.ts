@@ -26,7 +26,7 @@ import {
     transactionCompletion,
 } from '../../storage/database.js';
 import {
-    deliverFinalAggregate,
+    streamFinalAggregate,
     readFinalAggregate,
 } from '../setup/setup-cache.js';
 
@@ -546,7 +546,7 @@ const evaluate = async (
                     evaluationCommand(context, evaluationOperation.nextKey),
                 );
                 if (index !== unusedWord)
-                    await deliverFinalAggregate(context, () =>
+                    await streamFinalAggregate(context, () =>
                         deliverEvaluationInput(
                             context,
                             (accept) =>
@@ -570,7 +570,9 @@ const evaluate = async (
                 );
                 const slot = usable.get(author);
                 if (length > 0 && slot === undefined)
-                    throw new Error('The evaluation needs an unusable ballot.');
+                    throw new Error(
+                        'The evaluation needs an unusable submission.',
+                    );
                 if (length > 0 && slot !== undefined)
                     await deliverEvaluationInput(
                         context,
@@ -706,9 +708,9 @@ const evaluate = async (
     );
 };
 
-// Verifies the close barrier, classifies each usable ballot and evaluates
+// Verifies the close barrier, classifies each usable submission and evaluates
 // the target in this instance. Returns the target body, how many slots were
-// usable and how many usable ballots were valid. The owning setup verifier
+// usable and how many usable submissions were valid. The owning setup verifier
 // must have verified the complete setup in this instance first, and a
 // participant must have restored its completed close.
 export const evaluateClosedTarget = async (

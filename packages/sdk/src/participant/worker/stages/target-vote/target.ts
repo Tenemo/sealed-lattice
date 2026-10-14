@@ -37,7 +37,7 @@ import {
 import type { TargetState } from './target-state.js';
 
 // A participant's target signing. It verifies the organizer's close barrier
-// from the public close records, classifies each usable ballot, evaluates
+// from the public close records, classifies each usable submission, evaluates
 // the public ranking target and retains the exact target body and the own
 // ballot's status in it before its target vote exists. An interrupted signing
 // evaluates again and must reproduce the retained body. A verifier without
@@ -80,14 +80,14 @@ export const certifiedBallotInclusion = (
         finalityOperation.certifiedBallotInclusion,
     );
     if (output.length !== 1 || output[0] >= ballotInclusions.length)
-        throw new Error('The finality work reported no ballot status.');
+        throw new Error('The finality work reported no ballot inclusion.');
     return ballotInclusions[output[0]];
 };
 
 // The retained target signing state, or undefined before it begins.
 export const resumeTarget = (close: CloseSession): TargetState | undefined => {
     const { root, context } = close.participant;
-    if (root.head.generation < targetPhase.intent) return undefined;
+    if (root.head.generation < targetPhase.locked) return undefined;
     const bytes = root.manifest.suffixes.target;
     if (bytes === undefined) throw new Error('No target state is retained.');
     return decodeTargetState(
@@ -162,7 +162,7 @@ export const restoreOrEvaluateTarget = async (
 // participant's target vote. The owning setup verifier must have verified
 // the complete setup in this instance first. The signing state retains the
 // own ballot's status in the target. Returns how many slots were usable and
-// how many usable ballots were valid.
+// how many usable submissions were valid.
 export const signTarget = async (close: CloseSession, relay: PublicRelay) => {
     const { participant } = close;
     const { context } = participant;
@@ -175,7 +175,7 @@ export const signTarget = async (close: CloseSession, relay: PublicRelay) => {
         throw new Error('The finality work names another target.');
     const code = finality[0];
     if (code >= ballotInclusions.length)
-        throw new Error('The finality work reported no ballot status.');
+        throw new Error('The finality work reported no ballot inclusion.');
     const ballotInclusion = ballotInclusions[code];
     let state = resumeTarget(close);
     if (state === undefined) {
@@ -185,13 +185,13 @@ export const signTarget = async (close: CloseSession, relay: PublicRelay) => {
             body,
             vote: new Uint8Array(),
         };
-        await commitTarget(close, targetPhase.intent, state);
+        await commitTarget(close, targetPhase.locked, state);
     } else if (!equalBytes(state.body, body))
         throw new PublicInputFailure(
             'The public close records name another target.',
         );
     else if (state.ballotInclusion !== ballotInclusion)
-        throw new Error('The finality work reported another ballot status.');
+        throw new Error('The finality work reported another ballot inclusion.');
     const vote = finalityCommand(
         context,
         finalityOperation.signVote,

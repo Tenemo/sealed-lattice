@@ -110,7 +110,7 @@ const lastUnsignedGeneration = [
     [signingPurpose.closeIntent, closePhase.intent],
     [signingPurpose.closeResponse, closePhase.responding],
     [signingPurpose.closeProposal, closePhase.responded],
-    [signingPurpose.target, targetPhase.intent],
+    [signingPurpose.target, targetPhase.locked],
     [signingPurpose.release, releasePhase.body],
 ] as const;
 

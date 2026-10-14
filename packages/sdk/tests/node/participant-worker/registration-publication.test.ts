@@ -81,7 +81,7 @@ const fixture = async (
     const records = new Map<string, Blob>();
     const references: RecordReference[] = [];
     for (const kind of Object.values(dataKind).filter(
-        (value) => value <= dataKind.proposalSignature,
+        (value) => value <= dataKind.rosterProposalSignature,
     )) {
         const length = kind === dataKind.publicKey ? keyBytes : 32 + kind;
         for (let offset = 0; offset < length; offset += chunkBytes) {
@@ -136,8 +136,8 @@ const fixture = async (
         [prefix + 'signature.bin', dataKind.signature],
         ['poll-definition.bin', dataKind.pollDefinition],
         ['poll-signature.bin', dataKind.pollSignature],
-        ['proposal.bin', dataKind.proposal],
-        ['proposal-signature.bin', dataKind.proposalSignature],
+        ['proposal.bin', dataKind.rosterProposal],
+        ['proposal-signature.bin', dataKind.rosterProposalSignature],
     ]);
     const copies: Uint8Array[] = [];
     const reads: string[] = [];

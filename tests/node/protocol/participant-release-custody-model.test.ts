@@ -9,7 +9,7 @@ describe('participant release custody layout', () => {
         expect(value.proofRoleBytes).toBe(
             8n + 6n * 6n + 4n + 35n + 4n + 128n + 3n * 64n + 2n,
         );
-        // The marker, predecessor, ballot status, target length, body
+        // The marker, predecessor, ballot inclusion, target length, body
         // length and key count;
         // the 2,048-byte largest target; the 512-bit seed; 32-byte keys; the
         // envelope of the release context, body length and body identity;

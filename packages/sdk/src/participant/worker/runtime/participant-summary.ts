@@ -42,7 +42,7 @@ const ballotInclusion = (
     const { target, release } = root.manifest.suffixes;
     if (profiled === undefined) return undefined;
     if (
-        generation >= targetPhase.intent &&
+        generation >= targetPhase.locked &&
         target !== undefined &&
         target.length !== 0
     )

@@ -615,8 +615,8 @@ export const writeProofInput = (module: ParticipantModule, bytes: Uint8Array) =>
         module.contribution_proof_input_capacity(),
     );
 
-// The certificate collector's, close verifier's, ballot classifier's and
-// evaluation's input buffers, by the exports that give each one's address
+// The completion verifier's, close barrier verifier's, ballot classifier's
+// and // evaluation's input buffers, by the exports that give each one's address
 // and the capacity the module reports for it.
 const inputBuffers = {
     completion: ['completion_input_pointer', 'completion_input_capacity'],
@@ -682,14 +682,14 @@ type CommandDispatcher = Readonly<{
 const noOutput = () => new Uint8Array();
 const commandDispatchers = {
     ballot: {
-        subject: 'ballot module',
+        subject: 'ballot work',
         write: writeInput,
         run: (module, operation, argument, length) =>
             module.participant_ballot_command(operation, argument, length),
         read: readParticipantOutput,
     },
     close: {
-        subject: 'close module',
+        subject: 'close work',
         write: writeInput,
         run: (module, operation, argument, length) =>
             module.participant_close_command(operation, argument, length),
@@ -710,14 +710,14 @@ const commandDispatchers = {
         read: readParticipantOutput,
     },
     selection: {
-        subject: 'original preparation signer',
+        subject: 'selection signer',
         write: writeInput,
         run: (module, operation, _argument, length) =>
             module.selection_signing_command(operation, length),
         read: readParticipantOutput,
     },
     offerSigning: {
-        subject: 'contribution signer',
+        subject: 'offer signer',
         write: writeInput,
         run: (module, operation, argument, length) =>
             module.offer_signing_command(operation, argument, length),

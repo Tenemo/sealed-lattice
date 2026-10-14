@@ -413,7 +413,11 @@ export const restoreCheckpoint = async (
         }
     }
     const registrationBodyDigests = proposalRegistrationBodyDigests(
-        await readDataKind(context, session.root.manifest, dataKind.proposal),
+        await readDataKind(
+            context,
+            session.root.manifest,
+            dataKind.rosterProposal,
+        ),
     );
     for (const [
         position,

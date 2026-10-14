@@ -21,7 +21,7 @@ import {
     rootGeneration,
 } from '../../storage/root-generation.js';
 
-// The close log beneath the authenticated root. It retains every close input
+// The close state beneath the authenticated root. It retains every close input
 // the participant's state machine accepted, in arrival order, so restoration
 // replays them into the same state. An event holds its kind, its record
 // count, the serial its records are stored under, its payload length and one
@@ -200,7 +200,7 @@ const packetLength = (
     return 4 + length + signatureBytes;
 };
 
-// Decodes the close log under the phase its root generation supplies. The
+// Decodes the close state under the phase its root generation supplies. The
 // events must keep their serials ascending, the lock must be present exactly
 // from generation 19, only the organizer may take responses and only after
 // the lock, and only the organizer's phases may carry its intent signing and
@@ -231,7 +231,7 @@ export const decodeCloseState = (
     };
     const eventCount = readUnsigned32(take(4), 0);
     if (eventCount > close.maximumEvents)
-        throw new Error('The close log has too many events.');
+        throw new Error('The close state has too many events.');
     const events: CloseEvent[] = [];
     let records = 0;
     let locked = false;
@@ -243,7 +243,7 @@ export const decodeCloseState = (
         const length = readUnsigned32(header, 7);
         records += count;
         if (records > close.maximumRecords)
-            throw new Error('The close log has too many records.');
+            throw new Error('The close state has too many records.');
         const event = {
             kind,
             serial,
@@ -256,12 +256,12 @@ export const decodeCloseState = (
             (kind === closeEventKind.lock && locked) ||
             (kind === closeEventKind.response && (!isOrganizer || !locked))
         )
-            throw new Error('The close log is inconsistent.');
+            throw new Error('The close state is inconsistent.');
         if (kind === closeEventKind.lock) locked = true;
         events.push(event);
     }
     if (locked !== phase >= closePhase.locked)
-        throw new Error('The close log disagrees with its intent lock.');
+        throw new Error('The close state disagrees with its intent lock.');
     const signature = registration.signatureBytes;
     const intentPacketBytes = 4 + close.intentBodyBytes + signature;
     const state = { ...collectingCloseState(), events };

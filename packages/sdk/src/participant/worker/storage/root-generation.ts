@@ -28,7 +28,7 @@ export const closePhase = {
     proposed: 22,
 } as const;
 
-export const targetPhase = { intent: 23, signed: 24 } as const;
+export const targetPhase = { locked: 23, signed: 24 } as const;
 
 export const releasePhase = {
     locked: 25,

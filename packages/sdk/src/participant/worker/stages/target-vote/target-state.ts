@@ -48,7 +48,7 @@ export const encodeTargetState = (generation: number, state: TargetState) =>
         ),
         unsigned16(state.body.length),
         state.body,
-        generation === targetPhase.intent ? new Uint8Array() : state.vote,
+        generation === targetPhase.locked ? new Uint8Array() : state.vote,
     );
 
 export const decodeTargetState = (
@@ -60,7 +60,7 @@ export const decodeTargetState = (
     const { maximumBodyBytes, votePacketBytes } = profile.target;
     const signed = generation >= targetPhase.signed;
     if (
-        generation < targetPhase.intent ||
+        generation < targetPhase.locked ||
         bytes.length < targetPrefixBytes ||
         !equalBytes(bytes.subarray(0, marker.length), marker) ||
         bytes[marker.length] !== completedClosePhase(isOrganizer) ||

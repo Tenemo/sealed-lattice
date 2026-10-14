@@ -11,13 +11,13 @@ import {
 
 const fixture = Buffer.from(`
 globalThis.run = async (command) => {
-    const delivered = await deliverModule(command);
+    const delivered = await fetchModule(command);
     const module = await WebAssembly.compile(delivered.bytes);
     const evaluation = evaluatingOperations.has(command.operation);
     return { module, evaluation };
 };
 globalThis.verify = async () => {
-    const delivered = await deliverModule({ module: 'honest' });
+    const delivered = await fetchModule({ module: 'honest' });
     return await WebAssembly.compile(delivered.bytes);
 };`);
 
@@ -66,7 +66,7 @@ describe('corrupt participant module selection', () => {
             const context = {
                 location: { origin: 'https://participant.test' },
                 evaluatingOperations: new Set(['sign-target']),
-                deliverModule: () => {
+                fetchModule: () => {
                     events.push('honest delivery and runtime identity');
                     return { bytes: honest, runtime: 'runtime' };
                 },

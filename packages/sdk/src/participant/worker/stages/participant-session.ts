@@ -57,7 +57,7 @@ const retainProposal = async (
     const proposal = await readDataKind(
         context,
         root.manifest,
-        dataKind.proposal,
+        dataKind.rosterProposal,
     );
     const control = concatenate(
         root.manifest.poll,

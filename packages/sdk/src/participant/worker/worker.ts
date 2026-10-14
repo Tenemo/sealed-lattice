@@ -10,7 +10,7 @@ import { readParticipantLimits } from './module/runtime-bounds.js';
 import type { PublicRelay } from './relay/relay.js';
 import { beginRelayBudget } from './relay/relay.js';
 import {
-    deliverModule,
+    fetchModule,
     instantiateForOperation,
     isSupportedBrowser,
     operationMemory,
@@ -56,7 +56,7 @@ const run = async (
     let helpers: ParallelHelpers | undefined;
     let authorityStarted = false;
     try {
-        const delivered = await deliverModule(command);
+        const delivered = await fetchModule(command);
         const compiledModule = await WebAssembly.compile(delivered.bytes);
         const evaluation = evaluatingOperations.has(command.operation);
         const started = startParallelHelpers(
@@ -180,7 +180,7 @@ const runVerification = async (
     if (!isWellFormedVerification(command)) return refused('invalid request');
     let helpers: ParallelHelpers | undefined;
     try {
-        const delivered = await deliverModule(command);
+        const delivered = await fetchModule(command);
         const compiledModule = await WebAssembly.compile(delivered.bytes);
         helpers = await startParallelHelpers(compiledModule, helperPorts, true);
         const parallel = helpers;

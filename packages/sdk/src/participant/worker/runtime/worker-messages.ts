@@ -97,7 +97,7 @@ const isBaseUrl = (value: unknown) => {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
     typeof value === 'object' && value !== null && !Array.isArray(value);
 
-const hasRuntime = (command: Record<string, unknown>) =>
+const hasRuntimeAndRelay = (command: Record<string, unknown>) =>
     isBaseUrl(command.relay) &&
     httpUrl(command.module) !== undefined &&
     isRecord(command.identity) &&
@@ -107,7 +107,7 @@ const hasRuntime = (command: Record<string, unknown>) =>
 
 export const isWellFormed = (command: unknown): command is WorkerCommand =>
     isRecord(command) &&
-    hasRuntime(command) &&
+    hasRuntimeAndRelay(command) &&
     isParticipantOperation(command.operation) &&
     isRecord(command.parameters) &&
     typeof command.namespace === 'string' &&
@@ -122,6 +122,6 @@ export const isWellFormedVerification = (
     command: unknown,
 ): command is VerificationCommand =>
     isRecord(command) &&
-    hasRuntime(command) &&
+    hasRuntimeAndRelay(command) &&
     command.operation === 'verify-outcome' &&
     isDigest(command.poll);

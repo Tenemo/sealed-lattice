@@ -12,7 +12,7 @@ describe('participant module public input', () => {
             start: buffer.pointer(module) >>> 0,
             capacity: buffer.capacity(module),
         }));
-        // The buffers of the certificate collector, close verifier, ballot
+        // The buffers of the completion verifier, close barrier verifier, ballot
         // classifier and evaluation each hold a mebibyte.
         for (const name of [
             'completion',

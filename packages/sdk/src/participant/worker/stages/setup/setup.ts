@@ -38,7 +38,7 @@ import {
     aggregateSelection,
     authenticateCertificate,
     authenticateSelection,
-    preparedRosters,
+    modulesWithReplayedRoster,
     readSetupCertificate,
     verifyCertificateInputs,
 } from './setup-verification.js';
@@ -56,9 +56,13 @@ export const verifySetupRoster = async (
 ) => {
     const { context } = session;
     const { module, profile } = context;
-    if (preparedRosters.has(module)) return;
+    if (modulesWithReplayedRoster.has(module)) return;
     const { manifest } = session.root;
-    const proposal = await readDataKind(context, manifest, dataKind.proposal);
+    const proposal = await readDataKind(
+        context,
+        manifest,
+        dataKind.rosterProposal,
+    );
     const definition = await readDataKind(
         context,
         manifest,
@@ -101,7 +105,7 @@ export const verifySetupRoster = async (
     const proposalSignature = await readDataKind(
         context,
         manifest,
-        dataKind.proposalSignature,
+        dataKind.rosterProposalSignature,
     );
     const proposalPacket = concatenate(
         unsigned32(proposal.length),
@@ -115,7 +119,7 @@ export const verifySetupRoster = async (
         throw new PublicInputFailure(
             'The published registrations are not the retained proposal.',
         );
-    preparedRosters.add(module);
+    modulesWithReplayedRoster.add(module);
 };
 
 export const verifySelectionInputs = async (
@@ -223,7 +227,7 @@ export const ensureFinalAggregate = async (
     if (await holdsFinalAggregate(session.context)) return false;
     // A cache loss can also occur after certification in this same operation.
     // Rebuild from fresh owning verification, not an existing aggregate flag.
-    preparedRosters.delete(session.context.module);
+    modulesWithReplayedRoster.delete(session.context.module);
     await verifySetupRoster(session, relay);
     const certificate = await readDataKind(
         session.context,

@@ -36,7 +36,7 @@ const deliveryDigest = async (bytes: Uint8Array<ArrayBuffer>) =>
 
 // Fetches the module, which must have the pinned digest, and recomputes the
 // runtime identity from it and the pinned source and worker digests.
-export const deliverModule = async (
+export const fetchModule = async (
     command: Pick<WorkerCommand, 'module' | 'identity'>,
 ) => {
     const bytes = await readBounded(command.module, maximumModuleBytes);

@@ -569,7 +569,7 @@ const targetBounds = (moduleLimits: ModuleLimits) => {
     };
 };
 
-// The release suffix: its marker, predecessor, own ballot status, target
+// The release suffix: its marker, predecessor, own ballot inclusion, target
 // length, body length and key count, the target body, the randomness seed until the body exists,
 // a key per body record, the envelope and the signature.
 export const releasePrefixBytes = 4 + 1 + 1 + 2 + 4 + 2;

@@ -108,7 +108,7 @@ const storedOffer = async (
     signature: await openSigning(session, 'offerSignature'),
 });
 
-export const signContribution = async (
+export const signOffer = async (
     session: ContributionSession,
 ): Promise<SignedPacket> => {
     const { context } = session;

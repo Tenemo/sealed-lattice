@@ -258,7 +258,7 @@ describe('participant root manifest decoding', () => {
             withoutKind(dataKind.sourceCapsule),
             [
                 ...canonical.slice(0, sourceCapsule),
-                { ...header, kind: dataKind.proposal },
+                { ...header, kind: dataKind.rosterProposal },
                 ...canonical.slice(sourceCapsule),
             ],
         ])
@@ -275,8 +275,8 @@ describe('participant root manifest decoding', () => {
             generation,
             records([
                 ...enrollment.slice(0, -1),
-                [dataKind.proposal, 100],
-                [dataKind.proposalSignature, registration.signatureBytes],
+                [dataKind.rosterProposal, 100],
+                [dataKind.rosterProposalSignature, registration.signatureBytes],
                 enrollment[enrollment.length - 1],
             ]),
         );

@@ -96,7 +96,7 @@ export const runSingleRoster = async (cohort: ParticipantCohort) => {
             [
                 [0, 'contribute', 5],
                 [0, 'cast-ballot', 15],
-                [0, 'sign-target', targetPhase.intent],
+                [0, 'sign-target', targetPhase.locked],
                 [0, 'release', 27],
             ],
         );

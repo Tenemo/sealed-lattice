@@ -27,7 +27,7 @@ import {
 } from '../stages/close/close.js';
 import {
     publishOffer,
-    signContribution,
+    signOffer,
 } from '../stages/contribution/contribution-offer.js';
 import { contributionPhase } from '../stages/contribution/contribution-state.js';
 import {
@@ -294,7 +294,7 @@ export const executeOperation = async (
                 session.state.phase === contributionPhase.continuationIntent
             )
                 await continueContribution(session);
-            const offer = await signContribution(session);
+            const offer = await signOffer(session);
             root = session.root;
             await publishOffer(session, relay, offer);
             break;

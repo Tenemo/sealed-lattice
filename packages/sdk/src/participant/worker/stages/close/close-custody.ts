@@ -130,7 +130,7 @@ export const nextSerial = (state: CloseState) =>
 const recordCount = (state: CloseState) =>
     state.events.reduce((total, event) => total + event.keys.length, 0);
 
-// Decodes the retained close log and the signed ballot it may reference.
+// Decodes the retained close state and the signed ballot it may reference.
 // Every listed record must be stored and nothing else.
 export const resumeClose = async (
     participant: Pick<ParticipantSession, 'context' | 'root'>,
@@ -142,7 +142,7 @@ export const resumeClose = async (
         root.head.generation < rootGeneration.setupRetained ||
         bytes === undefined
     )
-        throw new Error('No close log is retained.');
+        throw new Error('No close state is retained.');
     const records = await retainedRecordContext(participant);
     const state = decodeCloseState(
         context.profile,
@@ -455,7 +455,7 @@ const replayEvent = async (session: CloseSession, event: CloseEvent) => {
         case closeEventKind.own: {
             const { ballot } = session;
             if (ballot === undefined)
-                throw new Error('The close log names an unsigned ballot.');
+                throw new Error('The close state names an unsigned ballot.');
             closeCommand(
                 context,
                 closeOperation.beginHeldBody,
@@ -509,7 +509,7 @@ const replayEvent = async (session: CloseSession, event: CloseEvent) => {
             break;
         }
         default:
-            throw new Error('The close log names an unknown event.');
+            throw new Error('The close state names an unknown event.');
     }
 };
 

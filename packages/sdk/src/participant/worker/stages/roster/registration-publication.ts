@@ -47,8 +47,8 @@ export const publishRegistrationRecords = async (
             groups.push([
                 'roster',
                 [
-                    [dataKind.proposal, 'proposal.bin'],
-                    [dataKind.proposalSignature, 'signature.bin'],
+                    [dataKind.rosterProposal, 'proposal.bin'],
+                    [dataKind.rosterProposalSignature, 'signature.bin'],
                 ],
             ]);
     }

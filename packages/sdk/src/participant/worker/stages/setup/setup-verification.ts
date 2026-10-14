@@ -551,7 +551,7 @@ export const aggregateSelection = async (
 
 // Each operation owns one Rust module; this records only whether that module
 // has already restored the roster, never whether an offer or setup is valid.
-export const preparedRosters = new WeakSet<object>();
+export const modulesWithReplayedRoster = new WeakSet<object>();
 
 export const authenticateCertificate = (
     context: PublicProfileContext,
@@ -778,7 +778,7 @@ export const verifyPublicSetup = async (
                     'The poll names no supported profile.',
                 );
             const profiled = { ...context, profile };
-            preparedRosters.add(module);
+            modulesWithReplayedRoster.add(module);
             const certificate = await readSetupCertificate(profiled, relay);
             await verifyCertificateInputs(profiled, relay, certificate.bytes);
             return profiled;

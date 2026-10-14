@@ -63,7 +63,7 @@ const maximumListedEntries = ({ close }: ParticipantProfile) =>
     listedEntryBytes;
 
 // Delivers the own signed ballot once, from the ballot suffix.
-export const deliverOwnBallot = async (session: CloseSession) => {
+export const holdOwnBallot = async (session: CloseSession) => {
     const { ballot } = session;
     if (
         ballot === undefined ||
@@ -95,7 +95,7 @@ export const deliverOwnBallot = async (session: CloseSession) => {
     learnSubmission(session, serial, ballot.state.envelope);
 };
 
-// Read both parts from the same candidate; the owning close verifier decides
+// Read both parts from the same candidate; the owning close barrier verifier decides
 // authentication before it accepts any body or publishes a response.
 const readSubmissionCandidate = async (
     profile: ParticipantProfile,
@@ -226,7 +226,7 @@ const deliverBody = async (
 
 // Tries every candidate in the author's finite published prefix. Exact
 // duplicates and extra conflicting envelopes are refused by the close owner.
-export const deliverBallot = async (
+export const collectBallot = async (
     session: CloseSession,
     relay: PublicRelay,
     author: number,

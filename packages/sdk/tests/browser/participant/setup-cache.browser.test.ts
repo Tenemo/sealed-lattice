@@ -5,9 +5,9 @@ import {
     ModuleFailure,
     PublicInputFailure,
 } from '#packages/sdk/src/participant/worker/shared/failures.js';
-import { deliverBallotKey } from '#packages/sdk/src/participant/worker/stages/ballot/ballot.js';
+import { streamBallotKey } from '#packages/sdk/src/participant/worker/stages/ballot/ballot.js';
 import {
-    deliverFinalAggregate,
+    streamFinalAggregate,
     readFinalAggregate,
 } from '#packages/sdk/src/participant/worker/stages/setup/setup-cache.js';
 import {
@@ -140,7 +140,7 @@ describe('bounded public aggregate cache reads', () => {
         const refusal = new PublicInputFailure('The aggregate digest differs.');
         const seen: number[] = [];
         await expect(
-            deliverFinalAggregate(context, () =>
+            streamFinalAggregate(context, () =>
                 readFinalAggregate(context, 7, (offset) => {
                     seen.push(offset);
                     if (offset === 6) throw refusal;
@@ -199,7 +199,7 @@ describe('ballot key delivery', () => {
     it('streams every cached chunk of the key and finishes it, keeping the cache', async () => {
         const fixed = await fixture();
         const { calls, context } = withBallotModule(fixed.context, () => 0);
-        await deliverBallotKey(context, 7);
+        await streamBallotKey(context, 7);
         expect(calls).toEqual([
             [2, 0, 6],
             [2, 6, 6],
@@ -220,7 +220,7 @@ describe('ballot key delivery', () => {
                 fixed.context,
                 (operation, offset) => (refused(operation, offset) ? 1 : 0),
             );
-            await expect(deliverBallotKey(context, 7)).rejects.toThrow(
+            await expect(streamBallotKey(context, 7)).rejects.toThrow(
                 new PublicInputFailure('A ballot key was refused.'),
             );
             expect(await cachedChunks(fixed.database)).toBe(0);
@@ -234,7 +234,7 @@ describe('ballot key delivery', () => {
             if (operation === 3) throw failure;
             return 0;
         });
-        await expect(deliverBallotKey(context, 7)).rejects.toBe(failure);
+        await expect(streamBallotKey(context, 7)).rejects.toBe(failure);
         expect(await cachedChunks(fixed.database)).toBe(0);
     });
 });
