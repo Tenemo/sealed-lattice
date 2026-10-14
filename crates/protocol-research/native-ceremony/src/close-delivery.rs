@@ -253,15 +253,14 @@ pub(super) fn exercise_body_delivery(
             submission.envelope.identity()
         );
     }
-    let mut malformed = all_wanted[0].envelope.bytes().to_vec();
-    malformed[0] ^= 1;
+    let envelope = all_wanted[0].envelope.bytes();
     assert!(
         lacking
             .command(
                 &mut enrollments[0].credential,
                 CloseOperation::EnvelopeIdentity,
                 0,
-                &malformed
+                &envelope[..envelope.len() - 1]
             )
             .is_err()
     );
