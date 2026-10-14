@@ -425,7 +425,7 @@ pub fn run(
             1,
             1,
             vec![
-                CanonicalItem::nonempty_ascii("sealed-lattice/close-response/v1").unwrap(),
+                CanonicalItem::nonempty_ascii(ClosePurpose::Response.context()).unwrap(),
                 CanonicalItem::hash512(poll.identity()),
                 CanonicalItem::hash512(setup.identity()),
                 CanonicalItem::hash512(*intent.message().identity()),
@@ -686,9 +686,10 @@ pub fn run(
         )
         .unwrap();
     let responders: Vec<_> = barrier
+        .proposal()
         .responses()
         .iter()
-        .map(|response| response.message().responder())
+        .map(|(responder, _)| *responder)
         .collect();
     assert_eq!(responders, (0..quorum).collect::<Vec<_>>());
     let usable = scenario.usable();

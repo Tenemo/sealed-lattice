@@ -348,6 +348,14 @@ impl CanonicalTuple {
         }
     }
 
+    /// Whether the tuple has the canonical schema and version and exactly
+    /// `item_count` items.
+    pub fn has_header(&self, item_count: usize) -> bool {
+        self.schema_identifier == super::CANONICAL_TUPLE_SCHEMA_IDENTIFIER
+            && self.schema_version == super::CANONICAL_TUPLE_VERSION
+            && self.items.len() == item_count
+    }
+
     pub fn encode(&self) -> Result<Vec<u8>, CanonicalCodecError> {
         let limits = CanonicalDecodeLimits::default();
         let mut budget = CanonicalDecodeBudget::new(&limits);

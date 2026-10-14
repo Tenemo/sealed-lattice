@@ -124,10 +124,15 @@ impl FinalityWork {
             return Err(Error::Context);
         }
         let barrier = self.barrier();
-        if barrier.responses().iter().any(|response| {
-            response.message().responder() == self.owner.position()
-                && Some(response.message().identity()) != credential.close_response_identity()
-        }) {
+        if barrier
+            .proposal()
+            .responses()
+            .iter()
+            .any(|(responder, identity)| {
+                *responder == self.owner.position()
+                    && Some(identity) != credential.close_response_identity()
+            })
+        {
             return Err(Error::Context);
         }
         credential.sign_target(&self.owner, self.target.setup().roster(), &self.message)

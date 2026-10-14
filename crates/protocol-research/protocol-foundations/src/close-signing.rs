@@ -134,10 +134,7 @@ fn decode(
         ..CanonicalDecodeLimits::default()
     };
     let tuple = CanonicalTuple::decode(body, &limits).map_err(|_| Error::Shape)?;
-    if tuple.schema_identifier != 1
-        || tuple.schema_version != 1
-        || tuple.items.len() != purpose.item_count()
-    {
+    if !tuple.has_header(purpose.item_count()) {
         return Err(Error::Shape);
     }
     let items = tuple.items;

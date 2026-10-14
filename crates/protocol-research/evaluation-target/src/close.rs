@@ -65,7 +65,6 @@ pub struct VerifiedCloseBarrier {
     setup: Arc<VerifiedSetupAggregate>,
     intent: AuthenticatedCloseIntent,
     proposal: CloseProposalMessage,
-    responses: Vec<AuthenticatedCloseResponse>,
     slots: Vec<ClosedSlot>,
 }
 impl VerifiedCloseBarrier {
@@ -80,10 +79,6 @@ impl VerifiedCloseBarrier {
     }
     pub fn proposal(&self) -> &CloseProposalMessage {
         &self.proposal
-    }
-    /// The used responses in ascending responder order.
-    pub fn responses(&self) -> &[AuthenticatedCloseResponse] {
-        &self.responses
     }
     pub fn slots(&self) -> &[ClosedSlot] {
         &self.slots
@@ -309,12 +304,15 @@ impl CloseContext {
         )
         .map_err(|_| Error::Context)
     }
+    // Finds each response the proposal names, from its responder and for
+    // the intent, and returns the distinct listed identities of each slot in
+    // the union of those responses.
     fn select(
         &self,
         intent: &AuthenticatedCloseIntent,
         proposal: &CloseProposalMessage,
         responses: &[AuthenticatedCloseResponse],
-    ) -> Result<Selection, Error> {
+    ) -> Result<Vec<Vec<[u8; 64]>>, Error> {
         if *proposal.poll() != self.poll.identity()
             || *proposal.setup_identity() != self.setup_identity()
             || proposal.intent() != intent.message.identity()
@@ -332,13 +330,12 @@ impl CloseContext {
             {
                 return Err(Error::Context);
             }
-            used.push(response.clone());
+            used.push(response);
         }
-        let slots = union(
+        Ok(union(
             self.participant_count(),
             used.iter().map(|response| response.message.listed()),
-        );
-        Ok(Selection { used, slots })
+        ))
     }
     /// The author and envelope identity of every usable slot of a proposal's
     /// union: the only bodies its barrier requires. Conflicting slots need
@@ -349,7 +346,7 @@ impl CloseContext {
         proposal: &CloseProposalMessage,
         responses: &[AuthenticatedCloseResponse],
     ) -> Result<Vec<(usize, [u8; 64])>, Error> {
-        Ok(singletons(&self.select(intent, proposal, responses)?.slots))
+        Ok(singletons(&self.select(intent, proposal, responses)?))
     }
     /// The only producer of `VerifiedCloseBarrier`. It authenticates the
     /// organizer's proposal, selects exactly its named responses, and derives
@@ -366,7 +363,7 @@ impl CloseContext {
         let proposal =
             CloseProposalMessage::parse(body, self.participant_count(), self.organizer())
                 .map_err(|_| Error::Shape)?;
-        let Selection { used, slots } = self.select(&intent, &proposal, responses)?;
+        let slots = self.select(&intent, &proposal, responses)?;
         if !verify_close_signature(
             self.key(self.organizer())?,
             ClosePurpose::Proposal,
@@ -392,17 +389,9 @@ impl CloseContext {
             setup: self.setup.clone(),
             intent,
             proposal,
-            responses: used,
             slots,
         })
     }
-}
-
-/// The named responses of a proposal and the distinct listed identities of
-/// each slot in their union.
-struct Selection {
-    used: Vec<AuthenticatedCloseResponse>,
-    slots: Vec<Vec<[u8; 64]>>,
 }
 
 fn held_identities(held: &[AuthenticatedBallotBody]) -> Vec<[u8; 64]> {

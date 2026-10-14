@@ -105,7 +105,7 @@ impl RegistrationHeader {
             0,
         )
         .map_err(|_| crate::Error::Shape)?;
-        if tuple.schema_identifier != 1 || tuple.schema_version != 1 || tuple.items.len() != 6 {
+        if !tuple.has_header(6) {
             return Err(crate::Error::Shape);
         }
         let items = &tuple.items;

@@ -249,9 +249,10 @@ impl TargetSession {
                 let engine = session.engine.as_mut().ok_or(Error::Arithmetic)?;
                 let required = engine.requirements().map_err(|_| Error::Arithmetic)?;
                 let loaded = engine.key_count();
-                let input_kind = required.input_position.map_or(0, |author| {
-                    usize::from(session.inventory.accepted[author].is_some())
-                });
+                let input_kind = match required.input_position {
+                    Some(author) => usize::from(session.inventory.accepted(author)?.is_some()),
+                    None => 0,
+                };
                 for value in [
                     required.step,
                     loaded,

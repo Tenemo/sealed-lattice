@@ -180,7 +180,7 @@ pub fn verify_poll(
         maximum_cumulative_allocation_byte_length: 4 * MAXIMUM_POLL_BYTES,
     };
     let tuple = CanonicalTuple::decode(body, &limits).map_err(|_| Error::Shape)?;
-    if tuple.schema_identifier != 1 || tuple.schema_version != 1 || tuple.items.len() != 7 {
+    if !tuple.has_header(7) {
         return Err(Error::Shape);
     }
     let items = &tuple.items;

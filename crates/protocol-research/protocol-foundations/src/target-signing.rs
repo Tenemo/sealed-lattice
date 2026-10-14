@@ -46,10 +46,7 @@ impl TargetMessage {
             ..CanonicalDecodeLimits::default()
         };
         let tuple = CanonicalTuple::decode(body, &limits).map_err(|_| Error::Shape)?;
-        if tuple.schema_identifier != 1
-            || tuple.schema_version != 1
-            || ![6, 7].contains(&tuple.items.len())
-        {
+        if !(tuple.has_header(6) || tuple.has_header(7)) {
             return Err(Error::Shape);
         }
         let items = &tuple.items;

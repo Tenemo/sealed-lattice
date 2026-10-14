@@ -1,4 +1,5 @@
 use super::*;
+use parallel_work::CHUNK_LIMIT;
 use sha3::{
     Shake256,
     digest::{ExtendableOutput, Update, XofReader},
@@ -61,12 +62,12 @@ fn incomplete_oversized_and_excess_streams_cannot_return_a_digest() {
             .is_err()
     );
     let mut hasher = header_body_hasher(profile, &header).unwrap();
-    assert!(hasher.push(&vec![0; (1 << 20) + 1]).is_err());
+    assert!(hasher.push(&vec![0; CHUNK_LIMIT + 1]).is_err());
     assert!(hasher.finish().is_err());
     let mut hasher = header_body_hasher(profile, &header).unwrap();
     let mut body = header.clone();
     body.extend((0..ciphertext_bytes(profile) + PROOF_HEADER_BYTES).map(|index| index as u8));
-    for part in body[header.len()..].chunks(1 << 20) {
+    for part in body[header.len()..].chunks(CHUNK_LIMIT) {
         hasher.push(part).unwrap();
     }
     assert!(hasher.push(&[0]).is_err());
@@ -105,11 +106,18 @@ fn body_digest_matches_the_framed_shake256_across_part_boundaries() {
     }
     let mut expected = [0; 64];
     sponge.finalize_xof().read(&mut expected);
-    for part_size in [4093, 1 << 20] {
+    for part_size in [4093, CHUNK_LIMIT] {
         let mut hasher = header_body_hasher(profile, &body[..HEADER_BYTES]).unwrap();
         for part in body[HEADER_BYTES..].chunks(part_size) {
             hasher.push(part).unwrap();
         }
         assert_eq!(hasher.finish().unwrap(), expected);
     }
+    // Single-byte parts, then parts of the limit.
+    let mut hasher = header_body_hasher(profile, &body[..HEADER_BYTES]).unwrap();
+    let (single, rest) = body[HEADER_BYTES..].split_at(4096);
+    for part in single.chunks(1).chain(rest.chunks(CHUNK_LIMIT)) {
+        hasher.push(part).unwrap();
+    }
+    assert_eq!(hasher.finish().unwrap(), expected);
 }

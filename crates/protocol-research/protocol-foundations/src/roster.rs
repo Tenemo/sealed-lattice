@@ -61,7 +61,7 @@ impl RetainedContributionContext {
             maximum_cumulative_allocation_byte_length: 8192,
         };
         let tuple = CanonicalTuple::decode(bytes, &limits).map_err(|_| Error::Shape)?;
-        if tuple.schema_identifier != 1 || tuple.schema_version != 1 || tuple.items.len() != 3 {
+        if !tuple.has_header(3) {
             return Err(Error::Shape);
         }
         let items = &tuple.items;

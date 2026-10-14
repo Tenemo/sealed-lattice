@@ -7,7 +7,7 @@ use crate::{
         CanonicalItemType, CanonicalTuple,
     },
 };
-use parallel_work::{HashStream, PendingDigest, Sponge};
+use parallel_work::{CHUNK_LIMIT, HashStream, PendingDigest, Sponge};
 
 /// The identity of a public polynomial in its canonical coefficient
 /// encoding: a setup aggregate, a common polynomial, or a key polynomial read
@@ -65,7 +65,7 @@ impl IdentityHasher {
 }
 
 /// Hashes a body of a committed length, pushed in nonempty parts of at most
-/// one mebibyte, into its exact framed byte identity. A refused part
+/// `CHUNK_LIMIT` bytes, into its exact framed byte identity. A refused part
 /// consumes the hasher. The identity supplies no proof or signing authority.
 pub struct BodyHasher(Option<IdentityHasher>);
 impl BodyHasher {
@@ -74,7 +74,7 @@ impl BodyHasher {
     }
     pub fn push(&mut self, bytes: &[u8]) -> Result<(), Error> {
         let hash = self.0.as_mut().ok_or(Error::Consumed)?;
-        if bytes.is_empty() || bytes.len() > 1 << 20 || hash.absorb(bytes).is_err() {
+        if bytes.is_empty() || bytes.len() > CHUNK_LIMIT || hash.absorb(bytes).is_err() {
             self.0 = None;
             return Err(Error::Shape);
         }

@@ -53,11 +53,8 @@ pub trait WorkingStore {
 /// Classification codes in the target: 0 absent, 1 invalid, 2 accepted and
 /// 3 conflicting.
 pub struct ClassifiedClosedInventory {
-    pub(crate) poll: Arc<VerifiedPoll>,
-    pub(crate) setup: Arc<VerifiedSetupAggregate>,
     barrier: VerifiedCloseBarrier,
     classifications: Vec<u8>,
-    pub(crate) accepted: Vec<Option<BallotEnvelope>>,
 }
 impl ClassifiedClosedInventory {
     /// Consumes the close barrier and exactly one owning classification for
@@ -71,23 +68,19 @@ impl ClassifiedClosedInventory {
             return Err(Error::Incomplete);
         }
         let mut encoded = Vec::with_capacity(count);
-        let mut accepted = Vec::with_capacity(count);
         for (slot, classification) in barrier.slots().iter().zip(classifications) {
             match (slot, classification) {
                 (ClosedSlot::Absent, None) => {
                     encoded.push(0);
-                    accepted.push(None);
                 }
                 (ClosedSlot::Conflicting(_), None) => {
                     encoded.push(3);
-                    accepted.push(None);
                 }
                 (ClosedSlot::Usable(source), Some(BallotBodyClassification::Invalid(value))) => {
                     if source.authentication().envelope().bytes() != value.envelope().bytes() {
                         return Err(Error::Context);
                     }
                     encoded.push(1);
-                    accepted.push(None);
                 }
                 (ClosedSlot::Usable(source), Some(BallotBodyClassification::Valid(value))) => {
                     // The owning submission verifier matched this envelope to
@@ -97,30 +90,32 @@ impl ClassifiedClosedInventory {
                         return Err(Error::Context);
                     }
                     encoded.push(2);
-                    accepted.push(Some(value.envelope().clone()));
                 }
                 _ => return Err(Error::Incomplete),
             }
         }
         Ok(Self {
-            poll: barrier.poll().clone(),
-            setup: barrier.setup().clone(),
             barrier,
             classifications: encoded,
-            accepted,
         })
     }
     pub fn accepted_authors(&self) -> impl Iterator<Item = usize> + '_ {
-        self.accepted
-            .iter()
-            .enumerate()
-            .filter_map(|(position, value)| value.as_ref().map(|_| position))
+        (0..self.classifications.len()).filter(|&author| self.classifications[author] == 2)
+    }
+    /// The envelope of the author's accepted ballot, or none when the
+    /// author's slot holds no accepted ballot.
+    pub(crate) fn accepted(&self, author: usize) -> Result<Option<&BallotEnvelope>, Error> {
+        let code = self.classifications.get(author).ok_or(Error::Context)?;
+        Ok(match (code, &self.barrier.slots()[author]) {
+            (2, ClosedSlot::Usable(source)) => Some(source.authentication().envelope()),
+            _ => None,
+        })
     }
     pub fn poll(&self) -> &Arc<VerifiedPoll> {
-        &self.poll
+        self.barrier.poll()
     }
     pub fn setup(&self) -> &Arc<VerifiedSetupAggregate> {
-        &self.setup
+        self.barrier.setup()
     }
     pub fn barrier(&self) -> &VerifiedCloseBarrier {
         &self.barrier
@@ -128,8 +123,8 @@ impl ClassifiedClosedInventory {
     fn target_fields(&self) -> Result<Vec<CanonicalItem>, Error> {
         Ok(vec![
             CanonicalItem::nonempty_ascii(TARGET_PURPOSE).map_err(|_| Error::Encoding)?,
-            CanonicalItem::hash512(self.poll.identity()),
-            CanonicalItem::hash512(self.setup.identity()),
+            CanonicalItem::hash512(self.poll().identity()),
+            CanonicalItem::hash512(self.setup().identity()),
             CanonicalItem::hash512(*self.barrier.proposal().identity()),
             CanonicalItem::variable_bytes(&self.classifications).map_err(|_| Error::Encoding)?,
         ])
@@ -166,7 +161,7 @@ impl ClassifiedClosedInventory {
             return Ok(None);
         }
         let metadata = self
-            .setup
+            .setup()
             .polynomials()
             .iter()
             .find(|value| value.index() == index)
@@ -193,7 +188,7 @@ impl ClassifiedClosedInventory {
         if required.input_position != Some(author) {
             return Err(Error::Context);
         }
-        let Some(envelope) = self.accepted.get(author).ok_or(Error::Context)?.as_ref() else {
+        let Some(envelope) = self.accepted(author)? else {
             let zero = engine.zero_value();
             engine
                 .load_input(author, zero)
@@ -211,21 +206,22 @@ impl ClassifiedClosedInventory {
         }))
     }
     pub fn start(self) -> Result<RunningEvaluation, Error> {
-        let program = if self.accepted_authors().count() < minimum_turnout(self.accepted.len()) {
-            None
-        } else {
-            Some(
-                RankingProgram::for_profile(
-                    self.setup.profile(),
-                    usize::from(self.poll.top_count()),
+        let program =
+            if self.accepted_authors().count() < minimum_turnout(self.classifications.len()) {
+                None
+            } else {
+                Some(
+                    RankingProgram::for_profile(
+                        self.setup().profile(),
+                        usize::from(self.poll().top_count()),
+                    )
+                    .ok_or(Error::UnsupportedProfile)?,
                 )
-                .ok_or(Error::UnsupportedProfile)?,
-            )
-        };
+            };
         let mut engine = program
             .as_ref()
             .map(|program| {
-                Engine::new(self.setup.profile(), program.bytes()).map_err(|_| Error::Arithmetic)
+                Engine::new(self.setup().profile(), program.bytes()).map_err(|_| Error::Arithmetic)
             })
             .transpose()?;
         // The instance and each helper grow once to what the evaluation plans
@@ -512,10 +508,10 @@ impl VerifiedEvaluationTarget {
         let body = CanonicalTuple::new(1, 1, fields)
             .encode()
             .map_err(|_| Error::Encoding)?;
-        let identity = target_identity(&body, inventory.setup.profile().participants())?;
+        let identity = target_identity(&body, inventory.setup().profile().participants())?;
         Ok(Self {
-            poll: inventory.poll.clone(),
-            setup: inventory.setup.clone(),
+            poll: inventory.poll().clone(),
+            setup: inventory.setup().clone(),
             classified: Some(inventory),
             body,
             identity,
