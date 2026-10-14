@@ -8,13 +8,6 @@ import {
 import { bitLength, byteLength } from '#tests/exact-integer.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import {
-    zero,
-    one,
-    base,
-    add,
-    subtract,
-    multiply,
-    scale,
     negate,
     power,
     powers,
@@ -31,7 +24,12 @@ import {
     zeros,
 } from '#tests/relation-operator-model.js';
 import { type SupportedProfile } from '#tests/supported-profile-model.js';
-import { type Extension } from '#tests/word-proof-reference/field.js';
+import {
+    type Extension,
+    wordFieldArithmetic,
+} from '#tests/word-proof-reference/field.js';
+
+const { zero, one, base, add, subtract, multiply, scale } = wordFieldArithmetic;
 
 const productionBallotLayout = {
     degree: Number(fixedModulusBfvInputs.polynomialDegree),

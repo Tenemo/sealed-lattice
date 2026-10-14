@@ -18,6 +18,10 @@ const agreement = compileCommonAgreementDegreeCensus();
 const tagBytes = 64;
 const saltBytes = 128;
 const elementBytes = 48;
+// The canonical tuple item types of a proof role.
+const asciiItem = 2;
+const unsigned16Item = 3;
+const hash512Item = 6;
 type Purpose = ProofRelationCatalogueEntry['role'];
 const purposeCatalogues = new Map<
     Purpose,
@@ -59,7 +63,7 @@ const parseRole = (
     if (offset !== role.length) return undefined;
     const ascii = (index: number) => {
         const item = items[index];
-        return item.type === 2 &&
+        return item.type === asciiItem &&
             item.bytes.length >= 4 &&
             item.bytes.readUInt32LE(0) === item.bytes.length - 4
             ? item.bytes.subarray(4)
@@ -76,8 +80,10 @@ const parseRole = (
         count !== (purpose === 'release' ? 6 : 5) ||
         items
             .slice(2, -1)
-            .some((item) => item.type !== 6 || item.bytes.length !== 64) ||
-        items[items.length - 1].type !== 3 ||
+            .some(
+                (item) => item.type !== hash512Item || item.bytes.length !== 64,
+            ) ||
+        items[items.length - 1].type !== unsigned16Item ||
         items[items.length - 1].bytes.length !== 2
     )
         return undefined;

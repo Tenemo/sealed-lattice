@@ -3,13 +3,6 @@ import assert from 'node:assert/strict';
 import { bitLength, byteLength, littleEndian } from '#tests/exact-integer.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import {
-    zero,
-    one,
-    base,
-    add,
-    subtract,
-    multiply,
-    scale,
     negate,
     power,
     powers,
@@ -31,7 +24,12 @@ import {
     type SupportedProfile,
 } from '#tests/supported-profile-model.js';
 import { shareEncryptionParameters } from '#tests/wide-share-lifting-model.js';
-import { type Extension } from '#tests/word-proof-reference/field.js';
+import {
+    type Extension,
+    wordFieldArithmetic,
+} from '#tests/word-proof-reference/field.js';
+
+const { zero, one, base, add, subtract, multiply, scale } = wordFieldArithmetic;
 
 const productionSetupLayout = {
     degree: Number(fixedModulusBfvInputs.polynomialDegree),

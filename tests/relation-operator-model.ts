@@ -20,10 +20,8 @@ import { type WordProofDomain } from '#tests/word-proof-reference/transcript.js'
 // operator keeps each public column with the weight it gives every witness
 // column, which is how a verifier evaluates it at queried points.
 
-const { modulus, zero, one, base, add, subtract, multiply, scale, equal } =
+const { modulus, zero, one, add, subtract, multiply, scale, equal } =
     wordFieldArithmetic;
-
-export { zero, one, base, add, subtract, multiply, scale };
 
 export const negate = (value: Extension) => subtract(zero, value);
 
