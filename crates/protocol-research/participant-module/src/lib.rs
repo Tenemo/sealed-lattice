@@ -13,6 +13,8 @@ mod abi;
 pub mod ballot;
 #[path = "close-work.rs"]
 pub mod close_work;
+#[path = "contribution-session.rs"]
+pub mod contribution_session;
 #[path = "custody-identity.rs"]
 pub mod custody_identity;
 #[cfg(any(target_arch = "wasm32", test))]

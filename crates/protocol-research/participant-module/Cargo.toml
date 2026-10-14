@@ -13,7 +13,6 @@ invalid-ballot = ["ballot-proof/invalid-ballot"]
 
 [dependencies]
 protocol-foundations = { path = "../protocol-foundations" }
-contribution-prover = { path = "../contribution-prover" }
 setup-witness = { path = "../setup-witness" }
 supported-profile = { path = "../supported-profile" }
 num-bigint.workspace = true

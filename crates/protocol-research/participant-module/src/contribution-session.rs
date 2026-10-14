@@ -34,7 +34,7 @@ const _: () = assert!(
 pub struct Refused;
 protocol_foundations::operation_codes! {
     /// The contribution proof's commands.
-    enum ProverOperation {
+    pub enum ProverOperation {
         Generate = 2,
         Step = 7,
         BeginPolynomial = 8,
@@ -71,7 +71,37 @@ protocol_foundations::operation_codes! {
 /// The host's receipt of one chunk of a public setup object at an
 /// offset: object zero is the statement header and object i + 1 setup
 /// polynomial i.
-pub(crate) type PublicChunk = fn(object: usize, offset: usize, bytes: &[u8]);
+pub type PublicChunk = Box<dyn FnMut(usize, usize, &[u8])>;
+
+/// Opens only the public checkpoint header under the original owner's
+/// retained context. The importer still authenticates every sealed record
+/// and recipient key before restoring the unfinished proof.
+pub fn import_checkpoint(
+    context: &RetainedContributionContext,
+    position: usize,
+    bytes: &[u8],
+) -> Result<first_checkpoint::Import, word_proof::bridge::Error> {
+    use word_proof::bridge::Error;
+    let prefix = bytes.get(..128).ok_or(Error::Operation)?;
+    let import = first_checkpoint::Import::begin(&bytes[128..])?;
+    let expected = context
+        .checkpoint_role(prefix, position, import.profile())
+        .map_err(|_| Error::Operation)?;
+    if import.role() != expected {
+        return Err(Error::Operation);
+    }
+    Ok(import)
+}
+
+/// The longest checkpoint header of a profile's contribution and each of its
+/// sealed checkpoint records' lengths, in record order.
+pub fn checkpoint_layout(profile: Profile) -> (usize, Vec<usize>) {
+    (
+        first_checkpoint::maximum_header_bytes(profile),
+        first_checkpoint::record_lengths(&setup_relation(profile)),
+    )
+}
+
 struct PublicOutput {
     profile: Profile,
     // The statement's digest and context, which helpers hash when there are
@@ -162,7 +192,6 @@ impl Work {
         proposal: &RosterProposal,
         position: usize,
         source: setup_witness::fhe_key_source::FheKeySource,
-        public_chunk: PublicChunk,
     ) -> Result<Self, ()> {
         let profile = proposal.profile();
         let role = proposal.contribution_role(position).map_err(|_| ())?;
@@ -177,7 +206,7 @@ impl Work {
                 .collect(),
             generator: Some(Contribution::from_source(profile, source).map_err(|_| ())?),
             proof: None,
-            public: Some(PublicOutput::new(profile, &role, public_chunk)),
+            public: None,
             role,
             next_gadget: 0,
             shares_started: false,
@@ -336,7 +365,8 @@ pub struct ContributionSession {
     checkpoint_export: Option<first_checkpoint::Export>,
     checkpoint_import: Option<first_checkpoint::Import>,
     restore_keys: Vec<Option<Vec<u8>>>,
-    public_chunk: PublicChunk,
+    // The receiver of the public setup objects, until generation begins.
+    public_chunk: Option<PublicChunk>,
 }
 impl ContributionSession {
     pub fn new(public_chunk: PublicChunk) -> Self {
@@ -348,7 +378,7 @@ impl ContributionSession {
             checkpoint_export: None,
             checkpoint_import: None,
             restore_keys: Vec::new(),
-            public_chunk,
+            public_chunk: Some(public_chunk),
         }
     }
     /// Initializes an embedded prover from the owning verifier's immutable proposal.
@@ -362,13 +392,15 @@ impl ContributionSession {
         use protocol_foundations::Error;
         if self.stopped
             || self.work.is_some()
+            || self.public_chunk.is_none()
             || self.checkpoint_import.is_some()
             || self.checkpoint_export.is_some()
         {
             return Err(Error::Consumed);
         }
-        let work =
-            Work::new(proposal, position, source, self.public_chunk).map_err(|_| Error::Context)?;
+        let mut work = Work::new(proposal, position, source).map_err(|_| Error::Context)?;
+        let public_chunk = self.public_chunk.take().ok_or(Error::Consumed)?;
+        work.public = Some(PublicOutput::new(work.profile, &work.role, public_chunk));
         self.output.clear();
         self.work = Some(work);
         Ok(())
@@ -454,8 +486,7 @@ impl ContributionSession {
                         && checkpoint_export.is_none()
                         && checkpoint_import.is_none() =>
                 {
-                    let import =
-                        crate::import_checkpoint(retained, position, bytes).map_err(|_| ())?;
+                    let import = import_checkpoint(retained, position, bytes).map_err(|_| ())?;
                     let participants = import.profile().participants();
                     *checkpoint_import = Some(import);
                     *restore_keys = vec![None; participants];
@@ -527,18 +558,24 @@ impl ContributionSession {
         self.output.clear();
         self.stopped = true;
     }
-    pub fn command(
+    pub fn command(&mut self, code: u32, argument: usize, length: usize) -> Result<(), Refused> {
+        self.advance(
+            ProverOperation::from_code(code).ok_or(Refused)?,
+            argument,
+            length,
+        )
+    }
+    /// Runs a proof command over the first `length` input bytes. A command
+    /// that fails once it runs stops the session.
+    pub fn advance(
         &mut self,
-        operation: u32,
+        operation: ProverOperation,
         argument: usize,
         length: usize,
     ) -> Result<(), Refused> {
         if self.checkpoint_export.is_some() || self.checkpoint_import.is_some() {
             return Err(Refused);
         }
-        let Some(operation) = ProverOperation::from_code(operation) else {
-            return Err(Refused);
-        };
         if length > CHUNK {
             return Err(Refused);
         }

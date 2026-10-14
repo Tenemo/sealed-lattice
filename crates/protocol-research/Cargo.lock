@@ -102,20 +102,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "contribution-prover"
-version = "0.0.0"
-dependencies = [
- "num-bigint",
- "parallel-work",
- "protocol-foundations",
- "setup-witness",
- "statement-stream",
- "supported-profile",
- "word-proof",
- "zeroize",
-]
-
-[[package]]
 name = "cpufeatures"
 version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -294,18 +280,12 @@ version = "0.0.0"
 dependencies = [
  "ballot-encryption",
  "ballot-proof",
- "contribution-prover",
  "encrypted-ranking",
  "evaluation-target",
- "num-bigint",
- "num-traits",
- "parallel-work",
  "participant-module",
  "protocol-foundations",
  "setup-aggregate",
- "setup-witness",
  "supported-profile",
- "word-proof",
  "zeroize",
 ]
 
@@ -362,7 +342,6 @@ version = "0.0.0"
 dependencies = [
  "ballot-encryption",
  "ballot-proof",
- "contribution-prover",
  "encrypted-ranking",
  "evaluation-target",
  "linked-release-proof",

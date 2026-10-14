@@ -1,7 +1,7 @@
 //! The contribution: its offer signing, its proof and checkpoints, and the
 //! retained proposal it names.
 use super::{SESSION, Session, original_context};
-use contribution_prover::contribution_session::{CONTRIBUTION_INPUT_BYTES, ContributionSession};
+use crate::contribution_session::{CONTRIBUTION_INPUT_BYTES, ContributionSession};
 use protocol_foundations::{roster::RetainedContributionContext, signed_packet};
 use std::cell::RefCell;
 use zeroize::{Zeroize, Zeroizing};
@@ -110,7 +110,7 @@ fn send_public_chunk(object: usize, offset: usize, bytes: &[u8]) {
     );
 }
 
-thread_local! {static CONTRIBUTION: RefCell<ContributionSession> = RefCell::new(ContributionSession::new(send_public_chunk));}
+thread_local! {static CONTRIBUTION: RefCell<ContributionSession> = RefCell::new(ContributionSession::new(Box::new(send_public_chunk)));}
 
 /// Drops the completed contribution's private prover state and its
 /// remaining random stream state.

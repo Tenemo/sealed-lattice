@@ -94,7 +94,8 @@ pub fn limits() -> Vec<u64> {
 pub fn profile_bounds(profile: Profile) -> Vec<u64> {
     let participants = profile.participants();
     let contribution = contribution_body::proof_lengths(profile);
-    let (checkpoint_header, checkpoint_records) = contribution_prover::checkpoint_layout(profile);
+    let (checkpoint_header, checkpoint_records) =
+        crate::contribution_session::checkpoint_layout(profile);
     let ballot = ballot_body::body_lengths(profile);
     let response = maximum_close_message_bytes(ClosePurpose::Response, participants);
     let proposal = maximum_close_message_bytes(ClosePurpose::Proposal, participants);

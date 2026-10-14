@@ -13,7 +13,6 @@ members = [
     "evaluation-target",
     "linked-release-proof",
     "encrypted-ranking",
-    "contribution-prover",
     "supported-profile",
     "parallel-work",
 ]

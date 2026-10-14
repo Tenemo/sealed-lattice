@@ -1,8 +1,8 @@
 //! Registration sessions against the registration verifier on a real
 //! registration: the same verified record however the bytes are divided or
 //! interleaved, and the verifier's own refusal of changed bytes.
+use crate::contribution_session::{ContributionSession, checkpoint_layout, import_checkpoint};
 use crate::registration_fixture::{Record, registration};
-use contribution_prover::contribution_session::ContributionSession;
 use parallel_work::sealing;
 use protocol_foundations::{
     Credential, Error,
@@ -180,22 +180,22 @@ fn checkpoint_import_preserves_the_verified_original_owner(
         // The checkpoint decoder accepts this partial header, isolating the
         // owning import helper's role check as the reason for refusal.
         assert!(word_proof::bridge::first_checkpoint::Import::begin(&bytes[128..]).is_ok());
-        assert!(contribution_prover::import_checkpoint(&context, 0, &bytes).is_err());
+        assert!(import_checkpoint(&context, 0, &bytes).is_err());
     }
     for position in [1, 2, usize::MAX] {
-        assert!(contribution_prover::import_checkpoint(&context, position, &valid).is_err());
+        assert!(import_checkpoint(&context, position, &valid).is_err());
     }
     // The checkpoint decoder refuses a header without every recipient key
     // hash.
     let missing_keys = request(&expected_role, 0);
     assert!(word_proof::bridge::first_checkpoint::Import::begin(&missing_keys[128..]).is_err());
-    assert!(contribution_prover::import_checkpoint(&context, 0, &missing_keys).is_err());
+    assert!(import_checkpoint(&context, 0, &missing_keys).is_err());
     for offset in [0, 64] {
         let mut changed = valid.clone();
         changed[offset] ^= 1;
-        assert!(contribution_prover::import_checkpoint(&context, 0, &changed).is_err());
+        assert!(import_checkpoint(&context, 0, &changed).is_err());
     }
-    let imported = contribution_prover::import_checkpoint(&context, 0, &valid).unwrap();
+    let imported = import_checkpoint(&context, 0, &valid).unwrap();
     assert_eq!(imported.role(), expected_role);
     assert!(!imported.complete());
     assert!(imported.finish().is_err());
@@ -212,8 +212,11 @@ fn contribution_session_imports_the_checkpoint(
     key: &[u8],
     profile: Profile,
 ) {
-    let session =
-        || ContributionSession::new(|_, _, _| unreachable!("An import emits no public chunk."));
+    let session = || {
+        ContributionSession::new(Box::new(|_, _, _| {
+            unreachable!("An import emits no public chunk.")
+        }))
+    };
     let write = |session: &mut ContributionSession, bytes: &[u8]| {
         session.input()[..bytes.len()].copy_from_slice(bytes);
     };
@@ -224,7 +227,7 @@ fn contribution_session_imports_the_checkpoint(
         .unwrap();
     assert_eq!(
         importing.checkpoint_records(),
-        contribution_prover::checkpoint_layout(profile).1.len()
+        checkpoint_layout(profile).1.len()
     );
     // A second import is refused without stopping the first.
     write(&mut importing, request);

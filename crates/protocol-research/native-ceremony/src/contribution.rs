@@ -1,121 +1,61 @@
-use contribution_prover::contribution_session::recipient_key_values;
-use num_bigint::{BigInt, Sign};
-use num_traits::Signed;
-use parallel_work::ProtocolHash;
-use participant_module::{Enrollment, offer_signing::OfferSigning};
+use crate::public_output::PublicOutput;
+use participant_module::{
+    Enrollment,
+    contribution_session::{ContributionSession, ProverOperation},
+    offer_signing::OfferSigning,
+};
 use protocol_foundations::roster::RetainedContributionContext;
 use protocol_foundations::roster_authentication::AuthenticatedRosterProposal;
 use setup_aggregate::contribution_family;
-use setup_witness::{
-    PolynomialOutput,
-    contribution::{Contribution, common_polynomial},
-};
-
 use std::{
+    cell::RefCell,
     fs::File,
     io::{Read, Write},
     path::{Path, PathBuf},
+    rc::Rc,
     sync::Arc,
 };
-use supported_profile::{Profile, relation::setup_relation};
-use word_proof::{
-    bridge::{Prover, ProverStep},
-    transcript,
-};
+use supported_profile::Profile;
 
-struct PublicOutput {
+// The session's proof phases: one hundred plus the prover's.
+const POLYNOMIALS_PHASE: u32 = 107;
+const OUTPUT_PHASE: u32 = 110;
+const DONE_PHASE: u32 = 111;
+
+/// Publishes each contribution body polynomial the session emits under its
+/// final name once the next object begins or generation ends. Object zero is
+/// the statement header and object i + 1 setup polynomial i.
+struct BodyFiles {
     profile: Profile,
     directory: PathBuf,
-    next: usize,
-    hash: ProtocolHash,
-    context: ProtocolHash,
+    open: Option<PublicOutput>,
 }
-impl PolynomialOutput for PublicOutput {
-    fn polynomial(&mut self, values: &[BigInt], modulus: &BigInt, width: usize) {
-        let family = self.profile.setup_family(self.next).unwrap();
-        assert_eq!(
-            (values.len(), width),
-            (
-                self.profile.family_degree(family),
-                self.profile.family_magnitude_bytes(family)
-            )
-        );
-        let half = modulus >> 1usize;
-        // Only contribution body polynomials are published; the others are
-        // recomputed common polynomials and roster keys.
-        let mut file = contribution_family(self.profile, self.next).map(|_| {
-            crate::public_output::PublicOutput::create(
-                self.directory
-                    .join(format!("polynomial-{:02}.bin", self.next)),
-            )
-            .unwrap()
-        });
-        let mut buffer = Vec::with_capacity(1 << 20);
-        let mut encoded = vec![0u8; 1 + width];
-        for value in values {
-            assert!(value.abs() <= half);
-            let (sign, magnitude) = value.to_bytes_le();
-            assert!(magnitude.len() <= width);
-            encoded.fill(0);
-            encoded[0] = u8::from(sign == Sign::Minus);
-            encoded[1..1 + magnitude.len()].copy_from_slice(&magnitude);
-            buffer.extend(&encoded);
-            if buffer.len() + encoded.len() > 1 << 20 {
-                self.hash.update(&buffer);
-                self.context.update(&buffer);
-                if let Some(file) = file.as_mut() {
-                    file.write_all(&buffer).unwrap();
-                }
-                buffer.clear();
+impl BodyFiles {
+    fn receive(&mut self, object: usize, offset: usize, bytes: &[u8]) {
+        if offset == 0 {
+            self.finish();
+            if let Some(index) = object
+                .checked_sub(1)
+                .filter(|index| contribution_family(self.profile, *index).is_some())
+            {
+                let name = format!("polynomial-{index:02}.bin");
+                self.open = Some(PublicOutput::create(self.directory.join(name)).unwrap());
             }
         }
-        if !buffer.is_empty() {
-            self.hash.update(&buffer);
-            self.context.update(&buffer);
-            if let Some(file) = file.as_mut() {
-                file.write_all(&buffer).unwrap();
-            }
+        if let Some(file) = self.open.as_mut() {
+            file.write_all(bytes).unwrap();
         }
-        if let Some(file) = file {
+    }
+    fn finish(&mut self) {
+        if let Some(file) = self.open.take() {
             file.finish().unwrap();
         }
-        self.next += 1;
     }
 }
-fn public_bytes(values: &[BigInt], width: usize) -> Vec<u8> {
-    let mut output = Vec::with_capacity(values.len() * (width + 1));
-    for value in values {
-        let (sign, magnitude) = value.to_bytes_le();
-        assert!(magnitude.len() <= width);
-        output.push(u8::from(sign == Sign::Minus));
-        output.extend(&magnitude);
-        output.resize(output.len() + width - magnitude.len(), 0);
-    }
-    output
-}
-/// A setup statement polynomial: a published body polynomial, a roster
-/// member's registration key or a recomputed common polynomial.
-fn polynomial_bytes(
-    roster: &AuthenticatedRosterProposal,
-    directory: &Path,
-    index: usize,
-) -> Vec<u8> {
-    let profile = roster.proposal().profile();
-    if contribution_family(profile, index).is_some() {
-        return std::fs::read(directory.join(format!("polynomial-{index:02}.bin"))).unwrap();
-    }
-    let records = roster.proposal().records();
-    if let Some(recipient) =
-        (0..records.len()).find(|recipient| profile.recipient_key_polynomial(*recipient) == index)
-    {
-        return records[recipient].public_key().to_vec();
-    }
-    let family = profile.setup_family(index).unwrap();
-    public_bytes(
-        &common_polynomial(profile, index).unwrap(),
-        profile.family_magnitude_bytes(family),
-    )
-}
+
+/// Generates and proves the contribution through the participant module's
+/// contribution session, in the browser worker's command order, then signs
+/// the offer over the published body and proof.
 pub fn generate(
     poll: &protocol_foundations::poll::VerifiedPoll,
     roster: &Arc<AuthenticatedRosterProposal>,
@@ -125,77 +65,64 @@ pub fn generate(
 ) -> (OfferSigning, Vec<u8>) {
     std::fs::create_dir(directory).unwrap();
     let profile = roster.proposal().profile();
-    let role = roster.proposal().contribution_role(position).unwrap();
-    let header = profile.setup_statement_header();
-    let mut output = PublicOutput {
+    let files = Rc::new(RefCell::new(BodyFiles {
         profile,
         directory: directory.to_owned(),
-        next: 0,
-        hash: ProtocolHash::new(),
-        context: transcript::context_hasher(&setup_relation(profile), &role),
-    };
-    output.hash.update(&header);
-    output.context.update(&header);
+        open: None,
+    }));
+    let receiver = Rc::clone(&files);
+    let mut session = ContributionSession::new(Box::new(move |object, offset, bytes| {
+        receiver.borrow_mut().receive(object, offset, bytes);
+    }));
     let source = enrollment.contribution_source(profile).unwrap();
-    let mut generator = Contribution::from_source(profile, source).unwrap();
-    for gadget in 0..profile.gadget_length() {
-        generator.gadget(gadget, &mut output).unwrap();
+    session
+        .begin_verified(roster.proposal(), position, source)
+        .unwrap();
+    while session.phase() < 100 {
+        session.advance(ProverOperation::Generate, 0, 0).unwrap();
     }
-    generator.begin_shares(&mut output).unwrap();
-    for (recipient, record) in roster.proposal().records().iter().enumerate() {
-        let values = recipient_key_values(record);
-        generator.share(recipient, &values, &mut output).unwrap();
+    files.borrow_mut().finish();
+    while session.phase() != POLYNOMIALS_PHASE {
+        session.advance(ProverOperation::Step, 0, 0).unwrap();
     }
-    generator.finish().unwrap();
-    assert_eq!(output.next, profile.setup_polynomials());
-    let columns = generator.into_columns().unwrap();
-    let mut prover = Prover::from_generated(
-        profile,
-        &role,
-        output.hash.finalize(),
-        output.context.finalize(),
-        header,
-        columns,
-    )
-    .unwrap();
-    let mut unused = Vec::new();
-    loop {
-        match prover.phase_code() {
-            3..=6 | 8..=9 => prover
-                .advance(ProverStep::Step, 0, &[], &mut unused)
-                .unwrap(),
-            7 => {
-                for index in 0..profile.setup_polynomials() {
-                    prover
-                        .advance(ProverStep::BeginPolynomial, index, &[], &mut unused)
-                        .unwrap();
-                    let bytes = polynomial_bytes(roster, directory, index);
-                    for chunk in bytes.chunks(1 << 20) {
-                        prover
-                            .advance(ProverStep::PushPolynomial, 0, chunk, &mut unused)
-                            .unwrap();
-                    }
-                    prover
-                        .advance(ProverStep::FinishPolynomial, 0, &[], &mut unused)
-                        .unwrap();
-                }
-            }
-            10 => break,
-            phase => panic!("Unexpected setup proof phase {phase}"),
+    // The prover takes the published body polynomials back from the host
+    // and recomputes the roster keys and common polynomials itself.
+    for index in 0..profile.setup_polynomials() {
+        if contribution_family(profile, index).is_none() {
+            session
+                .advance(ProverOperation::ConsumePredecessor, index, 0)
+                .unwrap();
+            continue;
         }
-    }
-    let proof_path = directory.join("proof.bin");
-    let mut file = crate::public_output::PublicOutput::create(&proof_path).unwrap();
-    while prover.phase_code() != 11 {
-        let mut bytes = Vec::new();
-        prover
-            .advance(ProverStep::NextOutput, 0, &[], &mut bytes)
+        session
+            .advance(ProverOperation::BeginPolynomial, index, 0)
             .unwrap();
-        assert!(bytes.len() <= 1 << 20);
-        file.write_all(&bytes).unwrap();
+        let mut file = File::open(directory.join(format!("polynomial-{index:02}.bin"))).unwrap();
+        loop {
+            let length = file.read(&mut session.input()[..1 << 20]).unwrap();
+            if length == 0 {
+                break;
+            }
+            session
+                .advance(ProverOperation::PushPolynomial, 0, length)
+                .unwrap();
+        }
+        session
+            .advance(ProverOperation::FinishPolynomial, 0, 0)
+            .unwrap();
     }
+    // The linear oracle, then the folded combination.
+    session.advance(ProverOperation::Step, 0, 0).unwrap();
+    session.advance(ProverOperation::Step, 0, 0).unwrap();
+    let proof_path = directory.join("proof.bin");
+    let mut file = PublicOutput::create(&proof_path).unwrap();
+    while session.phase() == OUTPUT_PHASE {
+        session.advance(ProverOperation::NextOutput, 0, 0).unwrap();
+        file.write_all(session.output()).unwrap();
+    }
+    assert_eq!(session.phase(), DONE_PHASE);
     file.finish().unwrap();
-    drop(prover);
+    drop(session);
     let body_header = enrollment
         .contribution_header(
             profile,
