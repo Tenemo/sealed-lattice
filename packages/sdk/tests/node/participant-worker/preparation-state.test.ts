@@ -52,12 +52,13 @@ const endorsement = (stage: 'intent' | 'signed'): PreparationEndorsement => ({
     reference: originalReference(),
 });
 
-// Synthetic journal payloads for structural checks only: neither
-// their opaque signatures nor SPI1 bytes establish a verified selection.
+// Synthetic journal payloads for structural checks only: neither their
+// opaque signatures nor their selection reference bytes establish a verified
+// selection.
 const unfinished = (phase: 4 | 5 | 6): ContributionState => ({
     phase,
     position: 2,
-    header: phase === 4 ? new Uint8Array() : Uint8Array.of(70, 80, 67, 52, 7),
+    header: phase === 4 ? new Uint8Array() : Uint8Array.of(7),
     publicRecords:
         phase === 4
             ? []
@@ -108,7 +109,7 @@ describe('independent preparation authority journal', () => {
     });
 
     it.each([4, 5, 6] as const)(
-        'permits endorsement with original SPI1 while eligible own phase %i remains unfinished',
+        'permits endorsement with an original selection reference while eligible own phase %i remains unfinished',
         (phase) => {
             const own = unfinished(phase);
             expect(own.position).toBeGreaterThanOrEqual(
@@ -318,14 +319,14 @@ describe('independent preparation authority journal', () => {
             expect(() => unusedPreparationPurposes(bad)).toThrow();
         }
         const badLength = encoded.slice();
-        new DataView(badLength.buffer).setUint32(4, 0xffffffff, true);
+        new DataView(badLength.buffer).setUint32(0, 0xffffffff, true);
         expect(() => decodePreparationState(badLength, profile)).toThrow();
         expect(() => unusedPreparationPurposes(badLength)).toThrow();
         for (const phase of [0, 3, 10, 255])
             expect(() =>
                 unusedPreparationPurposes(
                     preparationJournalLayout([
-                        Uint8Array.of(80, 67, 83, 53, phase),
+                        Uint8Array.of(phase),
                         new Uint8Array(),
                         new Uint8Array(),
                     ]),
@@ -335,7 +336,7 @@ describe('independent preparation authority journal', () => {
 
     it('does not let another journal phase hide malformed required own work', () => {
         const own = encodeContributionState(unfinished(5));
-        own[4] = 4; // A generation intent cannot carry the checkpoint records.
+        own[0] = 4; // A generation intent cannot carry the checkpoint records.
         const decoded = decodePreparationState(
             encodePreparationState({
                 contribution: own,

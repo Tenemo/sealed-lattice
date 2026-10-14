@@ -69,8 +69,10 @@ const fixture = async (author = 1) => {
     );
     const envelope = new Uint8Array(profile.ballot.envelopeBytes);
     const view = new DataView(envelope.buffer);
-    view.setUint16(132, author, true);
-    view.setBigUint64(142, BigInt(body.length), true);
+    // The poll and setup identities, then the author, ballot time and body
+    // length.
+    view.setUint16(128, author, true);
+    view.setBigUint64(138, BigInt(body.length), true);
     const submission = new Uint8Array(profile.close.submissionBytes);
     submission.set(envelope);
     const { module } = await instantiateParticipantModule(

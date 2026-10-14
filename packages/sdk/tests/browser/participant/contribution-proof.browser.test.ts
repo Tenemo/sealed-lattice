@@ -304,29 +304,26 @@ describe('fixed private contribution proof storage', () => {
     it('refuses malformed body framing before reading private records', async () => {
         const fixed = await fixture();
         const header = await fixed.retain(proofBytes(17), [17]);
-        const wrongMagic = header.slice();
-        wrongMagic[0] ^= 1;
         const shortProof = header.slice();
-        new DataView(shortProof.buffer).setBigUint64(4, 16n, true);
+        new DataView(shortProof.buffer).setBigUint64(0, 16n, true);
         const tooLong = header.slice();
         new DataView(tooLong.buffer).setBigUint64(
-            4,
+            0,
             BigInt(bounds.maximumProofBytes) + 1n,
             true,
         );
         const overflowing = header.slice();
         new DataView(overflowing.buffer).setBigUint64(
-            4,
+            0,
             18_446_744_073_709_551_615n,
             true,
         );
         for (const malformed of [
-            wrongMagic,
             shortProof,
             tooLong,
             overflowing,
-            header.subarray(0, 75),
-            new Uint8Array(77),
+            header.subarray(0, 71),
+            new Uint8Array(73),
         ])
             await expect(
                 readProof(bounds, malformed, fixed.read, () => undefined),

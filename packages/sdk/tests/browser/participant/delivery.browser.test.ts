@@ -44,9 +44,10 @@ const rootIdentity = async (bytes: Uint8Array) =>
     );
 const hexadecimal = (bytes: Uint8Array) =>
     Array.from(bytes, (value) => value.toString(16).padStart(2, '0')).join('');
-const rootContext = Uint8Array.of(80, 79, 76, 49, 7);
 const generation = 29;
 const runtime = 'c4'.repeat(64);
+// A root's associated data is its runtime identity.
+const rootContext = new Uint8Array(64).fill(0xc4);
 
 // A participant database holding one sealed root, two data records and three
 // release records, and the authority a delivery expects of it.

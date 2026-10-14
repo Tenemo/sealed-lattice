@@ -147,23 +147,16 @@ describe('participant release state', () => {
         refused(targetPhase.signed, body);
         refused(releasePhase.body, body.subarray(0, -1));
         refused(releasePhase.body, Uint8Array.of(...body, 0));
-        const marker = body.slice();
-        marker[0] ^= 1;
-        refused(releasePhase.body, marker);
-        // The state before the retained status is another shape.
-        const unversioned = body.slice();
-        unversioned[3] = '2'.charCodeAt(0);
-        refused(releasePhase.body, unversioned);
         const unknownStatus = body.slice();
-        unknownStatus[5] = ballotInclusions.length;
+        unknownStatus[1] = ballotInclusions.length;
         refused(releasePhase.body, unknownStatus);
         // A release follows a signed target or the participant's own
         // completed close, never a pending signature or another role's close.
         const predecessor = body.slice();
-        predecessor[4] = targetPhase.locked;
+        predecessor[0] = targetPhase.locked;
         refused(releasePhase.body, predecessor);
         for (const isOrganizer of [false, true]) {
-            predecessor[4] = completedClosePhase(!isOrganizer);
+            predecessor[0] = completedClosePhase(!isOrganizer);
             refused(releasePhase.body, predecessor, isOrganizer);
         }
         // The body must fit its bounds and its record count.

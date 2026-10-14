@@ -161,9 +161,6 @@ describe('participant ballot state', () => {
         refused(ballotPhase.signed + 1, body);
         refused(ballotPhase.body, body.subarray(0, -1));
         refused(ballotPhase.body, Uint8Array.of(...body, 0));
-        const marker = body.slice();
-        marker[0] ^= 1;
-        refused(ballotPhase.body, marker);
         // Scores are one valid score per option until the signed ballot
         // retires them.
         for (const scores of [

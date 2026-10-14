@@ -107,8 +107,9 @@ export const compilePreparationResources = (profile: SupportedProfile) => {
         selectedProofVerificationsPerReader: selected,
         // Complete exact named reads plus owning verification establish
         // published dependencies under monotone store retention; activation
-        // never forwards the selected bodies again. Matching original SPI1
-        // avoids another proof pass; losing/no endorsement follows the fresh path.
+        // never forwards the selected bodies again. A matching original
+        // selection reference avoids another proof pass; losing/no endorsement
+        // follows the fresh path.
         maximumOfferVerificationReadBytes,
         selectedPolynomialRereadBytes,
         selectedProofLookaheadBytes,

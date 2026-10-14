@@ -128,8 +128,8 @@ impl RecipientKey {
 
 #[path = "recipient-key-custody.rs"]
 mod custody;
-/// A sealed recipient key: its magic, its secret's support positions and
-/// the AES-GCM tag.
+/// A sealed recipient key: its secret's support positions and the AES-GCM
+/// tag.
 pub use custody::SEALED_BYTES as SEALED_KEY_BYTES;
 
 #[cfg(test)]

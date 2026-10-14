@@ -54,7 +54,7 @@ const stateAt = (
         phase === 4
             ? new Uint8Array()
             : phase <= 6
-              ? Uint8Array.of(70, 80, 67, 52, 17, 29)
+              ? Uint8Array.of(17, 29)
               : fixtureHeader(proofLength),
     publicRecords:
         phase === 4
