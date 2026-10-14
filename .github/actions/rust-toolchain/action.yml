@@ -9,14 +9,14 @@ inputs:
 runs:
     using: composite
     steps:
-        - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067
+        - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f
           with:
               components: clippy, rustfmt
               toolchain: 1.95.0
               targets: wasm32-unknown-unknown
         # The cache restores before the fetch, so a partial cache cannot
         # replace the registry the fetch fills.
-        - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
+        - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
           with:
               workspaces: ${{ inputs.cache-workspaces }}
         # The module builds offline from the research workspace's lockfile,

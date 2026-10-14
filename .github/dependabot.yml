@@ -1,0 +1,13 @@
+version: 2
+updates:
+    # The workflows and the local composite actions pin actions by commit.
+    - package-ecosystem: github-actions
+      directories:
+          - /
+          - /.github/actions/*
+      schedule:
+          interval: monthly
+      groups:
+          github-actions:
+              patterns:
+                  - '*'
