@@ -1,42 +1,86 @@
 import { readFile } from 'node:fs/promises';
 
+import * as ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 
 import { compileFirstOracleCheckpointCensus } from '#tests/first-oracle-checkpoint-model.js';
+import { readRustSource, rustFunctionBody } from '#tests/node/rust-source.js';
 import { completionProfile } from '#tests/supported-profile-model.js';
+
+// The callees of the calls in the named arrow function's body, in source
+// order. Comments are not calls, so they cannot satisfy an ordering check.
+const callsIn = (source: string, name: string) => {
+    const file = ts.createSourceFile(
+        'source.ts',
+        source,
+        ts.ScriptTarget.Latest,
+        true,
+    );
+    const bodies: ts.Node[] = [];
+    const findBody = (node: ts.Node) => {
+        if (
+            ts.isVariableDeclaration(node) &&
+            node.name.getText(file) === name &&
+            node.initializer !== undefined &&
+            ts.isArrowFunction(node.initializer)
+        )
+            bodies.push(node.initializer.body);
+        ts.forEachChild(node, findBody);
+    };
+    findBody(file);
+    expect(bodies).toHaveLength(1);
+    const calls: string[] = [];
+    const collect = (node: ts.Node) => {
+        if (ts.isCallExpression(node))
+            calls.push(node.expression.getText(file));
+        ts.forEachChild(node, collect);
+    };
+    collect(bodies[0]);
+    return calls;
+};
 
 describe('complete first-oracle proof checkpoint', () => {
     it('keeps the first response salt after the checkpoint and prices separate field reads', async () => {
         const model = compileFirstOracleCheckpointCensus(completionProfile());
-        const read = (file: string) =>
-            readFile(new URL('../../../' + file, import.meta.url), 'utf8');
         const [worker, bridge, transcript, checkpoint] = await Promise.all([
-            read(
-                'packages/sdk/src/participant/worker/stages/contribution/contribution.ts',
+            readFile(
+                new URL(
+                    '../../../packages/sdk/src/participant/worker/stages/contribution/contribution.ts',
+                    import.meta.url,
+                ),
+                'utf8',
             ),
-            read('crates/protocol-research/word-proof/src/bridge.rs'),
-            read('crates/protocol-research/word-proof/src/transcript.rs'),
-            read('crates/protocol-research/word-proof/src/first-checkpoint.rs'),
+            readRustSource('crates/protocol-research/word-proof/src/bridge.rs'),
+            readRustSource(
+                'crates/protocol-research/word-proof/src/transcript.rs',
+            ),
+            readRustSource(
+                'crates/protocol-research/word-proof/src/first-checkpoint.rs',
+            ),
         ]);
+        // The continuation retains its fresh seed before the prover draws
+        // the first response salt from it.
+        const continuation = callsIn(worker, 'continueContribution');
+        expect(continuation.indexOf('commitContribution')).toBeGreaterThan(-1);
+        expect(continuation.indexOf('commitContribution')).toBeLessThan(
+            continuation.indexOf('proverRun'),
+        );
         const position = (source: string, text: string) => {
             const index = source.indexOf(text);
             expect(index).toBeGreaterThanOrEqual(0);
             return index;
         };
-        const continuation = worker.slice(
-            position(worker, 'export const continueContribution'),
+        const step = rustFunctionBody(bridge, 'step');
+        expect(position(step, 'first.finish_commitment();')).toBeLessThan(
+            position(step, 'transcript.respond(&[&first.tree.root()]);'),
         );
-        expect(position(continuation, 'await commitContribution')).toBeLessThan(
-            position(continuation, 'const run = proverRun'),
+        const respond = rustFunctionBody(transcript, 'respond');
+        expect(position(respond, 'let mut salt = [0; 128];')).toBeLessThan(
+            position(respond, 'parallel_work::random::proof(&mut salt);'),
         );
-        expect(position(bridge, 'first.finish_commitment();')).toBeLessThan(
-            position(bridge, 'transcript.respond(&[&first.tree.root()]);'),
+        expect(rustFunctionBody(checkpoint, 'finish')).toContain(
+            'tree: Tree::with_seed(',
         );
-        expect(transcript).toContain('let mut salt = [0; 128];');
-        expect(transcript).toContain(
-            'parallel_work::random::proof(&mut salt);',
-        );
-        expect(checkpoint).toContain('tree: Tree::with_seed(');
 
         // Independent request schedule for the completion profile: one full
         // read for each base mask, the degree mask, then one retained seed.
