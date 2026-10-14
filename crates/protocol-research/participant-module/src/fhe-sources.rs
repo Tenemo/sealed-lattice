@@ -162,10 +162,7 @@ impl Sources {
     fn index(&self, profile: Profile) -> Result<usize, Error> {
         self.families
             .iter()
-            .position(|family| {
-                family.ciphertext_modulus().to_bytes() == profile.ciphertext_modulus().to_bytes()
-                    && family.fhe_common_sample_bits() == profile.fhe_common_sample_bits()
-            })
+            .position(|family| family.same_fhe_key_family(profile))
             .ok_or(Error::State)
     }
 

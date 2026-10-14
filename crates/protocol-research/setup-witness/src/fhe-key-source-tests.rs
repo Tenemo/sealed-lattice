@@ -33,16 +33,10 @@ fn explicit_reader_reproduces_both_original_private_operands() {
 }
 
 #[test]
-fn wrong_modulus_or_common_sampler_width_refuses_before_continuation() {
+fn another_fhe_key_family_refuses_before_continuation() {
     let profile = Profile::new(3, 2).unwrap();
     let original = source(profile, 7);
-    let modulus = profile.ciphertext_modulus().to_bytes();
-    assert!(original.matches_family(&modulus, profile.fhe_common_sample_bits()));
-    assert!(!original.matches_family(&modulus, profile.fhe_common_sample_bits() + 8));
-    let mut changed_modulus = modulus;
-    changed_modulus[0] ^= 2;
-    assert!(!original.matches_family(&changed_modulus, profile.fhe_common_sample_bits()));
-
+    assert!(original.check_profile(profile).is_ok());
     let other = Profile::all()
         .find(|candidate| candidate.ciphertext_modulus() != profile.ciphertext_modulus())
         .unwrap();

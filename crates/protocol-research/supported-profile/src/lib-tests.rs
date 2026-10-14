@@ -6,6 +6,22 @@ fn integer(bytes: &[u8]) -> BigUint {
 }
 
 #[test]
+fn an_fhe_key_family_is_one_modulus_and_common_sampler_width() {
+    let profile = Profile::new(3, 2).unwrap();
+    let mut resized = profile;
+    resized.participants = 20;
+    resized.options = 20;
+    assert!(profile.same_fhe_key_family(resized));
+    let mut wider = profile;
+    wider.common_sample_bits += 8;
+    assert!(!profile.same_fhe_key_family(wider));
+    let other = Profile::all()
+        .find(|candidate| candidate.ciphertext.to_bytes() != profile.ciphertext.to_bytes())
+        .unwrap();
+    assert!(!profile.same_fhe_key_family(other));
+}
+
+#[test]
 fn every_modulus_is_a_certified_prime_of_its_form() {
     let plaintext = 65_537u32;
     for profile in Profile::all() {

@@ -323,6 +323,12 @@ impl Profile {
     pub fn fhe_common_sample_bits(self) -> usize {
         self.common_sample_bits
     }
+    /// Whether the profiles share an FHE key family: one ciphertext modulus
+    /// and one common-sampler width, whatever their dimensions.
+    pub fn same_fhe_key_family(self, other: Self) -> bool {
+        self.ciphertext.to_bytes() == other.ciphertext.to_bytes()
+            && self.common_sample_bits == other.common_sample_bits
+    }
     pub fn sharing_coefficient_bits(self) -> usize {
         self.sharing_coefficient_bits
     }

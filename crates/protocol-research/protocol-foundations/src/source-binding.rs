@@ -13,19 +13,14 @@ use supported_profile::{DEGREE, Profile};
 
 pub const SOURCE_SALT_BYTES: usize = 64;
 
-fn same_family(left: Profile, right: Profile) -> bool {
-    left.ciphertext_modulus().to_bytes() == right.ciphertext_modulus().to_bytes()
-        && left.fhe_common_sample_bits() == right.fhe_common_sample_bits()
-}
-
 fn families(maximum: usize, options: usize) -> Vec<Profile> {
-    let mut families = Vec::new();
+    let mut families: Vec<Profile> = Vec::new();
     for participants in *Profile::participant_range().start()..=maximum {
         let profile =
             Profile::new(participants, options).expect("A verified poll has supported dimensions.");
         if !families
             .iter()
-            .any(|previous| same_family(*previous, profile))
+            .any(|previous| previous.same_fhe_key_family(profile))
         {
             families.push(profile);
         }
@@ -51,7 +46,7 @@ pub(crate) fn fhe_key_family_index(poll: &VerifiedPoll, profile: Profile) -> Res
     }
     fhe_key_families(poll)
         .iter()
-        .position(|family| same_family(*family, profile))
+        .position(|family| family.same_fhe_key_family(profile))
         .ok_or(Error::Context)
 }
 
