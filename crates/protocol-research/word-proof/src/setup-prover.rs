@@ -2,8 +2,8 @@ use crate::{
     combination,
     field::{self, Element},
     fri::{self, Fri},
+    in_memory::write_header,
     linear::{AffineSum, Challenges, LinearOracle, PreparedPolynomial},
-    one_shot::write_header,
     oracles::{FirstOracle, SecondOracle, Witness},
     transcript::{self, Transcript},
     tree::Multiproof,
@@ -15,8 +15,8 @@ use supported_profile::{Profile, relation::*};
 use std::collections::VecDeque;
 use zeroize::Zeroizing;
 
-#[path = "first-checkpoint.rs"]
-pub mod first_checkpoint;
+#[path = "first-oracle-checkpoint.rs"]
+pub mod first_oracle_checkpoint;
 
 const CHUNK: usize = 1 << 20;
 #[derive(Clone, Copy, PartialEq)]
@@ -42,7 +42,7 @@ pub enum ProverStep {
     FinishPolynomial,
     NextOutput,
 }
-pub struct Prover {
+pub struct SetupProver {
     profile: Profile,
     relation: Relation,
     role: Vec<u8>,
@@ -66,7 +66,7 @@ pub struct Prover {
     rows: VecDeque<(usize, Vec<u8>)>,
     multiproof: Multiproof,
 }
-impl Prover {
+impl SetupProver {
     pub fn profile(&self) -> Profile {
         self.profile
     }

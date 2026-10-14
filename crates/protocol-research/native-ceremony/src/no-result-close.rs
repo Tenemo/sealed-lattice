@@ -4,7 +4,7 @@ use crate::close::{
 };
 use crate::scenario::Scenario;
 use ballot_proof::{
-    body::SignedBallotVerifier,
+    body::BallotBodyClassifier,
     submission::{AuthenticatedBallotBody, authenticate_envelope},
 };
 use evaluation_target::close::{CloseContext, ClosedSlot, VerifiedCloseBarrier};
@@ -68,7 +68,7 @@ fn invalid_source(
     crate::write(directory.join("signature.bin"), &signature);
     let authentication = authenticate_envelope(setup, envelope.bytes(), &signature).unwrap();
     assert!(
-        SignedBallotVerifier::new(poll.clone(), setup.clone(), authentication, &header, None)
+        BallotBodyClassifier::new(poll.clone(), setup.clone(), authentication, &header, None)
             .unwrap()
             .requires_key()
     );

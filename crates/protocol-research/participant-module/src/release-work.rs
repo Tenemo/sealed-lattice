@@ -1,21 +1,23 @@
 use evaluation_target::release::ReleaseContext;
-use linked_release_proof::{ReleaseInputs, derive_bound, proof::prove, statement::PublicStatement};
-use protocol_foundations::{
-    Credential, Error, ballot_authentication::RetainedBallotOwner, target_signing::TargetMessage,
+use linked_release_proof::{
+    ReleaseInputs, prepare_release, proof::prove, statement::PublicStatement,
 };
-use setup_witness::{contribution::common_share_polynomial, registration::RegistrationKey};
+use protocol_foundations::{
+    Credential, Error, ballot_authentication::RetainedSetupOwner, target_signing::TargetMessage,
+};
+use setup_witness::{contribution::common_share_polynomial, registration::RecipientKey};
 use std::sync::Arc;
-use word_proof::one_shot::OneShotProof;
+use word_proof::in_memory::InMemoryProof;
 
 /// Private generation is reachable only from an actual verified target
 /// certificate and the corresponding original participant/root context.
 pub struct ReleaseWork {
     context: Arc<ReleaseContext>,
-    owner: Arc<RetainedBallotOwner>,
+    owner: Arc<RetainedSetupOwner>,
 }
 impl ReleaseWork {
     pub fn new(
-        owner: Arc<RetainedBallotOwner>,
+        owner: Arc<RetainedSetupOwner>,
         context: Arc<ReleaseContext>,
     ) -> Result<Self, Error> {
         let target = context.certificate().target();
@@ -32,9 +34,9 @@ impl ReleaseWork {
     /// operation from the seed.
     pub fn prove(
         self,
-        key: &RegistrationKey,
+        key: &RecipientKey,
         credential: &mut Credential,
-    ) -> Result<(Arc<ReleaseContext>, PublicStatement, OneShotProof), Error> {
+    ) -> Result<(Arc<ReleaseContext>, PublicStatement, InMemoryProof), Error> {
         if self.owner.position() != self.context.position()
             || key.public_key() != self.context.public_key()
         {
@@ -59,7 +61,7 @@ impl ReleaseWork {
                 )
                 .map_err(|_| Error::Crypto)?;
                 let prepared =
-                    derive_bound(inputs, *self.context.header()).map_err(|_| Error::Crypto)?;
+                    prepare_release(inputs, *self.context.header()).map_err(|_| Error::Crypto)?;
                 let role = self.context.proof_role().map_err(|_| Error::Context)?;
                 Ok(prove(&role, prepared))
             })

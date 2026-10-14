@@ -1,6 +1,6 @@
 use crate::{
     Credential, Error, SIGNATURE_BYTES, SigningPurpose,
-    ballot_authentication::RetainedBallotOwner,
+    ballot_authentication::RetainedSetupOwner,
     foundation::{
         CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple,
         hash_foundation_tuple_512,
@@ -198,11 +198,11 @@ impl TargetVote {
 impl Credential {
     pub(crate) fn check_target_owner(
         &self,
-        owner: &RetainedBallotOwner,
+        owner: &RetainedSetupOwner,
         roster: &AuthenticatedRosterProposal,
         message: &TargetMessage,
     ) -> Result<(), Error> {
-        self.check_ballot_owner(owner)?;
+        self.check_setup_owner(owner)?;
         let records = roster.proposal().records();
         let record = records.get(owner.position()).ok_or(Error::Context)?;
         if records.len() != message.participants
@@ -222,7 +222,7 @@ impl Credential {
     /// proposed. Its own ballot need not be included.
     pub(crate) fn check_target_predecessors(
         &self,
-        owner: &RetainedBallotOwner,
+        owner: &RetainedSetupOwner,
         roster: &AuthenticatedRosterProposal,
     ) -> Result<(), Error> {
         if self.close_response.is_none()
@@ -238,7 +238,7 @@ impl Credential {
     /// its exact exact body before reaching this method.
     pub fn sign_target(
         &mut self,
-        owner: &RetainedBallotOwner,
+        owner: &RetainedSetupOwner,
         roster: &AuthenticatedRosterProposal,
         message: &TargetMessage,
     ) -> Result<TargetVote, Error> {
@@ -262,7 +262,7 @@ impl Credential {
     /// signs nothing and never reopens that purpose.
     pub fn restore_target(
         &mut self,
-        owner: &RetainedBallotOwner,
+        owner: &RetainedSetupOwner,
         roster: &AuthenticatedRosterProposal,
         message: &TargetMessage,
         packet: &[u8],

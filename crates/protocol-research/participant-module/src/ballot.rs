@@ -2,7 +2,7 @@ use ballot_encryption::{context::BallotComputationContext, encryption::check_bal
 use ballot_proof::statement::setup_input;
 use protocol_foundations::{
     Credential, Error, RETAINED_TAG_BYTES, SIGNATURE_BYTES,
-    ballot_authentication::{BallotEnvelope, ENVELOPE_BYTES, RetainedBallotOwner},
+    ballot_authentication::{BallotEnvelope, ENVELOPE_BYTES, RetainedSetupOwner},
     poll::{VerifiedPoll, verify_poll},
     roster::RetainedContributionContext,
 };
@@ -47,7 +47,7 @@ protocol_foundations::operation_codes! {
 /// Volatile private operations beneath the authenticated parent's ballot phases.
 /// No operation loads a public setup capability from saved records.
 pub struct BallotWork {
-    owner: RetainedBallotOwner,
+    owner: RetainedSetupOwner,
     inputs: RetainedSetupInputs,
     context: Option<BallotComputationContext>,
     key: Option<RetainedAggregatePolynomial>,
@@ -61,7 +61,7 @@ pub struct BallotWork {
     failed: bool,
 }
 impl BallotWork {
-    pub fn into_owner(self) -> RetainedBallotOwner {
+    pub fn into_owner(self) -> RetainedSetupOwner {
         self.owner
     }
     pub fn new(
@@ -95,13 +95,8 @@ impl BallotWork {
                 .checked_sub(RETAINED_TAG_BYTES)
                 .ok_or(Error::Shape)?,
         );
-        let owner = credential.retain_setup_ballot_owner(
-            &poll,
-            proposal,
-            setup_identity,
-            reference,
-            tag,
-        )?;
+        let owner =
+            credential.retain_setup_owner(&poll, proposal, setup_identity, reference, tag)?;
         let inputs = RetainedSetupInputs::parse(proposal.profile(), reference, setup_identity)
             .map_err(|_| Error::Context)?;
         let context = BallotComputationContext::from_retained(poll, &owner, &inputs)

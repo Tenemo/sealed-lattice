@@ -4,8 +4,8 @@ use parallel_work::sealing::{self, Sealed, TAG_BYTES};
 const PLAIN_BYTES: usize = 4 + 2 * RECIPIENT_SECRET_SUPPORT;
 pub const SEALED_BYTES: usize = PLAIN_BYTES + TAG_BYTES;
 
-impl RegistrationKey {
-    /// Seals one completed registration key under a fresh, single-use local
+impl RecipientKey {
+    /// Seals one completed recipient key under a fresh, single-use local
     /// key. The caller owns that key's confidential browser-local custody.
     pub fn seal_retained(&mut self, associated: &[u8]) -> Result<Sealed, Error> {
         if self.sealed || associated.is_empty() || associated.len() > 2048 {
@@ -71,5 +71,5 @@ impl RegistrationKey {
 }
 
 #[cfg(test)]
-#[path = "registration-custody-tests.rs"]
+#[path = "recipient-key-custody-tests.rs"]
 mod tests;

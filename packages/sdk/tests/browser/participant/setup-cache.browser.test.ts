@@ -170,8 +170,8 @@ const withBallotModule = (
         memory: new WebAssembly.Memory({ initial: 1 }),
         input_pointer: () => 0,
         input_capacity: () => 64,
-        contribution_output_pointer: () => 0,
-        contribution_output_length: () => 0,
+        participant_output_pointer: () => 0,
+        participant_output_length: () => 0,
         participant_ballot_command: (
             operation: number,
             offset: number,

@@ -87,7 +87,7 @@ fn command(session: &mut Session, operation: u32, input: &[u8]) -> Result<Vec<u8
 pub extern "C" fn participant_finality_command(operation: u32, length: usize) -> u32 {
     SESSION.with(|session| {
         let mut session = session.borrow_mut();
-        session.contribution_output.clear();
+        session.participant_output.clear();
         if length > session.input.len() {
             return 1;
         }
@@ -95,7 +95,7 @@ pub extern "C" fn participant_finality_command(operation: u32, length: usize) ->
         session.input[..length].zeroize();
         match command(&mut session, operation, &input) {
             Ok(output) => {
-                session.contribution_output = output;
+                session.participant_output = output;
                 0
             }
             Err(_) => 1,

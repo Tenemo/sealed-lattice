@@ -25,13 +25,13 @@ fn verify_body(context: Arc<ReleaseContext>, body: &[u8]) -> Result<VerifiedRele
 /// from the participant's records in slices, and in either case verified by
 /// the release body verifier before it can be read or signed. A refused
 /// slice or a failed verification closes the import for good.
-pub(crate) struct ReleaseBody {
+pub(crate) struct OwnReleaseBody {
     body: Vec<u8>,
     envelope: ReleaseEnvelope,
     verified: Option<VerifiedReleaseBody>,
     import_closed: bool,
 }
-impl ReleaseBody {
+impl OwnReleaseBody {
     #[cfg(target_arch = "wasm32")]
     pub(crate) fn generated(context: Arc<ReleaseContext>, body: Vec<u8>) -> Result<Self, Error> {
         let verified = verify_body(context, &body)?;

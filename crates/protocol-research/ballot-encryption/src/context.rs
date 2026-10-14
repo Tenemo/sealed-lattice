@@ -1,5 +1,5 @@
 use protocol_foundations::foundation::participant_identity::ParticipantIdentity;
-use protocol_foundations::{ballot_authentication::RetainedBallotOwner, poll::VerifiedPoll};
+use protocol_foundations::{ballot_authentication::RetainedSetupOwner, poll::VerifiedPoll};
 use setup_aggregate::RetainedSetupInputs;
 use std::sync::Arc;
 use supported_profile::Profile;
@@ -17,7 +17,7 @@ pub struct BallotComputationContext {
 impl BallotComputationContext {
     pub fn from_retained(
         poll: Arc<VerifiedPoll>,
-        owner: &RetainedBallotOwner,
+        owner: &RetainedSetupOwner,
         inputs: &RetainedSetupInputs,
     ) -> Result<Self, Error> {
         let profile = inputs.profile();

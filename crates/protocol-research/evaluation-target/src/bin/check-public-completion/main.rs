@@ -1,5 +1,5 @@
 use ballot_proof::{
-    body::SignedBallotVerifier,
+    body::BallotBodyClassifier,
     statement::setup_input,
     submission::{BallotBodyAuthentication, authenticate_envelope},
 };
@@ -36,7 +36,6 @@ use std::{
 };
 use supported_profile::{Profile, relation::PROOF_HEADER_BYTES};
 
-#[path = "../public-completion-check.rs"]
 mod completion;
 
 #[derive(Default)]
@@ -614,7 +613,7 @@ fn main() -> io::Result<()> {
         work.read(&mut body, &mut header)?;
         authenticated.push(&header).map_err(refusal)?;
         let mut classifier =
-            SignedBallotVerifier::new(poll.clone(), setup.clone(), authentication, &header, None)
+            BallotBodyClassifier::new(poll.clone(), setup.clone(), authentication, &header, None)
                 .map_err(refusal)?;
         if classifier.requires_key() {
             let (_, _, index) = setup_input(profile);

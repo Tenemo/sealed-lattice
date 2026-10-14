@@ -46,7 +46,7 @@ const compileWordProverResources = (
     const folding = (domain - 4n) * (extension + 2n * 64n + 128n);
     const reciprocals = systematic * extension;
     // These are explicit allocation allowances, not measured object sizes.
-    // The bridge checks the opaque hasher bound before starting work.
+    // The setup prover checks the opaque hasher bound before starting work.
     const maximumHasherBytes = 512n;
     const commitmentWorkspace =
         domain * maximumHasherBytes + systematic * (5n * extension + 4n * base);

@@ -4,7 +4,7 @@ use sha3::{
     Shake256,
     digest::{ExtendableOutput, Update, XofReader},
 };
-use statement_stream::arithmetic::MODULUS;
+use statement_stream::proof_field::MODULUS;
 use supported_profile::relation::{
     EVALUATION_DOMAIN_SIZE, MASKS, MAXIMUM_DEGREE, QUERY_COUNT, Relation, SYSTEMATIC,
     WITNESS_DEGREE,

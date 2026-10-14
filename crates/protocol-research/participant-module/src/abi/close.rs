@@ -12,7 +12,7 @@ use zeroize::{Zeroize, Zeroizing};
 pub extern "C" fn participant_close_command(operation: u32, argument: usize, length: usize) -> u32 {
     SESSION.with(|session| {
         let mut session = session.borrow_mut();
-        session.contribution_output.clear();
+        session.participant_output.clear();
         if length > session.input.len() {
             return 1;
         }
@@ -52,7 +52,7 @@ pub extern "C" fn participant_close_command(operation: u32, argument: usize, len
         let Session {
             enrollment,
             close,
-            contribution_output,
+            participant_output,
             ..
         } = &mut *session;
         let Some(enrollment) = enrollment.as_mut() else {
@@ -63,7 +63,7 @@ pub extern "C" fn participant_close_command(operation: u32, argument: usize, len
         };
         match close.command(&mut enrollment.credential, operation, argument, &input) {
             Ok(bytes) => {
-                *contribution_output = bytes;
+                *participant_output = bytes;
                 0
             }
             Err(_) => 1,

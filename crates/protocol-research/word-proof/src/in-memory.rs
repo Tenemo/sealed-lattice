@@ -12,7 +12,7 @@ use supported_profile::relation::*;
 
 /// A proof of one statement that holds every oracle in memory, for the
 /// relations whose witness fits a single call.
-pub struct OneShotProof {
+pub struct InMemoryProof {
     witness: Witness,
     first: FirstOracle,
     second: SecondOracle,
@@ -21,7 +21,7 @@ pub struct OneShotProof {
     transcript: Transcript,
     inverses: Vec<Element>,
 }
-impl OneShotProof {
+impl InMemoryProof {
     /// Proves the witness's statement. The context hashes the statement's
     /// header and polynomials in order, and the operator function gives the
     /// statement's affine operator at the linear challenge.

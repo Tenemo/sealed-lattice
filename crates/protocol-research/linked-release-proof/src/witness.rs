@@ -5,8 +5,8 @@ use crate::statement::{
 use num_bigint::{BigInt, Sign};
 use num_traits::{Signed, ToPrimitive};
 use statement_stream::{
-    arithmetic::MODULUS,
     negacyclic::{Plan, digit_in},
+    proof_field::MODULUS,
 };
 use supported_profile::{
     Profile, RECIPIENT_SECRET_SUPPORT, RELEASE_DECODING_LIMB_BITS, RELEASE_LIMB_BITS, SHARE_SCALE,
@@ -184,7 +184,7 @@ impl ReleaseInputs {
     }
 }
 /// Derives the release of the header's roster position.
-pub fn derive_bound(
+pub fn prepare_release(
     inputs: ReleaseInputs,
     header: [u8; RELEASE_HEADER_BYTES],
 ) -> Result<PreparedRelease, ReleaseInputError> {

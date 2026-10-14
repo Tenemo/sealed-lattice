@@ -20,7 +20,7 @@ use evaluation_target::close::{
 use participant_module::close_work::CloseOperation;
 use protocol_foundations::{
     Credential, Error,
-    ballot_authentication::{BallotEnvelope, RetainedBallotOwner},
+    ballot_authentication::{BallotEnvelope, RetainedSetupOwner},
     close_signing::{
         CloseIntentMessage, CloseMessage, ClosePurpose, CloseResponseMessage,
         maximum_close_message_bytes,
@@ -84,7 +84,7 @@ pub fn run(
         equivocator,
         organizer: mut organizer_restored,
     } = restored;
-    let (mut equivocation, forged) = equivocator
+    let (mut equivocation, equivocated) = equivocator
         .map(|equivocator| {
             let position = scenario.equivocator.unwrap();
             let Equivocator {
@@ -112,9 +112,12 @@ pub fn run(
                     body: base.body.clone(),
                 }
             };
-            let a = equivocate(&mut first, close_time - 2);
-            let b = equivocate(&mut second, close_time - 1);
-            assert_ne!(a.envelope.identity(), b.envelope.identity());
+            let first_on_time = equivocate(&mut first, close_time - 2);
+            let second_on_time = equivocate(&mut second, close_time - 1);
+            assert_ne!(
+                first_on_time.envelope.identity(),
+                second_on_time.envelope.identity()
+            );
             let late = equivocate(&mut late_fork, close_time + 1);
             (
                 Equivocation {
@@ -123,11 +126,15 @@ pub fn run(
                     late_fork,
                     restored,
                 },
-                Forged { a, b, late },
+                EquivocatedSubmissions {
+                    first_on_time,
+                    second_on_time,
+                    late,
+                },
             )
         })
         .unzip();
-    if let Some(forged) = &forged {
+    if let Some(equivocated) = &equivocated {
         let position = scenario.equivocator.unwrap();
         // The late envelope reaches the organizer and the first honest
         // responder before the intent; their locks discard its body and
@@ -136,13 +143,13 @@ pub fn run(
             deliver(
                 &mut works[position],
                 &mut enrollments[position].credential,
-                &forged.late,
+                &equivocated.late,
                 &mut hashed,
             );
         }
         // A slot holds at most two bodies: a third is refused before
         // transfer.
-        for submission in [&forged.a, &forged.b] {
+        for submission in [&equivocated.first_on_time, &equivocated.second_on_time] {
             deliver(
                 &mut works[position],
                 &mut enrollments[position].credential,
@@ -155,7 +162,7 @@ pub fn run(
                 &mut enrollments[position].credential,
                 CloseOperation::BeginHeldBody,
                 0,
-                &control(&forged.late)
+                &control(&equivocated.late)
             ),
             Err(Error::Consumed)
         ));
@@ -242,14 +249,14 @@ pub fn run(
             Err(Error::Consumed)
         ));
     }
-    if let Some(forged) = &forged {
+    if let Some(equivocated) = &equivocated {
         for position in [0, first_honest] {
             assert!(matches!(
                 works[position].command(
                     &mut enrollments[position].credential,
                     CloseOperation::BeginHeldBody,
                     0,
-                    &control(&forged.late)
+                    &control(&equivocated.late)
                 ),
                 Err(Error::Context)
             ));
@@ -268,8 +275,11 @@ pub fn run(
         .omitted
         .map(|author| submissions[author].as_ref().unwrap());
     let mut held: Vec<Vec<&Submission>> = vec![common.clone(); count];
-    if let Some(forged) = &forged {
-        for (second, submission) in [(false, &forged.a), (true, &forged.b)] {
+    if let Some(equivocated) = &equivocated {
+        for (second, submission) in [
+            (false, &equivocated.first_on_time),
+            (true, &equivocated.second_on_time),
+        ] {
             for position in scenario.equivocation_holders(second) {
                 held[position].push(submission);
             }
@@ -343,8 +353,12 @@ pub fn run(
         );
     }
     let mut everything: Vec<&Submission> = common.clone();
-    if let Some(forged) = &forged {
-        everything.extend([&forged.a, &forged.b, &forged.late]);
+    if let Some(equivocated) = &equivocated {
+        everything.extend([
+            &equivocated.first_on_time,
+            &equivocated.second_on_time,
+            &equivocated.late,
+        ]);
     }
     everything.extend(omitted);
     let available: Vec<AuthenticatedBallotEnvelope> = everything
@@ -352,7 +366,7 @@ pub fn run(
         .map(|submission| envelope(&setup, submission))
         .collect();
     let mut late_response = None;
-    if let (Some(equivocation), Some(forged)) = (equivocation.as_mut(), &forged) {
+    if let (Some(equivocation), Some(equivocated)) = (equivocation.as_mut(), &equivocated) {
         // A corrupt fork may sign a response that lists its late envelope; no
         // verifier authenticates it.
         let position = equivocation.position;
@@ -374,7 +388,7 @@ pub fn run(
             *intent.message().identity(),
             position,
             count,
-            &[(position, forged.late.envelope.identity())],
+            &[(position, equivocated.late.envelope.identity())],
         )
         .unwrap();
         let late_signature = late_fork
@@ -398,10 +412,14 @@ pub fn run(
         );
         // Three envelopes for one slot are refused before any signature
         // check.
-        let mut entries: Vec<_> = [&forged.a, &forged.b, &forged.late]
-            .iter()
-            .map(|submission| (position as u16, submission.envelope.identity()))
-            .collect();
+        let mut entries: Vec<_> = [
+            &equivocated.first_on_time,
+            &equivocated.second_on_time,
+            &equivocated.late,
+        ]
+        .iter()
+        .map(|submission| (position as u16, submission.envelope.identity()))
+        .collect();
         entries.sort();
         let three = CanonicalTuple::new(
             1,
@@ -499,7 +517,7 @@ pub fn run(
             common: &common,
             everything: &everything,
             omitted,
-            forged: forged.as_ref(),
+            equivocated: equivocated.as_ref(),
         },
     );
     // The organizer lacks the equivocator's on-time envelopes and the omitted
@@ -507,8 +525,8 @@ pub fn run(
     // other responses are ready without it, so the organizer answers and
     // proposes its own response and those.
     let mut unheld: Vec<&Submission> = Vec::new();
-    if let Some(forged) = &forged {
-        unheld.extend([&forged.a, &forged.b]);
+    if let Some(equivocated) = &equivocated {
+        unheld.extend([&equivocated.first_on_time, &equivocated.second_on_time]);
     }
     unheld.extend(omitted);
     gather(
@@ -564,26 +582,26 @@ pub fn run(
     // Honest listings exclude the late envelope and cap each slot at two. The
     // organizer lists both on-time envelopes of the equivocator without
     // their bodies.
-    let equivocated = usize::from(forged.is_some()) * 2;
+    let equivocated_envelopes = usize::from(equivocated.is_some()) * 2;
     for (position, listing) in listings.iter().enumerate() {
         let expected = match position {
             0 => common.len(),
             position => held[position].len(),
         } + if position == 0 || Some(position) == scenario.equivocator {
-            equivocated
+            equivocated_envelopes
         } else {
             0
         };
         assert_eq!(listing.listed().len(), expected, "listing {position}");
     }
-    if let Some(forged) = &forged {
+    if let Some(equivocated) = &equivocated {
         let position = scenario.equivocator.unwrap();
         assert!(listings.iter().all(|listing| {
             !listing
                 .listed()
-                .contains(&(position, forged.late.envelope.identity()))
+                .contains(&(position, equivocated.late.envelope.identity()))
         }));
-        for submission in [&forged.a, &forged.b] {
+        for submission in [&equivocated.first_on_time, &equivocated.second_on_time] {
             assert!(
                 listings[0]
                     .listed()
@@ -681,8 +699,11 @@ pub fn run(
                 submissions[author].as_ref().unwrap().envelope.bytes()
             ),
             ClosedSlot::Conflicting(identities) if Some(author) == scenario.equivocator => {
-                let forged = forged.as_ref().unwrap();
-                let mut expected = vec![forged.a.envelope.identity(), forged.b.envelope.identity()];
+                let equivocated = equivocated.as_ref().unwrap();
+                let mut expected = vec![
+                    equivocated.first_on_time.envelope.identity(),
+                    equivocated.second_on_time.envelope.identity(),
+                ];
                 expected.sort();
                 assert_eq!(identities, &expected);
             }
@@ -777,9 +798,9 @@ pub fn run(
         Err(Error::Consumed)
     ));
     let directory = output.join("close");
-    let late_identity = forged
+    let late_identity = equivocated
         .as_ref()
-        .map(|forged| forged.late.envelope.identity());
+        .map(|equivocated| equivocated.late.envelope.identity());
     let listed: Vec<&Submission> = everything
         .iter()
         .copied()
@@ -817,13 +838,13 @@ pub fn run(
 /// The equivocator's credentials during the close.
 struct Equivocation {
     position: usize,
-    owner: RetainedBallotOwner,
+    owner: RetainedSetupOwner,
     late_fork: Credential,
     restored: Credential,
 }
 /// The equivocator's two on-time envelopes and its late one.
-struct Forged {
-    a: Submission,
-    b: Submission,
+struct EquivocatedSubmissions {
+    first_on_time: Submission,
+    second_on_time: Submission,
     late: Submission,
 }

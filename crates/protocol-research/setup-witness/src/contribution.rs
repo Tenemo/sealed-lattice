@@ -24,7 +24,7 @@ pub struct Contribution {
     next_recipient: usize,
     finished: bool,
 }
-/// The common share polynomial. Registration keys use it before the roster,
+/// The common share polynomial. Recipient keys use it before the roster,
 /// and so the profile, is known.
 pub fn common_share_polynomial() -> Vec<BigInt> {
     public_polynomial(

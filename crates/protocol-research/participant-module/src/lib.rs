@@ -3,7 +3,7 @@ use protocol_foundations::{
     BodyDigest, Credential,
     foundation::{RegistrationHeader, normalize_username},
 };
-use setup_witness::registration::RegistrationKey;
+use setup_witness::registration::RecipientKey;
 
 use std::io::{self, Write};
 use zeroize::Zeroizing;
@@ -35,8 +35,8 @@ pub mod offer_signing;
 #[path = "operation-random.rs"]
 mod operation_random;
 #[cfg(any(target_arch = "wasm32", test))]
-#[path = "own-verification.rs"]
-mod own_verification;
+#[path = "own-registration.rs"]
+mod own_registration;
 #[path = "participant-bounds.rs"]
 pub mod participant_bounds;
 #[cfg(test)]
@@ -69,7 +69,7 @@ static ALLOCATOR: parallel_work::scalar_allocator::ScalarAllocator =
     parallel_work::scalar_allocator::ScalarAllocator::new();
 
 pub struct Enrollment {
-    pub key: RegistrationKey,
+    pub key: RecipientKey,
     pub credential: Credential,
     sources: Option<fhe_sources::Sources>,
 }
@@ -195,7 +195,7 @@ impl Enrollment {
         let username = normalize_username(username).map_err(|_| Error::Shape)?;
         let poll = verified_poll.identity();
         let mut sources = fhe_sources::Sources::create(verified_poll, &credential)?;
-        let mut key = RegistrationKey::new();
+        let mut key = RecipientKey::new();
         let public = key.public_key_bytes();
         let key_hash = ProtocolHash::digest(&public);
         let mut key_output = RecordWriter::new(data_kind::PUBLIC_KEY, &mut output);
@@ -359,7 +359,7 @@ impl Enrollment {
             records[1],
         )
         .map_err(|_| Error::State)?;
-        let key = RegistrationKey::open_retained(
+        let key = RecipientKey::open_retained(
             public,
             data_keys[..32].try_into().unwrap(),
             &key_associated(body_digest),

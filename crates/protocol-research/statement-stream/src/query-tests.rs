@@ -15,9 +15,9 @@ fn transforms_match_every_direct_fourier_coefficient() {
             .collect();
         // The inverse transform is unnormalized.
         for inverse in [false, true] {
-            let mut root = arithmetic::power(7, (MODULUS - 1) / length as u128);
+            let mut root = proof_field::power(7, (MODULUS - 1) / length as u128);
             if inverse {
-                root = arithmetic::power(root, MODULUS - 2);
+                root = proof_field::power(root, MODULUS - 2);
             }
             let expected: Vec<Element> = (0..length)
                 .map(|output| {
@@ -27,7 +27,7 @@ fn transforms_match_every_direct_fourier_coefficient() {
                         .fold(ZERO, |sum, (input, value)| {
                             plus(
                                 sum,
-                                scale(*value, arithmetic::power(root, (input * output) as u128)),
+                                scale(*value, proof_field::power(root, (input * output) as u128)),
                             )
                         })
                 })
@@ -43,7 +43,7 @@ fn transforms_match_every_direct_fourier_coefficient() {
 fn query_values_match_direct_evaluation_of_the_masked_interpolant() {
     let systematic_size = 16;
     let domain_size = 4 * systematic_size;
-    let domain_root = arithmetic::power(7, (MODULUS - 1) / domain_size as u128);
+    let domain_root = proof_field::power(7, (MODULUS - 1) / domain_size as u128);
     for degree in [2, 16, 4, 8, 2, 16] {
         let values: Vec<Element> = (0..degree)
             .map(|index| {
@@ -55,9 +55,9 @@ fn query_values_match_direct_evaluation_of_the_masked_interpolant() {
             })
             .collect();
         // The interpolant's coefficients by the inverse Fourier sum.
-        let root = arithmetic::power(7, (MODULUS - 1) / degree as u128);
-        let inverse_root = arithmetic::power(root, MODULUS - 2);
-        let inverse_degree = arithmetic::power(degree as u128, MODULUS - 2);
+        let root = proof_field::power(7, (MODULUS - 1) / degree as u128);
+        let inverse_root = proof_field::power(root, MODULUS - 2);
+        let inverse_degree = proof_field::power(degree as u128, MODULUS - 2);
         let coefficients: Vec<Element> = (0..degree)
             .map(|power| {
                 scale(
@@ -66,7 +66,7 @@ fn query_values_match_direct_evaluation_of_the_masked_interpolant() {
                             sum,
                             scale(
                                 *value,
-                                arithmetic::power(inverse_root, (index * power) as u128),
+                                proof_field::power(inverse_root, (index * power) as u128),
                             ),
                         )
                     }),
@@ -85,14 +85,15 @@ fn query_values_match_direct_evaluation_of_the_masked_interpolant() {
         ] {
             let actual = evaluate_in(values.clone(), &indices, systematic_size).unwrap();
             for (index, value) in indices.iter().zip(actual) {
-                let point = multiply(7, arithmetic::power(domain_root, u128::from(*index)));
+                let point = multiply(7, proof_field::power(domain_root, u128::from(*index)));
                 let interpolant = coefficients.iter().rev().fold(ZERO, |sum, coefficient| {
                     plus(scale(sum, point), *coefficient)
                 });
                 let indicator = (0..stride).fold(0, |sum, power| {
-                    arithmetic::add(sum, arithmetic::power(point, (degree * power) as u128))
+                    proof_field::add(sum, proof_field::power(point, (degree * power) as u128))
                 });
-                let indicator = multiply(indicator, arithmetic::power(stride as u128, MODULUS - 2));
+                let indicator =
+                    multiply(indicator, proof_field::power(stride as u128, MODULUS - 2));
                 assert_eq!(value, scale(interpolant, indicator));
             }
         }

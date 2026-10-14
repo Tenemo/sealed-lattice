@@ -76,8 +76,8 @@ const fixture = async (length = 2 * chunkBytes + 37) => {
     const module = {
         memory,
         retain_evaluation: () => 0,
-        contribution_output_pointer: () => 32,
-        contribution_output_length: () => bytes.length,
+        participant_output_pointer: () => 32,
+        participant_output_length: () => bytes.length,
         input_pointer: () => 32,
         input_capacity: () => chunkBytes,
         restore_evaluation: restore,

@@ -19,7 +19,3 @@ supported-profile = { path = "../supported-profile" }
 
 [dev-dependencies]
 ballot-encryption = { path = "../ballot-encryption" }
-
-[[bin]]
-name = "check-target"
-path = "src/bin/check-target.rs"

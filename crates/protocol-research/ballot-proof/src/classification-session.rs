@@ -1,6 +1,6 @@
 use crate::{
     CHUNK_LIMIT,
-    body::{BallotBodyClassification, BallotInputs, SignedBallotVerifier},
+    body::{BallotBodyClassification, BallotBodyClassifier, BallotInputs},
     submission::authenticate_envelope,
 };
 use protocol_foundations::SIGNATURE_BYTES;
@@ -19,7 +19,7 @@ pub struct Refused;
 /// classification they reach.
 pub struct ClassificationSession {
     input: Vec<u8>,
-    classifier: Option<SignedBallotVerifier>,
+    classifier: Option<BallotBodyClassifier>,
     classification: Option<BallotBodyClassification>,
     // The statement inputs that the first ballot under the current setup
     // read, which the setup's later ballots share until they are released.
@@ -69,7 +69,7 @@ impl ClassificationSession {
                 &bytes[ENVELOPE_BYTES..ENVELOPE_BYTES + SIGNATURE_BYTES],
             )
             .map_err(|_| Refused)?;
-            SignedBallotVerifier::new(
+            BallotBodyClassifier::new(
                 poll,
                 setup,
                 authentication,
@@ -88,7 +88,7 @@ impl ClassificationSession {
     pub fn requires_key(&self) -> bool {
         self.classifier
             .as_ref()
-            .is_some_and(SignedBallotVerifier::requires_key)
+            .is_some_and(BallotBodyClassifier::requires_key)
     }
     pub fn begin_key(&mut self, index: usize) -> Result<(), Refused> {
         let result = self
@@ -114,7 +114,7 @@ impl ClassificationSession {
         } else if let Some(inputs) = self
             .classifier
             .as_ref()
-            .and_then(SignedBallotVerifier::inputs)
+            .and_then(BallotBodyClassifier::inputs)
         {
             self.inputs = Some(inputs);
         }

@@ -158,7 +158,7 @@ describe('original private-randomness scope populations', () => {
             expect(operation).toContain(`"${row.domain}"`);
         expect(tree).toContain(`b"${rows[rows.length - 1].domain}"`);
         const restore = await readRustSource(
-            'crates/protocol-research/word-proof/src/first-checkpoint.rs',
+            'crates/protocol-research/word-proof/src/first-oracle-checkpoint.rs',
         );
         expect(restore).toContain('tree: Tree::with_seed(');
     });

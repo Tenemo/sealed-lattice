@@ -179,7 +179,9 @@ fn checkpoint_import_preserves_the_verified_original_owner(
         let bytes = request(&wrong_role, profile.participants());
         // The checkpoint decoder accepts this partial header, isolating the
         // owning import helper's role check as the reason for refusal.
-        assert!(word_proof::bridge::first_checkpoint::Import::begin(&bytes[128..]).is_ok());
+        assert!(
+            word_proof::setup_prover::first_oracle_checkpoint::Import::begin(&bytes[128..]).is_ok()
+        );
         assert!(import_checkpoint(&context, 0, &bytes).is_err());
     }
     for position in [1, 2, usize::MAX] {
@@ -188,7 +190,10 @@ fn checkpoint_import_preserves_the_verified_original_owner(
     // The checkpoint decoder refuses a header without every recipient key
     // hash.
     let missing_keys = request(&expected_role, 0);
-    assert!(word_proof::bridge::first_checkpoint::Import::begin(&missing_keys[128..]).is_err());
+    assert!(
+        word_proof::setup_prover::first_oracle_checkpoint::Import::begin(&missing_keys[128..])
+            .is_err()
+    );
     assert!(import_checkpoint(&context, 0, &missing_keys).is_err());
     for offset in [0, 64] {
         let mut changed = valid.clone();

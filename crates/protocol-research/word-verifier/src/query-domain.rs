@@ -1,5 +1,5 @@
 use super::{Challenges, Element, FOLDS, Shape, add, root, scale};
-use statement_stream::arithmetic::{
+use statement_stream::proof_field::{
     MODULUS, multiply as multiply_base, power as power_base, subtract as subtract_base,
 };
 use std::sync::OnceLock;

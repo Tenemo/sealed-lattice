@@ -1,6 +1,6 @@
 //! The release body import: slices accumulate up to the envelope's body
 //! length, and a refused slice or a failed finish closes the import for good.
-use super::{RELEASE_CHUNK_BYTES, ReleaseBody};
+use super::{OwnReleaseBody, RELEASE_CHUNK_BYTES};
 use protocol_foundations::{
     Error,
     release_signing::{ReleaseEnvelope, body_lengths},
@@ -8,16 +8,16 @@ use protocol_foundations::{
 use supported_profile::Profile;
 
 // An import of the shortest body the first profile admits, and that length.
-fn importing() -> (ReleaseBody, usize) {
+fn importing() -> (OwnReleaseBody, usize) {
     let profile = Profile::all().next().unwrap();
     let length = *body_lengths(profile).start();
     let envelope =
         ReleaseEnvelope::new(profile, [1; 64], [2; 64], [3; 64], 0, length, [4; 64]).unwrap();
-    (ReleaseBody::importing(envelope), length)
+    (OwnReleaseBody::importing(envelope), length)
 }
 
 // Pushes that many body bytes in slices of at most one chunk.
-fn push(release: &mut ReleaseBody, length: usize) {
+fn push(release: &mut OwnReleaseBody, length: usize) {
     for chunk in vec![0; length].chunks(RELEASE_CHUNK_BYTES) {
         release.push(chunk).unwrap();
     }

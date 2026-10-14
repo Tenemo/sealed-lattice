@@ -1,5 +1,5 @@
 use super::*;
-use crate::bridge::ProverStep;
+use crate::setup_prover::ProverStep;
 
 // A setup witness of the relation: zero words, and each sparse
 // support's least positions of its stride.
@@ -16,13 +16,13 @@ fn columns(relation: &Relation) -> Vec<Vec<u16>> {
     }
     columns
 }
-fn step(prover: &mut Prover) {
+fn step(prover: &mut SetupProver) {
     prover
         .advance(ProverStep::Step, 0, &[], &mut Vec::new())
         .unwrap();
 }
 // The first oracle's root once the prover commits its remaining columns.
-fn first_root(mut prover: Prover) -> [u8; 64] {
+fn first_root(mut prover: SetupProver) -> [u8; 64] {
     while prover.phase != Phase::SecondInitialize {
         step(&mut prover);
     }
@@ -38,7 +38,7 @@ fn first_root(mut prover: Prover) -> [u8; 64] {
 fn restored_checkpoints_commit_the_same_first_oracle() {
     let profile = Profile::new(3, 2).unwrap();
     let relation = setup_relation(profile);
-    let mut prover = Prover::from_generated(
+    let mut prover = SetupProver::from_generated(
         profile,
         b"checkpoint-test",
         [7; 64],

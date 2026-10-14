@@ -1,6 +1,6 @@
 use crate::{
-    CHUNK_LIMIT, Element, Error, ONE, PolynomialStream, StatementOutput, ZERO, arithmetic::MODULUS,
-    evaluate_public_columns, plus, query, times,
+    CHUNK_LIMIT, Element, Error, ONE, PolynomialStream, StatementOutput, ZERO,
+    evaluate_public_columns, plus, proof_field::MODULUS, query, times,
 };
 use parallel_work::{HashStream, Sponge};
 use supported_profile::{

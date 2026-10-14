@@ -260,13 +260,13 @@ await runWithLocalRunLog(
                     '-p',
                     'evaluation-target',
                     '--bin',
-                    'check-target',
+                    'check-public-completion',
                 ],
                 'build',
             );
             const executable = path.join(
                     workspace,
-                    'target/release/check-target' +
+                    'target/release/check-public-completion' +
                         (process.platform === 'win32' ? '.exe' : ''),
                 ),
                 output = path.join(log.artifactDirectoryPath, 'verification');
@@ -274,8 +274,8 @@ await runWithLocalRunLog(
             // directory.
             await mkdir(log.artifactDirectoryPath, { recursive: true });
             for (const file of [
-                'crates/protocol-research/evaluation-target/src/public-completion-check.rs',
-                'crates/protocol-research/evaluation-target/src/bin/check-target.rs',
+                'crates/protocol-research/evaluation-target/src/bin/check-public-completion/completion.rs',
+                'crates/protocol-research/evaluation-target/src/bin/check-public-completion/main.rs',
                 import.meta.filename,
             ])
                 await writeFile(

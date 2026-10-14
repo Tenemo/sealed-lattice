@@ -8,7 +8,9 @@ use protocol_foundations::{
 };
 use setup_witness::{Profile, contribution::common_records_job};
 use std::{collections::VecDeque, sync::Arc};
-use word_verifier::{CHUNK_LIMIT, HEADER_LENGTH, Verifier, verifier};
+use word_verifier::{
+    CHUNK_LIMIT, HEADER_LENGTH, SetupContributionVerifier, setup_contribution_verifier,
+};
 
 /// The most common polynomials whose records helpers compute ahead of
 /// their use; the host holds each one's records until the verifier takes
@@ -71,7 +73,7 @@ pub struct ContributionOfferVerifier {
     source_binding: Option<FheKeyCommitmentHasher>,
     polynomial_hash: Option<IdentityHasher>,
     polynomials: Vec<OfferPolynomial>,
-    verifier: Verifier,
+    verifier: SetupContributionVerifier,
     proof_header: Vec<u8>,
     statement_index: usize,
     // The common polynomials the statement supplies, in its order: those
@@ -112,7 +114,8 @@ impl ContributionOfferVerifier {
         // The statement digest the proof declares is not trusted: the
         // statement stream recomputes it from fixed predecessors and every
         // supplied polynomial.
-        let mut verifier = verifier(profile, &role, proof_header).map_err(|_| Refusal::Proof)?;
+        let mut verifier = setup_contribution_verifier(profile, &role, proof_header)
+            .map_err(|_| Refusal::Proof)?;
         verifier
             .push_statement(&profile.setup_statement_header())
             .map_err(|_| Refusal::Statement)?;

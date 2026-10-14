@@ -437,7 +437,7 @@ describe('source coefficient allocation comparison', () => {
                 'crates/protocol-research/setup-witness/src/gaussian.rs',
             ),
             readRustSource(
-                'crates/protocol-research/statement-stream/src/arithmetic.rs',
+                'crates/protocol-research/statement-stream/src/proof-field.rs',
             ),
         ]);
         expect(source).toContain(

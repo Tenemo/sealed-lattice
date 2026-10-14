@@ -7,7 +7,7 @@ use evaluation_target::close::{
 };
 use protocol_foundations::{
     Credential, Error, SIGNATURE_BYTES,
-    ballot_authentication::{BallotEnvelope, ENVELOPE_BYTES, RetainedBallotOwner},
+    ballot_authentication::{BallotEnvelope, ENVELOPE_BYTES, RetainedSetupOwner},
     close_signing::{
         CloseIntentMessage, CloseMessage, CloseProposalMessage, ClosePurpose, CloseResponseMessage,
         MAXIMUM_LISTED_ENVELOPES_PER_SLOT, maximum_close_message_bytes,
@@ -75,7 +75,7 @@ impl Prepared {
 /// responder are refused. A persistent log of accepted inputs therefore stays
 /// within these bounds.
 pub struct CloseWork {
-    owner: Arc<RetainedBallotOwner>,
+    owner: Arc<RetainedSetupOwner>,
     context: CloseContext,
     intent: Option<AuthenticatedCloseIntent>,
     pending: Option<BallotBodyAuthentication>,
@@ -91,7 +91,7 @@ fn packet(bytes: &[u8], maximum: usize) -> Result<(&[u8], &[u8]), Error> {
 }
 impl CloseWork {
     pub fn new(
-        owner: RetainedBallotOwner,
+        owner: RetainedSetupOwner,
         poll: Arc<VerifiedPoll>,
         setup: Arc<VerifiedSetupAggregate>,
     ) -> Result<Self, Error> {
@@ -113,7 +113,7 @@ impl CloseWork {
             prepared: None,
         })
     }
-    pub fn owner(&self) -> Arc<RetainedBallotOwner> {
+    pub fn owner(&self) -> Arc<RetainedSetupOwner> {
         self.owner.clone()
     }
     #[cfg(target_arch = "wasm32")]

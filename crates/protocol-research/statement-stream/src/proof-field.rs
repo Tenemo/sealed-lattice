@@ -212,5 +212,5 @@ pub fn power(mut value: u128, mut exponent: u128) -> u128 {
 }
 
 #[cfg(test)]
-#[path = "arithmetic-tests.rs"]
+#[path = "proof-field-tests.rs"]
 mod tests;

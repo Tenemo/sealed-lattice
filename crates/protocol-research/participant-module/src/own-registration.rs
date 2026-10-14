@@ -108,5 +108,5 @@ impl State {
 }
 
 #[cfg(test)]
-#[path = "own-verification-tests.rs"]
+#[path = "own-registration-tests.rs"]
 mod tests;

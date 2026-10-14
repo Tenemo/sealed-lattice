@@ -1,4 +1,4 @@
-use crate::arithmetic::{MODULUS, add, multiply, power, subtract};
+use crate::proof_field::{MODULUS, add, multiply, power, subtract};
 use num_bigint::{BigInt, Sign};
 use zeroize::Zeroizing;
 

@@ -3,7 +3,7 @@ use protocol_foundations::{Error, close_signing::CloseResponseMessage, poll::Ver
 use setup_aggregate::verified::VerifiedSetupAggregate;
 use std::sync::Arc;
 
-use super::Forged;
+use super::EquivocatedSubmissions;
 use super::records::{Submission, control, read_chunks, split, wanted_bytes};
 use super::work::{LoggedWork, close_work, deliver, gather};
 
@@ -13,7 +13,7 @@ pub(super) struct CloseDeliveryInputs<'a> {
     pub(super) common: &'a [&'a Submission],
     pub(super) everything: &'a [&'a Submission],
     pub(super) omitted: Option<&'a Submission>,
-    pub(super) forged: Option<&'a Forged>,
+    pub(super) equivocated: Option<&'a EquivocatedSubmissions>,
 }
 
 pub(super) fn exercise_body_delivery(
@@ -30,7 +30,7 @@ pub(super) fn exercise_body_delivery(
         common,
         everything,
         omitted,
-        forged,
+        equivocated,
     } = inputs;
     // Only the organizer takes responses. Delivery adds at most two envelopes
     // to a slot, and the intent lock discards and then refuses late ones.
@@ -45,8 +45,8 @@ pub(super) fn exercise_body_delivery(
     ));
     let mut probe = close_work(&enrollments[0], poll, setup, 0);
     let mut hashed = 0;
-    if let Some(forged) = &forged {
-        for submission in [&forged.a, &forged.late] {
+    if let Some(equivocated) = &equivocated {
+        for submission in [&equivocated.first_on_time, &equivocated.late] {
             deliver(
                 &mut probe,
                 &mut enrollments[0].credential,
@@ -59,7 +59,7 @@ pub(super) fn exercise_body_delivery(
                 &mut enrollments[0].credential,
                 CloseOperation::BeginHeldBody,
                 0,
-                &control(&forged.b)
+                &control(&equivocated.second_on_time)
             ),
             Err(Error::Consumed)
         ));
@@ -72,20 +72,20 @@ pub(super) fn exercise_body_delivery(
             intent_packet,
         )
         .unwrap();
-    if let Some(forged) = &forged {
+    if let Some(equivocated) = &equivocated {
         assert!(matches!(
             probe.command(
                 &mut enrollments[0].credential,
                 CloseOperation::BeginHeldBody,
                 0,
-                &control(&forged.late)
+                &control(&equivocated.late)
             ),
             Err(Error::Context)
         ));
         deliver(
             &mut probe,
             &mut enrollments[0].credential,
-            &forged.b,
+            &equivocated.second_on_time,
             &mut hashed,
         );
     }
@@ -175,9 +175,9 @@ pub(super) fn exercise_body_delivery(
         .iter()
         .flat_map(|submission| control(submission))
         .collect();
-    let unlisted = forged
+    let unlisted = equivocated
         .as_ref()
-        .map(|forged| &forged.late)
+        .map(|equivocated| &equivocated.late)
         .into_iter()
         .chain(omitted)
         .find(|submission| !lists(submission));

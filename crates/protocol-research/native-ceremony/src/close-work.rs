@@ -7,7 +7,7 @@ use participant_module::{
     close_work::{CloseOperation, CloseWork},
 };
 use protocol_foundations::{
-    Credential, Error, RETAINED_TAG_BYTES, ballot_authentication::RetainedBallotOwner,
+    Credential, Error, RETAINED_TAG_BYTES, ballot_authentication::RetainedSetupOwner,
     close_signing::CloseResponseMessage, poll::VerifiedPoll, roster::RetainedContributionContext,
 };
 use setup_aggregate::verified::VerifiedSetupAggregate;
@@ -56,7 +56,7 @@ pub fn owner_of(
     poll: &VerifiedPoll,
     setup: &VerifiedSetupAggregate,
     position: usize,
-) -> RetainedBallotOwner {
+) -> RetainedSetupOwner {
     let retained = RetainedContributionContext::parse(
         credential,
         &setup.roster().proposal().records()[position],
@@ -69,7 +69,7 @@ pub fn owner_of(
         participant_module::ballot::retained_setup_reference(credential, poll, setup).unwrap();
     let (reference, tag) = reference.split_at(reference.len() - RETAINED_TAG_BYTES);
     credential
-        .retain_setup_ballot_owner(poll, &retained, setup.identity(), reference, tag)
+        .retain_setup_owner(poll, &retained, setup.identity(), reference, tag)
         .unwrap()
 }
 

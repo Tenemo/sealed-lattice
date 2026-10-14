@@ -1,7 +1,7 @@
 //! The verification of the participant's own registration, which enrollment,
 //! the roster and the contribution read.
 use super::SESSION;
-use crate::own_verification::{CONTROL_BYTES, State};
+use crate::own_registration::{CONTROL_BYTES, State};
 use protocol_foundations::{poll::VerifiedPoll, registration::VerifiedRegistration};
 use std::{cell::RefCell, sync::Arc};
 
@@ -115,11 +115,11 @@ pub extern "C" fn own_registration_body_digest_pointer() -> usize {
 pub extern "C" fn own_registration_poll() -> u32 {
     SESSION.with(|state| {
         let mut state = state.borrow_mut();
-        state.contribution_output.clear();
+        state.participant_output.clear();
         let Some(poll) = verified_poll() else {
             return 1;
         };
-        state.contribution_output = poll;
+        state.participant_output = poll;
         0
     })
 }

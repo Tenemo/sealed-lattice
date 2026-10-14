@@ -129,13 +129,13 @@ fn restore_enrollment(length: usize, prepared: bool) -> u32 {
             return 1;
         };
         let Some(Ok(mut enrollment)) =
-            super::own_verification::with_poll(|poll| retained.enrollment(poll))
+            super::own_registration::with_poll(|poll| retained.enrollment(poll))
         else {
             return 1;
         };
         // The registration this instance verified. The keys stay only if it
         // names the root's exact inputs.
-        let Some(verified) = super::own_verification::verified() else {
+        let Some(verified) = super::own_registration::verified() else {
             return 1;
         };
         if verified.header().encode().ok().as_deref() != Some(retained.header_bytes)

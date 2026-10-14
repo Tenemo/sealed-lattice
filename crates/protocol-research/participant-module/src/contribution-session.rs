@@ -16,7 +16,7 @@ use statement_stream::coefficient::{self, CenteredCodec};
 use std::sync::Arc;
 use supported_profile::{Profile, relation::setup_relation, share_modulus};
 use word_proof::{
-    bridge::{Prover, ProverStep, first_checkpoint},
+    setup_prover::{ProverStep, SetupProver, first_oracle_checkpoint},
     transcript::context_stream,
 };
 use zeroize::Zeroize;
@@ -26,7 +26,7 @@ const CHUNK: usize = 1 << 20;
 /// or one checkpoint record with its key.
 pub const CONTRIBUTION_INPUT_BYTES: usize = 1_572_864;
 const _: () = assert!(
-    sealing::KEY_BYTES + first_checkpoint::RECORD_BYTES + sealing::TAG_BYTES
+    sealing::KEY_BYTES + first_oracle_checkpoint::RECORD_BYTES + sealing::TAG_BYTES
         <= CONTRIBUTION_INPUT_BYTES
 );
 /// A refused contribution step.
@@ -80,10 +80,10 @@ pub fn import_checkpoint(
     context: &RetainedContributionContext,
     position: usize,
     bytes: &[u8],
-) -> Result<first_checkpoint::Import, word_proof::bridge::Error> {
-    use word_proof::bridge::Error;
+) -> Result<first_oracle_checkpoint::Import, word_proof::setup_prover::Error> {
+    use word_proof::setup_prover::Error;
     let prefix = bytes.get(..128).ok_or(Error::Operation)?;
-    let import = first_checkpoint::Import::begin(&bytes[128..])?;
+    let import = first_oracle_checkpoint::Import::begin(&bytes[128..])?;
     let expected = context
         .checkpoint_role(prefix, position, import.profile())
         .map_err(|_| Error::Operation)?;
@@ -97,8 +97,8 @@ pub fn import_checkpoint(
 /// sealed checkpoint records' lengths, in record order.
 pub fn checkpoint_layout(profile: Profile) -> (usize, Vec<usize>) {
     (
-        first_checkpoint::maximum_header_bytes(profile),
-        first_checkpoint::record_lengths(&setup_relation(profile)),
+        first_oracle_checkpoint::maximum_header_bytes(profile),
+        first_oracle_checkpoint::record_lengths(&setup_relation(profile)),
     )
 }
 
@@ -181,7 +181,7 @@ struct Work {
     retained_keys: Vec<Vec<u8>>,
     input_hashes: Vec<[u8; 64]>,
     generator: Option<Contribution>,
-    proof: Option<Prover>,
+    proof: Option<SetupProver>,
     public: Option<PublicOutput>,
     next_gadget: usize,
     shares_started: bool,
@@ -214,7 +214,7 @@ impl Work {
         })
     }
     fn restore(
-        proof: Prover,
+        proof: SetupProver,
         retained_keys: Vec<Vec<u8>>,
         input_hashes: Vec<[u8; 64]>,
     ) -> Result<Self, ()> {
@@ -269,7 +269,7 @@ impl Work {
                 .map_err(|_| ())?;
             let public = self.public.take().ok_or(())?;
             self.proof = Some(
-                Prover::from_generated(
+                SetupProver::from_generated(
                     profile,
                     &self.role,
                     public.hash.finish(),
@@ -362,8 +362,8 @@ pub struct ContributionSession {
     output: Vec<u8>,
     work: Option<Work>,
     stopped: bool,
-    checkpoint_export: Option<first_checkpoint::Export>,
-    checkpoint_import: Option<first_checkpoint::Import>,
+    checkpoint_export: Option<first_oracle_checkpoint::Export>,
+    checkpoint_import: Option<first_oracle_checkpoint::Import>,
     restore_keys: Vec<Option<Vec<u8>>>,
     // The receiver of the public setup objects, until generation begins.
     public_chunk: Option<PublicChunk>,
@@ -413,14 +413,14 @@ impl ContributionSession {
     pub fn checkpoint_records(&self) -> usize {
         self.checkpoint_import
             .as_ref()
-            .map(first_checkpoint::Import::relation)
+            .map(first_oracle_checkpoint::Import::relation)
             .or_else(|| {
                 self.work
                     .as_ref()
                     .and_then(|work| work.proof.as_ref())
-                    .map(Prover::relation)
+                    .map(SetupProver::relation)
             })
-            .map_or(0, first_checkpoint::record_count)
+            .map_or(0, first_oracle_checkpoint::record_count)
     }
     pub fn checkpoint_command(
         &mut self,
@@ -454,7 +454,7 @@ impl ContributionSession {
                         && checkpoint_import.is_none() =>
                 {
                     let work = work.as_mut().ok_or(())?;
-                    let export = first_checkpoint::Export::begin_with_inputs(
+                    let export = first_oracle_checkpoint::Export::begin_with_inputs(
                         work.proof.as_mut().ok_or(())?,
                         &work.input_hashes,
                     )
@@ -494,7 +494,7 @@ impl ContributionSession {
                 Some(CheckpointOperation::Open)
                     if (sealing::KEY_BYTES + sealing::TAG_BYTES
                         ..=sealing::KEY_BYTES
-                            + first_checkpoint::RECORD_BYTES
+                            + first_oracle_checkpoint::RECORD_BYTES
                             + sealing::TAG_BYTES)
                         .contains(&length) =>
                 {

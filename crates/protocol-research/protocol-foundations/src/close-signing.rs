@@ -1,6 +1,6 @@
 use crate::{
     Credential, Error, SIGNATURE_BYTES, SIGNING_PUBLIC_KEY_BYTES, SigningPurpose,
-    ballot_authentication::RetainedBallotOwner,
+    ballot_authentication::RetainedSetupOwner,
     foundation::{
         CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple,
         hash_foundation_tuple_512,
@@ -430,12 +430,12 @@ pub enum CloseMessage<'a> {
 impl Credential {
     fn check_close_owner(
         &self,
-        owner: &RetainedBallotOwner,
+        owner: &RetainedSetupOwner,
         roster: &AuthenticatedRosterProposal,
         poll: &[u8; 64],
         setup_identity: &[u8; 64],
     ) -> Result<(), Error> {
-        self.check_ballot_owner(owner)?;
+        self.check_setup_owner(owner)?;
         let records = roster.proposal().records();
         let record = records.get(owner.position()).ok_or(Error::Context)?;
         if !Profile::participant_range().contains(&records.len())
@@ -450,7 +450,7 @@ impl Credential {
         Ok(())
     }
     fn check_organizer(
-        owner: &RetainedBallotOwner,
+        owner: &RetainedSetupOwner,
         roster: &AuthenticatedRosterProposal,
     ) -> Result<(), Error> {
         if owner.position() != roster.proposal().organizer_position() {
@@ -490,7 +490,7 @@ impl Credential {
     /// The organizer's one close intent. Signing it also authenticates it.
     pub fn sign_close_intent(
         &mut self,
-        owner: &RetainedBallotOwner,
+        owner: &RetainedSetupOwner,
         roster: &AuthenticatedRosterProposal,
         message: &CloseIntentMessage,
     ) -> Result<[u8; SIGNATURE_BYTES], Error> {
@@ -513,7 +513,7 @@ impl Credential {
     /// most one response from this participant.
     pub fn lock_close_intent(
         &mut self,
-        owner: &RetainedBallotOwner,
+        owner: &RetainedSetupOwner,
         roster: &AuthenticatedRosterProposal,
         message: &CloseIntentMessage,
         signature: &[u8],
@@ -534,7 +534,7 @@ impl Credential {
     /// complete, and the participant's own on-time ballot must be listed.
     pub fn sign_close_response(
         &mut self,
-        owner: &RetainedBallotOwner,
+        owner: &RetainedSetupOwner,
         roster: &AuthenticatedRosterProposal,
         message: &CloseResponseMessage,
     ) -> Result<[u8; SIGNATURE_BYTES], Error> {
@@ -560,7 +560,7 @@ impl Credential {
     /// include its own response.
     pub fn sign_close_proposal(
         &mut self,
-        owner: &RetainedBallotOwner,
+        owner: &RetainedSetupOwner,
         roster: &AuthenticatedRosterProposal,
         message: &CloseProposalMessage,
     ) -> Result<[u8; SIGNATURE_BYTES], Error> {
@@ -585,7 +585,7 @@ impl Credential {
     /// for unused authority. A response requires its intent to be locked first.
     pub fn restore_close_message(
         &mut self,
-        owner: &RetainedBallotOwner,
+        owner: &RetainedSetupOwner,
         roster: &AuthenticatedRosterProposal,
         message: CloseMessage<'_>,
         signature: &[u8],

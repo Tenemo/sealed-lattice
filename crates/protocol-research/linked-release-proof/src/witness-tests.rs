@@ -84,7 +84,7 @@ pub(crate) fn synthetic_release(profile: Profile) -> (PreparedRelease, Vec<BigIn
     header[..4].copy_from_slice(RELEASE_HEADER_MAGIC);
     let position = (profile.participants() - 1) as u16;
     header[RELEASE_HEADER_BYTES - 2..].copy_from_slice(&position.to_le_bytes());
-    (derive_bound(inputs, header).unwrap(), shares)
+    (prepare_release(inputs, header).unwrap(), shares)
 }
 
 fn affine_value(prepared: &PreparedRelease, alpha: Element) -> (Element, Element) {

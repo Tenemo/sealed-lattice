@@ -1,6 +1,6 @@
 use super::{
     CHUNK_LIMIT, Element, Error, MODULUS, ONE, PolynomialRecords, PolynomialStream, ZERO,
-    arithmetic, fingerprint_in, jobs, minus, plus, power, query, times,
+    fingerprint_in, jobs, minus, plus, power, proof_field, query, times,
 };
 use parallel_work::{HashStream, Pipeline, Sponge, Ticket};
 use std::collections::VecDeque;
@@ -19,7 +19,7 @@ fn base(value: i128) -> u128 {
     }
 }
 fn scale(value: Element, scalar: u128) -> Element {
-    value.map(|entry| arithmetic::multiply(entry, scalar))
+    value.map(|entry| proof_field::multiply(entry, scalar))
 }
 fn signed_fingerprint(value: i128, radix_bits: usize, weight: Element) -> Element {
     let result = fingerprint_in(&value.unsigned_abs().to_le_bytes(), radix_bits, weight);

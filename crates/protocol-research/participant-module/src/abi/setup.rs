@@ -46,7 +46,7 @@ fn selection_operation(
             if selection.roster_identity() != context.identity() {
                 return Err(Error::Context);
             }
-            state.contribution_output = selection.body().to_vec();
+            state.participant_output = selection.body().to_vec();
             state.unsigned_selection = Some(selection);
         }
         Some(SelectionOperation::SignProposal) => {
@@ -60,7 +60,7 @@ fn selection_operation(
                 .ok_or(Error::Context)?
                 .credential
                 .sign_selection_proposal(&roster, selection)?;
-            state.contribution_output = signed_packet::encode(selection.body(), &signature);
+            state.participant_output = signed_packet::encode(selection.body(), &signature);
         }
         Some(SelectionOperation::Endorse | SelectionOperation::EndorsementBody) => {
             let inputs = super::setup_verification::selection_inputs().ok_or(Error::Context)?;
@@ -68,7 +68,7 @@ fn selection_operation(
                 return Err(Error::Context);
             }
             let selection = inputs.selection().selection();
-            state.contribution_output = if operation == Some(SelectionOperation::Endorse) {
+            state.participant_output = if operation == Some(SelectionOperation::Endorse) {
                 if !input.is_empty() {
                     return Err(Error::Shape);
                 }
@@ -129,7 +129,7 @@ pub extern "C" fn selection_signing_command(operation: u32, length: usize) -> u3
 pub extern "C" fn retain_selection_inputs() -> u32 {
     SESSION.with(|state| {
         let mut state = state.borrow_mut();
-        state.contribution_output.clear();
+        state.participant_output.clear();
         let Some(enrollment) = state.enrollment.as_ref() else {
             return 1;
         };
@@ -142,7 +142,7 @@ pub extern "C" fn retain_selection_inputs() -> u32 {
         let Ok(retained) = inputs.retain(&enrollment.credential, &poll) else {
             return 1;
         };
-        state.contribution_output = retained;
+        state.participant_output = retained;
         0
     })
 }
@@ -169,7 +169,7 @@ pub extern "C" fn restore_selection_inputs(length: usize) -> u32 {
 pub extern "C" fn retain_setup() -> u32 {
     SESSION.with(|state| {
         let mut state = state.borrow_mut();
-        state.contribution_output.clear();
+        state.participant_output.clear();
         let Some(enrollment) = state.enrollment.as_ref() else {
             return 1;
         };
@@ -181,7 +181,7 @@ pub extern "C" fn retain_setup() -> u32 {
         else {
             return 1;
         };
-        state.contribution_output = reference;
+        state.participant_output = reference;
         0
     })
 }
@@ -201,7 +201,7 @@ pub extern "C" fn retire_contribution_sources() -> u32 {
         let Some((poll, setup)) = super::setup_verification::verified_setup() else {
             return 1;
         };
-        let Some(original) = super::own_verification::verified() else {
+        let Some(original) = super::own_registration::verified() else {
             return 1;
         };
         let proposal = setup.roster().proposal();

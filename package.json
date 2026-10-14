@@ -19,7 +19,7 @@
         "check": "tsx ./tools/ci/run-check.ts",
         "check:desktop": "tsx ./tools/ci/run-check.ts --include-desktop-browser",
         "research:protocol": "tsx ./tools/ci/run-protocol-research.ts",
-        "research:protocol:public-records": "tsx ./tools/ci/check-protocol-public-completion.ts",
+        "research:protocol:public-records": "tsx ./tools/ci/run-protocol-public-records.ts",
         "research:participant": "pnpm run build && pnpm run research:participant:built",
         "research:participant:built": "tsx ./tools/ci/run-participant-browser.ts",
         "research:evidence-renewal": "tsx ./tools/ci/run-evidence-renewal.ts",

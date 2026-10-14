@@ -21,8 +21,8 @@ mod evaluation;
 mod finality;
 #[path = "abi/operation-random.rs"]
 mod operation_random;
-#[path = "abi/own-verification.rs"]
-mod own_verification;
+#[path = "abi/own-registration.rs"]
+mod own_registration;
 mod parallel;
 #[path = "abi/participant-bounds.rs"]
 mod participant_bounds;
@@ -66,13 +66,13 @@ struct Session {
     proposal_signature: Option<[u8; SIGNATURE_BYTES]>,
     signed_proposal: Option<Arc<AuthenticatedRosterProposal>>,
     offer: OfferSigning,
-    contribution_output: Vec<u8>,
+    participant_output: Vec<u8>,
     unsigned_selection: Option<protocol_foundations::setup_selection::SelectionProposal>,
     retained_context: Option<RetainedContributionContext>,
     ballot: Option<crate::ballot::BallotWork>,
     close: Option<crate::close_work::CloseWork>,
     finality: Option<crate::finality_work::FinalityWork>,
-    release: Option<crate::release_body::ReleaseBody>,
+    release: Option<crate::release_body::OwnReleaseBody>,
     // A retained evaluated target the host streams in, and its length.
     evaluation: Option<(usize, Vec<u8>)>,
 }
@@ -88,7 +88,7 @@ thread_local! {
         proposal_signature: None,
         signed_proposal: None,
         offer: OfferSigning::default(),
-        contribution_output: Vec::new(),
+        participant_output: Vec::new(),
         unsigned_selection: None,
         retained_context: None,
         ballot: None,
@@ -122,7 +122,7 @@ fn original_context(
         return Ok(context.clone());
     }
     let enrollment = state.enrollment.as_ref().ok_or(Error::Context)?;
-    let original = own_verification::verified().ok_or(Error::Context)?;
+    let original = own_registration::verified().ok_or(Error::Context)?;
     let proposal = state
         .signed_proposal
         .as_ref()
@@ -136,7 +136,7 @@ fn original_context(
                 && record.header().signing_public == *enrollment.credential.signing_public()
         })
         .ok_or(Error::Context)?;
-    own_verification::with_poll(|poll| {
+    own_registration::with_poll(|poll| {
         RetainedContributionContext::parse(
             &enrollment.credential,
             &original,
@@ -149,11 +149,11 @@ fn original_context(
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn contribution_output_pointer() -> usize {
-    SESSION.with(|state| state.borrow().contribution_output.as_ptr() as usize)
+pub extern "C" fn participant_output_pointer() -> usize {
+    SESSION.with(|state| state.borrow().participant_output.as_ptr() as usize)
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn contribution_output_length() -> usize {
-    SESSION.with(|state| state.borrow().contribution_output.len())
+pub extern "C" fn participant_output_length() -> usize {
+    SESSION.with(|state| state.borrow().participant_output.len())
 }

@@ -2,7 +2,7 @@ use evaluation_target::close::ClosedSlot;
 use evaluation_target::target::VerifiedEvaluationTarget;
 use protocol_foundations::{
     Credential, Error,
-    ballot_authentication::RetainedBallotOwner,
+    ballot_authentication::RetainedSetupOwner,
     target_signing::{TargetMessage, TargetVote},
 };
 use std::sync::Arc;
@@ -56,13 +56,13 @@ pub fn classified_ballot_inclusion(
 /// classified closed inventory it keeps. Persistence stays in the root
 /// worker.
 pub struct FinalityWork {
-    owner: Arc<RetainedBallotOwner>,
+    owner: Arc<RetainedSetupOwner>,
     target: Arc<VerifiedEvaluationTarget>,
     message: TargetMessage,
 }
 impl FinalityWork {
     pub fn new(
-        owner: Arc<RetainedBallotOwner>,
+        owner: Arc<RetainedSetupOwner>,
         target: Arc<VerifiedEvaluationTarget>,
     ) -> Result<Self, Error> {
         let count = target.setup().profile().participants();

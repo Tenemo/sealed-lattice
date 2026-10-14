@@ -110,8 +110,8 @@ export const moduleArity = {
     selection_signing_command: 2,
     retain_selection_inputs: 0,
     restore_selection_inputs: 1,
-    contribution_output_pointer: 0,
-    contribution_output_length: 0,
+    participant_output_pointer: 0,
+    participant_output_length: 0,
     begin_contribution: 1,
     contribution_proof_input_pointer: 0,
     contribution_proof_input_capacity: 0,
@@ -290,8 +290,8 @@ export type ParticipantModule = Readonly<{
     selection_signing_command: (operation: number, length: number) => number;
     retain_selection_inputs: () => number;
     restore_selection_inputs: (length: number) => number;
-    contribution_output_pointer: () => number;
-    contribution_output_length: () => number;
+    participant_output_pointer: () => number;
+    participant_output_length: () => number;
     begin_contribution: (position: number) => number;
     contribution_proof_input_pointer: () => number;
     contribution_proof_input_capacity: () => number;
@@ -603,8 +603,8 @@ export const seededRandomness = (
 export const readParticipantOutput = (module: ParticipantModule) =>
     readModuleMemory(
         module,
-        module.contribution_output_pointer(),
-        module.contribution_output_length(),
+        module.participant_output_pointer(),
+        module.participant_output_length(),
     );
 
 export const writeProofInput = (module: ParticipantModule, bytes: Uint8Array) =>

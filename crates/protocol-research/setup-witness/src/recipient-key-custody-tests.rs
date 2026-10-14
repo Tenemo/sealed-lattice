@@ -1,12 +1,12 @@
 use super::*;
 #[test]
 fn sealed_keys_restore_without_resealing_authority() {
-    let mut original = RegistrationKey::new();
+    let mut original = RecipientKey::new();
     let context: &[u8] = b"registration/context";
     let sealed = original.seal_retained(context).unwrap();
     assert_eq!(sealed.bytes.len(), SEALED_BYTES);
     assert!(original.seal_retained(context).is_err());
-    let open = RegistrationKey::open_retained;
+    let open = RecipientKey::open_retained;
     let mut restored = open(original.public.clone(), &sealed.key, context, &sealed.bytes).unwrap();
     assert_eq!(*original.secret, *restored.secret);
     assert!(restored.seal_retained(context).is_err());

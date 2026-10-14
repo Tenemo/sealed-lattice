@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn cubic_field_uses_the_selected_nonresidue() {
-    assert_ne!(arithmetic::power(2, (MODULUS - 1) / 3), 1);
+    assert_ne!(proof_field::power(2, (MODULUS - 1) / 3), 1);
 }
 
 fn auxiliary_stream() -> PolynomialStream {

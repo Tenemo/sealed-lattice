@@ -1,6 +1,6 @@
 use crate::close::VerifiedCloseBarrier;
 use crate::target::{
-    BallotReader, ClassifiedClosedInventory, Error, EvaluationSession, KeyReader,
+    BallotReader, ClassifiedClosedInventory, Error, KeyReader, RunningEvaluation,
     VerifiedEvaluationTarget,
 };
 use ballot_proof::body::BallotBodyClassification;
@@ -66,7 +66,7 @@ pub struct TargetSession {
     output: Vec<u8>,
     context: Option<(Arc<VerifiedPoll>, Arc<VerifiedSetupAggregate>)>,
     classifications: Vec<Option<BallotBodyClassification>>,
-    session: Option<EvaluationSession>,
+    session: Option<RunningEvaluation>,
     incoming: Option<Incoming>,
     target: Option<Arc<VerifiedEvaluationTarget>>,
 }
@@ -112,7 +112,7 @@ impl TargetSession {
             .and_then(|session| session.engine.as_ref())
             .is_some_and(Engine::finished)
     }
-    fn session(&mut self) -> Result<&mut EvaluationSession, Error> {
+    fn session(&mut self) -> Result<&mut RunningEvaluation, Error> {
         self.session.as_mut().ok_or(Error::Context)
     }
     fn engine(&mut self) -> Result<&mut Engine, Error> {

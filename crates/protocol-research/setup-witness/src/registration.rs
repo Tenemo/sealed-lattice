@@ -17,17 +17,17 @@ impl PolynomialOutput for KeyOutput {
     }
 }
 
-pub struct RegistrationKey {
+pub struct RecipientKey {
     public: Vec<BigInt>,
     secret: Zeroizing<Vec<i8>>,
     sealed: bool,
 }
-impl Default for RegistrationKey {
+impl Default for RecipientKey {
     fn default() -> Self {
         Self::new()
     }
 }
-impl RegistrationKey {
+impl RecipientKey {
     pub fn new() -> Self {
         let plan = Plan::new(DEGREE);
         let modulus = integer(share_modulus());
@@ -126,9 +126,9 @@ impl RegistrationKey {
     }
 }
 
-#[path = "registration-custody.rs"]
+#[path = "recipient-key-custody.rs"]
 mod custody;
-/// A sealed registration key: its magic, its secret's support positions and
+/// A sealed recipient key: its magic, its secret's support positions and
 /// the AES-GCM tag.
 pub use custody::SEALED_BYTES as SEALED_KEY_BYTES;
 

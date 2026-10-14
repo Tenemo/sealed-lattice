@@ -55,7 +55,7 @@ fn offer_operation(
                     .offer
                     .begin_body(&enrollment.credential, context, &header)?;
             }
-            state.contribution_output = header.to_vec();
+            state.participant_output = header.to_vec();
         }
         Some(OfferSigningOperation::Polynomial) => {
             if !(5..=4 + (1 << 20)).contains(&input.len()) {
@@ -70,7 +70,7 @@ fn offer_operation(
                 return Err(Error::Shape);
             }
             state.offer.finish_body()?;
-            state.contribution_output = state
+            state.participant_output = state
                 .offer
                 .envelope()
                 .ok_or(Error::Consumed)?
@@ -84,7 +84,7 @@ fn offer_operation(
             let credential = &mut state.enrollment.as_mut().ok_or(Error::Context)?.credential;
             state.offer.sign(credential)?;
             let (envelope, signature) = state.offer.offer().ok_or(Error::Consumed)?;
-            state.contribution_output = signed_packet::encode(envelope.bytes(), signature);
+            state.participant_output = signed_packet::encode(envelope.bytes(), signature);
         }
         None => return Err(Error::Shape),
     }
@@ -259,7 +259,7 @@ pub extern "C" fn retain_proposal(length: usize) -> u32 {
         let mut state = state.borrow_mut();
         // The proposal names the poll of this instance's verified
         // registration, which fixes the option count.
-        let Some(verified) = super::own_verification::verified() else {
+        let Some(verified) = super::own_registration::verified() else {
             return 1;
         };
         let Some(enrollment) = state.enrollment.as_ref() else {
@@ -280,7 +280,7 @@ pub extern "C" fn retain_proposal(length: usize) -> u32 {
         {
             return 1;
         }
-        let Some(Ok(context)) = super::own_verification::with_poll(|poll| {
+        let Some(Ok(context)) = super::own_registration::with_poll(|poll| {
             RetainedContributionContext::parse(
                 &enrollment.credential,
                 &verified,

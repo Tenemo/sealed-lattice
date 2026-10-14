@@ -1,5 +1,5 @@
 pub use base::MODULUS;
-pub use statement_stream::arithmetic as base;
+pub use statement_stream::proof_field as base;
 pub type Element = [u128; 3];
 pub const ZERO: Element = [0, 0, 0];
 pub const ONE: Element = [1, 0, 0];

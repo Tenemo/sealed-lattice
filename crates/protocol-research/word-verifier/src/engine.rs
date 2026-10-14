@@ -11,7 +11,7 @@ use transcript::{
 use parallel_work::ProtocolHash;
 use parallel_work::{HashStream, Sponge};
 use statement_stream::StatementOutput;
-use statement_stream::arithmetic::{
+use statement_stream::proof_field::{
     MODULUS, add as add_base, multiply as multiply_base, power as power_base,
     subtract as subtract_base,
 };
@@ -46,7 +46,7 @@ fn scale(value: Element, factor: u128) -> Element {
     value.map(|entry| multiply_base(entry, factor))
 }
 fn multiply(left: Element, right: Element) -> Element {
-    statement_stream::arithmetic::multiply_extension(left, right)
+    statement_stream::proof_field::multiply_extension(left, right)
 }
 fn encode(value: Element) -> [u8; 48] {
     let mut bytes = [0; 48];

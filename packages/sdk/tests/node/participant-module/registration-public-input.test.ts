@@ -223,8 +223,8 @@ describe('participant module public input', () => {
                 module.own_registration_poll() === 0
                     ? readModuleMemory(
                           module,
-                          module.contribution_output_pointer(),
-                          module.contribution_output_length(),
+                          module.participant_output_pointer(),
+                          module.participant_output_length(),
                       )
                     : undefined;
             // An accepted begin names the poll and the registration this

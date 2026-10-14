@@ -371,14 +371,14 @@ pub enum BallotBodyClassification {
 
 /// Classifies only bytes matching an already authenticated envelope.
 /// Corrupt key/cache inputs and wrong-hash delivery never yield `Invalid`.
-pub struct SignedBallotVerifier {
+pub struct BallotBodyClassifier {
     authentication: crate::submission::AuthenticatedBallotEnvelope,
     setup: Arc<VerifiedSetupAggregate>,
     relation: Option<BallotBodyRelationVerifier>,
     hash: BodyHasher,
     failed: bool,
 }
-impl SignedBallotVerifier {
+impl BallotBodyClassifier {
     /// Inputs kept from an earlier ballot of the same setup spare this one
     /// reading the keys again.
     pub fn new(

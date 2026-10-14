@@ -1,14 +1,15 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 
 pub mod affine;
-pub mod arithmetic;
 pub mod coefficient;
 mod jobs;
 pub mod negacyclic;
+#[path = "proof-field.rs"]
+pub mod proof_field;
 mod query;
 mod setup;
-use arithmetic::{Columns, MODULUS, add, multiply, subtract};
 use coefficient::CenteredCodec;
+use proof_field::{Columns, MODULUS, add, multiply, subtract};
 pub use setup::{
     ProverFixedTerm, ProverOperatorPlan, SetupStatementStream, StatementOutput,
     prover_operator_plan, setup_polynomial_stream,
@@ -28,7 +29,7 @@ fn minus(left: Element, right: Element) -> Element {
     std::array::from_fn(|index| subtract(left[index], right[index]))
 }
 fn times(left: Element, right: Element) -> Element {
-    arithmetic::multiply_extension(left, right)
+    proof_field::multiply_extension(left, right)
 }
 // The limb of `radix_bits` bits at `limb` of a little-endian magnitude.
 fn limb_value(bytes: &[u8], limb: usize, radix_bits: usize) -> u128 {
@@ -131,7 +132,7 @@ fn adjoint_of(
 }
 fn power(mut value: Element, mut exponent: usize) -> Element {
     if value[1] == 0 && value[2] == 0 {
-        return [arithmetic::power(value[0], exponent as u128), 0, 0];
+        return [proof_field::power(value[0], exponent as u128), 0, 0];
     }
     let mut result = ONE;
     while exponent != 0 {

@@ -210,7 +210,7 @@ impl ClassifiedClosedInventory {
             components: [engine.polynomial_decoder(), engine.polynomial_decoder()],
         }))
     }
-    pub fn start(self) -> Result<EvaluationSession, Error> {
+    pub fn start(self) -> Result<RunningEvaluation, Error> {
         let program = if self.accepted_authors().count() < minimum_turnout(self.accepted.len()) {
             None
         } else {
@@ -253,7 +253,7 @@ impl ClassifiedClosedInventory {
                 assert!(ticket.wait().is_empty());
             }
         }
-        Ok(EvaluationSession {
+        Ok(RunningEvaluation {
             inventory: self,
             engine,
         })
@@ -340,11 +340,11 @@ impl ClassifiedClosedInventory {
     }
 }
 
-pub struct EvaluationSession {
+pub struct RunningEvaluation {
     pub(crate) inventory: ClassifiedClosedInventory,
     pub(crate) engine: Option<Engine>,
 }
-impl EvaluationSession {
+impl RunningEvaluation {
     /// Completes the target body: the no-result branch, or the result branch
     /// and the identity of its final ciphertext, whose framing also fixes its
     /// length. The program is not a field, since the profile and the poll's

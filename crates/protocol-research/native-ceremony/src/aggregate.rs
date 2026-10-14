@@ -509,7 +509,7 @@ pub fn classify_ballot(
     keys: &Path,
     mode: &str,
 ) -> Result<ballot_proof::body::BallotBodyClassification, ballot_proof::body::Error> {
-    use ballot_proof::body::{Error, SignedBallotVerifier};
+    use ballot_proof::body::{BallotBodyClassifier, Error};
     let profile = setup.profile();
     let authentication =
         ballot_proof::submission::authenticate_envelope(&setup, envelope, signature)
@@ -520,7 +520,7 @@ pub fn classify_ballot(
     if mode == "header" {
         header[0] ^= 1;
     }
-    let mut verifier = SignedBallotVerifier::new(poll, setup, authentication, &header, None)?;
+    let mut verifier = BallotBodyClassifier::new(poll, setup, authentication, &header, None)?;
     let index = ballot_key(profile);
     if verifier.requires_key() {
         verifier.begin_key(index)?;

@@ -1,4 +1,4 @@
-use super::{Error, Phase, Prover};
+use super::{Error, Phase, SetupProver};
 use crate::{
     field::{self, Element, MODULUS},
     oracles::{FirstOracle, Witness},
@@ -154,7 +154,7 @@ pub struct Export {
 }
 impl Export {
     pub fn begin_with_inputs(
-        prover: &mut Prover,
+        prover: &mut SetupProver,
         input_hashes: &[[u8; 64]],
     ) -> Result<Self, Error> {
         let profile = prover.profile;
@@ -197,7 +197,7 @@ impl Export {
         self.next == record_count(&self.relation)
     }
     /// Seals the next record under a fresh key.
-    pub fn seal(&mut self, prover: &mut Prover) -> Result<Sealed, Error> {
+    pub fn seal(&mut self, prover: &mut SetupProver) -> Result<Sealed, Error> {
         let (field, start, count, width) = record_layout(&self.relation, self.next).ok_or(())?;
         if prover.profile != self.header.profile
             || prover.phase != Phase::FirstColumn(self.header.column)
@@ -351,7 +351,7 @@ impl Import {
         self.next += 1;
         Ok(())
     }
-    pub fn finish(mut self) -> Result<Prover, Error> {
+    pub fn finish(mut self) -> Result<SetupProver, Error> {
         if !self.complete() {
             return Err(Error::Operation);
         }
@@ -361,7 +361,8 @@ impl Import {
             std::mem::take(&mut *self.columns),
         )
         .map_err(|_| ())?;
-        let mut prover = Prover::new(self.header.profile, &self.header.role, self.header.expected);
+        let mut prover =
+            SetupProver::new(self.header.profile, &self.header.role, self.header.expected);
         let mut transcript = Transcript::new(
             &self.header.role,
             self.header.context,
@@ -390,5 +391,5 @@ impl Import {
 }
 
 #[cfg(test)]
-#[path = "first-checkpoint-tests.rs"]
+#[path = "first-oracle-checkpoint-tests.rs"]
 mod tests;

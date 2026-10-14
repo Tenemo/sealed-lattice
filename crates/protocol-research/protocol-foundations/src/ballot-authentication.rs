@@ -29,14 +29,14 @@ const RETAINED_SETUP_TAG_LABEL: &[u8] = b"sealed-lattice/retained-setup-referenc
 
 /// Original credential correspondence beneath the authenticated participant root.
 /// This creates no public roster, setup, ballot, or unspent-attempt capability.
-pub struct RetainedBallotOwner {
+pub struct RetainedSetupOwner {
     poll: [u8; 64],
     setup_identity: [u8; 64],
     position: usize,
     owner_body: [u8; 64],
     signing_public: [u8; SIGNING_PUBLIC_KEY_BYTES],
 }
-impl RetainedBallotOwner {
+impl RetainedSetupOwner {
     pub fn participant_identity(
         &self,
     ) -> crate::foundation::participant_identity::ParticipantIdentity {
@@ -184,7 +184,7 @@ impl Credential {
     ) -> Result<(), Error> {
         self.check_retained_tag(RETAINED_SETUP_TAG_LABEL, poll, reference, tag)
     }
-    pub(crate) fn check_ballot_owner(&self, owner: &RetainedBallotOwner) -> Result<(), Error> {
+    pub(crate) fn check_setup_owner(&self, owner: &RetainedSetupOwner) -> Result<(), Error> {
         if self.completed_body != Some(owner.owner_body)
             || self.signing_public != owner.signing_public
         {
@@ -195,8 +195,8 @@ impl Credential {
     /// Mirrors an already authenticated local ballot intent. It grants no
     /// public publication and cannot restore unused authority.
     /// No attempt starts after an authenticated close intent.
-    pub fn reserve_ballot_attempt(&mut self, owner: &RetainedBallotOwner) -> Result<(), Error> {
-        self.check_ballot_owner(owner)?;
+    pub fn reserve_ballot_attempt(&mut self, owner: &RetainedSetupOwner) -> Result<(), Error> {
+        self.check_setup_owner(owner)?;
         self.check_unlocked(SigningPurpose::Ballot)?;
         if self.signed_ballot.is_some() || self.close_lock.is_some() {
             return Err(Error::Consumed);
@@ -220,20 +220,20 @@ impl Credential {
     }
     /// Every original roster member uses its own verified winning setup
     /// reference, whether its own offer or endorsement was selected or absent.
-    pub fn retain_setup_ballot_owner(
+    pub fn retain_setup_owner(
         &self,
         poll: &VerifiedPoll,
         context: &RetainedContributionContext,
         setup_identity: [u8; 64],
         reference: &[u8],
         tag: &[u8],
-    ) -> Result<RetainedBallotOwner, Error> {
+    ) -> Result<RetainedSetupOwner, Error> {
         self.check_owner_context(poll, context)?;
         self.check_retained_setup_tag(poll, reference, tag)?;
         if reference.get(4..68) != Some(setup_identity.as_slice()) {
             return Err(Error::Context);
         }
-        Ok(RetainedBallotOwner {
+        Ok(RetainedSetupOwner {
             poll: poll.identity(),
             setup_identity,
             position: context.position,
@@ -243,7 +243,7 @@ impl Credential {
     }
     pub fn sign_retained_ballot_envelope(
         &mut self,
-        owner: &RetainedBallotOwner,
+        owner: &RetainedSetupOwner,
         envelope: &BallotEnvelope,
     ) -> Result<[u8; SIGNATURE_BYTES], Error> {
         if self.completed_body != Some(owner.owner_body)
@@ -258,7 +258,7 @@ impl Credential {
     }
     pub fn restore_retained_ballot_signing(
         &mut self,
-        owner: &RetainedBallotOwner,
+        owner: &RetainedSetupOwner,
         envelope: &BallotEnvelope,
         signature: &[u8],
     ) -> Result<(), Error> {

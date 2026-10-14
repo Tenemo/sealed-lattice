@@ -46,22 +46,26 @@ const callsIn = (source: string, name: string) => {
 describe('complete first-oracle proof checkpoint', () => {
     it('keeps the first response salt after the checkpoint and prices separate field reads', async () => {
         const model = compileFirstOracleCheckpointCensus(completionProfile());
-        const [worker, bridge, transcript, checkpoint] = await Promise.all([
-            readFile(
-                new URL(
-                    '../../../packages/sdk/src/participant/worker/stages/contribution/contribution.ts',
-                    import.meta.url,
+        const [worker, setupProver, transcript, checkpoint] = await Promise.all(
+            [
+                readFile(
+                    new URL(
+                        '../../../packages/sdk/src/participant/worker/stages/contribution/contribution.ts',
+                        import.meta.url,
+                    ),
+                    'utf8',
                 ),
-                'utf8',
-            ),
-            readRustSource('crates/protocol-research/word-proof/src/bridge.rs'),
-            readRustSource(
-                'crates/protocol-research/word-proof/src/transcript.rs',
-            ),
-            readRustSource(
-                'crates/protocol-research/word-proof/src/first-checkpoint.rs',
-            ),
-        ]);
+                readRustSource(
+                    'crates/protocol-research/word-proof/src/setup-prover.rs',
+                ),
+                readRustSource(
+                    'crates/protocol-research/word-proof/src/transcript.rs',
+                ),
+                readRustSource(
+                    'crates/protocol-research/word-proof/src/first-oracle-checkpoint.rs',
+                ),
+            ],
+        );
         // The continuation retains its fresh seed before the prover draws
         // the first response salt from it.
         const continuation = callsIn(worker, 'continueContribution');
@@ -74,7 +78,7 @@ describe('complete first-oracle proof checkpoint', () => {
             expect(index).toBeGreaterThanOrEqual(0);
             return index;
         };
-        const step = rustFunctionBody(bridge, 'step');
+        const step = rustFunctionBody(setupProver, 'step');
         expect(position(step, 'first.finish_commitment();')).toBeLessThan(
             position(step, 'transcript.respond(&[&first.tree.root()]);'),
         );

@@ -1,5 +1,5 @@
 use crate::{
-    Credential, Error, SIGNATURE_BYTES, SigningPurpose, ballot_authentication::RetainedBallotOwner,
+    Credential, Error, SIGNATURE_BYTES, SigningPurpose, ballot_authentication::RetainedSetupOwner,
     identity::BodyHasher, roster_authentication::AuthenticatedRosterProposal,
     target_signing::TargetMessage,
 };
@@ -145,7 +145,7 @@ pub fn body_hasher(profile: Profile, length: usize) -> Result<BodyHasher, Error>
 impl Credential {
     pub fn begin_release(
         &mut self,
-        owner: &RetainedBallotOwner,
+        owner: &RetainedSetupOwner,
         roster: &AuthenticatedRosterProposal,
         message: &TargetMessage,
     ) -> Result<(), Error> {
@@ -166,11 +166,11 @@ impl Credential {
     }
     pub fn sign_release(
         &mut self,
-        owner: &RetainedBallotOwner,
+        owner: &RetainedSetupOwner,
         roster: &AuthenticatedRosterProposal,
         envelope: &ReleaseEnvelope,
     ) -> Result<[u8; SIGNATURE_BYTES], Error> {
-        self.check_ballot_owner(owner)?;
+        self.check_setup_owner(owner)?;
         self.check_target_predecessors(owner, roster)?;
         let record = roster
             .proposal()

@@ -238,8 +238,8 @@ export const retainEvaluation = async (context: ParticipantProfileContext) => {
     const { module } = context;
     if (module.retain_evaluation() !== 0)
         throw new Error('The credential refused the evaluated target.');
-    const pointer = module.contribution_output_pointer() >>> 0;
-    const length = module.contribution_output_length();
+    const pointer = module.participant_output_pointer() >>> 0;
+    const length = module.participant_output_length();
     const parts: Blob[] = [];
     for (let offset = 0; offset < length; offset += chunkBytes)
         // Blob snapshots this bounded view synchronously. No Wasm call or

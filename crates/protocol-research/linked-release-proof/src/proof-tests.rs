@@ -1,11 +1,11 @@
 use super::*;
 use crate::{
-    CHUNK_LIMIT, HEADER_LENGTH, ReleaseInputs, derive_bound, statement::share_modulus, verifier,
+    CHUNK_LIMIT, HEADER_LENGTH, ReleaseInputs, prepare_release, statement::share_modulus, verifier,
     witness::tests::synthetic_release,
 };
 use num_bigint::BigInt;
 use parallel_work::random::{self, Purpose};
-use setup_witness::{contribution::common_share_polynomial, registration::RegistrationKey};
+use setup_witness::{contribution::common_share_polynomial, registration::RecipientKey};
 use sha3::{
     Digest, Sha3_512, Shake256, Shake256Reader,
     digest::{ExtendableOutput, Update, XofReader},
@@ -72,7 +72,7 @@ fn release_proofs_verify_only_for_their_role_and_true_partial() {
     )
     .unwrap();
     let statement = &prepared.statement;
-    let proof = OneShotProof::create(
+    let proof = InMemoryProof::create(
         role,
         witness,
         &statement.header,
@@ -169,7 +169,7 @@ fn centered(value: BigInt, modulus: &BigInt) -> BigInt {
 // The last position's release header and its public inputs: an encryption
 // of small shares under the key with small errors, and a target.
 fn release_inputs(
-    key: &RegistrationKey,
+    key: &RecipientKey,
     profile: Profile,
     seed: u8,
 ) -> ([u8; RELEASE_HEADER_BYTES], [Vec<BigInt>; 3]) {
@@ -199,7 +199,7 @@ fn release_inputs(
     (header, [constant, linear, target])
 }
 
-// The digest of the statement and proof of a release to a registration key
+// The digest of the statement and proof of a release to a recipient key
 // generated from the seed's witness stream and proved from its proof stream,
 // as the participant's release proves it with the key's lent secret.
 fn replayed_release(seed: u8) -> String {
@@ -209,7 +209,7 @@ fn replayed_release(seed: u8) -> String {
         *draws.borrow_mut() = Some([stream("witness", seed), stream("proof", seed)]);
     });
     random::install(serve);
-    let key = RegistrationKey::new();
+    let key = RecipientKey::new();
     let (header, [constant, linear, target]) = release_inputs(&key, profile, seed);
     let (statement, proof) = key
         .lend_secret(|secret| {
@@ -223,7 +223,7 @@ fn replayed_release(seed: u8) -> String {
                 secret,
             )
             .unwrap();
-            prove(role, derive_bound(inputs, header).unwrap())
+            prove(role, prepare_release(inputs, header).unwrap())
         })
         .unwrap();
     random::release();
