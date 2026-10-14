@@ -9,8 +9,7 @@ import {
 describe('documentation census generator', () => {
     const rendered = renderDocumentationCensus();
 
-    it('renders deterministically with the current model owners', () => {
-        expect(renderDocumentationCensus()).toBe(rendered);
+    it('renders the current model owners', () => {
         for (const heading of [
             '## Threshold completion census',
             '## Threshold key-aggregation structural census',

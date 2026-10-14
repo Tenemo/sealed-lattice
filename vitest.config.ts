@@ -4,7 +4,11 @@ import { fileURLToPath } from 'node:url';
 
 import { playwright } from '@vitest/browser-playwright';
 import { defineConfig, type UserWorkspaceConfig } from 'vitest/config';
-import type { BrowserInstanceOption } from 'vitest/node';
+import {
+    BaseSequencer,
+    type BrowserInstanceOption,
+    type TestSpecification,
+} from 'vitest/node';
 
 import { resolveTestDiagnosticPaths } from './tools/ci/test-diagnostic-environment.js';
 
@@ -44,8 +48,6 @@ const nodeTestProjectDefinitions = [
     {
         // Rendering the complete deterministic model census exceeds a fast
         // unit-test interval, so it keeps the fixture-initialization budget.
-        // The census, the participant-module files and the other model files
-        // all run together.
         include: censusNodeTestGlobs,
         projectName: 'node-census',
         testTimeout: nodeHookTimeoutMilliseconds,
@@ -212,9 +214,25 @@ const makeBrowserProject = ({
     };
 };
 
+// The census and participant-module projects hold the longest files. The
+// default order runs projects by name, so they would start only after every
+// other Node file.
+class HeavyProjectsFirstSequencer extends BaseSequencer {
+    override async sort(
+        files: TestSpecification[],
+    ): Promise<TestSpecification[]> {
+        const sorted = await super.sort(files);
+        return [
+            ...sorted.filter(({ project }) => project.name !== 'node'),
+            ...sorted.filter(({ project }) => project.name === 'node'),
+        ];
+    }
+}
+
 export default defineConfig({
     resolve: testResolve,
     test: {
+        sequence: { sequencer: HeavyProjectsFirstSequencer },
         reporters: [
             'default' as const,
             ...(process.env.GITHUB_ACTIONS === 'true'
