@@ -51,6 +51,7 @@ export default defineConfig(
     globalIgnores([
         'logs/**',
         'temp/**',
+        'implementation-documentation/**',
         'reference-projects/**',
         '**/dist/**',
         '**/target/**',
