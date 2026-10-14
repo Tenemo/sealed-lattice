@@ -40,13 +40,13 @@ impl TargetMessage {
         // Classification codes: 0 absent, 1 invalid, 2 accepted, 3 conflicting.
         let limits = CanonicalDecodeLimits {
             maximum_tuple_byte_length: MAXIMUM_TARGET_BODY_BYTES,
-            maximum_item_count: 7,
+            maximum_item_count: 6,
             maximum_item_byte_length: MAXIMUM_TARGET_BODY_BYTES,
             maximum_nesting_depth: 0,
             ..CanonicalDecodeLimits::default()
         };
         let tuple = CanonicalTuple::decode(body, &limits).map_err(|_| Refusal::Shape)?;
-        if !(tuple.has_header(6) || tuple.has_header(7)) {
+        if !(tuple.has_header(5) || tuple.has_header(6)) {
             return Err(Refusal::Shape);
         }
         let items = &tuple.items;
@@ -62,7 +62,6 @@ impl TargetMessage {
             .iter()
             .any(|item| item.item_type() != CanonicalItemType::Hash512)
             || items[4].item_type() != CanonicalItemType::RawBytes
-            || items[5].item_type() != CanonicalItemType::Unsigned16
         {
             return Err(Refusal::Shape);
         }
@@ -72,27 +71,18 @@ impl TargetMessage {
         if classifications.len() != participants || classifications.iter().any(|value| *value > 3) {
             return Err(Refusal::Shape);
         }
-        let branch = u16::from_le_bytes(
-            items[5]
-                .canonical_bytes()
-                .try_into()
-                .map_err(|_| Refusal::Shape)?,
-        );
+        // The classifications select the branch: below the minimum turnout
+        // the body ends there, and otherwise the final ciphertext's identity
+        // follows.
         let accepted = classifications.iter().filter(|value| **value == 2).count();
         let evaluated = accepted >= minimum_turnout(participants);
-        let ciphertext = match branch {
-            0 if items.len() == 6 && !evaluated => None,
-            1 if items.len() == 7 && evaluated => {
-                if items[6].item_type() != CanonicalItemType::Hash512 {
-                    return Err(Refusal::Shape);
-                }
-                Some(
-                    items[6]
-                        .canonical_bytes()
-                        .try_into()
-                        .map_err(|_| Refusal::Shape)?,
-                )
-            }
+        let ciphertext = match (items.get(5), evaluated) {
+            (None, false) => None,
+            (Some(item), true) if item.item_type() == CanonicalItemType::Hash512 => Some(
+                item.canonical_bytes()
+                    .try_into()
+                    .map_err(|_| Refusal::Shape)?,
+            ),
             _ => return Err(Refusal::Shape),
         };
         let identity = hash_foundation_tuple_512(

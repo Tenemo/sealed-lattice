@@ -342,24 +342,18 @@ pub struct RunningEvaluation {
     pub(crate) engine: Option<Engine>,
 }
 impl RunningEvaluation {
-    /// Completes the target body: the no-result branch, or the result branch
-    /// and the identity of its final ciphertext, whose framing also fixes its
-    /// length. The program is not a field, since the profile and the poll's
-    /// result length determine it.
+    /// Completes the target body: the no-result branch ends at the
+    /// classifications, and the result branch adds the identity of its final
+    /// ciphertext, whose framing also fixes its length. The program is not a
+    /// field, since the profile and the poll's result length determine it.
     pub(crate) fn finish(self) -> Result<VerifiedEvaluationTarget, Refusal> {
         let Self { inventory, engine } = self;
         let mut fields = inventory.target_fields()?;
         let ciphertext = match engine {
-            None => {
-                fields.push(CanonicalItem::unsigned16(0));
-                None
-            }
+            None => None,
             Some(engine) => {
                 let ciphertext = engine.final_switch().map_err(|_| Refusal::Arithmetic)?;
-                fields.extend([
-                    CanonicalItem::unsigned16(1),
-                    CanonicalItem::hash512(ciphertext_identity(&ciphertext)?),
-                ]);
+                fields.push(CanonicalItem::hash512(ciphertext_identity(&ciphertext)?));
                 Some(ciphertext)
             }
         };

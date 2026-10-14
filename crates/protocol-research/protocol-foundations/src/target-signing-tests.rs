@@ -16,7 +16,6 @@ fn body(participants: usize, accepted: usize, evaluated: bool) -> Vec<u8> {
         CanonicalItem::hash512([2; 64]),
         CanonicalItem::hash512([3; 64]),
         CanonicalItem::variable_bytes(&classifications).unwrap(),
-        CanonicalItem::unsigned16(u16::from(evaluated)),
     ];
     if evaluated {
         items.push(CanonicalItem::hash512([4; 64]));
@@ -54,7 +53,7 @@ fn only_the_minimum_turnout_selects_the_evaluated_branch() {
     }
 }
 #[test]
-fn signing_data_is_canonical_and_cannot_switch_branch_or_roster_shape() {
+fn signing_data_is_canonical_and_cannot_switch_roster_shape_or_item_type() {
     for participants in 3..=20 {
         for evaluated in [false, true] {
             let accepted = if evaluated { participants } else { 0 };
@@ -81,10 +80,12 @@ fn signing_data_is_canonical_and_cannot_switch_branch_or_roster_shape() {
             classifications[participants - 1] = 4;
             tuple.items[4] = CanonicalItem::variable_bytes(&classifications).unwrap();
             assert!(TargetMessage::parse(&tuple.encode().unwrap(), participants).is_err());
-            let mut tuple =
-                CanonicalTuple::decode(&bytes, &CanonicalDecodeLimits::default()).unwrap();
-            tuple.items[5] = CanonicalItem::unsigned16(u16::from(!evaluated));
-            assert!(TargetMessage::parse(&tuple.encode().unwrap(), participants).is_err());
+            if evaluated {
+                let mut tuple =
+                    CanonicalTuple::decode(&bytes, &CanonicalDecodeLimits::default()).unwrap();
+                tuple.items[5] = CanonicalItem::variable_bytes([4; 64]).unwrap();
+                assert!(TargetMessage::parse(&tuple.encode().unwrap(), participants).is_err());
+            }
         }
     }
 }
