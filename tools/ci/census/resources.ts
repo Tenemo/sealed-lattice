@@ -218,7 +218,7 @@ export const renderContributionBodyCensus = (): string[] => {
                     formatCount(contributionBody.maximumBodyBytes),
                 ],
                 [
-                    'Registered-coordinate opening salt bytes inside SCB2',
+                    'Registered-coordinate opening salt bytes inside the contribution body header',
                     formatCount(contributionBody.sourceOpeningSaltBytes),
                 ],
                 [

@@ -141,8 +141,7 @@ describe('complete first-oracle proof checkpoint', () => {
         expect(model.recordHashBytes).toBe(64n * records);
         expect(model.maximumHeaderBytes).toBeLessThan(16384n);
         expect(model.maximumHeaderBytes).toBe(
-            4n +
-                1n +
+            1n +
                 1n +
                 4n +
                 2n +
@@ -153,7 +152,6 @@ describe('complete first-oracle proof checkpoint', () => {
                 10n * 64n,
         );
         const actualHeader = Buffer.concat([
-            Buffer.from('FPC4'),
             Buffer.from([10, 10]),
             Buffer.alloc(4),
             Buffer.from([84, 1]),

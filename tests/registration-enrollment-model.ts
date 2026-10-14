@@ -22,8 +22,8 @@ export const compileRegistrationSourceCustody = (
     return {
         familyCount: source.coordinateCount,
         commitmentListBytes: 2n + 4n + source.commitmentDigestPayloadBytes,
-        capsulePlaintextBytes: 4n + source.privateSeedAndSaltPayloadBytes,
-        capsuleBytes: 4n + source.privateSeedAndSaltPayloadBytes + 16n,
+        capsulePlaintextBytes: source.privateSeedAndSaltPayloadBytes,
+        capsuleBytes: source.privateSeedAndSaltPayloadBytes + 16n,
     };
 };
 
@@ -48,13 +48,13 @@ const maximumSourceInventory = () => {
         ) {
             const profile = deriveSupportedProfile(count, option);
             const polynomials = 4n * profile.gadgetLength + 2n * BigInt(count);
-            const bytes = 4n + 64n + 64n * polynomials + 64n;
+            const bytes = 64n + 64n * polynomials + 64n;
             if (bytes > retainedSetupBytes) retainedSetupBytes = bytes;
         }
     }
     sourceMaximums = {
         familyCount,
-        capsuleBytes: 4n + familyCount * 128n + 16n,
+        capsuleBytes: familyCount * 128n + 16n,
         retainedSetupBytes,
     };
     return sourceMaximums;
@@ -90,8 +90,8 @@ export const compileRegistrationEnrollmentCensus = () => {
         2n +
         4n +
         64n * source.familyCount;
-    const recipientCapsuleBytes = 4n + key.support * 2n + 16n;
-    const signingCapsuleBytes = 4n + 32n + 16n;
+    const recipientCapsuleBytes = key.support * 2n + 16n;
+    const signingCapsuleBytes = 32n + 16n;
     const maximumEnrollmentRecords =
         ceiling(key.publicKeyBytes, 1_048_576n) + 7n;
     // The proposal and its signature.

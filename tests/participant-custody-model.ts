@@ -91,7 +91,8 @@ export const projectContributionProofPadding = (
         additionalProofReadBytes:
             completeReadPasses * additionalProofCiphertextBytes,
         additionalProofVerificationCalls: completeReadPasses * addedRecords,
-        // The source-opening salt stays in SCB2; padding changes no proof bytes.
+        // The source-opening salt stays in the body header; padding changes
+        // no proof bytes.
         publishedProofBytes: observedProofBytes,
     };
 };

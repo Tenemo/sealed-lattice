@@ -186,10 +186,9 @@ export const runSingleRoster = async (cohort: ParticipantCohort) => {
         const certificate = await readFile(
             path.join(publicDirectory, 'setup-certificate.bin'),
         );
-        assert.equal(certificate.subarray(0, 4).toString('ascii'), 'SSC1');
         const endorsementOffset =
-            8 +
-            certificate.readUInt32LE(4) +
+            4 +
+            certificate.readUInt32LE(0) +
             bounds.registration.signatureBytes;
         assert.deepEqual(
             Array.from({ length: bounds.quorum }, (_, ordinal) =>
@@ -247,10 +246,9 @@ export const runSingleRoster = async (cohort: ParticipantCohort) => {
         const certificate = await readFile(
             path.join(publicDirectory, 'setup-certificate.bin'),
         );
-        assert.equal(certificate.subarray(0, 4).toString('ascii'), 'SSC1');
         const endorsementOffset =
-            8 +
-            certificate.readUInt32LE(4) +
+            4 +
+            certificate.readUInt32LE(0) +
             bounds.registration.signatureBytes;
         certificateEndorsers = Array.from(
             { length: bounds.quorum },

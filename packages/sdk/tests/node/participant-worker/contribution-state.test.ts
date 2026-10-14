@@ -16,9 +16,8 @@ const profile = compileParticipantRuntimeProfile(4, 2);
 const bounds = profile.contribution;
 const recordBytes = 1_048_576;
 const fixtureHeader = (length: number) => {
-    const header = new Uint8Array(76).fill(43);
-    header.set(new TextEncoder().encode('SCB2'));
-    new DataView(header.buffer).setBigUint64(4, BigInt(length), true);
+    const header = new Uint8Array(72).fill(43);
+    new DataView(header.buffer).setBigUint64(0, BigInt(length), true);
     return header;
 };
 const proofObject = bounds.expandedPolynomials + 1;
@@ -135,7 +134,7 @@ describe('independent contribution state framing', () => {
                 const decoded = decodeContributionState(encoded, profile);
                 expect(decoded).toEqual(state);
                 expect(
-                    new DataView(decoded.header.buffer).getBigUint64(4, true),
+                    new DataView(decoded.header.buffer).getBigUint64(0, true),
                 ).toBe(BigInt(length));
                 expect(
                     decoded.publicRecords
@@ -251,7 +250,7 @@ describe('independent contribution state framing', () => {
         }
     });
 
-    it('refuses malformed SCB2 framing and obsolete contribution formats', () => {
+    it('refuses malformed body header framing and obsolete contribution formats', () => {
         const state = stateAt(7);
         for (const header of [
             new Uint8Array(),
@@ -262,7 +261,7 @@ describe('independent contribution state framing', () => {
                 (1n << 64n) - 1n,
             ].map((length) => {
                 const changed = state.header.slice();
-                new DataView(changed.buffer).setBigUint64(4, length, true);
+                new DataView(changed.buffer).setBigUint64(0, length, true);
                 return changed;
             }),
         ])

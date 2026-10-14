@@ -1,6 +1,6 @@
 import { chunkBytes } from '../../module/runtime-bounds.js';
 import type { ParticipantProfile } from '../../module/runtime-bounds.js';
-import { encodeText, equalBytes, readUnsigned64 } from '../../shared/bytes.js';
+import { readUnsigned64 } from '../../shared/bytes.js';
 
 type ProofBounds = Pick<
     ParticipantProfile['contribution'],
@@ -24,7 +24,7 @@ export const proofRecordLayout = (bounds: ProofBounds): ProofSlot[] =>
 
 const checkProofLength = (bounds: ProofBounds, length: number) => {
     if (
-        bounds.bodyHeaderBytes !== 4 + 8 + 64 ||
+        bounds.bodyHeaderBytes !== 8 + 64 ||
         !Number.isSafeInteger(length) ||
         length < bounds.minimumProofBytes ||
         length > bounds.maximumProofBytes
@@ -36,12 +36,11 @@ const checkProofLength = (bounds: ProofBounds, length: number) => {
 // of the actual proof length. Physical record lengths always follow the plan.
 export const proofLength = (bounds: ProofBounds, header: Uint8Array) => {
     if (
-        bounds.bodyHeaderBytes !== 4 + 8 + 64 ||
-        header.length !== bounds.bodyHeaderBytes ||
-        !equalBytes(header.subarray(0, 4), encodeText('SCB2'))
+        bounds.bodyHeaderBytes !== 8 + 64 ||
+        header.length !== bounds.bodyHeaderBytes
     )
         throw new Error('The contribution body header is malformed.');
-    const length = readUnsigned64(header, 4);
+    const length = readUnsigned64(header, 0);
     if (
         length < BigInt(bounds.minimumProofBytes) ||
         length > BigInt(bounds.maximumProofBytes)

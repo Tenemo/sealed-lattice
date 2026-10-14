@@ -60,11 +60,10 @@ export const compileFirstOracleCheckpointCensus = (
                 count + (polynomial.bytes + (1n << 20n) - 1n) / (1n << 20n),
             0n,
         );
-    // Fixed fields: magic, participant and option counts, column, role
-    // length, statement digest, statement header and complete original
-    // recipient-key hash list. Only the role payload varies.
+    // Fixed fields: participant and option counts, column, role length,
+    // statement digest, statement header and complete original recipient-key
+    // hash list. Only the role payload varies.
     const fixedHeaderBytes =
-        4n +
         2n +
         4n +
         2n +

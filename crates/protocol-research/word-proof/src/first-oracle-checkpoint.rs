@@ -16,7 +16,6 @@ use zeroize::Zeroizing;
 /// The most plaintext bytes one record seals, the chunk bound of the
 /// participant's other retained records.
 pub const RECORD_BYTES: usize = 1 << 20;
-const MAGIC: &[u8; 4] = b"FPC4";
 const MAXIMUM_ROLE_BYTES: usize = 1024;
 
 // The checkpoint names its profile, whose statement header it carries, and
@@ -32,11 +31,10 @@ struct Header {
 }
 impl Header {
     fn encode(&self) -> Vec<u8> {
-        let mut bytes = MAGIC.to_vec();
-        bytes.extend([
+        let mut bytes = vec![
             self.profile.participants() as u8,
             self.profile.options() as u8,
-        ]);
+        ];
         bytes.extend((self.column as u32).to_le_bytes());
         bytes.extend((self.role.len() as u16).to_le_bytes());
         bytes.extend(&self.role);
@@ -49,15 +47,15 @@ impl Header {
         bytes
     }
     fn decode(bytes: &[u8]) -> Result<Self, Refusal> {
-        if bytes.len() < 12 || &bytes[..4] != MAGIC {
+        if bytes.len() < 8 {
             return Err(Refusal::Operation);
         }
-        let profile = Profile::new(usize::from(bytes[4]), usize::from(bytes[5]))
+        let profile = Profile::new(usize::from(bytes[0]), usize::from(bytes[1]))
             .map_err(|_| Refusal::Operation)?;
         let statement = profile.setup_statement_header();
-        let column = u32::from_le_bytes(bytes[6..10].try_into().unwrap()) as usize;
-        let role_length = u16::from_le_bytes(bytes[10..12].try_into().unwrap()) as usize;
-        let start = 12 + role_length;
+        let column = u32::from_le_bytes(bytes[2..6].try_into().unwrap()) as usize;
+        let role_length = u16::from_le_bytes(bytes[6..8].try_into().unwrap()) as usize;
+        let start = 8 + role_length;
         let input_start = start + 64 + statement.len();
         if role_length == 0
             || role_length > MAXIMUM_ROLE_BYTES
@@ -77,7 +75,7 @@ impl Header {
         Ok(Self {
             profile,
             column,
-            role: bytes[12..start].to_vec(),
+            role: bytes[8..start].to_vec(),
             expected: bytes[start..start + 64].try_into().unwrap(),
             statement,
             input_hashes: bytes[input_start + 2..]
@@ -110,11 +108,11 @@ pub fn record_count(relation: &Relation) -> usize {
         .map(|(units, width)| units.div_ceil(RECORD_BYTES / width))
         .sum()
 }
-/// The longest header of a profile's checkpoint: its magic, profile, column
-/// and role length, the longest role, the statement digest, the statement
-/// header, and a recipient key hash for each participant.
+/// The longest header of a profile's checkpoint: its profile, column and
+/// role length, the longest role, the statement digest, the statement header,
+/// and a recipient key hash for each participant.
 pub fn maximum_header_bytes(profile: Profile) -> usize {
-    12 + MAXIMUM_ROLE_BYTES
+    8 + MAXIMUM_ROLE_BYTES
         + 64
         + profile.setup_statement_header().len()
         + 2

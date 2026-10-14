@@ -180,13 +180,9 @@ export const participantCandidateView = (store: Store, directory: string) => {
                     'certificate.bin',
                     1 << 20,
                 );
-                if (
-                    bytes !== undefined &&
-                    bytes.length >= 8 &&
-                    bytes.subarray(0, 4).toString() === 'SSC1'
-                ) {
-                    const length = bytes.readUInt32LE(4);
-                    if (length <= bytes.length - 8) {
+                if (bytes !== undefined && bytes.length >= 4) {
+                    const length = bytes.readUInt32LE(0);
+                    if (length <= bytes.length - 4) {
                         const handle = await open(
                             path.join(directory, 'setup-identity.bin'),
                             'w',
@@ -195,7 +191,7 @@ export const participantCandidateView = (store: Store, directory: string) => {
                             await handle.writeFile(
                                 identity(
                                     'sealed-lattice/setup-selection-identity/v1',
-                                    bytes.subarray(8, 8 + length),
+                                    bytes.subarray(4, 4 + length),
                                 ),
                             );
                         } finally {

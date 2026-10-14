@@ -5,11 +5,13 @@ import { sourceOpeningSaltBytes } from '#tests/registration-setup-binding-model.
 import { compileSetupSelectionCensus } from '#tests/setup-selection-model.js';
 import type { SupportedProfile } from '#tests/supported-profile-model.js';
 
-const contributionBodyHeaderBytes = 4n + 8n + sourceOpeningSaltBytes;
+// The complete proof length and the source opening salt.
+const contributionBodyHeaderBytes = 8n + sourceOpeningSaltBytes;
 const bodyDomain = Buffer.from('sealed-lattice/contribution-body/v1', 'ascii');
 
 // Ordinary body-hash framing; the source-opening salt is already inside
-// SCB2. This calculation creates no contribution verifier capability.
+// the body header. This calculation creates no contribution verifier
+// capability.
 export const contributionBodyHashPrefix = (bodyBytes: number) => {
     if (
         !Number.isSafeInteger(bodyBytes) ||

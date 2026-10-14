@@ -31,8 +31,8 @@ describe('signed registration and original-key custody', () => {
             694n + 1_048_576n - 2143n - 118n,
         );
         expect(value.maximumJoinInputBytes).toBeLessThan(1_572_864n);
-        expect(value.recipientCapsuleBytes).toBe(532n);
-        expect(value.signingCapsuleBytes).toBe(52n);
+        expect(value.recipientCapsuleBytes).toBe(528n);
+        expect(value.signingCapsuleBytes).toBe(48n);
         expect(value.maximumEnrollmentRecords).toBe(9n);
         expect(value.maximumRecords).toBe(11n);
         expect(value.maximumEnrollmentManifestBytes).toBe(
@@ -65,7 +65,7 @@ describe('signed registration and original-key custody', () => {
         );
         expect(value.initialRootDistinctBlockInputs).toBe(60n);
         expect(value.rootDistinctBlockInputs).toBe(63n);
-        expect(value.signingDistinctBlockInputs).toBe(5n);
+        expect(value.signingDistinctBlockInputs).toBe(4n);
         expect(value.sourceDistinctBlockInputs).toBe(
             2n + (value.maximumSourceCapsuleBytes - 16n + 15n) / 16n,
         );
@@ -107,7 +107,6 @@ describe('signed registration and original-key custody', () => {
                 ...[...families].map(() => Buffer.alloc(64)),
             ]);
             const capsule = Buffer.concat([
-                Buffer.from('FSC1'),
                 ...[...families].map(() =>
                     Buffer.concat([Buffer.alloc(64), Buffer.alloc(64)]),
                 ),

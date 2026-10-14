@@ -45,7 +45,7 @@ describe('complete contribution body encoding', () => {
             expect(() => contributionBodyHashPrefix(length)).toThrow('length');
     });
 
-    it('carries only the FHE and encrypted-share polynomials and preserves the SCB2 source opening', () => {
+    it('carries only the FHE and encrypted-share polynomials and preserves the header source opening', () => {
         const value = compileContributionBodyCensus(completionProfile());
         const excluded = new Set([
             42,
@@ -63,7 +63,7 @@ describe('complete contribution body encoding', () => {
                 (index) => !excluded.has(index),
             ),
         );
-        const headerBytes = 4n + 8n + 64n;
+        const headerBytes = 8n + 64n;
         const payloadBytes = 24n * 65536n * 109n + 20n * 65536n * 21n;
         const prefixBytes = 8n + 2n * 6n + 4n + 35n + 4n;
         // The full word proof's header is its shortest encoding.

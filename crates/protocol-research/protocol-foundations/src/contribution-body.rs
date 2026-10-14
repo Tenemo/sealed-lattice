@@ -5,7 +5,8 @@ use supported_profile::{
     relation::{PROOF_HEADER_BYTES, setup_relation},
 };
 
-pub const BODY_HEADER_BYTES: usize = 4 + 8 + SOURCE_SALT_BYTES;
+/// The complete proof length and the source opening salt.
+pub const BODY_HEADER_BYTES: usize = 8 + SOURCE_SALT_BYTES;
 pub(crate) const BODY_DOMAIN: &str = "sealed-lattice/contribution-body/v1";
 pub struct ContributionBodyHeader {
     pub proof_length: usize,
@@ -13,17 +14,17 @@ pub struct ContributionBodyHeader {
 }
 impl ContributionBodyHeader {
     pub fn decode(profile: Profile, bytes: &[u8]) -> Result<Self, Refusal> {
-        if bytes.len() != BODY_HEADER_BYTES || &bytes[..4] != b"SCB2" {
+        if bytes.len() != BODY_HEADER_BYTES {
             return Err(Refusal::Shape);
         }
-        let proof_length = usize::try_from(u64::from_le_bytes(bytes[4..12].try_into().unwrap()))
+        let proof_length = usize::try_from(u64::from_le_bytes(bytes[..8].try_into().unwrap()))
             .map_err(|_| Refusal::Shape)?;
         if !proof_lengths(profile).contains(&proof_length) {
             return Err(Refusal::Shape);
         }
         Ok(Self {
             proof_length,
-            source_salt: bytes[12..].try_into().unwrap(),
+            source_salt: bytes[8..].try_into().unwrap(),
         })
     }
 }
@@ -61,9 +62,8 @@ pub fn body_header(
         return Err(Refusal::Shape);
     }
     let mut header = [0; BODY_HEADER_BYTES];
-    header[..4].copy_from_slice(b"SCB2");
-    header[4..12].copy_from_slice(&(proof_length as u64).to_le_bytes());
-    header[12..].copy_from_slice(source_salt);
+    header[..8].copy_from_slice(&(proof_length as u64).to_le_bytes());
+    header[8..].copy_from_slice(source_salt);
     Ok(header)
 }
 pub struct ComputedContributionBody {

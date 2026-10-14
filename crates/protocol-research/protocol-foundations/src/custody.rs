@@ -2,8 +2,8 @@ use crate::{Credential, Refusal, SIGNING_PUBLIC_KEY_BYTES};
 use parallel_work::sealing::{self, Sealed, TAG_BYTES};
 use zeroize::Zeroizing;
 
-/// The sealed signing seed: its magic, the seed and the AES-GCM tag.
-pub const SEALED_SIGNING_SEED_BYTES: usize = 4 + 32 + TAG_BYTES;
+/// The sealed signing seed: the seed and the AES-GCM tag.
+pub const SEALED_SIGNING_SEED_BYTES: usize = 32 + TAG_BYTES;
 
 /// Signing purposes that a restored credential withholds until the
 /// authenticated participant root unlocks those its records show unused.
@@ -46,10 +46,10 @@ impl Credential {
         if !self.check_retained() {
             return Err(Refusal::Crypto);
         }
-        let mut bytes = Zeroizing::new(Vec::with_capacity(4 + 32));
-        bytes.extend(b"RCS1");
-        bytes.extend(*self.signing_seed);
-        Ok(sealing::seal(&bytes, &associated(body)))
+        Ok(sealing::seal(
+            self.signing_seed.as_slice(),
+            &associated(body),
+        ))
     }
     pub fn open_complete(
         signing_public: [u8; SIGNING_PUBLIC_KEY_BYTES],
@@ -61,11 +61,8 @@ impl Credential {
             return Err(Refusal::Shape);
         }
         let bytes = sealing::open(key, &associated(body), sealed).ok_or(Refusal::Crypto)?;
-        if bytes.len() != 36 || &bytes[..4] != b"RCS1" {
-            return Err(Refusal::Shape);
-        }
         let value = Self {
-            signing_seed: Zeroizing::new(bytes[4..].try_into().map_err(|_| Refusal::Shape)?),
+            signing_seed: Zeroizing::new(bytes[..].try_into().map_err(|_| Refusal::Shape)?),
             signing_public,
             signed: true,
             completed_body: Some(body),

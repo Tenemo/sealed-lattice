@@ -156,8 +156,7 @@ fn checkpoint_import_preserves_the_verified_original_owner(
         expected_role
     );
     let header = |role: &[u8], input_hashes: usize| {
-        let mut bytes = b"FPC4".to_vec();
-        bytes.extend([profile.participants() as u8, profile.options() as u8]);
+        let mut bytes = vec![profile.participants() as u8, profile.options() as u8];
         bytes.extend(0u32.to_le_bytes());
         bytes.extend((role.len() as u16).to_le_bytes());
         bytes.extend(role);

@@ -53,7 +53,8 @@ export type ContributionPhase =
 export type ContributionState = Readonly<{
     phase: ContributionPhase;
     position: number;
-    // The first-oracle checkpoint header until completion, then SCB2.
+    // The first-oracle checkpoint header until completion, then the body
+    // header.
     header: Uint8Array;
     publicRecords: readonly ContributionRecord[];
     privateRecords: readonly CheckpointRecord[];
@@ -165,7 +166,7 @@ const decodeSigningRecords = (
 
 // Decodes the contribution suffix of an authenticated root. The body records
 // and every physical proof slot follow the profile's fixed plan. From
-// completion onward SCB2 frames the logical proof prefix inside those slots,
+// completion onward the body header frames the logical proof prefix inside those slots,
 // and the signing records agree with its independent phase.
 export const decodeContributionState = (
     bytes: Uint8Array,

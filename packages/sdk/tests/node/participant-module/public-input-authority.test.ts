@@ -6,7 +6,6 @@ import {
 } from '#packages/sdk/src/participant/worker/module/participant-module.js';
 import {
     concatenate,
-    encodeText,
     unsigned16,
     unsigned32,
 } from '#packages/sdk/src/participant/worker/shared/bytes.js';
@@ -53,15 +52,14 @@ describe('participant module public input authority', () => {
                     new Uint8Array(signatureBytes - 1),
                 ),
             },
-            { name: 'setup_certificate', bytes: encodeText('SSC1') },
+            { name: 'setup_certificate', bytes: new Uint8Array(3) },
             {
                 name: 'setup_certificate',
-                bytes: concatenate(encodeText('SSC1'), unsigned32(0xffff_ffff)),
+                bytes: unsigned32(0xffff_ffff),
             },
             {
                 name: 'setup_certificate',
                 bytes: concatenate(
-                    encodeText('SSC1'),
                     unsigned32(selection.length),
                     selection,
                     new Uint8Array(signatureBytes),

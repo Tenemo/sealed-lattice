@@ -316,10 +316,11 @@ pub fn certificate_bytes(profile: Profile, proposal_bytes: usize) -> Result<usiz
     if proposal_bytes > MAXIMUM_SELECTION_BYTES {
         return Err(Refusal::Shape);
     }
-    Ok(4 + 4
-        + proposal_bytes
-        + SIGNATURE_BYTES
-        + profile.inventory_threshold() * (2 + SIGNATURE_BYTES))
+    Ok(
+        4 + proposal_bytes
+            + SIGNATURE_BYTES
+            + profile.inventory_threshold() * (2 + SIGNATURE_BYTES),
+    )
 }
 pub fn encode_certificate(
     proposal: &AuthenticatedSelectionProposal,
@@ -339,8 +340,7 @@ pub fn encode_certificate(
         return Err(Refusal::Context);
     }
     let body = proposal.selection.body();
-    let mut bytes = Vec::from(b"SSC1".as_slice());
-    bytes.extend((body.len() as u32).to_le_bytes());
+    let mut bytes = (body.len() as u32).to_le_bytes().to_vec();
     bytes.extend(body);
     bytes.extend(proposal.signature);
     for endorsement in endorsements {
@@ -353,19 +353,19 @@ pub fn authenticate_certificate(
     roster: Arc<AuthenticatedRosterProposal>,
     bytes: &[u8],
 ) -> Result<AuthenticatedSelectionCertificate, Refusal> {
-    if bytes.len() < 8 || &bytes[..4] != b"SSC1" {
+    if bytes.len() < 4 {
         return Err(Refusal::Shape);
     }
-    let length = u32::from_le_bytes(bytes[4..8].try_into().unwrap()) as usize;
+    let length = u32::from_le_bytes(bytes[..4].try_into().unwrap()) as usize;
     if bytes.len() != certificate_bytes(roster.proposal().profile(), length)? {
         return Err(Refusal::Shape);
     }
     let proposal = authenticate_selection(
         roster.clone(),
-        &bytes[8..8 + length],
-        &bytes[8 + length..8 + length + SIGNATURE_BYTES],
+        &bytes[4..4 + length],
+        &bytes[4 + length..4 + length + SIGNATURE_BYTES],
     )?;
-    let endorsements = bytes[8 + length + SIGNATURE_BYTES..]
+    let endorsements = bytes[4 + length + SIGNATURE_BYTES..]
         .chunks_exact(2 + SIGNATURE_BYTES)
         .map(|entry| {
             endorsement(

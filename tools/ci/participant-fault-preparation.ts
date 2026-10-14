@@ -692,9 +692,8 @@ return { records: keys.length, ordinals };`,
             ),
         );
         assert.equal(header.length, bounds.contribution.bodyHeaderBytes);
-        assert.equal(header.subarray(0, 4).toString('ascii'), 'SCB2');
         assert.equal(
-            header.readBigUInt64LE(4),
+            header.readBigUInt64LE(0),
             BigInt(last.observation.halt.proofBytes),
         );
         assert.equal(

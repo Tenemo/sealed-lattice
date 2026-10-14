@@ -118,7 +118,6 @@ export const encodeSetupCertificateModel = (
         selected,
     );
     return Buffer.concat([
-        Buffer.from('SSC1'),
         unsigned(body.length, 4),
         body,
         organizerSignature,
@@ -167,7 +166,6 @@ export const compileSetupSelectionWireCensus = (participants: number) => {
         endorsementBodyBytes,
         endorsementPacketBytes: 2n + 64n + signatureBytes,
         certificateBytes:
-            4n +
             4n +
             selectionBodyBytes +
             signatureBytes +

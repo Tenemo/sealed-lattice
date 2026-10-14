@@ -26,7 +26,6 @@ use supported_profile::Profile;
 use zeroize::Zeroizing;
 
 const SEED_BYTES: usize = 64;
-const MAGIC: &[u8; 4] = b"FSC1";
 
 struct Entry {
     seed: Zeroizing<[u8; SEED_BYTES]>,
@@ -44,11 +43,11 @@ pub(crate) struct Sources {
 
 /// Capsule length is determined by the original verified poll, not the roster.
 pub(crate) fn capsule_bytes(poll: &VerifiedPoll) -> usize {
-    MAGIC.len() + fhe_key_families(poll).len() * (SEED_BYTES + SALT_BYTES) + TAG_BYTES
+    fhe_key_families(poll).len() * (SEED_BYTES + SALT_BYTES) + TAG_BYTES
 }
 
 pub(crate) fn maximum_capsule_bytes() -> usize {
-    MAGIC.len() + maximum_fhe_key_family_count() * (SEED_BYTES + SALT_BYTES) + TAG_BYTES
+    maximum_fhe_key_family_count() * (SEED_BYTES + SALT_BYTES) + TAG_BYTES
 }
 
 fn associated(body: [u8; 64]) -> Vec<u8> {
@@ -197,9 +196,8 @@ impl Sources {
         // The buffer holds every entry at once, so building it never moves a
         // seed.
         let mut bytes = Zeroizing::new(Vec::with_capacity(
-            MAGIC.len() + self.entries.len() * (SEED_BYTES + SALT_BYTES),
+            self.entries.len() * (SEED_BYTES + SALT_BYTES),
         ));
-        bytes.extend(MAGIC);
         for entry in &self.entries {
             bytes.extend(entry.seed.as_ref());
             bytes.extend(entry.salt.as_ref());
@@ -220,10 +218,7 @@ impl Sources {
             return Err(Refusal::Shape);
         }
         let bytes = sealing::open(key, &associated(body), capsule).ok_or(Refusal::State)?;
-        if &bytes[..MAGIC.len()] != MAGIC {
-            return Err(Refusal::Shape);
-        }
-        let entries = bytes[MAGIC.len()..]
+        let entries = bytes
             .chunks_exact(SEED_BYTES + SALT_BYTES)
             .map(|entry| Entry {
                 seed: Zeroizing::new(entry[..SEED_BYTES].try_into().unwrap()),

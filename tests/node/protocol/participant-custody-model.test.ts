@@ -125,7 +125,7 @@ describe('shared participant custody', () => {
             expect(storage.dataKeyBytes).toBe(32n * records);
             expect(storage.recordIdentityBytes).toBe(64n * records);
             expect(storage.recordReferenceBytes).toBe(referenceBytes * records);
-            expect(storage.completedBodyHeaderBytes).toBe(4n + 8n + 64n);
+            expect(storage.completedBodyHeaderBytes).toBe(8n + 64n);
             const bodyRecords = body.polynomials.reduce(
                 (count, polynomial) =>
                     count + (polynomial.bytes + chunk - 1n) / chunk,
@@ -435,7 +435,7 @@ describe('shared participant custody', () => {
                 .slice(1)
                 .every((value) => value.encryptionWork.invocations === 1n),
         ).toBe(true);
-        expect(classes[3].encryptionWork.distinctAesInputUpperBound).toBe(5n);
+        expect(classes[3].encryptionWork.distinctAesInputUpperBound).toBe(4n);
     });
 
     it('includes target-bound release records without turning corpus maxima into lifetime limits', () => {
