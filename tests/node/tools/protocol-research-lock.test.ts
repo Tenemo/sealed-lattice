@@ -124,6 +124,11 @@ describe('protocol research serialization', () => {
             await expect(
                 acquireProtocolResearchLock('run-two', root),
             ).rejects.toMatchObject({ code: 'EEXIST' });
+            await expect(
+                acquireProtocolResearchLock('run-two', root),
+            ).rejects.toThrow(
+                `Protocol research lock is held by ${JSON.stringify({ pid: process.pid, run: 'run-one' })}. If that process and run have ended, remove ${lockPath}.`,
+            );
             expect(JSON.parse(await readFile(lockPath, 'utf8'))).toEqual({
                 pid: process.pid,
                 run: 'run-one',

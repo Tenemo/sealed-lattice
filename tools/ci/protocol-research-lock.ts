@@ -26,7 +26,18 @@ const acquireRunLock = async (
     const directory = path.join(rootDirectoryPath, 'temp');
     await mkdir(directory, { recursive: true });
     const lockPath = path.join(directory, fileName);
-    const handle = await open(lockPath, 'wx');
+    const handle = await open(lockPath, 'wx').catch(async (error: unknown) => {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+        const holder = await readFile(lockPath, 'utf8').catch(
+            () => 'an unreadable holder',
+        );
+        throw Object.assign(
+            new Error(
+                `${label} is held by ${holder}. If that process and run have ended, remove ${lockPath}.`,
+            ),
+            { code: 'EEXIST', cause: error },
+        );
+    });
     const value = JSON.stringify({ pid: process.pid, run: runDirectoryPath });
     let identity: BigIntStats | undefined;
     let initialized = false;

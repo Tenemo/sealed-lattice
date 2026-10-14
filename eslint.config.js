@@ -13,7 +13,7 @@ import {
 
 const sourceFiles = ['**/*.{js,mjs,ts}'];
 const javaScriptFiles = ['**/*.{js,mjs}'];
-const testFiles = ['packages/*/tests/**/*.ts', 'tests/**/*.ts'];
+const testFiles = ['packages/*/tests/**/*.ts', 'tests/node/**/*.ts'];
 const toolFiles = ['tools/**/*.{ts,mjs}', '*.config.{ts,js}'];
 
 const projectPaths = ['./tsconfig.tools.json', './packages/*/tsconfig.json'];

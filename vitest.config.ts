@@ -142,56 +142,45 @@ const makeNodeProject = ({
     },
 });
 
-type BrowserProjectInput = {
-    readonly include: readonly string[];
-    readonly instances: BrowserInstanceOption[];
-    readonly projectName: string;
-};
-
-const makeBrowserProject = ({
-    include,
-    instances,
-    projectName,
-}: BrowserProjectInput): UserWorkspaceConfig => {
-    const projectAttachmentDirectoryPath =
-        testAttachmentDirectoryPath === undefined
-            ? undefined
-            : path.join(testAttachmentDirectoryPath, projectName);
-    return {
-        resolve: testResolve,
-        test: {
-            name: projectName,
-            include: [...include],
-            ...projectAttachments(projectName),
-            // Each real-WASM browser file can instantiate a large module and
-            // create workers. Keep the canonical Chromium lane serialized so
-            // concurrent files cannot inflate the measured working set.
-            fileParallelism: false,
-            ...(nodeDiagnosticReportArguments.length === 0
-                ? {}
-                : { execArgv: nodeDiagnosticReportArguments }),
-            browser: {
-                enabled: true,
-                api: {
-                    host: browserServerHost,
-                    port: browserServerBasePort,
-                    strictPort: false,
-                },
-                provider: playwright(),
-                headless: true,
-                instances,
-                ...(projectAttachmentDirectoryPath === undefined
-                    ? {}
-                    : {
-                          screenshotDirectory: path.join(
-                              projectAttachmentDirectoryPath,
-                              'screenshots',
-                          ),
-                          screenshotFailures: true,
-                      }),
+const browserProjectName = 'browser-desktop';
+const browserAttachmentDirectoryPath =
+    testAttachmentDirectoryPath === undefined
+        ? undefined
+        : path.join(testAttachmentDirectoryPath, browserProjectName);
+const browserProject: UserWorkspaceConfig = {
+    resolve: testResolve,
+    test: {
+        name: browserProjectName,
+        include: [...desktopBrowserTestGlobs],
+        ...projectAttachments(browserProjectName),
+        // Each real-WASM browser file can instantiate a large module and
+        // create workers. Keep the canonical Chromium lane serialized so
+        // concurrent files cannot inflate the measured working set.
+        fileParallelism: false,
+        ...(nodeDiagnosticReportArguments.length === 0
+            ? {}
+            : { execArgv: nodeDiagnosticReportArguments }),
+        browser: {
+            enabled: true,
+            api: {
+                host: browserServerHost,
+                port: browserServerBasePort,
+                strictPort: false,
             },
+            provider: playwright(),
+            headless: true,
+            instances: desktopBrowserInstances,
+            ...(browserAttachmentDirectoryPath === undefined
+                ? {}
+                : {
+                      screenshotDirectory: path.join(
+                          browserAttachmentDirectoryPath,
+                          'screenshots',
+                      ),
+                      screenshotFailures: true,
+                  }),
         },
-    };
+    },
 };
 
 // The census and participant-module projects hold the longest files. The
@@ -230,11 +219,7 @@ export default defineConfig({
             ...nodeTestProjectDefinitions.map((projectDefinition) =>
                 makeNodeProject(projectDefinition),
             ),
-            makeBrowserProject({
-                include: desktopBrowserTestGlobs,
-                instances: desktopBrowserInstances,
-                projectName: 'browser-desktop',
-            }),
+            browserProject,
         ],
     },
 });
