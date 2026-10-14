@@ -467,7 +467,7 @@ export const renderWideChallengeCompilerCensus = (): string[] => {
         '',
         'W_F bounds complete raw inputs recognized by the fixed grammar, including full statements rather than their identifiers; it is expressed in bits for the conservative substring reference bound and does not bound arbitrary auxiliary oracle inputs. The only fixed hash-label sentinel is the zero initial-state label; absent or malformed predecessors resolve to no context or oracle entry. M_F reuses the source-linked shared-path Merkle and transcript expansion census. The finite-family expression still requires the complete prior oracle history and mapped reducer costs; these operands select no numerical security claim.',
         '',
-        'The following prefix-compiler caps and exponents are historical role-union reference arithmetic. Its conservative algebraic numerator now includes the weighted folding term, but its finite corrupt-role population and whole-experiment composition are not established for preparation. The current finite-family argument takes a maximum of the per-role sampled-round bounds above without adding a family union factor. Reference exponents below do not select a new honest-credential scope or claim admission, end-to-end security, or supported-phone qualification.',
+        'The following prefix-compiler caps, conditional exponents and event operands of the largest relation are conditional reference arithmetic; the algebraic numerator includes the weighted folding term. The current finite-family argument takes a maximum of the per-role sampled-round bounds above without adding a family union factor. These values do not select a new honest-credential scope or claim admission, end-to-end security, or supported-phone qualification.',
         '',
         table(
             ['Property', 'Value'],
@@ -567,10 +567,6 @@ export const renderWideChallengeCompilerCensus = (): string[] => {
                     formatCount(
                         wideChallengeCompiler.ordinaryAlgebraicNumerator,
                     ),
-                ],
-                [
-                    'Historical role-union QROM reference exponent',
-                    formatCount(wideChallengeCompiler.failureBits),
                 ],
             ],
         ),
