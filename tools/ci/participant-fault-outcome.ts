@@ -467,14 +467,14 @@ export const verifyFaultOutcome = async (
     }[] = [];
     const unreadOutcomes: {
         family: string;
-        encrypted: unknown;
+        hasResult: unknown;
         identifiers: unknown;
     }[] = [];
     const probeForeignPoll = async (position: number) => {
         if (foreign === undefined) return;
         assert.notEqual(foreign.poll, organizer.poll);
         for (const { family, pattern, details } of foreignFamilies) {
-            // Only an encrypted target's result reads release shares,
+            // Only a target with a result reads release shares,
             // and only a result run of the other poll released any.
             if (family === 'release shares' && noResult) continue;
             const { view, served } = await foreignRecordView(
@@ -487,11 +487,11 @@ export const verifyFaultOutcome = async (
             assert.ok(served > 0, `The foreign poll has no ${family}.`);
             let detail: string | undefined;
             if (details === undefined) {
-                const { encrypted, identifiers } = await probeUnread(
+                const { hasResult, identifiers } = await probeUnread(
                     position,
                     view,
                 );
-                unreadOutcomes.push({ family, encrypted, identifiers });
+                unreadOutcomes.push({ family, hasResult, identifiers });
             } else
                 detail = await probe(
                     position,
@@ -555,17 +555,17 @@ export const verifyFaultOutcome = async (
             if (position === voteProbe) await probeForeignPoll(position);
         }),
     ]);
-    assert.equal(result.encrypted, !noResult);
+    assert.equal(result.hasResult, !noResult);
     assert.deepEqual(result.identifiers, noResult ? [] : expectedResult);
-    for (const { family, encrypted, identifiers } of unreadOutcomes) {
-        assert.equal(encrypted, result.encrypted, family);
+    for (const { family, hasResult, identifiers } of unreadOutcomes) {
+        assert.equal(hasResult, result.hasResult, family);
         assert.deepEqual(identifiers, result.identifiers, family);
     }
     // None of the forged views stopped its participant or withdrew
     // its ballot: with the relay's own records it combines the same
     // outcome.
     const recovered = await run(voteProbe, 'compute-result');
-    assert.equal(recovered.encrypted, result.encrypted);
+    assert.equal(recovered.hasResult, result.hasResult);
     assert.deepEqual(recovered.identifiers, result.identifiers);
     // This untrusted public cache is outside the authenticated
     // participant root. A damaged credential-keyed target must be
@@ -586,7 +586,7 @@ await completion(writing);`,
     );
     deliveredRecords[voteProbe].clear();
     const recomputed = await run(voteProbe, 'compute-result');
-    assert.equal(recomputed.encrypted, result.encrypted);
+    assert.equal(recomputed.hasResult, result.hasResult);
     assert.deepEqual(recomputed.identifiers, result.identifiers);
     assert.ok(
         deliveredRecords[voteProbe].has('close/proposal.bin'),
@@ -666,7 +666,7 @@ return key;`,
         );
         assert.equal(verified.details.poll, organizer.poll);
         if (scalar) requireScalarMemory(verified.details);
-        assert.equal(verified.details.encrypted, result.encrypted);
+        assert.equal(verified.details.hasResult, result.hasResult);
         assert.deepEqual(verified.details.identifiers, result.identifiers);
     }
     const scope = [

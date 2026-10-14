@@ -449,7 +449,7 @@ export const advanceRelease = async (
             'The public close records name another target.',
         );
     }
-    const encrypted = await certifyTarget(context, relay, evaluated.restored);
+    const hasResult = await certifyTarget(context, relay, evaluated.restored);
     const ballotInclusion =
         session.signed?.ballotInclusion ?? certifiedBallotInclusion(context);
     if (
@@ -457,7 +457,7 @@ export const advanceRelease = async (
         session.state.ballotInclusion !== ballotInclusion
     )
         throw new Error('The release names another ballot inclusion.');
-    if (!encrypted) return { encrypted, ballotInclusion };
+    if (!hasResult) return { hasResult, ballotInclusion };
     // A release that follows the completed close takes the certified target.
     session.target ??= {
         body: evaluated.body,
@@ -473,7 +473,7 @@ export const advanceRelease = async (
         await proveRelease(session);
     else await restoreReleaseBody(session);
     await signRelease(session);
-    return { encrypted, ballotInclusion };
+    return { hasResult, ballotInclusion };
 };
 
 // Delivers the signed release body and then its envelope packet, inspecting

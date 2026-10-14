@@ -56,8 +56,7 @@ export type ParticipantWorkerResult =
     | Readonly<{
           status: 'completed';
           details: Omit<ParticipantSummary, 'isStoragePersistent'> &
-              ParticipantReportedDetails &
-              Readonly<Record<string, unknown>>;
+              ParticipantReportedDetails;
       }>
     | IncompleteOperation
     | Readonly<{ status: 'evaluated'; memory: OperationMemory }>;

@@ -524,7 +524,10 @@ export const openParticipantCohort = async (
     assert.deepEqual(verifiedPoll(organizer), createdPoll);
     // The page asked the browser to keep the origin's storage, which
     // it grants by its own policy.
-    assert.equal(typeof organizer.isStoragePersistent, 'boolean');
+    assert.ok(
+        'isStoragePersistent' in organizer &&
+            typeof organizer.isStoragePersistent === 'boolean',
+    );
     await run(0, 'publish');
     // An operation on an empty namespace is refused and leaves it
     // empty, so that participant still joins below.

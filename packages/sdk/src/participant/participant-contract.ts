@@ -122,6 +122,35 @@ export type ParticipantSummary = Readonly<{
 }>;
 
 /**
+ * What a completed operation reports beside the participant's summary.
+ * A field marked diagnostic describes the operation's work, not the poll.
+ */
+export type ParticipantReportedDetails = Readonly<{
+    /** The roster's usernames in order, from `propose-roster` and `accept-roster`. */
+    rosterUsernames?: readonly string[];
+    /** The usable submissions in the target that `sign-target` signed. */
+    usableSubmissions?: number;
+    /** The accepted ballots in the target that `sign-target` signed. */
+    acceptedBallots?: number;
+    /** Whether the certified target carries a result, from `release` and `compute-result`. */
+    hasResult?: boolean;
+    /** The result's ordered option identifiers from `compute-result`, none for a certified no-result target. */
+    identifiers?: readonly string[];
+    /** Diagnostic: the proof randomness the module drew in this operation, in bytes. */
+    proofRandomBytes?: number;
+    /** Diagnostic: the retained close events in arrival order, with the author or responder each one learned. */
+    closeEvents?: readonly Readonly<{ kind: string; position?: number }>[];
+    /** Diagnostic: the signed-target or completed-close generation that a release follows. */
+    predecessor?: number;
+    /** Diagnostic: the generation that a release continued from an earlier operation resumed from. */
+    resumedFrom?: Readonly<{ generation: number }>;
+    /** Diagnostic: the memory of the worker that ran the operation. */
+    memory?: OperationMemory;
+    /** Diagnostic: the memory of the separate worker that evaluated the target. */
+    evaluationMemory?: OperationMemory;
+}>;
+
+/**
  * A refused request changed nothing, and its reason says why; a pending one
  * waits for public input, storage or a device resource such as memory, or
  * follows a module or worker failure, as its cause names and its detail
@@ -136,26 +165,10 @@ export type ParticipantSummary = Readonly<{
  * created is refused, naming that runtime, so the application can open it
  * with the SDK of that runtime.
  */
-export type ParticipantReportedDetails = Readonly<{
-    rosterUsernames?: readonly string[];
-    proofRandomBytes?: number;
-    closeEvents?: readonly Readonly<{ kind: string; position?: number }>[];
-    usableSubmissions?: number;
-    acceptedBallots?: number;
-    encrypted?: boolean;
-    identifiers?: readonly string[];
-    predecessor?: number;
-    resumedFrom?: Readonly<{ generation: number }>;
-    memory?: OperationMemory;
-    evaluationMemory?: OperationMemory;
-}>;
-
 export type ParticipantResponse =
     | Readonly<{
           status: 'completed';
-          details: ParticipantSummary &
-              ParticipantReportedDetails &
-              Readonly<Record<string, unknown>>;
+          details: ParticipantSummary & ParticipantReportedDetails;
       }>
     | IncompleteOperation;
 
@@ -176,22 +189,23 @@ export type OutcomeVerificationOptions = Readonly<{
 }>;
 
 /**
- * A completed verification names whether the certified target carries an
- * encrypted result, and the result's ordered option identifiers, none for a
- * certified no-result target. A refused request changed nothing, and its
- * reason says why; a pending one waits for public records that verify, or
- * ended on a device resource or a module or worker failure, as its cause
- * names and its detail describes.
+ * A completed verification names whether the certified target carries a
+ * result, and the result's ordered option identifiers, none for a certified
+ * no-result target. A refused request changed nothing, and its reason says
+ * why; a pending one waits for public records that verify, or ended on a
+ * device resource or a module or worker failure, as its cause names and its
+ * detail describes.
  */
 export type OutcomeVerification = Readonly<
     | {
           status: 'completed';
           details: Readonly<{
               poll: string;
-              encrypted: boolean;
+              hasResult: boolean;
               identifiers: readonly string[];
-          }> &
-              Readonly<Record<string, unknown>>;
+              /** Diagnostic: the memory of the worker that verified the outcome. */
+              memory: OperationMemory;
+          }>;
       }
     | {
           status: 'refused';

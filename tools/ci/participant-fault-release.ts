@@ -220,7 +220,7 @@ export const releaseFaultTarget = async (
         for (const position of remaining) {
             const details = await run(position, 'release');
             assert.equal(details.generation, predecessor(position));
-            assert.equal(details.encrypted, false);
+            assert.equal(details.hasResult, false);
             assert.equal(details.predecessor, undefined);
             assert.equal(details.resumedFrom, undefined);
             // A nonvoter reads its status from the certified target.
@@ -265,7 +265,7 @@ export const releaseFaultTarget = async (
             recoveryOperations.set(interruptedPosition, 'release');
             const details = await run(interruptedPosition, 'release');
             assert.equal(details.generation, 29);
-            assert.equal(details.encrypted, true);
+            assert.equal(details.hasResult, true);
             assert.equal(
                 details.ballotInclusion,
                 ballotInclusion(interruptedPosition),
@@ -289,7 +289,7 @@ export const releaseFaultTarget = async (
                     const details = await run(position, 'release');
                     assert.equal(details.generation, 29);
                     assert.equal(details.resumedFrom, undefined);
-                    assert.equal(details.encrypted, true);
+                    assert.equal(details.hasResult, true);
                     assert.equal(
                         details.ballotInclusion,
                         ballotInclusion(position),
@@ -305,7 +305,7 @@ export const releaseFaultTarget = async (
             await interrupt(combiningPosition, 'release', {}, generation);
         const delivered = await run(combiningPosition, 'release');
         assert.equal(delivered.generation, 29);
-        assert.equal(delivered.encrypted, undefined);
+        assert.equal(delivered.hasResult, undefined);
         // A release after the completed close spent the target
         // purpose, and its lock retains the own ballot's status.
         for (const position of nonvoters) {
@@ -318,7 +318,7 @@ export const releaseFaultTarget = async (
         // A signed release is only delivered again.
         const rereleased = await run(combiningPosition, 'release');
         assert.equal(rereleased.generation, 29);
-        assert.equal(rereleased.encrypted, undefined);
+        assert.equal(rereleased.hasResult, undefined);
         for (const position of remaining) {
             const body = await stat(completionFile('release-', position));
             assert.ok(

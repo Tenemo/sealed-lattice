@@ -152,7 +152,7 @@ impl Credential {
         self.check_target_owner(owner, roster, message)?;
         self.check_target_predecessors(owner, roster)?;
         self.check_unlocked(SigningPurpose::Release)?;
-        if !message.encrypted()
+        if !message.has_result()
             || self.release_started
             || self
                 .target_lock

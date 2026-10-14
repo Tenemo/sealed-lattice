@@ -713,7 +713,7 @@ export const completeRoster = async (
             await interrupt(member.origin, 'release', {}, 27);
         const details = await act(member, 'release');
         assert.equal(details.generation, 29);
-        assert.equal(details.encrypted, true);
+        assert.equal(details.hasResult, true);
     });
     markStage([7]);
     const expected = rankedIdentifiers([
@@ -724,7 +724,7 @@ export const completeRoster = async (
         measureWorkflow ? active : [active[active.length - 1]],
         async ({ member }) => {
             const combined = await act(member, 'compute-result');
-            assert.equal(combined.encrypted, true);
+            assert.equal(combined.hasResult, true);
             assert.deepEqual(combined.identifiers, expected);
         },
     );

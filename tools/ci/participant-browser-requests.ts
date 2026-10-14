@@ -3,7 +3,8 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
-import type { WorkerResult } from '#packages/sdk/src/participant/worker/runtime/worker-messages.js';
+import type { ParticipantResponse } from '#packages/sdk/src/participant/participant-contract.js';
+import type { ParticipantWorkerResult } from '#packages/sdk/src/participant/worker/runtime/worker-messages.js';
 import { compileOperationProofDraws } from '#tests/operation-seed-model.js';
 import type { ActiveLocalRunLog } from '#tools/ci/local-run-log.js';
 import { type Relay } from '#tools/ci/participant-browser-relay.js';
@@ -20,6 +21,10 @@ import {
     summarizeCpuTrace,
 } from '#tools/ci/participant-cpu-profile.js';
 import type { ParticipantOperationMeasurement } from '#tools/ci/participant-workflow-measurements.js';
+
+// An honest page answers through the SDK's participant API; a patched
+// client's page answers with its worker's own result.
+type HarnessResult = ParticipantResponse | ParticipantWorkerResult;
 
 export const createParticipantRequests = async ({
     cpuProfiling,
@@ -141,8 +146,8 @@ export const createParticipantRequests = async ({
                     }).then(() => {
                         throw new Error('Participant operation deadline.');
                     }),
-                ])) as WorkerResult;
-            let result: WorkerResult;
+                ])) as HarnessResult;
+            let result: HarnessResult;
             let cpuProfile: CpuProfileSummary | undefined;
             try {
                 if (cpuProfileDirectory === undefined)
@@ -196,7 +201,7 @@ export const createParticipantRequests = async ({
                 result.details.proofRandomBytes !== undefined
             )
                 assert.equal(
-                    BigInt(result.details.proofRandomBytes as number),
+                    BigInt(result.details.proofRandomBytes),
                     operation === 'cast-ballot'
                         ? proofDraws.ballot
                         : proofDraws.release,
@@ -253,7 +258,7 @@ export const createParticipantRequests = async ({
     const expectStatus = async (
         position: number,
         operation: ParticipantOperation,
-        status: WorkerResult['status'],
+        status: HarnessResult['status'],
         parameters: Record<string, unknown> = {},
     ) => {
         const result = await request(position, operation, parameters);

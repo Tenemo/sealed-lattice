@@ -137,7 +137,7 @@ impl TargetMessage {
     pub fn participants(&self) -> usize {
         self.participants
     }
-    pub fn encrypted(&self) -> bool {
+    pub fn has_result(&self) -> bool {
         self.ciphertext.is_some()
     }
     /// The identity of the evaluated ciphertext, which only an evaluated

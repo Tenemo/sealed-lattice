@@ -50,7 +50,7 @@ type TerminalResult = {
 };
 type CertificateResult = {
     kind: 'certified-target';
-    encrypted: boolean;
+    hasResult: boolean;
     certificateAuthors: number[];
 };
 type ReleaseResult = {
@@ -392,7 +392,7 @@ await runWithLocalRunLog(
             );
             if (selected.stage === 'certificate') {
                 assert.ok(verified.kind === 'certified-target');
-                assert.equal(verified.encrypted, !emptyCase);
+                assert.equal(verified.hasResult, !emptyCase);
             } else if (selected.stage === 'release') {
                 assert.ok(verified.kind === 'verified-release');
                 assert.equal(emptyCase, false);

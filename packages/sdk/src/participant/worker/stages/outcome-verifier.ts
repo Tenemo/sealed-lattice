@@ -16,8 +16,8 @@ import { evaluateClosedTarget } from './target-vote/evaluation.js';
 // Verifies the outcome of the poll the identity names from the relay's
 // public records: the complete setup, the close barrier and each usable
 // ballot's classification, the evaluated target and its certificate, and the
-// release shares of a result. Returns whether the certified target is
-// encrypted and the ordered option identifiers, none for no result.
+// release shares of a result. Returns whether the certified target carries a
+// result and the ordered option identifiers, none for no result.
 export const verifyPublishedOutcome = async (
     context: PublicContext,
     relay: PublicRelay,

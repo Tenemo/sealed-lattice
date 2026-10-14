@@ -102,12 +102,12 @@ pub fn verify(
         .map(|vote| vote.position())
         .collect();
     if stage == Stage::Certificate {
-        let encrypted = target.ciphertext().is_some();
-        if !encrypted {
+        let has_result = target.ciphertext().is_some();
+        if !has_result {
             verify_no_result(certificate).map_err(refusal)?;
         }
         return Ok(format!(
-            "{{\"kind\":\"certified-target\",\"encrypted\":{encrypted},\"certificateAuthors\":{certificate_authors:?},\"unavailableVotes\":{unavailable_votes:?},\"invalidVotes\":{invalid_votes:?}}}"
+            "{{\"kind\":\"certified-target\",\"hasResult\":{has_result},\"certificateAuthors\":{certificate_authors:?},\"unavailableVotes\":{unavailable_votes:?},\"invalidVotes\":{invalid_votes:?}}}"
         ));
     }
     if target.ciphertext().is_none() {

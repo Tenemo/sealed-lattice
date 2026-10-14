@@ -133,12 +133,12 @@ impl CompletionSession {
                         .certificate()
                         .map_err(|_| Error::Incomplete)?,
                 );
-                let encrypted = certificate.target().ciphertext().is_some();
-                if encrypted {
+                let has_result = certificate.target().ciphertext().is_some();
+                if has_result {
                     self.releases = Some(ReleaseCollector::new(certificate.clone())?);
                 }
                 self.certificate = Some(certificate);
-                self.word(usize::from(encrypted));
+                self.word(usize::from(has_result));
             }
             Some(CompletionOperation::BeginShareConstant) => {
                 if length != 0 {

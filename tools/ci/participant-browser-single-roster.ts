@@ -210,7 +210,7 @@ export const runSingleRoster = async (cohort: ParticipantCohort) => {
         )) as WorkerResult;
         assert.equal(independentOutcome.status, 'completed');
         assert.ok(independentOutcome.status === 'completed');
-        assert.equal(independentOutcome.details.encrypted, true);
+        assert.equal(independentOutcome.details.hasResult, true);
         assert.deepEqual(independentOutcome.details.identifiers, identifiers);
     }
     if (departureSchedule !== undefined) {
@@ -283,7 +283,7 @@ export const runSingleRoster = async (cohort: ParticipantCohort) => {
             ),
         )) as WorkerResult;
         assert.ok(independentOutcome.status === 'completed');
-        assert.equal(independentOutcome.details.encrypted, true);
+        assert.equal(independentOutcome.details.hasResult, true);
         assert.deepEqual(independentOutcome.details.identifiers, identifiers);
     }
     if (publicationFaults) {
