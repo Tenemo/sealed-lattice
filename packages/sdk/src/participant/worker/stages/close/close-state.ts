@@ -1,5 +1,8 @@
 import type { ParticipantProfile } from '../../module/runtime-bounds.js';
-import { recordKeyBytes } from '../../module/runtime-bounds.js';
+import {
+    closeEventHeaderBytes,
+    recordKeyBytes,
+} from '../../module/runtime-bounds.js';
 import {
     concatenate,
     encodeText,
@@ -30,8 +33,6 @@ import {
 // later generations keep the completed close unchanged.
 
 const marker = encodeText('CST2');
-
-const eventHeaderBytes = 1 + 2 + 4 + 4;
 
 // The participant's own signed ballot and the locked intent reference other
 // retained state and add no record. A held body has one record with its
@@ -235,7 +236,7 @@ export const decodeCloseState = (
     let records = 0;
     let locked = false;
     for (let index = 0; index < eventCount; index++) {
-        const header = take(eventHeaderBytes);
+        const header = take(closeEventHeaderBytes);
         const kind = header[0];
         const count = readUnsigned16(header, 1);
         const serial = readUnsigned32(header, 3);

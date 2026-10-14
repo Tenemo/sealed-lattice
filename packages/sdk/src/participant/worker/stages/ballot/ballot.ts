@@ -13,7 +13,6 @@ import type { ParticipantProfile } from '../../module/runtime-bounds.js';
 import { ballotEnvelopeOffset } from '../../module/runtime-bounds.js';
 import { createCandidatePublication } from '../../relay/publication.js';
 import type { PublicRelay } from '../../relay/relay.js';
-import type { ParticipantSession } from '../../runtime/participant-session.js';
 import {
     concatenate,
     equalBytes,
@@ -45,6 +44,7 @@ import {
     closeRecordInventory,
     decodeCloseState,
 } from '../close/close-state.js';
+import type { ParticipantSession } from '../participant-session.js';
 import {
     deliverFinalAggregate,
     readFinalAggregate,
@@ -66,7 +66,7 @@ import {
 // phases the ballot state records.
 
 export type BallotSession = {
-    readonly participant: ParticipantSession;
+    readonly participant: Pick<ParticipantSession, 'context' | 'root'>;
     readonly records: RecordContext;
     state: BallotState;
     // The proof-stream bytes the module drew, when this operation created the
@@ -128,7 +128,7 @@ const openBallotRecord = (session: BallotSession, index: number) => {
 // the attempt's phase through generation seventeen, and the signed ballot
 // after it.
 const retainedBallotState = (
-    participant: ParticipantSession,
+    participant: Pick<ParticipantSession, 'context' | 'root'>,
     records: RecordContext,
 ): BallotState | undefined => {
     const { root, context } = participant;
@@ -152,7 +152,7 @@ const retainedBallotState = (
 
 // The ballot records the current root lists.
 export const retainedBallotRecords = (
-    participant: ParticipantSession,
+    participant: Pick<ParticipantSession, 'context' | 'root'>,
     records: RecordContext,
 ): ParticipantStoredRecord[] => {
     const state = retainedBallotState(participant, records);
@@ -164,7 +164,7 @@ export const retainedBallotRecords = (
 // The close records the root lists while a ballot is pending; the close log
 // only collects through the ballot phases.
 const collectedCloseRecords = (
-    participant: ParticipantSession,
+    participant: Pick<ParticipantSession, 'context' | 'root'>,
     records: RecordContext,
 ) => {
     const { root, context } = participant;
@@ -225,7 +225,7 @@ const commitBallot = async (
 // Locks a ballot attempt: the scores and the ballot time enter the root
 // before any ballot randomness exists.
 export const beginBallot = async (
-    participant: ParticipantSession,
+    participant: Pick<ParticipantSession, 'context' | 'root'>,
     scores: Uint8Array,
 ): Promise<BallotSession> => {
     const { context, root } = participant;
@@ -270,7 +270,7 @@ export const beginBallot = async (
 // Decodes the retained ballot, or undefined when the root retains none.
 // Every listed record must be stored and nothing else.
 export const resumeBallot = async (
-    participant: ParticipantSession,
+    participant: Pick<ParticipantSession, 'context' | 'root'>,
 ): Promise<BallotSession | undefined> => {
     const { context } = participant;
     const records = await retainedRecordContext(participant);
@@ -283,7 +283,7 @@ export const resumeBallot = async (
 
 // Ballot and close authority binds the original member to its verified setup.
 export const ballotWorkInput = async (
-    participant: ParticipantSession,
+    participant: Pick<ParticipantSession, 'context' | 'root'>,
     setupIdentity: Uint8Array,
 ) => {
     const { context } = participant;

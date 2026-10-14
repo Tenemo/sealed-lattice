@@ -3,20 +3,6 @@ import type { ParticipantProfileContext } from '../module/context.js';
 import { readModuleMemory } from '../module/participant-module.js';
 import { identityBytes } from '../module/runtime-bounds.js';
 import { concatenate, unsigned16, unsigned32 } from '../shared/bytes.js';
-import {
-    decodeContributionState,
-    discardInterruptedRecords,
-    contributionInventory,
-} from '../stages/contribution/contribution-state.js';
-import type {
-    ProposalRecordContext,
-    ContributionState,
-} from '../stages/contribution/contribution-state.js';
-import {
-    decodePreparationState,
-    encodePreparationState,
-} from '../stages/contribution/preparation-state.js';
-import type { PreparationState } from '../stages/contribution/preparation-state.js';
 import { snapshotParticipant } from '../storage/database.js';
 import { rootGeneration } from '../storage/root-generation.js';
 import type { AuthenticatedRoot } from '../storage/root.js';
@@ -27,6 +13,21 @@ import {
     dataRecordInventory,
     readDataKind,
 } from '../storage/root.js';
+
+import {
+    decodeContributionState,
+    discardInterruptedRecords,
+    contributionInventory,
+} from './contribution/contribution-state.js';
+import type {
+    ProposalRecordContext,
+    ContributionState,
+} from './contribution/contribution-state.js';
+import {
+    decodePreparationState,
+    encodePreparationState,
+} from './contribution/preparation-state.js';
+import type { PreparationState } from './contribution/preparation-state.js';
 
 // Every original roster member has the same preparation journal. Own offer
 // work is optional and advances independently from quorum selection.

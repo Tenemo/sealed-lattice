@@ -2,6 +2,7 @@ import type { ParticipantProfileContext } from '../../module/context.js';
 import { operationSeedBytes } from '../../module/participant-module.js';
 import type { ParticipantProfile } from '../../module/runtime-bounds.js';
 import {
+    contributionPrefixBytes,
     privateEntryBytes,
     publicEntryBytes,
     recordKeyBytes,
@@ -101,8 +102,6 @@ const retainedShape = (phase: number) => ({
             : 0,
 });
 
-const prefixBytes = 4 + 1 + 2 + 4 * 4;
-
 const encodeSigningRecord = (record: ContributionRecord) =>
     concatenate(
         unsigned16(record.object),
@@ -173,7 +172,7 @@ export const decodeContributionState = (
     profile: ParticipantProfile,
 ): ContributionState => {
     const bounds = profile.contribution;
-    const prefix = prefixBytes;
+    const prefix = contributionPrefixBytes;
     const phase = bytes[4];
     if (
         phase === undefined ||

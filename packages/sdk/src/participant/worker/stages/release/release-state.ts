@@ -1,6 +1,9 @@
 import { operationSeedBytes } from '../../module/participant-module.js';
 import type { ParticipantProfile } from '../../module/runtime-bounds.js';
-import { recordKeyBytes } from '../../module/runtime-bounds.js';
+import {
+    recordKeyBytes,
+    releasePrefixBytes,
+} from '../../module/runtime-bounds.js';
 import {
     concatenate,
     encodeText,
@@ -32,7 +35,6 @@ import type { BallotInclusion } from '../target-vote/target-state.js';
 // signature.
 
 const marker = encodeText('RST4');
-const prefixBytes = marker.length + 2 + 2 + 4 + 2;
 
 export type ReleaseState = Readonly<{
     // The signed-target or completed-close generation the release follows.
@@ -92,7 +94,7 @@ export const decodeReleaseState = (
     if (
         generation < releasePhase.locked ||
         !isRootGeneration(generation) ||
-        bytes.length < prefixBytes ||
+        bytes.length < releasePrefixBytes ||
         bytes.length > bounds.maximumStateBytes ||
         !equalBytes(bytes.subarray(0, marker.length), marker) ||
         (bytes[marker.length] !== targetPhase.signed &&
@@ -121,7 +123,7 @@ export const decodeReleaseState = (
         (generation === releasePhase.signed
             ? profile.registration.signatureBytes
             : 0);
-    const seedStart = prefixBytes + targetLength;
+    const seedStart = releasePrefixBytes + targetLength;
     const keysStart = seedStart + seedLength;
     const tailStart = keysStart + recordKeyBytes * bodyCount;
     if (bytes.length !== tailStart + tail)
@@ -130,7 +132,7 @@ export const decodeReleaseState = (
     return {
         predecessor: bytes[marker.length],
         ballotInclusion: ballotInclusions[bytes[marker.length + 1]],
-        target: bytes.slice(prefixBytes, seedStart),
+        target: bytes.slice(releasePrefixBytes, seedStart),
         seed: bytes.slice(seedStart, keysStart),
         bodyLength,
         bodyKeys: Array.from({ length: bodyCount }, (_unused, index) =>

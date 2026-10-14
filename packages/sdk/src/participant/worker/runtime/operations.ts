@@ -42,6 +42,11 @@ import {
     restoreEnrollment,
 } from '../stages/enrollment/enrollment.js';
 import {
+    confirmRoster,
+    isContributionSession,
+    resumeParticipant,
+} from '../stages/participant-session.js';
+import {
     advanceRelease,
     computeResult,
     publishRelease,
@@ -77,11 +82,6 @@ import {
 import { authenticateRoot } from '../storage/root.js';
 
 import { isOperationAvailable } from './operation-availability.js';
-import {
-    confirmRoster,
-    isContributionSession,
-    resumeParticipant,
-} from './participant-session.js';
 import { summary } from './participant-summary.js';
 import { refused } from './worker-messages.js';
 import type {

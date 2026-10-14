@@ -4,7 +4,6 @@ import {
     tryModuleCommand,
 } from '../../module/participant-module.js';
 import { ballotEnvelopeOffset } from '../../module/runtime-bounds.js';
-import type { ParticipantSession } from '../../runtime/participant-session.js';
 import {
     concatenate,
     equalBytes,
@@ -33,6 +32,7 @@ import {
     resumeBallot,
     retainedBallotRecords,
 } from '../ballot/ballot.js';
+import type { ParticipantSession } from '../participant-session.js';
 import { retainedRecordContext } from '../setup/setup.js';
 
 import { custodyEnvelopeIdentity } from './close-records.js';
@@ -66,7 +66,7 @@ type Submission = Readonly<{
 }>;
 
 export type CloseSession = {
-    readonly participant: ParticipantSession;
+    readonly participant: Pick<ParticipantSession, 'context' | 'root'>;
     readonly records: RecordContext;
     readonly isOrganizer: boolean;
     readonly ballot: BallotSession | undefined;
@@ -133,7 +133,7 @@ const recordCount = (state: CloseState) =>
 // Decodes the retained close log and the signed ballot it may reference.
 // Every listed record must be stored and nothing else.
 export const resumeClose = async (
-    participant: ParticipantSession,
+    participant: Pick<ParticipantSession, 'context' | 'root'>,
     isOrganizer: boolean,
 ): Promise<CloseSession> => {
     const { context, root } = participant;

@@ -2,14 +2,14 @@ import { noParallelHelpers } from '#packages/sdk/src/participant/worker/module/p
 import { instantiateParticipantModule } from '#packages/sdk/src/participant/worker/module/participant-module.js';
 import { readParticipantLimits } from '#packages/sdk/src/participant/worker/module/runtime-bounds.js';
 import {
-    contributionRecords,
-    resumeParticipant,
-} from '#packages/sdk/src/participant/worker/runtime/participant-session.js';
-import {
     fromHexadecimal,
     hexadecimal,
 } from '#packages/sdk/src/participant/worker/shared/bytes.js';
 import { restoreEnrollment } from '#packages/sdk/src/participant/worker/stages/enrollment/enrollment.js';
+import {
+    contributionRecords,
+    resumeParticipant,
+} from '#packages/sdk/src/participant/worker/stages/participant-session.js';
 import { retainedProfile } from '#packages/sdk/src/participant/worker/stages/roster/roster.js';
 import {
     openParticipantDatabase,

@@ -14,11 +14,6 @@ import {
 import { chunkBytes, recordKeyBytes } from '../../module/runtime-bounds.js';
 import { findCandidate, readCandidateFile } from '../../relay/candidates.js';
 import type { PublicRelay } from '../../relay/relay.js';
-import { isContributionSession } from '../../runtime/participant-session.js';
-import type {
-    ParticipantSession,
-    ContributionSession,
-} from '../../runtime/participant-session.js';
 import {
     concatenate,
     equalBytes,
@@ -35,6 +30,11 @@ import {
 } from '../../storage/database.js';
 import { rootGeneration } from '../../storage/root-generation.js';
 import { dataKind, readDataKind } from '../../storage/root.js';
+import type {
+    ParticipantSession,
+    ContributionSession,
+} from '../participant-session.js';
+import { isContributionSession } from '../participant-session.js';
 import {
     proposalRegistrationBodyDigests,
     registrationFile,

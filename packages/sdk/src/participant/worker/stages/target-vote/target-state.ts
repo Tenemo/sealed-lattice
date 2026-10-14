@@ -1,4 +1,5 @@
 import type { ParticipantProfile } from '../../module/runtime-bounds.js';
+import { targetPrefixBytes } from '../../module/runtime-bounds.js';
 import {
     concatenate,
     encodeText,
@@ -60,14 +61,14 @@ export const decodeTargetState = (
     const signed = generation >= targetPhase.signed;
     if (
         generation < targetPhase.intent ||
-        bytes.length < marker.length + 4 ||
+        bytes.length < targetPrefixBytes ||
         !equalBytes(bytes.subarray(0, marker.length), marker) ||
         bytes[marker.length] !== completedClosePhase(isOrganizer) ||
         bytes[marker.length + 1] >= ballotInclusions.length
     )
         throw new Error('The target state is malformed.');
     const length = readUnsigned16(bytes, marker.length + 2);
-    const start = marker.length + 4;
+    const start = targetPrefixBytes;
     const tail = signed ? votePacketBytes : 0;
     if (
         length === 0 ||

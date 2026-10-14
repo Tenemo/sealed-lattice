@@ -6,8 +6,6 @@ import {
 } from '../../module/participant-module.js';
 import { createCandidatePublication } from '../../relay/publication.js';
 import type { PublicRelay } from '../../relay/relay.js';
-import type { ParticipantSession } from '../../runtime/participant-session.js';
-import { contributionRecords } from '../../runtime/participant-session.js';
 import { concatenate, equalBytes, unsigned32 } from '../../shared/bytes.js';
 import { PublicInputFailure } from '../../shared/failures.js';
 import type { SignedPacket } from '../../shared/signed-packet.js';
@@ -27,6 +25,8 @@ import {
     encodeCloseState,
 } from '../close/close-state.js';
 import { encodePreparationState } from '../contribution/preparation-state.js';
+import { contributionRecords } from '../participant-session.js';
+import type { ParticipantSession } from '../participant-session.js';
 import {
     proposalRegistrationBodyDigests,
     rosterBegin,
@@ -51,7 +51,7 @@ import {
 // when the cache lost it.
 
 export const verifySetupRoster = async (
-    session: ParticipantSession,
+    session: Pick<ParticipantSession, 'context' | 'root'>,
     relay: PublicRelay,
 ) => {
     const { context } = session;
@@ -215,7 +215,7 @@ export const verifySetup = async (
 };
 
 export const ensureFinalAggregate = async (
-    session: ParticipantSession,
+    session: Pick<ParticipantSession, 'context' | 'root'>,
     relay: PublicRelay,
 ) => {
     if (session.root.head.generation < rootGeneration.setupRetained)
@@ -269,7 +269,7 @@ export const restoreSetup = async (
 
 // The record context of a participant whose setup is retained.
 export const retainedRecordContext = async (
-    session: ParticipantSession,
+    session: Pick<ParticipantSession, 'context' | 'root'>,
 ): Promise<RecordContext> => ({
     poll: session.root.manifest.poll,
     setupIdentity: referenceSetupIdentity(
@@ -279,7 +279,7 @@ export const retainedRecordContext = async (
             dataKind.setupReference,
         ),
     ).slice(),
-    position: session.records.position,
+    position: session.context.position,
 });
 
 export const retainSetup = async (

@@ -1,7 +1,6 @@
 import { publishOfferAnnouncement } from '../../relay/offer-discovery.js';
 import { createCandidatePublication } from '../../relay/publication.js';
 import type { PublicRelay } from '../../relay/relay.js';
-import type { ContributionSession } from '../../runtime/participant-session.js';
 import {
     concatenate,
     equalBytes,
@@ -14,6 +13,7 @@ import {
 import { decodeSignedPacket } from '../../shared/signed-packet.js';
 import type { SignedPacket } from '../../shared/signed-packet.js';
 import { openDelivery } from '../../storage/delivery.js';
+import type { ContributionSession } from '../participant-session.js';
 
 import {
     openContributionRecord,

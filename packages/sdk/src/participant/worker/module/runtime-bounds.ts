@@ -392,7 +392,7 @@ const enrollmentPayloadBytes = (
 // checkpoint header, a reference per public and private record, each
 // signing record, and the seed of an interrupted generation or
 // continuation.
-const contributionPrefixBytes = 4 + 1 + 2 + 16;
+export const contributionPrefixBytes = 4 + 1 + 2 + 16;
 export const publicEntryBytes = 2 + 4 + 4 + recordKeyBytes + identityBytes;
 export const privateEntryBytes = recordKeyBytes + identityBytes;
 export const signingEntryBytes = 2 + 4 + recordKeyBytes + identityBytes;
@@ -502,8 +502,9 @@ const ballotBounds = (
 // record: a held body has its envelope and body records, and a response the
 // organizer takes one record.
 const closePrefixBytes = 4 + 4;
+export const closeEventHeaderBytes = 1 + 2 + 4 + 4;
 const eventBytes = (records: number) =>
-    1 + 2 + 4 + 4 + recordKeyBytes * records;
+    closeEventHeaderBytes + recordKeyBytes * records;
 
 const closeBounds = (
     moduleLimits: ModuleLimits,
@@ -556,26 +557,28 @@ const closeBounds = (
 
 // The target suffix: its marker, the close phase it follows, the own
 // ballot's status and the body length, the target body, then the signed vote once completed.
+export const targetPrefixBytes = 4 + 1 + 1 + 2;
 const targetBounds = (moduleLimits: ModuleLimits) => {
     const { target } = moduleLimits;
-    const prefix = 4 + 1 + 1 + 2;
     return {
         ...target,
         maximumStateBytes:
-            prefix + target.maximumBodyBytes + target.votePacketBytes,
+            targetPrefixBytes +
+            target.maximumBodyBytes +
+            target.votePacketBytes,
     };
 };
 
 // The release suffix: its marker, predecessor, own ballot status, target
 // length, body length and key count, the target body, the randomness seed until the body exists,
 // a key per body record, the envelope and the signature.
+export const releasePrefixBytes = 4 + 1 + 1 + 2 + 4 + 2;
 const releaseBounds = (moduleLimits: ModuleLimits, profile: ModuleProfile) => {
     const { release } = moduleLimits;
     const bodyRecords = Math.ceil(
         profile.maximumReleaseBodyBytes / release.recordBytes,
     );
-    const attempt =
-        4 + 1 + 1 + 2 + 4 + 2 + moduleLimits.target.maximumBodyBytes;
+    const attempt = releasePrefixBytes + moduleLimits.target.maximumBodyBytes;
     const retainedBody = recordKeyBytes * bodyRecords + release.envelopeBytes;
     return {
         ...release,

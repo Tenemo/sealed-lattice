@@ -4,10 +4,6 @@ import {
     custodyPurpose,
 } from '../../module/custody-identity.js';
 import { moduleCommand } from '../../module/participant-module.js';
-import type {
-    ParticipantSession,
-    ContributionSession,
-} from '../../runtime/participant-session.js';
 import { equalBytes } from '../../shared/bytes.js';
 import { readParticipantValue, recordBytes } from '../../storage/database.js';
 import {
@@ -17,6 +13,10 @@ import {
 } from '../../storage/private-records.js';
 import { rootGeneration } from '../../storage/root-generation.js';
 import { commitRoot, dataRecordInventory } from '../../storage/root.js';
+import type {
+    ParticipantSession,
+    ContributionSession,
+} from '../participant-session.js';
 
 import {
     recordAssociatedData,
