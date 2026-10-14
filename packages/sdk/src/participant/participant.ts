@@ -10,8 +10,8 @@ import {
     allStartedInTime,
 } from './worker/module/parallel-helpers.js';
 import type {
-    VerificationCommand,
-    WorkerCommand,
+    VerificationWorkerCommand,
+    ParticipantWorkerCommand,
     WorkerResult,
     ParticipantWorkerResult,
     VerificationWorkerResult,
@@ -95,15 +95,15 @@ const openHelpers = async (url: string) => {
 // ends them all once the worker answers.
 function runWorkerOnce(
     url: string,
-    command: WorkerCommand,
+    command: ParticipantWorkerCommand,
 ): Promise<ParticipantWorkerResult>;
 function runWorkerOnce(
     url: string,
-    command: VerificationCommand,
+    command: VerificationWorkerCommand,
 ): Promise<VerificationWorkerResult>;
 async function runWorkerOnce(
     url: string,
-    command: WorkerCommand | VerificationCommand,
+    command: ParticipantWorkerCommand | VerificationWorkerCommand,
 ): Promise<WorkerResult> {
     const helpers = await openHelpers(url);
     let worker: Worker | undefined;
@@ -156,7 +156,7 @@ async function runWorkerOnce(
 // the evaluating worker's memory.
 const runWorker = async (
     source: string,
-    command: Omit<WorkerCommand, 'separateEvaluation'>,
+    command: Omit<ParticipantWorkerCommand, 'separateEvaluation'>,
 ): Promise<Exclude<ParticipantWorkerResult, { status: 'evaluated' }>> => {
     const url = URL.createObjectURL(
         new Blob([source], { type: 'text/javascript' }),

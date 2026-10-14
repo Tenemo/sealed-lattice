@@ -190,17 +190,14 @@ describe.each(['status', 'verify-outcome'] as const)(
             expect(downstream.database).not.toHaveBeenCalled();
         });
 
-        it('refuses malformed pinned identity bytes before compilation', async () => {
+        it('refuses a malformed pinned identity digest before compilation', async () => {
             const compiling = vi.spyOn(WebAssembly, 'compile');
             expect(
                 await runWorker(operation, moduleBytes, {
                     ...identity,
                     source: 'not-hexadecimal',
                 }),
-            ).toMatchObject({
-                status: 'pending',
-                detail: 'Malformed hexadecimal bytes.',
-            });
+            ).toEqual({ status: 'refused', reason: 'invalid request' });
             expect(compiling).not.toHaveBeenCalled();
             expect(downstream.helpers).not.toHaveBeenCalled();
             expect(downstream.database).not.toHaveBeenCalled();

@@ -61,6 +61,9 @@ describe('worker message boundary', () => {
             { identity: undefined },
             { identity: [] },
             { identity: { ...runtime.identity, worker: 1 } },
+            { identity: { ...runtime.identity, source: 'AB'.repeat(64) } },
+            { identity: { ...runtime.identity, module: 'cd'.repeat(63) } },
+            { identity: { ...runtime.identity, worker: 'ef'.repeat(65) } },
             { relay: 'https://relay.invalid/?poll=1' },
             { module: 'file:///participant.wasm' },
         ]) {

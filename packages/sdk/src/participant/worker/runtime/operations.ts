@@ -85,7 +85,7 @@ import { isOperationAvailable } from './operation-availability.js';
 import { summary } from './participant-summary.js';
 import { refused } from './worker-messages.js';
 import type {
-    WorkerCommand,
+    ParticipantWorkerCommand,
     ParticipantWorkerResult,
 } from './worker-messages.js';
 
@@ -110,7 +110,7 @@ const bytes = (value: unknown) => {
 export const executeOperation = async (
     context: ParticipantContext,
     relay: PublicRelay,
-    command: WorkerCommand,
+    command: ParticipantWorkerCommand,
     started: () => void,
 ): Promise<ParticipantWorkerResult> => {
     const parameters = command.parameters;

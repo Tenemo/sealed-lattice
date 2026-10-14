@@ -16,7 +16,7 @@ import {
 import { PublicInputFailure } from '../shared/failures.js';
 import { evaluationStoreChunkBytes } from '../stages/target-vote/evaluation.js';
 
-import type { WorkerCommand } from './worker-messages.js';
+import type { ParticipantWorkerCommand } from './worker-messages.js';
 
 const maximumModuleBytes = 8_388_608;
 
@@ -37,7 +37,7 @@ const deliveryDigest = async (bytes: Uint8Array<ArrayBuffer>) =>
 // Fetches the module, which must have the pinned digest, and recomputes the
 // runtime identity from it and the pinned source and worker digests.
 export const fetchModule = async (
-    command: Pick<WorkerCommand, 'module' | 'identity'>,
+    command: Pick<ParticipantWorkerCommand, 'module' | 'identity'>,
 ) => {
     const bytes = await readBounded(command.module, maximumModuleBytes);
     const digest = await deliveryDigest(bytes);

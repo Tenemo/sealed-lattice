@@ -22,7 +22,7 @@ import { isParticipantOperation } from './operation-availability.js';
 // separates evaluation, a worker that retains the target it evaluated before
 // the operation's other work ends there, and the page runs the operation
 // again in a fresh worker.
-export type WorkerCommand = Readonly<{
+export type ParticipantWorkerCommand = Readonly<{
     operation: ParticipantRequest['operation'];
     namespace: string;
     relay: string;
@@ -39,12 +39,12 @@ export type WorkerCommand = Readonly<{
 // A verification of a poll's outcome from the relay's public records alone,
 // in a fresh worker that holds no participant state. The page names the
 // poll's identity, and the module refuses a poll of another runtime.
-export type VerificationCommand = Readonly<{
+export type VerificationWorkerCommand = Readonly<{
     operation: 'verify-outcome';
     poll: string;
     relay: string;
     module: string;
-    identity: WorkerCommand['identity'];
+    identity: ParticipantWorkerCommand['identity'];
 }>;
 
 // An evaluated result reports the memory of a worker that retained the
@@ -101,11 +101,13 @@ const hasRuntimeAndRelay = (command: Record<string, unknown>) =>
     isBaseUrl(command.relay) &&
     httpUrl(command.module) !== undefined &&
     isRecord(command.identity) &&
-    typeof command.identity.source === 'string' &&
-    typeof command.identity.module === 'string' &&
-    typeof command.identity.worker === 'string';
+    isDigest(command.identity.source) &&
+    isDigest(command.identity.module) &&
+    isDigest(command.identity.worker);
 
-export const isWellFormed = (command: unknown): command is WorkerCommand =>
+export const isWellFormed = (
+    command: unknown,
+): command is ParticipantWorkerCommand =>
     isRecord(command) &&
     hasRuntimeAndRelay(command) &&
     isParticipantOperation(command.operation) &&
@@ -120,7 +122,7 @@ export const isVerification = (command: unknown) =>
 
 export const isWellFormedVerification = (
     command: unknown,
-): command is VerificationCommand =>
+): command is VerificationWorkerCommand =>
     isRecord(command) &&
     hasRuntimeAndRelay(command) &&
     command.operation === 'verify-outcome' &&
