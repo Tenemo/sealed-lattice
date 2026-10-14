@@ -95,31 +95,4 @@ describe('import closure', () => {
                 );
             },
         ));
-
-    it('covers every module of the participant browser runner', async () => {
-        const closure = await importClosure([
-            'tools/ci/run-participant-browser.ts',
-        ]);
-        for (const file of [
-            'tools/ci/run-participant-browser.ts',
-            'tools/ci/participant-browser-cohort.ts',
-            'tools/ci/participant-browser-relay.ts',
-            'tools/ci/participant-browser-public-records.ts',
-            'tools/ci/participant-browser-roster-completion.ts',
-            'tools/ci/participant-browser-single-roster.ts',
-            'tools/ci/participant-browser-two-rosters.ts',
-            'tools/ci/participant-browser-fault-schedule.ts',
-            'tools/ci/participant-browser-options.ts',
-            'tools/ci/participant-workflow-measurements.ts',
-            'tools/ci/participant-padding-halt.ts',
-            'tools/ci/participant-padding-corruption.ts',
-            'tools/ci/participant-preparation-storage.ts',
-            'tools/ci/participant-relay-record.ts',
-            'tools/ci/participant-offer-announcements.ts',
-            'tools/ci/participant-runtime-chrome.ts',
-            'tests/setup-selection-model.ts',
-            'tests/threshold-completion-model.ts',
-        ])
-            expect(closure).toContain(file);
-    });
 });

@@ -61,7 +61,21 @@ describe('participant failures', () => {
                 pending('resource'),
             ],
             [new ModuleFailure('trap'), pending('module'), pending('module')],
+            [
+                new RangeError('Array buffer allocation failed'),
+                pending('resource'),
+                pending('resource'),
+            ],
             [new Error('database'), pending('worker'), stopped],
+            // WebCrypto reports a root that fails authentication this way.
+            [
+                new DOMException(
+                    'The operation failed for an operation-specific reason',
+                    'OperationError',
+                ),
+                pending('worker'),
+                stopped,
+            ],
             [new TypeError('fetch'), pending('worker'), stopped],
             ['thrown text', pending('worker'), stopped],
             [undefined, pending('worker'), stopped],

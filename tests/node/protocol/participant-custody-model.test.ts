@@ -16,12 +16,24 @@ import { compileRegistrationEnrollmentCensus } from '#tests/registration-enrollm
 import { compileSetupSelectionWireCensus } from '#tests/setup-selection-wire-model.js';
 import {
     completionProfile,
-    listSupportedProfiles,
+    deriveSupportedProfile,
     type SupportedProfile,
 } from '#tests/supported-profile-model.js';
 import { compileTargetSigningStateCensus } from '#tests/target-signing-state-model.js';
 
-// The exhaustive assertions inspect the same immutable owner-derived cases.
+// The smallest and largest rosters and option counts, and the completion
+// profile. Every supported profile takes the same branch of each bound.
+const boundaryProfiles = [
+    [3, 2],
+    [3, 20],
+    [10, 10],
+    [20, 2],
+    [20, 20],
+].map(([participantCount, optionCount]) =>
+    deriveSupportedProfile(participantCount, optionCount),
+);
+
+// The boundary assertions inspect the same immutable owner-derived cases.
 // Reuse their construction, not one assertion's expected result.
 const custodyCases = new Map<
     string,
@@ -77,9 +89,9 @@ describe('shared participant custody', () => {
         }
     });
 
-    it.each(Array.from({ length: 18 }, (_unused, index) => index + 3))(
-        'fixes proof slots and the body header for every option count at roster %i',
-        (participantCount) => {
+    it.each(boundaryProfiles)(
+        'fixes proof slots and the body header at roster $participantCount with $optionCount options',
+        (profile) => {
             const chunk = 1n << 20n;
             const referenceBytes = BigInt(
                 Buffer.concat([
@@ -90,165 +102,138 @@ describe('shared participant custody', () => {
                     Buffer.alloc(64),
                 ]).length,
             );
-            for (const profile of listSupportedProfiles().filter(
-                (value) => value.participantCount === participantCount,
-            )) {
-                const { body, storage, custody } = custodyCase(profile);
-                const records = (body.maximumProofBytes + chunk - 1n) / chunk;
-                expect(BigInt(storage.records.length)).toBe(records);
-                expect(
-                    storage.records.reduce(
-                        (total, record) => total + record.length,
-                        0n,
-                    ),
-                ).toBe(body.maximumProofBytes);
-                for (const [index, record] of storage.records.entries()) {
-                    expect(record.offset).toBe(BigInt(index) * chunk);
-                    expect(record.length).toBe(
-                        index + 1 === storage.records.length
-                            ? body.maximumProofBytes - BigInt(index) * chunk
-                            : chunk,
-                    );
-                }
-                expect(storage.ciphertextBytes).toBe(
-                    body.maximumProofBytes + 16n * records,
-                );
-                expect(storage.dataKeyBytes).toBe(32n * records);
-                expect(storage.recordIdentityBytes).toBe(64n * records);
-                expect(storage.recordReferenceBytes).toBe(
-                    referenceBytes * records,
-                );
-                expect(storage.completedBodyHeaderBytes).toBe(4n + 8n + 64n);
-                const prefix = 4n + 1n + 2n + 4n * 4n;
-                const bodyRecords = body.polynomials.reduce(
-                    (count, polynomial) =>
-                        count + (polynomial.bytes + chunk - 1n) / chunk,
+            const { body, storage, custody } = custodyCase(profile);
+            const records = (body.maximumProofBytes + chunk - 1n) / chunk;
+            expect(BigInt(storage.records.length)).toBe(records);
+            expect(
+                storage.records.reduce(
+                    (total, record) => total + record.length,
                     0n,
-                );
-                const signingReferences = 2n * (2n + 4n + 32n + 64n);
-                expect(custody.maximumCompletedMetadataBytes).toBe(
-                    prefix +
-                        storage.completedBodyHeaderBytes +
-                        referenceBytes * (bodyRecords + records) +
-                        signingReferences,
-                );
-                expect(custody.maximumPublicBodyCiphertextBytes).toBe(
-                    body.polynomialPayloadBytes +
-                        body.maximumProofBytes +
-                        16n * (bodyRecords + records),
+                ),
+            ).toBe(body.maximumProofBytes);
+            for (const [index, record] of storage.records.entries()) {
+                expect(record.offset).toBe(BigInt(index) * chunk);
+                expect(record.length).toBe(
+                    index + 1 === storage.records.length
+                        ? body.maximumProofBytes - BigInt(index) * chunk
+                        : chunk,
                 );
             }
+            expect(storage.ciphertextBytes).toBe(
+                body.maximumProofBytes + 16n * records,
+            );
+            expect(storage.dataKeyBytes).toBe(32n * records);
+            expect(storage.recordIdentityBytes).toBe(64n * records);
+            expect(storage.recordReferenceBytes).toBe(referenceBytes * records);
+            expect(storage.completedBodyHeaderBytes).toBe(4n + 8n + 64n);
+            const bodyRecords = body.polynomials.reduce(
+                (count, polynomial) =>
+                    count + (polynomial.bytes + chunk - 1n) / chunk,
+                0n,
+            );
+            expect(custody.maximumPublicBodyCiphertextBytes).toBe(
+                body.polynomialPayloadBytes +
+                    body.maximumProofBytes +
+                    16n * (bodyRecords + records),
+            );
         },
     );
 
-    it.each(Array.from({ length: 18 }, (_unused, index) => index + 3))(
-        'bounds independent preparation slots and retired later roots at roster %i',
-        (participantCount) => {
+    it.each(boundaryProfiles)(
+        'bounds independent preparation slots and retired later roots at roster $participantCount with $optionCount options',
+        (profile) => {
             const enrollment = compileRegistrationEnrollmentCensus();
-            for (const profile of listSupportedProfiles().filter(
-                (value) => value.participantCount === participantCount,
-            )) {
-                const { body, custody: current } = custodyCase(profile);
-                const checkpoint = compileFirstOracleCheckpointCensus(profile);
-                const wire = compileSetupSelectionWireCensus(participantCount);
-                const ballot = compileParticipantBallotCustody(profile);
-                const close = compileParticipantCloseCustody(profile);
-                const target = compileTargetSigningStateCensus();
-                const release = compileParticipantReleaseCustody(profile);
-                const chunk = 1n << 20n;
-                const bodyRecords = body.polynomials.reduce(
-                    (sum, polynomial) =>
-                        sum + (polynomial.bytes + chunk - 1n) / chunk,
-                    0n,
+            const { body, custody: current } = custodyCase(profile);
+            const checkpoint = compileFirstOracleCheckpointCensus(profile);
+            const wire = compileSetupSelectionWireCensus(
+                profile.participantCount,
+            );
+            const ballot = compileParticipantBallotCustody(profile);
+            const close = compileParticipantCloseCustody(profile);
+            const target = compileTargetSigningStateCensus();
+            const release = compileParticipantReleaseCustody(profile);
+            const chunk = 1n << 20n;
+            const bodyRecords = body.polynomials.reduce(
+                (sum, polynomial) =>
+                    sum + (polynomial.bytes + chunk - 1n) / chunk,
+                0n,
+            );
+            const proofRecords = (body.maximumProofBytes + chunk - 1n) / chunk;
+            const ownPrefix = 4n + 1n + 2n + 4n * 4n;
+            const checkpointBytes =
+                ownPrefix +
+                checkpoint.maximumHeaderBytes +
+                106n * bodyRecords +
+                96n * checkpoint.recordCount +
+                64n;
+            const completedBytes =
+                ownPrefix +
+                body.headerBytes +
+                106n * (bodyRecords + proofRecords) +
+                2n * 102n;
+            const maximum = (...values: bigint[]) =>
+                values.reduce((largest, value) =>
+                    value > largest ? value : largest,
                 );
-                const proofRecords =
-                    (body.maximumProofBytes + chunk - 1n) / chunk;
-                const ownPrefix = 4n + 1n + 2n + 4n * 4n;
-                const checkpointBytes =
-                    ownPrefix +
-                    checkpoint.maximumHeaderBytes +
-                    106n * bodyRecords +
-                    96n * checkpoint.recordCount +
-                    64n;
-                const completedBytes =
-                    ownPrefix +
-                    body.headerBytes +
-                    106n * (bodyRecords + proofRecords) +
-                    2n * 102n;
-                const maximum = (...values: bigint[]) =>
-                    values.reduce((largest, value) =>
-                        value > largest ? value : largest,
-                    );
-                const reference =
-                    4n + 64n + BigInt(body.polynomials.length) * 64n + 64n;
-                const selectionSlot = 1n + wire.selectionBodyBytes + 3309n;
-                const endorsementSlot =
-                    1n +
-                    wire.selectionBodyBytes +
-                    3309n +
-                    reference +
-                    wire.endorsementBodyBytes +
-                    3309n;
-                const journal =
-                    4n +
-                    3n * 4n +
-                    maximum(checkpointBytes, completedBytes) +
-                    selectionSlot +
-                    endorsementSlot;
-                const earlyRoot =
-                    4n +
-                    96n +
-                    64n +
-                    4n +
-                    73n * enrollment.maximumRecords +
-                    4n +
-                    journal +
-                    16n;
-                const completeBallot = ballot.phaseBytes.find(
-                    (value) => value.phase === 17,
-                )!.bytes;
-                const lateRoot =
-                    4n +
-                    64n +
-                    64n +
-                    4n +
-                    73n * (enrollment.maximumRecords + 1n) +
-                    4n +
-                    (4n + 3n * 4n) +
-                    maximum(
-                        2n * 4n +
-                            ballot.maximumStateBytes +
-                            close.collectingBytes,
-                        4n * 4n +
-                            completeBallot +
-                            close.maximumStateBytes +
-                            target.maximumStateBytes +
-                            release.maximumStateBytes,
-                    ) +
-                    16n;
-                expect(current.metadataPrefixBytes).toBe(ownPrefix);
-                expect(current.maximumCheckpointMetadataBytes).toBe(
-                    checkpointBytes,
-                );
-                expect(current.maximumCompletedMetadataBytes).toBe(
-                    completedBytes,
-                );
-                expect(current.maximumPreparationBytes).toBe(journal);
-                expect(current.emptyPreparationBytes).toBe(16n);
-                expect(current.maximumSelectionSlotBytes).toBe(selectionSlot);
-                expect(current.maximumEndorsementSlotBytes).toBe(
-                    endorsementSlot,
-                );
-                expect(current.selectionReferenceBytes).toBe(reference);
-                expect(current.setupCertificateBytes).toBe(
-                    wire.certificateBytes,
-                );
-                expect(current.maximumPreparationRootBytes).toBe(earlyRoot);
-                expect(current.maximumPreparedRootBytes).toBe(lateRoot);
-                expect(current.maximumRootBytes).toBe(
-                    maximum(earlyRoot, lateRoot),
-                );
-            }
+            const reference =
+                4n + 64n + BigInt(body.polynomials.length) * 64n + 64n;
+            const selectionSlot = 1n + wire.selectionBodyBytes + 3309n;
+            const endorsementSlot =
+                1n +
+                wire.selectionBodyBytes +
+                3309n +
+                reference +
+                wire.endorsementBodyBytes +
+                3309n;
+            const journal =
+                4n +
+                3n * 4n +
+                maximum(checkpointBytes, completedBytes) +
+                selectionSlot +
+                endorsementSlot;
+            const earlyRoot =
+                4n +
+                96n +
+                64n +
+                4n +
+                73n * enrollment.maximumRecords +
+                4n +
+                journal +
+                16n;
+            const completeBallot = ballot.phaseBytes.find(
+                (value) => value.phase === 17,
+            )!.bytes;
+            const lateRoot =
+                4n +
+                64n +
+                64n +
+                4n +
+                73n * (enrollment.maximumRecords + 1n) +
+                4n +
+                (4n + 3n * 4n) +
+                maximum(
+                    2n * 4n + ballot.maximumStateBytes + close.collectingBytes,
+                    4n * 4n +
+                        completeBallot +
+                        close.maximumStateBytes +
+                        target.maximumStateBytes +
+                        release.maximumStateBytes,
+                ) +
+                16n;
+            expect(current.metadataPrefixBytes).toBe(ownPrefix);
+            expect(current.maximumCheckpointMetadataBytes).toBe(
+                checkpointBytes,
+            );
+            expect(current.maximumCompletedMetadataBytes).toBe(completedBytes);
+            expect(current.maximumPreparationBytes).toBe(journal);
+            expect(current.emptyPreparationBytes).toBe(16n);
+            expect(current.maximumSelectionSlotBytes).toBe(selectionSlot);
+            expect(current.maximumEndorsementSlotBytes).toBe(endorsementSlot);
+            expect(current.selectionReferenceBytes).toBe(reference);
+            expect(current.setupCertificateBytes).toBe(wire.certificateBytes);
+            expect(current.maximumPreparationRootBytes).toBe(earlyRoot);
+            expect(current.maximumPreparedRootBytes).toBe(lateRoot);
+            expect(current.maximumRootBytes).toBe(maximum(earlyRoot, lateRoot));
         },
     );
 

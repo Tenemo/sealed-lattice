@@ -141,12 +141,19 @@ export const openParticipantCohort = async (
         log,
         invalidAuthor !== undefined,
     );
-    // The runner's own sources, every repository file it imports, beside the
-    // runtime sources the assembly recorded.
+    // The runner's own sources, every repository file it imports, and the
+    // browser entry it bundles by path, beside the runtime sources the
+    // assembly recorded.
     await snapshotRunSources(
         log,
         root,
-        await importClosure(['tools/ci/run-participant-browser.ts'], root),
+        await importClosure(
+            [
+                'tools/ci/run-participant-browser.ts',
+                'tools/ci/participant-preparation-storage.ts',
+            ],
+            root,
+        ),
     );
     const paddingClients =
         mode === 'preparation'
