@@ -1,8 +1,12 @@
 use super::*;
-use crate::{CHUNK_LIMIT, HEADER_LENGTH, statement::tests::synthetic_ballot, verifier};
+use crate::{
+    CHUNK_LIMIT, HEADER_LENGTH,
+    statement::{coefficient_bytes, tests::synthetic_ballot},
+    verifier,
+};
 use parallel_work::random::{self, Purpose};
 use std::cell::Cell;
-use supported_profile::{Profile, relation::ballot_relation};
+use supported_profile::{Family, Profile, relation::ballot_relation};
 
 thread_local! {
     // The state of the SplitMix64 stream that serves the proof's draws, as
@@ -53,7 +57,7 @@ fn verify(profile: Profile, role: &[u8], statement: &PublicStatement, proof: &[u
 }
 
 #[test]
-fn ballot_proofs_verify_only_for_their_role_profile_and_true_ciphertext() {
+fn ballot_proofs_verify_only_for_their_role_profile_inputs_and_true_ciphertext() {
     let profile = Profile::new(3, 2).unwrap();
     let role = b"ballot-proof-test";
     let (statement, columns) = synthetic_ballot(profile);
@@ -74,6 +78,19 @@ fn ballot_proofs_verify_only_for_their_role_profile_and_true_ciphertext() {
         &statement,
         &bytes
     ));
+    // The relation verifier states its setup's inputs itself, so a proof
+    // made over other inputs is refused: here the fixed auxiliary public
+    // key differs by its first coefficient, nonzero and negated.
+    let width = coefficient_bytes(profile, Family::Auxiliary);
+    let mut polynomials = statement.polynomials.clone();
+    assert!(polynomials[5][1..width].iter().any(|byte| *byte != 0));
+    polynomials[5][0] ^= 1;
+    let substituted = PublicStatement {
+        profile,
+        header: statement.header.clone(),
+        polynomials,
+    };
+    assert!(!verify(profile, role, &substituted, &bytes));
     // A proof for a ciphertext coefficient changed by one cannot meet
     // the affine relation. The coefficient is uniform, so its magnitude
     // stays nonzero and below half the modulus.

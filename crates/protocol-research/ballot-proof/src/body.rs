@@ -1,7 +1,7 @@
 use crate::{
-    CHUNK_LIMIT, HEADER_LENGTH,
-    relation::{BallotRelationVerifier, VerifiedBallotRelation},
-    statement::setup_input,
+    CHUNK_LIMIT, HEADER_LENGTH, Verifier, context,
+    statement::{self, setup_input},
+    verifier,
 };
 use protocol_foundations::{ballot_body, identity::BodyHasher, poll::VerifiedPoll};
 use setup_aggregate::{AggregatePolynomialReader, verified::VerifiedSetupAggregate};
@@ -16,6 +16,25 @@ pub enum Error {
     Stage,
     Context,
     Proof,
+}
+
+/// Proof-valid linked ciphertexts under this verifier's own setup.
+/// Envelope authentication and authoritative publication are separate gates.
+pub struct VerifiedBallotRelation {
+    poll: [u8; 64],
+    setup_identity: [u8; 64],
+    position: usize,
+}
+impl VerifiedBallotRelation {
+    pub fn poll(&self) -> &[u8; 64] {
+        &self.poll
+    }
+    pub fn setup_identity(&self) -> &[u8; 64] {
+        &self.setup_identity
+    }
+    pub fn position(&self) -> usize {
+        self.position
+    }
 }
 
 /// Exact body bytes and their linked relation, checked by one stream.
@@ -38,9 +57,10 @@ impl VerifiedBallotBody {
 }
 
 /// The statement polynomials that every ballot under one verified setup
-/// shares: the common polynomials' canonical records and the encryption keys
-/// read from that setup, in statement order. The relation verifier still
-/// checks each one's identity in every statement.
+/// shares: the common polynomials' canonical records and the encryption keys,
+/// in statement order. Only the relation verifier builds them, once the
+/// setup's key has matched its certified identity, so every statement takes
+/// them as they are.
 pub struct BallotInputs {
     setup: Arc<VerifiedSetupAggregate>,
     commons: [Vec<u8>; 2],
@@ -53,18 +73,22 @@ impl BallotInputs {
     }
 }
 
+/// Verifies a ballot body's proof over the statement the body implies: the
+/// statement header this poll, setup and position expect, the setup's
+/// inputs and the body's ciphertexts.
 struct BallotBodyRelationVerifier {
     profile: Profile,
-    poll: Arc<VerifiedPoll>,
     setup: Arc<VerifiedSetupAggregate>,
-    position: usize,
-    context: Vec<u8>,
+    role: Vec<u8>,
+    // The statement header, which the body header carries after its prefix.
+    statement_header: Vec<u8>,
+    relation: VerifiedBallotRelation,
     ciphertexts: Vec<Vec<u8>>,
     ordinal: usize,
     proof_prefix: Vec<u8>,
     proof_length: usize,
     proof_bytes: usize,
-    verifier: Option<BallotRelationVerifier>,
+    verifier: Option<Verifier>,
     // The complete shared inputs, or the FHE aggregate key being read.
     inputs: Option<Arc<BallotInputs>>,
     key: Option<Vec<u8>>,
@@ -75,7 +99,7 @@ struct BallotBodyRelationVerifier {
 impl BallotBodyRelationVerifier {
     /// Inputs of another setup are not used, and the keys are read again.
     pub fn new(
-        poll: Arc<VerifiedPoll>,
+        poll: &VerifiedPoll,
         setup: Arc<VerifiedSetupAggregate>,
         position: usize,
         header: &[u8],
@@ -83,26 +107,31 @@ impl BallotBodyRelationVerifier {
     ) -> Result<Self, Error> {
         let profile = setup.profile();
         let proof_length = ballot_body::proof_length(profile, header).map_err(|_| Error::Shape)?;
-        if position >= profile.participants() {
-            return Err(Error::Context);
-        }
-        let context = &header[12..];
-        if context[4..68] != poll.identity()
-            || context[68..132] != setup.identity()
-            || u16::from_le_bytes(context[132..134].try_into().unwrap()) as usize != position
-            || context[134] as usize != poll.manifest().option_count()
-            || u16::from(context[135]) != poll.top_count()
-            || setup.roster().proposal().records()[0].header().poll != poll.identity()
-        {
+        // The role names a position of the setup's roster for this poll.
+        let role = context::proof_role(poll, &setup, position).map_err(|_| Error::Context)?;
+        let relation = VerifiedBallotRelation {
+            poll: poll.identity(),
+            setup_identity: setup.identity(),
+            position,
+        };
+        let statement_header = statement::header(
+            &relation.poll,
+            &relation.setup_identity,
+            position,
+            profile.options(),
+            usize::from(poll.top_count()),
+        )
+        .map_err(|_| Error::Context)?;
+        if header[12..] != statement_header {
             return Err(Error::Context);
         }
         let inputs = inputs.filter(|value| value.serves(&setup));
         Ok(Self {
             profile,
-            poll,
             setup,
-            position,
-            context: context.to_vec(),
+            role,
+            statement_header,
+            relation,
             ciphertexts: (0..4).map(|_| Vec::new()).collect(),
             ordinal: 0,
             proof_prefix: Vec::new(),
@@ -245,16 +274,10 @@ impl BallotBodyRelationVerifier {
         // The proof's declared statement digest: the statement stream
         // recomputes it from the statement below and refuses a mismatch.
         let statement = self.proof_prefix[4..68].try_into().unwrap();
-        let mut verifier = BallotRelationVerifier::new(
-            &self.poll,
-            &self.setup,
-            self.position,
-            statement,
-            &self.proof_prefix,
-        )
-        .map_err(|_| Error::Context)?;
+        let mut verifier = verifier(self.profile, &self.role, statement, &self.proof_prefix)
+            .map_err(|_| Error::Context)?;
         verifier
-            .push_statement(&self.context)
+            .push_statement(&self.statement_header)
             .map_err(|_| Error::Context)?;
         for slot in 0..2 {
             for polynomial in [
@@ -275,15 +298,14 @@ impl BallotBodyRelationVerifier {
     fn inputs_ready(&self) -> bool {
         !self.failed && self.inputs.is_some() && self.key_reader.is_none()
     }
-    pub fn finish(mut self) -> Result<VerifiedBallotRelation, Error> {
+    pub fn finish(self) -> Result<VerifiedBallotRelation, Error> {
         if self.failed || self.proof_bytes != self.proof_length {
             return Err(Error::Stage);
         }
-        self.verifier
-            .take()
-            .ok_or(Error::Stage)?
-            .finish()
-            .map_err(|_| Error::Proof)
+        if !self.verifier.ok_or(Error::Stage)?.finish() {
+            return Err(Error::Proof);
+        }
+        Ok(self.relation)
     }
 }
 
@@ -300,7 +322,7 @@ impl BallotBodyVerifier {
         header: &[u8],
     ) -> Result<Self, Error> {
         let profile = setup.profile();
-        let relation = BallotBodyRelationVerifier::new(poll, setup, position, header, None)?;
+        let relation = BallotBodyRelationVerifier::new(&poll, setup, position, header, None)?;
         let length = ballot_body::HEADER_BYTES
             + ballot_body::ciphertext_bytes(profile)
             + relation.proof_length;
@@ -378,7 +400,7 @@ impl SignedBallotVerifier {
             .map_err(|_| Error::Shape)?;
         hash.push(header).map_err(|_| Error::Shape)?;
         let relation = BallotBodyRelationVerifier::new(
-            poll,
+            &poll,
             setup.clone(),
             envelope.position(),
             header,

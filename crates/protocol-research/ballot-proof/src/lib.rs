@@ -7,7 +7,6 @@ pub mod context;
 #[path = "private-ballot.rs"]
 pub mod private_ballot;
 pub mod proof;
-pub mod relation;
 pub mod statement;
 pub mod submission;
 use statement::{StatementOutput, StatementStream};
