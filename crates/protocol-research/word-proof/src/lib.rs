@@ -1,6 +1,6 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 
-pub mod affine;
+mod affine;
 pub mod bridge;
 pub mod combination;
 pub mod field;

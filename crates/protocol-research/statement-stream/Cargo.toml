@@ -9,5 +9,10 @@ num-bigint.workspace = true
 parallel-work = { path = "../parallel-work" }
 supported-profile = { path = "../supported-profile" }
 
+[features]
+# A test aid for the crates that build affine operators: every row of an
+# operator.
+test-support = []
+
 [dev-dependencies]
 num-traits.workspace = true

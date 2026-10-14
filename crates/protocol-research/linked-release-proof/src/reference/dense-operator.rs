@@ -2,6 +2,7 @@
 //! public polynomials were weighted: each column's coefficient placed at
 //! every row. Tests compare the weighted operator with it.
 use super::*;
+use statement_stream::CHUNK_LIMIT;
 
 /// Every relation column's coefficient at every row, the target and the
 /// lookup weight.

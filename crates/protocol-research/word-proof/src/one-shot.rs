@@ -1,5 +1,4 @@
 use crate::{
-    affine::Operator,
     combination,
     field::{self, Element},
     fri::{self, Fri},
@@ -7,6 +6,7 @@ use crate::{
     oracles::{FirstOracle, SecondOracle, Witness},
     transcript::{self, Transcript},
 };
+use statement_stream::affine::Operator;
 use std::io::Write;
 use supported_profile::relation::*;
 

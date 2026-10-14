@@ -1,0 +1,9 @@
+# The verifier checks proofs with its own arithmetic. The affine operator and
+# its query evaluation, which the prover shares, stay behind the statement
+# interface.
+disallowed-types = [
+    { path = "statement_stream::affine::Operator", reason = "the verifier reads only the statement output" },
+]
+disallowed-methods = [
+    { path = "statement_stream::evaluate_public_columns", reason = "the verifier evaluates at its queries itself" },
+]

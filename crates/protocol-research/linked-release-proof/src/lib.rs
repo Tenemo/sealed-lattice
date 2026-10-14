@@ -3,20 +3,11 @@ mod convolution;
 pub mod proof;
 pub mod statement;
 mod witness;
-use statement::{StatementOutput, StatementStream};
+use statement::StatementStream;
 use supported_profile::{Profile, relation::release_relation};
 pub use witness::{PreparedRelease, ReleaseInputError, ReleaseInputs, derive_bound};
 use word_verifier::engine;
 pub use word_verifier::engine::{CHUNK_LIMIT, HEADER_LENGTH, Refusal};
-
-impl engine::Statement for StatementStream {
-    fn push(&mut self, bytes: &[u8]) -> bool {
-        StatementStream::push(self, bytes).is_ok()
-    }
-    fn finish(self) -> Option<StatementOutput> {
-        StatementStream::finish(self).ok()
-    }
-}
 
 pub type Verifier = engine::Verifier<StatementStream>;
 /// Verifies one profile's release proof against its expected statement.

@@ -1,5 +1,6 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 
+pub mod affine;
 pub mod arithmetic;
 pub mod coefficient;
 mod jobs;

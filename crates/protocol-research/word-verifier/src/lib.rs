@@ -1,7 +1,10 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 pub mod engine;
 pub use engine::{CHUNK_LIMIT, HEADER_LENGTH, Refusal};
-use statement_stream::{SetupStatementStream, StatementOutput};
+use statement_stream::{
+    SetupStatementStream, StatementOutput,
+    affine::{HeaderThenPolynomials, OperatorBuilder},
+};
 use supported_profile::{Profile, relation::setup_relation};
 
 impl engine::Statement for SetupStatementStream {
@@ -10,6 +13,14 @@ impl engine::Statement for SetupStatementStream {
     }
     fn finish(self) -> Option<StatementOutput> {
         SetupStatementStream::finish(self).ok()
+    }
+}
+impl<B: OperatorBuilder> engine::Statement for HeaderThenPolynomials<B> {
+    fn push(&mut self, bytes: &[u8]) -> bool {
+        HeaderThenPolynomials::push(self, bytes).is_ok()
+    }
+    fn finish(self) -> Option<StatementOutput> {
+        HeaderThenPolynomials::finish(self).ok()
     }
 }
 

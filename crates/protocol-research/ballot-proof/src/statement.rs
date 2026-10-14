@@ -4,17 +4,15 @@ use ballot_encryption::{
 };
 use num_bigint::{BigInt, Sign};
 use parallel_work::ProtocolHash;
-use parallel_work::{HashStream, Sponge};
-use statement_stream::PolynomialStream;
-pub use statement_stream::StatementOutput;
+use statement_stream::{
+    PolynomialStream,
+    affine::{self, HeaderThenPolynomials, Operator, OperatorBuilder, PublicColumn, Term},
+};
 use supported_profile::{
     AUXILIARY_DEGREE, AUXILIARY_PLAINTEXT_MODULUS, FHE_LIMB_BITS, Family, PLAINTEXT_MODULUS,
     Profile, SETUP_ERROR_BITS, WORD_BITS, auxiliary_modulus, relation::*,
 };
-use word_proof::{
-    affine::{Operator, PublicColumn, Term},
-    field::{self, Element, MODULUS, ONE, ZERO},
-};
+use word_proof::field::{self, Element, MODULUS, ONE, ZERO};
 
 use std::collections::BTreeMap;
 
@@ -24,6 +22,17 @@ pub enum Error {
     Encoding,
     Binding,
     Arithmetic,
+}
+impl From<statement_stream::Error> for Error {
+    fn from(error: statement_stream::Error) -> Self {
+        use statement_stream::Error as Stream;
+        match error {
+            Stream::Parameters | Stream::Length | Stream::Incomplete => Self::Shape,
+            Stream::Encoding => Self::Encoding,
+            Stream::Binding => Self::Binding,
+            Stream::Arithmetic => Self::Arithmetic,
+        }
+    }
 }
 /// For the FHE and then the auxiliary encryption: the common polynomial, the
 /// key and both ciphertext components.
@@ -159,18 +168,7 @@ impl PublicStatement {
         hash.finalize()
     }
     pub fn operator(&self, alpha: Element) -> Result<Operator, Error> {
-        let mut builder = Builder::new(self.profile, alpha, &self.header)?;
-        if self.polynomials.len() != POLYNOMIALS {
-            return Err(Error::Shape);
-        }
-        for (index, bytes) in self.polynomials.iter().enumerate() {
-            let mut parser = polynomial_stream(self.profile, index, alpha)?;
-            for chunk in bytes.chunks(1 << 20) {
-                parser.push(chunk).map_err(|_| Error::Encoding)?;
-            }
-            builder.polynomial(index, parser)?;
-        }
-        builder.finish()
+        affine::operator::<Builder>(self.profile, alpha, &self.header, &self.polynomials)
     }
 }
 fn power(mut value: Element, mut exponent: usize) -> Element {
@@ -212,7 +210,7 @@ fn public_digits(bytes: &[u8], limb_weight: Element) -> Element {
 /// Rows of the ballot equations: each FHE ciphertext component's limbs,
 /// one ring degree per limb, then the packing equation, then each auxiliary
 /// ciphertext component, then the secrets' supports.
-struct Builder {
+pub struct Builder {
     profile: Profile,
     columns: BallotColumns,
     alpha: Element,
@@ -228,22 +226,6 @@ struct Builder {
     consumed: usize,
 }
 impl Builder {
-    fn new(profile: Profile, alpha: Element, header: &[u8]) -> Result<Self, Error> {
-        protocol_foundations::ballot_body::check_context(profile, header)
-            .map_err(|_| Error::Shape)?;
-        Ok(Self {
-            profile,
-            columns: BallotColumns::new(profile),
-            alpha,
-            column_count: ballot_relation(profile).columns(),
-            powers: BTreeMap::new(),
-            ones: BTreeMap::new(),
-            adjoints: BTreeMap::new(),
-            scores: vec![ZERO; profile.options()],
-            target: ZERO,
-            consumed: 0,
-        })
-    }
     fn fhe_row(&self, component: usize) -> usize {
         component * self.columns.fhe_limbs() * SYSTEMATIC
     }
@@ -262,6 +244,40 @@ impl Builder {
             .entry(degree)
             .or_insert_with(|| vec![ZERO; count]);
         weights[column] = field::add(weights[column], weight);
+    }
+}
+impl OperatorBuilder for Builder {
+    type Error = Error;
+    const HEADER_BYTES: usize = BALLOT_HEADER_BYTES;
+    const POLYNOMIALS: usize = POLYNOMIALS;
+    fn columns(profile: Profile) -> usize {
+        ballot_relation(profile).columns()
+    }
+    fn polynomial_bytes(profile: Profile, index: usize) -> usize {
+        polynomial_bytes(profile, index)
+    }
+    fn polynomial_stream(
+        profile: Profile,
+        index: usize,
+        alpha: Element,
+    ) -> Result<PolynomialStream, Error> {
+        polynomial_stream(profile, index, alpha)
+    }
+    fn begin(profile: Profile, alpha: Element, header: &[u8]) -> Result<Self, Error> {
+        protocol_foundations::ballot_body::check_context(profile, header)
+            .map_err(|_| Error::Shape)?;
+        Ok(Self {
+            profile,
+            columns: BallotColumns::new(profile),
+            alpha,
+            column_count: ballot_relation(profile).columns(),
+            powers: BTreeMap::new(),
+            ones: BTreeMap::new(),
+            adjoints: BTreeMap::new(),
+            scores: vec![ZERO; profile.options()],
+            target: ZERO,
+            consumed: 0,
+        })
     }
     fn polynomial(&mut self, index: usize, parser: PolynomialStream) -> Result<(), Error> {
         if self.consumed != index || index >= POLYNOMIALS {
@@ -489,132 +505,8 @@ impl Builder {
     }
 }
 
-pub struct StatementStream {
-    profile: Profile,
-    expected: [u8; 64],
-    alpha: Element,
-    queries: Vec<u32>,
-    statement_bytes: usize,
-    // The statement's digest, which a helper computes when there are helpers.
-    hash: HashStream,
-    header: Vec<u8>,
-    builder: Option<Builder>,
-    parser: Option<PolynomialStream>,
-    polynomial: usize,
-    polynomial_bytes: usize,
-    consumed: usize,
-    failed: bool,
-}
-impl StatementStream {
-    pub fn new(
-        profile: Profile,
-        expected: [u8; 64],
-        alpha: Element,
-        queries: &[u32],
-    ) -> Result<Self, Error> {
-        if alpha.iter().any(|value| *value >= MODULUS)
-            || queries.is_empty()
-            || queries.len() > 2 * QUERY_COUNT
-            || queries
-                .iter()
-                .any(|value| *value as usize >= EVALUATION_DOMAIN_SIZE)
-            || queries.windows(2).any(|pair| pair[0] >= pair[1])
-        {
-            return Err(Error::Shape);
-        }
-        Ok(Self {
-            profile,
-            expected,
-            alpha,
-            queries: queries.to_vec(),
-            statement_bytes: ballot_relation(profile).statement_bytes(),
-            hash: HashStream::new(Sponge::ProtocolHash),
-            header: Vec::new(),
-            builder: None,
-            parser: None,
-            polynomial: 0,
-            polynomial_bytes: 0,
-            consumed: 0,
-            failed: false,
-        })
-    }
-    pub fn push(&mut self, bytes: &[u8]) -> Result<(), Error> {
-        if self.failed {
-            return Err(Error::Binding);
-        }
-        let result = self.push_inner(bytes);
-        if result.is_err() {
-            self.failed = true;
-        }
-        result
-    }
-    fn push_inner(&mut self, mut bytes: &[u8]) -> Result<(), Error> {
-        if bytes.len() > 1 << 20 || bytes.len() > self.statement_bytes - self.consumed {
-            return Err(Error::Shape);
-        }
-        self.hash.update(bytes);
-        self.consumed += bytes.len();
-        if self.header.len() < BALLOT_HEADER_BYTES {
-            let count = bytes.len().min(BALLOT_HEADER_BYTES - self.header.len());
-            self.header.extend(&bytes[..count]);
-            bytes = &bytes[count..];
-            if self.header.len() == BALLOT_HEADER_BYTES {
-                self.builder = Some(Builder::new(self.profile, self.alpha, &self.header)?);
-            }
-        }
-        while !bytes.is_empty() {
-            if self.polynomial >= POLYNOMIALS {
-                return Err(Error::Shape);
-            }
-            let size = polynomial_bytes(self.profile, self.polynomial);
-            if self.parser.is_none() {
-                self.parser = Some(polynomial_stream(
-                    self.profile,
-                    self.polynomial,
-                    self.alpha,
-                )?);
-            }
-            let count = bytes.len().min(size - self.polynomial_bytes);
-            self.parser
-                .as_mut()
-                .unwrap()
-                .push(&bytes[..count])
-                .map_err(|_| Error::Encoding)?;
-            bytes = &bytes[count..];
-            self.polynomial_bytes += count;
-            if self.polynomial_bytes == size {
-                self.builder
-                    .as_mut()
-                    .ok_or(Error::Shape)?
-                    .polynomial(self.polynomial, self.parser.take().unwrap())?;
-                self.polynomial += 1;
-                self.polynomial_bytes = 0;
-            }
-        }
-        Ok(())
-    }
-    pub fn finish(self) -> Result<StatementOutput, Error> {
-        if self.failed
-            || self.consumed != self.statement_bytes
-            || self.polynomial != POLYNOMIALS
-            || self.parser.is_some()
-            || self.hash.finish() != self.expected
-        {
-            return Err(Error::Binding);
-        }
-        let operator = self.builder.ok_or(Error::Shape)?.finish()?;
-        let (target, lookup_weight) = (operator.target, operator.lookup_weight);
-        let coefficients = operator
-            .at_queries(ballot_relation(self.profile).columns(), &self.queries)
-            .map_err(|_| Error::Arithmetic)?;
-        Ok(StatementOutput {
-            statement_digest: self.expected,
-            target,
-            lookup_weight,
-            coefficients,
-        })
-    }
-}
+/// The ballot statement as it streams into a verifier.
+pub type StatementStream = HeaderThenPolynomials<Builder>;
 
 #[cfg(test)]
 #[path = "reference/dense-operator.rs"]

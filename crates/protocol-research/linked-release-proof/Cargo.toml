@@ -19,4 +19,4 @@ word-verifier = { path = "../word-verifier" }
 # registration key from the setup witness, and replay seeded streams.
 setup-witness = { path = "../setup-witness" }
 sha3.workspace = true
-word-proof = { path = "../word-proof", features = ["test-support"] }
+statement-stream = { path = "../statement-stream", features = ["test-support"] }
