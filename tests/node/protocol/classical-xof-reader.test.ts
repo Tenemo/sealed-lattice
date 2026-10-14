@@ -2,39 +2,13 @@ import { createHash } from 'node:crypto';
 
 import { describe, expect, it } from 'vitest';
 
+import { spongePermutations } from '#tests/node/protocol/reference/sponge-permutations.js';
 import {
     compileClassicalReaderOracleBudget,
     compileClassicalXofReaderBudget,
     shakePermutationGateCharge,
 } from '#tests/oracle-budget-model.js';
 import { shadowOracleDomainWork } from '#tests/oracle-domain-model.js';
-
-// A byte-by-byte reference sponge counter, separate from the budget formula.
-const referencePermutations = (
-    inputBytes: number,
-    outputBytes: number,
-    rate: number,
-) => {
-    let occupied = 0,
-        permutations = 0;
-    for (let byte = 0; byte < inputBytes; byte++) {
-        if (++occupied === rate) {
-            permutations++;
-            occupied = 0;
-        }
-    }
-    // Byte-aligned SHAKE's suffix and final padding fit one remaining block.
-    permutations++;
-    let available = rate;
-    for (let byte = 0; byte < outputBytes; byte++) {
-        if (available === 0) {
-            permutations++;
-            available = rate;
-        }
-        available--;
-    }
-    return BigInt(permutations);
-};
 
 const prefixCache = (
     suppliedInput: Buffer,
@@ -116,11 +90,11 @@ describe('classical XOF reader prefix caching', () => {
                     BigInt(8 * rate) as 1088n | 1344n,
                 );
                 expect(bound.minimumReferencePermutations).toBe(
-                    referencePermutations(inputBytes, cache.highWater(), rate),
+                    spongePermutations(inputBytes, cache.highWater(), rate),
                 );
                 const queried = cache.queries.reduce(
                     (sum, length) =>
-                        sum + referencePermutations(inputBytes, length, rate),
+                        sum + spongePermutations(inputBytes, length, rate),
                     0n,
                 );
                 expect(queried).toBeLessThanOrEqual(
@@ -215,7 +189,7 @@ describe('classical XOF reader prefix caching', () => {
             1088n,
         );
         const separatelyRequeriedClones =
-            128n * referencePermutations(0, length + 1, rate);
+            128n * spongePermutations(0, length + 1, rate);
         expect(separatelyRequeriedClones).toBeGreaterThan(
             5n * bound.minimumReferencePermutations,
         );
@@ -223,13 +197,13 @@ describe('classical XOF reader prefix caching', () => {
         let repeatedFullPrefixes = 0n;
         for (let read = 1; read <= 2048; read++) {
             bytewise.reader.read(1);
-            repeatedFullPrefixes += referencePermutations(0, read, rate);
+            repeatedFullPrefixes += spongePermutations(0, read, rate);
         }
-        const original = referencePermutations(0, 2048, rate);
+        const original = spongePermutations(0, 2048, rate);
         expect(repeatedFullPrefixes).toBeGreaterThan(5n * original);
         expect(
             bytewise.queries.reduce(
-                (sum, count) => sum + referencePermutations(0, count, rate),
+                (sum, count) => sum + spongePermutations(0, count, rate),
                 0n,
             ),
         ).toBeLessThanOrEqual(5n * original);

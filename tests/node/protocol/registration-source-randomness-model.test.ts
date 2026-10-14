@@ -8,21 +8,16 @@ import {
     unsigned,
     variable,
 } from '#tests/node/protocol/reference/canonical-tuple.js';
+import {
+    shake256RateBytes,
+    spongePermutations,
+} from '#tests/node/protocol/reference/sponge-permutations.js';
 import { operationSeedCount } from '#tests/operation-seed-model.js';
 import {
     compileRegistrationSourceRandomness,
     compileRegistrationSourceExtractionWork,
 } from '#tests/registration-source-randomness-model.js';
 import { completionProfile } from '#tests/supported-profile-model.js';
-
-const permutations = (input: number, output: number) => {
-    // SHAKE padding always starts another absorption block, even at an
-    // exact boundary; the first output block is already that permutation.
-    let count = 1;
-    for (let position = 136; position <= input; position += 136) count++;
-    for (let position = 136; position < output; position += 136) count++;
-    return BigInt(count);
-};
 
 describe('original registration source randomness and hash work', () => {
     it('prices the full source cell and exact-length padding at every extraction', () => {
@@ -130,9 +125,10 @@ describe('original registration source randomness and hash work', () => {
                     8n * 1024n + 20n * 65536n,
                 );
                 expect(family.comparisonSourcePermutations).toBe(
-                    permutations(
+                    spongePermutations(
                         source.length,
                         Number(family.comparisonMaximumSourceOutputBytes),
+                        shake256RateBytes,
                     ),
                 );
                 const commitmentPrefix = tuple([
@@ -152,7 +148,11 @@ describe('original registration source randomness and hash work', () => {
                     family.publicCoordinateBytes;
                 expect(family.commitmentInputBytes).toBe(commitmentBytes);
                 expect(family.commitmentPermutations).toBe(
-                    permutations(Number(commitmentBytes), 64),
+                    spongePermutations(
+                        Number(commitmentBytes),
+                        64,
+                        shake256RateBytes,
+                    ),
                 );
                 const commonInput = Buffer.concat([
                     Buffer.from('synthetic-full-setup-witness/1'),
@@ -166,9 +166,10 @@ describe('original registration source randomness and hash work', () => {
                     65536n * BigInt(family.sampleBits / 8),
                 );
                 expect(family.commonPermutations).toBe(
-                    permutations(
+                    spongePermutations(
                         commonInput.length,
                         Number(family.commonOutputBytes),
+                        shake256RateBytes,
                     ),
                 );
             }

@@ -1,6 +1,10 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import { goalThresholds } from '#tests/node/protocol/reference/product-goals.js';
+import {
+    shake256RateBytes,
+    spongePermutations,
+} from '#tests/node/protocol/reference/sponge-permutations.js';
 import { compilePrivateRandomnessScopes } from '#tests/operation-seed-model.js';
 import { compilePreparationLedger } from '#tests/preparation-ledger-model.js';
 import {
@@ -60,10 +64,6 @@ const largestExperiment = 1n << 80n;
 // Every wrapper of the compiler's hybrids makes at most four calls per call.
 const callsPerQuery = 4n;
 const budget = rational(1n, 1n << 83n);
-
-// FIPS 202 pads after the SHAKE suffix, so absorbing m bytes at rate r takes
-// floor(m/r)+1 permutations, and an output of at most r bytes adds none.
-const shake256Permutations = (inputBytes: bigint) => inputBytes / 136n + 1n;
 
 // FIPS 204 Table 1 for ML-DSA-65.
 const mlDsa65 = {
@@ -171,10 +171,15 @@ describe('security ledger', () => {
         const highBits = BigInt((highValues - 1n).toString(2).length);
         const challengeInputBytes = 64n + 32n * mlDsa65.rowCount * highBits;
         expect(challengeInputBytes).toBe(832n);
-        expect((mlDsa65.collisionStrength * 2n) / 8n).toBeLessThanOrEqual(136n);
+        // FIPS 204: the message representative has 64 bytes and the
+        // commitment hash 2 * lambda / 8 bytes.
         const verification =
-            shake256Permutations(frameInputBytes) +
-            shake256Permutations(challengeInputBytes) +
+            spongePermutations(frameInputBytes, 64n, shake256RateBytes) +
+            spongePermutations(
+                challengeInputBytes,
+                (mlDsa65.collisionStrength * 2n) / 8n,
+                shake256RateBytes,
+            ) +
             1n;
         expect(verification).toBe(10n);
         expect(authentication.verificationPermutations).toBe(verification);

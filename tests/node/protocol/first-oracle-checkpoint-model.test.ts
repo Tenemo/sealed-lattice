@@ -4,6 +4,10 @@ import * as ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 
 import { compileFirstOracleCheckpointCensus } from '#tests/first-oracle-checkpoint-model.js';
+import {
+    shake256RateBytes,
+    spongePermutations,
+} from '#tests/node/protocol/reference/sponge-permutations.js';
 import { readRustSource, rustFunctionBody } from '#tests/node/rust-source.js';
 import { completionProfile } from '#tests/supported-profile-model.js';
 
@@ -169,14 +173,14 @@ describe('complete first-oracle proof checkpoint', () => {
         expect(model.maximumHeaderBytes - model.headerBytes).toBe(1024n - 340n);
         const input = Buffer.concat([Buffer.alloc(64), actualHeader]);
         expect(model.headerDigestInputBytes).toBe(BigInt(input.length));
-        const padded = [...input, 0x1f];
-        while (padded.length % 136 !== 0) padded.push(0);
-        padded[padded.length - 1] |= 0x80;
-        expect(model.headerDigestPermutations).toBe(
-            BigInt(padded.length / 136),
+        const digestPermutations = spongePermutations(
+            input.length,
+            64,
+            shake256RateBytes,
         );
+        expect(model.headerDigestPermutations).toBe(digestPermutations);
         expect(model.headerDigestPermutationsPerPass).toBe(
-            model.recordCount * BigInt(padded.length / 136),
+            model.recordCount * digestPermutations,
         );
         expect(model.publicRecordCount).toBe(1n + 24n * 7n + 20n * 2n);
         expect(model.publicPlaintextBytes).toBe(

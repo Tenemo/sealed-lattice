@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+    shake256RateBytes,
+    spongePermutations,
+} from '#tests/node/protocol/reference/sponge-permutations.js';
+import {
     readRustSource,
     rustIntegerConstant,
 } from '#tests/node/rust-source.js';
@@ -145,26 +149,14 @@ describe('proof hash work', () => {
                     rate,
                     rate + 1,
                     2 * rate + 1,
-                ]) {
-                    const padded = Array<number>(input).fill(0);
-                    padded.push(rate === 72 ? 0x06 : 0x1f);
-                    while (padded.length % rate !== 0) padded.push(0);
-                    padded[padded.length - 1] |= 0x80;
-                    let expected = padded.length / rate;
-                    for (
-                        let produced = rate;
-                        produced < output;
-                        produced += rate
-                    )
-                        expected++;
+                ])
                     expect(
                         byteAlignedSpongePermutations(
                             BigInt(input),
                             BigInt(output),
                             BigInt(rate),
                         ),
-                    ).toBe(BigInt(expected));
-                }
+                    ).toBe(spongePermutations(input, output, rate));
     });
 
     it('includes every part length, including empty parts', () => {
@@ -233,13 +225,16 @@ describe('proof hash work', () => {
             }
             return { position, permutations };
         };
-        const finish = (position: number, bytes: Uint8Array) => {
-            const padded = Array<number>(position + bytes.length).fill(0);
-            padded.push(0x1f);
-            while (padded.length % 136 !== 0) padded.push(0);
-            padded[padded.length - 1] |= 0x80;
-            return padded.length / 136;
-        };
+        // The blocks a cached prefix position and a tail fill with their
+        // padding; the 64-byte digest takes no further permutation.
+        const finish = (position: number, bytes: Uint8Array) =>
+            Number(
+                spongePermutations(
+                    position + bytes.length,
+                    64,
+                    shake256RateBytes,
+                ),
+            );
         const exponents = [
             18,
             18,
