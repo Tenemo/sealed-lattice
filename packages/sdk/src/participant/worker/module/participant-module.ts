@@ -2,176 +2,184 @@ import { ModuleFailure, ResourceFailure } from '../shared/failures.js';
 
 import type { ParallelHelpers } from './parallel-helpers.js';
 
-// The participant scalar module's exports that the worker calls. Every
-// command returns zero when it accepts and one when it refuses, and a query's
-// comment states its answer; the owning Rust state machine decides
-// acceptance.
-export const moduleFunctions = [
+// The participant scalar module's exports that the worker calls, each with
+// its parameter count. Every command returns zero when it accepts and one
+// when it refuses, and a query's comment states its answer; the owning Rust
+// state machine decides acceptance.
+export const moduleArity = {
     // The shared bounds and one profile's, each written as 64-bit words; a
     // command returns the word count, zero for an unsupported profile.
-    'participant_bounds_pointer',
-    'participant_limits',
-    'participant_profile_bounds',
+    participant_bounds_pointer: 0,
+    participant_limits: 0,
+    participant_profile_bounds: 2,
     // The highest linear-memory address any allocation has reached.
-    'linear_memory_high_water',
+    linear_memory_high_water: 0,
     // The bounds of the memory plan of an operation with a helper count,
     // which evaluates the ranking program when the flag is one; zero
     // without a plan. Reserve lowers the instance's bound to the worker's
     // share before its first allocation.
-    'helper_memory_bound',
-    'worker_memory_bound',
-    'worker_reserve',
-    'input_pointer',
-    'input_capacity',
-    'poll_identity_pointer',
-    'validate_organizer',
-    'validate_joiner',
-    'prepare_organizer',
-    'prepare_joiner',
-    'restore',
-    'restore_prepared',
-    'retire_contribution_sources',
-    'own_registration_input_pointer',
-    'own_registration_input_capacity',
-    'own_registration_command',
-    'own_registration_body_digest_pointer',
-    'own_registration_username_pointer',
-    'own_registration_username_length',
+    helper_memory_bound: 2,
+    worker_memory_bound: 2,
+    worker_reserve: 2,
+    input_pointer: 0,
+    input_capacity: 0,
+    poll_identity_pointer: 0,
+    validate_organizer: 1,
+    validate_joiner: 1,
+    prepare_organizer: 1,
+    prepare_joiner: 1,
+    restore: 1,
+    restore_prepared: 1,
+    retire_contribution_sources: 0,
+    own_registration_input_pointer: 0,
+    own_registration_input_capacity: 0,
+    own_registration_command: 2,
+    own_registration_body_digest_pointer: 0,
+    own_registration_username_pointer: 0,
+    own_registration_username_length: 0,
     // The verified poll's option count, or zero before verification.
-    'own_registration_option_count',
+    own_registration_option_count: 0,
     // The verified poll's participant maximum, or zero before verification.
-    'own_registration_maximum_participants',
+    own_registration_maximum_participants: 0,
     // Writes the verified poll's result length, question and options to the
     // contribution output.
-    'own_registration_poll',
-    'roster_begin',
+    own_registration_poll: 0,
+    roster_begin: 1,
     // The registration records the worker may stream at once.
-    'roster_open_records',
-    'roster_record',
-    'roster_finish',
-    'roster_body_pointer',
-    'roster_body_length',
-    'roster_identity_pointer',
+    roster_open_records: 0,
+    roster_record: 3,
+    roster_finish: 0,
+    roster_body_pointer: 0,
+    roster_body_length: 0,
+    roster_identity_pointer: 0,
     // Writes the verified proposal's usernames in roster order to the
     // contribution output, each as its four-byte length and its bytes.
-    'roster_usernames',
-    'validate_roster_signer',
-    'sign_roster_proposal',
-    'roster_signature_pointer',
-    'verify_roster_signature',
-    'retain_proposal',
-    'retained_proposal_identity_pointer',
-    'participant_ballot_command',
-    'participant_close_command',
-    'participant_finality_command',
-    'participant_release_command',
+    roster_usernames: 0,
+    validate_roster_signer: 0,
+    sign_roster_proposal: 1,
+    roster_signature_pointer: 0,
+    verify_roster_signature: 1,
+    retain_proposal: 1,
+    retained_proposal_identity_pointer: 0,
+    participant_ballot_command: 3,
+    participant_close_command: 3,
+    participant_finality_command: 2,
+    participant_release_command: 2,
     // The inventory certificate, release contexts and release shares.
-    'completion_input_pointer',
-    'completion_input_capacity',
-    'completion_output_pointer',
-    'completion_output_length',
-    'completion_command',
+    completion_input_pointer: 0,
+    completion_input_capacity: 0,
+    completion_output_pointer: 0,
+    completion_output_length: 0,
+    completion_command: 3,
     // The public close barrier verifier.
-    'close_input_pointer',
-    'close_input_capacity',
-    'close_command',
-    'close_missing_pointer',
-    'close_missing_count',
+    close_input_pointer: 0,
+    close_input_capacity: 0,
+    close_command: 2,
+    close_missing_pointer: 0,
+    close_missing_count: 0,
     // The signed ballot classifier.
-    'ballot_body_input_pointer',
-    'ballot_body_input_capacity',
-    'ballot_classification_begin',
+    ballot_body_input_pointer: 0,
+    ballot_body_input_capacity: 0,
+    ballot_classification_begin: 1,
     // One when the body relation needs its encryption keys.
-    'ballot_classification_requires_key',
-    'ballot_classification_key_begin',
-    'ballot_classification_key_chunk',
-    'ballot_classification_key_finish',
-    'ballot_classification_chunk',
-    'ballot_classification_finish',
+    ballot_classification_requires_key: 0,
+    ballot_classification_key_begin: 1,
+    ballot_classification_key_chunk: 1,
+    ballot_classification_key_finish: 0,
+    ballot_classification_chunk: 1,
+    ballot_classification_finish: 0,
     // One when the finished classification holds a valid body.
-    'ballot_classification_is_valid',
+    ballot_classification_is_valid: 0,
     // The public ranking evaluation.
-    'evaluation_target_input_pointer',
-    'evaluation_target_input_capacity',
-    'evaluation_target_output_pointer',
-    'evaluation_target_output_length',
-    'evaluation_target_command',
-    'evaluation_target_body_pointer',
-    'evaluation_target_body_length',
+    evaluation_target_input_pointer: 0,
+    evaluation_target_input_capacity: 0,
+    evaluation_target_output_pointer: 0,
+    evaluation_target_output_length: 0,
+    evaluation_target_command: 3,
+    evaluation_target_body_pointer: 0,
+    evaluation_target_body_length: 0,
     // One when every evaluation step has run.
-    'evaluation_target_finished',
+    evaluation_target_finished: 0,
     // The evaluated target keyed to the credential, and its restoration:
     // zero begins a copy of a length, one appends input bytes and two
     // restores it.
-    'retain_evaluation',
-    'restore_evaluation',
-    'confirm_roster',
-    'offer_signing_command',
-    'selection_signing_command',
-    'retain_selection_inputs',
-    'restore_selection_inputs',
-    'contribution_output_pointer',
-    'contribution_output_length',
-    'begin_contribution',
-    'contribution_proof_input_pointer',
-    'contribution_proof_input_capacity',
-    'contribution_proof_command',
-    'contribution_proof_phase',
-    'contribution_proof_output_pointer',
-    'contribution_proof_output_length',
-    'contribution_checkpoint_records',
-    'contribution_checkpoint_command',
-    'contribution_checkpoint_key',
+    retain_evaluation: 0,
+    restore_evaluation: 2,
+    confirm_roster: 0,
+    offer_signing_command: 3,
+    selection_signing_command: 2,
+    retain_selection_inputs: 0,
+    restore_selection_inputs: 1,
+    contribution_output_pointer: 0,
+    contribution_output_length: 0,
+    begin_contribution: 1,
+    contribution_proof_input_pointer: 0,
+    contribution_proof_input_capacity: 0,
+    contribution_proof_command: 3,
+    contribution_proof_phase: 0,
+    contribution_proof_output_pointer: 0,
+    contribution_proof_output_length: 0,
+    contribution_checkpoint_records: 0,
+    contribution_checkpoint_command: 3,
+    contribution_checkpoint_key: 2,
     // The randomness of a contribution generation or continuation, a ballot
     // or a release, expanded from the seed its root retains.
-    'operation_random_input_pointer',
-    'operation_random_command',
-    'operation_random_drawn',
-    'setup_input_pointer',
-    'setup_input_capacity',
-    'setup_chunk_capacity',
-    'setup_roster_begin',
-    'setup_roster_record',
-    'setup_roster_finish',
+    operation_random_input_pointer: 0,
+    operation_random_command: 2,
+    operation_random_drawn: 1,
+    setup_input_pointer: 0,
+    setup_input_capacity: 0,
+    setup_chunk_capacity: 0,
+    setup_roster_begin: 1,
+    setup_roster_record: 3,
+    setup_roster_finish: 1,
     // The verified roster's poll option count, or zero before it verifies.
-    'setup_option_count',
-    'setup_output_pointer',
-    'setup_output_length',
-    'setup_offer_begin',
-    'setup_offer_polynomial',
-    'setup_offer_proof',
-    'setup_offer_finish',
+    setup_option_count: 0,
+    setup_output_pointer: 0,
+    setup_output_length: 0,
+    setup_offer_begin: 1,
+    setup_offer_polynomial: 3,
+    setup_offer_proof: 2,
+    setup_offer_finish: 0,
     // One when a verified offer has the position and body identity.
-    'setup_offer_available',
-    'setup_selection_build',
-    'setup_selection_begin',
+    setup_offer_available: 2,
+    setup_selection_build: 1,
+    setup_selection_begin: 1,
     // Writes the authenticated selection to the setup output: its identity,
     // then each selected position as four bytes and its body identity.
-    'setup_selection_output',
-    'setup_selection_aggregate',
-    'setup_begin_selected_offer',
-    'setup_begin_selected_offer_verification',
-    'setup_polynomial',
-    'setup_selected_offer_proof',
-    'setup_finish_selected_offer',
-    'setup_accepted',
-    'setup_selection_finish',
-    'setup_discard_aggregation',
-    'setup_endorsement',
-    'setup_certificate_build',
-    'setup_certificate',
-    'setup_finish_certificate',
-    'retain_setup',
+    setup_selection_output: 0,
+    setup_selection_aggregate: 0,
+    setup_begin_selected_offer: 1,
+    setup_begin_selected_offer_verification: 1,
+    setup_polynomial: 3,
+    setup_selected_offer_proof: 2,
+    setup_finish_selected_offer: 0,
+    setup_accepted: 0,
+    setup_selection_finish: 0,
+    setup_discard_aggregation: 0,
+    setup_endorsement: 1,
+    setup_certificate_build: 0,
+    setup_certificate: 1,
+    setup_finish_certificate: 0,
+    retain_setup: 0,
     // Restores the verified setup from the retained setup reference.
-    'restore_setup',
+    restore_setup: 1,
     // The identities the runtime binds into its retained state.
-    'custody_identity_input_pointer',
-    'custody_identity_input_capacity',
-    'custody_identity_output_pointer',
-    'custody_identity_begin',
-    'custody_identity_absorb',
-    'custody_identity_finish',
-] as const satisfies readonly Exclude<keyof ParticipantModule, 'memory'>[];
+    custody_identity_input_pointer: 0,
+    custody_identity_input_capacity: 0,
+    custody_identity_output_pointer: 0,
+    custody_identity_begin: 2,
+    custody_identity_absorb: 1,
+    custody_identity_finish: 0,
+} as const satisfies {
+    readonly [Name in Exclude<keyof ParticipantModule, 'memory'>]: Parameters<
+        ParticipantModule[Name]
+    >['length'];
+};
+
+export const moduleFunctions = Object.keys(
+    moduleArity,
+) as readonly (keyof typeof moduleArity)[];
 
 type ModuleFunction = (...values: number[]) => number;
 export type ParticipantModule = Readonly<{
@@ -458,6 +466,18 @@ export const instantiateParticipantModule = async (
         const call = exports[name];
         if (typeof call !== 'function')
             throw new Error('The participant module lacks ' + name + '.');
+        // A missing argument would reach the module as zero, so an export
+        // must take exactly the parameters the worker passes.
+        if (call.length !== moduleArity[name])
+            throw new Error(
+                'The participant module export ' +
+                    name +
+                    ' takes ' +
+                    String(call.length) +
+                    ' parameters, not ' +
+                    String(moduleArity[name]) +
+                    '.',
+            );
         module[name] = (...values: number[]): number => {
             if (ended !== undefined) throw ended.error;
             try {

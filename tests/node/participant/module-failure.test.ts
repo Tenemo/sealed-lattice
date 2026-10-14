@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import type { ParallelHelpers } from '#packages/sdk/src/participant/worker/module/parallel-helpers.js';
 import {
     instantiateParticipantModule,
+    moduleArity,
     moduleFunctions,
 } from '#packages/sdk/src/participant/worker/module/participant-module.js';
 import {
@@ -12,12 +13,19 @@ import {
 } from '#packages/sdk/src/participant/worker/shared/failures.js';
 
 // A stand-in participant module that exports every function the worker
-// calls. One export traps, one reports an exhausted memory bound through the
+// calls with its parameter count, or one export with an extra parameter. One
+// export traps, one reports an exhausted memory bound through the
 // allocator's import and one draws randomness through the witness import.
 const trapping = 'restore';
 const exhausting = 'retain_proposal';
 const drawing = 'prepare_organizer';
-const standInModule = () => {
+const standInModule = (extraParameter?: string) => {
+    const signature = (name: (typeof moduleFunctions)[number]) => {
+        const count = moduleArity[name] + (name === extraParameter ? 1 : 0);
+        return `(export "${name}")${
+            count === 0 ? '' : ` (param${' i32'.repeat(count)})`
+        } (result i32)`;
+    };
     const text = [
         '(module',
         '  (import "allocator" "exhausted" (func $exhausted (param i32)))',
@@ -25,12 +33,12 @@ const standInModule = () => {
         '  (memory (export "memory") 1)',
         ...moduleFunctions.map((name) =>
             name === trapping
-                ? `  (func (export "${name}") (result i32) unreachable)`
+                ? `  (func ${signature(name)} unreachable)`
                 : name === exhausting
-                  ? `  (func (export "${name}") (result i32) (call $exhausted (i32.const 4096)) (i32.const 0))`
+                  ? `  (func ${signature(name)} (call $exhausted (i32.const 4096)) (i32.const 0))`
                   : name === drawing
-                    ? `  (func (export "${name}") (result i32) (call $random (i32.const 0) (i32.const 16)))`
-                    : `  (func (export "${name}") (result i32) (i32.const 0))`,
+                    ? `  (func ${signature(name)} (call $random (i32.const 0) (i32.const 16)))`
+                    : `  (func ${signature(name)} (i32.const 0))`,
         ),
         ')',
     ].join('\n');
@@ -48,6 +56,17 @@ const noHelpers = {
 } as unknown as ParallelHelpers;
 
 describe('participant module failures', () => {
+    it('refuses a module whose export takes other parameters than the worker passes', async () => {
+        await expect(
+            instantiateParticipantModule(
+                standInModule('roster_record'),
+                noHelpers,
+            ),
+        ).rejects.toThrow(
+            'The participant module export roster_record takes 4 parameters, not 3.',
+        );
+    });
+
     it('reports a trap as a module failure and never enters the instance again', async () => {
         const { module } = await instantiateParticipantModule(
             standInModule(),
