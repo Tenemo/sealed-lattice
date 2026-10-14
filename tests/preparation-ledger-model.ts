@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 
 import { compileCommonMatrixSamplingCensus } from '#tests/common-matrix-sampling-model.js';
 import { sourceCacheWork } from '#tests/compressed-oracle/source-extraction.js';
+import { binomial } from '#tests/exact-integer.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import { compileRegistrationSetupBindingScreen } from '#tests/registration-setup-binding-model.js';
 import { compileSetupSelectionCensus } from '#tests/setup-selection-model.js';
@@ -62,13 +63,6 @@ const registrationCoordinateCount = (
         coordinateCounts.set(key, count);
     }
     return count;
-};
-
-const choose = (population: bigint, selected: bigint) => {
-    let result = 1n;
-    for (let index = 0n; index < selected; index++)
-        result = (result * (population - index)) / (index + 1n);
-    return result;
 };
 
 const compileSourceCache = (requests: bigint) => {
@@ -170,9 +164,9 @@ export const compilePreparationLedger = (
     const maximumHonestReleases = maximumHonestBallots;
     const maximumHonestRecipientRows =
         participants * maximumHonestContributionScopes;
-    const selectedPositionSets = choose(
-        BigInt(selection.eligibleCount),
-        BigInt(selection.selectedCount),
+    const selectedPositionSets = binomial(
+        selection.eligibleCount,
+        selection.selectedCount,
     );
     // The embedding precedes private generation and guesses the ordinal of a
     // roster's first honest generation, the selected positions and (where

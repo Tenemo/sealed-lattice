@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 
+import { bitLength } from '#tests/exact-integer.js';
+
 // Keccak-f[1600]: 24 rounds, with one chi product at each state bit.
 export const shakePermutationGateCharge = 24n * 1600n;
 
@@ -14,15 +16,6 @@ export const shakeQueryPermutations = (
     assert.ok(inputBits >= 0n && outputBits >= 1n);
     const ceiling = (bits: bigint) => (bits + rateBits - 1n) / rateBits;
     return ceiling(inputBits + 6n) + ceiling(outputBits) - 1n;
-};
-
-const bitWidth = (value: bigint) => {
-    let bits = 0n;
-    while (value > 0n) {
-        bits++;
-        value >>= 1n;
-    }
-    return bits;
 };
 
 // A full coherent circuit has this many permutation slots even when a slot
@@ -62,8 +55,8 @@ export const compileOraclePermutationBudget = (
             shadowStreams >= 0n,
     );
     const rateBits = 1344n;
-    const lengthBits = bitWidth(
-        4n * rateBits * permutations + 2n * firstChunkBits + 3n,
+    const lengthBits = BigInt(
+        bitLength(4n * rateBits * permutations + 2n * firstChunkBits + 3n),
     );
     const componentVisits = lengthBits ** 2n * permutations;
     // For each call, sum the cell widths w=u+s+2 over all input classes u
@@ -203,8 +196,10 @@ export const compileSourceDomainOracleBudget = (
     const minimumSourceCallPermutations =
         (minimumSourceInputBits + 6n + rateBits - 1n) / rateBits;
     const sourceCalls = permutations / minimumSourceCallPermutations;
-    const lengthBits = bitWidth(
-        4n * rateBits * forwardedPermutations + 2n * firstChunkBits + 3n,
+    const lengthBits = BigInt(
+        bitLength(
+            4n * rateBits * forwardedPermutations + 2n * firstChunkBits + 3n,
+        ),
     );
     const componentVisits = sourceCalls * lengthBits;
     const componentBitVisits =

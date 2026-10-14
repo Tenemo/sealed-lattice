@@ -1,3 +1,4 @@
+import { absolute } from '#tests/exact-integer.js';
 const participantCount = 10;
 const releaseThreshold = 4;
 const polynomialModulusDegree = 32_768;
@@ -11,8 +12,6 @@ const reconstructionClearingFactor =
 
 type Fraction = Readonly<{ denominator: bigint; numerator: bigint }>;
 type RationalRingElement = readonly Fraction[];
-
-const absolute = (value: bigint): bigint => (value < 0n ? -value : value);
 
 const greatestCommonDivisor = (left: bigint, right: bigint): bigint => {
     let first = absolute(left);

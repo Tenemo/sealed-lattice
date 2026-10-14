@@ -1,3 +1,5 @@
+import { binomial } from '#tests/exact-integer.js';
+
 const minimumParticipantCount = 3;
 const maximumParticipantCount = 20;
 
@@ -90,20 +92,6 @@ export const deriveLifecycleAvailability = (
             ),
         })),
     };
-};
-
-const binomial = (n: number, k: number): bigint => {
-    if (!Number.isSafeInteger(n) || !Number.isSafeInteger(k)) {
-        throw new TypeError('Binomial inputs must be safe integers.');
-    }
-    if (k < 0 || k > n) return 0n;
-
-    let result = 1n;
-    const reducedK = Math.min(k, n - k);
-    for (let index = 1; index <= reducedK; index += 1) {
-        result = (result * BigInt(n - reducedK + index)) / BigInt(index);
-    }
-    return result;
 };
 
 const popcount = (value: number): number => {

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 
+import { absolute, bitLength } from '#tests/exact-integer.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
 import { shareEncryptionParameters } from '#tests/wide-share-lifting-model.js';
 
@@ -7,8 +8,6 @@ const field = compileSmallLimbProofFieldCensus().modulus;
 const limbBits = 48;
 const radix = 1n << BigInt(limbBits),
     carryBound = 1n << 71n;
-const bitLength = (value: bigint): number => value.toString(2).length;
-
 type ReleaseShareLiftingInput = Readonly<{
     polynomialDegree: bigint;
     releaseModulus: bigint;
@@ -111,7 +110,6 @@ export const deriveReleaseShareLiftingLayout = (
 
 const degree = 8;
 type Polynomial = readonly bigint[];
-const abs = (value: bigint): bigint => (value < 0n ? -value : value);
 const mod = (value: bigint, coefficientModulus: bigint): bigint =>
     ((value % coefficientModulus) + coefficientModulus) % coefficientModulus;
 const center = (value: bigint, modulus: bigint): bigint => {
@@ -140,7 +138,8 @@ const rowProduct = (left: Polynomial, right: Polynomial, row: number): bigint =>
         0n,
     );
 const publicDigit = (value: bigint, index: number): bigint =>
-    (value < 0n ? -1n : 1n) * ((abs(value) / radix ** BigInt(index)) % radix);
+    (value < 0n ? -1n : 1n) *
+    ((absolute(value) / radix ** BigInt(index)) % radix);
 const privateDigits = (value: bigint, bits: number): bigint[] => {
     const radius = 1n << BigInt(bits - 1);
     assert.ok(value >= -radius && value < radius);
@@ -264,8 +263,8 @@ export const compileReleaseShareLiftingCensus = (
                 const next = residual / radix;
                 assert.ok(next >= -carryBound && next < carryBound);
                 maximumObservedCarry =
-                    abs(next) > maximumObservedCarry
-                        ? abs(next)
+                    absolute(next) > maximumObservedCarry
+                        ? absolute(next)
                         : maximumObservedCarry;
                 checkedEquations++;
                 return next;
@@ -275,8 +274,8 @@ export const compileReleaseShareLiftingCensus = (
         quotient.forEach(
             (value) =>
                 (maximumObservedQuotient =
-                    abs(value) > maximumObservedQuotient
-                        ? abs(value)
+                    absolute(value) > maximumObservedQuotient
+                        ? absolute(value)
                         : maximumObservedQuotient),
         );
     }

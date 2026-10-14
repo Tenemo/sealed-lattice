@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 
+import { bitLength } from '#tests/exact-integer.js';
 import {
     createFixedModulusBfvNoiseModel,
     deriveFloodedRelease,
@@ -40,8 +41,6 @@ const thresholdsFor = (participantCount: number) => {
     return profile;
 };
 
-const bitLength = (value: bigint): number =>
-    value <= 0n ? 0 : value.toString(2).length;
 const ceilingPowerOfTwoExponent = (value: number): number => {
     let exponent = 0;
     while (2 ** exponent < value) exponent++;

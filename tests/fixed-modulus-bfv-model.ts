@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 
+import { bitLength, ceilingDivide } from '#tests/exact-integer.js';
+
 // Operands shared by every supported profile. The contributor and option
 // counts and both moduli are derived per profile by the supported-profile
 // rules.
@@ -29,9 +31,6 @@ type NoiseParameters = Readonly<{
 }>;
 type BfvNoiseValue = Readonly<{ error: bigint; depth: number }>;
 
-const ceilingDivide = (numerator: bigint, denominator: bigint): bigint =>
-    (numerator + denominator - 1n) / denominator;
-const bitLength = (value: bigint): number => value.toString(2).length;
 const ceilingLogarithm = (value: bigint): number =>
     value <= 1n ? 0 : bitLength(value - 1n);
 

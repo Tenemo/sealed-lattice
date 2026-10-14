@@ -1,6 +1,7 @@
 import { compileBallotBodyCensus } from '#tests/ballot-body-model.js';
 import { compileCloseWireCensus } from '#tests/close-wire-model.js';
 import { compileContributionBodyCensus } from '#tests/contribution-body-model.js';
+import { maximum } from '#tests/exact-integer.js';
 import { compileParticipantReleaseCustody } from '#tests/participant-release-custody-model.js';
 import { compileRecipientKeyCensus } from '#tests/recipient-key-model.js';
 import { compileRegistrationEnrollmentCensus } from '#tests/registration-enrollment-model.js';
@@ -30,9 +31,6 @@ type File = Readonly<{
 const chunks = (bytes: bigint) =>
     (bytes + candidateTransportParameters.chunkBytes - 1n) /
     candidateTransportParameters.chunkBytes;
-const maximum = (values: readonly bigint[]) =>
-    values.reduce((largest, value) => (value > largest ? value : largest), 0n);
-
 const compileCandidatePublication = (
     key: string,
     files: readonly File[],

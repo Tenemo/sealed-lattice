@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 
+import { bitLength, byteLength, littleEndian } from '#tests/exact-integer.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import {
     zero,
@@ -12,9 +13,6 @@ import {
     negate,
     power,
     powers,
-    bitLength,
-    byteLength,
-    littleEndian,
     type RelationOperator,
     type Variable,
     column,

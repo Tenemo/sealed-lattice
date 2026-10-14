@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 
+import { byteLength } from '#tests/exact-integer.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import { compileLinkedReleaseColumnLayout } from '#tests/linked-release-relation-model.js';
 import {
@@ -13,7 +14,6 @@ import {
     negate,
     power,
     powers,
-    byteLength,
     type PublicColumn,
     type RelationOperator,
     type Variable,

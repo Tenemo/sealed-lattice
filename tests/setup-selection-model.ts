@@ -1,3 +1,4 @@
+import { binomial } from '#tests/exact-integer.js';
 import { compileThresholdCompletionProfile } from '#tests/threshold-completion-model.js';
 
 // Selection and chronology only. Signatures, registration commitments and
@@ -16,13 +17,6 @@ const deriveSetupSelection = (participantCount: number) => {
     };
 };
 
-const choose = (population: number, size: number): bigint => {
-    let value = 1n;
-    for (let index = 1; index <= size; index++)
-        value = (value * BigInt(population - index + 1)) / BigInt(index);
-    return value;
-};
-
 export const compileSetupSelectionCensus = (participantCount: number) => {
     const profile = deriveSetupSelection(participantCount);
     return {
@@ -30,7 +24,7 @@ export const compileSetupSelectionCensus = (participantCount: number) => {
         remainingEligibleCount: profile.eligibleCount - profile.faultBound,
         minimumHonestSelected: profile.selectedCount - profile.faultBound,
         minimumCertificateIntersection: 2 * profile.quorum - participantCount,
-        possibleSelectedSets: choose(
+        possibleSelectedSets: binomial(
             profile.eligibleCount,
             profile.selectedCount,
         ),

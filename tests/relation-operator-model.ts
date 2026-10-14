@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 
+import { byteLength } from '#tests/exact-integer.js';
 import {
     evaluateSystematicColumns,
     wordFieldArithmetic,
@@ -46,17 +47,6 @@ export const powers = (alpha: Extension, count: number) => {
 };
 
 const residue = (value: bigint) => ((value % modulus) + modulus) % modulus;
-
-export const bitLength = (value: bigint) => value.toString(2).length;
-
-export const byteLength = (value: bigint) => Math.ceil(bitLength(value) / 8);
-
-export const littleEndian = (value: bigint, bytes: number) => {
-    const output = Buffer.alloc(bytes);
-    for (let index = 0, rest = value; index < bytes; index++, rest >>= 8n)
-        output[index] = Number(rest & 255n);
-    return output;
-};
 
 // A public column places its values at every (systematic / degree)-th row:
 // the powers of alpha at each position's automorphism image and negacyclic
