@@ -5,7 +5,6 @@ import type { UserConfig } from 'tsdown';
 const sdkPackageDirectoryPath = fileURLToPath(
     new URL('../../packages/sdk/', import.meta.url),
 );
-const nodeBuiltin = /^node:/u;
 
 // The SDK entry's bundle options, which embed the participant runtime the
 // SDK build packaged.
@@ -15,12 +14,6 @@ export const sdkPackageOptions = (participantRuntime: unknown): UserConfig => ({
     define: {
         __SEALED_LATTICE_PARTICIPANT_RUNTIME__:
             JSON.stringify(participantRuntime),
-    },
-    deps: {
-        dts: {
-            neverBundle: [nodeBuiltin],
-        },
-        neverBundle: [nodeBuiltin],
     },
     dts: {
         incremental: false,

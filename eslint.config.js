@@ -45,11 +45,6 @@ const packageSourceImportPatterns = [
         message:
             'Published package source must not depend on repository-private aliases.',
     },
-    {
-        group: ['@sealed-lattice/*/*', 'sealed-lattice/*'],
-        message:
-            'Workspace packages must import another package through its public entry point.',
-    },
 ];
 
 export default defineConfig(

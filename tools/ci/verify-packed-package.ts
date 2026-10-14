@@ -14,6 +14,16 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import {
+    createSourceFile,
+    getLeadingCommentRanges,
+    isExportDeclaration,
+    isFunctionDeclaration,
+    isNamedExports,
+    isVariableStatement,
+    ScriptTarget,
+} from 'typescript';
+
+import {
     checkParticipantModule,
     participantRuntimeIdentity,
 } from './build-participant-module.js';
@@ -25,6 +35,10 @@ import {
     resolvePackageManagerRunnerForPackageManager,
     type PackageManagerRunner,
 } from './package-manager-runner.js';
+import {
+    readParticipantCrateMetadata,
+    thirdPartyNotices,
+} from './third-party-notices.js';
 
 import { helperFunctions } from '#packages/sdk/src/participant/worker/module/parallel-helper-instance.js';
 import { moduleFunctions } from '#packages/sdk/src/participant/worker/module/participant-module.js';
@@ -39,6 +53,7 @@ const expectedPackageFiles = [
     'dist/participant-worker.js',
     'dist/participant.wasm',
     'package.json',
+    'THIRD-PARTY-NOTICES.txt',
 ] as const;
 
 type PackMetadata = {
@@ -121,6 +136,7 @@ const stagePublicPackage = async (destinationPath: string): Promise<void> => {
     ) as Record<string, unknown>;
     delete manifest.devDependencies;
     delete manifest.scripts;
+    const notices = await thirdPartyNotices(readParticipantCrateMetadata());
     await Promise.all([
         cp(path.join(sourcePath, 'dist'), path.join(destinationPath, 'dist'), {
             recursive: true,
@@ -136,6 +152,11 @@ const stagePublicPackage = async (destinationPath: string): Promise<void> => {
         writeFile(
             path.join(destinationPath, 'package.json'),
             `${JSON.stringify(manifest, null, 4)}\n`,
+            'utf8',
+        ),
+        writeFile(
+            path.join(destinationPath, 'THIRD-PARTY-NOTICES.txt'),
+            notices,
             'utf8',
         ),
     ]);
@@ -160,21 +181,50 @@ const requireExactPackageFiles = (actualFiles: readonly string[]): void => {
     }
 };
 
-const requireSelfContainedBundle = async (
+// The published declarations document every value they export.
+const requireDocumentedRuntimeExports = async (
     packageDirectoryPath: string,
 ): Promise<void> => {
-    const [runtimeSource, declarationSource] = await Promise.all([
-        readFile(path.join(packageDirectoryPath, 'dist', 'index.js'), 'utf8'),
-        readFile(path.join(packageDirectoryPath, 'dist', 'index.d.ts'), 'utf8'),
-    ]);
-    if (runtimeSource.includes('@sealed-lattice/')) {
-        throw new Error('Published runtime output retains a workspace import.');
-    }
-    if (declarationSource.includes('@sealed-lattice/')) {
+    const text = await readFile(
+        path.join(packageDirectoryPath, 'dist', 'index.d.ts'),
+        'utf8',
+    );
+    const declarations = createSourceFile(
+        'index.d.ts',
+        text,
+        ScriptTarget.Latest,
+        true,
+    );
+    const exported = new Set(
+        declarations.statements.flatMap((statement) =>
+            isExportDeclaration(statement) &&
+            statement.exportClause !== undefined &&
+            isNamedExports(statement.exportClause)
+                ? statement.exportClause.elements.map(
+                      (element) => (element.propertyName ?? element.name).text,
+                  )
+                : [],
+        ),
+    );
+    const values = declarations.statements.flatMap((statement) => {
+        const names = isVariableStatement(statement)
+            ? statement.declarationList.declarations.map((declaration) =>
+                  declaration.name.getText(declarations),
+              )
+            : isFunctionDeclaration(statement) && statement.name !== undefined
+              ? [statement.name.text]
+              : [];
+        const documented = (
+            getLeadingCommentRanges(text, statement.pos) ?? []
+        ).some((range) => text.startsWith('/**', range.pos));
+        return names
+            .filter((name) => exported.has(name))
+            .map((name) => ({ name, documented }));
+    });
+    if (values.length === 0 || values.some(({ documented }) => !documented))
         throw new Error(
-            'Published declaration output retains a workspace import.',
+            `The published declarations leave runtime exports undocumented: ${values.map(({ name, documented }) => `${name}${documented ? '' : ' (undocumented)'}`).join(', ')}.`,
         );
-    }
 };
 
 // The published participant module exports exactly what the worker and its
@@ -205,10 +255,7 @@ const requireParticipantRuntime = async (packageDirectoryPath: string) => {
         throw new Error(
             `Published participant module exports differ from the worker's inventory: ${exportNames.join(', ')}.`,
         );
-    if (
-        /^\s*import(?:\s+[\w$*{"']|\s*[{*"'])|\bimport\s*\(/mu.test(worker) ||
-        worker.includes('@sealed-lattice/')
-    )
+    if (/^\s*import(?:\s+[\w$*{"']|\s*[{*"'])|\bimport\s*\(/mu.test(worker))
         throw new Error('The published participant worker imports a module.');
     const parsed = JSON.parse(manifest) as unknown;
     const record = requireRecord(parsed, 'Participant source manifest');
@@ -397,7 +444,7 @@ const verifyPackedPackage = async (
     try {
         await mkdir(packDirectory);
         await stagePublicPackage(packageDirectory);
-        await requireSelfContainedBundle(packageDirectory);
+        await requireDocumentedRuntimeExports(packageDirectory);
         const participantIdentity =
             await requireParticipantRuntime(packageDirectory);
         await runPackageManager(

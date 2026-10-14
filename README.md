@@ -151,4 +151,4 @@ Use `pnpm run check:desktop` for browser-facing changes and `pnpm run smoke:pack
 
 ## License
 
-This project is licensed under the Mozilla Public License 2.0. See [LICENSE](LICENSE).
+This project is licensed under the Mozilla Public License 2.0. See [LICENSE](LICENSE). The published package also includes `THIRD-PARTY-NOTICES.txt` with the licenses of the Rust crates compiled into its WebAssembly module.
