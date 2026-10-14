@@ -1,15 +1,27 @@
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { writeFile } from 'node:fs/promises';
+import { mkdir, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { setTimeout as delay } from 'node:timers/promises';
 import { parseArgs, promisify } from 'node:util';
 
-import { toolArguments } from '#tools/ci/command-line.js';
-import { runWithLocalRunLog } from '#tools/ci/local-run-log.js';
+import { repositoryRoot, toolArguments } from '#tools/ci/command-line.js';
+import {
+    createPackageManagerCommand,
+    runCommandAndCaptureOutput,
+    type CommandInvocation,
+} from '#tools/ci/command-runner.js';
+import {
+    runWithLocalRunLog,
+    type ActiveLocalRunLog,
+} from '#tools/ci/local-run-log.js';
+import {
+    placeCommand,
+    type ProcessorPlacement,
+} from '#tools/ci/processor-placement.js';
 
 // Records how busy the host is around a timed step and how much that load
 // slows one single-threaded workload under this process's placement. It times
@@ -20,6 +32,9 @@ import { runWithLocalRunLog } from '#tools/ci/local-run-log.js';
 // name or command line.
 const usage =
     'Usage: monitor-host-contention.ts --label=<step> --stop-file=<path> --own-path=<checkout>...';
+export const hostContentionMonitorScriptName = 'monitor-host-contention';
+const readyLimitMilliseconds = 5 * 60_000;
+const stopLimitMilliseconds = 10 * 60_000;
 const sampleSeconds = 60;
 const stopPollMilliseconds = 5_000;
 const longIterations = 12_000;
@@ -226,6 +241,95 @@ const mean = (values: readonly number[]) =>
                   100,
           ) / 100;
 
+// Starts the monitor around a step under the step's placement and waits for
+// its first probe. Its stop ends the sampling, waits for the last probe and
+// refuses a failed monitor.
+export const startHostContentionMonitor = async (
+    input: Readonly<{
+        directory: string;
+        label: string;
+        ownPaths: readonly string[];
+        placement: ProcessorPlacement;
+        runLog: ActiveLocalRunLog;
+    }>,
+): Promise<{ readonly stop: () => Promise<void> }> => {
+    await mkdir(input.directory, { recursive: true });
+    const stopFile = path.join(input.directory, `${input.label}.stop`);
+    const readyFile = `${stopFile}.ready`;
+    const controller = new AbortController();
+    const invocation: CommandInvocation = {
+        ...createPackageManagerCommand(
+            `Host-contention monitor around ${input.label}`,
+            [
+                'exec',
+                'tsx',
+                path.join(
+                    repositoryRoot,
+                    'tools/ci/monitor-host-contention.ts',
+                ),
+                `--label=${input.label}`,
+                `--stop-file=${stopFile}`,
+                ...input.ownPaths.map((ownPath) => `--own-path=${ownPath}`),
+            ],
+            { logFileSlug: `${input.label}-monitor` },
+        ),
+        workingDirectoryPath: repositoryRoot,
+    };
+    let settled = false;
+    const finished = runCommandAndCaptureOutput(
+        placeCommand(invocation, input.placement),
+        { runLog: input.runLog, signal: controller.signal },
+    ).finally(() => {
+        settled = true;
+    });
+    const failure = async (problem: string) => {
+        controller.abort(new Error(problem));
+        const result = await finished.catch((error: unknown) => ({
+            stderr: error instanceof Error ? error.message : String(error),
+            stdout: '',
+        }));
+        const output = `${result.stdout}\n${result.stderr}`.trim();
+        return new Error(
+            output.length === 0 ? problem : `${problem}\n${output}`,
+        );
+    };
+    const deadline = performance.now() + readyLimitMilliseconds;
+    while (!existsSync(readyFile)) {
+        if (settled)
+            throw await failure(
+                `The host-contention monitor for ${input.label} ended before its first probe.`,
+            );
+        if (performance.now() > deadline)
+            throw await failure(
+                `The host-contention monitor for ${input.label} gave no first probe within five minutes.`,
+            );
+        await delay(1000);
+    }
+    return {
+        stop: async () => {
+            await writeFile(stopFile, '');
+            const timer = setTimeout(
+                () =>
+                    controller.abort(
+                        new Error('The monitor outlasted its stop limit.'),
+                    ),
+                stopLimitMilliseconds,
+            );
+            try {
+                const result = await finished;
+                if (result.exitCode !== 0 || result.terminationSignal !== null)
+                    throw new Error(
+                        `The host-contention monitor for ${input.label} failed:\n${`${result.stdout}\n${result.stderr}`.trim()}`,
+                    );
+            } finally {
+                clearTimeout(timer);
+                await rm(stopFile, { force: true });
+                await rm(readyFile, { force: true });
+            }
+        },
+    };
+};
+
 const main = async (): Promise<void> => {
     const commandLineArguments = process.argv.slice(2);
     const options = selectMonitorOptions(commandLineArguments);
@@ -237,7 +341,7 @@ const main = async (): Promise<void> => {
         {
             commandLineArguments,
             lanes: ['Host contention around a timed step'],
-            scriptName: 'monitor-host-contention',
+            scriptName: hostContentionMonitorScriptName,
         },
         async (log) => {
             const placement = await readPlacement();

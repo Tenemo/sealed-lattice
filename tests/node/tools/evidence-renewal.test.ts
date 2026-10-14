@@ -20,6 +20,7 @@ import {
     receivedByAction,
 } from '#tools/ci/audit-renewed-lifecycle-matrix.js';
 import { participantRuntimeIdentity } from '#tools/ci/build-participant-module.js';
+import { repositoryRoot } from '#tools/ci/command-line.js';
 import {
     listChildRuns,
     readEvidenceRenewalRecord,
@@ -47,7 +48,10 @@ import {
     tolerableSlowdown,
 } from '#tools/ci/project-participant-phone-time.js';
 import { removeDirectoryLinks } from '#tools/ci/renewal-worktree.js';
-import { planEvidenceRenewal } from '#tools/ci/run-evidence-renewal.js';
+import {
+    formatRenewalSummary,
+    planEvidenceRenewal,
+} from '#tools/ci/run-evidence-renewal.js';
 
 const commit = 'a'.repeat(40);
 const digest = (bytes: Uint8Array) =>
@@ -297,6 +301,124 @@ describe('evidence renewal plan', () => {
         ).toThrow(
             'The resumed record of result names no research:participant run.',
         );
+    });
+    it('refuses to carry a run that no longer exists', () => {
+        const resumed = recordsThrough('projection');
+        const deleted = runOfStep('result');
+        expect(() =>
+            planEvidenceRenewal(evidenceRenewalSteps, {
+                from: 'audit',
+                resumed,
+                runExists: (run) => run !== deleted,
+            }),
+        ).toThrow(
+            `The resumed record of result names runs that no longer exist: ${deleted}.`,
+        );
+        expect(
+            planEvidenceRenewal(evidenceRenewalSteps, {
+                from: 'audit',
+                resumed,
+                runExists: () => true,
+            }).carried,
+        ).toHaveLength(evidenceRenewalSteps.length - 3);
+    });
+});
+
+describe('evidence renewal summary', () => {
+    const name = '2026-10-12T01-00-00.000Z-research-evidence-renewal';
+    const runDirectoryPath = path.join(
+        repositoryRoot,
+        'logs',
+        '2026-10-12',
+        name,
+    );
+    const resume = `--resume=${path.join('logs', '2026-10-12', name)}`;
+    const record = `Renewal record: ${path.join(runDirectoryPath, 'renewal-record.json')}`;
+    const statusOf = (summary: string, step: string) =>
+        new RegExp(
+            `^  (PASSED|FAILED|CARRIED|NOT RUN) +${step}(?: |$)`,
+            'mu',
+        ).exec(summary)?.[1];
+
+    it('reports every step and how to resume after a failed step', () => {
+        const failure = stepRecord('participant-module', {
+            exitCode: 1,
+            failure: 'The participant module tests failed.',
+        });
+        const summary = formatRenewalSummary({
+            carried: new Set(['rust-fast']),
+            cleanupFailures: [],
+            failed: evidenceRenewalSteps.find(
+                (step) => step.name === 'participant-module',
+            ),
+            interrupted: true,
+            outcomes: new Map([
+                [
+                    'build',
+                    {
+                        durationMilliseconds: 65_000,
+                        record: stepRecord('build'),
+                        recentOutput: [],
+                    },
+                ],
+                [
+                    'participant-module',
+                    {
+                        durationMilliseconds: 5_000,
+                        record: failure,
+                        recentOutput: ['1 failed', '2 passed'],
+                    },
+                ],
+            ]),
+            records: new Map([
+                ['build', stepRecord('build')],
+                ['rust-fast', stepRecord('rust-fast')],
+                ['participant-module', failure],
+            ]),
+            runDirectoryPath,
+        });
+        expect(statusOf(summary, 'build')).toBe('PASSED');
+        expect(statusOf(summary, 'rust-fast')).toBe('CARRIED');
+        expect(statusOf(summary, 'participant-module')).toBe('FAILED');
+        expect(statusOf(summary, 'smoke-pack')).toBe('NOT RUN');
+        expect(summary).toMatch(/ build +1m 05s\n/u);
+        expect(summary).toContain(
+            [
+                'participant-module failed with exit code 1.',
+                'The participant module tests failed.',
+                'Recent output:',
+                '1 failed',
+                '2 passed',
+                `Full output: ${path.join(runDirectoryPath, 'output.log')} (command participant-module)`,
+                `Resume with ${resume}`,
+                record,
+                '',
+            ].join('\n'),
+        );
+        // The failure, not the interrupt, says how to resume.
+        expect(summary).not.toContain('interrupted');
+    });
+
+    it('says how to resume an interrupted renewal and reports cleanup failures', () => {
+        const summary = formatRenewalSummary({
+            carried: new Set(),
+            cleanupFailures: ['The worktree at W could not be removed: busy'],
+            interrupted: true,
+            outcomes: new Map(),
+            records: new Map([['build', stepRecord('build')]]),
+            runDirectoryPath,
+        });
+        expect(statusOf(summary, 'build')).toBe('PASSED');
+        expect(statusOf(summary, 'rust-fast')).toBe('NOT RUN');
+        expect(summary).toContain(
+            [
+                `The renewal was interrupted; resume with ${resume}`,
+                'The worktree at W could not be removed: busy',
+                record,
+                '',
+            ].join('\n'),
+        );
+        expect(summary).not.toContain('failed with exit code');
     });
 });
 

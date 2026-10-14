@@ -1,16 +1,14 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { performance } from 'node:perf_hooks';
-import { setTimeout as delay } from 'node:timers/promises';
 import { parseArgs, stripVTControlCharacters } from 'node:util';
 
 import { repositoryRoot, toolArguments } from '#tools/ci/command-line.js';
 import {
     createPackageManagerCommand,
-    runCommandAndCaptureOutput,
     runCommandsInSeries,
     type CommandInvocation,
 } from '#tools/ci/command-runner.js';
@@ -32,6 +30,10 @@ import {
     runWithLocalRunLog,
     type ActiveLocalRunLog,
 } from '#tools/ci/local-run-log.js';
+import {
+    hostContentionMonitorScriptName,
+    startHostContentionMonitor,
+} from '#tools/ci/monitor-host-contention.js';
 import {
     describeProcessorPlacement,
     parseProcessorPlacement,
@@ -64,10 +66,7 @@ type PlacementRole = NonNullable<EvidenceRenewalStep['placement']>;
 
 const stepLimitMilliseconds = 6 * 60 * 60_000;
 const memorySampleIntervalMilliseconds = 30_000;
-const monitorReadyLimitMilliseconds = 5 * 60_000;
-const monitorStopLimitMilliseconds = 10 * 60_000;
 const recentOutputLineLimit = 40;
-const monitorScriptName = 'monitor-host-contention';
 
 type EvidenceRenewalPlan = Readonly<{
     carried: readonly EvidenceRenewalStepRecord[];
@@ -83,6 +82,8 @@ export const planEvidenceRenewal = (
     input: Readonly<{
         from?: string;
         resumed?: ReadonlyMap<string, EvidenceRenewalStepRecord>;
+        // Whether a run named relative to the repository root exists.
+        runExists?: (run: string) => boolean;
     }>,
 ): EvidenceRenewalPlan => {
     const names = steps.map((step) => step.name);
@@ -123,6 +124,14 @@ export const planEvidenceRenewal = (
         if (step.run !== undefined && record.run === undefined)
             throw new Error(
                 `The resumed record of ${step.name} names no ${step.run} run.`,
+            );
+        const missing = [
+            ...record.runs,
+            ...(record.monitorRun === undefined ? [] : [record.monitorRun]),
+        ].filter((run) => input.runExists?.(run) === false);
+        if (missing.length > 0)
+            throw new Error(
+                `The resumed record of ${step.name} names runs that no longer exist: ${missing.join(', ')}.`,
             );
         carried.push(record);
     }
@@ -259,93 +268,6 @@ const stepInvocation = (
     };
 };
 
-// Starts the host-contention monitor under the step's placement and waits
-// for its first probe. Its stop ends the sampling, waits for the last probe
-// and refuses a failed monitor.
-const startMonitor = async (
-    step: EvidenceRenewalStep,
-    placement: ProcessorPlacement,
-    context: RenewalContext,
-): Promise<{ readonly stop: () => Promise<void> }> => {
-    await mkdir(context.monitorDirectory, { recursive: true });
-    const stopFile = path.join(context.monitorDirectory, `${step.name}.stop`);
-    const readyFile = `${stopFile}.ready`;
-    const controller = new AbortController();
-    const invocation: CommandInvocation = {
-        ...createPackageManagerCommand(
-            `Host-contention monitor around ${step.name}`,
-            [
-                'exec',
-                'tsx',
-                path.join(
-                    repositoryRoot,
-                    'tools/ci/monitor-host-contention.ts',
-                ),
-                `--label=${step.name}`,
-                `--stop-file=${stopFile}`,
-                ...[...new Set([repositoryRoot, context.checkoutRoot])].map(
-                    (ownPath) => `--own-path=${ownPath}`,
-                ),
-            ],
-            { logFileSlug: `${step.name}-monitor` },
-        ),
-        workingDirectoryPath: repositoryRoot,
-    };
-    let settled = false;
-    const finished = runCommandAndCaptureOutput(
-        placeCommand(invocation, placement),
-        { runLog: context.runLog, signal: controller.signal },
-    ).finally(() => {
-        settled = true;
-    });
-    const failure = async (problem: string) => {
-        controller.abort(new Error(problem));
-        const result = await finished.catch((error: unknown) => ({
-            stderr: errorMessage(error),
-            stdout: '',
-        }));
-        const output = `${result.stdout}\n${result.stderr}`.trim();
-        return new Error(
-            output.length === 0 ? problem : `${problem}\n${output}`,
-        );
-    };
-    const deadline = performance.now() + monitorReadyLimitMilliseconds;
-    while (!existsSync(readyFile)) {
-        if (settled)
-            throw await failure(
-                `The host-contention monitor for ${step.name} ended before its first probe.`,
-            );
-        if (performance.now() > deadline)
-            throw await failure(
-                `The host-contention monitor for ${step.name} gave no first probe within five minutes.`,
-            );
-        await delay(1000);
-    }
-    return {
-        stop: async () => {
-            await writeFile(stopFile, '');
-            const timer = setTimeout(
-                () =>
-                    controller.abort(
-                        new Error('The monitor outlasted its stop limit.'),
-                    ),
-                monitorStopLimitMilliseconds,
-            );
-            try {
-                const result = await finished;
-                if (result.exitCode !== 0 || result.terminationSignal !== null)
-                    throw new Error(
-                        `The host-contention monitor for ${step.name} failed:\n${`${result.stdout}\n${result.stderr}`.trim()}`,
-                    );
-            } finally {
-                clearTimeout(timer);
-                await rm(stopFile, { force: true });
-                await rm(readyFile, { force: true });
-            }
-        },
-    };
-};
-
 type StepOutcome = Readonly<{
     durationMilliseconds: number;
     record: EvidenceRenewalStepRecord;
@@ -395,7 +317,13 @@ const runStep = async (
         placement !== undefined
     ) {
         try {
-            monitor = await startMonitor(step, placement, context);
+            monitor = await startHostContentionMonitor({
+                directory: context.monitorDirectory,
+                label: step.name,
+                ownPaths: [...new Set([repositoryRoot, context.checkoutRoot])],
+                placement,
+                runLog: context.runLog,
+            });
         } catch (error) {
             failures.push(errorMessage(error));
         }
@@ -452,10 +380,10 @@ const runStep = async (
     ).filter((child) => !context.attributedRuns.has(child.run));
     for (const child of children) context.attributedRuns.add(child.run);
     const monitorRuns = children.filter(
-        (child) => child.scriptName === monitorScriptName,
+        (child) => child.scriptName === hostContentionMonitorScriptName,
     );
     const stepRuns = children.filter(
-        (child) => child.scriptName !== monitorScriptName,
+        (child) => child.scriptName !== hostContentionMonitorScriptName,
     );
     const ownRuns = stepRuns.filter((child) => child.scriptName === step.run);
     const run = ownRuns.length === 1 ? ownRuns[0].run : undefined;
@@ -579,6 +507,70 @@ const formatPlan = (
     return lines.join('\n') + '\n';
 };
 
+// The summary a renewal prints last: each step's status, duration and run,
+// then why the renewal stopped, how to resume it and where its record is.
+export const formatRenewalSummary = (
+    input: Readonly<{
+        carried: ReadonlySet<string>;
+        cleanupFailures: readonly string[];
+        failed?: EvidenceRenewalStep;
+        interrupted: boolean;
+        outcomes: ReadonlyMap<string, StepOutcome>;
+        records: ReadonlyMap<string, EvidenceRenewalStepRecord>;
+        runDirectoryPath: string;
+    }>,
+): string => {
+    const resume = `--resume=${path.relative(repositoryRoot, input.runDirectoryPath)}`;
+    const width = Math.max(
+        ...evidenceRenewalSteps.map((step) => step.name.length),
+    );
+    const lines = ['', 'Evidence renewal summary'];
+    for (const step of evidenceRenewalSteps) {
+        const record = input.records.get(step.name);
+        const outcome = input.outcomes.get(step.name);
+        const status =
+            record === undefined
+                ? 'NOT RUN'
+                : input.carried.has(step.name)
+                  ? 'CARRIED'
+                  : stepPassed(record)
+                    ? 'PASSED'
+                    : 'FAILED';
+        lines.push(
+            `  ${status.padEnd(7)}  ${step.name.padEnd(width)}  ${[
+                outcome === undefined
+                    ? ''
+                    : formatDuration(outcome.durationMilliseconds),
+                record?.run ?? '',
+            ]
+                .filter(Boolean)
+                .join('  ')}`.trimEnd(),
+        );
+    }
+    if (input.failed !== undefined) {
+        const outcome = input.outcomes.get(input.failed.name);
+        lines.push(
+            '',
+            `${input.failed.name} failed with exit code ${String(outcome?.record.exitCode)}.`,
+            ...(outcome?.record.failure === undefined
+                ? []
+                : [outcome.record.failure]),
+            ...(outcome === undefined || outcome.recentOutput.length === 0
+                ? []
+                : ['Recent output:', ...outcome.recentOutput]),
+            `Full output: ${path.join(input.runDirectoryPath, 'output.log')} (command ${input.failed.name})`,
+            `Resume with ${resume}`,
+        );
+    } else if (input.interrupted)
+        lines.push('', `The renewal was interrupted; resume with ${resume}`);
+    lines.push(
+        ...input.cleanupFailures,
+        `Renewal record: ${path.join(input.runDirectoryPath, 'renewal-record.json')}`,
+        '',
+    );
+    return lines.join('\n');
+};
+
 const resolveCommit = (revision: string): string =>
     execFileSync('git', ['rev-parse', '--verify', `${revision}^{commit}`], {
         cwd: repositoryRoot,
@@ -624,6 +616,7 @@ const main = async (): Promise<void> => {
             resumeSource === undefined
                 ? undefined
                 : await readEvidenceRenewalRecord(resumeSource),
+        runExists: (run) => existsSync(path.join(repositoryRoot, run)),
     });
     const placements: Partial<Record<PlacementRole, ProcessorPlacement>> = {};
     for (const role of ['timing', 'background'] as const) {
@@ -799,62 +792,17 @@ const main = async (): Promise<void> => {
                 ) + '\n',
                 { flag: 'wx' },
             );
-            const carriedNames = new Set(
-                plan.carried.map((record) => record.name),
+            process.stdout.write(
+                formatRenewalSummary({
+                    carried: new Set(plan.carried.map((record) => record.name)),
+                    cleanupFailures,
+                    failed,
+                    interrupted,
+                    outcomes,
+                    records,
+                    runDirectoryPath: runLog.runDirectoryPath,
+                }),
             );
-            const width = Math.max(
-                ...evidenceRenewalSteps.map((step) => step.name.length),
-            );
-            const lines = ['', 'Evidence renewal summary'];
-            for (const step of evidenceRenewalSteps) {
-                const record = records.get(step.name);
-                const outcome = outcomes.get(step.name);
-                const status =
-                    record === undefined
-                        ? 'NOT RUN'
-                        : carriedNames.has(step.name)
-                          ? 'CARRIED'
-                          : stepPassed(record)
-                            ? 'PASSED'
-                            : 'FAILED';
-                lines.push(
-                    `  ${status.padEnd(7)}  ${step.name.padEnd(width)}  ${[
-                        outcome === undefined
-                            ? ''
-                            : formatDuration(outcome.durationMilliseconds),
-                        record?.run ?? '',
-                    ]
-                        .filter(Boolean)
-                        .join('  ')}`.trimEnd(),
-                );
-            }
-            if (failed !== undefined) {
-                const outcome = outcomes.get(failed.name);
-                lines.push(
-                    '',
-                    `${failed.name} failed with exit code ${String(outcome?.record.exitCode)}.`,
-                    ...(outcome?.record.failure === undefined
-                        ? []
-                        : [outcome.record.failure]),
-                    ...(outcome === undefined ||
-                    outcome.recentOutput.length === 0
-                        ? []
-                        : ['Recent output:', ...outcome.recentOutput]),
-                    `Full output: ${path.join(runLog.runDirectoryPath, 'output.log')} (command ${failed.name})`,
-                    `Resume with --resume=${path.relative(repositoryRoot, runLog.runDirectoryPath)}`,
-                );
-            }
-            if (interrupted && failed === undefined)
-                lines.push(
-                    '',
-                    `The renewal was interrupted; resume with --resume=${path.relative(repositoryRoot, runLog.runDirectoryPath)}`,
-                );
-            lines.push(...cleanupFailures);
-            lines.push(
-                `Renewal record: ${path.join(runLog.runDirectoryPath, 'renewal-record.json')}`,
-                '',
-            );
-            process.stdout.write(lines.join('\n'));
             if (
                 failed !== undefined ||
                 interrupted ||
