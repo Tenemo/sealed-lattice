@@ -16,6 +16,7 @@ import {
     ModuleFailure,
     PublicInputFailure,
     ResourceFailure,
+    StorageFailure,
 } from '../../shared/failures.js';
 import {
     awaitLater,
@@ -108,11 +109,12 @@ const evaluationCommand = (
     moduleCommand(context.module, 'evaluation', operation, { argument, input });
 
 // Delivers one incoming evaluation input in chunks and finishes it. A refusal
-// means the bytes are not the ones the engine expects.
+// means the bytes are not the ones the engine expects, which fails the
+// input's source: the public input, or the evaluation storage that held it.
 const deliverEvaluationInput = async (
     context: PublicProfileContext,
     produce: (accept: (bytes: Uint8Array) => void) => Promise<unknown>,
-    reason: string,
+    refusal: () => Error,
 ) => {
     await produce((bytes) => {
         if (
@@ -123,19 +125,20 @@ const deliverEvaluationInput = async (
                 bytes,
             ) === undefined
         )
-            throw new PublicInputFailure(reason);
+            throw refusal();
     });
     if (
         tryEvaluationCommand(context, evaluationOperation.finishInput) ===
         undefined
     )
-        throw new PublicInputFailure(reason);
+        throw refusal();
 };
 
-// The evaluation storage holds only public work, so its failure leaves the
-// participant pending, like any other public input.
-const evaluationStorageFailure = () =>
-    new PublicInputFailure('The evaluation storage failed.');
+// The evaluation storage holds only public work that a later operation
+// computes again, so its failure, or a record it lost or changed, leaves the
+// participant pending on storage.
+const evaluationStorageFailure = (message = 'The evaluation storage failed.') =>
+    new StorageFailure(message);
 
 // Starts a transaction on public evaluation storage, which a connection the
 // browser has closed refuses.
@@ -399,7 +402,7 @@ const readStoredRecords = async (
     return Promise.all(
         values.map(async (value) => {
             if (!(value instanceof Blob) || 4 + value.size > inputCapacity)
-                throw new PublicInputFailure(
+                throw evaluationStorageFailure(
                     'A stored evaluation key is missing.',
                 );
             return storedBytes(value);
@@ -459,13 +462,16 @@ const evaluate = async (
                             !(blob instanceof Blob) ||
                             blob.size !== chunk.count * storedCoefficientBytes
                         )
-                            throw new PublicInputFailure(
+                            throw evaluationStorageFailure(
                                 'A stored evaluation value is missing.',
                             );
                         accept(await storedBytes(blob));
                     }
                 },
-                'A stored evaluation value changed.',
+                () =>
+                    evaluationStorageFailure(
+                        'A stored evaluation value changed.',
+                    ),
             );
         };
         // Stores the records of the key just loaded, which the module hands
@@ -555,7 +561,10 @@ const evaluate = async (
                                     index,
                                     (_offset, bytes) => accept(bytes),
                                 ),
-                            'An evaluation key was refused.',
+                            () =>
+                                new PublicInputFailure(
+                                    'An evaluation key was refused.',
+                                ),
                         ),
                     );
                 await storeKeyRecords(ordinal);
@@ -585,7 +594,10 @@ const evaluate = async (
                                 slot.source,
                                 accept,
                             ),
-                        'An accepted ballot changed.',
+                        () =>
+                            new PublicInputFailure(
+                                'An accepted ballot changed.',
+                            ),
                     );
             }
             // The step ends with the values whose last use it was, or asks
@@ -615,7 +627,7 @@ const evaluate = async (
                     break;
                 }
                 if (status === 2)
-                    throw new PublicInputFailure(
+                    throw evaluationStorageFailure(
                         'A stored evaluation key changed.',
                     );
                 if (status === 3) {
@@ -677,7 +689,7 @@ const evaluate = async (
                             ),
                         ) === undefined
                     )
-                        throw new PublicInputFailure(
+                        throw evaluationStorageFailure(
                             'A stored evaluation key changed.',
                         );
                 } else
@@ -690,7 +702,7 @@ const evaluate = async (
                                 concatenate(unsigned32(prime), record),
                             ) === undefined
                         )
-                            throw new PublicInputFailure(
+                            throw evaluationStorageFailure(
                                 'A stored evaluation key changed.',
                             );
             }

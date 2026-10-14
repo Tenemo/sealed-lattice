@@ -36,6 +36,9 @@ export const decodePublicInput = async <Value>(
 // participant pending: the browser commits a transaction whole or not at
 // all, so the participant stays where its last commit left it. Retained
 // state that a check finds missing or changed is local state loss instead.
+// Public working storage that fails or loses a record, and an evaluation
+// value or key record whose stored bytes changed, are storage failures too,
+// since a later operation computes that work again.
 export class StorageFailure extends Error {}
 
 // A helper that failed, and an exhausted memory bound of the module instance
