@@ -16,6 +16,7 @@ import type {
     ParticipantWorkerResult,
     VerificationWorkerResult,
 } from './worker/runtime/worker-messages.js';
+import { isDigest } from './worker/shared/bytes.js';
 import { participantNamespacePattern } from './worker/storage/database.js';
 
 // The application page's side of the participant runtime. The SDK carries the
@@ -293,7 +294,7 @@ export const verifyOutcome = async (
 ): Promise<OutcomeVerification> => {
     const runtime = packagedRuntime();
     const { poll } = options;
-    if (typeof poll !== 'string' || !/^[0-9a-f]{128}$/u.test(poll))
+    if (!isDigest(poll))
         throw new TypeError(
             'A poll identity is 64 bytes in lower-case hexadecimal.',
         );

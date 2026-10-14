@@ -7,6 +7,10 @@ export const encodeText = (value: string): Uint8Array =>
 export const hexadecimal = (bytes: Uint8Array): string =>
     Array.from(bytes, (value) => value.toString(16).padStart(2, '0')).join('');
 
+// Whether the value is a 64-byte digest in lower-case hexadecimal.
+export const isDigest = (value: unknown): value is string =>
+    typeof value === 'string' && /^[0-9a-f]{128}$/u.test(value);
+
 export const fromHexadecimal = (value: string): Uint8Array => {
     if (!/^(?:[0-9a-f]{2})*$/u.test(value))
         throw new Error('Malformed hexadecimal bytes.');

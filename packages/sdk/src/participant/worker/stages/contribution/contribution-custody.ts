@@ -4,10 +4,6 @@ import {
     custodyPurpose,
 } from '../../module/custody-identity.js';
 import { moduleCommand } from '../../module/participant-module.js';
-import {
-    isContributionSession,
-    resumeParticipant,
-} from '../../runtime/participant-session.js';
 import type {
     ParticipantSession,
     ContributionSession,
@@ -20,9 +16,7 @@ import {
     sealedLength,
 } from '../../storage/private-records.js';
 import { rootGeneration } from '../../storage/root-generation.js';
-import type { AuthenticatedRoot } from '../../storage/root.js';
 import { commitRoot, dataRecordInventory } from '../../storage/root.js';
-import type { VerifiedProposal } from '../roster/roster.js';
 
 import {
     recordAssociatedData,
@@ -204,14 +198,3 @@ export const signing = (
         argument,
         input: bytes,
     });
-
-export const resumeContribution = async (
-    context: ParticipantProfileContext,
-    root: AuthenticatedRoot,
-    verified?: VerifiedProposal,
-): Promise<ContributionSession> => {
-    const session = await resumeParticipant(context, root, verified);
-    if (!isContributionSession(session))
-        throw new Error('No own contribution is retained.');
-    return session;
-};

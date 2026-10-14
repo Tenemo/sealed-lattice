@@ -22,10 +22,7 @@ import {
     unsigned64,
 } from '../../shared/bytes.js';
 import { PublicInputFailure, StorageFailure } from '../../shared/failures.js';
-import {
-    estimateStorage,
-    snapshotParticipant,
-} from '../../storage/database.js';
+import { hasStorageRoom, snapshotParticipant } from '../../storage/database.js';
 import { openDelivery } from '../../storage/delivery.js';
 import type { ParticipantStoredRecord } from '../../storage/predecessor.js';
 import { openRecord, sealRecord } from '../../storage/private-records.js';
@@ -237,12 +234,7 @@ export const beginBallot = async (
         throw new Error('No verified setup awaits a ballot.');
     if (!validBallotScores(profile, scores))
         throw new Error('The scores are invalid.');
-    const estimate = await estimateStorage();
-    if (
-        estimate.quota === undefined ||
-        estimate.usage === undefined ||
-        estimate.quota - estimate.usage < profile.ballot.requiredStorageBytes
-    )
+    if (!(await hasStorageRoom(profile.ballot.requiredStorageBytes)))
         throw new StorageFailure('The origin lacks room for a ballot.');
     const records = await retainedRecordContext(participant);
     const session: BallotSession = {

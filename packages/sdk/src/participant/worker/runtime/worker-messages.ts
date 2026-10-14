@@ -4,6 +4,7 @@ import type {
     ParticipantSummary,
     ParticipantReportedDetails,
 } from '../../participant-contract.js';
+import { isDigest } from '../shared/bytes.js';
 import type {
     IncompleteOperation,
     ParticipantRefusalReason,
@@ -123,5 +124,4 @@ export const isWellFormedVerification = (
     isRecord(command) &&
     hasRuntime(command) &&
     command.operation === 'verify-outcome' &&
-    typeof command.poll === 'string' &&
-    /^[0-9a-f]{128}$/u.test(command.poll);
+    isDigest(command.poll);

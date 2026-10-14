@@ -31,7 +31,7 @@ import {
 } from '../../shared/bytes.js';
 import type { ParticipantRefusalReason } from '../../shared/operation-status.js';
 import {
-    estimateStorage,
+    hasStorageRoom,
     isEmptyParticipant,
     participantRecordStores,
     participantStores,
@@ -218,13 +218,7 @@ export const createEnrollment = async (
             if (module.validate_joiner(input.length) !== 0)
                 return 'invalid request';
         }
-        const estimate = await estimateStorage();
-        if (
-            estimate.quota === undefined ||
-            estimate.usage === undefined ||
-            estimate.quota - estimate.usage <
-                2 * limits.registration.publicKeyBytes
-        )
+        if (!(await hasStorageRoom(2 * limits.registration.publicKeyBytes)))
             return 'insufficient storage';
         const associatedData = rootAssociatedData(runtime);
         const key = await createRootKey();

@@ -569,13 +569,10 @@ export const seededRandomness = (
         ) !== 0
     )
         throw new Error('The ' + purpose + ' randomness refused its seed.');
-    // The module counts each stream's bytes until the next seed is installed.
-    const drawn = (stream: number) =>
-        module.operation_random_drawn(stream) >>> 0;
     return {
-        drawn: () => drawn(0) + drawn(proofStream),
-        // The bytes the proof stream served.
-        proofDrawn: () => drawn(proofStream),
+        // The bytes the proof stream served, which the module counts until
+        // the next seed is installed.
+        proofDrawn: () => module.operation_random_drawn(proofStream) >>> 0,
         discard: () => {
             module.operation_random_command(randomOperation.discard, 0);
         },

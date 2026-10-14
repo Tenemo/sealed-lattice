@@ -32,6 +32,7 @@ import { retainedBallotRecords } from '../ballot/ballot.js';
 import type { CloseSession } from '../close/close-custody.js';
 import {
     completedCloseRecords,
+    generationOf,
     restoreCompletedClose,
 } from '../close/close-custody.js';
 import { discardEvaluation } from '../target-vote/evaluation.js';
@@ -92,9 +93,6 @@ const releaseTarget = (session: ReleaseSession) => {
         throw new Error('No certified target is retained.');
     return session.target;
 };
-
-const generationOf = (session: ReleaseSession) =>
-    session.close.participant.root.head.generation;
 
 // Decodes the retained release state beneath its predecessor. A release that
 // follows the completed close keeps an empty target field. Every listed
@@ -279,7 +277,7 @@ const lockRelease = async (
     session: ReleaseSession,
     ballotInclusion: BallotInclusion,
 ) => {
-    if (generationOf(session) < releasePhase.locked)
+    if (generationOf(session.close) < releasePhase.locked)
         await commitRelease(session, {
             generation: releasePhase.locked,
             state: {
@@ -296,7 +294,7 @@ const lockRelease = async (
                 signature: new Uint8Array(),
             },
         });
-    if (generationOf(session) === releasePhase.locked) {
+    if (generationOf(session.close) === releasePhase.locked) {
         const { state } = session;
         if (state === undefined)
             throw new Error('No locked release is retained.');
@@ -471,7 +469,7 @@ export const advanceRelease = async (
     };
     await establishReleaseContext(context, close.records.position);
     await lockRelease(session, ballotInclusion);
-    if (generationOf(session) === releasePhase.ready)
+    if (generationOf(session.close) === releasePhase.ready)
         await proveRelease(session);
     else await restoreReleaseBody(session);
     await signRelease(session);
@@ -485,7 +483,10 @@ export const publishRelease = async (
     relay: PublicRelay,
 ) => {
     const { state } = session;
-    if (state === undefined || generationOf(session) < releasePhase.signed)
+    if (
+        state === undefined ||
+        generationOf(session.close) < releasePhase.signed
+    )
         return;
     const { context, root } = session.close.participant;
     const delivery = await openDelivery(context, root, {

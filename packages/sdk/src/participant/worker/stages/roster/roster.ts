@@ -25,6 +25,7 @@ import {
     equalBytes,
     fromHexadecimal,
     hexadecimal,
+    isDigest,
     readUnsigned32,
     tupleFields,
     unsigned16,
@@ -213,9 +214,7 @@ export const validRegistrationBodyDigests = (
     registrationBodyDigests.length >= limits.participants.minimum &&
     registrationBodyDigests.length <= limits.participants.maximum &&
     new Set(registrationBodyDigests).size === registrationBodyDigests.length &&
-    registrationBodyDigests.every((registrationBodyDigest) =>
-        /^[0-9a-f]{128}$/u.test(registrationBodyDigest),
-    );
+    registrationBodyDigests.every(isDigest);
 
 export type VerifiedProposal = Readonly<{
     body: Uint8Array;
@@ -611,14 +610,7 @@ export const retainedProfile = async (
 };
 
 export const parseRegistrationBodyDigests = (value: unknown): string[] => {
-    if (
-        !Array.isArray(value) ||
-        !value.every(
-            (registrationBodyDigest) =>
-                typeof registrationBodyDigest === 'string' &&
-                /^[0-9a-f]{128}$/u.test(registrationBodyDigest),
-        )
-    )
+    if (!Array.isArray(value) || !value.every(isDigest))
         throw new InvalidRequest('Malformed proposed record identifiers.');
-    return value as string[];
+    return value;
 };

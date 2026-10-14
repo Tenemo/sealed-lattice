@@ -29,7 +29,7 @@ import { PublicInputFailure, StorageFailure } from '../../shared/failures.js';
 import {
     addParticipantRecords,
     awaitLater,
-    estimateStorage,
+    hasStorageRoom,
     readParticipantValue,
     recordBytes,
 } from '../../storage/database.js';
@@ -218,7 +218,6 @@ const proverRun = (session: ContributionSession, statement: boolean) => {
         phase: () => module.contribution_proof_phase(),
         objects: () => lengths.size,
         emitted: () => emitted,
-        randomBytes: randomness.drawn,
         close: () => {
             handlers.contribution = undefined;
             for (const record of pending) record.bytes.fill(0);
@@ -238,12 +237,10 @@ export const beginContribution = async (
         context.position >= context.profile.eligibleContributorCount
     )
         throw new Error('No confirmed roster awaits an eligible offer.');
-    const estimate = await estimateStorage();
     if (
-        estimate.quota === undefined ||
-        estimate.usage === undefined ||
-        estimate.quota - estimate.usage <
-            context.profile.contribution.requiredStorageBytes
+        !(await hasStorageRoom(
+            context.profile.contribution.requiredStorageBytes,
+        ))
     )
         throw new StorageFailure('The origin lacks room for a contribution.');
     const state: ContributionState = {
@@ -361,7 +358,6 @@ export const generateContribution = async (session: ContributionSession) => {
         },
         staged: true,
     });
-    return run.randomBytes();
 };
 
 // Resumes the checkpointed prover in a new instance. Each recipient key comes
@@ -582,5 +578,4 @@ export const continueContribution = async (session: ContributionSession) => {
         staged: true,
         clearCheckpoint: true,
     });
-    return run.randomBytes();
 };

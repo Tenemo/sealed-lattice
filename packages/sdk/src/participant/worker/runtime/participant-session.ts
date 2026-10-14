@@ -17,7 +17,6 @@ import {
     encodePreparationState,
 } from '../stages/contribution/preparation-state.js';
 import type { PreparationState } from '../stages/contribution/preparation-state.js';
-import type { VerifiedProposal } from '../stages/roster/roster.js';
 import { snapshotParticipant } from '../storage/database.js';
 import { rootGeneration } from '../storage/root-generation.js';
 import type { AuthenticatedRoot } from '../storage/root.js';
@@ -78,7 +77,6 @@ const retainProposal = async (
 export const resumeParticipant = async (
     context: ParticipantProfileContext,
     root: AuthenticatedRoot,
-    verified?: VerifiedProposal,
 ): Promise<ParticipantSession> => {
     const { generation } = root.head;
     const suffix = root.manifest.suffixes.preparation;
@@ -115,10 +113,7 @@ export const resumeParticipant = async (
         snapshot.counts.checkpoint !== (state?.privateRecords.length ?? 0)
     )
         throw new Error('The contribution records changed.');
-    if (verified !== undefined && verified.position !== context.position)
-        throw new Error('The verified proposal moved this participant.');
-    const proposal =
-        verified?.identity ?? (await retainProposal(context, root));
+    const proposal = await retainProposal(context, root);
     if (
         generation >= rootGeneration.preparation &&
         context.module.confirm_roster() !== 0

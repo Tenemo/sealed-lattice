@@ -6,13 +6,16 @@ import {
 import { noParallelHelpers } from '#packages/sdk/src/participant/worker/module/parallel-helpers.js';
 import { instantiateParticipantModule } from '#packages/sdk/src/participant/worker/module/participant-module.js';
 import { readParticipantLimits } from '#packages/sdk/src/participant/worker/module/runtime-bounds.js';
-import { contributionRecords } from '#packages/sdk/src/participant/worker/runtime/participant-session.js';
+import {
+    contributionRecords,
+    isContributionSession,
+    resumeParticipant,
+} from '#packages/sdk/src/participant/worker/runtime/participant-session.js';
 import {
     equalBytes,
     fromHexadecimal,
     hexadecimal,
 } from '#packages/sdk/src/participant/worker/shared/bytes.js';
-import { resumeContribution } from '#packages/sdk/src/participant/worker/stages/contribution/contribution-custody.js';
 import { proofLength } from '#packages/sdk/src/participant/worker/stages/contribution/contribution-proof.js';
 import { encodeContributionState } from '#packages/sdk/src/participant/worker/stages/contribution/contribution-state.js';
 import { encodePreparationState } from '#packages/sdk/src/participant/worker/stages/contribution/preparation-state.js';
@@ -105,7 +108,9 @@ export const mutateParticipantPadding = async (
             context.position >= context.profile.eligibleContributorCount
         )
             throw new Error('The padding control names another participant.');
-        const session = await resumeContribution(context, root);
+        const session = await resumeParticipant(context, root);
+        if (!isContributionSession(session))
+            throw new Error('No own contribution is retained.');
         const state = session.state;
         if (state.phase !== 7)
             throw new Error(

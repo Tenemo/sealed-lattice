@@ -56,13 +56,13 @@ describe('seeded operation randomness', () => {
         }
     });
 
-    it('reports the bytes both streams served and those of the proof stream', () => {
+    it('reports the bytes the proof stream served', () => {
         const { module, drawn } = seededModule();
         const randomness = seededRandomness(module, 'ballot', seed);
-        expect([randomness.drawn(), randomness.proofDrawn()]).toEqual([0, 0]);
+        expect(randomness.proofDrawn()).toBe(0);
         drawn[0] = 53;
         drawn[1] = 31;
-        expect([randomness.drawn(), randomness.proofDrawn()]).toEqual([84, 31]);
+        expect(randomness.proofDrawn()).toBe(31);
     });
 
     it('refuses a missing, short or refused seed', () => {
