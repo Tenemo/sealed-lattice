@@ -109,11 +109,10 @@ impl ContributionOfferVerifier {
             .contribution_role(offer.envelope().position())
             .map_err(|_| Refusal::Context)?;
         let body = ContributionBodyHasher::new(profile, body_header).map_err(|_| Refusal::Shape)?;
-        // This declared value is not trusted: the underlying statement stream
-        // recomputes it from fixed predecessors and every supplied polynomial.
-        let declared_statement = proof_header[4..68].try_into().map_err(|_| Refusal::Shape)?;
-        let mut verifier = verifier(profile, &role, declared_statement, proof_header)
-            .map_err(|_| Refusal::Proof)?;
+        // The statement digest the proof declares is not trusted: the
+        // statement stream recomputes it from fixed predecessors and every
+        // supplied polynomial.
+        let mut verifier = verifier(profile, &role, proof_header).map_err(|_| Refusal::Proof)?;
         verifier
             .push_statement(&profile.setup_statement_header())
             .map_err(|_| Refusal::Statement)?;

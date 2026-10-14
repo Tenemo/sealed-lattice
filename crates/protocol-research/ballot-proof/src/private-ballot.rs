@@ -30,13 +30,8 @@ fn verify_expanded(
         return Err(Error::Encoding);
     }
     let role = private_proof_role(context).map_err(|_| Error::Context)?;
-    let mut verifier = crate::verifier(
-        profile,
-        &role,
-        public.digest(),
-        &proof[..PROOF_HEADER_BYTES],
-    )
-    .map_err(|_| Error::Proof)?;
+    let mut verifier =
+        crate::verifier(profile, &role, &proof[..PROOF_HEADER_BYTES]).map_err(|_| Error::Proof)?;
     verifier
         .push_statement(&public.header)
         .map_err(|_| Error::Proof)?;

@@ -35,8 +35,9 @@ import {
 // description: its header, the salted wide verifier-message chain, the
 // salted Merkle openings of every stage, the combined rational word at
 // every queried point, and each fold down to the terminal constant. The
-// statement parser is an input: it receives the affine challenge and the
-// queried positions, consumes the statement, and yields the affine operator
+// statement parser is an input: it receives the statement digest the
+// header declares, the affine challenge and the queried positions, consumes
+// the statement, which must have that digest, and yields the affine operator
 // at those positions. A small-domain reference prover exercises the same
 // grammar with honest and hostile proofs.
 
@@ -44,12 +45,12 @@ export type WordProofInput = Readonly<{
     relation: WordRelation;
     domain: WordProofDomain;
     role: Uint8Array;
-    expectedStatement: Uint8Array;
     header: Uint8Array;
     // The statement's complete public input, in chunks.
     statement: Iterable<Uint8Array>;
     // Undefined when the parser refuses the challenge or positions.
     openStatement: (
+        statement: Uint8Array,
         affine: Extension,
         positions: readonly number[],
     ) => WordStatementParser | undefined;
@@ -79,8 +80,6 @@ const verifyStages = (input: WordProofInput) => {
     if (role.length === 0 || role.length > 1024)
         throw new Refused('Context', 'open');
     const header = parseHeader(input.header, relation.magic, domain);
-    if (!header.statement.equals(Buffer.from(input.expectedStatement)))
-        throw new Refused('Context', 'open');
     const shape = wordRelationShape(relation, domain);
     const challenges = deriveWordProofChallenges(
         relation,
@@ -92,7 +91,11 @@ const verifyStages = (input: WordProofInput) => {
         challenges.queries,
         domain.domain,
     );
-    const parser = input.openStatement(challenges.affine, firstPositions);
+    const parser = input.openStatement(
+        header.statement,
+        challenges.affine,
+        firstPositions,
+    );
     if (parser === undefined) throw new Refused('Context', 'open');
     const context = contextHash(relation, domain, role);
     for (const chunk of input.statement) {

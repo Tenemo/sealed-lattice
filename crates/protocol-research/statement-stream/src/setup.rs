@@ -740,7 +740,6 @@ pub fn prover_operator_plan(profile: Profile, alpha: Element) -> Result<ProverOp
 // Arithmetic output for one fully parsed statement. This is not setup proof
 // acceptance and cannot create a voting capability.
 pub struct StatementOutput {
-    pub statement_digest: [u8; 64],
     pub target: Element,
     pub lookup_weight: Element,
     pub coefficients: Vec<Element>,
@@ -876,7 +875,6 @@ impl SetupStatementStream {
         let mut accumulator = self.accumulator.ok_or(Error::Incomplete)?;
         accumulator.settle()?;
         Ok(StatementOutput {
-            statement_digest: digest,
             target: accumulator.target,
             lookup_weight: accumulator.weight,
             coefficients: accumulator.coefficients,

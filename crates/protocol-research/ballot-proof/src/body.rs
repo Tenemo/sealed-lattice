@@ -271,11 +271,10 @@ impl BallotBodyRelationVerifier {
     fn initialize_proof(&mut self) -> Result<(), Error> {
         let inputs = self.inputs.clone().ok_or(Error::Stage)?;
         let ciphertexts = std::mem::take(&mut self.ciphertexts);
-        // The proof's declared statement digest: the statement stream
-        // recomputes it from the statement below and refuses a mismatch.
-        let statement = self.proof_prefix[4..68].try_into().unwrap();
-        let mut verifier = verifier(self.profile, &self.role, statement, &self.proof_prefix)
-            .map_err(|_| Error::Context)?;
+        // The statement stream recomputes the statement digest the proof
+        // declares from the statement below and refuses a mismatch.
+        let mut verifier =
+            verifier(self.profile, &self.role, &self.proof_prefix).map_err(|_| Error::Context)?;
         verifier
             .push_statement(&self.statement_header)
             .map_err(|_| Error::Context)?;

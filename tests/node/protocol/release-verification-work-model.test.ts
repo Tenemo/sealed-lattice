@@ -12,13 +12,13 @@ describe('public release verification work', () => {
     it('counts full retry work without counting replay as a new proof oracle point', () => {
         const result = compileReleaseVerificationWorkload(attempts(3n, 2n, 1n));
         // The emitted verifier has seventeen folds: twenty rounds plus the
-        // final verifier message, one context, two plain digests and one body.
+        // final verifier message, one context, one plain digest and one body.
         expect(result.perAttempt.minimumProofCoreQueries).toBe(
             21n + 20n + 20n + 1n,
         );
-        expect(result.perAttempt.minimumKnownHashCalls).toBe(65n);
-        expect(result.totals.minimumKnownHashCalls).toBe(390n);
-        expect(result.totals.plainStatementDigestPasses).toBe(12n);
+        expect(result.perAttempt.minimumKnownHashCalls).toBe(64n);
+        expect(result.totals.minimumKnownHashCalls).toBe(384n);
+        expect(result.totals.plainStatementDigestPasses).toBe(6n);
         expect(result.totals.completedBodyDigestPasses).toBe(6n);
         expect(result.totals.envelopeVerificationCalls).toBe(6n);
         expect(result.totals.commonPolynomialCalls).toBe(6n);
@@ -68,7 +68,7 @@ describe('public release verification work', () => {
         );
         const count = 1n << 80n;
         const large = compileReleaseVerificationWorkload(attempts(count));
-        expect(large.totals.minimumKnownHashCalls).toBe(65n * count);
+        expect(large.totals.minimumKnownHashCalls).toBe(64n * count);
         expect(large.lifetimeAttemptLimit).toBeNull();
     });
 

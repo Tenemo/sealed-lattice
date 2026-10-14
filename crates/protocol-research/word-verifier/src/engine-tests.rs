@@ -16,13 +16,12 @@ impl Statement for Refused {
         None
     }
 }
-fn open(role: &[u8], statement: [u8; 64], bytes: &[u8]) -> Result<Verifier<Refused>, Refusal> {
+fn open(role: &[u8], bytes: &[u8]) -> Result<Verifier<Refused>, Refusal> {
     Verifier::open(
         ballot_relation(Profile::new(3, 2).unwrap()),
         role,
-        statement,
         bytes,
-        |_, _| Some(Refused),
+        |_, _, _| Some(Refused),
     )
 }
 fn header() -> Vec<u8> {
@@ -34,36 +33,41 @@ fn header() -> Vec<u8> {
 fn malformed_headers_and_unfinished_streams_cannot_verify() {
     assert_eq!(HEADER_LENGTH, PROOF_HEADER_BYTES);
     let bytes = header();
-    assert!(open(b"role", [0; 64], &bytes).is_ok());
-    assert!(!open(b"role", [0; 64], &bytes).unwrap().finish());
-    assert!(open(b"", [0; 64], &bytes).is_err());
-    assert!(open(b"role", [1; 64], &bytes).is_err());
-    assert!(open(b"role", [0; 64], &bytes[..HEADER_LENGTH - 1]).is_err());
+    assert!(open(b"role", &bytes).is_ok());
+    assert!(!open(b"role", &bytes).unwrap().finish());
+    assert!(open(b"", &bytes).is_err());
+    // The statement parser receives the digest the header declares, which
+    // it must recompute.
+    let mut declared = bytes.clone();
+    declared[4..68].fill(7);
+    assert!(
+        Verifier::open(
+            ballot_relation(Profile::new(3, 2).unwrap()),
+            b"role",
+            &declared,
+            |statement, _, _| (statement == [7; 64]).then_some(Refused),
+        )
+        .is_ok()
+    );
+    assert!(open(b"role", &bytes[..HEADER_LENGTH - 1]).is_err());
     let mut other = bytes.clone();
     other[..4].copy_from_slice(b"SWP3");
-    assert!(matches!(
-        open(b"role", [0; 64], &other),
-        Err(Refusal::Encoding)
-    ));
+    assert!(matches!(open(b"role", &other), Err(Refusal::Encoding)));
     assert!(matches!(
         Verifier::<Refused>::open(
             ballot_relation(Profile::new(3, 2).unwrap()),
             b"role",
-            [0; 64],
             &bytes,
-            |_, _| { None }
+            |_, _, _| { None }
         ),
         Err(Refusal::Context)
     ));
     for offset in [324, HEADER_LENGTH - 48] {
         let mut changed = bytes.clone();
         changed[offset..offset + 16].copy_from_slice(&MODULUS.to_le_bytes());
-        assert!(matches!(
-            open(b"role", [0; 64], &changed),
-            Err(Refusal::Encoding)
-        ));
+        assert!(matches!(open(b"role", &changed), Err(Refusal::Encoding)));
     }
-    let mut verifier = open(b"role", [0; 64], &bytes).unwrap();
+    let mut verifier = open(b"role", &bytes).unwrap();
     assert!(matches!(verifier.push_proof(&[0]), Err(Refusal::Stage)));
     assert!(matches!(
         verifier.push_statement(&[0]),

@@ -263,7 +263,6 @@ impl<B: OperatorBuilder> HeaderThenPolynomials<B> {
             .at_queries(B::columns(self.profile), &self.queries)
             .map_err(|_| Error::Arithmetic)?;
         Ok(StatementOutput {
-            statement_digest: self.expected,
             target,
             lookup_weight,
             coefficients,

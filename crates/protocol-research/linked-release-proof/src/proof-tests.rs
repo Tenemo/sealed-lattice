@@ -14,8 +14,7 @@ use std::cell::RefCell;
 use supported_profile::{DEGREE, Profile, RECIPIENT_SECRET_SUPPORT, SHARE_SCALE};
 
 fn verify(profile: Profile, role: &[u8], statement: &PublicStatement, proof: &[u8]) -> bool {
-    let Ok(mut verifier) = verifier(profile, role, statement.digest(), &proof[..HEADER_LENGTH])
-    else {
+    let Ok(mut verifier) = verifier(profile, role, &proof[..HEADER_LENGTH]) else {
         return false;
     };
     for part in std::iter::once(&statement.header).chain(&statement.polynomials) {

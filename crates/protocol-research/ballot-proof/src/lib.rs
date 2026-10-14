@@ -15,18 +15,12 @@ use word_verifier::engine;
 pub use word_verifier::engine::{CHUNK_LIMIT, HEADER_LENGTH, Refusal};
 
 pub type Verifier = engine::Verifier<StatementStream>;
-/// Verifies one profile's ballot proof against its expected statement.
-pub fn verifier(
-    profile: Profile,
-    role: &[u8],
-    expected_statement: [u8; 64],
-    proof_header: &[u8],
-) -> Result<Verifier, Refusal> {
+/// Verifies one profile's ballot proof.
+pub fn verifier(profile: Profile, role: &[u8], proof_header: &[u8]) -> Result<Verifier, Refusal> {
     Verifier::open(
         ballot_relation(profile),
         role,
-        expected_statement,
         proof_header,
-        |alpha, queries| StatementStream::new(profile, expected_statement, alpha, queries).ok(),
+        |statement, alpha, queries| StatementStream::new(profile, statement, alpha, queries).ok(),
     )
 }

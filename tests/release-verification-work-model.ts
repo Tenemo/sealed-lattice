@@ -31,9 +31,9 @@ export const compileReleaseVerificationWorkload = (
             proof.contextQueries,
     );
     const maximumProofCoreQueries = BigInt(proof.maximumCoreQueries);
-    // The caller computes the raw statement digest and StatementStream checks
-    // it independently. The role-bound context hash is already in the core.
-    const plainStatementDigestPasses = 2n;
+    // The statement stream recomputes the raw statement digest the proof
+    // declares. The role-bound context hash is already in the core.
+    const plainStatementDigestPasses = 1n;
     const completedBodyDigestPasses = 1n;
     // Every attempt's calls are oracle calls of the experiment, which the
     // query cap bounds together with the adversary's.

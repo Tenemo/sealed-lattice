@@ -103,28 +103,25 @@ pub struct Verifier<S> {
     complete: bool,
 }
 impl<S: Statement> Verifier<S> {
-    /// Opens a proof of the relation against its expected statement. The
-    /// statement parser opens only after the proof header fixes its
-    /// challenges.
+    /// Opens a proof of the relation. The statement parser opens only after
+    /// the proof header fixes its challenges, and must recompute the
+    /// statement digest the header declares.
     pub fn open(
         relation: Relation,
         role: &[u8],
-        expected_statement: [u8; 64],
         proof_header: &[u8],
-        open_statement: impl FnOnce(Element, &[u32]) -> Option<S>,
+        open_statement: impl FnOnce([u8; 64], Element, &[u32]) -> Option<S>,
     ) -> Result<Self, Refusal> {
         if role.is_empty() || role.len() > 1024 {
             return Err(Refusal::Context);
         }
         let header = Header::parse(proof_header, relation.proof_magic)?;
-        if header.statement != expected_statement {
-            return Err(Refusal::Context);
-        }
         let shape = Shape::new(&relation);
         let challenges = challenges(&shape, role, &header);
         let indices = requested(&challenges.queries, EVALUATION_DOMAIN_SIZE);
         let selected: Vec<u32> = indices.iter().map(|index| *index as u32).collect();
-        let statement = open_statement(challenges.alpha, &selected).ok_or(Refusal::Context)?;
+        let statement = open_statement(header.statement, challenges.alpha, &selected)
+            .ok_or(Refusal::Context)?;
         let mut context_hash = HashStream::new(Sponge::ProtocolHash);
         stream_part(&mut context_hash, b"bounded-proof/statement");
         for value in [

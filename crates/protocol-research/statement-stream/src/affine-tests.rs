@@ -147,7 +147,6 @@ fn header_then_polynomials_takes_exactly_the_declared_statement() {
     };
     for part in [1, 3, statement.len()] {
         let output = output(&statement, part).unwrap();
-        assert_eq!(output.statement_digest, digest(&statement));
         assert_eq!(output.coefficients, vec![fingerprint(&statement[2..10]); 3]);
         assert_eq!(output.target, fingerprint(&statement[10..]));
     }

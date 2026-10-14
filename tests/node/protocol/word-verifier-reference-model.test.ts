@@ -162,8 +162,9 @@ const toyOperator = (affine: Extension, targets: bigint[], support: bigint) => {
     };
 };
 // The verifier's parser of the toy statement: it refuses bytes beyond the
-// statement, then a wrong length, magic or noncanonical field word.
+// statement, then a wrong length, magic, noncanonical field word or digest.
 const toyParser = (
+    statement: Uint8Array,
     affine: Extension,
     positions: readonly number[],
 ): WordStatementParser => {
@@ -179,7 +180,8 @@ const toyParser = (
             const bytes = Buffer.concat(received);
             if (
                 bytes.length !== statementBytes ||
-                !bytes.subarray(0, 4).equals(statementMagic)
+                !bytes.subarray(0, 4).equals(statementMagic) ||
+                !createHash('sha3-512').update(bytes).digest().equals(statement)
             )
                 return undefined;
             const words = Array.from(
@@ -239,7 +241,6 @@ const verify = (proof: ToyProof, overrides: Partial<WordProofInput> = {}) =>
         relation,
         domain,
         role,
-        expectedStatement: proof.digest,
         header: proof.header,
         statement: chunks(proof.statement, 101),
         openStatement: toyParser,
@@ -413,14 +414,12 @@ describe('reference word verifier', () => {
                     ),
                 }),
             ).toEqual(refused('Encoding', 'open'));
+        // The parser recomputes the statement digest the header declares.
         expect(
             verify(proof, {
-                expectedStatement: changed(
-                    proof.digest,
-                    (copy) => (copy[0] ^= 1),
-                ),
+                header: changed(proof.header, (copy) => (copy[4] ^= 1)),
             }),
-        ).toEqual(refused('Context', 'open'));
+        ).toEqual(refused('Encoding', 'statement'));
         expect(verify(proof, { openStatement: () => undefined })).toEqual(
             refused('Context', 'open'),
         );

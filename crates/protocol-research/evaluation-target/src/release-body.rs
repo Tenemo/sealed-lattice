@@ -118,7 +118,6 @@ impl ReleaseBodyVerifier {
                 let mut verifier = verifier(
                     self.context.profile(),
                     &self.context.proof_role()?,
-                    statement.digest(),
                     &self.proof_prefix,
                 )
                 .map_err(|_| Error::Proof)?;

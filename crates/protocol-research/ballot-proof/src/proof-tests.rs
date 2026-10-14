@@ -34,8 +34,7 @@ fn serve(purpose: Purpose, bytes: &mut [u8]) -> bool {
 }
 
 fn verify(profile: Profile, role: &[u8], statement: &PublicStatement, proof: &[u8]) -> bool {
-    let Ok(mut verifier) = verifier(profile, role, statement.digest(), &proof[..HEADER_LENGTH])
-    else {
+    let Ok(mut verifier) = verifier(profile, role, &proof[..HEADER_LENGTH]) else {
         return false;
     };
     for part in std::iter::once(&statement.header).chain(&statement.polynomials) {

@@ -26,19 +26,13 @@ impl<B: OperatorBuilder> engine::Statement for HeaderThenPolynomials<B> {
 
 pub type Verifier = engine::Verifier<SetupStatementStream>;
 /// Verifies a complete setup contribution proof of one profile.
-pub fn verifier(
-    profile: Profile,
-    role: &[u8],
-    expected_statement: [u8; 64],
-    proof_header: &[u8],
-) -> Result<Verifier, Refusal> {
+pub fn verifier(profile: Profile, role: &[u8], proof_header: &[u8]) -> Result<Verifier, Refusal> {
     Verifier::open(
         setup_relation(profile),
         role,
-        expected_statement,
         proof_header,
-        |alpha, queries| {
-            SetupStatementStream::new(profile, expected_statement, alpha, queries).ok()
+        |statement, alpha, queries| {
+            SetupStatementStream::new(profile, statement, alpha, queries).ok()
         },
     )
 }
