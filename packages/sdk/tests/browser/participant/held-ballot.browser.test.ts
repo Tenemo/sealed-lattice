@@ -12,18 +12,22 @@ import {
 } from '#packages/sdk/src/participant/worker/module/runtime-bounds.js';
 import { ballotRecordAssociatedData } from '#packages/sdk/src/participant/worker/stages/ballot/ballot-state.js';
 import type { BallotSession } from '#packages/sdk/src/participant/worker/stages/ballot/ballot.js';
+import { heldBallotBody } from '#packages/sdk/src/participant/worker/stages/close/close-custody.js';
+import type { CloseSession } from '#packages/sdk/src/participant/worker/stages/close/close-custody.js';
 import {
     closeEventKind,
     closeRecordAssociatedData,
     collectingCloseState,
 } from '#packages/sdk/src/participant/worker/stages/close/close-state.js';
-import { heldBallotBody } from '#packages/sdk/src/participant/worker/stages/close/close.js';
-import type { CloseSession } from '#packages/sdk/src/participant/worker/stages/close/close.js';
 import {
     openParticipantDatabase,
     participantDatabaseName,
 } from '#packages/sdk/src/participant/worker/storage/database.js';
 import { sealRecord } from '#packages/sdk/src/participant/worker/storage/private-records.js';
+import {
+    fixtureRequest,
+    writeFixtureStore,
+} from '#packages/sdk/tests/browser-storage.js';
 
 const opened: IDBDatabase[] = [];
 const names: string[] = [];
@@ -43,24 +47,12 @@ const profile = readParticipantProfile(
     2,
 );
 if (profile === undefined) throw new Error('The fixture profile was refused.');
-const requestResult = <Value>(request: IDBRequest<Value>) =>
-    new Promise<Value>((resolve, reject) => {
-        request.onsuccess = () => resolve(request.result);
-        request.onerror = () =>
-            reject(request.error ?? new Error('Fixture read failed.'));
-    });
+
 const write = (
     database: IDBDatabase,
     change: (store: IDBObjectStore) => void,
     storeName: 'close' | 'ballot' = 'close',
-) =>
-    new Promise<void>((resolve, reject) => {
-        const transaction = database.transaction(storeName, 'readwrite');
-        transaction.oncomplete = () => resolve();
-        transaction.onabort = () =>
-            reject(transaction.error ?? new Error('Fixture write failed.'));
-        change(transaction.objectStore(storeName));
-    });
+) => writeFixtureStore(database, storeName, change);
 
 // This isolates ciphertext custody and selection, using real IndexedDB,
 // AES-GCM and the module's envelope identity. The synthetic envelope and body
@@ -77,8 +69,10 @@ const fixture = async (author = 1) => {
     );
     const envelope = new Uint8Array(profile.ballot.envelopeBytes);
     const view = new DataView(envelope.buffer);
-    view.setUint16(132, author, true);
-    view.setBigUint64(142, BigInt(body.length), true);
+    // The poll and setup identities, then the author, ballot time and body
+    // length.
+    view.setUint16(128, author, true);
+    view.setBigUint64(138, BigInt(body.length), true);
     const submission = new Uint8Array(profile.close.submissionBytes);
     submission.set(envelope);
     const { module } = await instantiateParticipantModule(
@@ -141,7 +135,7 @@ const fixture = async (author = 1) => {
 afterEach(async () => {
     for (const database of opened.splice(0)) database.close();
     for (const name of names.splice(0))
-        await requestResult(
+        await fixtureRequest(
             indexedDB.deleteDatabase(participantDatabaseName(name)),
         );
 });

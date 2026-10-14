@@ -11,18 +11,18 @@ import {
 
 const fixture = Buffer.from(`
 globalThis.run = async (command) => {
-    const delivered = await deliverModule(command);
+    const delivered = await fetchModule(command);
     const module = await WebAssembly.compile(delivered.bytes);
     const evaluation = evaluatingOperations.has(command.operation);
     return { module, evaluation };
 };
 globalThis.verify = async () => {
-    const delivered = await deliverModule({ module: 'honest' });
+    const delivered = await fetchModule({ module: 'honest' });
     return await WebAssembly.compile(delivered.bytes);
 };`);
 
 describe('corrupt participant module selection', () => {
-    it('patches the built operation path while preserving the standalone verifier', async () => {
+    it('patches the built operation path while preserving the outcome verifier', async () => {
         const source = await readFile(
             path.resolve('packages/sdk/dist/participant-worker.js'),
         );
@@ -41,56 +41,78 @@ describe('corrupt participant module selection', () => {
         ).toHaveLength(1);
     });
 
-    it('checks the honest delivery first and compiles only the corrupt operation from the fixture path', async () => {
-        const events: string[] = [];
-        const honest = Uint8Array.of(1, 2, 3);
-        const corrupt = Uint8Array.of(4, 5, 6);
-        const context = {
-            location: { origin: 'https://participant.test' },
-            evaluatingOperations: new Set(['sign-target']),
-            deliverModule: () => {
-                events.push('honest delivery and runtime identity');
-                return { bytes: honest, runtime: 'runtime' };
-            },
-            fetch: (url: string) => {
-                expect(url).toBe(
-                    'https://participant.test/' + invalidBallotModulePath,
-                );
-                events.push('corrupt delivery');
-                return { arrayBuffer: () => corrupt.buffer };
-            },
-            WebAssembly: {
-                compile: (bytes: ArrayBuffer | Uint8Array) => {
-                    const values = Array.from(new Uint8Array(bytes));
-                    events.push('compile ' + values.join(','));
-                    return values;
+    it.each([
+        fixture,
+        Buffer.from(
+            fixture
+                .toString('utf8')
+                .split('await WebAssembly.compile(delivered.bytes)')
+                .join(
+                    'await /* checked delivery */ WebAssembly . compile( delivered . bytes )',
+                ),
+        ),
+        Buffer.from(
+            'const documentation = ' +
+                JSON.stringify(fixture.toString('utf8')) +
+                ';\n' +
+                fixture.toString('utf8'),
+        ),
+    ])(
+        'checks honest delivery first and preserves verification despite formatting and lookalikes',
+        async (workerSource) => {
+            const events: string[] = [];
+            const honest = Uint8Array.of(1, 2, 3);
+            const corrupt = Uint8Array.of(4, 5, 6);
+            const context = {
+                location: { origin: 'https://participant.test' },
+                evaluatingOperations: new Set(['sign-target']),
+                fetchModule: () => {
+                    events.push('honest delivery and runtime identity');
+                    return { bytes: honest, runtime: 'runtime' };
                 },
-            },
-            run: undefined as
-                | ((command: unknown) => Promise<{ module: number[] }>)
-                | undefined,
-            verify: undefined as (() => Promise<number[]>) | undefined,
-        };
-        runInNewContext(invalidBallotWorker(fixture).toString('utf8'), context);
-        expect(
-            await context.run!({
-                module: 'honest',
-                identity: { module: 'digest' },
-                operation: 'cast-ballot',
-            }),
-        ).toEqual({ module: [4, 5, 6], evaluation: false });
-        expect(events).toEqual([
-            'honest delivery and runtime identity',
-            'corrupt delivery',
-            'compile 4,5,6',
-        ]);
-        events.length = 0;
-        expect(await context.verify!()).toEqual([1, 2, 3]);
-        expect(events).toEqual([
-            'honest delivery and runtime identity',
-            'compile 1,2,3',
-        ]);
-    });
+                fetch: (url: string) => {
+                    expect(url).toBe(
+                        'https://participant.test/' + invalidBallotModulePath,
+                    );
+                    events.push('corrupt delivery');
+                    return { arrayBuffer: () => corrupt.buffer };
+                },
+                WebAssembly: {
+                    compile: (bytes: ArrayBuffer | Uint8Array) => {
+                        const values = Array.from(new Uint8Array(bytes));
+                        events.push('compile ' + values.join(','));
+                        return values;
+                    },
+                },
+                run: undefined as
+                    | ((command: unknown) => Promise<{ module: number[] }>)
+                    | undefined,
+                verify: undefined as (() => Promise<number[]>) | undefined,
+            };
+            runInNewContext(
+                invalidBallotWorker(workerSource).toString('utf8'),
+                context,
+            );
+            expect(
+                await context.run!({
+                    module: 'honest',
+                    identity: { module: 'digest' },
+                    operation: 'cast-ballot',
+                }),
+            ).toEqual({ module: [4, 5, 6], evaluation: false });
+            expect(events).toEqual([
+                'honest delivery and runtime identity',
+                'corrupt delivery',
+                'compile 4,5,6',
+            ]);
+            events.length = 0;
+            expect(await context.verify!()).toEqual([1, 2, 3]);
+            expect(events).toEqual([
+                'honest delivery and runtime identity',
+                'compile 1,2,3',
+            ]);
+        },
+    );
 
     it('refuses an absent or ambiguous participant compilation', () => {
         for (const source of [

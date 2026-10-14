@@ -5,11 +5,13 @@ import { sourceOpeningSaltBytes } from '#tests/registration-setup-binding-model.
 import { compileSetupSelectionCensus } from '#tests/setup-selection-model.js';
 import type { SupportedProfile } from '#tests/supported-profile-model.js';
 
-const contributionBodyHeaderBytes = 4n + 8n + sourceOpeningSaltBytes;
-const bodyDomain = Buffer.from('sealed-lattice/contribution-body/v1', 'ascii');
+// The complete proof length and the source opening salt.
+const contributionBodyHeaderBytes = 8n + sourceOpeningSaltBytes;
+const bodyDomain = Buffer.from('sealed-lattice/contribution-body', 'ascii');
 
 // Ordinary body-hash framing; the source-opening salt is already inside
-// SCB2. This calculation creates no contribution verifier capability.
+// the body header. This calculation creates no contribution verifier
+// capability.
 export const contributionBodyHashPrefix = (bodyBytes: number) => {
     if (
         !Number.isSafeInteger(bodyBytes) ||
@@ -17,17 +19,16 @@ export const contributionBodyHashPrefix = (bodyBytes: number) => {
         bodyBytes > 0xffff_fffb
     )
         throw new RangeError('Invalid contribution body length.');
-    const prefix = Buffer.alloc(8 + 2 * 6 + 4 + bodyDomain.length + 4);
+    const prefix = Buffer.alloc(6 + 2 * 6 + 4 + bodyDomain.length + 4);
     prefix.writeUInt16LE(1, 0);
-    prefix.writeUInt16LE(1, 2);
-    prefix.writeUInt32LE(2, 4);
-    prefix.writeUInt16LE(2, 8);
-    prefix.writeUInt32LE(4 + bodyDomain.length, 10);
-    prefix.writeUInt32LE(bodyDomain.length, 14);
-    bodyDomain.copy(prefix, 18);
-    prefix.writeUInt16LE(1, 18 + bodyDomain.length);
-    prefix.writeUInt32LE(4 + bodyBytes, 20 + bodyDomain.length);
-    prefix.writeUInt32LE(bodyBytes, 24 + bodyDomain.length);
+    prefix.writeUInt32LE(2, 2);
+    prefix.writeUInt16LE(2, 6);
+    prefix.writeUInt32LE(4 + bodyDomain.length, 8);
+    prefix.writeUInt32LE(bodyDomain.length, 12);
+    bodyDomain.copy(prefix, 16);
+    prefix.writeUInt16LE(1, 16 + bodyDomain.length);
+    prefix.writeUInt32LE(4 + bodyBytes, 18 + bodyDomain.length);
+    prefix.writeUInt32LE(bodyBytes, 22 + bodyDomain.length);
     return prefix;
 };
 
@@ -82,7 +83,7 @@ export const compileContributionBodyCensus = (profile: SupportedProfile) => {
     );
     const maximumBodyBytes =
         headerBytes + polynomialPayloadBytes + proof.maximumMultiproofBytes;
-    const hashPrefixBytes = 8n + 2n * 6n + 4n + BigInt(bodyDomain.length) + 4n;
+    const hashPrefixBytes = 6n + 2n * 6n + 4n + BigInt(bodyDomain.length) + 4n;
     const minimumHashInputBytes =
         hashPrefixBytes +
         headerBytes +
@@ -97,7 +98,7 @@ export const compileContributionBodyCensus = (profile: SupportedProfile) => {
     return {
         participantCount,
         setupContributorCount: profile.setupContributorCount,
-        eligibleContributorCount: selection.eligibleCount,
+        eligibleContributorCount: selection.eligibleContributorCount,
         polynomials,
         headerBytes,
         polynomialPayloadBytes,
@@ -117,6 +118,6 @@ export const compileContributionBodyCensus = (profile: SupportedProfile) => {
         maximumSelectedContributionBodies:
             BigInt(profile.setupContributorCount) * maximumBodyBytes,
         maximumEligibleOfferBodies:
-            BigInt(selection.eligibleCount) * maximumBodyBytes,
+            BigInt(selection.eligibleContributorCount) * maximumBodyBytes,
     };
 };

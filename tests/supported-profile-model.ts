@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 
+import { bitLength } from '#tests/exact-integer.js';
 import {
     createFixedModulusBfvNoiseModel,
     deriveFloodedRelease,
@@ -9,7 +10,7 @@ import { evaluateFixedModulusBfvRanking } from '#tests/fixed-modulus-bfv-ranking
 import { deriveReleaseShareLiftingLayout } from '#tests/release-share-lifting-model.js';
 import {
     compileSupportedThresholdCompletionProfiles,
-    compileThresholdCompletionProfile,
+    thresholdProfileFor,
 } from '#tests/threshold-completion-model.js';
 import { deriveWideShareLiftingLayout } from '#tests/wide-share-lifting-model.js';
 
@@ -27,21 +28,6 @@ export const supportedProfileRules = {
     prothWitnessLimit: 256n,
 } as const;
 
-const thresholdProfiles = new Map<
-    number,
-    ReturnType<typeof compileThresholdCompletionProfile>
->();
-const thresholdsFor = (participantCount: number) => {
-    let profile = thresholdProfiles.get(participantCount);
-    if (profile === undefined) {
-        profile = compileThresholdCompletionProfile(participantCount);
-        thresholdProfiles.set(participantCount, profile);
-    }
-    return profile;
-};
-
-const bitLength = (value: bigint): number =>
-    value <= 0n ? 0 : value.toString(2).length;
 const ceilingPowerOfTwoExponent = (value: number): number => {
     let exponent = 0;
     while (2 ** exponent < value) exponent++;
@@ -189,7 +175,7 @@ export const clearedReconstructionCoefficient = (
     member: number,
 ): RingElement => {
     const releaseThreshold =
-        thresholdsFor(participantCount).resultReleaseThreshold;
+        thresholdProfileFor(participantCount).resultReleaseThreshold;
     assert.equal(subset.length, releaseThreshold);
     assert.ok(subset.includes(member));
     const degree = interpolationRingDegree(participantCount);
@@ -221,7 +207,7 @@ const interpolations = new Map<
 
 const computeReleaseInterpolation = (participantCount: number) => {
     const releaseThreshold =
-        thresholdsFor(participantCount).resultReleaseThreshold;
+        thresholdProfileFor(participantCount).resultReleaseThreshold;
     const degree = interpolationRingDegree(participantCount);
     const period = 2 * degree;
     // Every subset has a translate inside the roster that contains position
@@ -370,8 +356,8 @@ export const deriveRankingNoise = (
     try {
         const model = createFixedModulusBfvNoiseModel({
             ...fixedModulusBfvInputs,
-            contributorCount: BigInt(
-                thresholdsFor(participantCount).setupContributorCount,
+            setupContributorCount: BigInt(
+                thresholdProfileFor(participantCount).setupContributorCount,
             ),
             ciphertextModulus,
         });
@@ -435,9 +421,9 @@ const shareLiftings = new Map<
 const deriveSupportedShareLifting = (participantCount: number) => {
     let lifting = shareLiftings.get(participantCount);
     if (lifting === undefined) {
-        const thresholds = thresholdsFor(participantCount);
+        const thresholds = thresholdProfileFor(participantCount);
         lifting = deriveWideShareLiftingLayout({
-            contributorCount: BigInt(thresholds.setupContributorCount),
+            setupContributorCount: BigInt(thresholds.setupContributorCount),
             sharingDegree: thresholds.resultReleaseThreshold - 1,
         });
         shareLiftings.set(participantCount, lifting);
@@ -451,7 +437,7 @@ const computeSupportedProfile = (
     participantCount: number,
     optionCount: number,
 ) => {
-    const thresholds = thresholdsFor(participantCount);
+    const thresholds = thresholdProfileFor(participantCount);
     assert.ok(
         Number.isSafeInteger(optionCount) &&
             optionCount >= supportedOptionCounts.minimum &&
@@ -560,6 +546,12 @@ export const supportedProfileRanges = () => {
     };
 };
 
+// The supported profile with the most participants and options.
+export const largestSupportedProfile = () => {
+    const { participants, options } = supportedProfileRanges();
+    return deriveSupportedProfile(participants.maximum, options.maximum);
+};
+
 // Every supported profile, by participant count and then option count.
 export const listSupportedProfiles = (): readonly SupportedProfile[] =>
     supportedParticipantCounts().flatMap((participantCount) =>
@@ -567,6 +559,40 @@ export const listSupportedProfiles = (): readonly SupportedProfile[] =>
             deriveSupportedProfile(participantCount, optionCount),
         ),
     );
+
+// Fills the empty caches with every supported profile, as this model listed
+// them earlier in the same test run, so a test file skips the derivation.
+export const primeSupportedProfiles = (
+    profiles: readonly SupportedProfile[],
+): void => {
+    assert.ok(
+        supportedProfiles.size === 0 &&
+            interpolations.size === 0 &&
+            shareLiftings.size === 0,
+        'Only empty profile caches can be primed.',
+    );
+    assert.deepStrictEqual(
+        profiles.map(({ participantCount, optionCount }) => [
+            participantCount,
+            optionCount,
+        ]),
+        supportedParticipantCounts().flatMap((participantCount) =>
+            supportedOptionCountRange().map((optionCount) => [
+                participantCount,
+                optionCount,
+            ]),
+        ),
+        'The primed profiles differ from the supported profile grid.',
+    );
+    for (const profile of profiles) {
+        supportedProfiles.set(
+            `${profile.participantCount}:${profile.optionCount}`,
+            profile,
+        );
+        interpolations.set(profile.participantCount, profile.interpolation);
+        shareLiftings.set(profile.participantCount, profile.shareLifting);
+    }
+};
 
 // The noise census of one profile's ranking graph and flooded release.
 export const compileProfileBfvCensus = (profile: SupportedProfile) => {

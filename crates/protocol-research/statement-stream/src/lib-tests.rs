@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn cubic_field_uses_the_selected_nonresidue() {
-    assert_ne!(arithmetic::power(2, (MODULUS - 1) / 3), 1);
+    assert_ne!(proof_field::power(2, (MODULUS - 1) / 3), 1);
 }
 
 fn auxiliary_stream() -> PolynomialStream {
@@ -58,7 +58,7 @@ fn refuses_moduli_whose_limbs_exceed_the_column_sum_bound() {
         modulus.push(0);
         assert_eq!(
             check_parameters(&modulus, 2, radix_bits, ZERO),
-            Err(Error::Parameters)
+            Err(Refusal::Parameters)
         );
     }
     let magnitude = vec![0xff; 8_704];
@@ -75,18 +75,19 @@ fn refuses_moduli_whose_limbs_exceed_the_column_sum_bound() {
 }
 
 #[test]
-fn rejects_partial_records_and_forbidden_lengths_without_output() {
+fn refuses_partial_records_and_forbidden_lengths_without_output() {
     let mut stream = auxiliary_stream();
     stream.push(&[0; 5]).unwrap();
-    assert_eq!(stream.finish_value(), Err(Error::Incomplete));
+    assert_eq!(stream.finish_value(), Err(Refusal::Incomplete));
     let mut stream = auxiliary_stream();
-    assert_eq!(stream.push(&vec![0; CHUNK_LIMIT + 1]), Err(Error::Length));
-    assert_eq!(stream.push(&[]), Err(Error::Encoding));
-    assert_eq!(stream.finish_value(), Err(Error::Encoding));
+    assert_eq!(stream.push(&vec![0; CHUNK_LIMIT + 1]), Err(Refusal::Length));
+    assert_eq!(stream.push(&[]), Err(Refusal::Encoding));
+    assert_eq!(stream.finish_value(), Err(Refusal::Encoding));
 }
 
 #[test]
 fn record_runs_and_their_jobs_match_one_stream() {
+    use num_bigint::{BigInt, Sign};
     use supported_profile::{DEGREE, FHE_LIMB_BITS, Family, Profile};
     // The widest full-degree records span several runs, and parts of
     // 1,000 bytes split them.
@@ -95,7 +96,10 @@ fn record_runs_and_their_jobs_match_one_stream() {
         .max_by_key(Vec::len)
         .unwrap();
     let (width, alpha) = (modulus.len() + 1, [17, 37, 91]);
-    let half = half_modulus(&modulus);
+    let mut half = (BigInt::from_bytes_le(Sign::Plus, &modulus) >> 1usize)
+        .to_bytes_le()
+        .1;
+    half.resize(modulus.len(), 0);
     let mut state = 0x9e37_79b9_7f4a_7c15u64;
     let mut bytes = Vec::with_capacity(DEGREE * width);
     for index in 0..DEGREE {
@@ -167,7 +171,7 @@ fn record_runs_and_their_jobs_match_one_stream() {
     };
     assert_eq!(adjoint(total), Ok(expected));
     // Fingerprints whose weighted sum is not the total never close.
-    assert_eq!(adjoint(plus(total, ONE)), Err(Error::Arithmetic));
+    assert_eq!(adjoint(plus(total, ONE)), Err(Refusal::Arithmetic));
     // A run refuses a magnitude beyond half the modulus, a negative zero
     // and a sign byte beyond one.
     for (offset, value) in [(width - 1, half[half.len() - 1] + 1), (0, 1), (0, 2)] {
@@ -177,11 +181,11 @@ fn record_runs_and_their_jobs_match_one_stream() {
         let mut records = PolynomialRecords::new(&modulus, DEGREE, FHE_LIMB_BITS, alpha).unwrap();
         assert_eq!(
             records.push(&changed, |_, _, _| Ok(())),
-            Err(Error::Encoding)
+            Err(Refusal::Encoding)
         );
         assert_eq!(
             records.push(&bytes[..width], |_, _, _| Ok(())),
-            Err(Error::Length)
+            Err(Refusal::Length)
         );
     }
 }

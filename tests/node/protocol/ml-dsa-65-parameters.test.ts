@@ -1,13 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-    mlDsa65ChallengeSeedBytes,
+    mlDsa65EncodedSizes,
     mlDsa65Parameters,
+    mlDsa65Sizes,
 } from '#tests/ml-dsa-65-parameters.js';
 
-// FIPS 204 Table 1 bounds the ML-DSA-65 hint weight by omega = 55. No model
-// uses omega, so this test states it.
-const mlDsa65HintWeight = 55n;
 // FIPS 204 Table 2, ML-DSA-65 sizes in bytes.
 const publishedMlDsa65Sizes = {
     publicKeyBytes: 1952n,
@@ -15,44 +13,9 @@ const publishedMlDsa65Sizes = {
     signatureBytes: 3309n,
 };
 
-const bitLength = (value: bigint): bigint => BigInt(value.toString(2).length);
-
-// FIPS 204 Algorithms 22, 24 and 26 output 32 + 32k(bitlen(q-1)-d),
-// 128 + 32((k+l)bitlen(2 eta)+dk) and lambda/4 + 32l(1+bitlen(gamma1-1))
-// + omega + k bytes. Beyond the seeds and the hint, a packed polynomial takes
-// n/8 = 32 bytes per bit of coefficient width.
-const encodedSizes = (parameters: typeof mlDsa65Parameters) => {
-    const polynomialBytes = (coefficientBits: bigint): bigint =>
-        (parameters.polynomialDegree * coefficientBits) / 8n;
-    return {
-        publicKeyBytes:
-            32n +
-            parameters.rowCount *
-                polynomialBytes(
-                    bitLength(parameters.modulus - 1n) -
-                        parameters.roundingBits,
-                ),
-        privateKeyBytes:
-            32n +
-            32n +
-            64n +
-            (parameters.rowCount + parameters.columnCount) *
-                polynomialBytes(
-                    bitLength(2n * parameters.secretCoefficientBound),
-                ) +
-            parameters.rowCount * polynomialBytes(parameters.roundingBits),
-        signatureBytes:
-            mlDsa65ChallengeSeedBytes +
-            parameters.columnCount *
-                polynomialBytes(1n + bitLength(parameters.maskingBound - 1n)) +
-            mlDsa65HintWeight +
-            parameters.rowCount,
-    };
-};
-
 describe('the ML-DSA-65 operand transcription', () => {
     it('reproduces the FIPS 204 Table 2 key and signature sizes', () => {
-        expect(encodedSizes(mlDsa65Parameters)).toEqual(publishedMlDsa65Sizes);
+        expect(mlDsa65Sizes).toEqual(publishedMlDsa65Sizes);
         // The sizes see q only through its bit length and omit tau. FIPS 204
         // section 2.3 states q = 2^23 - 2^13 + 1, and Table 1 states
         // beta = tau*eta = 196 and gamma2 = (q-1)/32.
@@ -66,22 +29,26 @@ describe('the ML-DSA-65 operand transcription', () => {
         );
     });
 
-    it('rejects a mistranscribed operand through the published sizes', () => {
+    it('refuses a mistranscribed operand through the published sizes', () => {
         // gamma1 = 2^17 and eta = 2 are entries of other Table 1 columns.
         expect(
-            encodedSizes({ ...mlDsa65Parameters, maskingBound: 1n << 17n })
-                .signatureBytes,
+            mlDsa65EncodedSizes({
+                ...mlDsa65Parameters,
+                maskingBound: 1n << 17n,
+            }).signatureBytes,
         ).not.toBe(publishedMlDsa65Sizes.signatureBytes);
         expect(
-            encodedSizes({ ...mlDsa65Parameters, roundingBits: 12n })
+            mlDsa65EncodedSizes({ ...mlDsa65Parameters, roundingBits: 12n })
                 .publicKeyBytes,
         ).not.toBe(publishedMlDsa65Sizes.publicKeyBytes);
         expect(
-            encodedSizes({ ...mlDsa65Parameters, secretCoefficientBound: 2n })
-                .privateKeyBytes,
+            mlDsa65EncodedSizes({
+                ...mlDsa65Parameters,
+                secretCoefficientBound: 2n,
+            }).privateKeyBytes,
         ).not.toBe(publishedMlDsa65Sizes.privateKeyBytes);
         expect(
-            encodedSizes({
+            mlDsa65EncodedSizes({
                 ...mlDsa65Parameters,
                 rowCount: 5n,
                 columnCount: 6n,

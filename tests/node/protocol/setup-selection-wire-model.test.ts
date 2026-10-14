@@ -20,7 +20,7 @@ describe('setup selection wire census and semantic identity', () => {
         'counts canonical selection and exact certificate carriers at n=%i',
         (participants) => {
             const census = compileSetupSelectionWireCensus(participants);
-            const entries = selected(census.selectedCount);
+            const entries = selected(census.setupContributorCount);
             const body = encodeSetupSelectionModel(
                 participants,
                 roster,
@@ -29,7 +29,7 @@ describe('setup selection wire census and semantic identity', () => {
             expect(BigInt(body.length)).toBe(census.selectionBodyBytes);
             const signature = Buffer.alloc(signatureBytes, 17);
             const endorsements = Array.from(
-                { length: census.quorum },
+                { length: census.inventoryCertificateThreshold },
                 (_, position) => ({ position, signature }),
             );
             const carrier = encodeSetupCertificateModel(
@@ -39,16 +39,14 @@ describe('setup selection wire census and semantic identity', () => {
                 signature,
                 endorsements,
             );
-            expect(carrier.subarray(0, 4).toString('ascii')).toBe('SSC1');
-            expect(carrier.readUInt32LE(4)).toBe(body.length);
-            expect(carrier.subarray(8, 8 + body.length)).toEqual(body);
+            expect(carrier.readUInt32LE(0)).toBe(body.length);
+            expect(carrier.subarray(4, 4 + body.length)).toEqual(body);
             expect(BigInt(carrier.length)).toBe(census.certificateBytes);
             expect(carrier.length).toBe(
                 4 +
-                    4 +
                     body.length +
                     signatureBytes +
-                    census.quorum * (2 + signatureBytes),
+                    census.inventoryCertificateThreshold * (2 + signatureBytes),
             );
             expect(census.endorsementPacketBytes).toBe(
                 2n + 64n + BigInt(signatureBytes),
@@ -79,9 +77,9 @@ describe('setup selection wire census and semantic identity', () => {
             ),
         );
         expect(carriers[0]).not.toEqual(carriers[1]);
-        const bodyLength = carriers[0].readUInt32LE(4);
-        expect(carriers[0].subarray(8, 8 + bodyLength)).toEqual(
-            carriers[1].subarray(8, 8 + bodyLength),
+        const bodyLength = carriers[0].readUInt32LE(0);
+        expect(carriers[0].subarray(4, 4 + bodyLength)).toEqual(
+            carriers[1].subarray(4, 4 + bodyLength),
         );
         const identity = setupSelectionIdentityModel(4, roster, entries);
         expect(identity).not.toBe(

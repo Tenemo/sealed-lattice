@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 
 import { auxiliaryInputEncryptionParameters } from '#tests/auxiliary-input-encryption-parameters.js';
+import { unsigned } from '#tests/node/protocol/reference/canonical-tuple.js';
 import { setupGaussianParameters } from '#tests/setup-randomness-model.js';
 import {
     encodeSupportedProfileTable,
@@ -10,15 +11,6 @@ import {
 } from '#tests/supported-profile-table-model.js';
 import { shareEncryptionParameters } from '#tests/wide-share-lifting-model.js';
 
-const unsigned = (value: bigint, bytes: number) => {
-    const encoded = Buffer.alloc(bytes);
-    for (let index = 0; index < bytes; index++) {
-        encoded[index] = Number(value & 255n);
-        value >>= 8n;
-    }
-    expect(value).toBe(0n);
-    return encoded;
-};
 type Fraction = readonly [bigint, bigint];
 const fraction = (numerator: bigint, denominator: bigint): Fraction => {
     let a = numerator,
@@ -37,29 +29,28 @@ describe('tracked research parameter correspondence', () => {
             'crates/protocol-research/supported-profile/profiles.bin',
         );
         expect(stored).toEqual(encodeSupportedProfileTable());
-        // Header: magic, both length-prefixed moduli, their families' common
-        // sample width and the count ranges.
-        expect(stored.subarray(0, 4).toString()).toBe('SPT1');
-        expect(stored.subarray(4, 25)).toEqual(
+        // Header: both length-prefixed moduli, their families' common sample
+        // width and the count ranges.
+        expect(stored.subarray(0, 21)).toEqual(
             Buffer.concat([
                 Buffer.of(20),
                 unsigned(shareEncryptionParameters.modulus, 20),
             ]),
         );
-        expect(stored.subarray(25, 31)).toEqual(
+        expect(stored.subarray(21, 27)).toEqual(
             Buffer.concat([
                 Buffer.of(5),
                 unsigned(auxiliaryInputEncryptionParameters.modulus, 5),
             ]),
         );
-        expect(stored.readUInt16LE(31)).toBe(320);
-        expect([...stored.subarray(33, 37)]).toEqual([3, 20, 2, 20]);
-        expect(stored.length).toBe(37 + 18 * 19 * supportedProfileRecordBytes);
+        expect(stored.readUInt16LE(27)).toBe(320);
+        expect([...stored.subarray(29, 33)]).toEqual([3, 20, 2, 20]);
+        expect(stored.length).toBe(33 + 18 * 19 * supportedProfileRecordBytes);
         // The completion record, independently of the search: the FHE
         // modulus 65537*65319*2^832+1 and the release modulus
         // 65537*65445*2^160+1, both with Proth witness 7.
         const offset =
-            37 + ((10 - 3) * 19 + (10 - 2)) * supportedProfileRecordBytes;
+            33 + ((10 - 3) * 19 + (10 - 2)) * supportedProfileRecordBytes;
         const record = stored.subarray(
             offset,
             offset + supportedProfileRecordBytes,

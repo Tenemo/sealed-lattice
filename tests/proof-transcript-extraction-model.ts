@@ -1,11 +1,13 @@
 import { compileCommonAgreementDegreeCensus } from '#tests/common-agreement-degree-model.js';
 import {
     hasProofHashLayout,
+    isRawStatementInput,
     parseProofHashInput,
     type ProofHashInput,
 } from '#tests/proof-hash-domain-model.js';
 import { resolveProofContext } from '#tests/proof-relation-catalogue-model.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
+import { protocolHashPrefix } from '#tests/word-proof-reference/transcript.js';
 
 // A projection of a consistent full-XOF database. Each challenged record
 // supplies its tag prefix; an edge needing a longer prefix checks it below.
@@ -41,6 +43,7 @@ const canonicalFieldWords = (bytes: Buffer) => {
 
 // No auxiliary hash is used as an identity: duplicate inputs are compared
 // literally. Tag collisions include raw members with unusable typed layouts.
+// Raw statements, whose digests contexts bind, share one role-free scope.
 const indexRecords = (
     records: readonly RawProofHashRecord[],
     honestOwners: ReadonlySet<string>,
@@ -49,13 +52,19 @@ const indexRecords = (
     // complete input, including any middle bytes omitted from this key.
     // Adversarial buckets can remain quadratic; no reduction-time bound is
     // inferred from the ordinary captured-trace lookup performance.
-    const inputs = new Map<string, IndexedRecord[]>();
+    const inputs = new Map<string, { input: Buffer; output: Buffer }[]>();
     const tags = new Map<string, IndexedRecord>();
+    const digests = new Map<string, Buffer>();
     for (const record of records) {
         const parsed = parseProofHashInput(record.input);
-        if (parsed === undefined || honestOwners.has(parsed.owner)) continue;
+        if (
+            parsed === undefined
+                ? !isRawStatementInput(record.input)
+                : honestOwners.has(parsed.owner)
+        )
+            continue;
         if (record.output.length < tagBytes)
-            throw new RangeError('A challenged record lacks its tag prefix.');
+            throw new RangeError('An indexed record lacks its tag prefix.');
         const bucketKey = `${record.input.length}:${record.input.subarray(0, tagBytes).toString('hex')}:${record.input.subarray(-tagBytes).toString('hex')}`;
         const bucket = inputs.get(bucketKey) ?? [];
         const duplicate = bucket.find((known) =>
@@ -76,17 +85,34 @@ const indexRecords = (
                 duplicate.output = record.output;
             continue;
         }
-        const key = `${parsed.role}:${record.output.subarray(0, tagBytes).toString('hex')}`;
+        const tag = record.output.subarray(0, tagBytes).toString('hex');
+        if (parsed === undefined) {
+            if (digests.has(tag)) return undefined;
+            digests.set(tag, record.input);
+            bucket.push({ input: record.input, output: record.output });
+            inputs.set(bucketKey, bucket);
+            continue;
+        }
+        const key = `${parsed.role}:${tag}`;
         if (tags.has(key)) return undefined;
         const indexed = { ...record, parsed };
         bucket.push(indexed);
         inputs.set(bucketKey, bucket);
         tags.set(key, indexed);
     }
-    return (role: string, tag: Buffer) =>
-        tag.length === tagBytes
-            ? tags.get(`${role}:${tag.toString('hex')}`)
-            : undefined;
+    return {
+        find: (role: string, tag: Buffer) =>
+            tag.length === tagBytes
+                ? tags.get(`${role}:${tag.toString('hex')}`)
+                : undefined,
+        // The raw statement with this digest.
+        digestInput: (digest: Buffer) =>
+            digest.length === tagBytes
+                ? digests
+                      .get(digest.toString('hex'))
+                      ?.subarray(protocolHashPrefix.length)
+                : undefined,
+    };
 };
 
 export const rawProofHashHasCollision = (
@@ -106,12 +132,15 @@ export const extractRawProofPrefix = (
         !hasProofHashLayout(query)
     )
         return undefined;
-    const find = indexRecords(records, honestOwners);
-    if (find === undefined) return undefined;
+    const index = indexRecords(records, honestOwners);
+    if (index === undefined) return undefined;
+    const { find } = index;
     const contextTag = query.fields[0];
     const context = find(query.role, contextTag);
     if (context?.parsed.family !== 'statement') return undefined;
-    const aliases = resolveProofContext(context.parsed.fields);
+    const statement = index.digestInput(context.parsed.fields[6]);
+    if (statement === undefined) return undefined;
+    const aliases = resolveProofContext(context.parsed.fields, statement);
     if (
         aliases.length === 0 ||
         new Set(aliases.map((entry) => entry.arithmeticKey)).size !== 1
@@ -235,6 +264,7 @@ export const extractRawProofPrefix = (
     return {
         role: query.role,
         context: context.input,
+        statement,
         // One representative of the effective relation, not a uniquely
         // inferred roster/profile. The complete compatible set is retained.
         relation,

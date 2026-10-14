@@ -23,7 +23,6 @@ import { sealRecord } from '#packages/sdk/src/participant/worker/storage/private
 import {
     createRootKey,
     openRoot,
-    rootAssociatedData,
     sealRoot,
 } from '#packages/sdk/src/participant/worker/storage/root-sealing.js';
 import {
@@ -35,6 +34,10 @@ import type {
     ParticipantManifest,
     RootTransition,
 } from '#packages/sdk/src/participant/worker/storage/root.js';
+import {
+    fixtureRequest,
+    writeFixtureTransaction,
+} from '#packages/sdk/tests/browser-storage.js';
 
 const compiledModule = await WebAssembly.compile(
     await (
@@ -44,25 +47,14 @@ const compiledModule = await WebAssembly.compile(
 const databases: IDBDatabase[] = [];
 const hexadecimal = (bytes: Uint8Array) =>
     Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
-const requestResult = <Value>(request: IDBRequest<Value>) =>
-    new Promise<Value>((resolve, reject) => {
-        request.onsuccess = () => resolve(request.result);
-        request.onerror = () =>
-            reject(request.error ?? new Error('Fixture read failed.'));
-    });
+
 const write = (
     database: IDBDatabase,
     stores: ParticipantStore[],
     change: (transaction: IDBTransaction) => void,
 ) =>
-    new Promise<void>((resolve, reject) => {
-        const transaction = database.transaction(stores, 'readwrite', {
-            durability: 'strict',
-        });
-        transaction.oncomplete = () => resolve();
-        transaction.onabort = () =>
-            reject(transaction.error ?? new Error('Fixture write failed.'));
-        change(transaction);
+    writeFixtureTransaction(database, stores, change, {
+        durability: 'strict',
     });
 
 // Transaction-layer custody fixture: real root and record AES-GCM, real
@@ -130,12 +122,7 @@ const fixture = async () => {
     };
     const plaintext = encodeManifest(manifest, 4);
     const key = await createRootKey();
-    const sealed = await sealRoot(
-        key,
-        4,
-        rootAssociatedData(runtime),
-        plaintext,
-    );
+    const sealed = await sealRoot(key, 4, runtime, plaintext);
     const head = {
         generation: 4,
         runtime: hexadecimal(runtime),
@@ -176,7 +163,7 @@ const fixture = async () => {
         const reopened = await openRoot(
             snapshot.key as CryptoKey,
             4,
-            rootAssociatedData(runtime),
+            runtime,
             snapshot.root as Uint8Array,
         );
         expect(reopened).toEqual(plaintext);
@@ -203,7 +190,7 @@ afterEach(async () => {
     vi.restoreAllMocks();
     for (const database of databases.splice(0)) {
         database.close();
-        await requestResult(indexedDB.deleteDatabase(database.name));
+        await fixtureRequest(indexedDB.deleteDatabase(database.name));
     }
 });
 

@@ -104,12 +104,8 @@ describe('instrumented participant padding boundaries', () => {
         };`);
         const journal = (field: number, phase: number) => {
             const fields = [Buffer.alloc(0), Buffer.alloc(0), Buffer.alloc(0)];
-            fields[field] =
-                field === 0
-                    ? Buffer.from([80, 67, 83, 53, phase])
-                    : Buffer.from([phase]);
+            fields[field] = Buffer.from([phase]);
             return Buffer.concat([
-                Buffer.from('PRE2'),
                 ...fields.flatMap((bytes) => {
                     const length = Buffer.alloc(4);
                     length.writeUInt32LE(bytes.length);
@@ -191,93 +187,128 @@ describe('instrumented participant padding boundaries', () => {
             });
         }
     });
-    it('halts only after the awaited store and identifies partial padding and the final slot', async () => {
-        for (const cut of ['padding', 'final-slot'] as const) {
-            const client = paddingHaltingClient(source, cut);
-            const observed: PaddingSlotObservation[] = [];
-            let resolve!: (halt: PaddingHaltObservation) => void;
-            const reached = new Promise<PaddingHaltObservation>((accept) => {
-                resolve = accept;
-            });
-            let stored = 0;
-            const context = {
-                crypto: webcrypto,
-                performance,
-                self: {
-                    postMessage: (
-                        message:
-                            PaddingSlotObservation | PaddingHaltObservation,
-                    ) => {
-                        if (message.type === 'participant-padding-slot') {
-                            assert.equal(stored, observed.length + 1);
-                            observed.push(message);
-                        } else resolve(message);
+    it.each([
+        source,
+        Buffer.from(
+            source
+                .toString('utf8')
+                .replace(
+                    'await store(slot, buffer.subarray(0, slot.length));',
+                    'await /* completed store */ store(slot, buffer /* fragment */ . subarray(0, slot.length));',
+                ),
+        ),
+        Buffer.from(
+            'const documentation = ' +
+                JSON.stringify(source.toString('utf8')) +
+                ';\n' +
+                source.toString('utf8'),
+        ),
+    ])(
+        'halts only after the awaited store despite formatting and nonexecuting lookalikes',
+        async (workerSource) => {
+            for (const cut of ['padding', 'final-slot'] as const) {
+                const client = paddingHaltingClient(workerSource, cut);
+                const observed: PaddingSlotObservation[] = [];
+                let resolve!: (halt: PaddingHaltObservation) => void;
+                const reached = new Promise<PaddingHaltObservation>(
+                    (accept) => {
+                        resolve = accept;
                     },
-                },
-                append: undefined as
-                    | undefined
-                    | ((
-                          store: () => Promise<void>,
-                          bytes: Uint8Array,
-                          slot: { offset: number; length: number },
-                          next: number,
-                          slots: readonly { offset: number; length: number }[],
-                          length: number,
-                      ) => Promise<string>),
-            };
-            runInNewContext(client.worker.toString('utf8'), context);
-            const slots = [
-                { offset: 0, length: 4 },
-                { offset: 4, length: 4 },
-            ];
-            const buffers = [new Uint8Array([1, 2, 3, 0]), new Uint8Array(4)];
-            for (const [index, slot] of slots.entries()) {
-                const running = context.append!(
-                    () => {
-                        stored++;
-                        return Promise.resolve();
-                    },
-                    buffers[index],
-                    slot,
-                    index,
-                    slots,
-                    3,
                 );
-                if (cut === 'final-slot' && index === 0)
-                    assert.equal(await running, 'finished');
-                else {
-                    const halt = await Promise.race([
-                        reached,
-                        running.then(() => {
-                            throw new Error(
-                                'The instrumented operation finished before its cut.',
-                            );
-                        }),
-                    ]);
-                    assert.equal(halt.cut, cut);
-                    assert.equal(halt.proofBytes, 3);
-                    assert.equal(halt.slotOffset, cut === 'padding' ? 0 : 4);
-                    assert.equal(halt.storedSlots, cut === 'padding' ? 1 : 2);
-                    assert.equal(halt.totalSlots, 2);
-                    assert.equal(halt.paddingOnly, cut === 'final-slot');
-                    validatePaddingObservation(
-                        { slots: observed, halt },
-                        { minimumProofBytes: 1, maximumProofBytes: 8 },
-                        4,
+                let stored = 0;
+                const context = {
+                    crypto: webcrypto,
+                    performance,
+                    self: {
+                        postMessage: (
+                            message:
+                                PaddingSlotObservation | PaddingHaltObservation,
+                        ) => {
+                            if (message.type === 'participant-padding-slot') {
+                                assert.equal(stored, observed.length + 1);
+                                observed.push(message);
+                            } else resolve(message);
+                        },
+                    },
+                    append: undefined as
+                        | undefined
+                        | ((
+                              store: () => Promise<void>,
+                              bytes: Uint8Array,
+                              slot: { offset: number; length: number },
+                              next: number,
+                              slots: readonly {
+                                  offset: number;
+                                  length: number;
+                              }[],
+                              length: number,
+                          ) => Promise<string>),
+                };
+                runInNewContext(client.worker.toString('utf8'), context);
+                const slots = [
+                    { offset: 0, length: 4 },
+                    { offset: 4, length: 4 },
+                ];
+                const buffers = [
+                    new Uint8Array([1, 2, 3, 0]),
+                    new Uint8Array(4),
+                ];
+                for (const [index, slot] of slots.entries()) {
+                    const running = context.append!(
+                        () => {
+                            stored++;
+                            return Promise.resolve();
+                        },
+                        buffers[index],
+                        slot,
+                        index,
+                        slots,
+                        3,
                     );
-                    break;
+                    if (cut === 'final-slot' && index === 0)
+                        assert.equal(await running, 'finished');
+                    else {
+                        const halt = await Promise.race([
+                            reached,
+                            running.then(() => {
+                                throw new Error(
+                                    'The instrumented operation finished before its cut.',
+                                );
+                            }),
+                        ]);
+                        assert.equal(halt.cut, cut);
+                        assert.equal(halt.proofBytes, 3);
+                        assert.equal(
+                            halt.slotOffset,
+                            cut === 'padding' ? 0 : 4,
+                        );
+                        assert.equal(
+                            halt.storedSlots,
+                            cut === 'padding' ? 1 : 2,
+                        );
+                        assert.equal(halt.totalSlots, 2);
+                        assert.equal(halt.paddingOnly, cut === 'final-slot');
+                        validatePaddingObservation(
+                            { slots: observed, halt },
+                            { minimumProofBytes: 1, maximumProofBytes: 8 },
+                            4,
+                        );
+                        break;
+                    }
                 }
-            }
-            for (const [index, slot] of observed.entries())
-                expect(slot.sha512).toBe(
-                    createHash('sha512').update(buffers[index]).digest('hex'),
+                for (const [index, slot] of observed.entries())
+                    expect(slot.sha512).toBe(
+                        createHash('sha512')
+                            .update(buffers[index])
+                            .digest('hex'),
+                    );
+                expect(client.originalDigest).toBe(
+                    createHash('sha512').update(workerSource).digest('hex'),
                 );
-            expect(client.originalDigest).toBe(
-                createHash('sha512').update(source).digest('hex'),
-            );
-            expect(client.digest).not.toBe(client.originalDigest);
-        }
-    });
+                expect(client.digest).not.toBe(client.originalDigest);
+            }
+        },
+    );
     it('refuses missing or ambiguous store boundaries and malformed replay observations', () => {
         expect(() => paddingHaltingClient(Buffer.from(''), 'padding')).toThrow(
             'one completed',

@@ -53,6 +53,9 @@ export const compileProofVerifierQueryCensus = () => {
     const chainStateQueries = folds + 3;
     const messageRootQueries = folds + 3;
     const contextQueries = 1;
+    // The statement stream recomputes the statement digest the context
+    // binds.
+    const statementDigestQueries = 1;
     return {
         groups,
         maximumLeafQueries,
@@ -61,15 +64,17 @@ export const compileProofVerifierQueryCensus = () => {
         chainStateQueries,
         messageRootQueries,
         contextQueries,
+        statementDigestQueries,
         maximumCoreQueries:
             maximumLeafQueries +
             maximumNodeQueries +
             verifierMessageQueries +
             chainStateQueries +
             messageRootQueries +
-            contextQueries,
-        // One canonical verifier attempt. Statement reconstruction, common
-        // matrix generation, outer authentication and additional attempts are
-        // separate callers/queries, not silently covered by this subtotal.
+            contextQueries +
+            statementDigestQueries,
+        // One canonical verifier attempt. Common matrix generation, outer
+        // authentication and additional attempts are separate callers and
+        // queries, not silently covered by this subtotal.
     };
 };

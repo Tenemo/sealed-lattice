@@ -1,3 +1,5 @@
+import { binomial } from '#tests/exact-integer.js';
+
 const minimumParticipantCount = 3;
 const maximumParticipantCount = 20;
 
@@ -54,7 +56,9 @@ export const deriveLifecycleAvailability = (
             );
     };
     requirePosition(organizer);
-    const faultBound = Math.floor((participantCount - 1) / 3);
+    const maximumCorruptParticipantCount = Math.floor(
+        (participantCount - 1) / 3,
+    );
     const firstFailure = new Map<number, number>();
     for (const { participant, before } of failures) {
         requirePosition(participant);
@@ -70,7 +74,7 @@ export const deriveLifecycleAvailability = (
             Math.min(firstFailure.get(participant) ?? stage, stage),
         );
     }
-    if (firstFailure.size > faultBound)
+    if (firstFailure.size > maximumCorruptParticipantCount)
         throw new RangeError(
             'The total unavailable set exceeds the fault bound.',
         );
@@ -80,8 +84,9 @@ export const deriveLifecycleAvailability = (
     );
     return {
         roster,
-        faultBound,
-        requiredContinuerCount: participantCount - faultBound,
+        maximumCorruptParticipantCount,
+        requiredContinuerCount:
+            participantCount - maximumCorruptParticipantCount,
         stages: lifecycleAvailabilityStages.map((stage, index) => ({
             stage,
             availableParticipants: roster.filter(
@@ -90,20 +95,6 @@ export const deriveLifecycleAvailability = (
             ),
         })),
     };
-};
-
-const binomial = (n: number, k: number): bigint => {
-    if (!Number.isSafeInteger(n) || !Number.isSafeInteger(k)) {
-        throw new TypeError('Binomial inputs must be safe integers.');
-    }
-    if (k < 0 || k > n) return 0n;
-
-    let result = 1n;
-    const reducedK = Math.min(k, n - k);
-    for (let index = 1; index <= reducedK; index += 1) {
-        result = (result * BigInt(n - reducedK + index)) / BigInt(index);
-    }
-    return result;
 };
 
 const popcount = (value: number): number => {
@@ -151,7 +142,7 @@ type SetClassCensus = Readonly<{
 // envelope, whose unavailable union is bounded by f.
 const enumerateSetClassCensus = (
     participantCount: number,
-    faultBound: number,
+    maximumCorruptParticipantCount: number,
 ): SetClassCensus => {
     let classCount = 0;
     let caseCount = 0n;
@@ -159,12 +150,12 @@ const enumerateSetClassCensus = (
 
     for (
         let corruptionCount = 0;
-        corruptionCount <= faultBound;
+        corruptionCount <= maximumCorruptParticipantCount;
         corruptionCount += 1
     ) {
         for (
             let disappearanceCount = 0;
-            disappearanceCount <= faultBound;
+            disappearanceCount <= maximumCorruptParticipantCount;
             disappearanceCount += 1
         ) {
             const minimumOverlap = Math.max(
@@ -221,11 +212,14 @@ type BruteForceCensus = Readonly<{
 
 const bruteForceSmallProfile = (
     participantCount: number,
-    faultBound: number,
+    maximumCorruptParticipantCount: number,
     certificateThreshold: number,
     releaseThreshold: number,
 ): BruteForceCensus => {
-    const boundedMasks = masksAtMost(participantCount, faultBound);
+    const boundedMasks = masksAtMost(
+        participantCount,
+        maximumCorruptParticipantCount,
+    );
     let lifecycleCaseCount = 0n;
     let minimumHonestResponderCount = participantCount;
 
@@ -269,7 +263,7 @@ const bruteForceSmallProfile = (
         for (const right of certificates) {
             certificatePairCount += 1n;
             const intersection = popcount(left & right);
-            if (intersection <= faultBound) {
+            if (intersection <= maximumCorruptParticipantCount) {
                 throw new Error(
                     'Two certificates lack an honest intersection.',
                 );
@@ -298,12 +292,13 @@ const bruteForceSmallProfile = (
     };
 };
 
-type ThresholdCompletionProfile = Readonly<{
+export type ThresholdCompletionProfile = Readonly<{
     participantCount: number;
     maximumCorruptParticipantCount: number;
     inventoryCertificateThreshold: number;
     resultReleaseThreshold: number;
     setupContributorCount: number;
+    eligibleContributorCount: number;
     minimumTurnout: number;
     noResultForceableAtFullHonestTurnout: boolean;
     guaranteedHonestResponderCount: number;
@@ -320,7 +315,7 @@ type ThresholdCompletionProfile = Readonly<{
     bruteForceCrossChecked: boolean;
 }>;
 
-export const compileThresholdCompletionProfile = (
+const compileThresholdCompletionProfile = (
     participantCount: number,
 ): ThresholdCompletionProfile => {
     requireParticipantCount(participantCount);
@@ -336,6 +331,10 @@ export const compileThresholdCompletionProfile = (
     // The setup selection takes exactly d contribution offers, so at least one
     // selected contributor is honest under the static corruption bound.
     const setupContributorCount = resultReleaseThreshold;
+    // The first d + f roster positions are eligible to offer a contribution,
+    // so at least d of them are honest.
+    const eligibleContributorCount =
+        setupContributorCount + maximumCorruptParticipantCount;
     const minimumTurnout = maximumCorruptParticipantCount + 2;
     const mandatoryReleaseParticipantCount =
         binomial(participantCount - 1, resultReleaseThreshold) === 0n
@@ -448,6 +447,7 @@ export const compileThresholdCompletionProfile = (
         inventoryCertificateThreshold,
         resultReleaseThreshold,
         setupContributorCount,
+        eligibleContributorCount,
         minimumTurnout,
         noResultForceableAtFullHonestTurnout,
         guaranteedHonestResponderCount,
@@ -465,6 +465,18 @@ export const compileThresholdCompletionProfile = (
     };
 };
 
+const thresholdProfiles = new Map<number, ThresholdCompletionProfile>();
+
+// The threshold profile of a roster size, compiled once per size.
+export const thresholdProfileFor = (participantCount: number) => {
+    let profile = thresholdProfiles.get(participantCount);
+    if (profile === undefined) {
+        profile = compileThresholdCompletionProfile(participantCount);
+        thresholdProfiles.set(participantCount, profile);
+    }
+    return profile;
+};
+
 export const compileSupportedThresholdCompletionProfiles =
     (): readonly ThresholdCompletionProfile[] =>
         Array.from(
@@ -472,7 +484,5 @@ export const compileSupportedThresholdCompletionProfiles =
                 length: maximumParticipantCount - minimumParticipantCount + 1,
             },
             (_unused, index) =>
-                compileThresholdCompletionProfile(
-                    minimumParticipantCount + index,
-                ),
+                thresholdProfileFor(minimumParticipantCount + index),
         );

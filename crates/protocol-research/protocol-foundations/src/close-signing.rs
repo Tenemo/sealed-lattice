@@ -1,6 +1,6 @@
 use crate::{
-    Credential, Error, SIGNATURE_BYTES, SIGNING_PUBLIC_KEY_BYTES, SigningPurpose,
-    ballot_authentication::RetainedBallotOwner,
+    Credential, Refusal, SIGNATURE_BYTES, SIGNING_PUBLIC_KEY_BYTES, SigningPurpose,
+    ballot_authentication::RetainedSetupOwner,
     foundation::{
         CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple,
         hash_foundation_tuple_512,
@@ -11,7 +11,7 @@ use fips204::{
     ml_dsa_65,
     traits::{SerDes, Verifier},
 };
-use supported_profile::Profile;
+use supported_profile::{Profile, inventory_threshold};
 
 /// Two different envelopes already make a slot conflicting, so a response
 /// lists no more; a corrupt author cannot inflate honest responses.
@@ -28,9 +28,9 @@ pub enum ClosePurpose {
 impl ClosePurpose {
     pub const fn context(self) -> &'static str {
         match self {
-            Self::Intent => "sealed-lattice/close-intent/v1",
-            Self::Response => "sealed-lattice/close-response/v1",
-            Self::Proposal => "sealed-lattice/close-proposal/v1",
+            Self::Intent => "sealed-lattice/close-intent",
+            Self::Response => "sealed-lattice/close-response",
+            Self::Proposal => "sealed-lattice/close-proposal",
         }
     }
     const fn item_count(self) -> usize {
@@ -42,13 +42,8 @@ impl ClosePurpose {
     }
 }
 
-/// The close quorum `q = n - f`, where `f = floor((n-1)/3)`.
-pub fn close_quorum(participants: usize) -> usize {
-    participants - (participants - 1) / 3
-}
-
 /// The exact encoded length of the largest message of a purpose, from the
-/// canonical tuple layout: an eight-byte header and, per item, a two-byte type
+/// canonical tuple layout: a six-byte header and, per item, a two-byte type
 /// and four-byte length, with a four-byte length inside variable values.
 pub fn maximum_close_message_bytes(purpose: ClosePurpose, participants: usize) -> usize {
     match purpose {
@@ -59,13 +54,13 @@ pub fn maximum_close_message_bytes(purpose: ClosePurpose, participants: usize) -
         ClosePurpose::Proposal => {
             close_prefix_bytes(purpose)
                 + (6 + 64)
-                + (6 + 4 + close_quorum(participants) * LISTED_ENTRY_BYTES)
+                + (6 + 4 + inventory_threshold(participants) * LISTED_ENTRY_BYTES)
         }
     }
 }
 /// The purpose, poll identity and setup identity open every close message.
 fn close_prefix_bytes(purpose: ClosePurpose) -> usize {
-    8 + (6 + 4 + purpose.context().len()) + 2 * (6 + 64)
+    6 + (6 + 4 + purpose.context().len()) + 2 * (6 + 64)
 }
 /// The exact encoded length of a response listing this many entries.
 pub fn close_response_bytes(entries: usize) -> usize {
@@ -77,13 +72,13 @@ pub fn close_response_bytes(entries: usize) -> usize {
 
 /// The signed message identity: the foundation hash of the complete body as
 /// one variable-byte item under the purpose, which is also the signature context.
-pub fn close_message_identity(purpose: ClosePurpose, body: &[u8]) -> Result<[u8; 64], Error> {
+pub fn close_message_identity(purpose: ClosePurpose, body: &[u8]) -> Result<[u8; 64], Refusal> {
     hash_foundation_tuple_512(
         purpose.context(),
-        &[CanonicalItem::variable_bytes(body).map_err(|_| Error::Shape)?],
+        &[CanonicalItem::variable_bytes(body).map_err(|_| Refusal::Shape)?],
     )
     .map(|value| value.into_bytes())
-    .map_err(|_| Error::Shape)
+    .map_err(|_| Refusal::Shape)
 }
 
 /// Checks one signature by the supplied roster key. The caller selects that
@@ -103,9 +98,9 @@ pub fn verify_close_signature(
     public.verify(identity, &signature, purpose.context().as_bytes())
 }
 
-fn check_participants(participants: usize) -> Result<(), Error> {
+fn check_participants(participants: usize) -> Result<(), Refusal> {
     if !Profile::participant_range().contains(&participants) {
-        return Err(Error::Context);
+        return Err(Refusal::Context);
     }
     Ok(())
 }
@@ -114,22 +109,22 @@ fn encode(
     poll: [u8; 64],
     setup_identity: [u8; 64],
     rest: Vec<CanonicalItem>,
-) -> Result<Vec<u8>, Error> {
+) -> Result<Vec<u8>, Refusal> {
     let mut items = vec![
-        CanonicalItem::nonempty_ascii(purpose.context()).map_err(|_| Error::Shape)?,
+        CanonicalItem::nonempty_ascii(purpose.context()).map_err(|_| Refusal::Shape)?,
         CanonicalItem::hash512(poll),
         CanonicalItem::hash512(setup_identity),
     ];
     items.extend(rest);
-    CanonicalTuple::new(1, 1, items)
+    CanonicalTuple::new(1, items)
         .encode()
-        .map_err(|_| Error::Shape)
+        .map_err(|_| Refusal::Shape)
 }
 fn decode(
     body: &[u8],
     purpose: ClosePurpose,
     participants: usize,
-) -> Result<Vec<CanonicalItem>, Error> {
+) -> Result<Vec<CanonicalItem>, Refusal> {
     let maximum = maximum_close_message_bytes(purpose, participants);
     let limits = CanonicalDecodeLimits {
         maximum_tuple_byte_length: maximum,
@@ -138,39 +133,40 @@ fn decode(
         maximum_nesting_depth: 0,
         ..CanonicalDecodeLimits::default()
     };
-    let tuple = CanonicalTuple::decode(body, &limits).map_err(|_| Error::Shape)?;
-    if tuple.schema_identifier != 1
-        || tuple.schema_version != 1
-        || tuple.items.len() != purpose.item_count()
-    {
-        return Err(Error::Shape);
+    let tuple = CanonicalTuple::decode(body, &limits).map_err(|_| Refusal::Shape)?;
+    if !tuple.has_header(purpose.item_count()) {
+        return Err(Refusal::Shape);
     }
     let items = tuple.items;
     if items[0].item_type() != CanonicalItemType::Ascii
-        || items[0].variable_value_bytes().map_err(|_| Error::Shape)?
+        || items[0]
+            .variable_value_bytes()
+            .map_err(|_| Refusal::Shape)?
             != purpose.context().as_bytes()
     {
-        return Err(Error::Context);
+        return Err(Refusal::Context);
     }
     Ok(items)
 }
-fn hash(item: &CanonicalItem) -> Result<[u8; 64], Error> {
+fn hash(item: &CanonicalItem) -> Result<[u8; 64], Refusal> {
     if item.item_type() != CanonicalItemType::Hash512 {
-        return Err(Error::Shape);
+        return Err(Refusal::Shape);
     }
-    item.canonical_bytes().try_into().map_err(|_| Error::Shape)
+    item.canonical_bytes()
+        .try_into()
+        .map_err(|_| Refusal::Shape)
 }
-fn position(item: &CanonicalItem, participants: usize) -> Result<usize, Error> {
+fn position(item: &CanonicalItem, participants: usize) -> Result<usize, Refusal> {
     if item.item_type() != CanonicalItemType::Unsigned16 {
-        return Err(Error::Shape);
+        return Err(Refusal::Shape);
     }
     let value = usize::from(u16::from_le_bytes(
         item.canonical_bytes()
             .try_into()
-            .map_err(|_| Error::Shape)?,
+            .map_err(|_| Refusal::Shape)?,
     ));
     if value >= participants {
-        return Err(Error::Context);
+        return Err(Refusal::Context);
     }
     Ok(value)
 }
@@ -180,13 +176,13 @@ fn entries(
     item: &CanonicalItem,
     participants: usize,
     per_author: usize,
-) -> Result<Vec<(usize, [u8; 64])>, Error> {
+) -> Result<Vec<(usize, [u8; 64])>, Refusal> {
     if item.item_type() != CanonicalItemType::RawBytes {
-        return Err(Error::Shape);
+        return Err(Refusal::Shape);
     }
-    let bytes = item.variable_value_bytes().map_err(|_| Error::Shape)?;
+    let bytes = item.variable_value_bytes().map_err(|_| Refusal::Shape)?;
     if bytes.len() % LISTED_ENTRY_BYTES != 0 {
-        return Err(Error::Shape);
+        return Err(Refusal::Shape);
     }
     let values: Vec<(usize, [u8; 64])> = bytes
         .chunks_exact(LISTED_ENTRY_BYTES)
@@ -200,10 +196,10 @@ fn entries(
     let mut run = 0;
     for (index, (author, _)) in values.iter().enumerate() {
         if *author >= participants {
-            return Err(Error::Context);
+            return Err(Refusal::Context);
         }
         if index > 0 && values[index - 1] >= values[index] {
-            return Err(Error::Shape);
+            return Err(Refusal::Shape);
         }
         run = if index > 0 && values[index - 1].0 == *author {
             run + 1
@@ -211,22 +207,22 @@ fn entries(
             1
         };
         if run > per_author {
-            return Err(Error::Shape);
+            return Err(Refusal::Shape);
         }
     }
     Ok(values)
 }
-fn encode_entries(values: &[(usize, [u8; 64])]) -> Result<CanonicalItem, Error> {
+fn encode_entries(values: &[(usize, [u8; 64])]) -> Result<CanonicalItem, Refusal> {
     let mut bytes = Vec::with_capacity(values.len() * LISTED_ENTRY_BYTES);
     for (author, identity) in values {
         bytes.extend(
             u16::try_from(*author)
-                .map_err(|_| Error::Shape)?
+                .map_err(|_| Refusal::Shape)?
                 .to_le_bytes(),
         );
         bytes.extend(identity);
     }
-    CanonicalItem::variable_bytes(bytes).map_err(|_| Error::Shape)
+    CanonicalItem::variable_bytes(bytes).map_err(|_| Refusal::Shape)
 }
 
 /// Canonical close-intent signing data. Parsing verifies no signature.
@@ -239,7 +235,7 @@ pub struct CloseIntentMessage {
     close_time: u64,
 }
 impl CloseIntentMessage {
-    pub fn new(poll: [u8; 64], setup_identity: [u8; 64], close_time: u64) -> Result<Self, Error> {
+    pub fn new(poll: [u8; 64], setup_identity: [u8; 64], close_time: u64) -> Result<Self, Refusal> {
         Self::parse(&encode(
             ClosePurpose::Intent,
             poll,
@@ -247,10 +243,10 @@ impl CloseIntentMessage {
             vec![CanonicalItem::unsigned64(close_time)],
         )?)
     }
-    pub fn parse(body: &[u8]) -> Result<Self, Error> {
+    pub fn parse(body: &[u8]) -> Result<Self, Refusal> {
         let items = decode(body, ClosePurpose::Intent, 3)?;
         if items[3].item_type() != CanonicalItemType::Unsigned64 {
-            return Err(Error::Shape);
+            return Err(Refusal::Shape);
         }
         Ok(Self {
             body: body.to_vec(),
@@ -261,7 +257,7 @@ impl CloseIntentMessage {
                 items[3]
                     .canonical_bytes()
                     .try_into()
-                    .map_err(|_| Error::Shape)?,
+                    .map_err(|_| Refusal::Shape)?,
             ),
         })
     }
@@ -302,7 +298,7 @@ impl CloseResponseMessage {
         responder: usize,
         participants: usize,
         listed: &[(usize, [u8; 64])],
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, Refusal> {
         check_participants(participants)?;
         let body = encode(
             ClosePurpose::Response,
@@ -310,13 +306,13 @@ impl CloseResponseMessage {
             setup_identity,
             vec![
                 CanonicalItem::hash512(intent),
-                CanonicalItem::unsigned16(u16::try_from(responder).map_err(|_| Error::Shape)?),
+                CanonicalItem::unsigned16(u16::try_from(responder).map_err(|_| Refusal::Shape)?),
                 encode_entries(listed)?,
             ],
         )?;
         Self::parse(&body, participants)
     }
-    pub fn parse(body: &[u8], participants: usize) -> Result<Self, Error> {
+    pub fn parse(body: &[u8], participants: usize) -> Result<Self, Refusal> {
         check_participants(participants)?;
         let items = decode(body, ClosePurpose::Response, participants)?;
         Ok(Self {
@@ -372,7 +368,7 @@ impl CloseProposalMessage {
         participants: usize,
         organizer: usize,
         responses: &[(usize, [u8; 64])],
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, Refusal> {
         check_participants(participants)?;
         let body = encode(
             ClosePurpose::Proposal,
@@ -382,18 +378,18 @@ impl CloseProposalMessage {
         )?;
         Self::parse(&body, participants, organizer)
     }
-    pub fn parse(body: &[u8], participants: usize, organizer: usize) -> Result<Self, Error> {
+    pub fn parse(body: &[u8], participants: usize, organizer: usize) -> Result<Self, Refusal> {
         check_participants(participants)?;
         let items = decode(body, ClosePurpose::Proposal, participants)?;
         let responses = entries(&items[4], participants, 1)?;
-        if responses.len() != close_quorum(participants) {
-            return Err(Error::Shape);
+        if responses.len() != inventory_threshold(participants) {
+            return Err(Refusal::Shape);
         }
         if !responses
             .iter()
             .any(|(responder, _)| *responder == organizer)
         {
-            return Err(Error::Context);
+            return Err(Refusal::Context);
         }
         Ok(Self {
             body: body.to_vec(),
@@ -435,14 +431,14 @@ pub enum CloseMessage<'a> {
 impl Credential {
     fn check_close_owner(
         &self,
-        owner: &RetainedBallotOwner,
+        owner: &RetainedSetupOwner,
         roster: &AuthenticatedRosterProposal,
         poll: &[u8; 64],
         setup_identity: &[u8; 64],
-    ) -> Result<(), Error> {
-        self.check_ballot_owner(owner)?;
+    ) -> Result<(), Refusal> {
+        self.check_setup_owner(owner)?;
         let records = roster.proposal().records();
-        let record = records.get(owner.position()).ok_or(Error::Context)?;
+        let record = records.get(owner.position()).ok_or(Refusal::Context)?;
         if !Profile::participant_range().contains(&records.len())
             || record.header().poll != *owner.poll()
             || record.header().signing_public != self.signing_public
@@ -450,16 +446,16 @@ impl Credential {
             || poll != owner.poll()
             || setup_identity != owner.setup_identity()
         {
-            return Err(Error::Context);
+            return Err(Refusal::Context);
         }
         Ok(())
     }
     fn check_organizer(
-        owner: &RetainedBallotOwner,
+        owner: &RetainedSetupOwner,
         roster: &AuthenticatedRosterProposal,
-    ) -> Result<(), Error> {
+    ) -> Result<(), Refusal> {
         if owner.position() != roster.proposal().organizer_position() {
-            return Err(Error::Context);
+            return Err(Refusal::Context);
         }
         Ok(())
     }
@@ -467,7 +463,7 @@ impl Credential {
         &self,
         purpose: ClosePurpose,
         identity: &[u8; 64],
-    ) -> Result<[u8; SIGNATURE_BYTES], Error> {
+    ) -> Result<[u8; SIGNATURE_BYTES], Refusal> {
         self.sign_deterministically(identity, purpose.context().as_bytes())
     }
     fn check_own_signature(
@@ -475,17 +471,17 @@ impl Credential {
         purpose: ClosePurpose,
         identity: &[u8; 64],
         signature: &[u8],
-    ) -> Result<(), Error> {
+    ) -> Result<(), Refusal> {
         if !verify_close_signature(&self.signing_public, purpose, identity, signature) {
-            return Err(Error::Crypto);
+            return Err(Refusal::Crypto);
         }
         Ok(())
     }
     /// Locks the first close intent this participant authenticates. It freezes
     /// new ballot attempts and fixes the only intent its response may name.
-    fn lock_intent(&mut self, message: &CloseIntentMessage) -> Result<(), Error> {
+    fn lock_intent(&mut self, message: &CloseIntentMessage) -> Result<(), Refusal> {
         match self.close_lock {
-            Some((identity, _)) if identity != *message.identity() => Err(Error::Consumed),
+            Some((identity, _)) if identity != *message.identity() => Err(Refusal::Consumed),
             _ => {
                 self.close_lock = Some((*message.identity(), message.close_time()));
                 Ok(())
@@ -495,10 +491,10 @@ impl Credential {
     /// The organizer's one close intent. Signing it also authenticates it.
     pub fn sign_close_intent(
         &mut self,
-        owner: &RetainedBallotOwner,
+        owner: &RetainedSetupOwner,
         roster: &AuthenticatedRosterProposal,
         message: &CloseIntentMessage,
-    ) -> Result<[u8; SIGNATURE_BYTES], Error> {
+    ) -> Result<[u8; SIGNATURE_BYTES], Refusal> {
         self.check_close_owner(owner, roster, message.poll(), message.setup_identity())?;
         Self::check_organizer(owner, roster)?;
         self.check_unlocked(SigningPurpose::CloseIntent)?;
@@ -507,7 +503,7 @@ impl Credential {
                 .close_lock
                 .is_some_and(|(identity, _)| identity != *message.identity())
         {
-            return Err(Error::Consumed);
+            return Err(Refusal::Consumed);
         }
         self.close_intent_signed = true;
         self.lock_intent(message)?;
@@ -518,11 +514,11 @@ impl Credential {
     /// most one response from this participant.
     pub fn lock_close_intent(
         &mut self,
-        owner: &RetainedBallotOwner,
+        owner: &RetainedSetupOwner,
         roster: &AuthenticatedRosterProposal,
         message: &CloseIntentMessage,
         signature: &[u8],
-    ) -> Result<(), Error> {
+    ) -> Result<(), Refusal> {
         self.check_close_owner(owner, roster, message.poll(), message.setup_identity())?;
         let organizer = &roster.proposal().records()[roster.proposal().organizer_position()];
         if !verify_close_signature(
@@ -531,7 +527,7 @@ impl Credential {
             message.identity(),
             signature,
         ) {
-            return Err(Error::Crypto);
+            return Err(Refusal::Crypto);
         }
         self.lock_intent(message)
     }
@@ -539,16 +535,16 @@ impl Credential {
     /// complete, and the participant's own on-time ballot must be listed.
     pub fn sign_close_response(
         &mut self,
-        owner: &RetainedBallotOwner,
+        owner: &RetainedSetupOwner,
         roster: &AuthenticatedRosterProposal,
         message: &CloseResponseMessage,
-    ) -> Result<[u8; SIGNATURE_BYTES], Error> {
+    ) -> Result<[u8; SIGNATURE_BYTES], Refusal> {
         self.check_close_owner(owner, roster, message.poll(), message.setup_identity())?;
         self.check_unlocked(SigningPurpose::CloseResponse)?;
         if self.close_response.is_some() {
-            return Err(Error::Consumed);
+            return Err(Refusal::Consumed);
         }
-        let (intent, close_time) = self.close_lock.ok_or(Error::Context)?;
+        let (intent, close_time) = self.close_lock.ok_or(Refusal::Context)?;
         if message.responder() != owner.position()
             || *message.intent() != intent
             || (self.ballot_attempted && self.signed_ballot.is_none())
@@ -556,7 +552,7 @@ impl Credential {
                 time <= close_time && !message.listed().contains(&(owner.position(), identity))
             })
         {
-            return Err(Error::Context);
+            return Err(Refusal::Context);
         }
         self.close_response = Some(*message.identity());
         self.sign_close(ClosePurpose::Response, message.identity())
@@ -565,22 +561,22 @@ impl Credential {
     /// include its own response.
     pub fn sign_close_proposal(
         &mut self,
-        owner: &RetainedBallotOwner,
+        owner: &RetainedSetupOwner,
         roster: &AuthenticatedRosterProposal,
         message: &CloseProposalMessage,
-    ) -> Result<[u8; SIGNATURE_BYTES], Error> {
+    ) -> Result<[u8; SIGNATURE_BYTES], Refusal> {
         self.check_close_owner(owner, roster, message.poll(), message.setup_identity())?;
         Self::check_organizer(owner, roster)?;
         self.check_unlocked(SigningPurpose::CloseProposal)?;
         if self.close_proposal_signed {
-            return Err(Error::Consumed);
+            return Err(Refusal::Consumed);
         }
-        let own = self.close_response.ok_or(Error::Context)?;
+        let own = self.close_response.ok_or(Refusal::Context)?;
         if !self.close_intent_signed
             || self.close_lock.map(|(identity, _)| identity) != Some(*message.intent())
             || !message.responses().contains(&(owner.position(), own))
         {
-            return Err(Error::Context);
+            return Err(Refusal::Context);
         }
         self.close_proposal_signed = true;
         self.sign_close(ClosePurpose::Proposal, message.identity())
@@ -590,17 +586,17 @@ impl Credential {
     /// for unused authority. A response requires its intent to be locked first.
     pub fn restore_close_message(
         &mut self,
-        owner: &RetainedBallotOwner,
+        owner: &RetainedSetupOwner,
         roster: &AuthenticatedRosterProposal,
         message: CloseMessage<'_>,
         signature: &[u8],
-    ) -> Result<(), Error> {
+    ) -> Result<(), Refusal> {
         match message {
             CloseMessage::Intent(message) => {
                 self.check_close_owner(owner, roster, message.poll(), message.setup_identity())?;
                 Self::check_organizer(owner, roster)?;
                 if self.close_intent_signed {
-                    return Err(Error::Consumed);
+                    return Err(Refusal::Consumed);
                 }
                 self.check_own_signature(ClosePurpose::Intent, message.identity(), signature)?;
                 self.lock_intent(message)?;
@@ -609,12 +605,12 @@ impl Credential {
             CloseMessage::Response(message) => {
                 self.check_close_owner(owner, roster, message.poll(), message.setup_identity())?;
                 if self.close_response.is_some() {
-                    return Err(Error::Consumed);
+                    return Err(Refusal::Consumed);
                 }
                 if message.responder() != owner.position()
                     || self.close_lock.map(|(identity, _)| identity) != Some(*message.intent())
                 {
-                    return Err(Error::Context);
+                    return Err(Refusal::Context);
                 }
                 self.check_own_signature(ClosePurpose::Response, message.identity(), signature)?;
                 self.close_response = Some(*message.identity());
@@ -623,10 +619,10 @@ impl Credential {
                 self.check_close_owner(owner, roster, message.poll(), message.setup_identity())?;
                 Self::check_organizer(owner, roster)?;
                 if self.close_proposal_signed {
-                    return Err(Error::Consumed);
+                    return Err(Refusal::Consumed);
                 }
                 if self.close_lock.map(|(identity, _)| identity) != Some(*message.intent()) {
-                    return Err(Error::Context);
+                    return Err(Refusal::Context);
                 }
                 self.check_own_signature(ClosePurpose::Proposal, message.identity(), signature)?;
                 self.close_proposal_signed = true;

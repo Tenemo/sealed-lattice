@@ -13,6 +13,7 @@ use sha3::{
     Shake256,
     digest::{ExtendableOutput, Update, XofReader},
 };
+use statement_stream::coefficient;
 use std::{cell::RefCell, io};
 use supported_profile::{DEGREE, FHE_SECRET_SUPPORT, Family};
 use zeroize::Zeroizing;
@@ -33,7 +34,7 @@ const POSITIONS: [usize; 8] = [
 
 fn source_reader() -> impl XofReader {
     let mut hash = Shake256::default();
-    hash.update(b"fhe-key-source-screen/1");
+    hash.update(b"fhe-key-source-screen");
     hash.update(&[0x67; 64]);
     hash.finalize_xof()
 }
@@ -43,14 +44,6 @@ fn ensure(condition: bool, message: &'static str) -> io::Result<()> {
     } else {
         Err(io::Error::other(message))
     }
-}
-fn encode_coefficient(value: &BigInt, width: usize) -> Vec<u8> {
-    let (sign, magnitude) = value.to_bytes_le();
-    assert!(magnitude.len() <= width);
-    let mut bytes = vec![0; width + 1];
-    bytes[0] = u8::from(sign == Sign::Minus);
-    bytes[1..1 + magnitude.len()].copy_from_slice(&magnitude);
-    bytes
 }
 struct Capture {
     profile: Profile,
@@ -81,8 +74,10 @@ impl PolynomialOutput for Capture {
                 &BigInt::from_bytes_le(Sign::Plus, &self.profile.ciphertext_modulus().to_bytes())
             );
             let mut hash = ProtocolHash::new();
+            let mut record = vec![0; 1 + width];
             for value in values {
-                hash.update(encode_coefficient(value, width));
+                coefficient::encode(value, &mut record);
+                hash.update(&record);
             }
             self.hash = Some(hash.finalize());
             self.samples = POSITIONS
@@ -154,7 +149,7 @@ impl Screen {
                 ensure(
                     matches!(
                         Contribution::from_source(wrong, source),
-                        Err(crate::contribution::Error::SourceFamily)
+                        Err(crate::contribution::Refusal::SourceFamily)
                     ),
                     "Wrong family began contribution work",
                 )?;
@@ -276,7 +271,6 @@ impl Screen {
             .as_ref()
             .ok_or_else(|| io::Error::other("Missing restored coordinate"))?;
         let width = self.profile.family_magnitude_bytes(Family::Fhe);
-        self.report.extend_from_slice(b"FKS1");
         for value in [
             self.profile.participants(),
             self.profile.options(),
@@ -289,11 +283,12 @@ impl Screen {
         }
         self.report.extend_from_slice(&original.hash.unwrap());
         self.report.extend_from_slice(&restored.hash.unwrap());
+        let mut record = vec![0; 1 + width];
         for (position, value) in POSITIONS.iter().zip(&original.samples) {
             self.report
                 .extend_from_slice(&(*position as u32).to_le_bytes());
-            self.report
-                .extend_from_slice(&encode_coefficient(value, width));
+            coefficient::encode(value, &mut record);
+            self.report.extend_from_slice(&record);
         }
         ensure(
             self.report.len() <= OUTPUT_BYTES,

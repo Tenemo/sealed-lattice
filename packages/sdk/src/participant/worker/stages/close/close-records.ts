@@ -38,7 +38,7 @@ export const closureBodyFile = (identity: Uint8Array) =>
     'body-' + hexadecimal(identity) + '.bin';
 
 // The identity of the envelope a retained submission begins with, derived
-// without the close module, so that an operation that restores no setup can name
+// without the close state machine, so that an operation that restores no setup can name
 // what its custody holds.
 export const custodyEnvelopeIdentity = (
     context: PublicProfileContext,
@@ -114,7 +114,8 @@ export const proposalResponses = (
     profile: ParticipantProfile,
     proposal: Uint8Array,
 ) => {
-    const { proposalBodyBytes, quorum } = profile.close;
+    const { quorum } = profile;
+    const { proposalBodyBytes } = profile.close;
     return Array.from({ length: quorum }, (_unused, index) => {
         const offset =
             4 + proposalBodyBytes - (quorum - index) * listedEntryBytes;

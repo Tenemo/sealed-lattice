@@ -1,5 +1,5 @@
 use super::root;
-use statement_stream::arithmetic::{MODULUS, add, multiply, power, subtract};
+use statement_stream::proof_field::{MODULUS, add, multiply, power, subtract};
 use std::sync::OnceLock;
 use supported_profile::relation::SYSTEMATIC;
 

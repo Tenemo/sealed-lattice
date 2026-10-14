@@ -1,6 +1,5 @@
 use crate::field::{Element, MODULUS, ZERO};
 use parallel_work::ProtocolHash;
-use parallel_work::{HashStream, Sponge};
 use sha3::{
     Shake256,
     digest::{ExtendableOutput, Update, XofReader},
@@ -31,7 +30,7 @@ fn wide(domain: &[u8], parts: &[&[u8]], length: usize) -> Vec<u8> {
     XofReader::read(&mut state.finalize_xof(), &mut result);
     result
 }
-pub fn parameters(relation: &Relation) -> Vec<u8> {
+fn parameters(relation: &Relation) -> Vec<u8> {
     let mut bytes: Vec<u8> = relation
         .relation_parameters()
         .into_iter()
@@ -45,37 +44,23 @@ pub fn parameters(relation: &Relation) -> Vec<u8> {
     }
     bytes
 }
-/// The statement context before the statement bytes, which the caller
-/// appends.
-pub fn context_hasher(relation: &Relation, role: &[u8]) -> ProtocolHash {
-    let mut state = ProtocolHash::new();
-    context_prefix(relation, role, |bytes| state.update(bytes));
-    state
-}
-/// The same context as a stream, which a helper hashes when there are
-/// helpers.
-pub fn context_stream(relation: &Relation, role: &[u8]) -> HashStream {
-    let mut stream = HashStream::new(Sponge::ProtocolHash);
-    context_prefix(relation, role, |bytes| stream.update(bytes));
-    stream
-}
-// The context's bytes before the statement: each part after its length,
-// then the statement's length.
-fn context_prefix(relation: &Relation, role: &[u8], mut absorb: impl FnMut(&[u8])) {
-    for value in [
-        b"bounded-proof/statement".as_slice(),
-        role,
-        relation.tag,
-        &2u128.to_le_bytes(),
-        &crate::field::root(1 << 20).to_le_bytes(),
-        &7u128.to_le_bytes(),
-        &parameters(relation),
-        &(MODULUS - 1).to_le_bytes(),
-    ] {
-        absorb(&(value.len() as u32).to_le_bytes());
-        absorb(value);
-    }
-    absorb(&(relation.statement_bytes() as u32).to_le_bytes());
+/// The statement context: the role, the proof system's constants, the
+/// relation parameters and the digest of the statement, which the verifier's
+/// statement stream recomputes from the statement.
+pub fn context(relation: &Relation, role: &[u8], statement: &[u8; 64]) -> [u8; 64] {
+    hash(
+        b"bounded-proof/statement",
+        &[
+            role,
+            relation.tag,
+            &2u128.to_le_bytes(),
+            &crate::field::root(1 << 20).to_le_bytes(),
+            &7u128.to_le_bytes(),
+            &parameters(relation),
+            &(MODULUS - 1).to_le_bytes(),
+            statement,
+        ],
+    )
 }
 pub struct Transcript {
     pub role: Vec<u8>,
@@ -113,7 +98,7 @@ impl Transcript {
     }
     pub fn respond(&mut self, parts: &[&[u8]]) {
         let mut salt = [0; 128];
-        crate::random::fill(&mut salt);
+        parallel_work::random::proof(&mut salt);
         self.respond_with_salt(parts, salt);
     }
     pub fn respond_with_salt(&mut self, parts: &[&[u8]], salt: [u8; 128]) {

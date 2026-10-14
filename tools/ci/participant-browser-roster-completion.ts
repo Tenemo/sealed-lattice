@@ -8,12 +8,10 @@ import {
 } from '#packages/sdk/src/participant/worker/relay/candidate-codec.js';
 import { tupleFields } from '#packages/sdk/src/participant/worker/shared/bytes.js';
 import { targetPhase } from '#packages/sdk/src/participant/worker/storage/root-generation.js';
-import type {
-    Member,
-    ParticipantCohort,
-} from '#tools/ci/participant-browser-cohort.js';
+import type { ParticipantCohort } from '#tools/ci/participant-browser-cohort.js';
 import type { ParticipantDepartureBoundary } from '#tools/ci/participant-browser-options.js';
 import { generatedOfferIdentity } from '#tools/ci/participant-browser-public-records.js';
+import { type Member } from '#tools/ci/participant-cohort-state.js';
 import type { CheckpointCustodyObservation } from '#tools/ci/participant-preparation-storage.js';
 
 // Completes one roster from its proposal to its combined
@@ -651,7 +649,7 @@ export const completeRoster = async (
         const receivedResponses = (
             concluded.closeEvents as { kind: string }[]
         ).filter((event) => event.kind === 'response').length;
-        assert.equal(receivedResponses, bounds.close.quorum);
+        assert.equal(receivedResponses, bounds.quorum);
         const proposal = await readFile(
             path.join(publicDirectory, 'close/proposal.bin'),
         );
@@ -662,19 +660,17 @@ export const completeRoster = async (
                 bounds.registration.signatureBytes,
         );
         const proposalResponders = Array.from(
-            { length: bounds.close.quorum },
+            { length: bounds.quorum },
             (_, ordinal) =>
                 proposal.readUInt16LE(
                     4 +
                         bounds.close.proposalBodyBytes -
-                        (bounds.close.quorum - ordinal) * 66,
+                        (bounds.quorum - ordinal) * 66,
                 ),
         );
         assert.deepEqual(
             proposalResponders,
-            active
-                .slice(0, bounds.close.quorum)
-                .map(({ position }) => position),
+            active.slice(0, bounds.quorum).map(({ position }) => position),
         );
         const evidence = {
             unavailableResponder: incompleteResponder,
@@ -689,14 +685,14 @@ export const completeRoster = async (
     }
     markStage([5]);
     await each(
-        measureWorkflow ? active : active.slice(0, bounds.close.quorum),
+        measureWorkflow ? active : active.slice(0, bounds.quorum),
         async ({ member, position }) => {
             if (measureRecovery && position === 0)
                 await interrupt(
                     member.origin,
                     'sign-target',
                     {},
-                    targetPhase.intent,
+                    targetPhase.locked,
                 );
             const voted = await act(member, 'sign-target');
             assert.equal(voted.generation, 24);
@@ -717,7 +713,7 @@ export const completeRoster = async (
             await interrupt(member.origin, 'release', {}, 27);
         const details = await act(member, 'release');
         assert.equal(details.generation, 29);
-        assert.equal(details.encrypted, true);
+        assert.equal(details.hasResult, true);
     });
     markStage([7]);
     const expected = rankedIdentifiers([
@@ -728,7 +724,7 @@ export const completeRoster = async (
         measureWorkflow ? active : [active[active.length - 1]],
         async ({ member }) => {
             const combined = await act(member, 'compute-result');
-            assert.equal(combined.encrypted, true);
+            assert.equal(combined.hasResult, true);
             assert.deepEqual(combined.identifiers, expected);
         },
     );

@@ -15,12 +15,10 @@
             "DOM",
             "DOM.Iterable"
         ],
-        "removeComments": true,
         "forceConsistentCasingInFileNames": true,
         "resolveJsonModule": true,
         "types": [],
         "strict": true,
-        "sourceMap": true,
         "allowJs": true,
         "esModuleInterop": true,
         "isolatedModules": true,

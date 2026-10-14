@@ -1,5 +1,5 @@
 use super::*;
-use protocol_foundations::foundation::hash_foundation_tuple_512;
+use protocol_foundations::foundation::{CanonicalItem, hash_foundation_tuple_512};
 
 const PURPOSES: [(u32, Purpose); 3] = [
     (0, Purpose::Contribution),
@@ -69,6 +69,41 @@ fn frames_each_stream_as_the_foundation_hash_of_its_domain_and_seed() {
     domains.sort_unstable();
     domains.dedup();
     assert_eq!(domains.len(), 5);
+}
+
+// SHAKE256 prefixes computed outside this crate from the canonical tuple of
+// each domain and the seed 3 + 29i. A retained seed must keep deriving the
+// same bytes, so no change to the framing may alter them.
+#[test]
+fn keeps_every_stream_prefix_byte_identical() {
+    let seed = seed(3);
+    for (domain, prefix) in [
+        (
+            "sealed-lattice/contribution-witness-randomness",
+            "cfb9a04f9b1573034681a81fe6748b6e19c54b0fe8bf65b678625167d292836b",
+        ),
+        (
+            "sealed-lattice/contribution-proof-randomness",
+            "1ea48958e62e12901c8e8af39e2a738e01c88fb4df5ccb99f5df3cf38a2ebf6c",
+        ),
+        (
+            "sealed-lattice/ballot-encryption-randomness",
+            "9876a6090dce31588bdfae48d0b39729044406cf516e09f269ed4774c2832d27",
+        ),
+        (
+            "sealed-lattice/ballot-proof-randomness",
+            "8caec31ad90b7cfb4cbb85a1bb0734f3588e452c79f500a927faa37b57419066",
+        ),
+        (
+            "sealed-lattice/release-proof-randomness",
+            "9a28119f5a661d134a7d2849c8f9dd4af76913f9fde4a94e80971359d330e22f",
+        ),
+    ] {
+        let mut bytes = [0; 32];
+        stream(domain, &seed).read(&mut bytes);
+        let actual: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
+        assert_eq!(actual, prefix, "{domain}");
+    }
 }
 
 #[test]

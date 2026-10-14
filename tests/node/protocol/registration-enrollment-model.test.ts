@@ -11,10 +11,10 @@ describe('signed registration and original-key custody', () => {
     it('accounts for the canonical username and every public or secret record', () => {
         const value = compileRegistrationEnrollmentCensus();
         expect(value.maximumHeaderBytes).toBe(
-            8n +
+            6n +
                 6n * 6n +
                 4n +
-                37n +
+                34n +
                 2n * 64n +
                 1952n +
                 4n +
@@ -23,30 +23,26 @@ describe('signed registration and original-key custody', () => {
                 4n +
                 64n * value.maximumSourceFamilyCount,
         );
-        expect(value.pollDefinitionOverheadBytes).toBe(2143n);
+        expect(value.pollDefinitionOverheadBytes).toBe(2138n);
         // A two-option poll: 694 bytes of runtime, lengths, counts, username
         // and data keys beside the texts, which fill the poll definition but
-        // its 2,143 bytes of framing and the manifest's 30 + 2 * 36 + 16.
+        // its 2,138 bytes of framing and the manifest's 28 + 2 * 34 + 16.
         expect(value.maximumOrganizerInputBytes).toBe(
-            694n + 1_048_576n - 2143n - 118n,
+            694n + 1_048_576n - 2138n - 112n,
         );
         expect(value.maximumJoinInputBytes).toBeLessThan(1_572_864n);
-        expect(value.recipientCapsuleBytes).toBe(532n);
-        expect(value.signingCapsuleBytes).toBe(52n);
+        expect(value.recipientCapsuleBytes).toBe(528n);
+        expect(value.signingCapsuleBytes).toBe(48n);
         expect(value.maximumEnrollmentRecords).toBe(9n);
         expect(value.maximumRecords).toBe(11n);
         expect(value.maximumEnrollmentManifestBytes).toBe(
-            4n + 96n + 64n + 4n + 9n * 73n,
+            96n + 64n + 4n + 9n * 73n,
         );
         expect(value.maximumProposalIntentManifestBytes).toBe(
-            4n + 96n + 64n + 4n + 10n * 73n,
+            96n + 64n + 4n + 10n * 73n,
         );
-        expect(value.maximumManifestBytes).toBe(
-            4n + 96n + 64n + 4n + 11n * 73n,
-        );
-        expect(value.maximumRootBytes).toBe(
-            4n + 96n + 64n + 4n + 11n * 73n + 16n,
-        );
+        expect(value.maximumManifestBytes).toBe(96n + 64n + 4n + 11n * 73n);
+        expect(value.maximumRootBytes).toBe(96n + 64n + 4n + 11n * 73n + 16n);
         expect(value.maximumRestoreInputBytes).toBeLessThan(1_572_864n);
         expect(value.maximumRetainedPayloadBytes).toBeLessThan(
             16n * 1024n ** 2n,
@@ -55,25 +51,24 @@ describe('signed registration and original-key custody', () => {
 
     it('charges all three original secret capsules and retires the source key before ballots', () => {
         const value = compileRegistrationEnrollmentCensus();
-        expect(value.manifestPrefixBytes).toBe(168n);
-        expect(value.preparedManifestPrefixBytes).toBe(136n);
-        expect(value.rootAssociatedBytes).toBe(68n);
+        expect(value.manifestPrefixBytes).toBe(164n);
+        expect(value.preparedManifestPrefixBytes).toBe(132n);
+        expect(value.rootAssociatedBytes).toBe(64n);
         expect(value.recipientAssociatedBytes).toBe(
-            BigInt(
-                Buffer.byteLength('sealed-lattice/recipient-key-custody/v1'),
-            ) + 64n,
+            BigInt(Buffer.byteLength('sealed-lattice/recipient-key-custody')) +
+                64n,
         );
-        expect(value.initialRootDistinctBlockInputs).toBe(60n);
+        expect(value.initialRootDistinctBlockInputs).toBe(59n);
         expect(value.rootDistinctBlockInputs).toBe(63n);
-        expect(value.signingDistinctBlockInputs).toBe(5n);
+        expect(value.signingDistinctBlockInputs).toBe(4n);
         expect(value.sourceDistinctBlockInputs).toBe(
             2n + (value.maximumSourceCapsuleBytes - 16n + 15n) / 16n,
         );
         const associated = Buffer.concat([
-            Buffer.alloc(8),
+            Buffer.alloc(6),
             Buffer.alloc(6),
             Buffer.alloc(4),
-            Buffer.from('sealed-lattice/fhe-source-custody/v1'),
+            Buffer.from('sealed-lattice/fhe-source-custody'),
             Buffer.alloc(6),
             Buffer.alloc(64),
         ]);
@@ -107,7 +102,6 @@ describe('signed registration and original-key custody', () => {
                 ...[...families].map(() => Buffer.alloc(64)),
             ]);
             const capsule = Buffer.concat([
-                Buffer.from('FSC1'),
                 ...[...families].map(() =>
                     Buffer.concat([Buffer.alloc(64), Buffer.alloc(64)]),
                 ),
@@ -128,7 +122,7 @@ describe('signed registration and original-key custody', () => {
     it('enumerates the root counter inputs independently of the byte census', () => {
         const inputs = new Set<bigint>([0n]);
         for (const [nonceOrdinal, plaintextBlocks] of [
-            [0n, 5],
+            [0n, 4],
             [1n, 52],
         ] as const) {
             const initial = (nonceOrdinal << 32n) + 1n;
@@ -143,7 +137,7 @@ describe('signed registration and original-key custody', () => {
                 .initialRootDistinctBlockInputs,
         );
         for (const [nonceOrdinal, blocks] of [
-            [2n, 57],
+            [2n, 56],
             [3n, 61],
         ] as const) {
             const rotatedKeyInputs = new Set<bigint>([0n]);

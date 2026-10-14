@@ -1,12 +1,12 @@
 import { compileBallotBodyCensus } from '#tests/ballot-body-model.js';
-import { deriveCloseProfile } from '#tests/close-contract-model.js';
 import { compileRegistrationEnrollmentCensus } from '#tests/registration-enrollment-model.js';
 import type { SupportedProfile } from '#tests/supported-profile-model.js';
+import { thresholdProfileFor } from '#tests/threshold-completion-model.js';
 
-// Canonical tuple framing: an eight-byte tuple header, then a two-byte type
-// and a four-byte length for each item. ASCII and byte-string values also
-// carry a four-byte inner length.
-const tupleHeaderBytes = 8n;
+// Canonical tuple framing: a six-byte tuple header, then a two-byte type and
+// a four-byte length for each item. ASCII and byte-string values also carry a
+// four-byte inner length.
+const tupleHeaderBytes = 6n;
 const itemHeaderBytes = 6n;
 const innerLengthBytes = 4n;
 const identityBytes = 64n;
@@ -18,9 +18,9 @@ const byteStringItemBytes = (length: bigint) =>
     itemHeaderBytes + innerLengthBytes + length;
 
 export const closeContexts = {
-    intent: 'sealed-lattice/close-intent/v1',
-    response: 'sealed-lattice/close-response/v1',
-    proposal: 'sealed-lattice/close-proposal/v1',
+    intent: 'sealed-lattice/close-intent',
+    response: 'sealed-lattice/close-response',
+    proposal: 'sealed-lattice/close-proposal',
 } as const;
 
 // A listed entry is a two-byte author position and an envelope identity; a
@@ -29,10 +29,12 @@ const entryBytes = 2n + identityBytes;
 const maximumListedEnvelopesPerSlot = 2n;
 export const compileCloseWireCensus = (supportedProfile: SupportedProfile) => {
     const participantCount = supportedProfile.participantCount;
-    const profile = deriveCloseProfile(participantCount);
+    const profile = thresholdProfileFor(participantCount);
     const participants = BigInt(participantCount);
-    const quorum = BigInt(profile.quorum);
-    const faultBound = BigInt(profile.faultBound);
+    const quorum = BigInt(profile.inventoryCertificateThreshold);
+    const maximumCorruptParticipantCount = BigInt(
+        profile.maximumCorruptParticipantCount,
+    );
     const { signatureBytes } = compileRegistrationEnrollmentCensus();
     const ballot = compileBallotBodyCensus(supportedProfile);
     // Purpose, poll identity and inventory identity open every close message.
@@ -56,19 +58,21 @@ export const compileCloseWireCensus = (supportedProfile: SupportedProfile) => {
     // at most two envelopes for one corrupt slot.
     const maximumUnionEnvelopes =
         participants -
-        faultBound +
-        faultBound * maximumListedEnvelopesPerSlot * quorum;
+        maximumCorruptParticipantCount +
+        maximumCorruptParticipantCount * maximumListedEnvelopesPerSlot * quorum;
     const submissionBytes = ballot.envelopeBytes + signatureBytes;
     // A participant holds at most two complete bodies for one slot. Its
     // intent lock discards late bodies and refuses later ones, so a corrupt
     // slot can deliver two before the lock and two on-time bodies after it;
     // an honest author's one body arrives once.
     const maximumHeldBodies =
-        participants - faultBound + faultBound * maximumListedEnvelopesPerSlot;
+        participants -
+        maximumCorruptParticipantCount +
+        maximumCorruptParticipantCount * maximumListedEnvelopesPerSlot;
     const maximumReceivedBodies =
         participants -
-        faultBound +
-        faultBound * 2n * maximumListedEnvelopesPerSlot;
+        maximumCorruptParticipantCount +
+        maximumCorruptParticipantCount * 2n * maximumListedEnvelopesPerSlot;
     // Delivery adds a new envelope to a slot only while fewer than two are
     // known, and every held body is known. The organizer alone also learns
     // the envelopes listed by the first response of each other responder, at
@@ -76,12 +80,16 @@ export const compileCloseWireCensus = (supportedProfile: SupportedProfile) => {
     const maximumKnownEnvelopes = maximumHeldBodies;
     const maximumOrganizerKnownEnvelopes =
         maximumKnownEnvelopes +
-        (participants - 1n) * faultBound * maximumListedEnvelopesPerSlot;
+        (participants - 1n) *
+            maximumCorruptParticipantCount *
+            maximumListedEnvelopesPerSlot;
     // Every participant's response may list two envelopes for a corrupt slot.
     const maximumRosterListedEnvelopes =
         participants -
-        faultBound +
-        faultBound * maximumListedEnvelopesPerSlot * participants;
+        maximumCorruptParticipantCount +
+        maximumCorruptParticipantCount *
+            maximumListedEnvelopesPerSlot *
+            participants;
     return {
         participantCount: participants,
         closeQuorum: quorum,

@@ -1,0 +1,276 @@
+import { describe, expect, it } from 'vitest';
+
+import {
+    decodeContributionState,
+    encodeContributionState,
+} from '#packages/sdk/src/participant/worker/stages/contribution/contribution-state.js';
+import type {
+    ContributionPhase,
+    ContributionState,
+} from '#packages/sdk/src/participant/worker/stages/contribution/contribution-state.js';
+import { contributionStateLayout } from '#packages/sdk/tests/node/participant-worker/stored-layouts.js';
+import { expectEveryTruncationStops } from '#packages/sdk/tests/node/participant-worker/stored-state-refusal.js';
+import { compileParticipantRuntimeProfile } from '#tests/participant-runtime-bounds-model.js';
+
+const profile = compileParticipantRuntimeProfile(4, 2);
+const bounds = profile.contribution;
+const recordBytes = 1_048_576;
+const fixtureHeader = (length: number) => {
+    const header = new Uint8Array(72).fill(43);
+    new DataView(header.buffer).setBigUint64(0, BigInt(length), true);
+    return header;
+};
+const proofObject = bounds.expandedPolynomials + 1;
+const slots = Array.from(
+    { length: Math.ceil(bounds.maximumProofBytes / recordBytes) },
+    (_unused, index) => ({
+        object: proofObject,
+        offset: index * recordBytes,
+        length: Math.min(
+            recordBytes,
+            bounds.maximumProofBytes - index * recordBytes,
+        ),
+    }),
+);
+const record = (
+    location: Readonly<{ object: number; offset: number; length: number }>,
+    index: number,
+) => {
+    const key = new Uint8Array(32);
+    new DataView(key.buffer).setUint32(0, index + 1, true);
+    return { ...location, key, hash: new Uint8Array(64).fill(index % 251) };
+};
+
+// These are references and opaque checkpoint headers for codec checks.
+// They create no authenticated storage, contribution or proof capability.
+const stateAt = (
+    phase: ContributionPhase,
+    proofLength = bounds.minimumProofBytes,
+    position = 2,
+): ContributionState => ({
+    phase,
+    position,
+    header:
+        phase === 4
+            ? new Uint8Array()
+            : phase <= 6
+              ? Uint8Array.of(17, 29)
+              : fixtureHeader(proofLength),
+    publicRecords:
+        phase === 4
+            ? []
+            : [...bounds.publicRecords, ...(phase >= 7 ? slots : [])].map(
+                  record,
+              ),
+    privateRecords:
+        phase === 5 || phase === 6
+            ? bounds.checkpointLengths.map((_length, index) => ({
+                  key: new Uint8Array(32).fill(index % 251),
+                  hash: new Uint8Array(64).fill((index + 1) % 251),
+              }))
+            : [],
+    signingRecords: [
+        bounds.offerEnvelopeBytes,
+        profile.registration.signatureBytes,
+    ]
+        .slice(0, phase === 8 ? 1 : phase === 9 ? 2 : 0)
+        .map((length, index) =>
+            record(
+                { object: proofObject + 1 + index, offset: 0, length },
+                bounds.publicRecords.length + slots.length + index,
+            ),
+        ),
+    seed: new Uint8Array(phase === 4 || phase === 6 ? 64 : 0).fill(61),
+});
+const decode = (state: ContributionState) =>
+    decodeContributionState(encodeContributionState(state), profile);
+
+describe('independent contribution state framing', () => {
+    it('admits every own phase for eligible pool members beyond the selected count', () => {
+        expect(profile.setupContributorCount).toBe(2);
+        expect(profile.eligibleContributorCount).toBe(3);
+        for (const phase of [4, 5, 6, 7, 8, 9] as const) {
+            for (const position of [0, 1, 2]) {
+                const state = stateAt(
+                    phase,
+                    bounds.minimumProofBytes,
+                    position,
+                );
+                const bytes = encodeContributionState(state);
+                expect(decodeContributionState(bytes, profile)).toEqual(state);
+                expect(bytes.length).toBeLessThanOrEqual(
+                    bounds.maximumStateBytes,
+                );
+            }
+            expect(() =>
+                decode(stateAt(phase, bounds.minimumProofBytes, 3)),
+            ).toThrow();
+        }
+    });
+
+    it('stops on every truncation of each phase', () => {
+        for (const phase of [4, 5, 6, 7, 8, 9] as const)
+            expectEveryTruncationStops(
+                encodeContributionState(stateAt(phase)),
+                (prefix) => decodeContributionState(prefix, profile),
+            );
+    });
+
+    it('retains the same maximum proof slot inventory for varied logical lengths', () => {
+        for (const phase of [7, 8, 9] as const) {
+            let encodedLength: number | undefined;
+            for (const length of [
+                bounds.minimumProofBytes,
+                recordBytes - 1,
+                recordBytes,
+                recordBytes + 1,
+                bounds.maximumProofBytes,
+            ]) {
+                const state = stateAt(phase, length);
+                const encoded = encodeContributionState(state);
+                const decoded = decodeContributionState(encoded, profile);
+                expect(decoded).toEqual(state);
+                expect(
+                    new DataView(decoded.header.buffer).getBigUint64(0, true),
+                ).toBe(BigInt(length));
+                expect(
+                    decoded.publicRecords
+                        .slice(bounds.publicRecords.length)
+                        .map(({ object, offset, length: bytes }) => ({
+                            object,
+                            offset,
+                            length: bytes,
+                        })),
+                ).toEqual(slots);
+                encodedLength ??= encoded.length;
+                expect(encoded.length).toBe(encodedLength);
+            }
+        }
+    });
+
+    it('refuses phase substitution instead of reviving or discarding private work', () => {
+        for (const phase of [4, 5, 6, 7, 8, 9] as const) {
+            const encoded = encodeContributionState(stateAt(phase));
+            for (const changedPhase of [0, 3, 4, 5, 6, 7, 8, 9, 10, 255]) {
+                if (changedPhase === phase) continue;
+                const changed = encoded.slice();
+                changed[0] = changedPhase;
+                expect(() =>
+                    decodeContributionState(changed, profile),
+                ).toThrow();
+            }
+            expect(() =>
+                decodeContributionState(
+                    encoded.subarray(0, encoded.length - 1),
+                    profile,
+                ),
+            ).toThrow();
+            expect(() =>
+                decodeContributionState(
+                    new Uint8Array([...encoded, 0]),
+                    profile,
+                ),
+            ).toThrow();
+        }
+    });
+
+    it('refuses missing, extra, shortened and displaced body or proof records', () => {
+        for (const phase of [5, 6, 7, 8, 9] as const) {
+            const state = stateAt(phase);
+            const last = state.publicRecords.length - 1;
+            for (const records of [
+                state.publicRecords.slice(0, last),
+                [...state.publicRecords, state.publicRecords[last]],
+                state.publicRecords.map((value, index) =>
+                    index === last
+                        ? { ...value, length: value.length - 1 }
+                        : value,
+                ),
+                state.publicRecords.map((value, index) =>
+                    index === last
+                        ? { ...value, offset: value.offset + 1 }
+                        : value,
+                ),
+                state.publicRecords.map((value, index) =>
+                    index === 0
+                        ? { ...value, object: value.object + 1 }
+                        : value,
+                ),
+            ])
+                expect(() =>
+                    decode({ ...state, publicRecords: records }),
+                ).toThrow();
+        }
+        for (const phase of [5, 6] as const) {
+            const state = stateAt(phase);
+            expect(() =>
+                decode({
+                    ...state,
+                    privateRecords: state.privateRecords.slice(1),
+                }),
+            ).toThrow();
+            expect(() =>
+                decode({
+                    ...state,
+                    privateRecords: [
+                        ...state.privateRecords,
+                        state.privateRecords[0],
+                    ],
+                }),
+            ).toThrow();
+        }
+    });
+
+    it('refuses wrong seed and offer record shapes at their actual phases', () => {
+        for (const phase of [4, 5, 6, 7, 8, 9] as const) {
+            const state = stateAt(phase);
+            for (const seed of [new Uint8Array(63), new Uint8Array(65)])
+                expect(() => decode({ ...state, seed })).toThrow();
+        }
+        for (const phase of [8, 9] as const) {
+            const state = stateAt(phase);
+            for (const signingRecords of [
+                state.signingRecords.slice(1),
+                [...state.signingRecords, state.signingRecords[0]],
+                state.signingRecords.map((value, index) =>
+                    index === 0
+                        ? { ...value, length: value.length + 1 }
+                        : value,
+                ),
+                state.signingRecords.map((value, index) =>
+                    index === 0
+                        ? { ...value, object: value.object + 1 }
+                        : value,
+                ),
+            ])
+                expect(() => decode({ ...state, signingRecords })).toThrow();
+        }
+    });
+
+    it('refuses malformed body header framing and obsolete contribution formats', () => {
+        const state = stateAt(7);
+        for (const header of [
+            new Uint8Array(),
+            new Uint8Array(12),
+            ...[
+                BigInt(bounds.minimumProofBytes - 1),
+                BigInt(bounds.maximumProofBytes + 1),
+                (1n << 64n) - 1n,
+            ].map((length) => {
+                const changed = state.header.slice();
+                new DataView(changed.buffer).setBigUint64(0, length, true);
+                return changed;
+            }),
+        ])
+            expect(() => decode({ ...state, header })).toThrow();
+    });
+
+    it('stores every own phase in its layout', () => {
+        for (const phase of [4, 5, 6, 7, 8, 9] as const) {
+            const state = stateAt(phase);
+            expect(Buffer.from(encodeContributionState(state))).toEqual(
+                contributionStateLayout(state),
+            );
+        }
+    });
+});

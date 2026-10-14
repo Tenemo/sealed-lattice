@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
+import { runCleanCircuit } from '#tests/compressed-oracle/reversible-circuit.js';
 import {
     compileSourceCacheInsert,
     compileSourceCacheLookup,
-    runCleanCircuit,
     sourceCacheWork,
-} from '#tests/compressed-oracle-model.js';
+} from '#tests/compressed-oracle/source-extraction.js';
 
 const bits = (value: number, width: number) =>
     Array.from({ length: width }, (_, bit) => (value >> bit) & 1);

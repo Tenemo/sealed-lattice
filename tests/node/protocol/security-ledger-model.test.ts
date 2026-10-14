@@ -1,5 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 
+import { goalThresholds } from '#tests/node/protocol/reference/product-goals.js';
+import {
+    shake256RateBytes,
+    spongePermutations,
+} from '#tests/node/protocol/reference/sponge-permutations.js';
 import { compilePrivateRandomnessScopes } from '#tests/operation-seed-model.js';
 import { compilePreparationLedger } from '#tests/preparation-ledger-model.js';
 import {
@@ -10,6 +15,10 @@ import {
     atMost,
     rationalCeilingLog2,
     ceilingSquareRoot,
+    rational,
+    type Rational,
+} from '#tests/security-ledger/rational.js';
+import {
     compileAuthenticationGroup,
     compileComparisonGrowth,
     compileIdentityCollisionGroup,
@@ -19,24 +28,28 @@ import {
     compileSoundnessCharge,
     compileStatisticalTerms,
     groupBudget,
-    rational,
     ratioResolutionBits,
     semanticUseStepsOutsideComparisons,
     soundnessChargeAt,
     statisticalRatioAt,
-    type Rational,
 } from '#tests/security-ledger-model.js';
+import {
+    instanceKnownAttackFloor,
+    latticeAssumptionGroups,
+    latticeGroupFloors,
+} from '#tests/security-margin/attack-screens.js';
 import {
     compileFhePopulationLimits,
     compileLatticePopulationLimits,
-    instanceKnownAttackFloor,
-    latticeAssumptionGroups,
-    latticeGroupComparisons,
-    latticeGroupFloors,
-    latticeRequirementAt,
     populationSearchCap,
+} from '#tests/security-margin/population-limits.js';
+import {
     supportedLevelBits,
     unpricedWorkAllowance,
+} from '#tests/security-margin/reduction-work.js';
+import {
+    latticeGroupComparisons,
+    latticeRequirementAt,
 } from '#tests/security-margin-screen-model.js';
 import {
     deriveSupportedProfile,
@@ -52,10 +65,6 @@ const largestExperiment = 1n << 80n;
 const callsPerQuery = 4n;
 const budget = rational(1n, 1n << 83n);
 
-// FIPS 202 pads after the SHAKE suffix, so absorbing m bytes at rate r takes
-// floor(m/r)+1 permutations, and an output of at most r bytes adds none.
-const shake256Permutations = (inputBytes: bigint) => inputBytes / 136n + 1n;
-
 // FIPS 204 Table 1 for ML-DSA-65.
 const mlDsa65 = {
     modulus: 8_380_417n,
@@ -69,22 +78,19 @@ const mlDsa65 = {
 // proposal and endorsement, optional ballot, close intent, response and
 // proposal, target certification and release envelope.
 const organizerPurposes = [
-    ['poll-definition', 'v2'],
-    ['registration', 'v1'],
-    ['roster-proposal', 'v1'],
-    ['contribution-offer', 'v1'],
-    ['setup-selection-proposal', 'v1'],
-    ['setup-selection-endorsement', 'v1'],
-    ['ballot-envelope', 'v1'],
-    ['close-intent', 'v1'],
-    ['close-response', 'v1'],
-    ['close-proposal', 'v1'],
-    ['target-certification', 'v1'],
-    ['release-envelope', 'v1'],
+    'poll-definition',
+    'registration',
+    'roster-proposal',
+    'contribution-offer',
+    'setup-selection-proposal',
+    'setup-selection-endorsement',
+    'ballot-envelope',
+    'close-intent',
+    'close-response',
+    'close-proposal',
+    'target-certification',
+    'release-envelope',
 ] as const;
-
-const maximumCorrupt = (participantCount: number) =>
-    BigInt(Math.floor((participantCount - 1) / 3));
 
 // Whether value/experiment <= bound, compared exactly.
 const ratioWithin = (value: Rational, experiment: bigint, bound: Rational) =>
@@ -106,8 +112,12 @@ const populationsUpTo = (limit: bigint) =>
     [0n, 1n, 2n, 1_000n, 1n << 30n, limit].filter((value) => value <= limit);
 
 describe('security ledger', () => {
-    const ledger = compileSecurityLedger();
-    const fheLimits = compileFhePopulationLimits();
+    let ledger: ReturnType<typeof compileSecurityLedger>;
+    let fheLimits: ReturnType<typeof compileFhePopulationLimits>;
+    beforeAll(() => {
+        ledger = compileSecurityLedger();
+        fheLimits = compileFhePopulationLimits();
+    });
     const profiles = listSupportedProfiles();
     const sampleProfiles = [
         deriveSupportedProfile(3, 2),
@@ -145,11 +155,8 @@ describe('security ledger', () => {
         );
         // tr || M' with M' = 0 || |ctx| || ctx || a 64-byte digest.
         const shortestContext = organizerPurposes
-            .filter(([purpose]) => !purpose.endsWith('-envelope'))
-            .map(
-                ([purpose, version]) =>
-                    `sealed-lattice/${purpose}/${version}`.length,
-            )
+            .filter((purpose) => !purpose.endsWith('-envelope'))
+            .map((purpose) => `sealed-lattice/${purpose}`.length)
             .reduce((minimum, value) => Math.min(minimum, value));
         const frameInputBytes =
             mlDsa65.publicKeyDigestBytes + 2n + BigInt(shortestContext) + 64n;
@@ -161,10 +168,15 @@ describe('security ledger', () => {
         const highBits = BigInt((highValues - 1n).toString(2).length);
         const challengeInputBytes = 64n + 32n * mlDsa65.rowCount * highBits;
         expect(challengeInputBytes).toBe(832n);
-        expect((mlDsa65.collisionStrength * 2n) / 8n).toBeLessThanOrEqual(136n);
+        // FIPS 204: the message representative has 64 bytes and the
+        // commitment hash 2 * lambda / 8 bytes.
         const verification =
-            shake256Permutations(frameInputBytes) +
-            shake256Permutations(challengeInputBytes) +
+            spongePermutations(frameInputBytes, 64n, shake256RateBytes) +
+            spongePermutations(
+                challengeInputBytes,
+                (mlDsa65.collisionStrength * 2n) / 8n,
+                shake256RateBytes,
+            ) +
             1n;
         expect(verification).toBe(10n);
         expect(authentication.verificationPermutations).toBe(verification);
@@ -215,7 +227,10 @@ describe('security ledger', () => {
 
     it('bounds every lattice group comparison count by its affine growth', () => {
         for (const profile of sampleProfiles) {
-            const corrupt = maximumCorrupt(profile.participantCount);
+            const corrupt = BigInt(
+                goalThresholds(profile.participantCount)
+                    .maximumCorruptParticipantCount,
+            );
             const participants = BigInt(profile.participantCount);
             const endorsers = participants - 2n * corrupt;
             const growth = compileComparisonGrowth(profile);

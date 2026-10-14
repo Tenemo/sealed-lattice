@@ -33,7 +33,7 @@ fn records_open_within_the_limit_and_the_roster_waits_for_every_verdict() {
     let above = [&input[..128], &4u16.to_le_bytes(), &input[130..]].concat();
     assert!(matches!(
         RosterInputVerifier::new(&above),
-        Err(Error::Context)
+        Err(Refusal::Context)
     ));
     let mut roster = RosterInputVerifier::new(&input).unwrap();
     let record = |position: u16| {
@@ -48,8 +48,8 @@ fn records_open_within_the_limit_and_the_roster_waits_for_every_verdict() {
     };
     let key = vec![0; KEY_BYTES];
     roster.begin_record(&record(0)).unwrap();
-    assert!(matches!(roster.push_key(1, &key[..1]), Err(Error::Shape)));
-    assert!(matches!(roster.finish(), Err(Error::Shape)));
+    assert!(matches!(roster.push_key(1, &key[..1]), Err(Refusal::Shape)));
+    assert!(matches!(roster.finish(), Err(Refusal::Shape)));
     let opened = open_record_limit().min(3) as u16;
     for position in 1..opened {
         roster.begin_record(&record(position)).unwrap();
@@ -57,7 +57,7 @@ fn records_open_within_the_limit_and_the_roster_waits_for_every_verdict() {
     if opened < 3 {
         assert!(matches!(
             roster.begin_record(&record(opened)),
-            Err(Error::Shape)
+            Err(Refusal::Shape)
         ));
     }
     for position in 0..3 {
@@ -71,25 +71,28 @@ fn records_open_within_the_limit_and_the_roster_waits_for_every_verdict() {
         assert!(roster.finish_record(position.into()).is_err());
         assert!(matches!(
             roster.begin_record(&record(position)),
-            Err(Error::Shape)
+            Err(Refusal::Shape)
         ));
         assert!(matches!(
             roster.finish_record(position.into()),
-            Err(Error::Shape)
+            Err(Refusal::Shape)
         ));
         roster.discard_record(position.into()).unwrap();
         let mut other_identity = record(position);
         other_identity[2] ^= 1;
         assert!(matches!(
             roster.begin_record(&other_identity),
-            Err(Error::Context)
+            Err(Refusal::Context)
         ));
         roster.begin_record(&record(position)).unwrap();
         roster.discard_record(position.into()).unwrap();
     }
-    assert!(matches!(roster.begin_record(&record(3)), Err(Error::Shape)));
-    assert!(matches!(roster.finish(), Err(Error::Shape)));
-    assert!(matches!(roster.finish(), Err(Error::Shape)));
+    assert!(matches!(
+        roster.begin_record(&record(3)),
+        Err(Refusal::Shape)
+    ));
+    assert!(matches!(roster.finish(), Err(Refusal::Shape)));
+    assert!(matches!(roster.finish(), Err(Refusal::Shape)));
 }
 
 struct Ceremony {
@@ -204,7 +207,7 @@ fn stream_record(
     ceremony: &Ceremony,
     position: usize,
     served: usize,
-) -> Result<(), Error> {
+) -> Result<(), Refusal> {
     verifier.begin_record(&record_input(ceremony, position, served))?;
     for part in ceremony.keys[served].chunks(CHUNK_LIMIT) {
         verifier.push_key(position, part)?;
@@ -250,21 +253,21 @@ fn records_bind_their_requested_identity_and_retries_keep_verified_positions() {
     let mut verifier = RosterInputVerifier::new(&begin_input(&ceremony)).unwrap();
     stream_record(&mut verifier, &ceremony, 0, 0).unwrap();
     stream_record(&mut verifier, &ceremony, 2, 2).unwrap();
-    assert!(matches!(verifier.discard_record(0), Err(Error::Consumed)));
+    assert!(matches!(verifier.discard_record(0), Err(Refusal::Consumed)));
     assert!(matches!(
         verifier.begin_record(&record_input(&ceremony, 0, 0)),
-        Err(Error::Shape)
+        Err(Refusal::Shape)
     ));
     assert!(matches!(
         stream_record(&mut verifier, &ceremony, 1, 2),
-        Err(Error::Context)
+        Err(Refusal::Context)
     ));
     verifier.discard_record(1).unwrap();
     let mut other_identity = record_input(&ceremony, 1, 1);
     other_identity[2] ^= 1;
     assert!(matches!(
         verifier.begin_record(&other_identity),
-        Err(Error::Context)
+        Err(Refusal::Context)
     ));
     let mut changed_signature = record_input(&ceremony, 1, 1);
     changed_signature[70 + ceremony.headers[1].len()] ^= 1;
@@ -273,7 +276,7 @@ fn records_bind_their_requested_identity_and_retries_keep_verified_positions() {
         verifier.push_key(1, part).unwrap();
     }
     verifier.finish_key(1).unwrap();
-    assert!(matches!(verifier.finish_record(1), Err(Error::Crypto)));
+    assert!(matches!(verifier.finish_record(1), Err(Refusal::Crypto)));
     verifier.discard_record(1).unwrap();
     verifier
         .begin_record(&record_input(&ceremony, 1, 1))
@@ -282,8 +285,8 @@ fn records_bind_their_requested_identity_and_retries_keep_verified_positions() {
         verifier.push_key(1, part).unwrap();
     }
     verifier.finish_key(1).unwrap();
-    assert!(matches!(verifier.finish_record(1), Err(Error::Shape)));
-    assert!(matches!(verifier.finish(), Err(Error::Shape)));
+    assert!(matches!(verifier.finish_record(1), Err(Refusal::Shape)));
+    assert!(matches!(verifier.finish(), Err(Refusal::Shape)));
     verifier.discard_record(1).unwrap();
     // A transport interruption after a complete key is cancellation, not
     // permission to install a record from incomplete delivery.
@@ -295,11 +298,11 @@ fn records_bind_their_requested_identity_and_retries_keep_verified_positions() {
     }
     verifier.finish_key(1).unwrap();
     verifier.discard_record(1).unwrap();
-    assert!(matches!(verifier.finish_record(1), Err(Error::Shape)));
+    assert!(matches!(verifier.finish_record(1), Err(Refusal::Shape)));
     stream_record(&mut verifier, &ceremony, 1, 1).unwrap();
     let proposal = verifier.finish().unwrap();
     assert_eq!(proposal.body(), ceremony.proposal.body());
     assert_eq!(proposal.identity(), ceremony.proposal.identity());
-    assert!(matches!(verifier.discard_record(1), Err(Error::Consumed)));
+    assert!(matches!(verifier.discard_record(1), Err(Refusal::Consumed)));
     assert_eq!(verifier.finish().unwrap().identity(), proposal.identity());
 }

@@ -1,4 +1,4 @@
-use crate::{Error, identity::BodyHasher};
+use crate::{Refusal, identity::BodyHasher};
 use std::ops::RangeInclusive;
 use supported_profile::{
     AUXILIARY_DEGREE, DEGREE, Profile, auxiliary_modulus,
@@ -6,8 +6,12 @@ use supported_profile::{
 };
 
 pub(crate) const CONTEXT_BYTES: usize = BALLOT_HEADER_BYTES;
-pub const HEADER_BYTES: usize = 12 + CONTEXT_BYTES;
-pub(crate) const BODY_DOMAIN: &str = "sealed-lattice/ballot-body/v1";
+/// The body header: the complete proof length, the statement context and
+/// the proof header. It opens the proof's verification, so the ciphertexts
+/// that follow it stream into the statement as they arrive, and the rest of
+/// the proof ends the body.
+pub const HEADER_BYTES: usize = 8 + CONTEXT_BYTES + PROOF_HEADER_BYTES;
+pub(crate) const BODY_DOMAIN: &str = "sealed-lattice/ballot-body";
 
 /// The body's ciphertext polynomials, by ballot statement index, with their
 /// byte lengths: both FHE ciphertext components, then both auxiliary
@@ -26,16 +30,19 @@ pub fn ciphertext_bytes(profile: Profile) -> usize {
 pub fn proof_lengths(profile: Profile) -> RangeInclusive<usize> {
     PROOF_HEADER_BYTES..=ballot_relation(profile).maximum_proof_bytes()
 }
+/// The length of a body whose complete proof has the length.
+pub fn body_length(profile: Profile, proof_length: usize) -> usize {
+    HEADER_BYTES + ciphertext_bytes(profile) + proof_length - PROOF_HEADER_BYTES
+}
 pub fn body_lengths(profile: Profile) -> RangeInclusive<usize> {
-    let fixed = HEADER_BYTES + ciphertext_bytes(profile);
     let proofs = proof_lengths(profile);
-    fixed + proofs.start()..=fixed + proofs.end()
+    body_length(profile, *proofs.start())..=body_length(profile, *proofs.end())
 }
 
 /// Checks a ballot statement header: it names a roster position of the
 /// profile, the poll's option count and a result length of at least one
 /// option and at most every option.
-pub fn check_context(profile: Profile, context: &[u8]) -> Result<(), Error> {
+pub fn check_context(profile: Profile, context: &[u8]) -> Result<(), Refusal> {
     if context.len() != CONTEXT_BYTES
         || &context[..4] != b"LBS1"
         || usize::from(context[134]) != profile.options()
@@ -44,45 +51,57 @@ pub fn check_context(profile: Profile, context: &[u8]) -> Result<(), Error> {
         || usize::from(u16::from_le_bytes(context[132..134].try_into().unwrap()))
             >= profile.participants()
     {
-        return Err(Error::Shape);
+        return Err(Refusal::Shape);
     }
     Ok(())
 }
-/// The body header of a ballot statement header.
-pub fn header(profile: Profile, context: &[u8], proof_length: usize) -> Result<Vec<u8>, Error> {
+/// The body header of a ballot statement header and its complete proof.
+pub fn header(profile: Profile, context: &[u8], proof: &[u8]) -> Result<Vec<u8>, Refusal> {
     check_context(profile, context)?;
-    if !proof_lengths(profile).contains(&proof_length) {
-        return Err(Error::Shape);
+    if !proof_lengths(profile).contains(&proof.len()) {
+        return Err(Refusal::Shape);
     }
-    let mut bytes = Vec::from(b"LBB1".as_slice());
-    bytes.extend((proof_length as u64).to_le_bytes());
+    let mut bytes = (proof.len() as u64).to_le_bytes().to_vec();
     bytes.extend(context);
+    bytes.extend(&proof[..PROOF_HEADER_BYTES]);
     Ok(bytes)
 }
-pub fn proof_length(profile: Profile, bytes: &[u8]) -> Result<usize, Error> {
-    if bytes.len() != HEADER_BYTES || &bytes[..4] != b"LBB1" {
-        return Err(Error::Shape);
+/// The parts of a body header.
+pub struct BodyHeader<'a> {
+    pub proof_length: usize,
+    pub context: &'a [u8],
+    pub proof_header: &'a [u8],
+}
+pub fn parse_header(profile: Profile, bytes: &[u8]) -> Result<BodyHeader<'_>, Refusal> {
+    if bytes.len() != HEADER_BYTES {
+        return Err(Refusal::Shape);
     }
-    let length = usize::try_from(u64::from_le_bytes(bytes[4..12].try_into().unwrap()))
-        .map_err(|_| Error::Shape)?;
-    if header(profile, &bytes[12..], length)? != bytes {
-        return Err(Error::Shape);
+    let proof_length = usize::try_from(u64::from_le_bytes(bytes[..8].try_into().unwrap()))
+        .map_err(|_| Refusal::Shape)?;
+    let (context, proof_header) = bytes[8..].split_at(CONTEXT_BYTES);
+    check_context(profile, context)?;
+    if !proof_lengths(profile).contains(&proof_length) {
+        return Err(Refusal::Shape);
     }
-    Ok(length)
+    Ok(BodyHeader {
+        proof_length,
+        context,
+        proof_header,
+    })
 }
 /// The hasher of a ballot body of the length. It hashes the committed bytes
 /// even if their inner header or proof is malformed: completion supplies a
 /// byte identity, not semantic validity.
-pub fn body_hasher(profile: Profile, length: usize) -> Result<BodyHasher, Error> {
+pub fn body_hasher(profile: Profile, length: usize) -> Result<BodyHasher, Refusal> {
     if !body_lengths(profile).contains(&length) {
-        return Err(Error::Shape);
+        return Err(Refusal::Shape);
     }
     BodyHasher::new(BODY_DOMAIN, length)
 }
 /// The hasher of the ballot body that the canonical header begins, after
 /// the header.
-pub fn header_body_hasher(profile: Profile, header: &[u8]) -> Result<BodyHasher, Error> {
-    let length = HEADER_BYTES + ciphertext_bytes(profile) + proof_length(profile, header)?;
+pub fn header_body_hasher(profile: Profile, header: &[u8]) -> Result<BodyHasher, Refusal> {
+    let length = body_length(profile, parse_header(profile, header)?.proof_length);
     let mut hash = body_hasher(profile, length)?;
     hash.push(header)?;
     Ok(hash)

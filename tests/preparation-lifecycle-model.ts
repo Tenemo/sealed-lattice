@@ -44,7 +44,7 @@ export class PreparationLifecycleModel {
         this.corrupt = new Set(corrupt);
         if (
             this.corrupt.size !== corrupt.length ||
-            this.corrupt.size > this.profile.faultBound ||
+            this.corrupt.size > this.profile.maximumCorruptParticipantCount ||
             corrupt.some(
                 (position) =>
                     !Number.isSafeInteger(position) ||
@@ -121,7 +121,7 @@ export class PreparationLifecycleModel {
         const state = this.authenticated(position);
         if (
             state?.generation !== 4 ||
-            position >= this.profile.eligibleCount ||
+            position >= this.profile.eligibleContributorCount ||
             state.ownPhase !== undefined
         )
             return false;
@@ -167,7 +167,7 @@ export class PreparationLifecycleModel {
         if (
             !Number.isSafeInteger(entry.position) ||
             entry.position < 0 ||
-            entry.position >= this.profile.eligibleCount ||
+            entry.position >= this.profile.eligibleContributorCount ||
             !/^[0-9a-f]{128}$/u.test(entry.bodyIdentity)
         )
             return false;
@@ -235,7 +235,8 @@ export class PreparationLifecycleModel {
             identity === undefined ||
             !this.proposals.has(identity) ||
             !this.completeInputs(certificate.selected) ||
-            certificate.signers.length !== this.profile.quorum ||
+            certificate.signers.length !==
+                this.profile.inventoryCertificateThreshold ||
             certificate.signers.some(
                 (position, index) =>
                     !Number.isSafeInteger(position) ||

@@ -2,29 +2,25 @@
 //! A digest fixes bytes; only the later contribution verifier checks their
 //! complete key and encrypted-sharing relation.
 use crate::{
-    Credential, Error, SIGNING_PUBLIC_KEY_BYTES,
+    Credential, Refusal, SIGNING_PUBLIC_KEY_BYTES,
     foundation::CanonicalItem,
     identity::IdentityHasher,
     poll::VerifiedPoll,
     roster::{RetainedContributionContext, RosterProposal},
 };
+use statement_stream::coefficient::CenteredCodec;
 use supported_profile::{DEGREE, Profile};
 
 pub const SOURCE_SALT_BYTES: usize = 64;
 
-fn same_family(left: Profile, right: Profile) -> bool {
-    left.ciphertext_modulus().to_bytes() == right.ciphertext_modulus().to_bytes()
-        && left.fhe_common_sample_bits() == right.fhe_common_sample_bits()
-}
-
 fn families(maximum: usize, options: usize) -> Vec<Profile> {
-    let mut families = Vec::new();
+    let mut families: Vec<Profile> = Vec::new();
     for participants in *Profile::participant_range().start()..=maximum {
         let profile =
             Profile::new(participants, options).expect("A verified poll has supported dimensions.");
         if !families
             .iter()
-            .any(|previous| same_family(*previous, profile))
+            .any(|previous| previous.same_fhe_key_family(profile))
         {
             families.push(profile);
         }
@@ -42,16 +38,19 @@ pub fn fhe_key_families(poll: &VerifiedPoll) -> Vec<Profile> {
     )
 }
 
-pub(crate) fn fhe_key_family_index(poll: &VerifiedPoll, profile: Profile) -> Result<usize, Error> {
+pub(crate) fn fhe_key_family_index(
+    poll: &VerifiedPoll,
+    profile: Profile,
+) -> Result<usize, Refusal> {
     if profile.options() != poll.manifest().option_count()
         || profile.participants() > usize::from(poll.maximum_participants())
     {
-        return Err(Error::Context);
+        return Err(Refusal::Context);
     }
     fhe_key_families(poll)
         .iter()
-        .position(|family| same_family(*family, profile))
-        .ok_or(Error::Context)
+        .position(|family| family.same_fhe_key_family(profile))
+        .ok_or(Refusal::Context)
 }
 
 pub fn maximum_fhe_key_family_count() -> usize {
@@ -67,7 +66,7 @@ pub struct FheKeyCommitmentHasher {
     hash: Option<IdentityHasher>,
     length: usize,
     received: usize,
-    half_modulus: Vec<u8>,
+    codec: CenteredCodec,
     coefficient: Vec<u8>,
 }
 
@@ -77,7 +76,7 @@ impl FheKeyCommitmentHasher {
         credential: &Credential,
         profile: Profile,
         salt: &[u8; SOURCE_SALT_BYTES],
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, Refusal> {
         fhe_key_family_index(poll, profile)?;
         Self::new(poll.identity(), credential.signing_public(), profile, salt)
     }
@@ -86,12 +85,12 @@ impl FheKeyCommitmentHasher {
         proposal: &RosterProposal,
         position: usize,
         salt: &[u8; SOURCE_SALT_BYTES],
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, Refusal> {
         proposal.fhe_key_commitment(position)?;
         let header = proposal
             .records()
             .get(position)
-            .ok_or(Error::Context)?
+            .ok_or(Refusal::Context)?
             .header();
         Self::new(
             header.poll,
@@ -105,9 +104,9 @@ impl FheKeyCommitmentHasher {
         context: &RetainedContributionContext,
         credential: &Credential,
         salt: &[u8; SOURCE_SALT_BYTES],
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, Refusal> {
         if credential.completed_body != Some(context.owner_body) {
-            return Err(Error::Context);
+            return Err(Refusal::Context);
         }
         Self::new(
             context.poll,
@@ -122,61 +121,47 @@ impl FheKeyCommitmentHasher {
         signing_public: &[u8; SIGNING_PUBLIC_KEY_BYTES],
         profile: Profile,
         salt: &[u8; SOURCE_SALT_BYTES],
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, Refusal> {
         let modulus = profile.ciphertext_modulus().to_bytes();
         let length = DEGREE * (1 + modulus.len());
         let prefix = [
-            CanonicalItem::fixed_bytes(signing_public).map_err(|_| Error::Shape)?,
-            CanonicalItem::fixed_bytes(salt).map_err(|_| Error::Shape)?,
+            CanonicalItem::fixed_bytes(signing_public).map_err(|_| Refusal::Shape)?,
+            CanonicalItem::fixed_bytes(salt).map_err(|_| Refusal::Shape)?,
             CanonicalItem::hash512(poll),
-            CanonicalItem::variable_bytes(&modulus).map_err(|_| Error::Shape)?,
+            CanonicalItem::variable_bytes(&modulus).map_err(|_| Refusal::Shape)?,
             CanonicalItem::unsigned64(profile.fhe_common_sample_bits() as u64),
         ];
-        let hash = IdentityHasher::local("sealed-lattice/registered-fhe-key/v2", &prefix, length)?;
-        let mut half_modulus = modulus;
-        let mut carry = 0;
-        for byte in half_modulus.iter_mut().rev() {
-            let next = (*byte & 1) << 7;
-            *byte = (*byte >> 1) | carry;
-            carry = next;
-        }
+        let hash = IdentityHasher::local("sealed-lattice/registered-fhe-key", &prefix, length)?;
+        let codec = CenteredCodec::new(&modulus);
         Ok(Self {
             hash: Some(hash),
             length,
             received: 0,
-            coefficient: Vec::with_capacity(1 + half_modulus.len()),
-            half_modulus,
+            coefficient: Vec::with_capacity(codec.record_bytes()),
+            codec,
         })
     }
 
-    pub fn push(&mut self, offset: usize, bytes: &[u8]) -> Result<(), Error> {
+    pub fn push(&mut self, offset: usize, bytes: &[u8]) -> Result<(), Refusal> {
         let Some(mut hash) = self.hash.take() else {
-            return Err(Error::Consumed);
+            return Err(Refusal::Consumed);
         };
         if offset != self.received
             || bytes.is_empty()
             || bytes.len() > 1 << 20
             || bytes.len() > self.length - self.received
         {
-            return Err(Error::Shape);
+            return Err(Refusal::Shape);
         }
         let mut remaining = bytes;
-        let width = 1 + self.half_modulus.len();
+        let width = self.codec.record_bytes();
         while !remaining.is_empty() {
             let count = remaining.len().min(width - self.coefficient.len());
             self.coefficient.extend_from_slice(&remaining[..count]);
             remaining = &remaining[count..];
             if self.coefficient.len() == width {
-                let magnitude = &self.coefficient[1..];
-                if self.coefficient[0] > 1
-                    || (self.coefficient[0] == 1 && magnitude.iter().all(|byte| *byte == 0))
-                    || magnitude
-                        .iter()
-                        .rev()
-                        .cmp(self.half_modulus.iter().rev())
-                        .is_gt()
-                {
-                    return Err(Error::Shape);
+                if !self.codec.is_canonical(&self.coefficient) {
+                    return Err(Refusal::Shape);
                 }
                 self.coefficient.clear();
             }
@@ -187,11 +172,11 @@ impl FheKeyCommitmentHasher {
         Ok(())
     }
 
-    pub fn finish(self) -> Result<[u8; 64], Error> {
+    pub fn finish(self) -> Result<[u8; 64], Refusal> {
         if self.received != self.length || !self.coefficient.is_empty() {
-            return Err(Error::Shape);
+            return Err(Refusal::Shape);
         }
-        self.hash.ok_or(Error::Consumed)?.finish()
+        self.hash.ok_or(Refusal::Consumed)?.finish()
     }
 }
 

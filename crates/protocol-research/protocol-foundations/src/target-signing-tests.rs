@@ -16,18 +16,11 @@ fn body(participants: usize, accepted: usize, evaluated: bool) -> Vec<u8> {
         CanonicalItem::hash512([2; 64]),
         CanonicalItem::hash512([3; 64]),
         CanonicalItem::variable_bytes(&classifications).unwrap(),
-        CanonicalItem::unsigned16(u16::from(evaluated)),
     ];
     if evaluated {
         items.push(CanonicalItem::hash512([4; 64]));
     }
-    CanonicalTuple::new(1, 1, items).encode().unwrap()
-}
-#[test]
-fn minimum_turnout_is_two_more_than_the_compromise_bound() {
-    for (participants, turnout) in [(3, 2), (4, 3), (6, 3), (7, 4), (10, 5), (13, 6), (20, 8)] {
-        assert_eq!(minimum_turnout(participants), turnout);
-    }
+    CanonicalTuple::new(1, items).encode().unwrap()
 }
 #[test]
 fn only_the_minimum_turnout_selects_the_evaluated_branch() {
@@ -38,7 +31,8 @@ fn only_the_minimum_turnout_selects_the_evaluated_branch() {
             let message =
                 TargetMessage::parse(&body(participants, accepted, evaluated), participants)
                     .unwrap();
-            assert_eq!(message.encrypted(), evaluated);
+            assert_eq!(message.has_result(), evaluated);
+            assert_eq!(message.ciphertext_identity(), evaluated.then_some(&[4; 64]));
             for position in 0..participants {
                 assert_eq!(
                     message.classification(position),
@@ -59,7 +53,7 @@ fn only_the_minimum_turnout_selects_the_evaluated_branch() {
     }
 }
 #[test]
-fn signing_data_is_canonical_and_cannot_switch_branch_or_roster_shape() {
+fn signing_data_is_canonical_and_cannot_switch_roster_shape_or_item_type() {
     for participants in 3..=20 {
         for evaluated in [false, true] {
             let accepted = if evaluated { participants } else { 0 };
@@ -86,10 +80,12 @@ fn signing_data_is_canonical_and_cannot_switch_branch_or_roster_shape() {
             classifications[participants - 1] = 4;
             tuple.items[4] = CanonicalItem::variable_bytes(&classifications).unwrap();
             assert!(TargetMessage::parse(&tuple.encode().unwrap(), participants).is_err());
-            let mut tuple =
-                CanonicalTuple::decode(&bytes, &CanonicalDecodeLimits::default()).unwrap();
-            tuple.items[5] = CanonicalItem::unsigned16(u16::from(!evaluated));
-            assert!(TargetMessage::parse(&tuple.encode().unwrap(), participants).is_err());
+            if evaluated {
+                let mut tuple =
+                    CanonicalTuple::decode(&bytes, &CanonicalDecodeLimits::default()).unwrap();
+                tuple.items[5] = CanonicalItem::variable_bytes([4; 64]).unwrap();
+                assert!(TargetMessage::parse(&tuple.encode().unwrap(), participants).is_err());
+            }
         }
     }
 }

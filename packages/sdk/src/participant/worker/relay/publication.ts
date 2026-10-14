@@ -1,10 +1,10 @@
 import { equalBytes, hexadecimal } from '../shared/bytes.js';
-import { PublicInputFailure } from '../shared/failures.js';
+import { PublicInputFailure, decodePublicInput } from '../shared/failures.js';
 import type { Delivery } from '../storage/delivery.js';
 
 import {
     candidateChunkBytes,
-    candidateIdentifierBytes,
+    candidateLocatorBytes,
     candidateManifestBytes,
     candidatePageEntries,
     decodeCandidateReceipt,
@@ -116,23 +116,23 @@ export const createCandidatePublication = (
             await delivery.transfer(async () => {
                 const response = await readBounded(
                     relay.base + 'chunks',
-                    candidateIdentifierBytes,
+                    candidateLocatorBytes,
                     bytes,
                 );
-                if (response.length !== candidateIdentifierBytes)
+                if (response.length !== candidateLocatorBytes)
                     throw new PublicInputFailure(
                         'Malformed chunk publication receipt.',
                     );
-                const id = hexadecimal(response);
+                const locator = hexadecimal(response);
                 const stored = await readBounded(
-                    relay.base + 'chunk/' + id,
+                    relay.base + 'chunk/' + locator,
                     bytes.length,
                 );
                 if (!equalBytes(bytes, stored))
                     throw new PublicInputFailure(
                         'Published chunk readback differs.',
                     );
-                chunks.push(id);
+                chunks.push(locator);
             }, bytes);
         });
         files.push({ name, length, chunks });
@@ -169,10 +169,10 @@ export const createCandidatePublication = (
                     if (file === undefined || file.length !== length) continue;
                     let index = 0;
                     await publicationChunks(length, read, async (expected) => {
-                        const id = file.chunks[index++];
+                        const locator = file.chunks[index++];
                         await delivery.transfer(async () => {
                             const bytes = await readBounded(
-                                relay.base + 'chunk/' + id,
+                                relay.base + 'chunk/' + locator,
                                 expected.length,
                             );
                             if (!equalBytes(bytes, expected))
@@ -193,45 +193,34 @@ export const createCandidatePublication = (
             if (completed) throw new Error('Publication already completed.');
             const bytes = encodeCandidateManifest({ files });
             await delivery.transfer(async () => {
-                let receipt;
-                try {
-                    receipt = decodeCandidateReceipt(
-                        await readBounded(
-                            relay.base + 'candidates/' + key,
-                            candidateIdentifierBytes + 8,
-                            bytes,
+                const receipt = await decodePublicInput(
+                    async () =>
+                        decodeCandidateReceipt(
+                            await readBounded(
+                                relay.base + 'candidates/' + key,
+                                candidateLocatorBytes + 8,
+                                bytes,
+                            ),
                         ),
-                    );
-                } catch (error) {
-                    if (error instanceof RangeError)
-                        throw new PublicInputFailure(
-                            'Malformed candidate publication receipt.',
-                        );
-                    throw error;
-                }
+                    'Malformed candidate publication receipt.',
+                );
                 const stored = await readBounded(
-                    relay.base + 'candidate/' + receipt.id,
+                    relay.base + 'candidate/' + receipt.locator,
                     candidateManifestBytes,
                 );
                 if (!equalBytes(bytes, stored))
                     throw new PublicInputFailure(
                         'Published manifest readback differs.',
                     );
-                let page;
-                try {
-                    page = await readCandidatePage(relay, key, receipt.index);
-                } catch (error) {
-                    if (error instanceof RangeError)
-                        throw new PublicInputFailure(
-                            'Malformed candidate discovery readback.',
-                        );
-                    throw error;
-                }
+                const page = await decodePublicInput(
+                    () => readCandidatePage(relay, key, receipt.index),
+                    'Malformed candidate discovery readback.',
+                );
                 if (
-                    page.ids[0] !== receipt.id ||
+                    page.locators[0] !== receipt.locator ||
                     page.total <= receipt.index ||
                     !fillsDiscoveryPage(
-                        page.ids.length,
+                        page.locators.length,
                         page.total,
                         receipt.index,
                         candidatePageEntries,

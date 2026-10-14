@@ -154,9 +154,8 @@ fn coordinate_commitment_matches_independent_framing_and_transport_partitions() 
     let length = DEGREE * (1 + modulus.len());
     let mut prefix = CanonicalTuple::new(
         1,
-        1,
         vec![
-            CanonicalItem::nonempty_ascii("sealed-lattice/registered-fhe-key/v2").unwrap(),
+            CanonicalItem::nonempty_ascii("sealed-lattice/registered-fhe-key").unwrap(),
             CanonicalItem::fixed_bytes(credential.signing_public()).unwrap(),
             CanonicalItem::fixed_bytes(salt).unwrap(),
             CanonicalItem::hash512(poll.identity()),
@@ -222,11 +221,20 @@ fn malformed_or_incomplete_coordinate_cannot_finish_or_resume() {
         assert!(hash.push(0, &[0]).is_err());
         assert!(hash.finish().is_err());
     }
-    let width = profile.ciphertext_modulus().to_bytes().len() + 1;
+    let modulus = profile.ciphertext_modulus().to_bytes();
+    let width = modulus.len() + 1;
+    // Half the modulus, shifted right from the most significant byte.
+    let mut half = modulus;
+    let mut carry = 0;
+    for byte in half.iter_mut().rev() {
+        let next = (*byte & 1) << 7;
+        *byte = (*byte >> 1) | carry;
+        carry = next;
+    }
     for sign in [0, 1] {
         let mut hash = create();
         let mut coefficient = vec![sign];
-        coefficient.extend(&hash.half_modulus);
+        coefficient.extend(&half);
         hash.push(0, &coefficient[..3]).unwrap();
         hash.push(3, &coefficient[3..]).unwrap();
         zero_coordinate(hash, 4093);

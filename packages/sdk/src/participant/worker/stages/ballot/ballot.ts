@@ -21,10 +21,7 @@ import {
     unsigned64,
 } from '../../shared/bytes.js';
 import { PublicInputFailure, StorageFailure } from '../../shared/failures.js';
-import {
-    estimateStorage,
-    snapshotParticipant,
-} from '../../storage/database.js';
+import { hasStorageRoom, snapshotParticipant } from '../../storage/database.js';
 import { openDelivery } from '../../storage/delivery.js';
 import type { ParticipantStoredRecord } from '../../storage/predecessor.js';
 import { openRecord, sealRecord } from '../../storage/private-records.js';
@@ -32,7 +29,11 @@ import type {
     RecordContext,
     SealedRecord,
 } from '../../storage/private-records.js';
-import { ballotPhase } from '../../storage/root-generation.js';
+import {
+    ballotPhase,
+    ballotPhaseOf,
+    rootGeneration,
+} from '../../storage/root-generation.js';
 import {
     commitRoot,
     dataKind,
@@ -43,9 +44,9 @@ import {
     closeRecordInventory,
     decodeCloseState,
 } from '../close/close-state.js';
-import type { ParticipantSession } from '../contribution/contribution.js';
+import type { ParticipantSession } from '../participant-session.js';
 import {
-    deliverFinalAggregate,
+    streamFinalAggregate,
     readFinalAggregate,
 } from '../setup/setup-cache.js';
 import { ensureFinalAggregate, retainedRecordContext } from '../setup/setup.js';
@@ -65,7 +66,7 @@ import {
 // phases the ballot state records.
 
 export type BallotSession = {
-    readonly participant: ParticipantSession;
+    readonly participant: Pick<ParticipantSession, 'context' | 'root'>;
     readonly records: RecordContext;
     state: BallotState;
     // The proof-stream bytes the module drew, when this operation created the
@@ -127,7 +128,7 @@ const openBallotRecord = (session: BallotSession, index: number) => {
 // the attempt's phase through generation seventeen, and the signed ballot
 // after it.
 const retainedBallotState = (
-    participant: ParticipantSession,
+    participant: Pick<ParticipantSession, 'context' | 'root'>,
     records: RecordContext,
 ): BallotState | undefined => {
     const { root, context } = participant;
@@ -144,14 +145,14 @@ const retainedBallotState = (
     return decodeBallotState(
         context.profile,
         records,
-        Math.min(root.head.generation, ballotPhase.signed),
+        ballotPhaseOf(root.head.generation),
         bytes,
     );
 };
 
 // The ballot records the current root lists.
 export const retainedBallotRecords = (
-    participant: ParticipantSession,
+    participant: Pick<ParticipantSession, 'context' | 'root'>,
     records: RecordContext,
 ): ParticipantStoredRecord[] => {
     const state = retainedBallotState(participant, records);
@@ -160,10 +161,10 @@ export const retainedBallotRecords = (
         : ballotRecordInventory(participant.context.profile, records, state);
 };
 
-// The close records the root lists while a ballot is pending; the close log
+// The close records the root lists while a ballot is pending; the close state
 // only collects through the ballot phases.
 const collectedCloseRecords = (
-    participant: ParticipantSession,
+    participant: Pick<ParticipantSession, 'context' | 'root'>,
     records: RecordContext,
 ) => {
     const { root, context } = participant;
@@ -224,21 +225,16 @@ const commitBallot = async (
 // Locks a ballot attempt: the scores and the ballot time enter the root
 // before any ballot randomness exists.
 export const beginBallot = async (
-    participant: ParticipantSession,
+    participant: Pick<ParticipantSession, 'context' | 'root'>,
     scores: Uint8Array,
 ): Promise<BallotSession> => {
     const { context, root } = participant;
     const { profile } = context;
-    if (root.head.generation !== ballotPhase.locked - 1)
+    if (root.head.generation !== rootGeneration.setupRetained)
         throw new Error('No verified setup awaits a ballot.');
     if (!validBallotScores(profile, scores))
         throw new Error('The scores are invalid.');
-    const estimate = await estimateStorage();
-    if (
-        estimate.quota === undefined ||
-        estimate.usage === undefined ||
-        estimate.quota - estimate.usage < profile.ballot.requiredStorageBytes
-    )
+    if (!(await hasStorageRoom(profile.ballot.requiredStorageBytes)))
         throw new StorageFailure('The origin lacks room for a ballot.');
     const records = await retainedRecordContext(participant);
     const session: BallotSession = {
@@ -274,7 +270,7 @@ export const beginBallot = async (
 // Decodes the retained ballot, or undefined when the root retains none.
 // Every listed record must be stored and nothing else.
 export const resumeBallot = async (
-    participant: ParticipantSession,
+    participant: Pick<ParticipantSession, 'context' | 'root'>,
 ): Promise<BallotSession | undefined> => {
     const { context } = participant;
     const records = await retainedRecordContext(participant);
@@ -287,7 +283,7 @@ export const resumeBallot = async (
 
 // Ballot and close authority binds the original member to its verified setup.
 export const ballotWorkInput = async (
-    participant: ParticipantSession,
+    participant: Pick<ParticipantSession, 'context' | 'root'>,
     setupIdentity: Uint8Array,
 ) => {
     const { context } = participant;
@@ -355,11 +351,8 @@ const ballotCommand = (
 // public aggregate. A refused chunk or finish is not the key the retained
 // setup reference names, so it leaves the participant pending and discards
 // the cache; any other failure keeps its own outcome.
-export const deliverBallotKey = (
-    context: PublicProfileContext,
-    index: number,
-) =>
-    deliverFinalAggregate(context, async () => {
+export const streamBallotKey = (context: PublicProfileContext, index: number) =>
+    streamFinalAggregate(context, async () => {
         const deliver = (operation: number, offset = 0, bytes?: Uint8Array) => {
             if (
                 tryBallotCommand(context, operation, offset, bytes) ===
@@ -388,7 +381,7 @@ const startBallotWork = async (session: BallotSession) => {
     );
     const index = context.profile.ballot.keyIndex;
     ballotCommand(context, ballotOperation.beginKey, index);
-    await deliverBallotKey(context, index);
+    await streamBallotKey(context, index);
 };
 
 // Creates the ballot from the locked scores and ballot time. Its encryption

@@ -4,38 +4,36 @@ import type { PublicProfileContext } from '#packages/sdk/src/participant/worker/
 import {
     ModuleFailure,
     PublicInputFailure,
+    StorageFailure,
 } from '#packages/sdk/src/participant/worker/shared/failures.js';
-import { deliverBallotKey } from '#packages/sdk/src/participant/worker/stages/ballot/ballot.js';
+import { streamBallotKey } from '#packages/sdk/src/participant/worker/stages/ballot/ballot.js';
 import {
-    deliverFinalAggregate,
+    streamFinalAggregate,
     readFinalAggregate,
 } from '#packages/sdk/src/participant/worker/stages/setup/setup-cache.js';
 import {
     namespacedName,
     setupCacheName,
 } from '#packages/sdk/src/participant/worker/storage/database.js';
+import {
+    fixtureRequest,
+    writeFixtureStore,
+} from '#packages/sdk/tests/browser-storage.js';
 
 const databases: IDBDatabase[] = [];
 const names: string[] = [];
-const result = <Value>(request: IDBRequest<Value>) =>
-    new Promise<Value>((resolve, reject) => {
-        request.onsuccess = () => resolve(request.result);
-        request.onerror = () =>
-            reject(request.error ?? new Error('Cache fixture read failed.'));
-    });
+
 const write = (
     database: IDBDatabase,
     change: (store: IDBObjectStore) => void,
 ) =>
-    new Promise<void>((resolve, reject) => {
-        const transaction = database.transaction('aggregate', 'readwrite');
-        transaction.oncomplete = () => resolve();
-        transaction.onabort = () =>
-            reject(
-                transaction.error ?? new Error('Cache fixture write failed.'),
-            );
-        change(transaction.objectStore('aggregate'));
-    });
+    writeFixtureStore(
+        database,
+        'aggregate',
+        change,
+        undefined,
+        'Cache fixture write failed.',
+    );
 
 // These are untrusted cache bytes and transport bounds only. No verifier,
 // signature or verified setup capability is replaced by this fixture.
@@ -46,7 +44,10 @@ const fixture = async () => {
     const opening = indexedDB.open(name, 1);
     opening.onupgradeneeded = () =>
         opening.result.createObjectStore('aggregate');
-    const database = await result(opening);
+    const database = await fixtureRequest(
+        opening,
+        'Cache fixture read failed.',
+    );
     databases.push(database);
     const context = {
         namespace,
@@ -79,7 +80,10 @@ const fixture = async () => {
 afterEach(async () => {
     for (const database of databases.splice(0)) database.close();
     for (const name of names.splice(0))
-        await result(indexedDB.deleteDatabase(name));
+        await fixtureRequest(
+            indexedDB.deleteDatabase(name),
+            'Cache fixture read failed.',
+        );
 });
 
 describe('bounded public aggregate cache reads', () => {
@@ -113,7 +117,7 @@ describe('bounded public aggregate cache reads', () => {
         expect(seen).toEqual([0]);
     });
 
-    it('refuses missing, wrong-type and wrong-length chunks without delivering a later chunk', async () => {
+    it('fails on storage for missing, wrong-type and wrong-length chunks without delivering a later chunk', async () => {
         for (const invalid of [
             undefined,
             'bytes',
@@ -127,7 +131,7 @@ describe('bounded public aggregate cache reads', () => {
             const seen: number[] = [];
             await expect(
                 readFinalAggregate(context, 7, (offset) => seen.push(offset)),
-            ).rejects.toBeInstanceOf(PublicInputFailure);
+            ).rejects.toBeInstanceOf(StorageFailure);
             expect(seen).toEqual([0]);
         }
     });
@@ -137,7 +141,7 @@ describe('bounded public aggregate cache reads', () => {
         const refusal = new PublicInputFailure('The aggregate digest differs.');
         const seen: number[] = [];
         await expect(
-            deliverFinalAggregate(context, () =>
+            streamFinalAggregate(context, () =>
                 readFinalAggregate(context, 7, (offset) => {
                     seen.push(offset);
                     if (offset === 6) throw refusal;
@@ -146,9 +150,12 @@ describe('bounded public aggregate cache reads', () => {
         ).rejects.toBe(refusal);
         expect(seen).toEqual([0, 6]);
         const transaction = database.transaction('aggregate', 'readonly');
-        expect(await result(transaction.objectStore('aggregate').count())).toBe(
-            0,
-        );
+        expect(
+            await fixtureRequest(
+                transaction.objectStore('aggregate').count(),
+                'Cache fixture read failed.',
+            ),
+        ).toBe(0);
     });
 });
 
@@ -164,8 +171,8 @@ const withBallotModule = (
         memory: new WebAssembly.Memory({ initial: 1 }),
         input_pointer: () => 0,
         input_capacity: () => 64,
-        contribution_output_pointer: () => 0,
-        contribution_output_length: () => 0,
+        participant_output_pointer: () => 0,
+        participant_output_length: () => 0,
         participant_ballot_command: (
             operation: number,
             offset: number,
@@ -181,18 +188,19 @@ const withBallotModule = (
     };
 };
 const cachedChunks = async (database: IDBDatabase) =>
-    result(
+    fixtureRequest(
         database
             .transaction('aggregate', 'readonly')
             .objectStore('aggregate')
             .count(),
+        'Cache fixture read failed.',
     );
 
 describe('ballot key delivery', () => {
     it('streams every cached chunk of the key and finishes it, keeping the cache', async () => {
         const fixed = await fixture();
         const { calls, context } = withBallotModule(fixed.context, () => 0);
-        await deliverBallotKey(context, 7);
+        await streamBallotKey(context, 7);
         expect(calls).toEqual([
             [2, 0, 6],
             [2, 6, 6],
@@ -213,7 +221,7 @@ describe('ballot key delivery', () => {
                 fixed.context,
                 (operation, offset) => (refused(operation, offset) ? 1 : 0),
             );
-            await expect(deliverBallotKey(context, 7)).rejects.toThrow(
+            await expect(streamBallotKey(context, 7)).rejects.toThrow(
                 new PublicInputFailure('A ballot key was refused.'),
             );
             expect(await cachedChunks(fixed.database)).toBe(0);
@@ -227,7 +235,7 @@ describe('ballot key delivery', () => {
             if (operation === 3) throw failure;
             return 0;
         });
-        await expect(deliverBallotKey(context, 7)).rejects.toBe(failure);
+        await expect(streamBallotKey(context, 7)).rejects.toBe(failure);
         expect(await cachedChunks(fixed.database)).toBe(0);
     });
 });

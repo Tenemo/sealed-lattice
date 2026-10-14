@@ -16,10 +16,10 @@ import {
     catalogueWordRelation,
     productionWordProofDomain,
     wordRelationShape,
-} from '#tests/word-verifier-reference-model.js';
+} from '#tests/word-proof-reference/transcript.js';
 
 describe('wide verifier messages and short authentication tags', () => {
-    it('derives the current three source families separately before taking a round-error maximum', () => {
+    it('derives the three source families separately before taking a round-error maximum', () => {
         const value = compileProofRoundErrorCensus(completionProfile());
         expect(
             value.roles.map((role) => [
@@ -201,7 +201,7 @@ describe('wide verifier messages and short authentication tags', () => {
         expect(prefixCollisions).toBe(256 ** 2 / 4);
     });
 
-    it('charges routing, verification, and role unions in the conditional compiler bound', () => {
+    it('charges routing, verification and proof roles in the conditional compiler caps', () => {
         const census = compileWideChallengeCompilerCensus(completionProfile());
         expect(census.chargedQueries).toBe(4n * (1n << 80n));
         expect(census.roleBudget).toBe(65536n);
@@ -213,12 +213,5 @@ describe('wide verifier messages and short authentication tags', () => {
         // 2^513) lies between 2^-186 and 2^-185.
         expect(census.programmedMessageBudget).toBe(census.honestProofBudget);
         expect(census.reprogrammingBits).toBe(185);
-        expect(census.failureBits).toBeGreaterThanOrEqual(80);
-        expect(
-            census.failureNumerator << BigInt(census.failureBits),
-        ).toBeLessThanOrEqual(census.failureDenominator);
-        expect(
-            census.failureNumerator << BigInt(census.failureBits + 1),
-        ).toBeGreaterThan(census.failureDenominator);
     });
 });

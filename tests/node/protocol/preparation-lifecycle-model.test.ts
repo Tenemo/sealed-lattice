@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { supportedParticipantCounts } from '#tests/node/protocol/reference/product-goals.js';
 import { PreparationLifecycleModel } from '#tests/preparation-lifecycle-model.js';
 import { compileSetupSelectionCensus } from '#tests/setup-selection-model.js';
 
@@ -32,17 +33,17 @@ const endorse = (
 };
 
 describe('preparation lifecycle under original custody', () => {
-    it.each(Array.from({ length: 18 }, (_, index) => index + 3))(
+    it.each(supportedParticipantCounts)(
         'finishes after eligible honest departures before any setup message at n=%i',
         (participants) => {
             const profile = compileSetupSelectionCensus(participants);
             const corrupt = Array.from(
-                { length: profile.faultBound },
+                { length: profile.maximumCorruptParticipantCount },
                 (_, index) => index,
             );
             const missing = Array.from(
-                { length: profile.faultBound },
-                (_, index) => profile.faultBound + index,
+                { length: profile.maximumCorruptParticipantCount },
+                (_, index) => profile.maximumCorruptParticipantCount + index,
             );
             const model = new PreparationLifecycleModel(
                 participants,
@@ -58,9 +59,11 @@ describe('preparation lifecycle under original custody', () => {
                 expect(model.confirm(position)).toBe(true),
             );
             const selected = continuers
-                .filter((position) => position < profile.eligibleCount)
-                .slice(0, profile.selectedCount);
-            expect(selected).toHaveLength(profile.selectedCount);
+                .filter(
+                    (position) => position < profile.eligibleContributorCount,
+                )
+                .slice(0, profile.setupContributorCount);
+            expect(selected).toHaveLength(profile.setupContributorCount);
             selected.forEach((position) => completeOffer(model, position));
             expect(model.propose(selected.map(offer))).toBe(true);
             continuers.forEach((position) =>

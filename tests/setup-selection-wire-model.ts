@@ -18,12 +18,7 @@ const variable = (bytes: Buffer) =>
 const item = (type: number, bytes: Buffer) =>
     Buffer.concat([unsigned(type, 2), unsigned(bytes.length, 4), bytes]);
 const tuple = (items: Buffer[]) =>
-    Buffer.concat([
-        unsigned(1, 2),
-        unsigned(1, 2),
-        unsigned(items.length, 4),
-        ...items,
-    ]);
+    Buffer.concat([unsigned(1, 2), unsigned(items.length, 4), ...items]);
 const ascii = (text: string) => item(2, variable(Buffer.from(text, 'ascii')));
 const hash = (hexadecimal: string) => {
     if (!/^[0-9a-f]{128}$/u.test(hexadecimal))
@@ -40,12 +35,12 @@ export const encodeSetupSelectionModel = (
 ) => {
     const profile = compileSetupSelectionCensus(participants);
     if (
-        selected.length !== profile.selectedCount ||
+        selected.length !== profile.setupContributorCount ||
         selected.some(
             (entry, index) =>
                 !Number.isSafeInteger(entry.position) ||
                 entry.position < 0 ||
-                entry.position >= profile.eligibleCount ||
+                entry.position >= profile.eligibleContributorCount ||
                 (index > 0 && selected[index - 1].position >= entry.position),
         )
     )
@@ -58,7 +53,7 @@ export const encodeSetupSelectionModel = (
         ]);
     });
     return tuple([
-        ascii('sealed-lattice/setup-selection/v1'),
+        ascii('sealed-lattice/setup-selection'),
         hash(rosterIdentity),
         item(
             1,
@@ -75,7 +70,7 @@ export const setupSelectionIdentityModel = (
     createHash('shake256', { outputLength: 64 })
         .update(
             tuple([
-                ascii('sealed-lattice/setup-selection-identity/v1'),
+                ascii('sealed-lattice/setup-selection-identity'),
                 item(
                     1,
                     variable(
@@ -100,7 +95,7 @@ export const encodeSetupCertificateModel = (
     const census = compileSetupSelectionWireCensus(participants);
     if (
         BigInt(organizerSignature.length) !== census.signatureBytes ||
-        endorsements.length !== census.quorum ||
+        endorsements.length !== census.inventoryCertificateThreshold ||
         endorsements.some(
             (entry, index) =>
                 !Number.isSafeInteger(entry.position) ||
@@ -118,7 +113,6 @@ export const encodeSetupCertificateModel = (
         selected,
     );
     return Buffer.concat([
-        Buffer.from('SSC1'),
         unsigned(body.length, 4),
         body,
         organizerSignature,
@@ -133,28 +127,28 @@ export const compileSetupSelectionWireCensus = (participants: number) => {
     const signatureBytes = compileRegistrationEnrollmentCensus().signatureBytes;
     const text = (value: string) => BigInt(Buffer.byteLength(value, 'ascii'));
     const offerEnvelopeBytes =
-        8n +
+        6n +
         5n * 6n +
         4n +
-        text('sealed-lattice/contribution-offer/v1') +
+        text('sealed-lattice/contribution-offer') +
         64n +
         2n +
         8n +
         64n;
     const selectionBodyBytes =
-        8n +
+        6n +
         3n * 6n +
         4n +
-        text('sealed-lattice/setup-selection/v1') +
+        text('sealed-lattice/setup-selection') +
         64n +
         4n +
         4n +
-        BigInt(profile.selectedCount) * (2n + 64n);
+        BigInt(profile.setupContributorCount) * (2n + 64n);
     const endorsementBodyBytes =
-        8n +
+        6n +
         3n * 6n +
         4n +
-        text('sealed-lattice/setup-selection-endorsement/v1') +
+        text('sealed-lattice/setup-selection-endorsement') +
         64n +
         2n;
     return {
@@ -168,22 +162,19 @@ export const compileSetupSelectionWireCensus = (participants: number) => {
         endorsementPacketBytes: 2n + 64n + signatureBytes,
         certificateBytes:
             4n +
-            4n +
             selectionBodyBytes +
             signatureBytes +
-            BigInt(profile.quorum) * (2n + signatureBytes),
+            BigInt(profile.inventoryCertificateThreshold) *
+                (2n + signatureBytes),
         allEligibleOfferPacketBytes:
-            BigInt(profile.eligibleCount) *
+            BigInt(profile.eligibleContributorCount) *
             (4n + offerEnvelopeBytes + signatureBytes),
         quorumEndorsementPacketBytes:
-            BigInt(profile.quorum) * (2n + 64n + signatureBytes),
+            BigInt(profile.inventoryCertificateThreshold) *
+            (2n + 64n + signatureBytes),
         // Ordinary body identity: domain and variable-byte body, no sender,
         // whole-body salt, role or predecessor copied into this hash input.
         bodyHashPrefixBytes:
-            8n +
-            2n * 6n +
-            4n +
-            text('sealed-lattice/contribution-body/v1') +
-            4n,
+            6n + 2n * 6n + 4n + text('sealed-lattice/contribution-body') + 4n,
     };
 };

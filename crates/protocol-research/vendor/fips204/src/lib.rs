@@ -105,6 +105,14 @@ mod types;
 pub mod traits;
 pub use crate::types::Ph;
 
+/// Vendored change: the inverse transform of one polynomial, for the
+/// workspace's regression test of the transform's input reduction.
+#[cfg(feature = "test-support")]
+#[must_use]
+pub fn inverse_transform(coefficients: [i32; 256]) -> [i32; 256] {
+    ntt::inv_ntt(&[types::T(coefficients)])[0].0
+}
+
 // Applies across all security parameter sets
 const Q: i32 = 8_380_417; // 2^23 - 2^13 + 1 = 0x7FE001; page 15 table 1 first row
 const ZETA: i32 = 1753; // See section 2.5 of FIPS 204; page 15 table 1 second row

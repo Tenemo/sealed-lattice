@@ -3,11 +3,6 @@ use supported_profile::{DEGREE, Profile};
 /// The comparison polynomial is evaluated in blocks of this many powers.
 const COMPARISON_BLOCK_WIDTH: usize = 16;
 
-#[derive(Debug, PartialEq, Eq)]
-pub enum Error {
-    UnsupportedTopCount,
-}
-
 struct Instruction {
     operation: u32,
     inputs: Vec<usize>,
@@ -117,8 +112,7 @@ impl Builder {
         for (index, original) in ordered.iter().enumerate() {
             renamed[*original] = index;
         }
-        let mut bytes = Vec::from(b"BRK1".as_slice());
-        bytes.extend((DEGREE as u32).to_le_bytes());
+        let mut bytes = (DEGREE as u32).to_le_bytes().to_vec();
         bytes.extend((ordered.len() as u32).to_le_bytes());
         bytes.extend((renamed[result] as u32).to_le_bytes());
         for original in ordered {
@@ -148,10 +142,10 @@ impl RankingProgram {
     /// The encrypted ranking of the profile's accepted ballots: their sum,
     /// every pairwise comparison, each option's rank over the comparison
     /// window and the rank-equality weights of the requested result length.
-    pub fn for_profile(profile: Profile, top_count: usize) -> Result<Self, Error> {
+    pub fn for_profile(profile: Profile, top_count: usize) -> Option<Self> {
         let options = profile.options();
         if !(1..=options).contains(&top_count) {
-            return Err(Error::UnsupportedTopCount);
+            return None;
         }
         let mut builder = Builder {
             instructions: Vec::new(),
@@ -191,7 +185,7 @@ impl RankingProgram {
             2 + top_count as u32
         };
         let result = builder.append(5, &[sum], constant);
-        Ok(Self {
+        Some(Self {
             bytes: builder.encode(result),
         })
     }

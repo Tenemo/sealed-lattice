@@ -16,7 +16,7 @@ import {
 import { PublicInputFailure } from '../shared/failures.js';
 import { evaluationStoreChunkBytes } from '../stages/target-vote/evaluation.js';
 
-import type { WorkerCommand } from './worker-messages.js';
+import type { ParticipantWorkerCommand } from './worker-messages.js';
 
 const maximumModuleBytes = 8_388_608;
 
@@ -36,8 +36,8 @@ const deliveryDigest = async (bytes: Uint8Array<ArrayBuffer>) =>
 
 // Fetches the module, which must have the pinned digest, and recomputes the
 // runtime identity from it and the pinned source and worker digests.
-export const deliverModule = async (
-    command: Pick<WorkerCommand, 'module' | 'identity'>,
+export const fetchModule = async (
+    command: Pick<ParticipantWorkerCommand, 'module' | 'identity'>,
 ) => {
     const bytes = await readBounded(command.module, maximumModuleBytes);
     const digest = await deliveryDigest(bytes);
@@ -93,11 +93,22 @@ export const instantiateForOperation = async (
 // The WebAssembly memory a completed operation held: the worker instance's
 // linear memory and how far its allocations reached, and its helpers' and
 // the shared arena's, beside the bounds of the operation's memory plan.
+export type OperationMemory = Readonly<{
+    workerBytes: number;
+    workerUsedBytes: number;
+    workerBoundBytes: number;
+    helpers: number;
+    helperBoundBytes: number;
+    helperBytes: number;
+    largestHelperBytes: number;
+    arenaBytes: number;
+}>;
+
 export const operationMemory = (
     module: ParticipantModule,
     helpers: ParallelHelpers,
     evaluation: boolean,
-) => ({
+): OperationMemory => ({
     workerBytes: module.memory.buffer.byteLength,
     workerUsedBytes: module.linear_memory_high_water() >>> 0,
     workerBoundBytes:
@@ -107,4 +118,3 @@ export const operationMemory = (
         module.helper_memory_bound(helpers.count, evaluation ? 1 : 0) >>> 0,
     ...helpers.memory(),
 });
-export type OperationMemory = ReturnType<typeof operationMemory>;

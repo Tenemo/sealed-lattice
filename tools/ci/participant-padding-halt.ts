@@ -1,13 +1,16 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 
+import { rewriteWorkerCheckpoint } from './worker-instrumentation.js';
+
 export type PaddingCut = 'padding' | 'final-slot';
 export type PreparationCut = Readonly<{
     kind: 'contribution' | 'selection' | 'selection-readback' | 'endorsement';
     phase: number;
 }>;
 
-// The root generation stays four while independent PRE2 authorities advance.
+// The root generation stays four while the preparation journal's independent
+// authorities advance.
 // Observe the actual authenticated journal after commit/readback, never an
 // uncommitted producer flag. This hook exists only in the guarded worker copy.
 export const preparationHaltingClient = (
@@ -16,20 +19,11 @@ export const preparationHaltingClient = (
 ) => {
     if (cut.kind === 'selection-readback') {
         assert.equal(cut.phase, 1);
-        const source = worker.toString('utf8');
-        const boundary =
-            /(await publication\.finish\(\);)(\s*await endorseSetup\(session,\s*relay,\s*retained\);)/gu;
-        assert.equal(
-            [...source.matchAll(boundary)].length,
-            1,
-            'The worker must contain one authenticated selection-readback continuation.',
-        );
-        const patched = Buffer.from(
-            source.replace(
-                boundary,
-                (_matched: string, readback: string, endorsement: string) =>
-                    `${readback}\nself.postMessage({type:'participant-preparation-halt',kind:'selection-readback',phase:1});\nawait new Promise(() => undefined);\n${endorsement}`,
-            ),
+        const patched = rewriteWorkerCheckpoint(
+            worker,
+            'selection-readback',
+            (readback) =>
+                `${readback}\nself.postMessage({type:'participant-preparation-halt',kind:'selection-readback',phase:1});\nawait new Promise(() => undefined);`,
         );
         return {
             generation: 4,
@@ -43,28 +37,21 @@ export const preparationHaltingClient = (
             ? Number.isInteger(cut.phase) && cut.phase >= 4 && cut.phase <= 9
             : cut.phase === 1 || cut.phase === 2,
     );
-    const source = worker.toString('utf8');
-    const boundary =
-        /return \{\s*head,\s*plaintext: reopened,\s*manifest\s*\};/gu;
-    assert.equal(
-        [...source.matchAll(boundary)].length,
-        1,
-        'The worker must contain one completed root readback.',
-    );
     const field = ['contribution', 'selection', 'endorsement'].indexOf(
         cut.kind,
     );
-    const instrumented = source.replace(
-        boundary,
+    const patched = rewriteWorkerCheckpoint(
+        worker,
+        'root-readback',
         (matched) => `
         if (head.generation === 4) {
             const journal = manifest.suffixes.preparation;
-            let journalOffset = 4;
-            if (journal && journal[0] === 80 && journal[1] === 82 && journal[2] === 69 && journal[3] === 50) {
+            let journalOffset = 0;
+            if (journal) {
                 for (let journalField = 0; journalField < 3; journalField++) {
                     const journalLength = new DataView(journal.buffer, journal.byteOffset + journalOffset, 4).getUint32(0, true);
                     journalOffset += 4;
-                    if (journalField === ${String(field)} && journalLength > 0 && journal[journalOffset + ${cut.kind === 'contribution' ? '4' : '0'}] === ${String(cut.phase)}) {
+                    if (journalField === ${String(field)} && journalLength > 0 && journal[journalOffset] === ${String(cut.phase)}) {
                         self.postMessage({type:'participant-preparation-halt',kind:${JSON.stringify(cut.kind)},phase:${String(cut.phase)}});
                         await new Promise(() => undefined);
                     }
@@ -74,7 +61,6 @@ export const preparationHaltingClient = (
         }
         ${matched}`,
     );
-    const patched = Buffer.from(instrumented);
     return {
         generation: 4,
         worker: patched,
@@ -104,20 +90,13 @@ export type PaddingHaltObservation = Readonly<{
 // store callback has completed before the observation or halt; the product
 // worker, private state schema and cryptographic acceptance are unchanged.
 export const paddingHaltingClient = (worker: Buffer, cut: PaddingCut) => {
-    const source = worker.toString('utf8');
-    const boundary =
-        /await store\(slot,\s*buffer\.subarray\(0,\s*slot\.length\)\);/gu;
-    assert.equal(
-        [...source.matchAll(boundary)].length,
-        1,
-        'The worker must contain one completed private proof-slot store.',
-    );
     const condition =
         cut === 'padding'
             ? 'slot.offset + slot.length > length'
             : 'next + 1 === slots.length';
-    const instrumented = source.replace(
-        boundary,
+    const patched = rewriteWorkerCheckpoint(
+        worker,
+        'proof-slot-store',
         (matched) =>
             matched +
             `
@@ -130,7 +109,6 @@ export const paddingHaltingClient = (worker: Buffer, cut: PaddingCut) => {
         }
     `,
     );
-    const patched = Buffer.from(instrumented);
     return {
         generation: 4,
         cut,

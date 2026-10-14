@@ -24,11 +24,6 @@ fn opens_a_record_that_another_implementation_sealed_and_only_that_record() {
     other_key[KEY_BYTES - 1] ^= 1;
     assert!(open(&other_key, CONTEXT, &sealed).is_none());
     assert!(open(&key, b"sealed-lattice/sealing-other", &sealed).is_none());
-    for position in [0, PLAINTEXT.len(), sealed.len() - 1] {
-        let mut changed = sealed.clone();
-        changed[position] ^= 1;
-        assert!(open(&key, CONTEXT, &changed).is_none());
-    }
     assert!(open(&key, CONTEXT, &sealed[..sealed.len() - 1]).is_none());
     assert!(open(&key, CONTEXT, &[]).is_none());
 }

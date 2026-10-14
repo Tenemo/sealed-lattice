@@ -2,13 +2,14 @@
 //! Only the source seed and salt are private; the verified poll derives the
 //! complete family inventory and the completed registration binds its custody.
 
-use crate::{Error, random};
+use crate::{Refusal, random};
 use num_bigint::BigInt;
 use parallel_work::sealing::{self, Sealed, TAG_BYTES};
 use protocol_foundations::{
     Credential, SIGNING_PUBLIC_KEY_BYTES,
     contribution_body::{BODY_HEADER_BYTES, body_header},
-    foundation::{CanonicalItem, CanonicalItemType, CanonicalTuple},
+    foundation::{CanonicalItem, CanonicalTuple},
+    identity::{self, Trailing},
     poll::VerifiedPoll,
     source_binding::{
         FheKeyCommitmentHasher, SOURCE_SALT_BYTES as SALT_BYTES, fhe_key_families,
@@ -20,11 +21,11 @@ use sha3::{
     Shake256, Shake256Reader,
     digest::{ExtendableOutput, Update},
 };
+use statement_stream::coefficient;
 use supported_profile::Profile;
 use zeroize::Zeroizing;
 
 const SEED_BYTES: usize = 64;
-const MAGIC: &[u8; 4] = b"FSC1";
 
 struct Entry {
     seed: Zeroizing<[u8; SEED_BYTES]>,
@@ -42,19 +43,18 @@ pub(crate) struct Sources {
 
 /// Capsule length is determined by the original verified poll, not the roster.
 pub(crate) fn capsule_bytes(poll: &VerifiedPoll) -> usize {
-    MAGIC.len() + fhe_key_families(poll).len() * (SEED_BYTES + SALT_BYTES) + TAG_BYTES
+    fhe_key_families(poll).len() * (SEED_BYTES + SALT_BYTES) + TAG_BYTES
 }
 
 pub(crate) fn maximum_capsule_bytes() -> usize {
-    MAGIC.len() + maximum_fhe_key_family_count() * (SEED_BYTES + SALT_BYTES) + TAG_BYTES
+    maximum_fhe_key_family_count() * (SEED_BYTES + SALT_BYTES) + TAG_BYTES
 }
 
 fn associated(body: [u8; 64]) -> Vec<u8> {
     CanonicalTuple::new(
         1,
-        1,
         vec![
-            CanonicalItem::nonempty_ascii("sealed-lattice/fhe-source-custody/v1").unwrap(),
+            CanonicalItem::nonempty_ascii("sealed-lattice/fhe-source-custody").unwrap(),
             CanonicalItem::hash512(body),
         ],
     )
@@ -62,31 +62,27 @@ fn associated(body: [u8; 64]) -> Vec<u8> {
     .unwrap()
 }
 
-// Absorb a canonical tuple without allocating a copy of the private seed.
+// Absorbs the canonical tuple of the original context and the seed as one
+// fixed raw byte item, without allocating a copy of the private seed.
 fn stream(
     poll: [u8; 64],
     owner: &[u8; SIGNING_PUBLIC_KEY_BYTES],
     profile: Profile,
     seed: &[u8; SEED_BYTES],
 ) -> Shake256Reader {
-    let mut prefix = CanonicalTuple::new(
-        1,
-        1,
-        vec![
-            CanonicalItem::nonempty_ascii("sealed-lattice/fhe-source-randomness/v2").unwrap(),
+    let framing = identity::framing(
+        "sealed-lattice/fhe-source-randomness",
+        &[
             CanonicalItem::fixed_bytes(owner).unwrap(),
             CanonicalItem::hash512(poll),
             CanonicalItem::variable_bytes(profile.ciphertext_modulus().to_bytes()).unwrap(),
             CanonicalItem::unsigned64(profile.fhe_common_sample_bits() as u64),
         ],
+        Trailing::Fixed(SEED_BYTES),
     )
-    .encode()
     .unwrap();
-    prefix[4..8].copy_from_slice(&6u32.to_le_bytes());
     let mut hash = Shake256::default();
-    hash.update(&prefix);
-    hash.update(&CanonicalItemType::RawBytes.canonical_code().to_le_bytes());
-    hash.update(&(SEED_BYTES as u32).to_le_bytes());
+    hash.update(&framing);
     hash.update(seed);
     hash.finalize_xof()
 }
@@ -104,11 +100,11 @@ impl PolynomialOutput for CoordinateHash {
         let mut bytes = vec![0; count * coefficient_bytes];
         for chunk in values.chunks(count) {
             let encoded = &mut bytes[..chunk.len() * coefficient_bytes];
-            for (value, coefficient) in chunk
+            for (value, record) in chunk
                 .iter()
                 .zip(encoded.chunks_exact_mut(coefficient_bytes))
             {
-                setup_witness::encode_coefficient(value, coefficient);
+                coefficient::encode(value, record);
             }
             hash.push(offset, encoded)
                 .expect("Canonical FHE coordinate");
@@ -119,7 +115,7 @@ impl PolynomialOutput for CoordinateHash {
 }
 
 impl Sources {
-    pub(crate) fn create(poll: &VerifiedPoll, credential: &Credential) -> Result<Self, Error> {
+    pub(crate) fn create(poll: &VerifiedPoll, credential: &Credential) -> Result<Self, Refusal> {
         let families = fhe_key_families(poll);
         let mut entries = Vec::with_capacity(families.len());
         let mut commitments = Vec::with_capacity(families.len());
@@ -143,12 +139,12 @@ impl Sources {
                         *profile,
                         &entry.salt,
                     )
-                    .map_err(|_| Error::State)?,
+                    .map_err(|_| Refusal::State)?,
                 ),
                 result: None,
             };
             source.public_coordinate(&mut output);
-            commitments.push(output.result.ok_or(Error::State)?);
+            commitments.push(output.result.ok_or(Refusal::State)?);
             entries.push(entry);
         }
         Ok(Self {
@@ -161,21 +157,18 @@ impl Sources {
         })
     }
 
-    fn index(&self, profile: Profile) -> Result<usize, Error> {
+    fn index(&self, profile: Profile) -> Result<usize, Refusal> {
         self.families
             .iter()
-            .position(|family| {
-                family.ciphertext_modulus().to_bytes() == profile.ciphertext_modulus().to_bytes()
-                    && family.fhe_common_sample_bits() == profile.fhe_common_sample_bits()
-            })
-            .ok_or(Error::State)
+            .position(|family| family.same_fhe_key_family(profile))
+            .ok_or(Refusal::State)
     }
 
     pub(crate) fn commitments(&self) -> &[[u8; 64]] {
         &self.commitments
     }
 
-    pub(crate) fn source(&self, profile: Profile) -> Result<FheKeySource, Error> {
+    pub(crate) fn source(&self, profile: Profile) -> Result<FheKeySource, Refusal> {
         let entry = &self.entries[self.index(profile)?];
         let mut random = stream(self.poll, &self.owner, profile, &entry.seed);
         Ok(FheKeySource::from_reader(profile, &mut random))
@@ -185,26 +178,25 @@ impl Sources {
         &self,
         profile: Profile,
         proof_length: usize,
-    ) -> Result<[u8; BODY_HEADER_BYTES], Error> {
+    ) -> Result<[u8; BODY_HEADER_BYTES], Refusal> {
         body_header(
             profile,
             proof_length,
             &self.entries[self.index(profile)?].salt,
         )
-        .map_err(|_| Error::State)
+        .map_err(|_| Refusal::State)
     }
 
-    pub(crate) fn seal(&mut self, body: [u8; 64]) -> Result<Sealed, Error> {
+    pub(crate) fn seal(&mut self, body: [u8; 64]) -> Result<Sealed, Refusal> {
         if self.sealed {
-            return Err(Error::State);
+            return Err(Refusal::State);
         }
         self.sealed = true;
         // The buffer holds every entry at once, so building it never moves a
         // seed.
         let mut bytes = Zeroizing::new(Vec::with_capacity(
-            MAGIC.len() + self.entries.len() * (SEED_BYTES + SALT_BYTES),
+            self.entries.len() * (SEED_BYTES + SALT_BYTES),
         ));
-        bytes.extend(MAGIC);
         for entry in &self.entries {
             bytes.extend(entry.seed.as_ref());
             bytes.extend(entry.salt.as_ref());
@@ -219,16 +211,13 @@ impl Sources {
         body: [u8; 64],
         key: &[u8; 32],
         capsule: &[u8],
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, Refusal> {
         let families = fhe_key_families(poll);
         if capsule.len() != capsule_bytes(poll) || commitments.len() != families.len() {
-            return Err(Error::Shape);
+            return Err(Refusal::Shape);
         }
-        let bytes = sealing::open(key, &associated(body), capsule).ok_or(Error::State)?;
-        if &bytes[..MAGIC.len()] != MAGIC {
-            return Err(Error::Shape);
-        }
-        let entries = bytes[MAGIC.len()..]
+        let bytes = sealing::open(key, &associated(body), capsule).ok_or(Refusal::State)?;
+        let entries = bytes
             .chunks_exact(SEED_BYTES + SALT_BYTES)
             .map(|entry| Entry {
                 seed: Zeroizing::new(entry[..SEED_BYTES].try_into().unwrap()),

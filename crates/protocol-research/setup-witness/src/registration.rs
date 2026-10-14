@@ -2,7 +2,7 @@ use super::*;
 use supported_profile::{RECIPIENT_SECRET_SUPPORT, share_modulus};
 
 #[derive(Debug)]
-pub enum Error {
+pub enum Refusal {
     Consumed,
     InvalidState,
 }
@@ -17,17 +17,17 @@ impl PolynomialOutput for KeyOutput {
     }
 }
 
-pub struct RegistrationKey {
+pub struct RecipientKey {
     public: Vec<BigInt>,
     secret: Zeroizing<Vec<i8>>,
     sealed: bool,
 }
-impl Default for RegistrationKey {
+impl Default for RecipientKey {
     fn default() -> Self {
         Self::new()
     }
 }
-impl RegistrationKey {
+impl RecipientKey {
     pub fn new() -> Self {
         let plan = Plan::new(DEGREE);
         let modulus = integer(share_modulus());
@@ -71,13 +71,13 @@ impl RegistrationKey {
     pub fn lend_secret<R>(
         &self,
         use_secret: impl FnOnce(Zeroizing<Vec<i128>>) -> R,
-    ) -> Result<R, Error> {
+    ) -> Result<R, Refusal> {
         self.validate_retained()?;
         Ok(use_secret(Zeroizing::new(
             self.secret.iter().copied().map(i128::from).collect(),
         )))
     }
-    fn validate_retained(&self) -> Result<(), Error> {
+    fn validate_retained(&self) -> Result<(), Refusal> {
         let public_modulus = integer(share_modulus());
         let public_half = public_modulus >> 1usize;
         if self.secret.len() != DEGREE
@@ -89,7 +89,7 @@ impl RegistrationKey {
                 != RECIPIENT_SECRET_SUPPORT / 2
             || self.secret.iter().any(|value| !(-1..=1).contains(value))
         {
-            return Err(Error::InvalidState);
+            return Err(Refusal::InvalidState);
         }
         let plan = Plan::new(DEGREE);
         let transformed = Zeroizing::new(plan.sparse_transform(&self.secret));
@@ -97,7 +97,7 @@ impl RegistrationKey {
         let products =
             Zeroizing::new(plan.digit_products(&common, &self.secret, &transformed, 2, RADIX_BITS));
         let modulus =
-            reduction::Modulus::new(share_modulus(), RADIX_BITS).ok_or(Error::InvalidState)?;
+            reduction::Modulus::new(share_modulus(), RADIX_BITS).ok_or(Refusal::InvalidState)?;
         for position in 0..DEGREE {
             let raw = Zeroizing::new([
                 products[0][position] + digit(&self.public[position], 0),
@@ -106,9 +106,9 @@ impl RegistrationKey {
             let mut output = Zeroizing::new([0u128; 2]);
             let reduced = modulus
                 .reduce(raw.as_ref(), output.as_mut())
-                .ok_or(Error::InvalidState)?;
+                .ok_or(Refusal::InvalidState)?;
             if output[1] != 0 || output[0] > 64 || (!reduced.negative && output[0] == 64) {
-                return Err(Error::InvalidState);
+                return Err(Refusal::InvalidState);
             }
         }
         Ok(())
@@ -126,10 +126,10 @@ impl RegistrationKey {
     }
 }
 
-#[path = "registration-custody.rs"]
+#[path = "recipient-key-custody.rs"]
 mod custody;
-/// A sealed registration key: its magic, its secret's support positions and
-/// the AES-GCM tag.
+/// A sealed recipient key: its secret's support positions and the AES-GCM
+/// tag.
 pub use custody::SEALED_BYTES as SEALED_KEY_BYTES;
 
 #[cfg(test)]

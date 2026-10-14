@@ -1,7 +1,8 @@
+use super::memory::helpers_reserved_bytes;
 use super::{
     super::{prime_count_bounds, primes, shared},
     Ciphertext, DEGREE, Engine, Instruction, MEMORY_BYTES, Profile, Progress, Refusal, capacity,
-    evictions, helper_memory_bytes, helpers_reserved_bytes, peak_values, stored_bytes, value_bytes,
+    evictions, helper_memory_bytes, peak_values, stored_bytes, value_bytes,
 };
 use parallel_work::JOB_MEMORY_BYTES;
 use std::collections::BTreeSet;
@@ -168,7 +169,7 @@ fn a_readback_repeats_the_resident_value_and_keys_its_reload() {
     let profile = Profile::new(3, 2).unwrap();
     // Three inputs, the sum of the first two, and that sum plus the third.
     let unused = u32::MAX;
-    let mut program = [b"BRK1".as_slice(), &(DEGREE as u32).to_le_bytes()].concat();
+    let mut program = (DEGREE as u32).to_le_bytes().to_vec();
     program.extend([5_u32, 4].iter().flat_map(|word| word.to_le_bytes()));
     for instruction in [
         [0, unused, unused, 0],

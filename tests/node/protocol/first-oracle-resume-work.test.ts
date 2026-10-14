@@ -10,7 +10,10 @@ import {
     firstOracleResumeHashWork,
     proofHashProfiles,
 } from '#tests/proof-hash-work-model.js';
-import { deriveSupportedProfile } from '#tests/supported-profile-model.js';
+import {
+    deriveSupportedProfile,
+    listSupportedProfiles,
+} from '#tests/supported-profile-model.js';
 
 // Independent byte traversal of the actual first-leaf framing, every base
 // column and final extension column. No closed permutation formula is used.
@@ -76,17 +79,21 @@ const checkEveryCut = (firstWidth: bigint, roleBytes: bigint) => {
 
 describe('first-oracle hash resume work', () => {
     it('bounds every permitted checkpoint column at every supported profile', () => {
-        for (let participants = 3; participants <= 20; participants++)
-            for (let options = 2; options <= 20; options++) {
-                const profile = deriveSupportedProfile(participants, options);
-                const setup = proofHashProfiles(profile).find(
-                    (value) => value.role === 'setup',
-                )!;
-                expect(
-                    checkEveryCut(setup.firstWidth, setup.roleBytes)
-                        .remainingInputBytes,
-                ).toBe(48n);
-            }
+        // Profiles that share a setup width and role length share every cut.
+        const inputs = new Map<string, [bigint, bigint]>();
+        for (const profile of listSupportedProfiles()) {
+            const setup = proofHashProfiles(profile).find(
+                (value) => value.role === 'setup',
+            )!;
+            inputs.set(`${setup.firstWidth}:${setup.roleBytes}`, [
+                setup.firstWidth,
+                setup.roleBytes,
+            ]);
+        }
+        for (const [firstWidth, roleBytes] of inputs.values())
+            expect(
+                checkEveryCut(firstWidth, roleBytes).remainingInputBytes,
+            ).toBe(48n);
     });
 
     it('covers role-length boundaries and repeated completed resumes without recharging old absorption', () => {
@@ -114,7 +121,7 @@ describe('first-oracle hash resume work', () => {
         }
     });
 
-    it('rejects checkpoint cuts and widths the original first oracle cannot have', () => {
+    it('refuses checkpoint cuts and widths the original first oracle cannot have', () => {
         for (const [width, role, column] of [
             [48n, 340n, 0n],
             [65n, 340n, 0n],

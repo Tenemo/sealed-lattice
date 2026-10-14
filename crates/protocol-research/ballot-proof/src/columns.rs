@@ -9,10 +9,10 @@ use supported_profile::{
 use zeroize::Zeroizing;
 
 #[derive(Debug)]
-pub struct Error;
+pub struct Refusal;
 pub(crate) fn from_encryption(
     witness: &LinkedBallotWitness,
-) -> Result<Zeroizing<Vec<Vec<u16>>>, Error> {
+) -> Result<Zeroizing<Vec<Vec<u16>>>, Refusal> {
     from_parts(
         witness.context.profile(),
         &witness.packing,
@@ -27,7 +27,7 @@ pub(crate) fn from_parts(
     packing: &PackingWitness,
     fhe: &EncryptionWitness,
     auxiliary: &EncryptionWitness,
-) -> Result<Zeroizing<Vec<Vec<u16>>>, Error> {
+) -> Result<Zeroizing<Vec<Vec<u16>>>, Refusal> {
     let layout = BallotColumns::new(profile);
     let limbs = layout.fhe_limbs();
     let mut columns = Zeroizing::new(vec![vec![0; DEGREE]; ballot_relation(profile).columns()]);
@@ -40,7 +40,7 @@ pub(crate) fn from_parts(
             || input.carries.len() != limbs - 1
             || input.carries.iter().any(|values| values.len() != DEGREE)
         {
-            return Err(Error);
+            return Err(Refusal);
         }
         for position in 0..DEGREE {
             columns[layout.fhe_quotient(component)][position] =
@@ -59,7 +59,7 @@ pub(crate) fn from_parts(
         || fhe.ephemeral.len() != DEGREE
         || auxiliary.ephemeral.len() != AUXILIARY_DEGREE
     {
-        return Err(Error);
+        return Err(Refusal);
     }
     // The packed plaintext offset by half a word takes a word and one high
     // bit.
@@ -67,7 +67,7 @@ pub(crate) fn from_parts(
     for position in 0..DEGREE {
         let shifted = packing.message()[position] + word_offset;
         if !(0..=word).contains(&shifted) {
-            return Err(Error);
+            return Err(Refusal);
         }
         columns[layout.plaintext()][position] = (shifted % word) as u16;
         columns[layout.plaintext_high_bit()][position] = (shifted / word) as u16;
@@ -84,7 +84,7 @@ pub(crate) fn from_parts(
             || input.errors.len() != AUXILIARY_DEGREE
             || !input.carries.is_empty()
         {
-            return Err(Error);
+            return Err(Refusal);
         }
         for position in 0..AUXILIARY_DEGREE {
             columns[layout.auxiliary_quotient(component)][position * stride] =

@@ -96,24 +96,22 @@ const resolvePackageManagerEntryPoint = (
     return entryPointPath;
 };
 
-export const resolvePackageManagerRunner = (): PackageManagerRunner => {
-    const packageManagerEntryPointPath = process.env.npm_execpath;
-    const resolvedPackageManagerEntryPointPath =
-        packageManagerEntryPointPath ?? resolvePackageManagerEntryPoint('pnpm');
+// A JavaScript entry point runs under this Node. A native package-manager
+// executable, such as the binary pnpm itself ships, runs directly.
+const runnerFor = (entryPointPath: string): PackageManagerRunner =>
+    /\.[cm]?js$/iu.test(entryPointPath)
+        ? {
+              command: process.execPath,
+              commandArgumentsPrefix: [entryPointPath],
+          }
+        : { command: entryPointPath, commandArgumentsPrefix: [] };
 
-    return {
-        command: process.execPath,
-        commandArgumentsPrefix: [resolvedPackageManagerEntryPointPath],
-    };
-};
+export const resolvePackageManagerRunner = (): PackageManagerRunner =>
+    runnerFor(
+        process.env.npm_execpath ?? resolvePackageManagerEntryPoint('pnpm'),
+    );
 
 export const resolvePackageManagerRunnerForPackageManager = (
     packageManager: PackageManager,
-): PackageManagerRunner => {
-    const entryPointPath = resolvePackageManagerEntryPoint(packageManager);
-
-    return {
-        command: process.execPath,
-        commandArgumentsPrefix: [entryPointPath],
-    };
-};
+): PackageManagerRunner =>
+    runnerFor(resolvePackageManagerEntryPoint(packageManager));

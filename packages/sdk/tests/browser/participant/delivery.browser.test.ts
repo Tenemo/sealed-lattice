@@ -15,27 +15,26 @@ import {
     createRootKey,
     sealRoot,
 } from '#packages/sdk/src/participant/worker/storage/root-sealing.js';
+import {
+    fixtureRequest,
+    writeFixtureStore,
+} from '#packages/sdk/tests/browser-storage.js';
 
 const databases: IDBDatabase[] = [];
 const namespaces: string[] = [];
-const requestResult = <T>(request: IDBRequest<T>): Promise<T> =>
-    new Promise((resolve, reject) => {
-        request.onsuccess = () => resolve(request.result);
-        request.onerror = () =>
-            reject(request.error ?? new Error('IndexedDB request failed.'));
-    });
+
 const write = (
     database: IDBDatabase,
     store: ParticipantStore,
     change: (objects: IDBObjectStore) => void,
 ) =>
-    new Promise<void>((resolve, reject) => {
-        const transaction = database.transaction(store, 'readwrite');
-        transaction.oncomplete = () => resolve();
-        transaction.onabort = () =>
-            reject(transaction.error ?? new Error('Fixture write aborted.'));
-        change(transaction.objectStore(store));
-    });
+    writeFixtureStore(
+        database,
+        store,
+        change,
+        undefined,
+        'Fixture write aborted.',
+    );
 // The inspection compares the root identity its caller derives; this
 // stand-in differs from the participant module's identity but is also a
 // collision-resistant digest of the sealed root.
@@ -45,9 +44,10 @@ const rootIdentity = async (bytes: Uint8Array) =>
     );
 const hexadecimal = (bytes: Uint8Array) =>
     Array.from(bytes, (value) => value.toString(16).padStart(2, '0')).join('');
-const rootContext = Uint8Array.of(80, 79, 76, 49, 7);
 const generation = 29;
 const runtime = 'c4'.repeat(64);
+// A root's associated data is its runtime identity.
+const rootContext = new Uint8Array(64).fill(0xc4);
 
 // A participant database holding one sealed root, two data records and three
 // release records, and the authority a delivery expects of it.
@@ -91,8 +91,9 @@ const changed = 'The participant authority changed during delivery.';
 afterEach(async () => {
     for (const database of databases.splice(0)) database.close();
     for (const namespace of namespaces.splice(0))
-        await requestResult(
+        await fixtureRequest(
             indexedDB.deleteDatabase(participantDatabaseName(namespace)),
+            'IndexedDB request failed.',
         );
 });
 

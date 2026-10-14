@@ -1,7 +1,7 @@
 //! The completion session takes the verified evaluation target only in its
 //! first operation and refuses each later operation before what it needs.
 use super::{COMPLETION_INPUT_BYTES, CompletionSession};
-use crate::{release::Error, target::VerifiedEvaluationTarget};
+use crate::{release::Refusal, target::VerifiedEvaluationTarget};
 use std::sync::Arc;
 
 type Target = Option<Arc<VerifiedEvaluationTarget>>;
@@ -21,19 +21,19 @@ fn refuses_malformed_commands_and_a_missing_target() {
     // exceeds the buffer.
     assert!(matches!(
         session.command(unread, 0, 1, 0),
-        Err(Error::Encoding)
+        Err(Refusal::Encoding)
     ));
     assert!(matches!(
         session.command(unread, 1, 0, COMPLETION_INPUT_BYTES + 1),
-        Err(Error::Encoding)
+        Err(Refusal::Encoding)
     ));
     assert!(matches!(
         session.command(unread, 0, 0, 1),
-        Err(Error::Context)
+        Err(Refusal::Context)
     ));
     assert!(matches!(
         session.command(absent, 0, 0, 0),
-        Err(Error::Incomplete)
+        Err(Refusal::Incomplete)
     ));
     assert!(session.output().is_empty());
 }
@@ -54,17 +54,17 @@ fn refuses_each_later_operation_before_what_it_needs() {
     ] {
         assert!(matches!(
             session.command(unread, operation, argument, 0),
-            Err(Error::Incomplete)
+            Err(Refusal::Incomplete)
         ));
     }
     // A release body begins only after its envelope is authenticated.
     assert!(matches!(
         session.command(unread, 7, 0, 0),
-        Err(Error::Context)
+        Err(Refusal::Context)
     ));
     assert!(matches!(
         session.command(unread, 11, 0, 0),
-        Err(Error::Encoding)
+        Err(Refusal::Encoding)
     ));
     assert!(session.context().is_none());
     assert!(session.certificate().is_none());

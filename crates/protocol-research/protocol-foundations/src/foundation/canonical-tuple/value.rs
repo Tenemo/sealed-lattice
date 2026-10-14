@@ -1,8 +1,6 @@
 use super::super::StabilizedDisplayText;
 use super::decoding::{decode_tuple_at, validate_item_bytes};
-use super::{
-    CanonicalCodecError, CanonicalCodecErrorKind, CanonicalDecodeBudget, CanonicalDecodeLimits,
-};
+use super::{CanonicalCodecRefusal, CanonicalDecodeBudget, CanonicalDecodeLimits};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u16)]
@@ -44,7 +42,7 @@ pub struct CanonicalItem {
 }
 
 impl CanonicalItem {
-    pub fn fixed_bytes(bytes: impl AsRef<[u8]>) -> Result<Self, CanonicalCodecError> {
+    pub fn fixed_bytes(bytes: impl AsRef<[u8]>) -> Result<Self, CanonicalCodecRefusal> {
         let source_bytes = bytes.as_ref();
         ensure_default_fixed_byte_value_limit(source_bytes.len())?;
         Ok(Self {
@@ -53,15 +51,10 @@ impl CanonicalItem {
         })
     }
 
-    pub fn variable_bytes(bytes: impl AsRef<[u8]>) -> Result<Self, CanonicalCodecError> {
-        let canonical_bytes =
-            encode_variable_value(bytes.as_ref(), "raw-byte item length does not fit u32")?;
+    pub fn variable_bytes(bytes: impl AsRef<[u8]>) -> Result<Self, CanonicalCodecRefusal> {
+        let canonical_bytes = encode_variable_value(bytes.as_ref())?;
         if canonical_bytes.len() > CanonicalDecodeLimits::default().maximum_item_byte_length {
-            return Err(CanonicalCodecError::new(
-                CanonicalCodecErrorKind::LimitExceeded,
-                0,
-                "variable byte value exceeds the default item limit",
-            ));
+            return Err(CanonicalCodecRefusal);
         }
         Ok(Self {
             item_type: CanonicalItemType::RawBytes,
@@ -69,16 +62,11 @@ impl CanonicalItem {
         })
     }
 
-    pub fn ascii(value: &str) -> Result<Self, CanonicalCodecError> {
+    pub fn ascii(value: &str) -> Result<Self, CanonicalCodecRefusal> {
         let bytes = value.as_bytes();
-        let (byte_length, capacity) =
-            checked_variable_value_layout(bytes.len(), "ASCII item length does not fit u32")?;
+        let (byte_length, capacity) = checked_variable_value_layout(bytes.len())?;
         if bytes.iter().any(|byte| !(0x20..=0x7e).contains(byte)) {
-            return Err(CanonicalCodecError::new(
-                CanonicalCodecErrorKind::InvalidItem,
-                0,
-                "ASCII item contains a non-printable byte",
-            ));
+            return Err(CanonicalCodecRefusal);
         }
         let mut canonical_bytes = Vec::with_capacity(capacity);
         canonical_bytes.extend_from_slice(&byte_length.to_le_bytes());
@@ -89,13 +77,9 @@ impl CanonicalItem {
         })
     }
 
-    pub fn nonempty_ascii(value: &str) -> Result<Self, CanonicalCodecError> {
+    pub fn nonempty_ascii(value: &str) -> Result<Self, CanonicalCodecRefusal> {
         if value.is_empty() {
-            return Err(CanonicalCodecError::new(
-                CanonicalCodecErrorKind::InvalidItem,
-                0,
-                "ASCII item must be nonempty in this schema",
-            ));
+            return Err(CanonicalCodecRefusal);
         }
         Self::ascii(value)
     }
@@ -121,21 +105,11 @@ impl CanonicalItem {
         }
     }
 
-    pub fn hash512_list(values: &[[u8; 64]]) -> Result<Self, CanonicalCodecError> {
+    pub fn hash512_list(values: &[[u8; 64]]) -> Result<Self, CanonicalCodecRefusal> {
         if values.len() > CanonicalDecodeLimits::default().maximum_item_count {
-            return Err(CanonicalCodecError::new(
-                CanonicalCodecErrorKind::LimitExceeded,
-                0,
-                "hash-list count exceeds the default limit",
-            ));
+            return Err(CanonicalCodecRefusal);
         }
-        let count = u32::try_from(values.len()).map_err(|_| {
-            CanonicalCodecError::new(
-                CanonicalCodecErrorKind::LengthOverflow,
-                0,
-                "hash-list count does not fit u32",
-            )
-        })?;
+        let count = u32::try_from(values.len()).map_err(|_| CanonicalCodecRefusal)?;
         let mut canonical_bytes = Vec::with_capacity(6 + values.len() * 64);
         canonical_bytes
             .extend_from_slice(&CanonicalItemType::Hash512.canonical_code().to_le_bytes());
@@ -150,11 +124,8 @@ impl CanonicalItem {
         })
     }
 
-    pub fn display_text(value: &StabilizedDisplayText) -> Result<Self, CanonicalCodecError> {
-        let canonical_bytes = encode_variable_value(
-            value.as_str().as_bytes(),
-            "display-text item length does not fit u32",
-        )?;
+    pub fn display_text(value: &StabilizedDisplayText) -> Result<Self, CanonicalCodecRefusal> {
+        let canonical_bytes = encode_variable_value(value.as_str().as_bytes())?;
         ensure_default_item_limit(&canonical_bytes)?;
         Ok(Self {
             item_type: CanonicalItemType::DisplayText,
@@ -162,50 +133,26 @@ impl CanonicalItem {
         })
     }
 
-    pub fn nested_tuple_list(values: &[CanonicalTuple]) -> Result<Self, CanonicalCodecError> {
+    pub fn nested_tuple_list(values: &[CanonicalTuple]) -> Result<Self, CanonicalCodecRefusal> {
         let limits = CanonicalDecodeLimits::default();
         if values.len() > limits.maximum_item_count {
-            return Err(CanonicalCodecError::new(
-                CanonicalCodecErrorKind::LimitExceeded,
-                0,
-                "homogeneous-list count exceeds the default item limit",
-            ));
+            return Err(CanonicalCodecRefusal);
         }
-        let count = u32::try_from(values.len()).map_err(|_| {
-            CanonicalCodecError::new(
-                CanonicalCodecErrorKind::LengthOverflow,
-                0,
-                "homogeneous-list count does not fit u32",
-            )
-        })?;
+        let count = u32::try_from(values.len()).map_err(|_| CanonicalCodecRefusal)?;
         let encoded_values = values
             .iter()
             .map(CanonicalTuple::encode)
             .collect::<Result<Vec<_>, _>>()?;
         let payload_length = encoded_values.iter().try_fold(0usize, |length, bytes| {
-            length.checked_add(bytes.len()).ok_or_else(|| {
-                CanonicalCodecError::new(
-                    CanonicalCodecErrorKind::LengthOverflow,
-                    0,
-                    "homogeneous-list byte length overflows",
-                )
-            })
+            length.checked_add(bytes.len()).ok_or(CanonicalCodecRefusal)
         })?;
-        let canonical_length = 6usize.checked_add(payload_length).ok_or_else(|| {
-            CanonicalCodecError::new(
-                CanonicalCodecErrorKind::LengthOverflow,
-                0,
-                "homogeneous-list byte length overflows",
-            )
-        })?;
+        let canonical_length = 6usize
+            .checked_add(payload_length)
+            .ok_or(CanonicalCodecRefusal)?;
         if canonical_length > limits.maximum_item_byte_length
             || u32::try_from(canonical_length).is_err()
         {
-            return Err(CanonicalCodecError::new(
-                CanonicalCodecErrorKind::LimitExceeded,
-                0,
-                "homogeneous-list payload exceeds the default item limit",
-            ));
+            return Err(CanonicalCodecRefusal);
         }
         let mut canonical_bytes = Vec::with_capacity(canonical_length);
         canonical_bytes.extend_from_slice(
@@ -231,26 +178,19 @@ impl CanonicalItem {
         &self.canonical_bytes
     }
 
-    pub fn variable_value_bytes(&self) -> Result<&[u8], CanonicalCodecError> {
+    pub fn variable_value_bytes(&self) -> Result<&[u8], CanonicalCodecRefusal> {
         if !matches!(
             self.item_type,
             CanonicalItemType::RawBytes | CanonicalItemType::Ascii | CanonicalItemType::DisplayText
         ) {
-            return Err(CanonicalCodecError::new(
-                CanonicalCodecErrorKind::InvalidItem,
-                0,
-                "item is not a variable-width byte or text value",
-            ));
+            return Err(CanonicalCodecRefusal);
         }
-        decode_variable_value(&self.canonical_bytes, 0)
+        decode_variable_value(&self.canonical_bytes)
     }
 }
 
-fn encode_variable_value(
-    value: &[u8],
-    overflow_message: &'static str,
-) -> Result<Vec<u8>, CanonicalCodecError> {
-    let (byte_length, capacity) = checked_variable_value_layout(value.len(), overflow_message)?;
+fn encode_variable_value(value: &[u8]) -> Result<Vec<u8>, CanonicalCodecRefusal> {
+    let (byte_length, capacity) = checked_variable_value_layout(value.len())?;
     let mut encoded = Vec::with_capacity(capacity);
     encoded.extend_from_slice(&byte_length.to_le_bytes());
     encoded.extend_from_slice(value);
@@ -259,75 +199,41 @@ fn encode_variable_value(
 
 fn checked_variable_value_layout(
     value_byte_length: usize,
-    overflow_message: &'static str,
-) -> Result<(u32, usize), CanonicalCodecError> {
-    let byte_length = u32::try_from(value_byte_length).map_err(|_| {
-        CanonicalCodecError::new(CanonicalCodecErrorKind::LengthOverflow, 0, overflow_message)
-    })?;
-    let capacity = value_byte_length.checked_add(4).ok_or_else(|| {
-        CanonicalCodecError::new(CanonicalCodecErrorKind::LengthOverflow, 0, overflow_message)
-    })?;
+) -> Result<(u32, usize), CanonicalCodecRefusal> {
+    let byte_length = u32::try_from(value_byte_length).map_err(|_| CanonicalCodecRefusal)?;
+    let capacity = value_byte_length
+        .checked_add(4)
+        .ok_or(CanonicalCodecRefusal)?;
     if capacity > CanonicalDecodeLimits::default().maximum_item_byte_length {
-        return Err(CanonicalCodecError::new(
-            CanonicalCodecErrorKind::LimitExceeded,
-            0,
-            "variable-width item exceeds the default item limit",
-        ));
+        return Err(CanonicalCodecRefusal);
     }
     Ok((byte_length, capacity))
 }
 
-fn ensure_default_fixed_byte_value_limit(byte_length: usize) -> Result<(), CanonicalCodecError> {
+fn ensure_default_fixed_byte_value_limit(byte_length: usize) -> Result<(), CanonicalCodecRefusal> {
     if byte_length > CanonicalDecodeLimits::default().maximum_item_byte_length {
-        return Err(CanonicalCodecError::new(
-            CanonicalCodecErrorKind::LimitExceeded,
-            0,
-            "fixed byte value exceeds the default item limit",
-        ));
+        return Err(CanonicalCodecRefusal);
     }
     Ok(())
 }
 
-fn ensure_default_item_limit(bytes: &[u8]) -> Result<(), CanonicalCodecError> {
+fn ensure_default_item_limit(bytes: &[u8]) -> Result<(), CanonicalCodecRefusal> {
     if bytes.len() > CanonicalDecodeLimits::default().maximum_item_byte_length {
-        return Err(CanonicalCodecError::new(
-            CanonicalCodecErrorKind::LimitExceeded,
-            0,
-            "item byte length exceeds the default limit",
-        ));
+        return Err(CanonicalCodecRefusal);
     }
     Ok(())
 }
 
-pub(super) fn decode_variable_value(
-    bytes: &[u8],
-    base_offset: usize,
-) -> Result<&[u8], CanonicalCodecError> {
+pub(super) fn decode_variable_value(bytes: &[u8]) -> Result<&[u8], CanonicalCodecRefusal> {
     if bytes.len() < 4 {
-        return Err(CanonicalCodecError::new(
-            CanonicalCodecErrorKind::Truncated,
-            base_offset + bytes.len(),
-            "variable-width item length is truncated",
-        ));
+        return Err(CanonicalCodecRefusal);
     }
     let declared_length = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as usize;
-    let expected_length = declared_length.checked_add(4).ok_or_else(|| {
-        CanonicalCodecError::new(
-            CanonicalCodecErrorKind::LengthOverflow,
-            base_offset,
-            "variable-width item length overflows",
-        )
-    })?;
+    let expected_length = declared_length
+        .checked_add(4)
+        .ok_or(CanonicalCodecRefusal)?;
     if bytes.len() != expected_length {
-        return Err(CanonicalCodecError::new(
-            if bytes.len() < expected_length {
-                CanonicalCodecErrorKind::Truncated
-            } else {
-                CanonicalCodecErrorKind::TrailingBytes
-            },
-            base_offset + bytes.len().min(expected_length),
-            "variable-width item length is not canonical",
-        ));
+        return Err(CanonicalCodecRefusal);
     }
     Ok(&bytes[4..])
 }
@@ -335,36 +241,33 @@ pub(super) fn decode_variable_value(
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CanonicalTuple {
     pub schema_identifier: u16,
-    pub schema_version: u16,
     pub items: Vec<CanonicalItem>,
 }
 
 impl CanonicalTuple {
-    pub fn new(schema_identifier: u16, schema_version: u16, items: Vec<CanonicalItem>) -> Self {
+    pub fn new(schema_identifier: u16, items: Vec<CanonicalItem>) -> Self {
         Self {
             schema_identifier,
-            schema_version,
             items,
         }
     }
 
-    pub fn encode(&self) -> Result<Vec<u8>, CanonicalCodecError> {
+    /// Whether the tuple has the canonical schema and exactly `item_count`
+    /// items.
+    pub fn has_header(&self, item_count: usize) -> bool {
+        self.schema_identifier == super::CANONICAL_TUPLE_SCHEMA_IDENTIFIER
+            && self.items.len() == item_count
+    }
+
+    pub fn encode(&self) -> Result<Vec<u8>, CanonicalCodecRefusal> {
         let limits = CanonicalDecodeLimits::default();
         let mut budget = CanonicalDecodeBudget::new(&limits);
         if self.items.len() > limits.maximum_item_count {
-            return Err(CanonicalCodecError::new(
-                CanonicalCodecErrorKind::LimitExceeded,
-                4,
-                "tuple item count exceeds the default limit",
-            ));
+            return Err(CanonicalCodecRefusal);
         }
         for item in &self.items {
             if item.canonical_bytes.len() > limits.maximum_item_byte_length {
-                return Err(CanonicalCodecError::new(
-                    CanonicalCodecErrorKind::LimitExceeded,
-                    0,
-                    "tuple item byte length exceeds the default limit",
-                ));
+                return Err(CanonicalCodecRefusal);
             }
             validate_item_bytes(
                 item.item_type,
@@ -372,55 +275,26 @@ impl CanonicalTuple {
                 &limits,
                 &mut budget,
                 0,
-                0,
             )?;
         }
-        let item_count = u32::try_from(self.items.len()).map_err(|_| {
-            CanonicalCodecError::new(
-                CanonicalCodecErrorKind::LengthOverflow,
-                4,
-                "tuple item count does not fit u32",
-            )
-        })?;
-        let total_length = self.items.iter().try_fold(8usize, |length, item| {
-            let _ = u32::try_from(item.canonical_bytes.len()).map_err(|_| {
-                CanonicalCodecError::new(
-                    CanonicalCodecErrorKind::LengthOverflow,
-                    length,
-                    "tuple item byte length does not fit u32",
-                )
-            })?;
+        let item_count = u32::try_from(self.items.len()).map_err(|_| CanonicalCodecRefusal)?;
+        let total_length = self.items.iter().try_fold(6usize, |length, item| {
+            let _ = u32::try_from(item.canonical_bytes.len()).map_err(|_| CanonicalCodecRefusal)?;
             length
                 .checked_add(6)
                 .and_then(|value| value.checked_add(item.canonical_bytes.len()))
-                .ok_or_else(|| {
-                    CanonicalCodecError::new(
-                        CanonicalCodecErrorKind::LengthOverflow,
-                        length,
-                        "tuple byte length overflows",
-                    )
-                })
+                .ok_or(CanonicalCodecRefusal)
         })?;
         if total_length > limits.maximum_tuple_byte_length {
-            return Err(CanonicalCodecError::new(
-                CanonicalCodecErrorKind::LimitExceeded,
-                0,
-                "tuple byte length exceeds the default limit",
-            ));
+            return Err(CanonicalCodecRefusal);
         }
         let mut output = Vec::with_capacity(total_length);
         output.extend_from_slice(&self.schema_identifier.to_le_bytes());
-        output.extend_from_slice(&self.schema_version.to_le_bytes());
         output.extend_from_slice(&item_count.to_le_bytes());
         for item in &self.items {
             output.extend_from_slice(&item.item_type.canonical_code().to_le_bytes());
-            let byte_length = u32::try_from(item.canonical_bytes.len()).map_err(|_| {
-                CanonicalCodecError::new(
-                    CanonicalCodecErrorKind::LengthOverflow,
-                    output.len(),
-                    "tuple item byte length does not fit u32",
-                )
-            })?;
+            let byte_length =
+                u32::try_from(item.canonical_bytes.len()).map_err(|_| CanonicalCodecRefusal)?;
             output.extend_from_slice(&byte_length.to_le_bytes());
             output.extend_from_slice(&item.canonical_bytes);
         }
@@ -430,7 +304,7 @@ impl CanonicalTuple {
     pub fn decode(
         bytes: &[u8],
         limits: &CanonicalDecodeLimits,
-    ) -> Result<Self, CanonicalCodecError> {
+    ) -> Result<Self, CanonicalCodecRefusal> {
         let mut budget = CanonicalDecodeBudget::new(limits);
         Self::decode_with_budget(bytes, limits, &mut budget)
     }
@@ -439,14 +313,10 @@ impl CanonicalTuple {
         bytes: &[u8],
         limits: &CanonicalDecodeLimits,
         budget: &mut CanonicalDecodeBudget,
-    ) -> Result<Self, CanonicalCodecError> {
-        let (tuple, consumed) = decode_tuple_at(bytes, limits, budget, 0, 0)?;
+    ) -> Result<Self, CanonicalCodecRefusal> {
+        let (tuple, consumed) = decode_tuple_at(bytes, limits, budget, 0)?;
         if consumed != bytes.len() {
-            return Err(CanonicalCodecError::new(
-                CanonicalCodecErrorKind::TrailingBytes,
-                consumed,
-                "tuple contains trailing bytes",
-            ));
+            return Err(CanonicalCodecRefusal);
         }
         Ok(tuple)
     }
@@ -456,7 +326,7 @@ impl CanonicalTuple {
         limits: &CanonicalDecodeLimits,
         budget: &mut CanonicalDecodeBudget,
         nesting_depth: u16,
-    ) -> Result<(Self, usize), CanonicalCodecError> {
-        decode_tuple_at(bytes, limits, budget, nesting_depth, 0)
+    ) -> Result<(Self, usize), CanonicalCodecRefusal> {
+        decode_tuple_at(bytes, limits, budget, nesting_depth)
     }
 }

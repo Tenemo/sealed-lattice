@@ -6,7 +6,7 @@ use protocol_foundations::{
 };
 use setup_aggregate::{
     CHUNK_BYTES,
-    setup_session::{Refused, SETUP_INPUT_BYTES, SetupSession},
+    setup_session::{Refusal, SETUP_INPUT_BYTES, SetupSession},
     verified::{VerifiedSelectionInputs, VerifiedSetupAggregate},
 };
 use std::{cell::RefCell, sync::Arc};
@@ -14,7 +14,7 @@ use std::{cell::RefCell, sync::Arc};
 thread_local! {static SETUP: RefCell<SetupSession> = RefCell::new(SetupSession::new());}
 
 // Runs one verification step, which answers one when it is refused.
-fn step(run: impl FnOnce(&mut SetupSession) -> Result<(), Refused>) -> u32 {
+fn step(run: impl FnOnce(&mut SetupSession) -> Result<(), Refusal>) -> u32 {
     SETUP.with(|setup| u32::from(run(&mut setup.borrow_mut()).is_err()))
 }
 
@@ -60,7 +60,7 @@ pub extern "C" fn setup_roster_begin(length: usize) -> u32 {
 #[unsafe(no_mangle)]
 pub extern "C" fn setup_roster_record(operation: u32, position: usize, length: usize) -> u32 {
     step(|setup| {
-        let record = RecordStep::from_code(operation).ok_or(Refused)?;
+        let record = RecordStep::from_code(operation).ok_or(Refusal)?;
         setup.roster_record(record, position, length)
     })
 }

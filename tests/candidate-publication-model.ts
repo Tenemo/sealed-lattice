@@ -1,6 +1,7 @@
 import { compileBallotBodyCensus } from '#tests/ballot-body-model.js';
 import { compileCloseWireCensus } from '#tests/close-wire-model.js';
 import { compileContributionBodyCensus } from '#tests/contribution-body-model.js';
+import { maximum } from '#tests/exact-integer.js';
 import { compileParticipantReleaseCustody } from '#tests/participant-release-custody-model.js';
 import { compileRecipientKeyCensus } from '#tests/recipient-key-model.js';
 import { compileRegistrationEnrollmentCensus } from '#tests/registration-enrollment-model.js';
@@ -9,7 +10,7 @@ import { compileSetupSelectionWireCensus } from '#tests/setup-selection-wire-mod
 import type { SupportedProfile } from '#tests/supported-profile-model.js';
 import { compileTargetSigningStateCensus } from '#tests/target-signing-state-model.js';
 
-// Independently maintained wire operands: RCM1/u16 count, u16 name length,
+// Independently maintained wire operands: u16 file count, u16 name length,
 // ASCII name, u64 payload length and one 16-byte locator per fixed chunk.
 const candidateTransportParameters = {
     chunkBytes: 1_048_576n,
@@ -30,9 +31,6 @@ type File = Readonly<{
 const chunks = (bytes: bigint) =>
     (bytes + candidateTransportParameters.chunkBytes - 1n) /
     candidateTransportParameters.chunkBytes;
-const maximum = (values: readonly bigint[]) =>
-    values.reduce((largest, value) => (value > largest ? value : largest), 0n);
-
 const compileCandidatePublication = (
     key: string,
     files: readonly File[],
@@ -52,7 +50,7 @@ const compileCandidatePublication = (
         referencedChunks = 0n,
         referenceMetadataBytes = 0n,
         referenceFiles = 0n;
-    let manifestBytes = 4n + 2n;
+    let manifestBytes = 2n;
     for (const file of files) {
         const name = BigInt(Buffer.byteLength(file.name));
         if (
@@ -134,7 +132,7 @@ export const compileCandidatePublicationCensus = (
     if (
         !Number.isSafeInteger(offers) ||
         offers < profile.setupContributorCount ||
-        offers > selection.eligibleCount
+        offers > selection.eligibleContributorCount
     )
         throw new RangeError('Invalid offer population.');
     const identity = (position: number) =>
@@ -240,8 +238,10 @@ export const compileCandidatePublicationCensus = (
     publish(0, 'close-proposal', [
         file('intent.bin', close.intentPacketBytes),
         file('proposal.bin', close.proposalPacketBytes),
-        ...Array.from({ length: selection.quorum }, (_, position) =>
-            file('response-' + identity(position) + '.bin', responseBytes),
+        ...Array.from(
+            { length: selection.inventoryCertificateThreshold },
+            (_, position) =>
+                file('response-' + identity(position) + '.bin', responseBytes),
         ),
         ...Array.from({ length: n }, (_, position) =>
             file(

@@ -1,7 +1,7 @@
 //! Canonical selection messages and authentication. These types establish
 //! signatures only; the setup verifier separately checks every selected body.
 use crate::{
-    Credential, Error, SIGNATURE_BYTES, SigningPurpose,
+    Credential, Refusal, SIGNATURE_BYTES, SigningPurpose,
     foundation::{CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple},
     identity::identity,
     poll::VerifiedPoll,
@@ -15,18 +15,17 @@ use fips204::{
 use std::sync::Arc;
 use supported_profile::Profile;
 
-pub(crate) const SELECTION_PURPOSE: &str = "sealed-lattice/setup-selection/v1";
-pub(crate) const SELECTION_IDENTITY_DOMAIN: &str = "sealed-lattice/setup-selection-identity/v1";
-pub const PROPOSAL_CONTEXT: &[u8] = b"sealed-lattice/setup-selection-proposal/v1";
-pub const ENDORSEMENT_PURPOSE: &str = "sealed-lattice/setup-selection-endorsement/v1";
+pub(crate) const SELECTION_PURPOSE: &str = "sealed-lattice/setup-selection";
+pub(crate) const SELECTION_IDENTITY_DOMAIN: &str = "sealed-lattice/setup-selection-identity";
+pub const PROPOSAL_CONTEXT: &[u8] = b"sealed-lattice/setup-selection-proposal";
+pub const ENDORSEMENT_PURPOSE: &str = "sealed-lattice/setup-selection-endorsement";
 pub(crate) const ENDORSEMENT_IDENTITY_DOMAIN: &str =
-    "sealed-lattice/setup-selection-endorsement-identity/v1";
+    "sealed-lattice/setup-selection-endorsement-identity";
 pub const ENDORSEMENT_BYTES: usize = 2 + 64 + SIGNATURE_BYTES;
 pub const MAXIMUM_SELECTION_BYTES: usize = 2048;
-const RETAINED_INPUTS_LABEL: &[u8] = b"sealed-lattice/retained-selection-inputs/v2";
+const RETAINED_INPUTS_LABEL: &[u8] = b"sealed-lattice/retained-selection-inputs";
 pub fn selection_body_bytes(profile: Profile) -> usize {
     CanonicalTuple::new(
-        1,
         1,
         vec![
             CanonicalItem::nonempty_ascii(SELECTION_PURPOSE).expect("Purpose"),
@@ -54,7 +53,7 @@ pub struct SelectionProposal {
 }
 impl SelectionProposal {
     /// Encoding alone creates no selected-offer or setup capability.
-    pub fn new(roster: &RosterProposal, selected: &[(usize, [u8; 64])]) -> Result<Self, Error> {
+    pub fn new(roster: &RosterProposal, selected: &[(usize, [u8; 64])]) -> Result<Self, Refusal> {
         let profile = roster.profile();
         if selected.len() != profile.setup_contributors()
             || selected
@@ -62,7 +61,7 @@ impl SelectionProposal {
                 .any(|(position, _)| *position >= profile.setup_eligible_contributors())
             || selected.windows(2).any(|pair| pair[0].0 >= pair[1].0)
         {
-            return Err(Error::Shape);
+            return Err(Refusal::Shape);
         }
         let mut entries = Vec::from((selected.len() as u32).to_le_bytes());
         for (position, body) in selected {
@@ -71,15 +70,14 @@ impl SelectionProposal {
         }
         let body = CanonicalTuple::new(
             1,
-            1,
             vec![
-                CanonicalItem::nonempty_ascii(SELECTION_PURPOSE).map_err(|_| Error::Shape)?,
+                CanonicalItem::nonempty_ascii(SELECTION_PURPOSE).map_err(|_| Refusal::Shape)?,
                 CanonicalItem::hash512(roster.identity()),
-                CanonicalItem::variable_bytes(entries).map_err(|_| Error::Shape)?,
+                CanonicalItem::variable_bytes(entries).map_err(|_| Refusal::Shape)?,
             ],
         )
         .encode()
-        .map_err(|_| Error::Shape)?;
+        .map_err(|_| Refusal::Shape)?;
         let identity = identity(SELECTION_IDENTITY_DOMAIN, &body)?;
         Ok(Self {
             body,
@@ -88,7 +86,7 @@ impl SelectionProposal {
             selected: selected.to_vec(),
         })
     }
-    pub fn decode(roster: &RosterProposal, bytes: &[u8]) -> Result<Self, Error> {
+    pub fn decode(roster: &RosterProposal, bytes: &[u8]) -> Result<Self, Refusal> {
         let limits = CanonicalDecodeLimits {
             maximum_tuple_byte_length: MAXIMUM_SELECTION_BYTES,
             maximum_item_count: 3,
@@ -96,26 +94,30 @@ impl SelectionProposal {
             maximum_nesting_depth: 0,
             ..CanonicalDecodeLimits::default()
         };
-        let tuple = CanonicalTuple::decode(bytes, &limits).map_err(|_| Error::Shape)?;
-        if tuple.schema_identifier != 1 || tuple.schema_version != 1 || tuple.items.len() != 3 {
-            return Err(Error::Shape);
+        let tuple = CanonicalTuple::decode(bytes, &limits).map_err(|_| Refusal::Shape)?;
+        if !tuple.has_header(3) {
+            return Err(Refusal::Shape);
         }
         let items = &tuple.items;
         if items[0].item_type() != CanonicalItemType::Ascii
             || items[1].item_type() != CanonicalItemType::Hash512
             || items[2].item_type() != CanonicalItemType::RawBytes
-            || items[0].variable_value_bytes().map_err(|_| Error::Shape)?
+            || items[0]
+                .variable_value_bytes()
+                .map_err(|_| Refusal::Shape)?
                 != SELECTION_PURPOSE.as_bytes()
             || items[1].canonical_bytes() != roster.identity()
         {
-            return Err(Error::Context);
+            return Err(Refusal::Context);
         }
-        let entries = items[2].variable_value_bytes().map_err(|_| Error::Shape)?;
+        let entries = items[2]
+            .variable_value_bytes()
+            .map_err(|_| Refusal::Shape)?;
         if entries.len() != 4 + roster.profile().setup_contributors() * 66
             || u32::from_le_bytes(entries[..4].try_into().unwrap()) as usize
                 != roster.profile().setup_contributors()
         {
-            return Err(Error::Shape);
+            return Err(Refusal::Shape);
         }
         let selected: Vec<_> = entries[4..]
             .chunks_exact(66)
@@ -163,9 +165,9 @@ pub fn authenticate_selection(
     roster: Arc<AuthenticatedRosterProposal>,
     body: &[u8],
     signature: &[u8],
-) -> Result<AuthenticatedSelectionProposal, Error> {
+) -> Result<AuthenticatedSelectionProposal, Refusal> {
     let selection = SelectionProposal::decode(roster.proposal(), body)?;
-    let signature = signature.try_into().map_err(|_| Error::Shape)?;
+    let signature = signature.try_into().map_err(|_| Refusal::Shape)?;
     verify(
         roster.proposal(),
         roster.proposal().organizer_position(),
@@ -185,33 +187,32 @@ fn verify(
     digest: &[u8; 64],
     signature: &[u8; SIGNATURE_BYTES],
     purpose: &[u8],
-) -> Result<(), Error> {
+) -> Result<(), Refusal> {
     let key = roster
         .records()
         .get(position)
-        .ok_or(Error::Context)?
+        .ok_or(Refusal::Context)?
         .header()
         .signing_public;
-    let key = ml_dsa_65::PublicKey::try_from_bytes(key).map_err(|_| Error::Shape)?;
+    let key = ml_dsa_65::PublicKey::try_from_bytes(key).map_err(|_| Refusal::Shape)?;
     if !key.verify(digest, signature, purpose) {
-        return Err(Error::Crypto);
+        return Err(Refusal::Crypto);
     }
     Ok(())
 }
-pub fn endorsement_body(selection: [u8; 64], position: usize) -> Result<Vec<u8>, Error> {
+pub fn endorsement_body(selection: [u8; 64], position: usize) -> Result<Vec<u8>, Refusal> {
     CanonicalTuple::new(
         1,
-        1,
         vec![
-            CanonicalItem::nonempty_ascii(ENDORSEMENT_PURPOSE).map_err(|_| Error::Shape)?,
+            CanonicalItem::nonempty_ascii(ENDORSEMENT_PURPOSE).map_err(|_| Refusal::Shape)?,
             CanonicalItem::hash512(selection),
-            CanonicalItem::unsigned16(u16::try_from(position).map_err(|_| Error::Shape)?),
+            CanonicalItem::unsigned16(u16::try_from(position).map_err(|_| Refusal::Shape)?),
         ],
     )
     .encode()
-    .map_err(|_| Error::Shape)
+    .map_err(|_| Refusal::Shape)
 }
-fn endorsement_identity(selection: [u8; 64], position: usize) -> Result<[u8; 64], Error> {
+fn endorsement_identity(selection: [u8; 64], position: usize) -> Result<[u8; 64], Refusal> {
     identity(
         ENDORSEMENT_IDENTITY_DOMAIN,
         &endorsement_body(selection, position)?,
@@ -252,14 +253,14 @@ pub fn authenticate_endorsement(
     roster: &AuthenticatedRosterProposal,
     selection: &SelectionProposal,
     packet: &[u8],
-) -> Result<AuthenticatedSelectionEndorsement, Error> {
+) -> Result<AuthenticatedSelectionEndorsement, Refusal> {
     if packet.len() != ENDORSEMENT_BYTES {
-        return Err(Error::Shape);
+        return Err(Refusal::Shape);
     }
     if selection.roster_identity() != roster.proposal().identity_bytes()
         || packet[2..66] != selection.identity()
     {
-        return Err(Error::Context);
+        return Err(Refusal::Context);
     }
     endorsement(
         roster,
@@ -274,7 +275,7 @@ fn endorsement(
     selection: &SelectionProposal,
     position: usize,
     signature: [u8; SIGNATURE_BYTES],
-) -> Result<AuthenticatedSelectionEndorsement, Error> {
+) -> Result<AuthenticatedSelectionEndorsement, Refusal> {
     verify(
         roster.proposal(),
         position,
@@ -308,19 +309,20 @@ impl AuthenticatedSelectionCertificate {
         self.proposal.selection.identity()
     }
 }
-pub fn certificate_bytes(profile: Profile, proposal_bytes: usize) -> Result<usize, Error> {
+pub fn certificate_bytes(profile: Profile, proposal_bytes: usize) -> Result<usize, Refusal> {
     if proposal_bytes > MAXIMUM_SELECTION_BYTES {
-        return Err(Error::Shape);
+        return Err(Refusal::Shape);
     }
-    Ok(4 + 4
-        + proposal_bytes
-        + SIGNATURE_BYTES
-        + profile.inventory_threshold() * (2 + SIGNATURE_BYTES))
+    Ok(
+        4 + proposal_bytes
+            + SIGNATURE_BYTES
+            + profile.inventory_threshold() * (2 + SIGNATURE_BYTES),
+    )
 }
 pub fn encode_certificate(
     proposal: &AuthenticatedSelectionProposal,
     endorsements: &[AuthenticatedSelectionEndorsement],
-) -> Result<Vec<u8>, Error> {
+) -> Result<Vec<u8>, Refusal> {
     let profile = proposal.roster.proposal().profile();
     if endorsements.len() != profile.inventory_threshold()
         || endorsements.iter().any(|value| {
@@ -332,11 +334,10 @@ pub fn encode_certificate(
             .windows(2)
             .any(|pair| pair[0].position >= pair[1].position)
     {
-        return Err(Error::Context);
+        return Err(Refusal::Context);
     }
     let body = proposal.selection.body();
-    let mut bytes = Vec::from(b"SSC1".as_slice());
-    bytes.extend((body.len() as u32).to_le_bytes());
+    let mut bytes = (body.len() as u32).to_le_bytes().to_vec();
     bytes.extend(body);
     bytes.extend(proposal.signature);
     for endorsement in endorsements {
@@ -348,20 +349,20 @@ pub fn encode_certificate(
 pub fn authenticate_certificate(
     roster: Arc<AuthenticatedRosterProposal>,
     bytes: &[u8],
-) -> Result<AuthenticatedSelectionCertificate, Error> {
-    if bytes.len() < 8 || &bytes[..4] != b"SSC1" {
-        return Err(Error::Shape);
+) -> Result<AuthenticatedSelectionCertificate, Refusal> {
+    if bytes.len() < 4 {
+        return Err(Refusal::Shape);
     }
-    let length = u32::from_le_bytes(bytes[4..8].try_into().unwrap()) as usize;
+    let length = u32::from_le_bytes(bytes[..4].try_into().unwrap()) as usize;
     if bytes.len() != certificate_bytes(roster.proposal().profile(), length)? {
-        return Err(Error::Shape);
+        return Err(Refusal::Shape);
     }
     let proposal = authenticate_selection(
         roster.clone(),
-        &bytes[8..8 + length],
-        &bytes[8 + length..8 + length + SIGNATURE_BYTES],
+        &bytes[4..4 + length],
+        &bytes[4 + length..4 + length + SIGNATURE_BYTES],
     )?;
-    let endorsements = bytes[8 + length + SIGNATURE_BYTES..]
+    let endorsements = bytes[4 + length + SIGNATURE_BYTES..]
         .chunks_exact(2 + SIGNATURE_BYTES)
         .map(|entry| {
             endorsement(
@@ -373,7 +374,7 @@ pub fn authenticate_certificate(
         })
         .collect::<Result<Vec<_>, _>>()?;
     if encode_certificate(&proposal, &endorsements)?.as_slice() != bytes {
-        return Err(Error::Shape);
+        return Err(Refusal::Shape);
     }
     Ok(AuthenticatedSelectionCertificate {
         proposal,
@@ -387,14 +388,14 @@ impl Credential {
         &mut self,
         roster: &AuthenticatedRosterProposal,
         selection: &SelectionProposal,
-    ) -> Result<[u8; SIGNATURE_BYTES], Error> {
+    ) -> Result<[u8; SIGNATURE_BYTES], Refusal> {
         self.check_unlocked(SigningPurpose::SelectionProposal)?;
         self.check_confirmed_position(roster.proposal(), roster.proposal().organizer_position())?;
         if self.preparation_retired || self.selection_proposal_signed.is_some() {
-            return Err(Error::Consumed);
+            return Err(Refusal::Consumed);
         }
         if selection.roster_identity() != roster.proposal().identity_bytes() {
-            return Err(Error::Context);
+            return Err(Refusal::Context);
         }
         self.selection_proposal_signed = Some(selection.identity());
         self.sign_deterministically(&selection.identity(), PROPOSAL_CONTEXT)
@@ -404,14 +405,14 @@ impl Credential {
         roster: &AuthenticatedRosterProposal,
         selection: &SelectionProposal,
         position: usize,
-    ) -> Result<Vec<u8>, Error> {
+    ) -> Result<Vec<u8>, Refusal> {
         self.check_unlocked(SigningPurpose::SelectionEndorsement)?;
         self.check_confirmed_position(roster.proposal(), position)?;
         if self.preparation_retired || self.selection_endorsed.is_some() {
-            return Err(Error::Consumed);
+            return Err(Refusal::Consumed);
         }
         if selection.roster_identity() != roster.proposal().identity_bytes() {
-            return Err(Error::Context);
+            return Err(Refusal::Context);
         }
         let digest = endorsement_identity(selection.identity(), position)?;
         self.selection_endorsed = Some(selection.identity());
@@ -425,7 +426,7 @@ impl Credential {
     pub fn restore_selection_proposal(
         &mut self,
         proposal: &AuthenticatedSelectionProposal,
-    ) -> Result<(), Error> {
+    ) -> Result<(), Refusal> {
         self.check_confirmed_position(
             proposal.roster.proposal(),
             proposal.roster.proposal().organizer_position(),
@@ -435,7 +436,7 @@ impl Credential {
             .selection_proposal_signed
             .is_some_and(|old| old != target)
         {
-            return Err(Error::Consumed);
+            return Err(Refusal::Consumed);
         }
         self.selection_proposal_signed = Some(target);
         self.locked_purposes |= SigningPurpose::SelectionProposal.mask();
@@ -445,16 +446,16 @@ impl Credential {
         &mut self,
         roster: &AuthenticatedRosterProposal,
         endorsement: &AuthenticatedSelectionEndorsement,
-    ) -> Result<(), Error> {
+    ) -> Result<(), Refusal> {
         self.check_confirmed_position(roster.proposal(), endorsement.position)?;
         if endorsement.roster != roster.proposal().identity() {
-            return Err(Error::Context);
+            return Err(Refusal::Context);
         }
         if self
             .selection_endorsed
             .is_some_and(|old| old != endorsement.selection)
         {
-            return Err(Error::Consumed);
+            return Err(Refusal::Consumed);
         }
         self.selection_endorsed = Some(endorsement.selection);
         self.locked_purposes |= SigningPurpose::SelectionEndorsement.mask();
@@ -468,7 +469,7 @@ impl Credential {
         poll: &VerifiedPoll,
         reference: &[u8],
         tag: &[u8],
-    ) -> Result<(), Error> {
+    ) -> Result<(), Refusal> {
         self.check_retained_tag(RETAINED_INPUTS_LABEL, poll, reference, tag)
     }
 }

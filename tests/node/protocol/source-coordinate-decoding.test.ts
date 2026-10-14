@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
+import { runCleanCircuit } from '#tests/compressed-oracle/reversible-circuit.js';
 import {
     compileSourceCoordinateDecoding,
-    runCleanCircuit,
     sourceCoordinateDecodingWork,
-} from '#tests/compressed-oracle-model.js';
+} from '#tests/compressed-oracle/source-extraction.js';
 import { listSupportedProfiles } from '#tests/supported-profile-model.js';
 
 const bits = (value: bigint, width: number) =>

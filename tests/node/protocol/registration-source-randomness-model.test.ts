@@ -1,43 +1,23 @@
 import { describe, expect, it } from 'vitest';
 
+import {
+    ascii,
+    item,
+    itemType,
+    tuple,
+    unsigned,
+    variable,
+} from '#tests/node/protocol/reference/canonical-tuple.js';
+import {
+    shake256RateBytes,
+    spongePermutations,
+} from '#tests/node/protocol/reference/sponge-permutations.js';
 import { operationSeedCount } from '#tests/operation-seed-model.js';
 import {
     compileRegistrationSourceRandomness,
     compileRegistrationSourceExtractionWork,
 } from '#tests/registration-source-randomness-model.js';
 import { completionProfile } from '#tests/supported-profile-model.js';
-
-const unsigned = (bytes: number, value: bigint) => {
-    const result = Buffer.alloc(bytes);
-    for (let index = 0; index < bytes; index++) {
-        result[index] = Number(value & 255n);
-        value >>= 8n;
-    }
-    return result;
-};
-const variable = (value: Buffer) =>
-    Buffer.concat([unsigned(4, BigInt(value.length)), value]);
-const item = (type: number, value: Buffer) =>
-    Buffer.concat([
-        unsigned(2, BigInt(type)),
-        unsigned(4, BigInt(value.length)),
-        value,
-    ]);
-const tuple = (items: Buffer[]) =>
-    Buffer.concat([
-        unsigned(2, 1n),
-        unsigned(2, 1n),
-        unsigned(4, BigInt(items.length)),
-        ...items,
-    ]);
-const permutations = (input: number, output: number) => {
-    // SHAKE padding always starts another absorption block, even at an
-    // exact boundary; the first output block is already that permutation.
-    let count = 1;
-    for (let position = 136; position <= input; position += 136) count++;
-    for (let position = 136; position < output; position += 136) count++;
-    return BigInt(count);
-};
 
 describe('original registration source randomness and hash work', () => {
     it('prices the full source cell and exact-length padding at every extraction', () => {
@@ -125,22 +105,15 @@ describe('original registration source randomness and hash work', () => {
             const value = compileRegistrationSourceRandomness(maximum, options);
             for (const family of value.families) {
                 const source = tuple([
+                    ascii('sealed-lattice/fhe-source-randomness'),
+                    item(itemType.rawBytes, Buffer.alloc(1952)),
+                    item(itemType.hash512, Buffer.alloc(64)),
                     item(
-                        2,
-                        variable(
-                            Buffer.from(
-                                'sealed-lattice/fhe-source-randomness/v2',
-                            ),
-                        ),
-                    ),
-                    item(1, Buffer.alloc(1952)),
-                    item(6, Buffer.alloc(64)),
-                    item(
-                        1,
+                        itemType.rawBytes,
                         variable(Buffer.alloc(Number(family.modulusBytes))),
                     ),
-                    item(4, unsigned(8, BigInt(family.sampleBits))),
-                    item(1, Buffer.alloc(64)),
+                    item(itemType.unsigned64, unsigned(family.sampleBits, 8)),
+                    item(itemType.rawBytes, Buffer.alloc(64)),
                 ]);
                 expect(family.sourceInputBytes).toBe(BigInt(source.length));
                 // The source's seed is fixed bytes, unlike the operation
@@ -152,38 +125,38 @@ describe('original registration source randomness and hash work', () => {
                     8n * 1024n + 20n * 65536n,
                 );
                 expect(family.comparisonSourcePermutations).toBe(
-                    permutations(
+                    spongePermutations(
                         source.length,
                         Number(family.comparisonMaximumSourceOutputBytes),
+                        shake256RateBytes,
                     ),
                 );
                 const commitmentPrefix = tuple([
+                    ascii('sealed-lattice/registered-fhe-key'),
+                    item(itemType.rawBytes, Buffer.alloc(1952)),
+                    item(itemType.rawBytes, Buffer.alloc(64)),
+                    item(itemType.hash512, Buffer.alloc(64)),
                     item(
-                        2,
-                        variable(
-                            Buffer.from('sealed-lattice/registered-fhe-key/v2'),
-                        ),
-                    ),
-                    item(1, Buffer.alloc(1952)),
-                    item(1, Buffer.alloc(64)),
-                    item(6, Buffer.alloc(64)),
-                    item(
-                        1,
+                        itemType.rawBytes,
                         variable(Buffer.alloc(Number(family.modulusBytes))),
                     ),
-                    item(4, unsigned(8, BigInt(family.sampleBits))),
-                    item(1, variable(Buffer.alloc(0))),
+                    item(itemType.unsigned64, unsigned(family.sampleBits, 8)),
+                    item(itemType.rawBytes, variable(Buffer.alloc(0))),
                 ]);
                 const commitmentBytes =
                     BigInt(commitmentPrefix.length) +
                     family.publicCoordinateBytes;
                 expect(family.commitmentInputBytes).toBe(commitmentBytes);
                 expect(family.commitmentPermutations).toBe(
-                    permutations(Number(commitmentBytes), 64),
+                    spongePermutations(
+                        Number(commitmentBytes),
+                        64,
+                        shake256RateBytes,
+                    ),
                 );
                 const commonInput = Buffer.concat([
-                    Buffer.from('synthetic-full-setup-witness/1'),
-                    unsigned(4, 14n),
+                    Buffer.from('synthetic-full-setup-witness'),
+                    unsigned(14, 4),
                     Buffer.from('common-fhe-a-0'),
                 ]);
                 expect(family.commonInputBytes).toBe(
@@ -193,9 +166,10 @@ describe('original registration source randomness and hash work', () => {
                     65536n * BigInt(family.sampleBits / 8),
                 );
                 expect(family.commonPermutations).toBe(
-                    permutations(
+                    spongePermutations(
                         commonInput.length,
                         Number(family.commonOutputBytes),
+                        shake256RateBytes,
                     ),
                 );
             }

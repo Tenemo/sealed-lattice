@@ -39,7 +39,6 @@ const runGraph = async (graph: CheckGraph, continuousIntegration = false) => {
     try {
         const runLog = await createLocalRunLog({
             commandLineArguments: [],
-            lanes: [],
             rootDirectoryPath: path.join(temporaryDirectoryPath, 'logs'),
             scriptName: 'check graph',
         });

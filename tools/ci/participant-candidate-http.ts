@@ -1,11 +1,9 @@
-import type { IncomingMessage, ServerResponse } from 'node:http';
-
 import {
     candidateChunkBytes,
     candidateManifestBytes,
     encodeCandidatePage,
     encodeCandidateReceipt,
-    isCandidateId,
+    isCandidateLocator,
     isCandidateKey,
 } from '#packages/sdk/src/participant/worker/relay/candidate-codec.js';
 import type {
@@ -14,20 +12,32 @@ import type {
 } from '#tools/ci/participant-relay-record.js';
 
 type Store = ReturnType<typeof participantRelayStore>;
+// The parts of a Node HTTP request and response the relay uses, which the
+// in-process test transport also supplies.
+type CandidateRequest = AsyncIterable<Uint8Array> &
+    Readonly<{ method?: string }>;
+type CandidateResponse = {
+    setHeader: (name: string, value: string) => unknown;
+    writeHead: (status: number) => { end: () => unknown };
+    end: (bytes?: Uint8Array) => unknown;
+};
 type Views = Readonly<{
     accept?: (key: string, bytes: Uint8Array) => Promise<boolean>;
     published?: (candidate: StoredParticipantCandidate) => Promise<void>;
     manifest?: (
         candidate: StoredParticipantCandidate,
     ) => Promise<Uint8Array | undefined>;
-    chunk?: (id: string, bytes: Uint8Array) => Promise<Uint8Array | undefined>;
+    chunk?: (
+        locator: string,
+        bytes: Uint8Array,
+    ) => Promise<Uint8Array | undefined>;
     page?: (key: string, offset: number) => ReturnType<Store['page']>;
 }>;
 
-const readBody = async (request: IncomingMessage, maximum: number) => {
-    const parts: Buffer[] = [];
+const readBody = async (request: CandidateRequest, maximum: number) => {
+    const parts: Uint8Array[] = [];
     let length = 0;
-    for await (const bytes of request as AsyncIterable<Buffer>) {
+    for await (const bytes of request) {
         length += bytes.length;
         if (length > maximum)
             throw new RangeError('Publication exceeds its bound.');
@@ -40,8 +50,8 @@ const readBody = async (request: IncomingMessage, maximum: number) => {
 // a malicious relay; no server verdict supplies authentication or acceptance.
 export const serveParticipantCandidates = async (
     store: Store,
-    request: IncomingMessage,
-    response: ServerResponse,
+    request: CandidateRequest,
+    response: CandidateResponse,
     url: URL,
     views: Views = {},
 ) => {
@@ -66,10 +76,10 @@ export const serveParticipantCandidates = async (
             request.method === 'POST' &&
             url.search === ''
         ) {
-            const id = await store.putChunk(
+            const locator = await store.putChunk(
                 await readBody(request, candidateChunkBytes),
             );
-            send(Buffer.from(id, 'hex'));
+            send(Buffer.from(locator, 'hex'));
             return true;
         }
         if (pathname.startsWith('/candidates/')) {
@@ -86,7 +96,7 @@ export const serveParticipantCandidates = async (
                     return true;
                 }
                 const receipt = await store.append(key, bytes);
-                await views.published?.(await store.candidate(receipt.id));
+                await views.published?.(await store.candidate(receipt.locator));
                 send(encodeCandidateReceipt(receipt));
                 return true;
             }
@@ -108,26 +118,26 @@ export const serveParticipantCandidates = async (
         }
         for (const prefix of ['/candidate/', '/chunk/']) {
             if (!pathname.startsWith(prefix)) continue;
-            const id = pathname.slice(prefix.length);
+            const locator = pathname.slice(prefix.length);
             if (
                 request.method !== 'GET' ||
                 url.search !== '' ||
-                !isCandidateId(id)
+                !isCandidateLocator(locator)
             )
                 break;
             if (prefix === '/candidate/') {
-                const candidate = await store.candidate(id);
+                const candidate = await store.candidate(locator);
                 send(
                     views.manifest === undefined
                         ? candidate.bytes
                         : await views.manifest(candidate),
                 );
             } else {
-                const bytes = await store.chunk(id);
+                const bytes = await store.chunk(locator);
                 send(
                     views.chunk === undefined
                         ? bytes
-                        : await views.chunk(id, bytes),
+                        : await views.chunk(locator, bytes),
                 );
             }
             return true;

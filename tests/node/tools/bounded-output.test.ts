@@ -1,7 +1,7 @@
 import binaryen from 'binaryen';
 import { describe, expect, it, vi } from 'vitest';
 
-import { runFheKeySourceScreen } from '#tools/ci/fhe-key-source-scalar.mjs';
+import { runScalarKeySourceScreen } from '#tools/ci/fhe-key-source-scalar.mjs';
 
 // A transport fixture, not a key source screen. Its pending span is changed
 // by memory growth only after acknowledgment, exposing stale-view mistakes.
@@ -92,7 +92,7 @@ describe('bounded scalar output transport', () => {
         });
         const chunks: Uint8Array[] = [];
         try {
-            const generation = runFheKeySourceScreen({
+            const generation = runScalarKeySourceScreen({
                 moduleBytes: fixture(),
                 expectedBytes: 13,
                 emitChunk: async (index, offset, bytes) => {
@@ -152,7 +152,7 @@ describe('bounded scalar output transport', () => {
                     Promise.resolve({ index, offset, length: bytes.length }),
             );
             await expect(
-                runFheKeySourceScreen({
+                runScalarKeySourceScreen({
                     moduleBytes: fixture(13, 5, flaw),
                     expectedBytes: 13,
                     emitChunk: sink,
@@ -164,7 +164,7 @@ describe('bounded scalar output transport', () => {
             Promise.resolve({ index, offset, length: bytes.length }),
         );
         await expect(
-            runFheKeySourceScreen({
+            runScalarKeySourceScreen({
                 moduleBytes: fixture(13, 5, 'randomness'),
                 expectedBytes: 13,
                 emitChunk: sink,
@@ -173,7 +173,7 @@ describe('bounded scalar output transport', () => {
         expect(sink).not.toHaveBeenCalled();
     });
 
-    it('rejects stale, reordered and partial acknowledgments without acknowledging the pending span', async () => {
+    it('refuses stale, reordered and partial acknowledgments without acknowledging the pending span', async () => {
         for (const wrong of [
             { index: 1, offset: 0, length: 5 },
             { index: 0, offset: 1, length: 5 },
@@ -182,7 +182,7 @@ describe('bounded scalar output transport', () => {
             const observed = captureInstance();
             try {
                 await expect(
-                    runFheKeySourceScreen({
+                    runScalarKeySourceScreen({
                         moduleBytes: fixture(),
                         expectedBytes: 13,
                         emitChunk: () => Promise.resolve(wrong),
@@ -196,7 +196,7 @@ describe('bounded scalar output transport', () => {
         const observed = captureInstance();
         try {
             await expect(
-                runFheKeySourceScreen({
+                runScalarKeySourceScreen({
                     moduleBytes: fixture(),
                     expectedBytes: 13,
                     emitChunk: (index, offset, bytes) =>
@@ -218,7 +218,7 @@ describe('bounded scalar output transport', () => {
         const failure = new Error('The output write failed.');
         try {
             await expect(
-                runFheKeySourceScreen({
+                runScalarKeySourceScreen({
                     moduleBytes: fixture(),
                     expectedBytes: 13,
                     emitChunk: () => Promise.reject(failure),
@@ -232,14 +232,14 @@ describe('bounded scalar output transport', () => {
             Promise.resolve({ index, offset, length: bytes.length });
         for (const expectedBytes of [12, 14])
             await expect(
-                runFheKeySourceScreen({
+                runScalarKeySourceScreen({
                     moduleBytes: fixture(),
                     expectedBytes,
                     emitChunk,
                 }),
             ).rejects.toThrow();
         await expect(
-            runFheKeySourceScreen({
+            runScalarKeySourceScreen({
                 moduleBytes: fixture(13, 1_048_577),
                 expectedBytes: 13,
                 emitChunk,

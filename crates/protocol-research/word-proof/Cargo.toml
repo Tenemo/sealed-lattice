@@ -10,8 +10,3 @@ zeroize.workspace = true
 parallel-work = { path = "../parallel-work" }
 statement-stream = { path = "../statement-stream" }
 supported-profile = { path = "../supported-profile" }
-
-[features]
-# Test aids for the crates that prove with this engine: a replayed seed in
-# place of the host's randomness, and every row of an affine operator.
-test-support = []

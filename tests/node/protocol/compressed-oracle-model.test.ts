@@ -1,21 +1,27 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-    compileLocalOracleUpdate,
-    compilePrefixCopy,
-    compileLabelledHashExtraction,
-    compileSparseRouting,
-    sparseExtractionWork,
-    sparseOracleQuerySchedule,
-    sparseRoutingWork,
     prefixOracleWork,
     prefixOracleQueriesPerAccess,
+} from '#tests/compressed-oracle/oracle-access.js';
+import {
+    compileLabelledHashExtraction,
+    sparseExtractionWork,
     labelledHashExtractionWork,
-    verifyLocalOracleUpdate,
+    verifyLabelledHashExtraction,
+} from '#tests/compressed-oracle/source-extraction.js';
+import {
+    compileSparseRouting,
+    sparseOracleQuerySchedule,
+    sparseRoutingWork,
     verifySparseRouting,
     verifySparseSelection,
+} from '#tests/compressed-oracle/sparse-routing.js';
+import {
+    compileLocalOracleUpdate,
+    compilePrefixCopy,
+    verifyLocalOracleUpdate,
     verifyPrefixOracleWrapper,
-    verifyLabelledHashExtraction,
 } from '#tests/compressed-oracle-model.js';
 
 describe('compressed oracle implementation', () => {

@@ -17,7 +17,7 @@ use std::{cell::RefCell, sync::Arc};
 pub extern "C" fn retain_evaluation() -> u32 {
     SESSION.with(|state| {
         let mut state = state.borrow_mut();
-        state.contribution_output.clear();
+        state.participant_output.clear();
         let (Some(enrollment), Some(target)) = (state.enrollment.as_ref(), verified_target())
         else {
             return 1;
@@ -25,7 +25,7 @@ pub extern "C" fn retain_evaluation() -> u32 {
         let Ok(retained) = target.retain(&enrollment.credential) else {
             return 1;
         };
-        state.contribution_output = retained;
+        state.participant_output = retained;
         0
     })
 }

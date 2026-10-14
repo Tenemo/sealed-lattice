@@ -1,8 +1,11 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
 
 import { describe, expect, it } from 'vitest';
 
+import {
+    readRustSource,
+    rustIntegerConstant,
+} from '#tests/node/rust-source.js';
 import { reduceSignedDigitModel } from '#tests/setup-randomness-model.js';
 import {
     boundSetupShareArithmetic,
@@ -274,20 +277,16 @@ describe('generated share arithmetic bounds', () => {
     });
 
     it('checks machine and emitted witness widths for every supported profile against native operands', async () => {
-        const native = await readFile(
-            new URL(
-                '../../../crates/protocol-research/supported-profile/src/lib.rs',
-                import.meta.url,
-            ),
-            'utf8',
+        const native = await readRustSource(
+            'crates/protocol-research/supported-profile/src/lib.rs',
         );
-        expect(native).toContain(
-            'pub const SHARE_EPHEMERAL_SUPPORT: usize = 256;',
+        expect(rustIntegerConstant(native, 'SHARE_EPHEMERAL_SUPPORT')).toBe(
+            256n,
         );
-        expect(native).toContain('pub const SHARE_SCALE: u32 = 998_244_353;');
-        expect(native).toContain('pub const SETUP_QUOTIENT_BITS: usize = 16;');
-        expect(native).toContain('pub const SETUP_FHE_CARRY_BITS: usize = 16;');
-        expect(native).toContain('pub const SETUP_ERROR_BITS: usize = 7;');
+        expect(rustIntegerConstant(native, 'SHARE_SCALE')).toBe(998_244_353n);
+        expect(rustIntegerConstant(native, 'SETUP_QUOTIENT_BITS')).toBe(16n);
+        expect(rustIntegerConstant(native, 'SETUP_FHE_CARRY_BITS')).toBe(16n);
+        expect(rustIntegerConstant(native, 'SETUP_ERROR_BITS')).toBe(7n);
         for (const profile of listSupportedProfiles()) {
             const [constant, linear] =
                 compileSetupShareArithmeticBounds(profile);

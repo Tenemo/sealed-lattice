@@ -1,38 +1,22 @@
-import { compileThresholdCompletionProfile } from '#tests/threshold-completion-model.js';
+import { binomial } from '#tests/exact-integer.js';
+import { thresholdProfileFor } from '#tests/threshold-completion-model.js';
 
 // Selection and chronology only. Signatures, registration commitments and
 // contribution relations are ideal verified inputs here. This model creates
 // no setup capability and makes no cryptographic privacy claim.
-const deriveSetupSelection = (participantCount: number) => {
-    const profile = compileThresholdCompletionProfile(participantCount);
-    const faultBound = profile.maximumCorruptParticipantCount;
-    const selectedCount = profile.resultReleaseThreshold;
-    return {
-        participantCount,
-        faultBound,
-        selectedCount,
-        eligibleCount: selectedCount + faultBound,
-        quorum: profile.inventoryCertificateThreshold,
-    };
-};
-
-const choose = (population: number, size: number): bigint => {
-    let value = 1n;
-    for (let index = 1; index <= size; index++)
-        value = (value * BigInt(population - index + 1)) / BigInt(index);
-    return value;
-};
-
 export const compileSetupSelectionCensus = (participantCount: number) => {
-    const profile = deriveSetupSelection(participantCount);
+    const profile = thresholdProfileFor(participantCount);
     return {
         ...profile,
-        remainingEligibleCount: profile.eligibleCount - profile.faultBound,
-        minimumHonestSelected: profile.selectedCount - profile.faultBound,
-        minimumCertificateIntersection: 2 * profile.quorum - participantCount,
-        possibleSelectedSets: choose(
-            profile.eligibleCount,
-            profile.selectedCount,
+        remainingEligibleCount:
+            profile.eligibleContributorCount -
+            profile.maximumCorruptParticipantCount,
+        minimumHonestSelected:
+            profile.setupContributorCount -
+            profile.maximumCorruptParticipantCount,
+        possibleSelectedSets: binomial(
+            profile.eligibleContributorCount,
+            profile.setupContributorCount,
         ),
     };
 };
@@ -49,11 +33,11 @@ export class SetupSelectionModel {
         readonly participantCount: number,
         corrupt: readonly number[] = [],
     ) {
-        this.profile = deriveSetupSelection(participantCount);
+        this.profile = thresholdProfileFor(participantCount);
         this.corrupt = new Set(corrupt);
         if (
             this.corrupt.size !== corrupt.length ||
-            this.corrupt.size > this.profile.faultBound ||
+            this.corrupt.size > this.profile.maximumCorruptParticipantCount ||
             corrupt.some(
                 (position) =>
                     !Number.isInteger(position) ||
@@ -70,12 +54,12 @@ export class SetupSelectionModel {
         selection: readonly number[],
     ): string | undefined {
         if (
-            selection.length !== this.profile.selectedCount ||
+            selection.length !== this.profile.setupContributorCount ||
             selection.some(
                 (position, index) =>
                     !Number.isInteger(position) ||
                     position < 0 ||
-                    position >= this.profile.eligibleCount ||
+                    position >= this.profile.eligibleContributorCount ||
                     (index > 0 && selection[index - 1] >= position),
             )
         )
@@ -108,7 +92,7 @@ export class SetupSelectionModel {
         const identity = this.selectionIdentity(selection);
         return (
             identity !== undefined &&
-            signers.length >= this.profile.quorum &&
+            signers.length >= this.profile.inventoryCertificateThreshold &&
             new Set(signers).size === signers.length &&
             signers.every(
                 (signer) =>
@@ -224,15 +208,15 @@ const keyFor = (selection: readonly number[]) =>
     selection.reduce((sum, position) => sum + BigInt(position + 1), 0n);
 
 export const closeOnlySelectionCounterexample = (participantCount: number) => {
-    const profile = deriveSetupSelection(participantCount);
-    if (profile.faultBound === 0)
+    const profile = thresholdProfileFor(participantCount);
+    if (profile.maximumCorruptParticipantCount === 0)
         throw new RangeError('The fork needs a corrupt organizer.');
     const firstSelection = Array.from(
-        { length: profile.selectedCount },
+        { length: profile.setupContributorCount },
         (_unused, position) => position,
     );
     const secondSelection = firstSelection.map((position) => position + 1);
-    const author = profile.faultBound;
+    const author = profile.maximumCorruptParticipantCount;
     const scores = [1n, 10n];
     const randomness = [2n, 3n];
     const ciphertext = scores.map((score, option) => ({
@@ -248,7 +232,7 @@ export const closeOnlySelectionCounterexample = (participantCount: number) => {
     // The organizer is corrupt. The author and f other honest recipients
     // hold this complete on-time ballot before the close intent.
     const honestHolders = Array.from(
-        { length: profile.faultBound + 1 },
+        { length: profile.maximumCorruptParticipantCount + 1 },
         (_unused, index) => author + index,
     );
     // Enough other participants can respond and certify the first setup.
@@ -259,7 +243,7 @@ export const closeOnlySelectionCounterexample = (participantCount: number) => {
         (_unused, position) => position,
     )
         .filter((position) => position !== author)
-        .slice(0, profile.quorum);
+        .slice(0, profile.inventoryCertificateThreshold);
     return {
         profile,
         firstSelection,
@@ -295,7 +279,7 @@ export const preparationStagePath = (
     prefix.push('setup-and-optional-ballot');
     const names = [
         ...prefix,
-        organizer ? 'close-request-and-collection' : 'close-response',
+        organizer ? 'close-intent-and-collection' : 'close-response',
         organizer ? 'close-proposal-and-target' : 'target',
         'release',
         'outcome-verification',

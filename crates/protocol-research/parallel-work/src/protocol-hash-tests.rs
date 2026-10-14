@@ -15,19 +15,19 @@ fn matches_independent_shake256_vectors() {
     for (input, expected) in [
         (
             vec![],
-            "29adf64c397cdd7c2a12c1394f67914da8987f45a7101fd4cd7b39eb289ed7df625620af7fd1951404e3042f65b8fb91a69ff9c1ca7ef0975b76f136a9ca6e96",
+            "d8c940acc0de8cce41ce55579e760be740b59361be7f2d66c9e5b45197cfc49d0b92f3ced58af3c303faa81ca9545ac3f108df366592934e21daa45b4c470945",
         ),
         (
             b"abc".to_vec(),
-            "a8df42eb0a2bad96d4d5fde4a7896c5f31287bf651801f3335038cd92aaf3b7f35c81fc12490ef51cd4efb534428f6abc938956e876ea85dd5c669bf484d86fc",
+            "57e23be26c7f5327983c44e9d60efac3d2b526474de65a541097c38ef870b6ab189972f952282d7b3115be2b1bd7a9ff30e3237e7f8337d87d972c4a76595efd",
         ),
         (
             (0..137).collect(),
-            "22144d386270491cf53fe8e489fc2d5be1e79520869e05c840eb8a05c509364ee3c2d369e2a91ceb6c25b1ca0e4b22ed96fe7b73adbbbbc42e7c6fffc5985ca4",
+            "47cedf4b667d5975c9e3f0bff6f5b8a6a489624ab70b9b2c6659d778adbde3858d7994f47e65976807d0484089ef28af57367b00256e9482f1e3b9b913e1a95b",
         ),
         (
             message(4097),
-            "14a76849aa7c6fd964ce1df16a2683f1c00a1998b5def2934db5b24d017e85d461c729927b4038cad29c986d0b5ae51b5a3a14aaa9d63a81fa1891ed099d7972",
+            "e4059e37692e41da24faf325e7771aa1b3f2b1e96030c22cc6d65e6eb62e4821d367ed71bee1957823914ca97e83bdeaa97c9328f8bb6cd9b6723f518d4ca380",
         ),
     ] {
         assert_eq!(hexadecimal(&ProtocolHash::digest(&input)), expected);
@@ -44,7 +44,7 @@ fn matches_independent_shake256_vectors() {
 #[test]
 fn checkpoints_continue_across_absorption_boundaries() {
     let input = message(4097);
-    let expected = "14a76849aa7c6fd964ce1df16a2683f1c00a1998b5def2934db5b24d017e85d461c729927b4038cad29c986d0b5ae51b5a3a14aaa9d63a81fa1891ed099d7972";
+    let expected = "e4059e37692e41da24faf325e7771aa1b3f2b1e96030c22cc6d65e6eb62e4821d367ed71bee1957823914ca97e83bdeaa97c9328f8bb6cd9b6723f518d4ca380";
     for split in [0, 1, 71, 72, 73, 135, 136, 137, 207, 208, 209, 4096, 4097] {
         let mut first = ProtocolHash::new();
         first.update(&input[..split]);

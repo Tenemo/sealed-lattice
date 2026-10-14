@@ -13,7 +13,6 @@ members = [
     "evaluation-target",
     "linked-release-proof",
     "encrypted-ranking",
-    "contribution-prover",
     "supported-profile",
     "parallel-work",
 ]
@@ -25,14 +24,14 @@ edition = "2024"
 publish = false
 
 [workspace.dependencies]
-aes = "=0.8.4"
-aes-gcm = { version = "=0.10.3", default-features = false }
+aes = "=0.9.3"
+aes-gcm = { version = "=0.11.1", default-features = false }
 fips204 = { version = "=0.4.6", default-features = false }
-getrandom = "=0.3.3"
+getrandom = "=0.4.3"
 num-bigint = "=0.5.1"
 num-traits = "=0.2.19"
 sha3 = "=0.10.9"
-zeroize = "=1.8.2"
+zeroize = "=1.9.1"
 
 # fips204 0.4.6 with its inverse transform reducing each input coefficient
 # first, so that verifying a signature from another party cannot overflow the

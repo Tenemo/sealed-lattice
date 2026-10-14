@@ -5,7 +5,7 @@ use setup_aggregate::verified::VerifiedSetupAggregate;
 use supported_profile::Profile;
 
 #[derive(Debug)]
-pub enum Error {
+pub enum Refusal {
     Context,
     Signature,
 }
@@ -20,9 +20,6 @@ impl VerifiedBallotSubmission {
     }
     pub fn envelope(&self) -> &BallotEnvelope {
         &self.authentication.envelope
-    }
-    pub fn signature(&self) -> &[u8; SIGNATURE_BYTES] {
-        &self.authentication.signature
     }
 }
 
@@ -50,25 +47,25 @@ pub struct BallotBodyAuthentication {
     hash: protocol_foundations::identity::BodyHasher,
 }
 impl BallotBodyAuthentication {
-    pub fn new(authentication: AuthenticatedBallotEnvelope) -> Result<Self, Error> {
+    pub fn new(authentication: AuthenticatedBallotEnvelope) -> Result<Self, Refusal> {
         let hash = protocol_foundations::ballot_body::body_hasher(
             authentication.profile,
             authentication.envelope().body_length(),
         )
-        .map_err(|_| Error::Context)?;
+        .map_err(|_| Refusal::Context)?;
         Ok(Self {
             authentication,
             hash,
         })
     }
-    pub fn push(&mut self, bytes: &[u8]) -> Result<(), Error> {
-        self.hash.push(bytes).map_err(|_| Error::Context)
+    pub fn push(&mut self, bytes: &[u8]) -> Result<(), Refusal> {
+        self.hash.push(bytes).map_err(|_| Refusal::Context)
     }
-    pub fn finish(self) -> Result<AuthenticatedBallotBody, Error> {
-        if &self.hash.finish().map_err(|_| Error::Context)?
+    pub fn finish(self) -> Result<AuthenticatedBallotBody, Refusal> {
+        if &self.hash.finish().map_err(|_| Refusal::Context)?
             != self.authentication.envelope().body_identity()
         {
-            return Err(Error::Context);
+            return Err(Refusal::Context);
         }
         Ok(AuthenticatedBallotBody {
             authentication: self.authentication,
@@ -88,12 +85,12 @@ pub fn authenticate_envelope(
     setup: &VerifiedSetupAggregate,
     bytes: &[u8],
     signature: &[u8],
-) -> Result<AuthenticatedBallotEnvelope, Error> {
+) -> Result<AuthenticatedBallotEnvelope, Refusal> {
     let profile = setup.profile();
-    let envelope = BallotEnvelope::decode(profile, bytes).map_err(|_| Error::Context)?;
-    let signature: [u8; SIGNATURE_BYTES] = signature.try_into().map_err(|_| Error::Signature)?;
+    let envelope = BallotEnvelope::decode(profile, bytes).map_err(|_| Refusal::Context)?;
+    let signature: [u8; SIGNATURE_BYTES] = signature.try_into().map_err(|_| Refusal::Signature)?;
     if !verify_ballot_signature(setup.roster(), &setup.identity(), &envelope, &signature) {
-        return Err(Error::Signature);
+        return Err(Refusal::Signature);
     }
     Ok(AuthenticatedBallotEnvelope {
         profile,
@@ -102,13 +99,16 @@ pub fn authenticate_envelope(
     })
 }
 
-fn check_setup(body: &VerifiedBallotBody, setup: &VerifiedSetupAggregate) -> Result<usize, Error> {
+fn check_setup(
+    body: &VerifiedBallotBody,
+    setup: &VerifiedSetupAggregate,
+) -> Result<usize, Refusal> {
     let relation = body.relation();
     if relation.setup_identity() != &setup.identity()
         || relation.poll() != &setup.roster().proposal().records()[0].header().poll
         || relation.position() >= setup.profile().participants()
     {
-        return Err(Error::Context);
+        return Err(Refusal::Context);
     }
     Ok(relation.position())
 }
@@ -116,7 +116,7 @@ pub fn verify_submission(
     body: VerifiedBallotBody,
     setup: &VerifiedSetupAggregate,
     authentication: AuthenticatedBallotEnvelope,
-) -> Result<VerifiedBallotSubmission, Error> {
+) -> Result<VerifiedBallotSubmission, Refusal> {
     let position = check_setup(&body, setup)?;
     let envelope = &authentication.envelope;
     if envelope.setup_identity() != &setup.identity()
@@ -125,7 +125,7 @@ pub fn verify_submission(
         || envelope.body_length() != body.length()
         || envelope.body_identity() != body.identity()
     {
-        return Err(Error::Context);
+        return Err(Refusal::Context);
     }
     Ok(VerifiedBallotSubmission {
         body,

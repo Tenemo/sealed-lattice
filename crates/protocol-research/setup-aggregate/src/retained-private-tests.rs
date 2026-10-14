@@ -6,8 +6,7 @@ fn record() -> (Vec<u8>, Vec<u8>) {
     let profile = profile();
     let key = profile.share_constant_polynomial(0);
     let values = vec![0; profile.setup_polynomial_bytes(key).unwrap()];
-    let mut record = Vec::from(b"SAV1".as_slice());
-    record.extend([9; 64]);
+    let mut record = vec![9; 64];
     for index in profile.contribution_body_polynomials() {
         record.extend(if index == key {
             protocol_foundations::identity::identity(PUBLIC_POLYNOMIAL_DOMAIN, &values).unwrap()
@@ -66,44 +65,26 @@ fn retained_reference_parser_refuses_wrong_setup_identity_profile_or_framing() {
     record.push(0);
     assert!(RetainedSetupInputs::parse(profile(), &record, [9; 64]).is_err());
     record.pop();
-    record[0] ^= 1;
+    record[63] ^= 1;
     assert!(RetainedSetupInputs::parse(profile(), &record, [9; 64]).is_err());
 }
 
 #[test]
-fn provisional_and_final_reference_grammars_do_not_alias() {
-    let (final_reference, _) = record();
+fn references_encode_every_polynomial_in_order() {
+    let (reference, _) = record();
     // Local reference operands only: this fixture creates no verified
     // offer, selection-input capability or public setup capability.
-    let polynomials = RetainedSetupInputs::parse(profile(), &final_reference, [9; 64])
+    let polynomials = RetainedSetupInputs::parse(profile(), &reference, [9; 64])
         .unwrap()
         .into_polynomials();
-    let provisional = encode_reference(b"SPI1", profile(), [9; 64], &polynomials).unwrap();
+    let encoded = encode_reference(profile(), [9; 64], &polynomials).unwrap();
+    assert_eq!(encoded, reference);
     assert_eq!(
-        provisional.len() + protocol_foundations::RETAINED_TAG_BYTES,
+        encoded.len() + protocol_foundations::RETAINED_TAG_BYTES,
         crate::retained_reference_bytes(profile())
     );
-    assert!(RetainedSetupInputs::parse(profile(), &provisional, [9; 64]).is_err());
-    assert!(
-        RetainedSetupInputs::parse_with_magic(b"SPI1", profile(), &final_reference, [9; 64])
-            .is_err()
-    );
-    assert!(
-        RetainedSetupInputs::parse_with_magic(b"SPI1", profile(), &provisional, [8; 64]).is_err()
-    );
-    let inputs =
-        RetainedSetupInputs::parse_with_magic(b"SPI1", profile(), &provisional, [9; 64]).unwrap();
-    assert_eq!(inputs.setup_identity(), &[9; 64]);
-    assert!(
-        encode_reference(
-            b"SPI1",
-            profile(),
-            [9; 64],
-            &polynomials[..polynomials.len() - 1]
-        )
-        .is_err()
-    );
+    assert!(encode_reference(profile(), [9; 64], &polynomials[..polynomials.len() - 1]).is_err());
     let mut reordered = polynomials.clone();
     reordered.swap(0, 1);
-    assert!(encode_reference(b"SPI1", profile(), [9; 64], &reordered).is_err());
+    assert!(encode_reference(profile(), [9; 64], &reordered).is_err());
 }

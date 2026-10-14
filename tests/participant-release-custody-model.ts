@@ -9,16 +9,17 @@ import type { SupportedProfile } from '#tests/supported-profile-model.js';
 import { compileTargetSigningStateCensus } from '#tests/target-signing-state-model.js';
 
 export const participantReleaseProofRoleBytes =
-    8n +
+    6n +
     6n * 6n +
     4n +
-    BigInt(Buffer.byteLength('sealed-lattice/certified-release/v3')) +
+    BigInt(Buffer.byteLength('sealed-lattice/certified-release')) +
     4n +
     participantIdentityAsciiBytes +
     3n * 64n +
     2n;
 
-const releaseContextBytes = 4n + 3n * 64n + 2n;
+// The poll, setup and target identities and the author's position.
+const releaseContextBytes = 3n * 64n + 2n;
 // Context, body length and body identity; the same for every profile.
 export const participantReleaseEnvelopeBytes = releaseContextBytes + 8n + 64n;
 
@@ -29,7 +30,9 @@ export const compileParticipantReleaseCustody = (profile: SupportedProfile) => {
     const { signatureBytes } = compileRegistrationEnrollmentCensus();
     const recordBytes = 1n << 20n;
     const keyBytes = 32n;
-    const bodyHeaderBytes = 4n + 8n + releaseContextBytes;
+    // The complete proof length and the statement header, which opens
+    // with its LRS1 marker.
+    const bodyHeaderBytes = 8n + 4n + releaseContextBytes;
     const coefficientBytes =
         1n + (BigInt(profile.release.modulus.toString(2).length) + 7n) / 8n;
     const partialBytes =
@@ -40,7 +43,7 @@ export const compileParticipantReleaseCustody = (profile: SupportedProfile) => {
     const envelopeBytes = participantReleaseEnvelopeBytes;
     const maximumBodyRecords =
         (maximumBodyBytes + recordBytes - 1n) / recordBytes;
-    const prefixBytes = 4n + 1n + 1n + 2n + 4n + 2n;
+    const prefixBytes = 1n + 1n + 2n + 4n + 2n;
     const attempt =
         prefixBytes + compileTargetSigningStateCensus().maximumBodyBytes;
     const retainedBody = keyBytes * maximumBodyRecords + envelopeBytes;

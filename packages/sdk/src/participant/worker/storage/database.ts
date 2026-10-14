@@ -1,4 +1,5 @@
 import { errorMessage } from '../module/context.js';
+import { isDigest } from '../shared/bytes.js';
 import { StorageFailure, UnrecognizedState } from '../shared/failures.js';
 
 // The participant's origin-local database. The key, root and head stores hold
@@ -143,14 +144,20 @@ export const recordBytes = async (blob: Blob) => {
     }
 };
 
-// The browser's estimate of the origin's quota and usage. An estimate that
-// the browser fails is a storage failure.
-export const estimateStorage = async () => {
+// Whether the browser estimates room for the bytes in the origin's quota.
+// An estimate that the browser fails is a storage failure.
+export const hasStorageRoom = async (bytes: number) => {
+    let estimate: StorageEstimate;
     try {
-        return await navigator.storage.estimate();
+        estimate = await navigator.storage.estimate();
     } catch (error) {
         throw storageFailure(error);
     }
+    return (
+        estimate.quota !== undefined &&
+        estimate.usage !== undefined &&
+        estimate.quota - estimate.usage >= bytes
+    );
 };
 
 // Keeps a promise that is awaited later, while other work continues, from
@@ -272,9 +279,6 @@ export const isEmptyParticipant = async (database: IDBDatabase) => {
     const { counts } = await snapshotParticipant(database);
     return participantStores.every((store) => counts[store] === 0);
 };
-
-const isDigest = (value: unknown) =>
-    typeof value === 'string' && /^[0-9a-f]{128}$/u.test(value);
 
 export const isParticipantHead = (value: unknown): value is ParticipantHead =>
     typeof value === 'object' &&

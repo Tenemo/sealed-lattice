@@ -1,7 +1,10 @@
-import { readFile } from 'node:fs/promises';
-
 import { describe, expect, it } from 'vitest';
 
+import { negacyclicProduct } from '#tests/node/protocol/reference/negacyclic-ring.js';
+import {
+    readRustSource,
+    rustIntegerConstant,
+} from '#tests/node/rust-source.js';
 import {
     compileRecipientKeyCensus,
     recipientKeyIntegerRows,
@@ -11,17 +14,13 @@ import { compileRecipientKeyArithmeticBounds } from '#tests/source-coefficient-a
 
 describe('recipient key relation', () => {
     it('checks generation and retained-key arithmetic against the native recipient parameters', async () => {
-        const native = await readFile(
-            new URL(
-                '../../../crates/protocol-research/supported-profile/src/lib.rs',
-                import.meta.url,
-            ),
-            'utf8',
+        const native = await readRustSource(
+            'crates/protocol-research/supported-profile/src/lib.rs',
         );
-        expect(native).toContain(
-            'pub const RECIPIENT_SECRET_SUPPORT: usize = 256;',
+        expect(rustIntegerConstant(native, 'RECIPIENT_SECRET_SUPPORT')).toBe(
+            256n,
         );
-        expect(native).toContain('pub const FHE_LIMB_BITS: usize = 96;');
+        expect(rustIntegerConstant(native, 'FHE_LIMB_BITS')).toBe(96n);
         const parameters = compileRecipientKeyCensus();
         const { generated, restored } = compileRecipientKeyArithmeticBounds();
         expect(generated.maximumRawInteger).toBe(
@@ -52,19 +51,12 @@ describe('recipient key relation', () => {
         const digit = (value: bigint, limb: number) =>
             (value < 0n ? -1n : 1n) *
             (((value < 0n ? -value : value) / radix ** BigInt(limb)) % radix);
-        const product = (values: bigint[]) => {
-            const result = Array<bigint>(values.length).fill(0n);
-            for (let i = 0; i < values.length; i++)
-                for (let j = 0; j < secret.length; j++)
-                    result[(i + j) % values.length] +=
-                        values[i] *
-                        secret[j] *
-                        (i + j < values.length ? 1n : -1n);
-            return result;
-        };
-        const full = product(common);
+        const full = negacyclicProduct(common, secret);
         const limbs = [0, 1].map((limb) =>
-            product(common.map((value) => digit(value, limb))),
+            negacyclicProduct(
+                common.map((value) => digit(value, limb)),
+                secret,
+            ),
         );
         for (const [error, accepted] of [
             [-65n, false],
@@ -127,13 +119,7 @@ describe('recipient key relation', () => {
         ];
         const secret = [1n, 0n, -1n, 0n, 0n, 1n, 0n, -1n];
         const errors = [-3n, 0n, 7n, -8n, 1n, 4n, -1n, 0n];
-        const convolution = Array.from({ length: degree }, () => 0n);
-        for (let left = 0; left < degree; left++)
-            for (let right = 0; right < degree; right++)
-                convolution[(left + right) % degree] +=
-                    common[left] *
-                    secret[right] *
-                    (left + right < degree ? 1n : -1n);
+        const convolution = negacyclicProduct(common, secret);
         const key = convolution.map((value, index) => {
             let residue =
                 (((errors[index] - value) % modulus) + modulus) % modulus;

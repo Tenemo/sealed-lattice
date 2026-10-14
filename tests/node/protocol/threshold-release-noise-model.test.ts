@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { verifyThresholdKeyAggregationModel } from '#tests/threshold-key-aggregation-model.js';
 import { compileThresholdReleaseNoiseCensus } from '#tests/threshold-release-noise-model.js';
 
 type Rational = Readonly<{ numerator: bigint; denominator: bigint }>;
@@ -185,6 +186,17 @@ describe('threshold release noise model', () => {
             census.jointTargetSecurityDominantNoiseReserveBitLength,
         ).toBeGreaterThan(
             census.exactTargetSecurityDominantNoiseBudgetLowerBoundBitLength,
+        );
+    });
+
+    it('agrees with the modular key-aggregation model on the largest interpolation norms', () => {
+        const rationalModel = compileThresholdReleaseNoiseCensus();
+        const modularModel = verifyThresholdKeyAggregationModel();
+        expect(
+            rationalModel.exactMaximumScaledReconstructionCoefficientOneNorm,
+        ).toBe(modularModel.maximumScaledReconstructionCoefficientOneNorm);
+        expect(rationalModel.exactMaximumSimulationCoefficientOneNorm).toBe(
+            modularModel.maximumSimulationCoefficientOneNorm,
         );
     });
 

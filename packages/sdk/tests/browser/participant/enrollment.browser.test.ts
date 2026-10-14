@@ -8,10 +8,7 @@ import {
 import { noParallelHelpers } from '#packages/sdk/src/participant/worker/module/parallel-helpers.js';
 import { instantiateParticipantModule } from '#packages/sdk/src/participant/worker/module/participant-module.js';
 import { readParticipantLimits } from '#packages/sdk/src/participant/worker/module/runtime-bounds.js';
-import {
-    encodeText,
-    hexadecimal,
-} from '#packages/sdk/src/participant/worker/shared/bytes.js';
+import { hexadecimal } from '#packages/sdk/src/participant/worker/shared/bytes.js';
 import {
     ModuleFailure,
     ResourceFailure,
@@ -24,10 +21,7 @@ import {
     openParticipantDatabase,
     snapshotParticipant,
 } from '#packages/sdk/src/participant/worker/storage/database.js';
-import {
-    openRoot,
-    rootAssociatedData,
-} from '#packages/sdk/src/participant/worker/storage/root-sealing.js';
+import { openRoot } from '#packages/sdk/src/participant/worker/storage/root-sealing.js';
 
 const databases: IDBDatabase[] = [];
 const compiledModule = await WebAssembly.compile(
@@ -81,6 +75,23 @@ afterEach(async () => {
                 reject(request.error ?? new Error('Fixture cleanup failed.'));
         });
     }
+});
+
+describe('enrollment storage room', () => {
+    it('refuses an enrollment one byte beyond the estimated room and writes no record', async () => {
+        const context = await fixture();
+        vi.spyOn(navigator.storage, 'estimate').mockResolvedValue({
+            usage: 1,
+            quota: 2 * context.limits.registration.publicKeyBytes,
+        });
+        const started = vi.fn();
+        await expect(
+            createEnrollment(context, enrollment, started),
+        ).resolves.toBe('insufficient storage');
+        expect(started).not.toHaveBeenCalled();
+        const { counts } = await snapshotParticipant(context.database);
+        expect(Object.values(counts).every((count) => count === 0)).toBe(true);
+    });
 });
 
 // Validation, identity hashing, intent encryption and persistence use the
@@ -166,11 +177,10 @@ describe('enrollment interruption custody', () => {
             const intent = await openRoot(
                 snapshot.key,
                 0,
-                rootAssociatedData(context.runtime),
+                context.runtime,
                 snapshot.root,
             );
-            expect(intent.subarray(0, 4)).toEqual(encodeText('INI2'));
-            expect(intent.length).toBe(68);
+            expect(intent.length).toBe(64);
             expect(snapshot.counts.data).toBe(0);
 
             // The failed attempt cannot create a replacement credential.

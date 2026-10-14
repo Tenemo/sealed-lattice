@@ -1,21 +1,21 @@
 use crate::close::{
     Submission, authenticate, authenticate_responses, close_work, deliver, now_milliseconds, open,
-    organize, replay, respond, write_records,
+    organize, owner_of, replay, respond, split, write_records,
 };
 use crate::scenario::Scenario;
 use ballot_proof::{
-    body::SignedBallotVerifier,
+    body::BallotBodyClassifier,
     submission::{AuthenticatedBallotBody, authenticate_envelope},
 };
 use evaluation_target::close::{CloseContext, ClosedSlot, VerifiedCloseBarrier};
 use participant_module::Enrollment;
 use protocol_foundations::{
-    ballot_authentication::BallotEnvelope, ballot_body, poll::VerifiedPoll,
+    ballot_authentication::BallotEnvelope, ballot_body, poll::VerifiedPoll, signed_packet,
 };
 use setup_aggregate::verified::VerifiedSetupAggregate;
 use std::{io::Write, path::Path, sync::Arc};
 
-// One statically corrupt creator signs a complete, correctly framed body
+// One statically corrupt organizer signs a complete, correctly framed body
 // whose minimum-length proof is malformed. No honest ballot is generated.
 fn invalid_source(
     output: &Path,
@@ -36,13 +36,13 @@ fn invalid_source(
         usize::from(poll.top_count()),
     )
     .unwrap();
-    let proof_bytes = *ballot_body::proof_lengths(profile).start();
-    let header = ballot_body::header(profile, &relation, proof_bytes).unwrap();
+    let proof = vec![0; *ballot_body::proof_lengths(profile).start()];
+    let header = ballot_body::header(profile, &relation, &proof).unwrap();
     let mut hash = ballot_body::header_body_hasher(profile, &header).unwrap();
     let mut file = crate::public_output::PublicOutput::create(&path).unwrap();
     file.write_all(&header).unwrap();
     let zeros = vec![0; 1 << 20];
-    let remaining = ballot_body::ciphertext_bytes(profile) + proof_bytes;
+    let remaining = ballot_body::body_length(profile, proof.len()) - header.len();
     for offset in (0..remaining).step_by(zeros.len()) {
         let bytes = &zeros[..zeros.len().min(remaining - offset)];
         file.write_all(bytes).unwrap();
@@ -59,15 +59,16 @@ fn invalid_source(
         hash.finish().unwrap(),
     )
     .unwrap();
+    let owner = owner_of(&enrollment.credential, poll, setup, 0);
     let signature = enrollment
         .credential
-        .sign_ballot_envelope(setup.roster(), &envelope)
+        .sign_retained_ballot_envelope(&owner, &envelope)
         .unwrap();
     crate::write(directory.join("envelope.bin"), envelope.bytes());
     crate::write(directory.join("signature.bin"), &signature);
     let authentication = authenticate_envelope(setup, envelope.bytes(), &signature).unwrap();
     assert!(
-        SignedBallotVerifier::new(poll.clone(), setup.clone(), authentication, &header, None)
+        BallotBodyClassifier::new(poll.clone(), setup.clone(), authentication, &header, None)
             .unwrap()
             .requires_key()
     );
@@ -95,7 +96,7 @@ fn invalid_source(
 
 /// Every other participant responds; the organizer then answers and proposes
 /// responses 0 to `n - f - 1`. Without ballots every slot is absent; the corrupt
-/// creator's invalid ballot, held by everyone, is the only usable slot.
+/// organizer's invalid ballot, held by everyone, is the only usable slot.
 pub fn run(
     output: &Path,
     poll: Arc<VerifiedPoll>,
@@ -161,12 +162,12 @@ pub fn run(
         .map(|body| body.authentication().clone())
         .collect();
     let authenticated = authenticate_responses(&context, &intent, &responses, &envelopes);
-    let length = u32::from_le_bytes(proposal[..4].try_into().unwrap()) as usize;
+    let (proposal_body, proposal_signature) = split(&proposal);
     let barrier = context
         .verify_proposal(
             intent,
-            &proposal[4..4 + length],
-            &proposal[4 + length..],
+            proposal_body,
+            proposal_signature,
             &authenticated,
             &bodies,
         )
@@ -182,7 +183,7 @@ pub fn run(
                 ClosedSlot::Conflicting(_) => false,
             })
     );
-    let intent_packet = crate::close::packet(&intent_body, &intent_signature);
+    let intent_packet = signed_packet::encode(&intent_body, &intent_signature);
     write_records(
         &output.join("close"),
         output,

@@ -2,13 +2,13 @@ import { PublicInputFailure } from '../shared/failures.js';
 
 import {
     candidateChunkBytes,
-    candidateIdentifierBytes,
+    candidateLocatorBytes,
     candidateManifestBytes,
     candidatePageEntries,
     decodeCandidateManifest,
     decodeCandidatePage,
     fillsDiscoveryPage,
-    isCandidateId,
+    isCandidateLocator,
     isCandidateKey,
     type CandidateManifest,
 } from './candidate-codec.js';
@@ -21,20 +21,21 @@ import type { PublicRelay } from './relay.js';
 // A view only correlates one untrusted manifest and its immutable transport
 // locators. It carries no author, byte-identity or proof verification result.
 export type CandidateView = Readonly<{
-    id: string;
     manifest: () => Promise<CandidateManifest>;
 }>;
 
-const publicCandidate = (relay: PublicRelay, id: string): CandidateView => {
-    if (!isCandidateId(id))
+const publicCandidate = (
+    relay: PublicRelay,
+    locator: string,
+): CandidateView => {
+    if (!isCandidateLocator(locator))
         throw new PublicInputFailure('Malformed candidate locator.');
     let loaded: Promise<CandidateManifest> | undefined;
     return {
-        id,
         manifest: () =>
             (loaded ??= (async () => {
                 const bytes = await readBounded(
-                    relay.base + 'candidate/' + id,
+                    relay.base + 'candidate/' + locator,
                     candidateManifestBytes,
                 );
                 try {
@@ -57,7 +58,7 @@ export const readCandidatePage = async (
     decodeCandidatePage(
         await readBounded(
             relay.base + 'candidates/' + key + '?offset=' + String(offset),
-            12 + candidatePageEntries * candidateIdentifierBytes,
+            12 + candidatePageEntries * candidateLocatorBytes,
         ),
     );
 
@@ -84,16 +85,16 @@ export async function* readCandidates(relay: PublicRelay, key: string) {
         if (
             page.total < end ||
             !fillsDiscoveryPage(
-                page.ids.length,
+                page.locators.length,
                 page.total,
                 offset,
                 candidatePageEntries,
             )
         )
             return;
-        for (const id of page.ids.slice(0, end - offset))
-            yield publicCandidate(relay, id);
-        offset += page.ids.length;
+        for (const locator of page.locators.slice(0, end - offset))
+            yield publicCandidate(relay, locator);
+        offset += page.locators.length;
         if (offset >= end) return;
     }
 }
@@ -184,9 +185,12 @@ export const streamCandidateFile = async (
             'A candidate file is missing or exceeds its bound.',
         );
     let remaining = file.length;
-    for (const id of file.chunks) {
+    for (const locator of file.chunks) {
         const length = Math.min(candidateChunkBytes, remaining);
-        const bytes = await readBounded(relay.base + 'chunk/' + id, length);
+        const bytes = await readBounded(
+            relay.base + 'chunk/' + locator,
+            length,
+        );
         if (bytes.length !== length)
             throw new PublicInputFailure('A candidate chunk is incomplete.');
         await accept(bytes);

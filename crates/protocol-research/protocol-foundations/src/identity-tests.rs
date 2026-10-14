@@ -34,11 +34,11 @@ fn matches_independent_shake256_vectors() {
     // SHAKE256 over the canonical tuple, computed outside Rust.
     assert_eq!(
         hexadecimal(&identity(PUBLIC_POLYNOMIAL_DOMAIN, b"").unwrap()),
-        "c43f773788c6d66f30eb39ee7230312ad8dda3e5cbb3205075377d824eaa781d54b6dd3661553cb3c64ece7bd15a6df92fdd901b2ba81ae35334879f69fdf8a4"
+        "cb0458477ff5bfa6fa24eba4e613831e23bf4b23b03544bd90daa5b9c4d66d5e6651910b519c41f7def6e0377a79116797efce82c6664fc82044b7d66517c2ae"
     );
     assert_eq!(
         hexadecimal(&identity(PUBLIC_POLYNOMIAL_DOMAIN, &[0, 1, 2, 255]).unwrap()),
-        "83d5019a3cb3292618bc674220dc584994c5db0e304ca47d144c6d1af27787cfb42ff63a9170c5e3c1761432f27adab775f8d7a047549e66c6b89a79f52c2b11"
+        "482ccf1fcd9583d7e3b08bed1e1c6067ef736f4cb34301673e4ee989a6f85e144c8ffe1f5cb9a977af20f43cce17d4d7cac80bd70e12780144d82e68e4633353"
     );
 }
 
@@ -54,4 +54,31 @@ fn refuses_a_short_long_or_empty_domain_payload() {
     short.absorb(&[1]).unwrap();
     assert!(short.finish_later().is_err());
     assert!(IdentityHasher::new("", &[], 0).is_err());
+}
+
+#[test]
+fn frames_a_fixed_or_variable_payload_as_its_canonical_raw_byte_item() {
+    let prefix = [CanonicalItem::hash512([7; 64])];
+    let payload = [5; 70];
+    for (trailing, item) in [
+        (
+            Trailing::Fixed(payload.len()),
+            CanonicalItem::fixed_bytes(payload).unwrap(),
+        ),
+        (
+            Trailing::Variable(payload.len()),
+            CanonicalItem::variable_bytes(payload).unwrap(),
+        ),
+    ] {
+        let mut framed = framing(PUBLIC_POLYNOMIAL_DOMAIN, &prefix, trailing).unwrap();
+        framed.extend_from_slice(&payload);
+        let mut items = vec![CanonicalItem::nonempty_ascii(PUBLIC_POLYNOMIAL_DOMAIN).unwrap()];
+        items.extend_from_slice(&prefix);
+        items.push(item);
+        let canonical = CanonicalTuple::new(CANONICAL_TUPLE_SCHEMA_IDENTIFIER, items)
+            .encode()
+            .unwrap();
+        assert_eq!(framed, canonical);
+    }
+    assert!(framing("", &prefix, Trailing::Fixed(1)).is_err());
 }

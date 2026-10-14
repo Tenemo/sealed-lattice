@@ -15,7 +15,7 @@ pub extern "C" fn participant_ballot_command(
 ) -> u32 {
     SESSION.with(|session| {
         let mut session = session.borrow_mut();
-        session.contribution_output.clear();
+        session.participant_output.clear();
         if length > session.input.len() {
             return 1;
         }
@@ -48,7 +48,7 @@ pub extern "C" fn participant_ballot_command(
         let Session {
             enrollment,
             ballot,
-            contribution_output,
+            participant_output,
             ..
         } = &mut *session;
         let Some(enrollment) = enrollment.as_mut() else {
@@ -66,7 +66,7 @@ pub extern "C" fn participant_ballot_command(
         }
         match ballot.command(&mut enrollment.credential, operation, argument, &input) {
             Ok(bytes) => {
-                *contribution_output = bytes;
+                *participant_output = bytes;
                 0
             }
             Err(_) => 1,

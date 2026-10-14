@@ -1,2 +1,7 @@
 **/*_FROZEN.md
+crates/protocol-research/vendor/
+implementation-documentation/
+pnpm-lock.yaml
+reference-documents/
 reference-projects/
+test-vectors/

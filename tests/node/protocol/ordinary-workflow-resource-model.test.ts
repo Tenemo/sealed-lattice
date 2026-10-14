@@ -4,6 +4,7 @@ import { encodeCandidateManifest } from '#packages/sdk/src/participant/worker/re
 import { compileBallotBodyCensus } from '#tests/ballot-body-model.js';
 import { compileCloseWireCensus } from '#tests/close-wire-model.js';
 import { compileContributionBodyCensus } from '#tests/contribution-body-model.js';
+import { goalThresholds } from '#tests/node/protocol/reference/product-goals.js';
 import { compileOrdinaryWorkflowResources } from '#tests/ordinary-workflow-resource-model.js';
 import { compileParticipantReleaseCustody } from '#tests/participant-release-custody-model.js';
 import { compileRecipientKeyCensus } from '#tests/recipient-key-model.js';
@@ -34,7 +35,9 @@ describe('complete ordinary workflow resource graph', () => {
             const close = compileCloseWireCensus(profile);
             const release = compileParticipantReleaseCustody(profile);
             const offers =
-                mode === 'selected' ? wire.selectedCount : wire.eligibleCount;
+                mode === 'selected'
+                    ? wire.setupContributorCount
+                    : wire.eligibleContributorCount;
             const chunkBytes = 1_048_576n;
             const bodies = new Map<number, string[]>();
             const objects = new Map<string, bigint>();
@@ -191,7 +194,7 @@ describe('complete ordinary workflow resource graph', () => {
                 ['intent.bin', close.intentPacketBytes],
                 ['proposal.bin', close.proposalPacketBytes],
                 ...Array.from(
-                    { length: wire.quorum },
+                    { length: wire.inventoryCertificateThreshold },
                     (_unused, position): Entry => [
                         'response-' + identity(position) + '.bin',
                         response,
@@ -233,9 +236,10 @@ describe('complete ordinary workflow resource graph', () => {
         (count) => {
             const profile = deriveSupportedProfile(count, count);
             const result = compileOrdinaryWorkflowResources(profile, artifact);
+            const thresholds = goalThresholds(count);
             const n = BigInt(count),
-                d = BigInt(Math.floor((count - 1) / 3) + 1),
-                f = BigInt(Math.floor((count - 1) / 3));
+                d = BigInt(thresholds.resultReleaseThreshold),
+                f = BigInt(thresholds.maximumCorruptParticipantCount);
             expect(result.rows.map((row) => row.offers)).toEqual([d, d + f]);
             expect(
                 result.rows[1].publicCorpusBytes -
@@ -251,9 +255,9 @@ describe('complete ordinary workflow resource graph', () => {
                         0n,
                     ),
                 );
-            expect(result.cleanResponseBytes).toBe(278n + 66n * n + 4n + 3309n);
+            expect(result.cleanResponseBytes).toBe(273n + 66n * n + 4n + 3309n);
             expect(result.responderListedCopyBytes).toBe(
-                n * n * (214n + 3309n),
+                n * n * (210n + 3309n),
             );
             expect(result.ordinaryForwardedBodyUploadBytes).toBe(0n);
             expect(result.ordinaryReferencedBodyBytes).toBe(
@@ -282,8 +286,10 @@ describe('complete ordinary workflow resource graph', () => {
             expect(result.retainedTarget.ciphertextBytes).toBe(
                 2n * 65536n * 25n,
             );
+            // The body length, the largest target body, the switched
+            // ciphertext and the credential tag.
             expect(result.retainedTarget.maximumRetainedBytes).toBe(
-                4n + 4n + 2048n + 2n * 65536n * 25n + 64n,
+                4n + 2048n + 2n * 65536n * 25n + 64n,
             );
             expect(result.retainedTarget.maximumSliceBytes).toBe(1048576n);
             expect(result.retainedTarget.maximumSlices).toBe(4n);

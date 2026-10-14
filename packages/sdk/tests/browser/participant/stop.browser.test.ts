@@ -1,35 +1,35 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { stopParticipant } from '#packages/sdk/src/participant/worker/storage/stop.js';
+import { fixtureRequest } from '#packages/sdk/tests/browser-storage.js';
 
 const databases: IDBDatabase[] = [];
 const names: string[] = [];
-const requestResult = <T>(request: IDBRequest<T>): Promise<T> =>
-    new Promise((resolve, reject) => {
-        request.onsuccess = () => resolve(request.result);
-        request.onerror = () =>
-            reject(request.error ?? new Error('IndexedDB request failed.'));
-    });
+
 const openDatabase = async (
     name = `participant-stop-${crypto.randomUUID()}`,
 ) => {
     const request = indexedDB.open(name, 1);
     request.onupgradeneeded = () => request.result.createObjectStore('stopped');
-    const database = await requestResult(request);
+    const database = await fixtureRequest(request, 'IndexedDB request failed.');
     databases.push(database);
     if (!names.includes(name)) names.push(name);
     return database;
 };
 const readMarker = (database: IDBDatabase) =>
-    requestResult<unknown>(
+    fixtureRequest<unknown>(
         database.transaction('stopped').objectStore('stopped').get(0),
+        'IndexedDB request failed.',
     );
 
 afterEach(async () => {
     vi.restoreAllMocks();
     for (const database of databases.splice(0)) database.close();
     for (const name of names.splice(0))
-        await requestResult(indexedDB.deleteDatabase(name));
+        await fixtureRequest(
+            indexedDB.deleteDatabase(name),
+            'IndexedDB request failed.',
+        );
 });
 
 describe('participant stop persistence in IndexedDB', () => {

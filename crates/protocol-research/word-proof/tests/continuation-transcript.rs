@@ -95,7 +95,7 @@ fn the_late_response_matches_the_complete_shake_framing_at_actual_profile_widths
         assert_eq!(transcript.message, initial_message);
 
         let mut root_input = vec![0; 64];
-        let domain = b"sealed-lattice/fixed-hash/v1";
+        let domain = b"sealed-lattice/fixed-hash";
         root_input[..domain.len()].copy_from_slice(domain);
         root_input.extend(framed(&[
             b"bounded-proof/message-root",

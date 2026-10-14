@@ -7,6 +7,10 @@ export const encodeText = (value: string): Uint8Array =>
 export const hexadecimal = (bytes: Uint8Array): string =>
     Array.from(bytes, (value) => value.toString(16).padStart(2, '0')).join('');
 
+// Whether the value is a 64-byte digest in lower-case hexadecimal.
+export const isDigest = (value: unknown): value is string =>
+    typeof value === 'string' && /^[0-9a-f]{128}$/u.test(value);
+
 export const fromHexadecimal = (value: string): Uint8Array => {
     if (!/^(?:[0-9a-f]{2})*$/u.test(value))
         throw new Error('Malformed hexadecimal bytes.');
@@ -67,14 +71,14 @@ export const readUnsigned32 = (bytes: Uint8Array, offset: number): number =>
 export const readUnsigned64 = (bytes: Uint8Array, offset: number): bigint =>
     view(bytes).getBigUint64(offset, true);
 
-// The values of a canonical tuple: a two-byte schema identifier and two-byte
-// version, a four-byte value count, then per value a two-byte type and a
-// four-byte length before its bytes.
+// The values of a canonical tuple: a two-byte schema identifier, a four-byte
+// value count, then per value a two-byte type and a four-byte length before
+// its bytes.
 export const tupleFields = (bytes: Uint8Array): Uint8Array[] => {
-    if (bytes.length < 8) throw new Error('Canonical tuple is truncated.');
-    const count = readUnsigned32(bytes, 4);
+    if (bytes.length < 6) throw new Error('Canonical tuple is truncated.');
+    const count = readUnsigned32(bytes, 2);
     const fields: Uint8Array[] = [];
-    let position = 8;
+    let position = 6;
     for (let index = 0; index < count; index++) {
         if (position + 6 > bytes.length)
             throw new Error('Canonical tuple is truncated.');

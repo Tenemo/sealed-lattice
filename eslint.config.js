@@ -13,7 +13,7 @@ import {
 
 const sourceFiles = ['**/*.{js,mjs,ts}'];
 const javaScriptFiles = ['**/*.{js,mjs}'];
-const testFiles = ['packages/*/tests/**/*.ts', 'tests/**/*.ts'];
+const testFiles = ['packages/*/tests/**/*.ts', 'tests/node/**/*.ts'];
 const toolFiles = ['tools/**/*.{ts,mjs}', '*.config.{ts,js}'];
 
 const projectPaths = ['./tsconfig.tools.json', './packages/*/tsconfig.json'];
@@ -45,19 +45,13 @@ const packageSourceImportPatterns = [
         message:
             'Published package source must not depend on repository-private aliases.',
     },
-    {
-        group: ['@sealed-lattice/*/*', 'sealed-lattice/*'],
-        message:
-            'Workspace packages must import another package through its public entry point.',
-    },
 ];
 
 export default defineConfig(
     globalIgnores([
-        '.tmp*/**',
         'logs/**',
         'temp/**',
-        'node_modules/**',
+        'implementation-documentation/**',
         'reference-projects/**',
         '**/dist/**',
         '**/target/**',
@@ -113,17 +107,7 @@ export default defineConfig(
                     argsIgnorePattern: '^_',
                 },
             ],
-            'prettier/prettier': [
-                'error',
-                {
-                    useTabs: false,
-                    semi: true,
-                    singleQuote: true,
-                    trailingComma: 'all',
-                    arrowParens: 'always',
-                    endOfLine: 'lf',
-                },
-            ],
+            'prettier/prettier': 'error',
             'import-x/no-extraneous-dependencies': [
                 'error',
                 { devDependencies: true },
@@ -191,11 +175,6 @@ export default defineConfig(
         plugins: {
             vitest: vitestPlugin,
         },
-        settings: {
-            vitest: {
-                typecheck: true,
-            },
-        },
         rules: {
             ...vitestPlugin.configs.recommended.rules,
             'vitest/expect-expect': [
@@ -207,6 +186,41 @@ export default defineConfig(
             'vitest/valid-expect': ['error', { minArgs: 1, maxArgs: 2 }],
             'vitest/no-focused-tests': 'error',
             'vitest/no-disabled-tests': 'error',
+        },
+    },
+    {
+        files: ['tests/**/*.ts'],
+        ignores: ['tests/node/**'],
+        rules: {
+            'no-restricted-imports': [
+                'error',
+                {
+                    patterns: [
+                        {
+                            regex: '^(?:#tests/node/|(?:\\.\\.?/)+node/)',
+                            message:
+                                'A model must not depend on the tests that check it.',
+                        },
+                    ],
+                },
+            ],
+        },
+    },
+    {
+        files: ['tests/node/protocol/reference/**/*.ts'],
+        rules: {
+            'no-restricted-imports': [
+                'error',
+                {
+                    patterns: [
+                        {
+                            regex: '^(?!node:|#tests/node/rust-source\\.js$)',
+                            message:
+                                'A test reference imports only Node built-ins and the Rust source reader.',
+                        },
+                    ],
+                },
+            ],
         },
     },
     {

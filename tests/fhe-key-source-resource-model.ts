@@ -31,7 +31,6 @@ export const compileFheKeySourceScreenResources = () => {
         Number(degree - 1n),
     ];
     const reportBytes =
-        4n +
         6n * 4n +
         2n * 64n +
         BigInt(samplePositions.length) * (4n + coefficientBytes);

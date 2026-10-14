@@ -6,6 +6,13 @@ import {
     compileContributionBodyCensus,
     contributionBodyHashPrefix,
 } from '#tests/contribution-body-model.js';
+import {
+    ascii,
+    item,
+    itemType,
+    tuple,
+    variable,
+} from '#tests/node/protocol/reference/canonical-tuple.js';
 import { completionProfile } from '#tests/supported-profile-model.js';
 
 describe('complete contribution body encoding', () => {
@@ -13,15 +20,12 @@ describe('complete contribution body encoding', () => {
         for (const length of [0, 1, 76, 1024, 65536]) {
             const body = Buffer.alloc(length, 17);
             const prefix = contributionBodyHashPrefix(length);
-            expect(prefix.subarray(0, 8)).toEqual(
-                Buffer.from([1, 0, 1, 0, 2, 0, 0, 0]),
+            expect(Buffer.concat([prefix, body])).toEqual(
+                tuple([
+                    ascii('sealed-lattice/contribution-body'),
+                    item(itemType.rawBytes, variable(body)),
+                ]),
             );
-            const domainLength = prefix.readUInt32LE(14);
-            expect(
-                prefix.subarray(18, 18 + domainLength).toString('ascii'),
-            ).toBe('sealed-lattice/contribution-body/v1');
-            expect(prefix.readUInt32LE(prefix.length - 8)).toBe(length + 4);
-            expect(prefix.readUInt32LE(prefix.length - 4)).toBe(length);
             const whole = createHash('shake256', { outputLength: 64 })
                 .update(prefix)
                 .update(body)
@@ -41,7 +45,7 @@ describe('complete contribution body encoding', () => {
             expect(() => contributionBodyHashPrefix(length)).toThrow('length');
     });
 
-    it('carries only the FHE and encrypted-share polynomials and preserves the SCB2 source opening', () => {
+    it('carries only the FHE and encrypted-share polynomials and preserves the header source opening', () => {
         const value = compileContributionBodyCensus(completionProfile());
         const excluded = new Set([
             42,
@@ -59,11 +63,11 @@ describe('complete contribution body encoding', () => {
                 (index) => !excluded.has(index),
             ),
         );
-        const headerBytes = 4n + 8n + 64n;
+        const headerBytes = 8n + 64n;
         const payloadBytes = 24n * 65536n * 109n + 20n * 65536n * 21n;
-        const prefixBytes = 8n + 2n * 6n + 4n + 35n + 4n;
+        const prefixBytes = 6n + 2n * 6n + 4n + 32n + 4n;
         // The full word proof's header is its shortest encoding.
-        const minimumProofBytes = 4004n;
+        const minimumProofBytes = 3936n;
         expect(value.headerBytes).toBe(headerBytes);
         expect(value.sourceOpeningSaltBytes).toBe(64n);
         expect(value.polynomialPayloadBytes).toBe(payloadBytes);

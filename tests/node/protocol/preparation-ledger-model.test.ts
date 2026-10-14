@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+    goalThresholds,
+    supportedParticipantCounts,
+} from '#tests/node/protocol/reference/product-goals.js';
+import {
     compilePreparationLedger,
     compilePreparationPollPopulations,
 } from '#tests/preparation-ledger-model.js';
@@ -137,10 +141,13 @@ describe('preparation comparison populations', () => {
     });
 
     it('uses the minimum endorsement consumption over every permitted roster size', () => {
-        for (let maximum = 3; maximum <= 20; maximum++) {
+        for (const maximum of supportedParticipantCounts) {
             const costs = Array.from({ length: maximum - 2 }, (_, index) => {
                 const size = index + 3;
-                return size - 2 * Math.floor((size - 1) / 3);
+                return (
+                    size -
+                    2 * goalThresholds(size).maximumCorruptParticipantCount
+                );
             });
             for (const population of [0n, 1n, 2n, 3n, 31n]) {
                 let remaining = population;
@@ -170,9 +177,11 @@ describe('preparation comparison populations', () => {
     });
 
     it('charges every possible selected set before selection, across supported rosters', () => {
-        for (let participants = 3; participants <= 20; participants++) {
-            const corrupt = Math.floor((participants - 1) / 3);
-            const selected = Math.max(corrupt + 1, 2);
+        for (const participants of supportedParticipantCounts) {
+            const {
+                maximumCorruptParticipantCount: corrupt,
+                resultReleaseThreshold: selected,
+            } = goalThresholds(participants);
             const eligible = selected + corrupt;
             const combinations = [...subsets(eligible, selected)];
             const row = compilePreparationLedger(
@@ -197,7 +206,8 @@ describe('preparation comparison populations', () => {
 
     it('derives honest endorsement consumption from every small quorum', () => {
         for (let participants = 3; participants <= 10; participants++) {
-            const corrupt = Math.floor((participants - 1) / 3);
+            const corrupt =
+                goalThresholds(participants).maximumCorruptParticipantCount;
             let minimumHonest = participants;
             for (const quorum of subsets(participants, participants - corrupt))
                 minimumHonest = Math.min(
@@ -232,7 +242,7 @@ describe('preparation comparison populations', () => {
     });
 
     it('keeps stalled and losing views outside the certified-roster denominator', () => {
-        // One corrupt creator can show these six distinct four-member rosters.
+        // One corrupt organizer can show these six distinct four-member rosters.
         // Each honest owner confirms only its own row and publishes one offer;
         // the other named honest members need not confirm that row.
         const honest = Array.from({ length: 6 }, (_, position) => position + 1);
@@ -289,7 +299,7 @@ describe('preparation comparison populations', () => {
     });
 
     it('counts private starts before the first published offer and does not count replays twice', () => {
-        // One corrupt creator shows three losing views to different honest
+        // One corrupt organizer shows three losing views to different honest
         // owners. Their generation fails before publication; other named
         // registrants never confirm those views. Only the last roster closes.
         const rosters = [

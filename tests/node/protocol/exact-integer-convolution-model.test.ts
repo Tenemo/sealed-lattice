@@ -18,7 +18,7 @@ const centered = (value: bigint, modulus: bigint) => {
 };
 
 describe('exact integer convolution through an auxiliary field', () => {
-    it('retains the centered endpoint and rejects its first alias', () => {
+    it('retains the centered endpoint and refuses its first alias', () => {
         const safe = convolution([4n, 4n, 0n, 0n], [1n, 1n, 0n, 0n]);
         expect(integerLimbConvolutionMagnitudeBound(5n, 2n, 17n)).toBe(8n);
         expect(safe.map((value) => centered(value, 17n))).toEqual(safe);

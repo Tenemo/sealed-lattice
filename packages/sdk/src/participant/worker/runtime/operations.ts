@@ -1,3 +1,4 @@
+import type { ParticipantReportedDetails } from '../../participant-contract.js';
 import { isEligibleContributor } from '../module/context.js';
 import type {
     ParticipantContext,
@@ -14,30 +15,37 @@ import {
     resumeBallot,
 } from '../stages/ballot/ballot.js';
 import {
-    advanceClose,
     closeEvents,
     isCloseComplete,
+    resumeClose,
+} from '../stages/close/close-custody.js';
+import { publishClose } from '../stages/close/close-delivery.js';
+import {
+    advanceClose,
     lockPublishedIntent,
     parseCloseParameters,
-    publishClose,
-    resumeClose,
 } from '../stages/close/close.js';
 import {
+    publishOffer,
+    signOffer,
+} from '../stages/contribution/contribution-offer.js';
+import { contributionPhase } from '../stages/contribution/contribution-state.js';
+import {
     beginContribution,
-    confirmRoster,
     continueContribution,
     generateContribution,
-    isContributionSession,
-    publishOffer,
     restoreCheckpoint,
-    resumeParticipant,
-    signContribution,
 } from '../stages/contribution/contribution.js';
 import type { EnrollmentRequest } from '../stages/enrollment/enrollment.js';
 import {
     createEnrollment,
     restoreEnrollment,
 } from '../stages/enrollment/enrollment.js';
+import {
+    confirmRoster,
+    isContributionSession,
+    resumeParticipant,
+} from '../stages/participant-session.js';
 import {
     advanceRelease,
     computeResult,
@@ -76,7 +84,10 @@ import { authenticateRoot } from '../storage/root.js';
 import { isOperationAvailable } from './operation-availability.js';
 import { summary } from './participant-summary.js';
 import { refused } from './worker-messages.js';
-import type { WorkerCommand, WorkerResult } from './worker-messages.js';
+import type {
+    ParticipantWorkerCommand,
+    ParticipantWorkerResult,
+} from './worker-messages.js';
 
 const text = (value: unknown) => {
     if (typeof value !== 'string')
@@ -99,9 +110,9 @@ const bytes = (value: unknown) => {
 export const executeOperation = async (
     context: ParticipantContext,
     relay: PublicRelay,
-    command: WorkerCommand,
+    command: ParticipantWorkerCommand,
     started: () => void,
-): Promise<WorkerResult> => {
+): Promise<ParticipantWorkerResult> => {
     const parameters = command.parameters;
     if (command.operation === 'create') {
         const role = text(parameters.role);
@@ -165,7 +176,7 @@ export const executeOperation = async (
             ? await retainedProfile(context, root, enrollment)
             : undefined;
     // What an operation reports beside the participant's summary.
-    let reported: Readonly<Record<string, unknown>> = {};
+    let reported: ParticipantReportedDetails = {};
     const profileContext = (): ParticipantProfileContext => {
         if (profiled === undefined)
             throw new Error('The participant profile is not known.');
@@ -247,7 +258,10 @@ export const executeOperation = async (
         }
         case 'contribute': {
             let session = await resumeParticipant(profileContext(), root);
-            if (session.state === undefined || session.state.phase === 4) {
+            if (
+                session.state === undefined ||
+                session.state.phase === contributionPhase.generationIntent
+            ) {
                 const proposal = await reverifyRoster(
                     context,
                     relay,
@@ -265,16 +279,22 @@ export const executeOperation = async (
                 if (!isContributionSession(session))
                     throw new Error('No offer intent is retained.');
                 await generateContribution(session);
-            } else if (session.state.phase === 5 || session.state.phase === 6) {
+            } else if (
+                session.state.phase === contributionPhase.checkpoint ||
+                session.state.phase === contributionPhase.continuationIntent
+            ) {
                 if (!isContributionSession(session))
                     throw new Error('No own proof checkpoint is retained.');
                 await restoreCheckpoint(session, relay);
             }
             if (!isContributionSession(session))
                 throw new Error('No own offer is retained.');
-            if (session.state.phase === 5 || session.state.phase === 6)
+            if (
+                session.state.phase === contributionPhase.checkpoint ||
+                session.state.phase === contributionPhase.continuationIntent
+            )
                 await continueContribution(session);
-            const offer = await signContribution(session);
+            const offer = await signOffer(session);
             root = session.root;
             await publishOffer(session, relay, offer);
             break;
@@ -478,7 +498,10 @@ export const executeOperation = async (
             };
         }
         default:
-            return refused('invalid request');
+            throw new Error(
+                'Unhandled participant operation: ' +
+                    String(command.operation satisfies never),
+            );
     }
     // A roster retained by this operation names the profile only now.
     return {

@@ -1,8 +1,8 @@
 use ballot_encryption::{context::BallotComputationContext, encryption::check_ballot_scores};
 use ballot_proof::statement::setup_input;
 use protocol_foundations::{
-    Credential, Error, RETAINED_TAG_BYTES, SIGNATURE_BYTES,
-    ballot_authentication::{BallotEnvelope, ENVELOPE_BYTES, RetainedBallotOwner},
+    Credential, RETAINED_TAG_BYTES, Refusal, SIGNATURE_BYTES,
+    ballot_authentication::{BallotEnvelope, ENVELOPE_BYTES, RetainedSetupOwner},
     poll::{VerifiedPoll, verify_poll},
     roster::RetainedContributionContext,
 };
@@ -19,8 +19,8 @@ pub fn retained_setup_reference(
     credential: &Credential,
     poll: &VerifiedPoll,
     setup: &VerifiedSetupAggregate,
-) -> Result<Vec<u8>, Error> {
-    let mut reference = RetainedSetupInputs::reference(setup).map_err(|_| Error::Context)?;
+) -> Result<Vec<u8>, Refusal> {
+    let mut reference = RetainedSetupInputs::reference(setup).map_err(|_| Refusal::Context)?;
     let tag = credential.retained_setup_tag(poll, &reference);
     reference.extend(tag);
     Ok(reference)
@@ -47,7 +47,7 @@ protocol_foundations::operation_codes! {
 /// Volatile private operations beneath the authenticated parent's ballot phases.
 /// No operation loads a public setup capability from saved records.
 pub struct BallotWork {
-    owner: RetainedBallotOwner,
+    owner: RetainedSetupOwner,
     inputs: RetainedSetupInputs,
     context: Option<BallotComputationContext>,
     key: Option<RetainedAggregatePolynomial>,
@@ -61,22 +61,22 @@ pub struct BallotWork {
     failed: bool,
 }
 impl BallotWork {
-    pub fn into_owner(self) -> RetainedBallotOwner {
+    pub fn into_owner(self) -> RetainedSetupOwner {
         self.owner
     }
     pub fn new(
         credential: &Credential,
         proposal: &RetainedContributionContext,
         input: &[u8],
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, Refusal> {
         if input.len() < 132 {
-            return Err(Error::Shape);
+            return Err(Refusal::Shape);
         }
         let definition_length = u32::from_le_bytes(input[128..132].try_into().unwrap()) as usize;
         if definition_length > protocol_foundations::poll::MAXIMUM_POLL_BYTES
             || input.len() < 132 + definition_length + SIGNATURE_BYTES + 64 + RETAINED_TAG_BYTES
         {
-            return Err(Error::Shape);
+            return Err(Refusal::Shape);
         }
         let mut offset = 132 + definition_length;
         let poll = Arc::new(verify_poll(
@@ -93,19 +93,14 @@ impl BallotWork {
             retained
                 .len()
                 .checked_sub(RETAINED_TAG_BYTES)
-                .ok_or(Error::Shape)?,
+                .ok_or(Refusal::Shape)?,
         );
-        let owner = credential.retain_setup_ballot_owner(
-            &poll,
-            proposal,
-            setup_identity,
-            reference,
-            tag,
-        )?;
+        let owner =
+            credential.retain_setup_owner(&poll, proposal, setup_identity, reference, tag)?;
         let inputs = RetainedSetupInputs::parse(proposal.profile(), reference, setup_identity)
-            .map_err(|_| Error::Context)?;
+            .map_err(|_| Refusal::Context)?;
         let context = BallotComputationContext::from_retained(poll, &owner, &inputs)
-            .map_err(|_| Error::Context)?;
+            .map_err(|_| Refusal::Context)?;
         Ok(Self {
             owner,
             inputs,
@@ -127,9 +122,9 @@ impl BallotWork {
         operation: BallotOperation,
         argument: usize,
         input: &[u8],
-    ) -> Result<Vec<u8>, Error> {
+    ) -> Result<Vec<u8>, Refusal> {
         if self.failed {
-            return Err(Error::Consumed);
+            return Err(Refusal::Consumed);
         }
         let result = self.command_inner(credential, operation, argument, input);
         // Public key delivery failures preserve no parsed operand; the current
@@ -159,9 +154,9 @@ impl BallotWork {
         operation: BallotOperation,
         argument: usize,
         input: &[u8],
-    ) -> Result<Vec<u8>, Error> {
+    ) -> Result<Vec<u8>, Refusal> {
         if input.len() > 1 << 20 {
-            return Err(Error::Shape);
+            return Err(Refusal::Shape);
         }
         match operation {
             BallotOperation::BeginKey => {
@@ -171,124 +166,124 @@ impl BallotWork {
                     || self.key.is_some()
                     || argument != setup_input(self.inputs.profile()).2
                 {
-                    return Err(Error::Consumed);
+                    return Err(Refusal::Consumed);
                 }
                 self.reader = Some(
                     self.inputs
                         .read_polynomial(argument)
-                        .map_err(|_| Error::Context)?,
+                        .map_err(|_| Refusal::Context)?,
                 );
                 self.key_offset = 0;
             }
             BallotOperation::PushKey => {
                 if argument != self.key_offset {
-                    return Err(Error::Shape);
+                    return Err(Refusal::Shape);
                 }
                 self.reader
                     .as_mut()
-                    .ok_or(Error::Consumed)?
+                    .ok_or(Refusal::Consumed)?
                     .push(argument, input)
-                    .map_err(|_| Error::Crypto)?;
+                    .map_err(|_| Refusal::Crypto)?;
                 self.key_offset += input.len();
             }
             BallotOperation::FinishKey => {
                 if argument != 0 || !input.is_empty() {
-                    return Err(Error::Shape);
+                    return Err(Refusal::Shape);
                 }
-                let reader = self.reader.take().ok_or(Error::Consumed)?;
-                self.key = Some(reader.finish().map_err(|_| Error::Crypto)?);
+                let reader = self.reader.take().ok_or(Refusal::Consumed)?;
+                self.key = Some(reader.finish().map_err(|_| Refusal::Crypto)?);
             }
             // Input is the ballot time fixed by the attempt lock, then the scores.
             BallotOperation::Create => {
                 if argument != 0 || self.consumed || self.key.is_none() || self.reader.is_some() {
-                    return Err(Error::Consumed);
+                    return Err(Refusal::Consumed);
                 }
-                let context = self.context.as_ref().ok_or(Error::Consumed)?;
-                let (time, scores) = input.split_at_checked(8).ok_or(Error::Shape)?;
-                check_ballot_scores(context.poll(), scores).map_err(|_| Error::Shape)?;
+                let context = self.context.as_ref().ok_or(Refusal::Consumed)?;
+                let (time, scores) = input.split_at_checked(8).ok_or(Refusal::Shape)?;
+                check_ballot_scores(context.poll(), scores).map_err(|_| Refusal::Shape)?;
                 credential.reserve_ballot_attempt(&self.owner)?;
                 self.consumed = true;
                 let ballot_time = u64::from_le_bytes(time.try_into().unwrap());
                 let scores = Zeroizing::new(scores.to_vec());
                 let fhe = self.key.take().unwrap();
                 let (body, envelope) = ballot_proof::private_ballot::create(
-                    self.context.take().ok_or(Error::Consumed)?,
+                    self.context.take().ok_or(Refusal::Consumed)?,
                     fhe,
                     &scores,
                     ballot_time,
                 )
-                .map_err(|_| Error::Crypto)?;
+                .map_err(|_| Refusal::Crypto)?;
                 self.body = body;
                 self.envelope = Some(envelope);
             }
             BallotOperation::BeginImport => {
                 if argument != 0 || self.consumed || self.key.is_none() || self.reader.is_some() {
-                    return Err(Error::Consumed);
+                    return Err(Refusal::Consumed);
                 }
                 let envelope = BallotEnvelope::decode(self.inputs.profile(), input)?;
                 if envelope.poll() != self.owner.poll()
                     || envelope.setup_identity() != self.owner.setup_identity()
                     || envelope.position() != self.owner.position()
                 {
-                    return Err(Error::Context);
+                    return Err(Refusal::Context);
                 }
                 self.consumed = true;
                 self.body = Vec::with_capacity(envelope.body_length());
                 self.pending = Some(envelope);
             }
             BallotOperation::PushImport => {
-                let expected = self.pending.as_ref().ok_or(Error::Consumed)?;
+                let expected = self.pending.as_ref().ok_or(Refusal::Consumed)?;
                 if input.is_empty()
                     || argument != self.body.len()
                     || input.len() > expected.body_length() - self.body.len()
                 {
-                    return Err(Error::Shape);
+                    return Err(Refusal::Shape);
                 }
                 self.body.extend(input);
             }
             BallotOperation::FinishImport => {
                 if argument != 0 || !input.is_empty() {
-                    return Err(Error::Shape);
+                    return Err(Refusal::Shape);
                 }
-                let pending = self.pending.take().ok_or(Error::Consumed)?;
-                let key = self.key.take().ok_or(Error::Context)?;
+                let pending = self.pending.take().ok_or(Refusal::Consumed)?;
+                let key = self.key.take().ok_or(Refusal::Context)?;
                 let checked = ballot_proof::private_ballot::verify(
-                    self.context.as_ref().ok_or(Error::Context)?,
+                    self.context.as_ref().ok_or(Refusal::Context)?,
                     &key,
                     &self.body,
                     pending.ballot_time(),
                 )
-                .map_err(|_| Error::Crypto)?;
+                .map_err(|_| Refusal::Crypto)?;
                 if checked.bytes() != pending.bytes() {
-                    return Err(Error::Context);
+                    return Err(Refusal::Context);
                 }
                 self.envelope = Some(checked);
             }
             BallotOperation::Sign => {
                 if argument != 0 || input.len() != ENVELOPE_BYTES || self.signature.is_some() {
-                    return Err(Error::Consumed);
+                    return Err(Refusal::Consumed);
                 }
-                let envelope = self.envelope.as_ref().ok_or(Error::Consumed)?;
+                let envelope = self.envelope.as_ref().ok_or(Refusal::Consumed)?;
                 if input[..ENVELOPE_BYTES] != *envelope.bytes() {
-                    return Err(Error::Context);
+                    return Err(Refusal::Context);
                 }
                 self.signature =
                     Some(credential.sign_retained_ballot_envelope(&self.owner, envelope)?);
             }
             BallotOperation::Envelope => {
                 if argument != 0 || !input.is_empty() {
-                    return Err(Error::Shape);
+                    return Err(Refusal::Shape);
                 }
                 return Ok(self
                     .envelope
                     .as_ref()
-                    .ok_or(Error::Consumed)?
+                    .ok_or(Refusal::Consumed)?
                     .bytes()
                     .to_vec());
             }
             BallotOperation::BodySlice => {
                 if input.len() != 4 || self.envelope.is_none() {
-                    return Err(Error::Consumed);
+                    return Err(Refusal::Consumed);
                 }
                 let length = u32::from_le_bytes(input.try_into().unwrap()) as usize;
                 if length == 0
@@ -296,17 +291,17 @@ impl BallotWork {
                     || argument > self.body.len()
                     || length > self.body.len() - argument
                 {
-                    return Err(Error::Shape);
+                    return Err(Refusal::Shape);
                 }
                 return Ok(self.body[argument..argument + length].to_vec());
             }
             BallotOperation::Signature => {
                 if argument != 0 || !input.is_empty() {
-                    return Err(Error::Shape);
+                    return Err(Refusal::Shape);
                 }
-                return Ok(self.signature.as_ref().ok_or(Error::Consumed)?.to_vec());
+                return Ok(self.signature.as_ref().ok_or(Refusal::Consumed)?.to_vec());
             }
-            BallotOperation::Begin => return Err(Error::Shape),
+            BallotOperation::Begin => return Err(Refusal::Shape),
         }
         Ok(Vec::new())
     }

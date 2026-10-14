@@ -20,8 +20,8 @@ export const compileParticipantCloseCustody = (profile: SupportedProfile) => {
     const participants = wire.participantCount;
     const keyBytes = 32n;
     const tagBytes = 16n;
-    // Marker and event count.
-    const prefixBytes = 4n + 4n;
+    // The event count.
+    const prefixBytes = 4n;
     const eventBytes = (records: bigint) =>
         1n + 2n + 4n + 4n + keyBytes * records;
     // Delivery adds one event per held body; only the organizer takes

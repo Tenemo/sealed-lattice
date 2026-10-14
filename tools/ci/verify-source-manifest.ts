@@ -4,7 +4,7 @@ import path from 'node:path';
 
 import { toolArguments } from '#tools/ci/command-line.js';
 
-export type SourceManifestRow = Readonly<{
+type SourceManifestRow = Readonly<{
     identifier: string;
     relativePath: string;
     byteLength: number;
@@ -12,7 +12,7 @@ export type SourceManifestRow = Readonly<{
     lineNumber: number;
 }>;
 
-export type SourceManifestFailure = Readonly<{
+type SourceManifestFailure = Readonly<{
     identifier: string;
     lineNumber: number;
     reason: string;

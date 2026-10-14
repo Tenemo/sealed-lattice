@@ -22,4 +22,4 @@ word-proof = { path = "../word-proof" }
 word-verifier = { path = "../word-verifier" }
 
 [dev-dependencies]
-word-proof = { path = "../word-proof", features = ["test-support"] }
+statement-stream = { path = "../statement-stream", features = ["test-support"] }

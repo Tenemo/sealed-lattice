@@ -105,12 +105,8 @@ impl VerifiedSelectionInputs {
     }
     pub fn retain(&self, credential: &Credential, poll: &VerifiedPoll) -> Result<Vec<u8>, Refusal> {
         check_poll(self.roster(), poll)?;
-        let mut reference = crate::retained::encode_reference(
-            b"SPI1",
-            self.profile(),
-            self.identity(),
-            &self.polynomials,
-        )?;
+        let mut reference =
+            crate::retained::encode_reference(self.profile(), self.identity(), &self.polynomials)?;
         let tag = credential.retained_selection_inputs_tag(poll, &reference);
         reference.extend(tag);
         Ok(reference)
@@ -131,12 +127,8 @@ impl VerifiedSelectionInputs {
             .check_retained_selection_inputs_tag(poll, reference, tag)
             .map_err(|_| Refusal::Context)?;
         let profile = selection.roster().proposal().profile();
-        let inputs = RetainedSetupInputs::parse_with_magic(
-            b"SPI1",
-            profile,
-            reference,
-            selection.selection().identity(),
-        )?;
+        let inputs =
+            RetainedSetupInputs::parse(profile, reference, selection.selection().identity())?;
         Ok(Self {
             selection,
             polynomials: inputs.into_polynomials(),

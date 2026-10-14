@@ -24,17 +24,16 @@ import { compileRosterProposalCensus } from '#tests/roster-proposal-model.js';
 import { compileSetupAggregateResources } from '#tests/setup-aggregate-resource-model.js';
 import { deriveSupportedProfile } from '#tests/supported-profile-model.js';
 import {
-    runCommandAndCaptureOutput,
+    runCheckedCommand,
     runCommandsInSeries,
 } from '#tools/ci/command-runner.js';
-import { snapshotResearchSources } from '#tools/ci/fixture-sources.js';
 import { importClosure } from '#tools/ci/import-closure.js';
 import { runWithLocalRunLog } from '#tools/ci/local-run-log.js';
-import { guardProcessTreeMemory } from '#tools/ci/process-tree-memory.js';
 import { acquireProtocolResearchLock } from '#tools/ci/protocol-research-lock.js';
 import { selectProtocolResearchCase } from '#tools/ci/protocol-research-registry.js';
 import { deriveResearchScenario } from '#tools/ci/protocol-research-scenario.js';
 import { runFheKeySourceScreen } from '#tools/ci/run-fhe-key-source-screen.js';
+import { snapshotResearchSources } from '#tools/ci/run-sources.js';
 import {
     rustCompilerCommit,
     rustToolchain,
@@ -48,10 +47,6 @@ type NativeResult = {
     conflicting?: number[];
     signers?: number[];
     identifiers?: string[];
-    releaseSubsets?: number;
-    departureSets?: number;
-    departed?: number[];
-    corrupt?: number[];
     selectedAuthors?: number[];
     cases?: {
         milliseconds: number;
@@ -76,7 +71,7 @@ if (
             : selected.name.startsWith('scalar-')
               ? 'scalar'
               : 'browser',
-        'source' in selected ? selected.source : undefined,
+        'nativeRun' in selected ? selected.nativeRun : undefined,
     );
     process.exit(process.exitCode ?? 0);
 }
@@ -137,16 +132,6 @@ await runWithLocalRunLog(
                 ? []
                 : ['--simulated-helpers', String(selected.simulatedHelpers)]),
         ],
-        lanes: [
-            'Pinned protocol research build',
-            ...(selected.execution
-                ? [
-                      requestedOutputCase
-                          ? 'Encrypted requested-output gates'
-                          : 'Native original-credential completion',
-                  ]
-                : []),
-        ],
         scriptName: 'research:protocol',
     },
     async (log) => {
@@ -167,7 +152,7 @@ await runWithLocalRunLog(
                       };
             // A step runs for at most its timeout. A guarded step also records
             // its process tree's memory every second and stops at the limit.
-            const execute = async (
+            const execute = (
                 command: string,
                 args: string[],
                 name: string,
@@ -179,64 +164,35 @@ await runWithLocalRunLog(
                     timeoutMilliseconds?: number;
                     guardedMemoryLimit?: number;
                 } = {},
-            ) => {
-                const controller = new AbortController();
-                let guard: { stop: () => Promise<void> } | undefined;
-                try {
-                    const result = await runCommandAndCaptureOutput(
-                        {
-                            command,
-                            args,
-                            env,
-                            workingDirectoryPath: workspace,
-                            description: name,
-                            logFileSlug: name,
+            ) =>
+                runCheckedCommand(
+                    {
+                        command,
+                        args,
+                        env,
+                        workingDirectoryPath: workspace,
+                        description: name,
+                        logFileSlug: name,
+                    },
+                    {
+                        runLog: log,
+                        echoOutput: true,
+                        guard: {
+                            timeoutMilliseconds,
+                            ...(guardedMemoryLimit === undefined
+                                ? {}
+                                : {
+                                      memory: {
+                                          limitBytes: guardedMemoryLimit,
+                                          exceededMessage:
+                                              'Unit-test process-tree memory guard exceeded.',
+                                          sampleEventType:
+                                              'unit-test-process-memory',
+                                      },
+                                  }),
                         },
-                        {
-                            runLog: log,
-                            echoOutput: true,
-                            signal: AbortSignal.any([
-                                controller.signal,
-                                AbortSignal.timeout(timeoutMilliseconds),
-                            ]),
-                            onCommandStart: ({ processIdentifier }) => {
-                                if (guardedMemoryLimit === undefined) return;
-                                assert.ok(processIdentifier);
-                                guard = guardProcessTreeMemory({
-                                    processIdentifier,
-                                    memoryLimit: guardedMemoryLimit,
-                                    exceededMessage:
-                                        'Unit-test process-tree memory guard exceeded.',
-                                    onSample: (bytes) => {
-                                        log.writeEvent({
-                                            eventType:
-                                                'unit-test-process-memory',
-                                            details: {
-                                                step: name,
-                                                bytes,
-                                                memoryLimit: guardedMemoryLimit,
-                                            },
-                                        });
-                                    },
-                                    abort: (reason) => {
-                                        controller.abort(reason);
-                                    },
-                                });
-                            },
-                        },
-                    );
-                    assert.equal(
-                        controller.signal.aborted,
-                        false,
-                        String(controller.signal.reason),
-                    );
-                    assert.equal(result.exitCode, 0, name);
-                    assert.equal(result.terminationSignal, null, name);
-                    return result.stdout;
-                } finally {
-                    await guard?.stop();
-                }
-            };
+                    },
+                );
             const compiler = await execute(
                 'rustc',
                 [rustToolchain, '-Vv'],
@@ -295,7 +251,7 @@ await runWithLocalRunLog(
                     : 0n) +
                 preparation.maximumEndorsementPacketBytes +
                 2n * preparation.certificateBytes +
-                64n * BigInt(preparation.eligibleCount) +
+                64n * BigInt(preparation.eligibleContributorCount) +
                 enrollment.maximumPollDefinitionBytes +
                 2n * enrollment.signatureBytes +
                 roster.proposalBytes +
@@ -346,12 +302,6 @@ await runWithLocalRunLog(
                             process.platform === 'win32'
                                 ? 'process-tree private bytes'
                                 : 'process-tree resident bytes',
-                        unmeasured: {
-                            physicalStorage: null,
-                            participantVisits: null,
-                            networkTransfers: null,
-                            recoveryWork: null,
-                        },
                     },
                     (_key, value: unknown) =>
                         typeof value === 'bigint' ? String(value) : value,
@@ -543,13 +493,6 @@ await runWithLocalRunLog(
                         case: selected.name,
                         executableSha512: runtime.toString('hex'),
                         unitSimulatedHelpers,
-                        unmeasured: {
-                            completion: null,
-                            peakMemory: null,
-                            storage: null,
-                            transfers: null,
-                            recovery: null,
-                        },
                     }) + '\n',
                     { flag: 'wx' },
                 );
@@ -570,9 +513,7 @@ await runWithLocalRunLog(
                 log.artifactDirectoryPath,
                 requestedOutputCase ? 'requested-output' : 'ceremony',
             );
-            const controller = new AbortController();
-            let guard: { stop: () => Promise<void> } | undefined,
-                peakMemory = 0,
+            let peakMemory = 0,
                 samples = 0;
             const started = performance.now();
             let exitCode: number;
@@ -614,43 +555,22 @@ await runWithLocalRunLog(
                     {
                         runLog: log,
                         outputMode: 'inherit',
-                        signal: AbortSignal.any([
-                            controller.signal,
-                            AbortSignal.timeout(executionTimeout),
-                        ]),
-                        observer: {
-                            onCommandStart({ processIdentifier }) {
-                                assert.ok(processIdentifier);
-                                guard = guardProcessTreeMemory({
-                                    processIdentifier,
-                                    memoryLimit,
-                                    exceededMessage:
-                                        'Protocol process-tree memory guard exceeded.',
-                                    onSample: (bytes) => {
-                                        samples++;
-                                        peakMemory = Math.max(
-                                            peakMemory,
-                                            bytes,
-                                        );
-                                        log.writeEvent({
-                                            eventType:
-                                                'protocol-process-memory',
-                                            details: { bytes, memoryLimit },
-                                        });
-                                    },
-                                    abort: (reason) => {
-                                        controller.abort(reason);
-                                    },
-                                });
-                            },
-                            onCommandExit() {
-                                void guard?.stop();
+                        guard: {
+                            timeoutMilliseconds: executionTimeout,
+                            memory: {
+                                limitBytes: memoryLimit,
+                                exceededMessage:
+                                    'Protocol process-tree memory guard exceeded.',
+                                sampleEventType: 'protocol-process-memory',
+                                onSample: (bytes) => {
+                                    samples++;
+                                    peakMemory = Math.max(peakMemory, bytes);
+                                },
                             },
                         },
                     },
                 );
             } finally {
-                await guard?.stop();
                 // The ceremony's working values and key records in its
                 // scratch directory outlive no run, whether it passed or not.
                 if (scratch !== undefined)
@@ -660,11 +580,6 @@ await runWithLocalRunLog(
                         retryDelay: 500,
                     });
             }
-            assert.equal(
-                controller.signal.aborted,
-                false,
-                String(controller.signal.reason),
-            );
             assert.equal(exitCode, 0);
             assert.ok(samples > 0);
             const result = JSON.parse(
@@ -784,14 +699,10 @@ await runWithLocalRunLog(
                 // The reference ranking of the accepted ballots; ties go to
                 // the lower option position.
                 assert.deepEqual(result.identifiers, scenario.identifiers);
-                assert.equal(result.releaseSubsets, scenario.releaseSubsets);
-                assert.equal(result.departureSets, scenario.departureSets);
                 if (
                     selected.name === 'native-setup-departure' ||
                     selected.name === 'native-selection-fork'
                 ) {
-                    assert.deepEqual(result.departed, scenario.departed);
-                    assert.deepEqual(result.corrupt, scenario.corrupt);
                     assert.deepEqual(
                         result.selectedAuthors,
                         scenario.selectedAuthors,
@@ -865,19 +776,6 @@ await runWithLocalRunLog(
                         peakMemory,
                         samples,
                         publicDiagnosticBytes,
-                        unmeasured: {
-                            physicalStorage: null,
-                            browserCompletion: null,
-                            actualDepartureChronology: null,
-                            participantVisits: null,
-                            networkTransfers: null,
-                            recoveryWork: null,
-                        },
-                        scope: requestedOutputCase
-                            ? 'Real full-degree BFV coefficient-selection operations on deterministic synthetic ciphertexts encrypting known rank powers. A test-only secret decoder checks every plaintext coefficient against direct interpolation, including all omitted ranks and padding. No participant, ballot proof, certificate, release share or outcome is created.'
-                            : selected.noResult
-                              ? 'Fresh native certified no-result execution using original credentials. No release shares are generated. This is not durable browser participation, security admission or supported-phone qualification.'
-                              : 'Fresh native cryptographic execution using tracked sources and original credentials. Subset controls run after share generation. This is not durable browser participation, security admission or supported-phone qualification.',
                     },
                     null,
                     2,

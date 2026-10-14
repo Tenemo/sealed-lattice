@@ -16,15 +16,15 @@ fn requested_prefixes_preserve_the_reference_schedule_and_complete_ordering() {
             .iter()
             .map(|byte| format!("{byte:02x}"))
             .collect::<String>(),
-        "fea389f6318ffe0fcb36050c9ba22fb24aa60b8462fe026eb20a63b0f8d312a0d6e2fb3666fc6655f0bd602178c808b42fe8a1682ab566a41184042ccae83cf8"
+        "017f859de532edf89af14dc72c7aea96b7917da7ffdebb01b4a853cf087d7d48d747640bc29f8a201fd5f699612f13de57dec36a18ded4d883deec289d3ac421"
     );
     for top_count in 1..10 {
         let selected = RankingProgram::for_profile(completion(), top_count).unwrap();
         assert_eq!(selected.bytes().len(), complete.bytes().len());
-        assert_eq!(selected.bytes()[..16], complete.bytes()[..16]);
-        for (before, after) in complete.bytes()[16..]
+        assert_eq!(selected.bytes()[..12], complete.bytes()[..12]);
+        for (before, after) in complete.bytes()[12..]
             .chunks_exact(16)
-            .zip(selected.bytes()[16..].chunks_exact(16))
+            .zip(selected.bytes()[12..].chunks_exact(16))
         {
             assert_eq!(before[..12], after[..12]);
             let operation = u32::from_le_bytes(before[..4].try_into().unwrap());
@@ -39,7 +39,7 @@ fn requested_prefixes_preserve_the_reference_schedule_and_complete_ordering() {
 // Counts each operation of a program.
 fn operations(program: &RankingProgram) -> [usize; 7] {
     let mut counts = [0; 7];
-    for bytes in program.bytes()[16..].chunks_exact(16) {
+    for bytes in program.bytes()[12..].chunks_exact(16) {
         counts[u32::from_le_bytes(bytes[..4].try_into().unwrap()) as usize] += 1;
     }
     counts
@@ -64,10 +64,7 @@ fn every_profile_and_requested_result_length_has_an_executable_program() {
             assert!(counts.iter().sum::<usize>() <= MAXIMUM_INSTRUCTIONS);
         }
         for top_count in [0, options + 1] {
-            assert!(matches!(
-                RankingProgram::for_profile(profile, top_count),
-                Err(Error::UnsupportedTopCount)
-            ));
+            assert!(RankingProgram::for_profile(profile, top_count).is_none());
         }
     }
     for (participants, options) in [(3, 2), (3, 20), (10, 10), (20, 2), (20, 20)] {
@@ -203,11 +200,11 @@ fn a_polynomial_arriving_in_pieces_decodes_as_it_does_whole() {
 #[test]
 fn mixed_or_noncanonical_rank_parameters_refuse_after_rehashing() {
     let program = RankingProgram::for_profile(completion(), 3).unwrap();
-    let weighted = program.bytes()[16..]
+    let weighted = program.bytes()[12..]
         .chunks_exact(16)
         .position(|bytes| u32::from_le_bytes(bytes[..4].try_into().unwrap()) == 4)
         .unwrap();
-    let parameter_offset = 16 + 16 * weighted + 12;
+    let parameter_offset = 12 + 16 * weighted + 12;
     let original = u32::from_le_bytes(
         program.bytes()[parameter_offset..parameter_offset + 4]
             .try_into()

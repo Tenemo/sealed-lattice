@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -96,30 +96,24 @@ describe('import closure', () => {
             },
         ));
 
-    it('covers every module of the participant browser runner', async () => {
-        const closure = await importClosure([
-            'tools/ci/run-participant-browser.ts',
-        ]);
-        for (const file of [
-            'tools/ci/run-participant-browser.ts',
-            'tools/ci/participant-browser-cohort.ts',
-            'tools/ci/participant-browser-relay.ts',
-            'tools/ci/participant-browser-public-records.ts',
-            'tools/ci/participant-browser-roster-completion.ts',
-            'tools/ci/participant-browser-single-roster.ts',
-            'tools/ci/participant-browser-two-rosters.ts',
-            'tools/ci/participant-browser-fault-schedule.ts',
-            'tools/ci/participant-browser-options.ts',
-            'tools/ci/participant-workflow-measurements.ts',
-            'tools/ci/participant-padding-halt.ts',
-            'tools/ci/participant-padding-corruption.ts',
-            'tools/ci/participant-preparation-storage.ts',
-            'tools/ci/participant-relay-record.ts',
-            'tools/ci/participant-offer-announcements.ts',
-            'tools/ci/participant-runtime-chrome.ts',
-            'tests/setup-selection-model.ts',
-            'tests/threshold-completion-model.ts',
-        ])
-            expect(closure).toContain(file);
+    // The type checker and the test runner resolve the subpath imports
+    // through the TypeScript paths, which must name the same targets.
+    it('mirrors the subpath imports in the TypeScript paths', async () => {
+        const read = async (file: string) =>
+            JSON.parse(await readFile(file, 'utf8')) as Record<string, unknown>;
+        const { imports } = (await read('package.json')) as {
+            imports: Record<string, string>;
+        };
+        const { compilerOptions } = (await read('tsconfig.base.json')) as {
+            compilerOptions: { paths: Record<string, readonly string[]> };
+        };
+        expect(compilerOptions.paths).toEqual(
+            Object.fromEntries(
+                Object.entries(imports).map(([pattern, target]) => [
+                    pattern,
+                    [target],
+                ]),
+            ),
+        );
     });
 });

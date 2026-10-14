@@ -20,14 +20,13 @@ jobs:
         runs-on: ubuntu-24.04
         timeout-minutes: 60
         steps:
-            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
               with:
                   persist-credentials: false
             - uses: ./.github/actions/bootstrap-pnpm
-            - uses: ./.github/actions/participant-toolchain
-            - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
+            - uses: ./.github/actions/rust-toolchain
               with:
-                  workspaces: |
+                  cache-workspaces: |
                       crates/protocol-research -> ../../target/participant-module
                       crates/protocol-research
             - name: Install Chromium
@@ -41,7 +40,7 @@ jobs:
               run: pnpm run build:verify-reproducible
             - name: Upload check diagnostics
               if: ${{ failure() }}
-              uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+              uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
               with:
                   if-no-files-found: warn
                   name: check-logs-${{ github.run_id }}-${{ github.run_attempt }}

@@ -1,0 +1,26 @@
+name: Rust toolchain
+description: Install the protocol workspace's Rust toolchain, restore its build cache and fetch its locked dependencies
+
+inputs:
+    cache-workspaces:
+        description: The rust-cache workspace and target mappings the calling job builds
+        required: true
+
+runs:
+    using: composite
+    steps:
+        - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f
+          with:
+              components: clippy, rustfmt
+              toolchain: 1.95.0
+              targets: wasm32-unknown-unknown
+        # The cache restores before the fetch, so a partial cache cannot
+        # replace the registry the fetch fills.
+        - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+          with:
+              workspaces: ${{ inputs.cache-workspaces }}
+        # The module builds offline from the research workspace's lockfile,
+        # with the toolchain its rust-toolchain.toml selects.
+        - shell: bash
+          working-directory: crates/protocol-research
+          run: cargo fetch --locked

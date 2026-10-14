@@ -4,7 +4,7 @@ use evaluation_target::{
     close::{ClosedSlot, VerifiedCloseBarrier},
     release::ReleaseContext,
     release_body::ReleaseBodyVerifier,
-    target::{ClassifiedClosedInventory, Error, PublicInputs, WorkingStore},
+    target::{ClassifiedClosedInventory, PublicInputs, Refusal, WorkingStore},
     terminal::{ReleaseCollector, verify_no_result},
 };
 use participant_module::{
@@ -12,7 +12,7 @@ use participant_module::{
     release_work::ReleaseWork,
 };
 use protocol_foundations::{
-    Credential, release_signing::body_header, target_signing::TargetMessage,
+    Credential, RETAINED_TAG_BYTES, release_signing::body_header, target_signing::TargetMessage,
 };
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -30,20 +30,20 @@ struct Inputs<'a> {
     scenario: &'a crate::scenario::Scenario,
 }
 impl PublicInputs for Inputs<'_> {
-    fn aggregate(&mut self, index: usize) -> Result<Box<dyn Read + '_>, Error> {
+    fn aggregate(&mut self, index: usize) -> Result<Box<dyn Read + '_>, Refusal> {
         Ok(Box::new(
             File::open(self.aggregate.join(format!("polynomial-{index:02}.bin")))
-                .map_err(|_| Error::PublicInput)?,
+                .map_err(|_| Refusal::PublicInput)?,
         ))
     }
-    fn ballot(&mut self, author: usize) -> Result<Box<dyn Read + '_>, Error> {
+    fn ballot(&mut self, author: usize) -> Result<Box<dyn Read + '_>, Refusal> {
         Ok(Box::new(
             File::open(crate::ballots::ballot_body_path(
                 &self.ballot,
                 self.scenario,
                 author,
             ))
-            .map_err(|_| Error::PublicInput)?,
+            .map_err(|_| Refusal::PublicInput)?,
         ))
     }
 }
@@ -54,9 +54,9 @@ struct Spool {
     value_bytes: usize,
 }
 impl WorkingStore for Spool {
-    fn put(&mut self, index: usize, value: &Ciphertext) -> Result<(), Error> {
+    fn put(&mut self, index: usize, value: &Ciphertext) -> Result<(), Refusal> {
         if !self.indices.insert(index) {
-            return Err(Error::Storage);
+            return Err(Refusal::Storage);
         }
         crate::write(
             self.directory.join(format!("{index}.bin")),
@@ -64,24 +64,24 @@ impl WorkingStore for Spool {
         );
         Ok(())
     }
-    fn get(&mut self, index: usize) -> Result<Vec<u8>, Error> {
+    fn get(&mut self, index: usize) -> Result<Vec<u8>, Refusal> {
         let bytes =
-            fs::read(self.directory.join(format!("{index}.bin"))).map_err(|_| Error::Storage)?;
+            fs::read(self.directory.join(format!("{index}.bin"))).map_err(|_| Refusal::Storage)?;
         if bytes.len() != self.value_bytes {
-            return Err(Error::Storage);
+            return Err(Refusal::Storage);
         }
         Ok(bytes)
     }
-    fn remove(&mut self, index: usize) -> Result<(), Error> {
+    fn remove(&mut self, index: usize) -> Result<(), Refusal> {
         if self.indices.remove(&index) {
             fs::remove_file(self.directory.join(format!("{index}.bin")))
-                .map_err(|_| Error::Storage)?;
+                .map_err(|_| Refusal::Storage)?;
         }
         Ok(())
     }
-    fn put_record(&mut self, ordinal: usize, prime: usize, record: &[u8]) -> Result<(), Error> {
+    fn put_record(&mut self, ordinal: usize, prime: usize, record: &[u8]) -> Result<(), Refusal> {
         if !self.records.insert((ordinal, prime)) {
-            return Err(Error::Storage);
+            return Err(Refusal::Storage);
         }
         crate::write(
             self.directory.join(format!("key-{ordinal}-{prime}.bin")),
@@ -89,17 +89,17 @@ impl WorkingStore for Spool {
         );
         Ok(())
     }
-    fn get_record(&mut self, ordinal: usize, prime: usize) -> Result<Vec<u8>, Error> {
+    fn get_record(&mut self, ordinal: usize, prime: usize) -> Result<Vec<u8>, Refusal> {
         if !self.records.contains(&(ordinal, prime)) {
-            return Err(Error::Storage);
+            return Err(Refusal::Storage);
         }
         fs::read(self.directory.join(format!("key-{ordinal}-{prime}.bin")))
-            .map_err(|_| Error::Storage)
+            .map_err(|_| Refusal::Storage)
     }
-    fn clear_records(&mut self) -> Result<(), Error> {
+    fn clear_records(&mut self) -> Result<(), Refusal> {
         for (ordinal, prime) in std::mem::take(&mut self.records) {
             fs::remove_file(self.directory.join(format!("key-{ordinal}-{prime}.bin")))
-                .map_err(|_| Error::Storage)?;
+                .map_err(|_| Refusal::Storage)?;
         }
         Ok(())
     }
@@ -268,8 +268,39 @@ pub fn run(
         assert!(restore(&enrollments[0].credential, &changed).is_err());
     }
     assert!(restore(&enrollments[0].credential, &retained[..retained.len() - 1]).is_err());
+    // A copy its credential keys again restores only while it carries
+    // exactly the ciphertext its body names: no byte after it, and no other
+    // ciphertext byte.
+    let rekeyed = |bytes: &[u8]| {
+        let mut copy = bytes.to_vec();
+        copy.extend(enrollments[0].credential.retained_tag(
+            b"sealed-lattice/retained-evaluation-target",
+            &poll,
+            bytes,
+        ));
+        copy
+    };
+    let unkeyed = &retained[..retained.len() - RETAINED_TAG_BYTES];
+    assert!(restore(&enrollments[0].credential, &rekeyed(unkeyed)).is_ok());
+    let extended = rekeyed(&[unkeyed, &[0]].concat());
+    if evaluated.ciphertext().is_some() {
+        assert!(matches!(
+            restore(&enrollments[0].credential, &extended),
+            Err(Refusal::Context)
+        ));
+        let mut changed = unkeyed.to_vec();
+        *changed.last_mut().unwrap() ^= 1;
+        assert!(matches!(
+            restore(&enrollments[0].credential, &rekeyed(&changed)),
+            Err(Refusal::Context)
+        ));
+    } else {
+        assert!(matches!(
+            restore(&enrollments[0].credential, &extended),
+            Err(Refusal::Encoding)
+        ));
+    }
     let mut collector = CertificateCollector::new(target.clone());
-    assert_eq!(collector.threshold(), profile.inventory_threshold());
     assert!(collector.certificate().is_err());
     assert_eq!(statuses.len(), enrollments.len());
     // Target signing reads the barrier, which only the evaluated target has.
@@ -457,6 +488,8 @@ pub fn run(
         .collect();
     let threshold = profile.release_threshold();
     let checked = crate::scenario::checked_subsets(active.len(), threshold);
+    // The verified result's identifiers, which the run records.
+    let mut verified = Vec::new();
     for subset in &checked {
         let mut result = ReleaseCollector::new(certificate.clone()).unwrap();
         assert!(result.result().is_err());
@@ -464,7 +497,8 @@ pub fn run(
             assert!(result.insert(shares[&active[*index]].clone()).unwrap());
             assert!(!result.insert(shares[&active[*index]].clone()).unwrap());
         }
-        assert_eq!(result.result().unwrap().identifiers(), expected);
+        verified = result.result().unwrap().identifiers().to_vec();
+        assert_eq!(verified, expected);
     }
     let subsets = checked.len();
     let departure_sets = scenario.departed.map_or_else(
@@ -493,10 +527,6 @@ pub fn run(
         assert_eq!(result.result().unwrap().identifiers(), expected);
     }
     let departures = departure_sets.len();
-    let departed: Vec<_> = scenario.departed.into_iter().collect();
-    let corrupt: Vec<_> = (0..profile.participants())
-        .filter(|position| scenario.corrupt(*position))
-        .collect();
     let selection = protocol_foundations::setup_selection::SelectionProposal::decode(
         setup.roster().proposal(),
         &fs::read(output.join("selection.bin")).unwrap(),
@@ -508,7 +538,7 @@ pub fn run(
         .iter()
         .map(|(position, _)| *position)
         .collect();
-    crate::write(directory.join("result.json"),format!("{{\"kind\":\"result\",\"accepted\":{accepted:?},\"invalid\":{invalid:?},\"conflicting\":{conflicting:?},\"signers\":{signers:?},\"identifiers\":{expected:?},\"releaseSubsets\":{subsets},\"departureSets\":{departures},\"departed\":{departed:?},\"corrupt\":{corrupt:?},\"selectedAuthors\":{selected_authors:?},\"milliseconds\":{}}}\n",started.elapsed().as_secs_f64()*1000.0).as_bytes());
+    crate::write(directory.join("result.json"),format!("{{\"kind\":\"result\",\"accepted\":{accepted:?},\"invalid\":{invalid:?},\"conflicting\":{conflicting:?},\"signers\":{signers:?},\"identifiers\":{verified:?},\"selectedAuthors\":{selected_authors:?},\"milliseconds\":{}}}\n",started.elapsed().as_secs_f64()*1000.0).as_bytes());
     println!(
         "Verified original ballot-to-result path, {subsets} release subsets and {departures} bounded departure sets"
     );

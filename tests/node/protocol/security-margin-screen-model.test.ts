@@ -1,24 +1,32 @@
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 
+import {
+    goalThresholds,
+    supportedParticipantCounts,
+} from '#tests/node/protocol/reference/product-goals.js';
 import { compileSourceDomainOracleBudget } from '#tests/oracle-budget-model.js';
 import { compileRegistrationSourceExtractionWork } from '#tests/registration-source-randomness-model.js';
 import {
-    budgetSplitBits,
-    ceilingLog2,
-    compileSecurityMarginScreen,
     criterionAttacks,
-    decisiveExperimentGates,
     fheAttackScreens,
     fheKnownAttackFloor,
-    compileFhePopulationLimits,
+} from '#tests/security-margin/attack-screens.js';
+import { compileFhePopulationLimits } from '#tests/security-margin/population-limits.js';
+import {
+    budgetSplitBits,
+    ceilingLog2,
+    decisiveExperimentGates,
     reductionGates,
     reductionVariants,
     registrationSourceInputBits,
     requiredFheAssumptionBits,
     securityTargetBits,
-    sourceDomainRequirementAt,
     supportedLevelBits,
     unpricedWorkAllowance,
+} from '#tests/security-margin/reduction-work.js';
+import {
+    compileSecurityMarginScreen,
+    sourceDomainRequirementAt,
 } from '#tests/security-margin-screen-model.js';
 import {
     deriveSupportedProfile,
@@ -92,8 +100,12 @@ const profilesOf = (participantCount: number): readonly SupportedProfile[] =>
     );
 
 describe('FHE security margin screen', () => {
-    const screen = compileSecurityMarginScreen();
-    const limits = compileFhePopulationLimits();
+    let screen: ReturnType<typeof compileSecurityMarginScreen>;
+    let limits: ReturnType<typeof compileFhePopulationLimits>;
+    beforeAll(() => {
+        screen = compileSecurityMarginScreen();
+        limits = compileFhePopulationLimits();
+    });
 
     it('rounds base-two logarithms up exactly at and around powers of two', () => {
         expect(ceilingLog2(1n)).toBe(0n);
@@ -113,12 +125,14 @@ describe('FHE security margin screen', () => {
             ),
         );
         expect(screen.map((row) => row.participantCount)).toEqual(
-            Array.from({ length: 18 }, (_, index) => index + 3),
+            supportedParticipantCounts,
         );
         for (const row of screen) {
             const participants = row.participantCount;
-            const faults = Math.floor((participants - 1) / 3);
-            const selected = Math.max(faults + 1, 2);
+            const {
+                maximumCorruptParticipantCount: faults,
+                resultReleaseThreshold: selected,
+            } = goalThresholds(participants);
             // f departures must leave d eligible authors.
             const eligible = selected + faults;
             const sets = triangle[eligible][selected];

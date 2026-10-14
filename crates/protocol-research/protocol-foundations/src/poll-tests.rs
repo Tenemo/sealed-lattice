@@ -21,14 +21,14 @@ fn manifest(title: &str, first: &str, second: &str, count: u16) -> Manifest {
     }
     Manifest::new(label(title), options).unwrap()
 }
-fn draft(top_count: u16) -> Result<PollDraft, Error> {
+fn draft(top_count: u16) -> Result<PollDraft, Refusal> {
     PollDraft::new(manifest("Question", "First", "Second", 10), top_count, 10)
 }
 #[test]
-fn poll_identity_binds_creator_definition_and_runtime_without_a_future_key() {
-    let mut creator = Credential::from_seed([7; 32]);
-    let original = *creator.signing_public();
-    let packet = creator
+fn poll_identity_binds_organizer_definition_and_runtime_without_a_future_key() {
+    let mut organizer = Credential::from_seed([7; 32]);
+    let original = *organizer.signing_public();
+    let packet = organizer
         .create_poll(draft(2).unwrap(), [2; 64], [3; 32])
         .unwrap();
     let verified = verify_poll(packet.identity, [2; 64], &packet.body, &packet.signature).unwrap();
@@ -46,7 +46,7 @@ fn poll_identity_binds_creator_definition_and_runtime_without_a_future_key() {
                 .len()
     );
     assert!(
-        creator
+        organizer
             .create_poll(draft(1).unwrap(), [2; 64], [4; 32])
             .is_err()
     );
@@ -83,7 +83,7 @@ fn every_supported_option_count_and_top_count_can_be_created() {
                 count + 1,
                 10
             ),
-            Err(Error::Shape)
+            Err(Refusal::Shape)
         ));
     }
     assert_eq!(Profile::option_range(), 2..=20);
@@ -104,7 +104,7 @@ fn every_supported_participant_maximum_can_be_created() {
     for maximum in [0, 2, 21] {
         assert!(matches!(
             PollDraft::new(manifest("Question", "First", "Second", 2), 1, maximum),
-            Err(Error::Shape)
+            Err(Refusal::Shape)
         ));
     }
     assert_eq!(Profile::participant_range(), 3..=20);
@@ -112,8 +112,8 @@ fn every_supported_participant_maximum_can_be_created() {
 
 #[test]
 fn valid_signatures_do_not_authorize_invalid_poll_fields() {
-    let mut creator = Credential::from_seed([7; 32]);
-    let packet = creator
+    let mut organizer = Credential::from_seed([7; 32]);
+    let packet = organizer
         .create_poll(draft(10).unwrap(), [2; 64], [3; 32])
         .unwrap();
     let original = CanonicalTuple::decode(&packet.body, &CanonicalDecodeLimits::default()).unwrap();
@@ -155,6 +155,6 @@ fn valid_signatures_do_not_authorize_invalid_poll_fields() {
             &vec![0; MAXIMUM_POLL_BYTES + 1],
             &packet.signature
         ),
-        Err(Error::Shape)
+        Err(Refusal::Shape)
     ));
 }

@@ -1,9 +1,7 @@
 import { runWithLocalRunLog } from '#tools/ci/local-run-log.js';
 import {
     closeParticipantCohort,
-    createCohortState,
     openParticipantCohort,
-    participantBrowserSettings,
 } from '#tools/ci/participant-browser-cohort.js';
 import { runFaultSchedule } from '#tools/ci/participant-browser-fault-schedule.js';
 import {
@@ -12,6 +10,10 @@ import {
 } from '#tools/ci/participant-browser-options.js';
 import { runSingleRoster } from '#tools/ci/participant-browser-single-roster.js';
 import { runTwoRosters } from '#tools/ci/participant-browser-two-rosters.js';
+import {
+    createCohortState,
+    participantBrowserSettings,
+} from '#tools/ci/participant-cohort-state.js';
 import { acquireProtocolResearchLock } from '#tools/ci/protocol-research-lock.js';
 
 // Runs a browser cohort of the selected profile through the maintained
@@ -34,7 +36,7 @@ import { acquireProtocolResearchLock } from '#tools/ci/protocol-research-lock.js
 // each roster with the organizer as its only corrupt member, and serves each
 // roster's records to a member of the other. A plain run carries one roster
 // of honest participants through each stage once, with no crash, forgery or
-// other roster. With --profile, Chrome records every operation's CPU samples,
+// other roster. With --cpu-profile, Chrome records every operation's CPU samples,
 // and their summary lies beside the run. With --base-port, the origins start
 // at another port, so runs of other checkouts may run beside this one. With
 // --memory-pressure, a plain run's second contributor first contributes in a
@@ -71,20 +73,6 @@ const {
 await runWithLocalRunLog(
     {
         commandLineArguments,
-        lanes: [
-            'Participant runtime assembly',
-            'Browser registration and roster agreement',
-            'Browser setup contribution',
-            'Browser setup verification',
-            'Browser signed ballots',
-            'Browser close responses',
-            'Browser target votes',
-            'Browser release shares',
-            'Browser result',
-            'Browser relay forgeries',
-            'Browser records of another poll',
-            'Browser altered and lost storage',
-        ],
         scriptName: 'research:participant',
     },
     async (log) => {

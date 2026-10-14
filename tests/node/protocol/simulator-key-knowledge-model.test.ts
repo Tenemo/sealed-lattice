@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { goalThresholds } from '#tests/node/protocol/reference/product-goals.js';
 import {
     availableExtractionRecipients,
     compileSimulatorKeyKnowledgeCensus,
@@ -70,7 +71,11 @@ describe('simulator trapdoor availability', () => {
                         (index) => mask & (1 << index),
                     ),
                 );
-                if (corrupted.size > Math.floor((count - 1) / 3)) continue;
+                if (
+                    corrupted.size >
+                    goalThresholds(count).maximumCorruptParticipantCount
+                )
+                    continue;
                 for (let challenge = 0; challenge < count; challenge++) {
                     if (corrupted.has(challenge)) continue;
                     const selected = availableExtractionRecipients(
@@ -79,7 +84,7 @@ describe('simulator trapdoor availability', () => {
                         new Set([challenge]),
                     );
                     expect(selected).toHaveLength(
-                        Math.max(Math.floor((count - 1) / 3) + 1, 2),
+                        goalThresholds(count).resultReleaseThreshold,
                     );
                     expect(selected).not.toContain(challenge);
                     expect(

@@ -3,11 +3,11 @@ import assert from 'node:assert/strict';
 import {
     labelledHashExtractionWork,
     sourceCoordinateDecodingWork,
-} from '#tests/compressed-oracle-model.js';
+} from '#tests/compressed-oracle/source-extraction.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
+import { mlDsa65Sizes } from '#tests/ml-dsa-65-parameters.js';
 import { operationSeedBytes } from '#tests/operation-seed-model.js';
 import { byteAlignedSpongePermutations } from '#tests/proof-hash-work-model.js';
-import { registrationSigningPublicKeyBytes } from '#tests/registration-enrollment-model.js';
 import { compileRegistrationSetupBindingScreen } from '#tests/registration-setup-binding-model.js';
 import { registrationSourceMask } from '#tests/registration-source-domain-model.js';
 import { setupGaussianParameters } from '#tests/setup-randomness-model.js';
@@ -35,7 +35,7 @@ export const compileRegistrationSourceRandomness = (
         sparse.maximumExaminedBytes + gaussianBytes;
     const bytes = (value: string) => BigInt(Buffer.byteLength(value, 'ascii'));
     const commonInputBytes =
-        bytes('synthetic-full-setup-witness/1') + 4n + bytes('common-fhe-a-0');
+        bytes('synthetic-full-setup-witness') + 4n + bytes('common-fhe-a-0');
     const families = inventory.fhe.map((family, index) => {
         const modulusBytes = BigInt(
             Math.ceil(family.modulus.toString(2).length / 8),
@@ -43,11 +43,11 @@ export const compileRegistrationSourceRandomness = (
         // Seven tuple items; the final seed is fixed bytes, with no inner
         // length. Only the ASCII domain and modulus have inner lengths.
         const sourceInputBytes =
-            8n +
+            6n +
             6n * 6n +
             4n +
-            bytes('sealed-lattice/fhe-source-randomness/v2') +
-            registrationSigningPublicKeyBytes +
+            bytes('sealed-lattice/fhe-source-randomness') +
+            mlDsa65Sizes.publicKeyBytes +
             64n +
             4n +
             modulusBytes +
@@ -57,11 +57,11 @@ export const compileRegistrationSourceRandomness = (
         // variable-byte public coordinate. This is ordinary SHAKE,
         // without ProtocolHash's separate fixed 64-byte prefix.
         const commitmentInputBytes =
-            8n +
+            6n +
             7n * 6n +
             4n +
-            bytes('sealed-lattice/registered-fhe-key/v2') +
-            registrationSigningPublicKeyBytes +
+            bytes('sealed-lattice/registered-fhe-key') +
+            mlDsa65Sizes.publicKeyBytes +
             64n +
             64n +
             4n +
@@ -71,7 +71,7 @@ export const compileRegistrationSourceRandomness = (
             family.publicCoordinateBytes;
         const commonOutputBytes = (degree * BigInt(family.sampleBits)) / 8n;
         const sourceMask = registrationSourceMask(
-            new Uint8Array(Number(registrationSigningPublicKeyBytes)),
+            new Uint8Array(Number(mlDsa65Sizes.publicKeyBytes)),
             Uint8Array.from({ length: Number(modulusBytes) }, (_, offset) =>
                 Number((family.modulus >> BigInt(8 * offset)) & 255n),
             ),

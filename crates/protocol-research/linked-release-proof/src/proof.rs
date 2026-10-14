@@ -1,9 +1,9 @@
 use crate::{PreparedRelease, statement::PublicStatement};
 use supported_profile::relation::*;
-use word_proof::{one_shot::OneShotProof, oracles::Witness};
+use word_proof::{in_memory::InMemoryProof, oracles::Witness};
 
 /// Proves a prepared release, returning its public statement and proof.
-pub fn prove(role: &[u8], mut prepared: PreparedRelease) -> (PublicStatement, OneShotProof) {
+pub fn prove(role: &[u8], mut prepared: PreparedRelease) -> (PublicStatement, InMemoryProof) {
     let statement = prepared.statement;
     let witness = Witness::from_columns(
         &release_relation(statement.profile),
@@ -11,11 +11,9 @@ pub fn prove(role: &[u8], mut prepared: PreparedRelease) -> (PublicStatement, On
         std::mem::take(&mut *prepared.columns),
     )
     .unwrap();
-    let proof = OneShotProof::create(
+    let proof = InMemoryProof::create(
         role,
         witness,
-        &statement.header,
-        &statement.polynomials,
         |alpha| statement.operator(alpha).unwrap(),
         false,
     );

@@ -33,9 +33,6 @@ import {
 // ballot stays retained unchanged through the later generations, and a
 // participant without a ballot keeps an empty suffix.
 
-const marker = encodeText('BST3');
-const envelopeMarker = encodeText('LBE2');
-
 export type BallotState = Readonly<{
     scores: Uint8Array;
     ballotTime: bigint;
@@ -43,7 +40,6 @@ export type BallotState = Readonly<{
     bodyLength: number;
     bodyKeys: readonly Uint8Array[];
     envelope: Uint8Array;
-
     signature: Uint8Array;
 }>;
 
@@ -72,7 +68,6 @@ export const ballotRecordLength = (
 
 export const encodeBallotState = (generation: number, state: BallotState) =>
     concatenate(
-        marker,
         Uint8Array.of(state.scores.length),
         state.scores,
         generation < ballotPhase.signed
@@ -83,7 +78,6 @@ export const encodeBallotState = (generation: number, state: BallotState) =>
         unsigned16(state.bodyKeys.length),
         ...state.bodyKeys,
         state.envelope,
-
         state.signature,
     );
 
@@ -94,10 +88,6 @@ export const ballotEnvelopeMatches = (
     bodyLength: number,
     ballotTime?: bigint,
 ) =>
-    equalBytes(
-        envelope.subarray(0, ballotEnvelopeOffset.poll),
-        envelopeMarker,
-    ) &&
     equalBytes(
         envelope.subarray(
             ballotEnvelopeOffset.poll,
@@ -125,19 +115,18 @@ export const ballotEnvelopeMatches = (
 export const decodeBallotState = (
     profile: ParticipantProfile,
     context: RecordContext,
-    generation: number,
+    phase: number,
     bytes: Uint8Array,
 ): BallotState => {
     const bounds = profile.ballot;
     if (
-        generation < ballotPhase.locked ||
-        generation > ballotPhase.signed ||
-        !isRootGeneration(generation) ||
-        bytes.length > bounds.maximumStateBytes ||
-        !equalBytes(bytes.subarray(0, marker.length), marker)
+        phase < ballotPhase.locked ||
+        phase > ballotPhase.signed ||
+        !isRootGeneration(phase) ||
+        bytes.length > bounds.maximumStateBytes
     )
         throw new Error('The ballot state is malformed.');
-    let offset = marker.length;
+    let offset = 0;
     const take = (length: number) => {
         if (length > bytes.length - offset)
             throw new Error('The ballot state is truncated.');
@@ -147,21 +136,19 @@ export const decodeBallotState = (
     };
     const scores = take(take(1)[0]);
     if (
-        generation === ballotPhase.signed
+        phase === ballotPhase.signed
             ? scores.length !== 0
             : !validBallotScores(profile, scores)
     )
         throw new Error('The locked scores changed.');
     const ballotTime =
-        generation === ballotPhase.signed ? 0n : readUnsigned64(take(8), 0);
-    const seed = take(
-        generation === ballotPhase.ready ? operationSeedBytes : 0,
-    );
+        phase === ballotPhase.signed ? 0n : readUnsigned64(take(8), 0);
+    const seed = take(phase === ballotPhase.ready ? operationSeedBytes : 0);
     const bodyLength = readUnsigned32(take(4), 0);
     const bodyCount = readUnsigned16(take(2), 0);
     const bodyRecords = Math.ceil(bodyLength / bounds.recordBytes);
     if (
-        generation < ballotPhase.body
+        phase < ballotPhase.body
             ? bodyLength !== 0 || bodyCount !== 0
             : bodyLength < bounds.minimumBodyBytes ||
               bodyLength > bounds.maximumBodyBytes ||
@@ -172,22 +159,22 @@ export const decodeBallotState = (
         take(recordKeyBytes),
     );
     const envelope =
-        generation >= ballotPhase.body
+        phase >= ballotPhase.body
             ? take(bounds.envelopeBytes)
             : new Uint8Array();
     const signature =
-        generation === ballotPhase.signed
+        phase === ballotPhase.signed
             ? take(profile.registration.signatureBytes)
             : new Uint8Array();
     if (offset !== bytes.length)
         throw new Error('The ballot state has extra bytes.');
     if (
-        generation >= ballotPhase.body &&
+        phase >= ballotPhase.body &&
         !ballotEnvelopeMatches(
             envelope,
             context,
             bodyLength,
-            generation === ballotPhase.signed ? undefined : ballotTime,
+            phase === ballotPhase.signed ? undefined : ballotTime,
         )
     )
         throw new Error('The retained envelope changed its context.');
@@ -209,7 +196,7 @@ export const ballotRecordAssociatedData = (
     length: number,
 ) =>
     concatenate(
-        encodeText('sealed-lattice/participant-ballot-record/v3'),
+        encodeText('sealed-lattice/participant-ballot-record'),
         context.poll,
         context.setupIdentity,
         unsigned16(context.position),

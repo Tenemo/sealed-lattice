@@ -1,6 +1,6 @@
 use crate::{
-    Credential, Error, SIGNATURE_BYTES, SigningPurpose,
-    ballot_authentication::RetainedBallotOwner,
+    Credential, Refusal, SIGNATURE_BYTES, SigningPurpose,
+    ballot_authentication::RetainedSetupOwner,
     foundation::{
         CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple,
         hash_foundation_tuple_512,
@@ -11,21 +11,14 @@ use fips204::{
     ml_dsa_65,
     traits::{SerDes, Verifier},
 };
-use supported_profile::Profile;
+use supported_profile::{Profile, minimum_turnout};
 
-pub const TARGET_PURPOSE: &str = "sealed-lattice/evaluation-target/v2";
-pub const TARGET_IDENTITY_DOMAIN: &str = "sealed-lattice/evaluation-target-identity/v1";
-pub const CERTIFICATION_CONTEXT: &[u8] = b"sealed-lattice/target-certification/v1";
+pub const TARGET_PURPOSE: &str = "sealed-lattice/evaluation-target";
+pub const TARGET_IDENTITY_DOMAIN: &str = "sealed-lattice/evaluation-target-identity";
+pub const CERTIFICATION_CONTEXT: &[u8] = b"sealed-lattice/target-certification";
 pub const TARGET_VOTE_BYTES: usize = 2 + 64 + crate::SIGNATURE_BYTES;
 /// Every evaluation target body is at most this long.
 pub const MAXIMUM_TARGET_BODY_BYTES: usize = 2048;
-
-/// A result needs at least `f+2` accepted ballots, where `f = floor((n-1)/3)`
-/// bounds the compromised participants, so every result combines at least two
-/// honest ballots. A smaller accepted set takes the no-result branch.
-pub fn minimum_turnout(participants: usize) -> usize {
-    participants.saturating_sub(1) / 3 + 2
-}
 
 /// Canonical signing data only. Parsing this value never verifies evaluation,
 /// the source inventory, certification or authority to release a share.
@@ -36,88 +29,85 @@ pub struct TargetMessage {
     proposal: [u8; 64],
     identity: [u8; 64],
     participants: usize,
-    encrypted: bool,
+    ciphertext: Option<[u8; 64]>,
     classifications: Vec<u8>,
 }
 impl TargetMessage {
-    pub fn parse(body: &[u8], participants: usize) -> Result<Self, Error> {
+    pub fn parse(body: &[u8], participants: usize) -> Result<Self, Refusal> {
         if !Profile::participant_range().contains(&participants) {
-            return Err(Error::Context);
+            return Err(Refusal::Context);
         }
         // Classification codes: 0 absent, 1 invalid, 2 accepted, 3 conflicting.
         let limits = CanonicalDecodeLimits {
             maximum_tuple_byte_length: MAXIMUM_TARGET_BODY_BYTES,
-            maximum_item_count: 7,
+            maximum_item_count: 6,
             maximum_item_byte_length: MAXIMUM_TARGET_BODY_BYTES,
             maximum_nesting_depth: 0,
             ..CanonicalDecodeLimits::default()
         };
-        let tuple = CanonicalTuple::decode(body, &limits).map_err(|_| Error::Shape)?;
-        if tuple.schema_identifier != 1
-            || tuple.schema_version != 1
-            || ![6, 7].contains(&tuple.items.len())
-        {
-            return Err(Error::Shape);
+        let tuple = CanonicalTuple::decode(body, &limits).map_err(|_| Refusal::Shape)?;
+        if !(tuple.has_header(5) || tuple.has_header(6)) {
+            return Err(Refusal::Shape);
         }
         let items = &tuple.items;
         if items[0].item_type() != CanonicalItemType::Ascii
-            || items[0].variable_value_bytes().map_err(|_| Error::Shape)?
+            || items[0]
+                .variable_value_bytes()
+                .map_err(|_| Refusal::Shape)?
                 != TARGET_PURPOSE.as_bytes()
         {
-            return Err(Error::Context);
+            return Err(Refusal::Context);
         }
         if items[1..4]
             .iter()
             .any(|item| item.item_type() != CanonicalItemType::Hash512)
             || items[4].item_type() != CanonicalItemType::RawBytes
-            || items[5].item_type() != CanonicalItemType::Unsigned16
         {
-            return Err(Error::Shape);
+            return Err(Refusal::Shape);
         }
-        let classifications = items[4].variable_value_bytes().map_err(|_| Error::Shape)?;
+        let classifications = items[4]
+            .variable_value_bytes()
+            .map_err(|_| Refusal::Shape)?;
         if classifications.len() != participants || classifications.iter().any(|value| *value > 3) {
-            return Err(Error::Shape);
+            return Err(Refusal::Shape);
         }
-        let branch = u16::from_le_bytes(
-            items[5]
-                .canonical_bytes()
-                .try_into()
-                .map_err(|_| Error::Shape)?,
-        );
+        // The classifications select the branch: below the minimum turnout
+        // the body ends there, and otherwise the final ciphertext's identity
+        // follows.
         let accepted = classifications.iter().filter(|value| **value == 2).count();
         let evaluated = accepted >= minimum_turnout(participants);
-        match branch {
-            0 if items.len() == 6 && !evaluated => {}
-            1 if items.len() == 7 && evaluated => {
-                if items[6].item_type() != CanonicalItemType::Hash512 {
-                    return Err(Error::Shape);
-                }
-            }
-            _ => return Err(Error::Shape),
-        }
+        let ciphertext = match (items.get(5), evaluated) {
+            (None, false) => None,
+            (Some(item), true) if item.item_type() == CanonicalItemType::Hash512 => Some(
+                item.canonical_bytes()
+                    .try_into()
+                    .map_err(|_| Refusal::Shape)?,
+            ),
+            _ => return Err(Refusal::Shape),
+        };
         let identity = hash_foundation_tuple_512(
             TARGET_IDENTITY_DOMAIN,
-            &[CanonicalItem::variable_bytes(body).map_err(|_| Error::Shape)?],
+            &[CanonicalItem::variable_bytes(body).map_err(|_| Refusal::Shape)?],
         )
-        .map_err(|_| Error::Shape)?
+        .map_err(|_| Refusal::Shape)?
         .into_bytes();
         Ok(Self {
             body: body.to_vec(),
             poll: items[1]
                 .canonical_bytes()
                 .try_into()
-                .map_err(|_| Error::Shape)?,
+                .map_err(|_| Refusal::Shape)?,
             setup_identity: items[2]
                 .canonical_bytes()
                 .try_into()
-                .map_err(|_| Error::Shape)?,
+                .map_err(|_| Refusal::Shape)?,
             proposal: items[3]
                 .canonical_bytes()
                 .try_into()
-                .map_err(|_| Error::Shape)?,
+                .map_err(|_| Refusal::Shape)?,
             identity,
             participants,
-            encrypted: branch == 1,
+            ciphertext,
             classifications: classifications.to_vec(),
         })
     }
@@ -141,8 +131,13 @@ impl TargetMessage {
     pub fn participants(&self) -> usize {
         self.participants
     }
-    pub fn encrypted(&self) -> bool {
-        self.encrypted
+    pub fn has_result(&self) -> bool {
+        self.ciphertext.is_some()
+    }
+    /// The identity of the evaluated ciphertext, which only an evaluated
+    /// target names.
+    pub fn ciphertext_identity(&self) -> Option<&[u8; 64]> {
+        self.ciphertext.as_ref()
     }
     /// A participant's classification code, or `None` outside the roster.
     pub fn classification(&self, position: usize) -> Option<u8> {
@@ -159,14 +154,14 @@ pub struct TargetVote {
     signature: [u8; SIGNATURE_BYTES],
 }
 impl TargetVote {
-    pub fn parse(bytes: &[u8]) -> Result<Self, Error> {
+    pub fn parse(bytes: &[u8]) -> Result<Self, Refusal> {
         if bytes.len() != TARGET_VOTE_BYTES {
-            return Err(Error::Shape);
+            return Err(Refusal::Shape);
         }
         let position = u16::from_le_bytes(bytes[..2].try_into().unwrap()) as usize;
         // A position lies within the largest supported roster.
         if position >= *Profile::participant_range().end() {
-            return Err(Error::Shape);
+            return Err(Refusal::Shape);
         }
         Ok(Self {
             position,
@@ -194,13 +189,13 @@ impl TargetVote {
 impl Credential {
     pub(crate) fn check_target_owner(
         &self,
-        owner: &RetainedBallotOwner,
+        owner: &RetainedSetupOwner,
         roster: &AuthenticatedRosterProposal,
         message: &TargetMessage,
-    ) -> Result<(), Error> {
-        self.check_ballot_owner(owner)?;
+    ) -> Result<(), Refusal> {
+        self.check_setup_owner(owner)?;
         let records = roster.proposal().records();
-        let record = records.get(owner.position()).ok_or(Error::Context)?;
+        let record = records.get(owner.position()).ok_or(Refusal::Context)?;
         if records.len() != message.participants
             || message.poll() != owner.poll()
             || message.setup_identity() != owner.setup_identity()
@@ -210,7 +205,7 @@ impl Credential {
                 .target_lock
                 .is_some_and(|target| target != *message.identity())
         {
-            return Err(Error::Context);
+            return Err(Refusal::Context);
         }
         Ok(())
     }
@@ -218,31 +213,31 @@ impl Credential {
     /// proposed. Its own ballot need not be included.
     pub(crate) fn check_target_predecessors(
         &self,
-        owner: &RetainedBallotOwner,
+        owner: &RetainedSetupOwner,
         roster: &AuthenticatedRosterProposal,
-    ) -> Result<(), Error> {
+    ) -> Result<(), Refusal> {
         if self.close_response.is_none()
             || (owner.position() == roster.proposal().organizer_position()
                 && !self.close_proposal_signed)
         {
-            return Err(Error::Consumed);
+            return Err(Refusal::Consumed);
         }
         Ok(())
     }
     /// Volatile one-shot signing beneath the authenticated participant root.
     /// The enrollment bridge supplies a genuinely evaluated target and commits
-    /// its exact exact body before reaching this method.
+    /// its exact body before reaching this method.
     pub fn sign_target(
         &mut self,
-        owner: &RetainedBallotOwner,
+        owner: &RetainedSetupOwner,
         roster: &AuthenticatedRosterProposal,
         message: &TargetMessage,
-    ) -> Result<TargetVote, Error> {
+    ) -> Result<TargetVote, Refusal> {
         self.check_target_owner(owner, roster, message)?;
         self.check_target_predecessors(owner, roster)?;
         self.check_unlocked(SigningPurpose::Target)?;
         if self.target_signed {
-            return Err(Error::Consumed);
+            return Err(Refusal::Consumed);
         }
         self.target_signed = true;
         self.target_lock = Some(*message.identity());
@@ -258,24 +253,24 @@ impl Credential {
     /// signs nothing and never reopens that purpose.
     pub fn restore_target(
         &mut self,
-        owner: &RetainedBallotOwner,
+        owner: &RetainedSetupOwner,
         roster: &AuthenticatedRosterProposal,
         message: &TargetMessage,
         packet: &[u8],
-    ) -> Result<(), Error> {
+    ) -> Result<(), Refusal> {
         self.check_target_owner(owner, roster, message)?;
         self.check_target_predecessors(owner, roster)?;
         if self.target_signed {
-            return Err(Error::Consumed);
+            return Err(Refusal::Consumed);
         }
         let vote = TargetVote::parse(packet)?;
-        let key =
-            ml_dsa_65::PublicKey::try_from_bytes(self.signing_public).map_err(|_| Error::Crypto)?;
+        let key = ml_dsa_65::PublicKey::try_from_bytes(self.signing_public)
+            .map_err(|_| Refusal::Crypto)?;
         if vote.position() != owner.position()
             || vote.target() != message.identity()
             || !key.verify(message.identity(), vote.signature(), CERTIFICATION_CONTEXT)
         {
-            return Err(Error::Crypto);
+            return Err(Refusal::Crypto);
         }
         self.target_signed = true;
         self.target_lock = Some(*message.identity());

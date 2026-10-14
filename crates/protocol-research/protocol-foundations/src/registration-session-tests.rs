@@ -70,35 +70,35 @@ fn sessions_refuse_as_the_verifier_does_and_leave_no_state() {
     let (_, foreign) = keyless_record([9; 64]);
     assert!(matches!(
         RegistrationSession::open(&poll, 0, &foreign, &signature),
-        Err(Error::Context)
+        Err(Refusal::Context)
     ));
     let extended = [header.as_slice(), &[0]].concat();
     assert!(matches!(
         RegistrationSession::open(&poll, 0, &extended, &signature),
-        Err(Error::Shape)
+        Err(Refusal::Shape)
     ));
     assert!(matches!(
         RegistrationSession::open(&poll, 0, &header, &signature[1..]),
-        Err(Error::Shape)
+        Err(Refusal::Shape)
     ));
     let mut session = RegistrationSession::open(&poll, 0, &header, &signature).unwrap();
     assert!(matches!(
         session.push_key(&vec![0; CHUNK_LIMIT + 1]),
-        Err(Error::Shape)
+        Err(Refusal::Shape)
     ));
-    assert!(matches!(session.finish(), Err(Error::Consumed)));
+    assert!(matches!(session.finish(), Err(Refusal::Consumed)));
     let mut session = RegistrationSession::open(&poll, 0, &header, &signature).unwrap();
     for part in vec![0; KEY_BYTES].chunks(CHUNK_LIMIT) {
         session.push_key(part).unwrap();
     }
-    assert!(matches!(session.push_key(&[0]), Err(Error::Shape)));
+    assert!(matches!(session.push_key(&[0]), Err(Refusal::Shape)));
     drop(session);
     let mut session = RegistrationSession::open(&poll, 0, &header, &signature).unwrap();
     for part in vec![0; KEY_BYTES].chunks(CHUNK_LIMIT) {
         session.push_key(part).unwrap();
     }
     session.finish_key().unwrap();
-    assert!(matches!(session.finish_key(), Err(Error::Shape)));
+    assert!(matches!(session.finish_key(), Err(Refusal::Shape)));
     drop(session);
     let mut session = RegistrationSession::open(&poll, 0, &header, &signature).unwrap();
     for part in vec![0; KEY_BYTES].chunks(CHUNK_LIMIT) {
@@ -107,5 +107,5 @@ fn sessions_refuse_as_the_verifier_does_and_leave_no_state() {
     session.finish_key().unwrap();
     let pending = session.finish().unwrap();
     assert_eq!(open_sessions(), 0);
-    assert!(matches!(pending.wait(), Err(Error::Shape)));
+    assert!(matches!(pending.wait(), Err(Refusal::Shape)));
 }

@@ -1,11 +1,11 @@
 //! Registration sessions against the registration verifier on a real
 //! registration: the same verified record however the bytes are divided or
 //! interleaved, and the verifier's own refusal of changed bytes.
+use crate::contribution_session::{ContributionSession, checkpoint_layout, import_checkpoint};
 use crate::registration_fixture::{Record, registration};
-use contribution_prover::contribution_session::ContributionSession;
 use parallel_work::sealing;
 use protocol_foundations::{
-    Credential, Error,
+    Credential, Refusal,
     foundation::{
         CanonicalItem, CanonicalTuple, participant_identity::derive_participant_identity,
     },
@@ -17,7 +17,7 @@ use supported_profile::Profile;
 
 const CHUNK: usize = 1 << 20;
 
-fn direct(poll: &VerifiedPoll, record: &Record) -> Result<VerifiedRegistration, Error> {
+fn direct(poll: &VerifiedPoll, record: &Record) -> Result<VerifiedRegistration, Refusal> {
     let mut verifier = RegistrationVerifier::new(poll, &record.header, &record.signature)?;
     for part in record.key.chunks(CHUNK) {
         verifier.push_key(part)?;
@@ -31,7 +31,7 @@ fn streamed(
     poll: &VerifiedPoll,
     record: &Record,
     division: usize,
-) -> Result<VerifiedRegistration, Error> {
+) -> Result<VerifiedRegistration, Refusal> {
     let mut session = RegistrationSession::open(poll, 0, &record.header, &record.signature)?;
     for part in record.key.chunks(division) {
         session.push_key(part)?;
@@ -93,7 +93,7 @@ fn sessions_verify_and_refuse_a_registration_as_its_verifier_does() {
         changed(|record| record.key[5] ^= 1),
         changed(|record| record.signature[0] ^= 1),
     ] {
-        let refusal = |result: Result<VerifiedRegistration, Error>| {
+        let refusal = |result: Result<VerifiedRegistration, Refusal>| {
             format!("{:?}", result.err().expect("A refusal"))
         };
         assert_eq!(
@@ -118,9 +118,8 @@ fn checkpoint_import_preserves_the_verified_original_owner(
     bodies.extend([8; 64]);
     let proposal = CanonicalTuple::new(
         1,
-        1,
         vec![
-            CanonicalItem::nonempty_ascii("sealed-lattice/roster-proposal/v2").unwrap(),
+            CanonicalItem::nonempty_ascii("sealed-lattice/roster-proposal").unwrap(),
             CanonicalItem::hash512(poll.identity()),
             CanonicalItem::variable_bytes(bodies).unwrap(),
         ],
@@ -132,7 +131,6 @@ fn checkpoint_import_preserves_the_verified_original_owner(
     let prefix = [poll.identity(), *context.identity()].concat();
     let role = |credential: &Credential, position: u16, purpose: &str| {
         CanonicalTuple::new(
-            1,
             1,
             vec![
                 CanonicalItem::nonempty_ascii(purpose).unwrap(),
@@ -150,18 +148,17 @@ fn checkpoint_import_preserves_the_verified_original_owner(
         .encode()
         .unwrap()
     };
-    let expected_role = role(credential, 0, "sealed-lattice/setup-contribution/v3");
+    let expected_role = role(credential, 0, "sealed-lattice/setup-contribution");
     assert_eq!(
         context.checkpoint_role(&prefix, 0, profile).unwrap(),
         expected_role
     );
     let header = |role: &[u8], input_hashes: usize| {
-        let mut bytes = b"FPC4".to_vec();
-        bytes.extend([profile.participants() as u8, profile.options() as u8]);
+        let mut bytes = vec![profile.participants() as u8, profile.options() as u8];
         bytes.extend(0u32.to_le_bytes());
         bytes.extend((role.len() as u16).to_le_bytes());
         bytes.extend(role);
-        bytes.extend([0; 128]);
+        bytes.extend([0; 64]);
         bytes.extend(profile.setup_statement_header());
         bytes.extend((input_hashes as u16).to_le_bytes());
         for _ in 0..input_hashes {
@@ -173,27 +170,34 @@ fn checkpoint_import_preserves_the_verified_original_owner(
     let valid = request(&expected_role, profile.participants());
     let other_owner = Credential::from_seed([91; 32]);
     for wrong_role in [
-        role(&other_owner, 0, "sealed-lattice/setup-contribution/v3"),
-        role(credential, 1, "sealed-lattice/setup-contribution/v3"),
+        role(&other_owner, 0, "sealed-lattice/setup-contribution"),
+        role(credential, 1, "sealed-lattice/setup-contribution"),
     ] {
         let bytes = request(&wrong_role, profile.participants());
         // The checkpoint decoder accepts this partial header, isolating the
         // owning import helper's role check as the reason for refusal.
-        assert!(word_proof::bridge::first_checkpoint::Import::begin(&bytes[128..]).is_ok());
-        assert!(contribution_prover::import_checkpoint(&context, 0, &bytes).is_err());
+        assert!(
+            word_proof::setup_prover::first_oracle_checkpoint::Import::begin(&bytes[128..]).is_ok()
+        );
+        assert!(import_checkpoint(&context, 0, &bytes).is_err());
     }
     for position in [1, 2, usize::MAX] {
-        assert!(contribution_prover::import_checkpoint(&context, position, &valid).is_err());
+        assert!(import_checkpoint(&context, position, &valid).is_err());
     }
+    // The checkpoint decoder refuses a header without every recipient key
+    // hash.
     let missing_keys = request(&expected_role, 0);
-    assert!(word_proof::bridge::first_checkpoint::Import::begin(&missing_keys[128..]).is_ok());
-    assert!(contribution_prover::import_checkpoint(&context, 0, &missing_keys).is_err());
+    assert!(
+        word_proof::setup_prover::first_oracle_checkpoint::Import::begin(&missing_keys[128..])
+            .is_err()
+    );
+    assert!(import_checkpoint(&context, 0, &missing_keys).is_err());
     for offset in [0, 64] {
         let mut changed = valid.clone();
         changed[offset] ^= 1;
-        assert!(contribution_prover::import_checkpoint(&context, 0, &changed).is_err());
+        assert!(import_checkpoint(&context, 0, &changed).is_err());
     }
-    let imported = contribution_prover::import_checkpoint(&context, 0, &valid).unwrap();
+    let imported = import_checkpoint(&context, 0, &valid).unwrap();
     assert_eq!(imported.role(), expected_role);
     assert!(!imported.complete());
     assert!(imported.finish().is_err());
@@ -210,8 +214,11 @@ fn contribution_session_imports_the_checkpoint(
     key: &[u8],
     profile: Profile,
 ) {
-    let session =
-        || ContributionSession::new(|_, _, _| unreachable!("An import emits no public chunk."));
+    let session = || {
+        ContributionSession::new(Box::new(|_, _, _| {
+            unreachable!("An import emits no public chunk.")
+        }))
+    };
     let write = |session: &mut ContributionSession, bytes: &[u8]| {
         session.input()[..bytes.len()].copy_from_slice(bytes);
     };
@@ -222,7 +229,7 @@ fn contribution_session_imports_the_checkpoint(
         .unwrap();
     assert_eq!(
         importing.checkpoint_records(),
-        contribution_prover::checkpoint_layout(profile).1.len()
+        checkpoint_layout(profile).1.len()
     );
     // A second import is refused without stopping the first.
     write(&mut importing, request);

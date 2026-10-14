@@ -3,7 +3,7 @@
 //! carries no hash of its own, and computes them here, since the host waits
 //! for each identity right after its last bytes.
 
-use crate::Error;
+use crate::Refusal;
 use protocol_foundations::{
     ballot_authentication::ENVELOPE_IDENTITY_DOMAIN, close_signing::ClosePurpose,
     identity::IdentityHasher, target_signing::TARGET_IDENTITY_DOMAIN,
@@ -29,9 +29,9 @@ protocol_foundations::operation_codes! {
 impl CustodyPurpose {
     fn domain(self) -> &'static str {
         match self {
-            Self::Root => "sealed-lattice/participant-root/v1",
-            Self::Record => "sealed-lattice/participant-record/v1",
-            Self::EnrollmentInput => "sealed-lattice/enrollment-input/v1",
+            Self::Root => "sealed-lattice/participant-root",
+            Self::Record => "sealed-lattice/participant-record",
+            Self::EnrollmentInput => "sealed-lattice/enrollment-input",
             Self::Target => TARGET_IDENTITY_DOMAIN,
             Self::Envelope => ENVELOPE_IDENTITY_DOMAIN,
             Self::CloseResponse => ClosePurpose::Response.context(),
@@ -55,21 +55,21 @@ impl Default for State {
 }
 impl State {
     /// Starts the identity of `length` bytes, discarding any unfinished one.
-    pub fn begin(&mut self, purpose: u32, length: usize) -> Result<(), Error> {
+    pub fn begin(&mut self, purpose: u32, length: usize) -> Result<(), Refusal> {
         self.output = [0; 64];
         self.hash = None;
-        let purpose = CustodyPurpose::from_code(purpose).ok_or(Error::Shape)?;
+        let purpose = CustodyPurpose::from_code(purpose).ok_or(Refusal::Shape)?;
         let hash =
-            IdentityHasher::local(purpose.domain(), &[], length).map_err(|_| Error::Shape)?;
+            IdentityHasher::local(purpose.domain(), &[], length).map_err(|_| Refusal::Shape)?;
         self.hash = Some(hash);
         Ok(())
     }
     /// Absorbs the first `length` input bytes, then clears them.
-    pub fn absorb(&mut self, length: usize) -> Result<(), Error> {
+    pub fn absorb(&mut self, length: usize) -> Result<(), Refusal> {
         let result = match (self.input.get(..length), self.hash.as_mut()) {
-            (Some(bytes), Some(hash)) => hash.absorb(bytes).map_err(|_| Error::Shape),
-            (None, _) => Err(Error::Shape),
-            (_, None) => Err(Error::State),
+            (Some(bytes), Some(hash)) => hash.absorb(bytes).map_err(|_| Refusal::Shape),
+            (None, _) => Err(Refusal::Shape),
+            (_, None) => Err(Refusal::State),
         };
         self.input[..length.min(INPUT_BYTES)].fill(0);
         if result.is_err() {
@@ -78,13 +78,13 @@ impl State {
         result
     }
     /// Writes the identity once every committed byte is absorbed.
-    pub fn finish(&mut self) -> Result<(), Error> {
+    pub fn finish(&mut self) -> Result<(), Refusal> {
         self.output = self
             .hash
             .take()
-            .ok_or(Error::State)?
+            .ok_or(Refusal::State)?
             .finish()
-            .map_err(|_| Error::Shape)?;
+            .map_err(|_| Refusal::Shape)?;
         Ok(())
     }
 }

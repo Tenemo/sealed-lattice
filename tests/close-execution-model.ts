@@ -3,12 +3,9 @@ import {
     capListing,
     checkCloseContract,
     closeInventory,
-    deriveCloseProfile,
     identityOf,
     knownSlots,
     listKnownEnvelopes,
-    maskOf,
-    masksAtMost,
     maximumListedEnvelopesPerSlot,
     memberCount,
     members,
@@ -23,6 +20,20 @@ import {
     type CloseResponse,
     type ClosedInventory,
 } from '#tests/close-contract-model.js';
+import {
+    type Message,
+    type Delivery,
+    CloseDeliveryQueue,
+} from '#tests/close-execution/delivery.js';
+import {
+    type HonestParticipant,
+    retainCloseBody,
+    lockCloseIntent,
+    canVerifyCloseBarrier,
+    retainReleaseShare,
+    createHonestParticipant,
+} from '#tests/close-execution/participant.js';
+import { thresholdProfileFor } from '#tests/threshold-completion-model.js';
 
 // Message-level executions of the close-response contract. Messages are
 // the contract model's ideal authenticated objects; these executions
@@ -58,65 +69,6 @@ const createRandom = (seed: number) => {
         state >>>= 0;
         return state % limit;
     };
-};
-
-type Message =
-    | Readonly<{ kind: 'envelope'; envelope: CloseEnvelope }>
-    | Readonly<{ kind: 'body'; envelope: CloseEnvelope }>
-    | Readonly<{ kind: 'intent'; intent: CloseIntent }>
-    | Readonly<{ kind: 'response'; response: CloseResponse }>
-    | Readonly<{ kind: 'proposal'; proposal: CloseProposal }>
-    // The honest organizer's copies of every named response, every envelope
-    // they list and every usable slot's body.
-    | Readonly<{ kind: 'closure'; proposal: CloseProposal }>
-    // A responder's copy of a body it lists alone, for the organizer.
-    | Readonly<{ kind: 'forward'; envelope: CloseEnvelope }>
-    | Readonly<{
-          kind: 'signature';
-          signer: number;
-          proposal: CloseProposal;
-      }>
-    | Readonly<{ kind: 'share'; signer: number; target: string }>;
-
-type Delivery = Readonly<{
-    recipient: number;
-    message: Message;
-    action: number;
-}>;
-
-type HonestParticipant = {
-    readonly position: number;
-    readonly clockSkew: number;
-    departed: boolean;
-    ownEnvelope: string | undefined;
-    // The envelopes known with or without a body, and the bodies held.
-    readonly known: Map<string, CloseEnvelope>;
-    readonly held: Map<string, CloseEnvelope>;
-    // What reached this participant for a close barrier: every body it could
-    // read, every response and the proposals whose closure it received.
-    readonly readable: Set<string>;
-    readonly seen: Set<CloseResponse>;
-    readonly closures: Set<CloseProposal>;
-    // Proposals it has yet to verify.
-    readonly waiting: CloseProposal[];
-    // The organizer's bodies that responders forwarded.
-    readonly forwarded: Map<string, CloseEnvelope>;
-    // Bodies ever received for each slot.
-    readonly received: Map<number, number>;
-    // Bodies the organizer requested.
-    readonly requested: Set<string>;
-    heldAtResponse: ReadonlySet<string>;
-    lockedIntent: CloseIntent | undefined;
-    answeredIntent: number | undefined;
-    readonly responses: Map<number, CloseResponse>;
-    proposed: boolean;
-    targetLock: string | undefined;
-    readonly signatures: Map<string, Set<number>>;
-    certified: string | undefined;
-    readonly shares: Map<string, Set<number>>;
-    released: boolean;
-    verified: boolean;
-    readonly visitSteps: Set<number>;
 };
 
 export type CloseExecutionOptions = Readonly<{
@@ -189,7 +141,7 @@ type CloseExecutionResult = Readonly<{
 export const runCloseExecution = (
     options: CloseExecutionOptions,
 ): CloseExecutionResult => {
-    const profile = deriveCloseProfile(options.participantCount);
+    const profile = thresholdProfileFor(options.participantCount);
     const n = options.participantCount;
     const random = createRandom(options.seed);
     const { corrupt } = options;
@@ -199,36 +151,11 @@ export const runCloseExecution = (
     const intents = new Map<number, CloseIntent>();
     const participants = new Map<number, HonestParticipant>();
     for (const position of members(((1 << n) - 1) & ~corrupt, n))
-        participants.set(position, {
+        participants.set(
             position,
-            clockSkew: random(3) - 1,
-            departed: false,
-            ownEnvelope: undefined,
-            known: new Map(),
-            held: new Map(),
-            readable: new Set(),
-            seen: new Set(),
-            closures: new Set(),
-            waiting: [],
-            forwarded: new Map(),
-            received: new Map(),
-            requested: new Set(),
-            heldAtResponse: new Set(),
-            lockedIntent: undefined,
-            answeredIntent: undefined,
-            responses: new Map(),
-            proposed: false,
-            targetLock: undefined,
-            signatures: new Map(),
-            certified: undefined,
-            shares: new Map(),
-            released: false,
-            verified: false,
-            visitSteps: new Set(),
-        });
-    let pending: Delivery[] = [];
-    let withheld: Delivery[] = [];
-    let step = 0;
+            createHonestParticipant(position, random(3) - 1),
+        );
+
     let ignoredMessages = 0;
     let maximumListedEntries = 0;
     let maximumHeldPerSlot = 0;
@@ -239,7 +166,52 @@ export const runCloseExecution = (
     // The bodies an honest organizer held when it locked its intent, which it
     // publishes with the intent.
     let organizerHeldAtLock: ReadonlySet<string> | undefined;
-    let anyCertificate = false;
+    const deliveries = new CloseDeliveryQueue(
+        new Set(participants.keys()),
+        random,
+        options.isolated,
+        options.priorityRecipient,
+        action,
+    );
+    const deliverOne = () =>
+        deliveries.deliverNext((delivery) => {
+            const participant = participants.get(delivery.recipient);
+            if (participant !== undefined) receive(participant, delivery);
+        });
+    const holdBody = (
+        participant: HonestParticipant,
+        envelope: CloseEnvelope,
+    ) => {
+        const retained = retainCloseBody(participant, envelope);
+        if (retained === undefined) return false;
+        maximumHeldPerSlot = Math.max(maximumHeldPerSlot, retained.held);
+        if ((corrupt & bit(envelope.author)) === 0)
+            maximumReceivedPerHonestSlot = Math.max(
+                maximumReceivedPerHonestSlot,
+                retained.received,
+            );
+        else
+            maximumReceivedPerCorruptSlot = Math.max(
+                maximumReceivedPerCorruptSlot,
+                retained.received,
+            );
+        return true;
+    };
+    const recordShare = (
+        participant: HonestParticipant,
+        signer: number,
+        target: string,
+    ) => {
+        if (
+            retainReleaseShare(
+                participant,
+                signer,
+                target,
+                profile.resultReleaseThreshold,
+            )
+        )
+            work(participant);
+    };
     const allResponses: CloseResponse[] = [];
     const proposalsByTarget = new Map<string, CloseProposal>();
     const signersByTarget = new Map<string, Set<number>>();
@@ -273,79 +245,16 @@ export const runCloseExecution = (
         }
         return inventory;
     };
-    const send = (message: Message, from: number | undefined): void => {
-        const withhold =
-            from !== undefined &&
-            (options.isolated & bit(from)) !== 0 &&
-            !anyCertificate;
-        for (const recipient of participants.keys()) {
-            if (recipient === from) continue;
-            const delivery = { recipient, message, action };
-            if (withhold) withheld.push(delivery);
-            else pending.push(delivery);
-        }
-    };
     // A corrupt participant's message, which the relay may show only to the
     // organizer.
     const sendCorrupt = (message: Message): void => {
         if (options.corruptShowsOnlyOrganizer !== true)
-            send(message, undefined);
+            deliveries.send(message, undefined);
         else if (participants.has(organizer))
-            pending.push({ recipient: organizer, message, action });
-    };
-    // An honest participant's message for one recipient.
-    const sendTo = (message: Message, from: number, recipient: number) => {
-        if (!participants.has(recipient)) return;
-        const delivery = { recipient, message, action };
-        if ((options.isolated & bit(from)) !== 0 && !anyCertificate)
-            withheld.push(delivery);
-        else pending.push(delivery);
+            deliveries.enqueue({ recipient: organizer, message, action });
     };
     const work = (participant: HonestParticipant): void => {
-        participant.visitSteps.add(step);
-    };
-    // A body is taken below the per-slot cap and, after the intent lock, only
-    // on time. Its envelope becomes known either way.
-    const holdBody = (
-        participant: HonestParticipant,
-        envelope: CloseEnvelope,
-    ): boolean => {
-        const identity = identityOf(envelope);
-        participant.known.set(identity, envelope);
-        if (envelope.bodyAvailable) participant.readable.add(identity);
-        const inSlot = [...participant.held.values()].filter(
-            ({ author }) => author === envelope.author,
-        ).length;
-        if (
-            participant.held.has(identity) ||
-            !envelope.bodyAvailable ||
-            (participant.lockedIntent !== undefined &&
-                envelope.time > participant.lockedIntent.closeTime) ||
-            inSlot >= maximumListedEnvelopesPerSlot
-        )
-            return false;
-        participant.held.set(identity, envelope);
-        const received = (participant.received.get(envelope.author) ?? 0) + 1;
-        participant.received.set(envelope.author, received);
-        maximumHeldPerSlot = Math.max(maximumHeldPerSlot, inSlot + 1);
-        if ((corrupt & bit(envelope.author)) === 0)
-            maximumReceivedPerHonestSlot = Math.max(
-                maximumReceivedPerHonestSlot,
-                received,
-            );
-        else
-            maximumReceivedPerCorruptSlot = Math.max(
-                maximumReceivedPerCorruptSlot,
-                received,
-            );
-        return true;
-    };
-    // Late bodies can never be listed or needed.
-    const lock = (participant: HonestParticipant, intent: CloseIntent) => {
-        participant.lockedIntent = intent;
-        for (const [identity, envelope] of participant.held)
-            if (envelope.time > intent.closeTime)
-                participant.held.delete(identity);
+        participant.visitSteps.add(deliveries.step);
     };
     const respond = (
         participant: HonestParticipant,
@@ -370,7 +279,7 @@ export const runCloseExecution = (
         participant.responses.set(participant.position, response);
         participant.seen.add(response);
         work(participant);
-        send({ kind: 'response', response }, participant.position);
+        deliveries.send({ kind: 'response', response }, participant.position);
         if (
             participant.position === organizer ||
             options.withoutForwarding === true
@@ -389,7 +298,7 @@ export const runCloseExecution = (
                     .length === 1
             ) {
                 forwards += 1;
-                sendTo(
+                deliveries.sendTo(
                     { kind: 'forward', envelope },
                     participant.position,
                     organizer,
@@ -400,25 +309,6 @@ export const runCloseExecution = (
             forwards,
         );
     };
-    // Whether a participant can verify a proposal's barrier: it received the
-    // organizer's closure, or every named response, every envelope they list
-    // and every usable slot's body reached it from their responders and
-    // authors.
-    const barrierReady = (
-        participant: HonestParticipant,
-        proposal: CloseProposal,
-    ): boolean =>
-        participant.closures.has(proposal) ||
-        (proposal.responses.every(
-            (response) =>
-                participant.seen.has(response) &&
-                response.listed.every((identity) =>
-                    participant.known.has(identity),
-                ),
-        ) &&
-            usableEnvelopes(proposal.responses, envelopes).every((envelope) =>
-                participant.readable.has(identityOf(envelope)),
-            ));
     const recordSignature = (
         participant: HonestParticipant,
         signer: number,
@@ -436,13 +326,10 @@ export const runCloseExecution = (
         proposalsByTarget.set(inventory.target, proposal);
         if (
             participant.certified === undefined &&
-            signers.size >= profile.quorum
+            signers.size >= profile.inventoryCertificateThreshold
         ) {
             participant.certified = inventory.target;
-            if (!anyCertificate) {
-                anyCertificate = true;
-                pending.push(...withheld);
-                withheld = [];
+            if (deliveries.certify()) {
                 for (const position of members(
                     options.departedAfterCertification,
                     n,
@@ -454,7 +341,7 @@ export const runCloseExecution = (
             if (inventory.branch === 'no-result') participant.verified = true;
             else if (!participant.released) {
                 participant.released = true;
-                send(
+                deliveries.send(
                     {
                         kind: 'share',
                         signer: participant.position,
@@ -470,23 +357,6 @@ export const runCloseExecution = (
             }
         }
     };
-    const recordShare = (
-        participant: HonestParticipant,
-        signer: number,
-        target: string,
-    ): void => {
-        const shares = participant.shares.get(target) ?? new Set();
-        shares.add(signer);
-        participant.shares.set(target, shares);
-        if (
-            participant.certified === target &&
-            !participant.verified &&
-            shares.size >= profile.releaseThreshold
-        ) {
-            participant.verified = true;
-            work(participant);
-        }
-    };
     const signTarget = (
         participant: HonestParticipant,
         proposal: CloseProposal,
@@ -497,10 +367,10 @@ export const runCloseExecution = (
         if (participant.answeredIntent === undefined) {
             // The proposal carries the organizer's intent.
             const intent = intents.get(proposal.intent)!;
-            lock(participant, intent);
+            lockCloseIntent(participant, intent);
             respond(participant, intent);
         }
-        if (!barrierReady(participant, proposal)) {
+        if (!canVerifyCloseBarrier(participant, proposal, envelopes)) {
             if (!participant.waiting.includes(proposal))
                 participant.waiting.push(proposal);
             return;
@@ -515,7 +385,7 @@ export const runCloseExecution = (
             return;
         participant.targetLock = inventory.target;
         work(participant);
-        send(
+        deliveries.send(
             { kind: 'signature', signer: participant.position, proposal },
             participant.position,
         );
@@ -525,7 +395,10 @@ export const runCloseExecution = (
         ) {
             corruptSigned.add(inventory.target);
             for (const signer of members(corrupt, n))
-                send({ kind: 'signature', signer, proposal }, undefined);
+                deliveries.send(
+                    { kind: 'signature', signer, proposal },
+                    undefined,
+                );
         }
         recordSignature(participant, participant.position, proposal);
     };
@@ -573,10 +446,10 @@ export const runCloseExecution = (
             honestAuthor &&
             !forwarded &&
             (options.isolated & bit(envelope.author)) !== 0 &&
-            !anyCertificate
+            !deliveries.certified
         )
-            withheld.push(delivery);
-        else pending.push(delivery);
+            deliveries.withhold(delivery);
+        else deliveries.enqueue(delivery);
     };
     // The organizer requests the one known envelope's body of each slot a
     // response lists when it lacks that body, answers once q - 1 other
@@ -607,13 +480,14 @@ export const runCloseExecution = (
         if (
             others.filter((response) => organizerReady(slots, held, response))
                 .length <
-            profile.quorum - 1
+            profile.inventoryCertificateThreshold - 1
         )
             return;
         respond(participant, intent);
         const selected = [participant.responses.get(organizer)!];
         for (const response of others) {
-            if (selected.length === profile.quorum) break;
+            if (selected.length === profile.inventoryCertificateThreshold)
+                break;
             if (
                 usableEnvelopes([...selected, response], envelopes).every(
                     (envelope) => held.has(identityOf(envelope)),
@@ -621,7 +495,7 @@ export const runCloseExecution = (
             )
                 selected.push(response);
         }
-        if (selected.length < profile.quorum)
+        if (selected.length < profile.inventoryCertificateThreshold)
             throw new Error('A ready organizer could not propose.');
         const proposal: CloseProposal = {
             intent: intent.variant,
@@ -633,8 +507,8 @@ export const runCloseExecution = (
         // The organizer holds its own closure, which precedes its proposal.
         participant.closures.add(proposal);
         if (options.withoutClosure !== true)
-            send({ kind: 'closure', proposal }, organizer);
-        send({ kind: 'proposal', proposal }, organizer);
+            deliveries.send({ kind: 'closure', proposal }, organizer);
+        deliveries.send({ kind: 'proposal', proposal }, organizer);
         signTarget(participant, proposal);
     };
     // Verifies the proposals whose barrier a new delivery may complete.
@@ -666,7 +540,7 @@ export const runCloseExecution = (
                     ignoredMessages += 1;
                     return;
                 }
-                lock(participant, message.intent);
+                lockCloseIntent(participant, message.intent);
                 respond(participant, message.intent);
                 return;
             }
@@ -719,28 +593,13 @@ export const runCloseExecution = (
                 return;
         }
     };
-    const deliverOne = (): void => {
-        const prioritized = pending.flatMap((delivery, index) =>
-            delivery.recipient === options.priorityRecipient ? [index] : [],
-        );
-        const index =
-            prioritized.length > 0
-                ? prioritized[random(prioritized.length)]
-                : random(pending.length);
-        const [delivery] = pending.splice(index, 1);
-        step += 1;
-        const participant = participants.get(delivery.recipient);
-        if (participant !== undefined) receive(participant, delivery);
-        // The relay duplicates some deliveries.
-        if (random(10) === 0) pending.push(delivery);
-    };
 
     // Honest ballots are cast before the close, each in its own visit, at the
     // author's clock; they are never later than the honest close time.
     let clock = 100;
     for (const participant of participants.values()) {
         if ((options.voters & bit(participant.position)) === 0) continue;
-        step += 1;
+        deliveries.advance();
         const envelope: CloseEnvelope = {
             author: participant.position,
             variant: 0,
@@ -753,7 +612,7 @@ export const runCloseExecution = (
         participant.ownEnvelope = identityOf(envelope);
         holdBody(participant, envelope);
         work(participant);
-        send({ kind: 'envelope', envelope }, participant.position);
+        deliveries.send({ kind: 'envelope', envelope }, participant.position);
     }
     if (options.corruptVotes)
         for (const author of members(corrupt, n))
@@ -781,15 +640,19 @@ export const runCloseExecution = (
             }
     // Replays from another action are ignored.
     for (const recipient of participants.keys())
-        pending.push({
+        deliveries.enqueue({
             recipient,
             message: { kind: 'intent', intent: { variant: 9, closeTime: 1e9 } },
             action: action + 1,
         });
     for (const position of members(options.departedBeforeClose, n))
         participants.get(position)!.departed = true;
-    const partial = random(pending.length + 1);
-    for (let index = 0; index < partial && pending.length > 0; index += 1)
+    const partial = random(deliveries.pendingCount + 1);
+    for (
+        let index = 0;
+        index < partial && deliveries.pendingCount > 0;
+        index += 1
+    )
         deliverOne();
     if (options.corruptTargetsOrganizer && !organizerCorrupt) {
         const organizerState = participants.get(organizer)!;
@@ -823,16 +686,16 @@ export const runCloseExecution = (
     if (!organizerCorrupt) {
         const organizerState = participants.get(organizer)!;
         if (!organizerState.departed) {
-            step += 1;
+            deliveries.advance();
             const intent: CloseIntent = {
                 variant: 0,
                 closeTime: clock + organizerState.clockSkew,
             };
             intents.set(0, intent);
-            lock(organizerState, intent);
+            lockCloseIntent(organizerState, intent);
             organizerHeldAtLock = new Set(organizerState.held.keys());
             work(organizerState);
-            send({ kind: 'intent', intent }, organizer);
+            deliveries.send({ kind: 'intent', intent }, organizer);
         }
     } else {
         // Two intents, one backdated, split among the honest participants.
@@ -841,7 +704,7 @@ export const runCloseExecution = (
         intents.set(0, backdated);
         intents.set(1, current);
         for (const recipient of participants.keys())
-            pending.push({
+            deliveries.enqueue({
                 recipient,
                 message: {
                     kind: 'intent',
@@ -860,7 +723,7 @@ export const runCloseExecution = (
             random(5) !== 0
         )
             continue;
-        step += 1;
+        deliveries.advance();
         const envelope: CloseEnvelope = {
             author: participant.position,
             variant: 0,
@@ -872,7 +735,7 @@ export const runCloseExecution = (
         participant.ownEnvelope = identityOf(envelope);
         holdBody(participant, envelope);
         work(participant);
-        send({ kind: 'envelope', envelope }, participant.position);
+        deliveries.send({ kind: 'envelope', envelope }, participant.position);
     }
     // Corrupt responders answer every intent with a relay-chosen listing of
     // at most two on-time envelopes per slot.
@@ -904,14 +767,13 @@ export const runCloseExecution = (
             }
     const corruptProposals = new Set<number>();
     let rounds = 0;
-    while (pending.length > 0 || withheld.length > 0) {
+    while (deliveries.pendingCount > 0 || deliveries.hasWithheld) {
         rounds += 1;
         if (rounds > 1_000_000)
             throw new Error('The close execution diverged.');
-        if (pending.length === 0) {
+        if (deliveries.pendingCount === 0) {
             // Eventual delivery: the relay must release withheld messages.
-            pending = withheld;
-            withheld = [];
+            deliveries.releaseWithheld();
             continue;
         }
         deliverOne();
@@ -926,7 +788,10 @@ export const runCloseExecution = (
                     responseValid(response)
                 )
                     bySigner.set(response.signer, response);
-            if (bySigner.size < profile.quorum || !bySigner.has(organizer))
+            if (
+                bySigner.size < profile.inventoryCertificateThreshold ||
+                !bySigner.has(organizer)
+            )
                 continue;
             corruptProposals.add(intent.variant);
             const own = bySigner.get(organizer)!;
@@ -935,15 +800,19 @@ export const runCloseExecution = (
             );
             const proposal: CloseProposal = {
                 intent: intent.variant,
-                responses: [own, ...others.slice(0, profile.quorum - 1)].sort(
-                    (left, right) => left.signer - right.signer,
-                ),
+                responses: [
+                    own,
+                    ...others.slice(
+                        0,
+                        profile.inventoryCertificateThreshold - 1,
+                    ),
+                ].sort((left, right) => left.signer - right.signer),
             };
             // A corrupt organizer publishes its closure with each proposal,
             // which lets honest participants sign whatever it proposes.
             for (const recipient of participants.keys())
                 if (random(2) === 0)
-                    pending.push(
+                    deliveries.enqueue(
                         {
                             recipient,
                             message: { kind: 'closure', proposal },
@@ -959,7 +828,10 @@ export const runCloseExecution = (
     }
 
     const certifiedTargets = [...signersByTarget.entries()]
-        .filter(([, signers]) => signers.size >= profile.quorum)
+        .filter(
+            ([, signers]) =>
+                signers.size >= profile.inventoryCertificateThreshold,
+        )
         .map(([target]) => target);
     const findings = new Set<string>();
     if (certifiedTargets.length > 1) findings.add('agreement');
@@ -1013,7 +885,7 @@ export const runCloseExecution = (
         !organizerCorrupt &&
         (options.departedBeforeClose & bit(organizer)) === 0 &&
         memberCount(corrupt | options.departedBeforeClose) <=
-            profile.faultBound &&
+            profile.maximumCorruptParticipantCount &&
         !options.refuseAfterOwnOmission;
     if (closeLivenessExpected && certifiedTargets.length === 0)
         findings.add('close-liveness');
@@ -1057,211 +929,5 @@ export const runCloseExecution = (
         maximumReceivedPerCorruptSlot,
         maximumOrganizerRequestsPerSlot,
         maximumForwardedPerResponder,
-    };
-};
-
-type CompletionProfileExecutionCensus = Readonly<{
-    participantCount: number;
-    corruptionSets: number;
-    executions: number;
-    certifiedExecutions: number;
-    maximumHonestOmission: number;
-    forcedNoResultExecutions: number;
-    maximumListedEntries: number;
-    targetedExecutions: number;
-    targetedCertifiedExecutions: number;
-    organizerOnlyExecutions: number;
-    organizerOnlyCertifiedExecutions: number;
-    hiddenExecutions: number;
-    hiddenCertifiedExecutions: number;
-    maximumHeldPerSlot: number;
-    maximumReceivedPerHonestSlot: number;
-    maximumReceivedPerCorruptSlot: number;
-    maximumOrganizerRequestsPerSlot: number;
-    maximumForwardedPerResponder: number;
-    maximumForwardedToHonestOrganizer: number;
-    findings: readonly string[];
-}>;
-
-// Every corruption set, with an honest or corrupt organizer, full or partial
-// honest turnout, departures inside the budget before the close and after
-// certification, isolation of f honest voters, and corrupt equivocation,
-// backdating, withheld bodies listed by corrupt responders, abstention,
-// withheld responses with late bodies filling the organizer's slots and a
-// different envelope for every other honest participant, corrupt ballots and
-// responses the relay shows only to the organizer, corrupt ballots hidden from
-// the organizer alone, and refused signatures.
-export const exploreCompletionProfileExecutions = (
-    participantCount = 10,
-): CompletionProfileExecutionCensus => {
-    const profile = deriveCloseProfile(participantCount);
-    const everyone = (1 << participantCount) - 1;
-    const findings = new Set<string>();
-    let corruptionSets = 0;
-    let executions = 0;
-    let certifiedExecutions = 0;
-    let maximumHonestOmission = 0;
-    let forcedNoResultExecutions = 0;
-    let maximumListedEntries = 0;
-    let targetedExecutions = 0;
-    let targetedCertifiedExecutions = 0;
-    let organizerOnlyExecutions = 0;
-    let organizerOnlyCertifiedExecutions = 0;
-    let hiddenExecutions = 0;
-    let hiddenCertifiedExecutions = 0;
-    let maximumHeldPerSlot = 0;
-    let maximumReceivedPerHonestSlot = 0;
-    let maximumReceivedPerCorruptSlot = 0;
-    let maximumOrganizerRequestsPerSlot = 0;
-    let maximumForwardedPerResponder = 0;
-    let maximumForwardedToHonestOrganizer = 0;
-    for (const corrupt of masksAtMost(participantCount, profile.faultBound)) {
-        corruptionSets += 1;
-        const honest = everyone & ~corrupt;
-        const others = members(honest & ~bit(organizer), participantCount);
-        const budget = profile.faultBound - memberCount(corrupt);
-        const firstF = maskOf(others.slice(0, profile.faultBound));
-        const lastF = maskOf(others.slice(others.length - profile.faultBound));
-        const cases = [
-            { isolated: 0, before: 0, after: 0, voters: honest },
-            { isolated: firstF, before: 0, after: 0, voters: honest },
-            {
-                isolated: lastF,
-                before: maskOf(others.slice(0, budget)),
-                after: 0,
-                voters: honest & 0b01010101010101010101,
-            },
-            { isolated: firstF, before: 0, after: lastF, voters: honest },
-            {
-                isolated: 0,
-                before: 0,
-                after: 0,
-                voters: honest,
-                targeted: true,
-            },
-            {
-                isolated: 0,
-                before: 0,
-                after: 0,
-                voters: honest,
-                organizerOnly: true,
-            },
-            {
-                isolated: 0,
-                before: 0,
-                after: 0,
-                voters: honest,
-                hidden: true,
-            },
-        ];
-        for (const [index, value] of cases.entries()) {
-            const seed = corrupt * 97 + index * 13 + 5;
-            const result = runCloseExecution({
-                participantCount,
-                corrupt,
-                voters: value.voters,
-                departedBeforeClose: value.before,
-                departedAfterCertification: value.after,
-                isolated: value.isolated,
-                seed,
-                corruptVotes:
-                    index % 2 === 0 ||
-                    value.organizerOnly === true ||
-                    value.hidden === true,
-                corruptEquivocation: (corrupt + index) % 3,
-                corruptBackdating: index === 2,
-                corruptWithholdsBody: index === 3,
-                corruptListsBodiless: index === 3,
-                corruptSignTargets: (corrupt + index) % 2 === 0,
-                corruptOmitsIsolated: index % 2 === 1,
-                refuseAfterOwnOmission: false,
-                corruptTargetsOrganizer: value.targeted === true,
-                corruptWithholdsResponses:
-                    value.targeted === true || value.hidden === true,
-                corruptShowsOnlyOrganizer: value.organizerOnly === true,
-                corruptHidesFromOrganizer: value.hidden === true,
-            });
-            executions += 1;
-            if (result.certifiedTargets > 0) certifiedExecutions += 1;
-            if (value.targeted === true && (corrupt & bit(organizer)) === 0) {
-                targetedExecutions += 1;
-                if (result.certifiedTargets > 0)
-                    targetedCertifiedExecutions += 1;
-            }
-            if (
-                value.organizerOnly === true &&
-                (corrupt & bit(organizer)) === 0
-            ) {
-                organizerOnlyExecutions += 1;
-                if (result.certifiedTargets > 0)
-                    organizerOnlyCertifiedExecutions += 1;
-            }
-            if (value.hidden === true && (corrupt & bit(organizer)) === 0) {
-                hiddenExecutions += 1;
-                if (result.certifiedTargets > 0) hiddenCertifiedExecutions += 1;
-            }
-            maximumForwardedPerResponder = Math.max(
-                maximumForwardedPerResponder,
-                result.maximumForwardedPerResponder,
-            );
-            if ((corrupt & bit(organizer)) === 0)
-                maximumForwardedToHonestOrganizer = Math.max(
-                    maximumForwardedToHonestOrganizer,
-                    result.maximumForwardedPerResponder,
-                );
-            maximumHeldPerSlot = Math.max(
-                maximumHeldPerSlot,
-                result.maximumHeldPerSlot,
-            );
-            maximumReceivedPerHonestSlot = Math.max(
-                maximumReceivedPerHonestSlot,
-                result.maximumReceivedPerHonestSlot,
-            );
-            maximumReceivedPerCorruptSlot = Math.max(
-                maximumReceivedPerCorruptSlot,
-                result.maximumReceivedPerCorruptSlot,
-            );
-            maximumOrganizerRequestsPerSlot = Math.max(
-                maximumOrganizerRequestsPerSlot,
-                result.maximumOrganizerRequestsPerSlot,
-            );
-            maximumHonestOmission = Math.max(
-                maximumHonestOmission,
-                result.omittedHonest,
-            );
-            maximumListedEntries = Math.max(
-                maximumListedEntries,
-                result.maximumListedEntries,
-            );
-            if (
-                result.inventory?.branch === 'no-result' &&
-                value.voters === honest &&
-                memberCount(honest) >= profile.minimumTurnout
-            )
-                forcedNoResultExecutions += 1;
-            for (const finding of result.findings) findings.add(finding);
-        }
-    }
-    return {
-        participantCount,
-        corruptionSets,
-        executions,
-        certifiedExecutions,
-        maximumHonestOmission,
-        forcedNoResultExecutions,
-        maximumListedEntries,
-        targetedExecutions,
-        targetedCertifiedExecutions,
-        organizerOnlyExecutions,
-        organizerOnlyCertifiedExecutions,
-        hiddenExecutions,
-        hiddenCertifiedExecutions,
-        maximumHeldPerSlot,
-        maximumReceivedPerHonestSlot,
-        maximumReceivedPerCorruptSlot,
-        maximumOrganizerRequestsPerSlot,
-        maximumForwardedPerResponder,
-        maximumForwardedToHonestOrganizer,
-        findings: [...findings].sort(),
     };
 };

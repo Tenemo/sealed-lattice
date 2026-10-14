@@ -10,12 +10,14 @@ import {
     chunkBytes,
     foregroundVisitMilliseconds,
     participantDataKindMaximums,
+    requiresFheKeySources,
+    rootDataKeyBytes,
+    rootPrefixBytes,
     rootReferenceBytes,
     tagBytes,
 } from '../module/runtime-bounds.js';
 import {
     concatenate,
-    encodeText,
     equalBytes,
     hexadecimal,
     readUnsigned32,
@@ -39,13 +41,10 @@ import {
     isRootGeneration,
     lastRootGeneration,
     rootGeneration,
+    targetPhase,
+    releasePhase,
 } from './root-generation.js';
-import {
-    createRootKey,
-    openRoot,
-    rootAssociatedData,
-    sealRoot,
-} from './root-sealing.js';
+import { createRootKey, openRoot, sealRoot } from './root-sealing.js';
 import { commitParticipantState } from './state-transaction.js';
 
 // The encrypted root manifest. Its prefix retains the enrollment data keys,
@@ -54,18 +53,12 @@ import { commitParticipantState } from './state-transaction.js';
 // length-prefixed suffixes follow in a fixed order, each present from its
 // first generation: preparation, then ballot and close together, then target
 // signing, then release.
-export const requiresFheKeySources = (generation: number) =>
-    generation < rootGeneration.setupRetained;
-const dataKeyBytes = (generation: number) =>
-    requiresFheKeySources(generation) ? 96 : 64;
-const prefixBytes = (generation: number) =>
-    4 + dataKeyBytes(generation) + 64 + 4;
 const suffixStarts = {
-    preparation: 4,
-    ballot: 12,
-    close: 12,
-    target: 23,
-    release: 25,
+    preparation: rootGeneration.preparation,
+    ballot: rootGeneration.setupRetained,
+    close: rootGeneration.setupRetained,
+    target: targetPhase.locked,
+    release: releasePhase.locked,
 } as const;
 type ManifestSuffix = keyof typeof suffixStarts;
 const suffixOrder: readonly ManifestSuffix[] = [
@@ -85,8 +78,8 @@ export const dataKind = {
     signingCapsule: 4,
     pollDefinition: 5,
     pollSignature: 6,
-    proposal: 7,
-    proposalSignature: 8,
+    rosterProposal: 7,
+    rosterProposalSignature: 8,
     setupReference: 9,
     // The setup certificate the setup was verified against.
     setupCertificate: 10,
@@ -154,14 +147,13 @@ export const encodeManifest = (
         return concatenate(unsigned32(bytes.length), bytes);
     });
     if (
-        manifest.dataKeys.length !== dataKeyBytes(generation) ||
+        manifest.dataKeys.length !== rootDataKeyBytes(generation) ||
         Object.keys(manifest.suffixes).length !== suffixes.length
     )
         throw new Error(
             'Participant root fields disagree with its generation.',
         );
     return concatenate(
-        encodeText('ERM9'),
         manifest.dataKeys,
         manifest.poll,
         unsigned32(manifest.references.length),
@@ -211,9 +203,9 @@ const checkReferences = (
         lengths[dataKind.pollDefinition] === 0 ||
         !exact(dataKind.pollSignature, registration.signatureBytes) ||
         generation >= rootGeneration.rosterLocked !==
-            lengths[dataKind.proposal] > 0 ||
+            lengths[dataKind.rosterProposal] > 0 ||
         !exact(
-            dataKind.proposalSignature,
+            dataKind.rosterProposalSignature,
             generation >= rootGeneration.rosterSigned
                 ? registration.signatureBytes
                 : 0,
@@ -226,19 +218,18 @@ const checkReferences = (
         throw new Error('Participant records do not match the generation.');
 };
 
-const decodeManifest = (
+export const decodeManifest = (
     bytes: Uint8Array,
     generation: number,
     limits: ParticipantLimits,
 ): ParticipantManifest => {
     if (
         !isRootGeneration(generation) ||
-        bytes.length < prefixBytes(generation) ||
-        !equalBytes(bytes.subarray(0, 4), encodeText('ERM9'))
+        bytes.length < rootPrefixBytes(generation)
     )
         throw new Error('Invalid participant root manifest.');
-    const prefix = prefixBytes(generation);
-    const keysEnd = 4 + dataKeyBytes(generation);
+    const prefix = rootPrefixBytes(generation);
+    const keysEnd = rootDataKeyBytes(generation);
     const count = readUnsigned32(bytes, prefix - 4);
     if (
         count > limits.root.maximumRecords ||
@@ -275,7 +266,7 @@ const decodeManifest = (
     if (offset !== bytes.length)
         throw new Error('Participant root manifest has trailing bytes.');
     return {
-        dataKeys: bytes.slice(4, keysEnd),
+        dataKeys: bytes.slice(0, keysEnd),
         poll: bytes.slice(keysEnd, keysEnd + 64),
         references,
         suffixes,
@@ -318,7 +309,7 @@ export const authenticateRoot = async (
     const plaintext = await openRoot(
         snapshot.key,
         snapshot.head.generation,
-        rootAssociatedData(runtime),
+        runtime,
         snapshot.root,
     );
     const manifest = decodeManifest(
@@ -406,7 +397,7 @@ export const authenticateRecords = (
             validateParticipantPredecessor(reader, {
                 head: root.head,
                 manifest: root.plaintext,
-                rootContext: rootAssociatedData(context.runtime),
+                rootContext: context.runtime,
                 maximumRootBytes: rootBound(context, root.head.generation),
                 recordStores: participantRecordStores,
                 records,
@@ -464,7 +455,6 @@ export const commitRoot = async (
     transition: RootTransition,
 ): Promise<AuthenticatedRoot> => {
     const { database, module, runtime } = context;
-    const associatedData = rootAssociatedData(runtime);
     const plaintext = encodeManifest(
         transition.manifest,
         transition.generation,
@@ -475,7 +465,7 @@ export const commitRoot = async (
     const sealed = await sealRoot(
         key,
         transition.generation,
-        associatedData,
+        runtime,
         plaintext,
     );
     const head: ParticipantHead = {
@@ -500,7 +490,7 @@ export const commitRoot = async (
         validateParticipantPredecessor(reader, {
             head: predecessor.head,
             manifest: predecessor.plaintext,
-            rootContext: associatedData,
+            rootContext: runtime,
             maximumRootBytes: rootBound(context, predecessor.head.generation),
             recordStores: participantRecordStores,
             records: rollback
@@ -562,7 +552,7 @@ export const commitRoot = async (
     const reopened = await openRoot(
         snapshot.key,
         head.generation,
-        associatedData,
+        runtime,
         snapshot.root,
     );
     if (!equalBytes(reopened, plaintext))

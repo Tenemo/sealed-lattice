@@ -1,4 +1,3 @@
-import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import {
     type IncomingMessage,
@@ -33,6 +32,7 @@ import {
     type ParticipantTransfer,
     observeParticipantTransfer,
 } from '#tools/ci/participant-transfer.js';
+import { rewriteWorkerCheckpoint } from '#tools/ci/worker-instrumentation.js';
 
 // The path of the organizer's origin under which the relay stores and
 // serves the second roster's records.
@@ -78,20 +78,12 @@ export const haltingClient = (
     worker: Buffer,
     generation: number,
 ): HaltingClient => {
-    const committed =
-        '\treturn {\n\t\thead,\n\t\tplaintext: reopened,\n\t\tmanifest\n\t};\n';
-    const bundled = worker.toString('utf8');
-    assert.equal(
-        bundled.split(committed).length,
-        2,
-        'The worker bundle does not return one committed root.',
-    );
-    const patched = Buffer.from(
-        bundled.replace(
+    const patched = rewriteWorkerCheckpoint(
+        worker,
+        'root-readback',
+        (committed) =>
+            `if (head.generation === ${String(generation)} && predecessor.head.generation !== ${String(generation)}) await new Promise(() => undefined);\n` +
             committed,
-            `\tif (head.generation === ${String(generation)} && predecessor.head.generation !== ${String(generation)}) await new Promise(() => undefined);\n` +
-                committed,
-        ),
     );
     return {
         generation,
@@ -108,7 +100,7 @@ export const participantDatabase =
 // An honest participant's page runs every operation through the SDK's
 // participant API, which carries the packaged worker; the relay serves it
 // beside the packaged module. The page also runs the SDK's
-// standalone verifier for the poll the runner names, from the same relay.
+// standalone outcome verifier for the poll the runner names, from the same relay.
 const participantPage = harnessPage(
     'Participant',
     `
@@ -363,7 +355,7 @@ export const startRelay = async (
                 ...reader,
                 manifest: async (candidate) => {
                     candidateReads[Number(new URL(origin).port) - basePort].add(
-                        candidate.id,
+                        candidate.locator,
                     );
                     return reader.manifest(candidate);
                 },
@@ -406,7 +398,7 @@ export const startRelay = async (
                         if (target !== undefined && target.chunks.length > 0) {
                             const wrong = await store.chunk(target.chunks[0]);
                             wrong[0] ^= 1;
-                            const id = await store.putChunk(wrong);
+                            const locator = await store.putChunk(wrong);
                             changed = (
                                 await store.append(
                                     key,
@@ -416,7 +408,7 @@ export const startRelay = async (
                                                 ? {
                                                       ...file,
                                                       chunks: [
-                                                          id,
+                                                          locator,
                                                           ...file.chunks.slice(
                                                               1,
                                                           ),
@@ -426,11 +418,11 @@ export const startRelay = async (
                                         ),
                                     }),
                                 )
-                            ).id;
+                            ).locator;
                         }
                         publicationFaultEvidence.push({
                             key,
-                            empty: empty.id,
+                            empty: empty.locator,
                             ...(changed === undefined ? {} : { changed }),
                         });
                     }

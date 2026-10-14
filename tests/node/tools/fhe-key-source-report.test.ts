@@ -13,7 +13,7 @@ import {
     fheKeySourceProgressLines,
     parseFheKeySourceOutput,
     parseFheKeySourceReport,
-    readFheKeySourceNativeSource,
+    readFheKeySourceNativeRun,
 } from '#tools/ci/fhe-key-source-report.js';
 import { runArtifactDirectoryPath } from '#tools/ci/local-run-log.js';
 
@@ -38,7 +38,6 @@ const putMagnitude = (
 const reportFixture = () => {
     const model = compileFheKeySourceScreenResources();
     const bytes = Buffer.alloc(Number(model.reportBytes));
-    bytes.write('FKS1');
     const dimensions = [
         model.participantCount,
         model.optionCount,
@@ -47,12 +46,10 @@ const reportFixture = () => {
         model.commonSampleBits,
         model.samplePositions.length,
     ];
-    dimensions.forEach((value, index) =>
-        bytes.writeUInt32LE(value, 4 + 4 * index),
-    );
-    bytes.fill(17, 28, 156);
+    dimensions.forEach((value, index) => bytes.writeUInt32LE(value, 4 * index));
+    bytes.fill(17, 24, 152);
     const width = Number(model.coefficientBytes - 1n);
-    let offset = 156;
+    let offset = 152;
     const offsets: number[] = [];
     const samples = model.samplePositions.map((position, index) => {
         offsets.push(offset);
@@ -88,15 +85,15 @@ const nativeFixture = async () => {
     await mkdir('temp', { recursive: true });
     const root = await mkdtemp(path.resolve('temp/fhe-source-intake-test-'));
     roots.push(root);
-    const source = path.join(
+    const runDirectory = path.join(
         root,
         'logs/2026-10-04/2026-10-04T00-00-00.000Z-research-protocol',
     );
     const archive = path.join(
-        runArtifactDirectoryPath(source),
+        runArtifactDirectoryPath(runDirectory),
         'fhe-key-source',
     );
-    await mkdir(source, { recursive: true });
+    await mkdir(runDirectory, { recursive: true });
     await mkdir(archive, { recursive: true });
     const fixture = reportFixture();
     await writeFile(path.join(archive, 'key-source.bin'), fixture.bytes);
@@ -155,14 +152,14 @@ const nativeFixture = async () => {
             ['result', result],
         ] as const)
             await writeFile(
-                path.join(source, name + '.json'),
+                path.join(runDirectory, name + '.json'),
                 JSON.stringify(value),
             );
     };
     await save();
     return {
         root,
-        source,
+        runDirectory,
         archive,
         fixture,
         summary,
@@ -200,17 +197,14 @@ describe('FHE key source report and source intake', () => {
             ),
         ).toEqual(fixture.expected);
     });
-    it('rejects altered shape, context-independent digest disagreement and noncanonical public samples', () => {
+    it('refuses altered shape, context-independent digest disagreement and noncanonical public samples', () => {
         const { bytes, offsets, width, model } = reportFixture();
         const changes: ((copy: Buffer) => void)[] = [
             (copy) => {
-                copy[0] ^= 1;
-            },
-            (copy) => {
-                copy[92] ^= 1;
+                copy[88] ^= 1;
             },
             ...Array.from({ length: 6 }, (_, index) => (copy: Buffer) => {
-                copy[4 + 4 * index] ^= 1;
+                copy[4 * index] ^= 1;
             }),
             (copy) => {
                 copy[offsets[0]] ^= 1;
@@ -278,44 +272,44 @@ describe('FHE key source report and source intake', () => {
     });
     it('accepts a passed exact native archive and detects diagnostic changes', async () => {
         const fixture = await nativeFixture();
-        const source = await readFheKeySourceNativeSource(
-            fixture.source,
+        const nativeRun = await readFheKeySourceNativeRun(
+            fixture.runDirectory,
             fixture.root,
         );
-        expect(source.reports).toEqual([fixture.fixture.expected]);
+        expect(nativeRun.reports).toEqual([fixture.fixture.expected]);
         await expect(
-            assertFheKeySourceStable(source, fixture.root),
+            assertFheKeySourceStable(nativeRun, fixture.root),
         ).resolves.toBeUndefined();
         fixture.result.native[0].result.reportBytes++;
         await fixture.save();
         await expect(
-            assertFheKeySourceStable(source, fixture.root),
+            assertFheKeySourceStable(nativeRun, fixture.root),
         ).rejects.toThrow();
     });
-    it('rejects failed runs, missing compiled owners and unrecorded artifacts', async () => {
+    it('refuses failed runs, missing compiled owners and unrecorded artifacts', async () => {
         const fixture = await nativeFixture();
         fixture.summary.result = 'failed';
         await fixture.save();
         await expect(
-            readFheKeySourceNativeSource(fixture.source, fixture.root),
+            readFheKeySourceNativeRun(fixture.runDirectory, fixture.root),
         ).rejects.toThrow();
         fixture.summary.result = 'passed';
-        const source = fixture.result.compiledInputs.pop()!;
+        const owner = fixture.result.compiledInputs.pop()!;
         await fixture.save();
         await expect(
-            readFheKeySourceNativeSource(fixture.source, fixture.root),
+            readFheKeySourceNativeRun(fixture.runDirectory, fixture.root),
         ).rejects.toThrow();
-        fixture.result.compiledInputs.push(source);
+        fixture.result.compiledInputs.push(owner);
         await fixture.save();
         await writeFile(path.join(fixture.archive, 'extra.bin'), 'extra');
         await expect(
-            readFheKeySourceNativeSource(fixture.source, fixture.root),
+            readFheKeySourceNativeRun(fixture.runDirectory, fixture.root),
         ).rejects.toThrow();
     });
     it('pins only the exact scalar allocator while requiring the screen arithmetic in the native closure', async () => {
         const fixture = await nativeFixture();
-        const source = await readFheKeySourceNativeSource(
-            fixture.source,
+        const nativeRun = await readFheKeySourceNativeRun(
+            fixture.runDirectory,
             fixture.root,
         );
         const adapter = {
@@ -323,53 +317,53 @@ describe('FHE key source report and source intake', () => {
             bytes: 1,
             sha512: digest('x'),
         };
-        source.sources.set(adapter.file, adapter);
+        nativeRun.sources.set(adapter.file, adapter);
         await mkdir(path.dirname(path.join(fixture.root, adapter.file)), {
             recursive: true,
         });
         await writeFile(path.join(fixture.root, adapter.file), 'x');
-        const files = [...source.compiledInputs.keys(), adapter.file];
+        const files = [...nativeRun.compiledInputs.keys(), adapter.file];
         await expect(
             assertScalarNativeInputs(
-                source,
+                nativeRun,
                 files,
-                source.compiler,
+                nativeRun.compiler,
                 fixture.root,
             ),
         ).resolves.toEqual({
-            unchangedNativeInputs: [...source.compiledInputs.keys()].sort(),
+            unchangedNativeInputs: [...nativeRun.compiledInputs.keys()].sort(),
             targetAdapters: [adapter.file],
         });
         const unrelated = {
             ...adapter,
             file: 'crates/protocol-research/setup-witness/src/browser.rs',
         };
-        source.sources.set(unrelated.file, unrelated);
+        nativeRun.sources.set(unrelated.file, unrelated);
         await writeFile(path.join(fixture.root, unrelated.file), 'x');
         await expect(
             assertScalarNativeInputs(
-                source,
+                nativeRun,
                 [...files, unrelated.file],
-                source.compiler,
+                nativeRun.compiler,
                 fixture.root,
             ),
         ).rejects.toThrow('did not compile a scalar shared input');
-        source.compiledInputs.delete(
+        nativeRun.compiledInputs.delete(
             'crates/protocol-research/setup-witness/src/fhe-key-source-screen.rs',
         );
         await expect(
             assertScalarNativeInputs(
-                source,
+                nativeRun,
                 files,
-                source.compiler,
+                nativeRun.compiler,
                 fixture.root,
             ),
         ).rejects.toThrow('did not compile a scalar shared input');
     });
     it('refuses an empty Rust closure, another compiler, any changed input and an unsnapshotted adapter', async () => {
         const fixture = await nativeFixture();
-        const source = await readFheKeySourceNativeSource(
-            fixture.source,
+        const nativeRun = await readFheKeySourceNativeRun(
+            fixture.runDirectory,
             fixture.root,
         );
         const adapter = {
@@ -377,19 +371,21 @@ describe('FHE key source report and source intake', () => {
             bytes: 1,
             sha512: digest('x'),
         };
-        source.sources.set(adapter.file, adapter);
+        nativeRun.sources.set(adapter.file, adapter);
         await mkdir(path.dirname(path.join(fixture.root, adapter.file)), {
             recursive: true,
         });
         await writeFile(path.join(fixture.root, adapter.file), 'x');
-        const files = [...source.compiledInputs.keys(), adapter.file];
+        const files = [...nativeRun.compiledInputs.keys(), adapter.file];
         const inspect = (
             inputs: readonly string[] = files,
-            compiler = source.compiler,
-            admitted: Parameters<typeof assertScalarNativeInputs>[0] = source,
+            compiler = nativeRun.compiler,
+            admitted: Parameters<
+                typeof assertScalarNativeInputs
+            >[0] = nativeRun,
         ) => assertScalarNativeInputs(admitted, inputs, compiler, fixture.root);
         await expect(inspect([])).rejects.toThrow('closure is empty');
-        await expect(inspect(['tools/ci/fixture-sources.ts'])).rejects.toThrow(
+        await expect(inspect(['tools/ci/run-sources.ts'])).rejects.toThrow(
             'closure is empty',
         );
         await expect(inspect(files, 'other compiler')).rejects.toThrow(
@@ -406,10 +402,10 @@ describe('FHE key source report and source intake', () => {
         await expect(inspect()).resolves.toMatchObject({
             targetAdapters: [adapter.file],
         });
-        const sources = new Map(source.sources);
+        const sources = new Map(nativeRun.sources);
         sources.delete(adapter.file);
         await expect(
-            inspect(files, source.compiler, { ...source, sources }),
+            inspect(files, nativeRun.compiler, { ...nativeRun, sources }),
         ).rejects.toThrow('did not snapshot a scalar target adapter');
     });
     it('refuses runtime digests of another length, foreign runs and compiled inventories that differ from their snapshots', async () => {
@@ -418,12 +414,12 @@ describe('FHE key source report and source intake', () => {
         for (const length of [63, 65]) {
             await writeFile(runtime, Buffer.alloc(length, 19));
             await expect(
-                readFheKeySourceNativeSource(fixture.source, fixture.root),
+                readFheKeySourceNativeRun(fixture.runDirectory, fixture.root),
             ).rejects.toThrow('runtime digest has another length');
         }
         await writeFile(runtime, Buffer.alloc(64, 19));
         await expect(
-            readFheKeySourceNativeSource(fixture.source, fixture.root),
+            readFheKeySourceNativeRun(fixture.runDirectory, fixture.root),
         ).resolves.toMatchObject({ compiler: 'synthetic compiler' });
         const changes: {
             change: (value: NativeFixture) => void;
@@ -480,7 +476,7 @@ describe('FHE key source report and source intake', () => {
             change(value);
             await value.save();
             await expect(
-                readFheKeySourceNativeSource(value.source, value.root),
+                readFheKeySourceNativeRun(value.runDirectory, value.root),
             ).rejects.toThrow(message);
         }
     });

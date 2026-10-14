@@ -28,7 +28,7 @@ export const closePhase = {
     proposed: 22,
 } as const;
 
-export const targetPhase = { intent: 23, signed: 24 } as const;
+export const targetPhase = { locked: 23, signed: 24 } as const;
 
 export const releasePhase = {
     locked: 25,
@@ -38,6 +38,24 @@ export const releasePhase = {
 } as const;
 
 export const lastRootGeneration = releasePhase.signed;
+
+// The ballot phase a root generation supplies: later generations keep the
+// signed ballot.
+export const ballotPhaseOf = (generation: number) =>
+    Math.min(generation, ballotPhase.signed);
+
+// The completed close of a participant: its signed response, and for the
+// organizer its signed proposal.
+export const completedClosePhase = (isOrganizer: boolean) =>
+    isOrganizer ? closePhase.proposed : closePhase.responded;
+
+// The close phase a root generation supplies: zero while the log collects,
+// and the completed close after it.
+export const closePhaseOf = (generation: number, isOrganizer: boolean) => {
+    if (generation > closePhase.proposed)
+        return completedClosePhase(isOrganizer);
+    return generation >= closePhase.intent ? generation : 0;
+};
 
 // Whether a completed root can hold the generation. None lies between
 // preparation and the retained setup, and none between a retained ballot or

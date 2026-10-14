@@ -157,7 +157,6 @@ describe('local run logs', () => {
                 ]).length > 0;
             const log = await createLocalRunLog({
                 commandLineArguments: [],
-                lanes: ['sample'],
                 rootDirectoryPath,
                 scriptName: 'sample',
             });
@@ -248,7 +247,6 @@ describe('local run logs', () => {
                                 NODE_OPTIONS: 'token=option-secret',
                                 UNRELATED_SECRET: 'environment-secret',
                             },
-                            lanes: ['sample'],
                             rootDirectoryPath,
                             scriptName: 'redaction sample',
                         },
@@ -280,7 +278,6 @@ describe('local run logs', () => {
         withTemporaryLogRoot(async (rootDirectoryPath) => {
             const log = await createLocalRunLog({
                 commandLineArguments: [],
-                lanes: ['sample'],
                 rootDirectoryPath,
                 scriptName: 'line buffering sample',
             });
@@ -340,6 +337,13 @@ describe('local run logs', () => {
                 ),
             ) as Record<string, unknown>;
             expect(summary.failedCommandId).toBe('initiating-command');
+            const metadata = JSON.parse(
+                await readFile(
+                    path.join(log.runDirectoryPath, 'metadata.json'),
+                    'utf8',
+                ),
+            ) as Record<string, unknown>;
+            expect(metadata.lanes).toEqual(['initiator', 'sibling']);
             await expect(
                 readFile(
                     path.join(log.runDirectoryPath, 'diagnostics.txt'),
@@ -352,7 +356,6 @@ describe('local run logs', () => {
         withTemporaryLogRoot(async (rootDirectoryPath) => {
             const log = await createLocalRunLog({
                 commandLineArguments: [],
-                lanes: ['sibling'],
                 rootDirectoryPath,
                 scriptName: 'cancellation sample',
             });
@@ -423,7 +426,6 @@ describe('local run logs', () => {
         withTemporaryLogRoot(async (rootDirectoryPath) => {
             const log = await createLocalRunLog({
                 commandLineArguments: [],
-                lanes: ['sample'],
                 resourceSampleIntervalMilliseconds: 60_000,
                 rootDirectoryPath,
                 scriptName: 'diagnostic sample',
@@ -472,7 +474,7 @@ describe('local run logs', () => {
             ).href;
             const childSource = [
                 `const { createLocalRunLog } = await import(${JSON.stringify(moduleUrl)});`,
-                `const log = await createLocalRunLog({ commandLineArguments: [], lanes: ['abrupt'], rootDirectoryPath: ${JSON.stringify(rootDirectoryPath)}, scriptName: 'abrupt-child' });`,
+                `const log = await createLocalRunLog({ commandLineArguments: [], rootDirectoryPath: ${JSON.stringify(rootDirectoryPath)}, scriptName: 'abrupt-child' });`,
                 "log.writeEvent({ eventType: 'before-abrupt-death' });",
                 "process.kill(process.pid, 'SIGKILL');",
             ].join('\n');
@@ -513,7 +515,6 @@ describe('local run logs', () => {
         withTemporaryLogRoot(async (rootDirectoryPath) => {
             const log = await createLocalRunLog({
                 commandLineArguments: [],
-                lanes: ['sample'],
                 rootDirectoryPath,
                 scriptName: 'artifact sample',
             });
@@ -605,7 +606,6 @@ describe('local run logs', () => {
                 process.exitCode = undefined;
                 const log = await createLocalRunLog({
                     commandLineArguments: [],
-                    lanes: ['sample'],
                     rootDirectoryPath,
                     scriptName: 'misplaced artifact sample',
                 });
@@ -704,7 +704,6 @@ describe('local run logs', () => {
         withTemporaryLogRoot(async (rootDirectoryPath) => {
             const log = await createLocalRunLog({
                 commandLineArguments: [],
-                lanes: ['sample'],
                 rootDirectoryPath,
                 scriptName: 'failed artifact sample',
             });
@@ -747,7 +746,6 @@ describe('local run logs', () => {
                 logs.push(
                     await createLocalRunLog({
                         commandLineArguments: [],
-                        lanes: ['sample'],
                         now,
                         rootDirectoryPath,
                         scriptName: 'same moment',
@@ -771,6 +769,7 @@ describe('local run logs', () => {
                     ),
                 ) as Record<string, unknown>;
                 expect(metadata.runDirectoryPath).toBe(log.runDirectoryPath);
+                expect(metadata).not.toHaveProperty('lanes');
             }
         }));
 
@@ -787,7 +786,6 @@ describe('local run logs', () => {
             await withTemporaryLogRoot(async (rootDirectoryPath) => {
                 const log = await createLocalRunLog({
                     commandLineArguments: [],
-                    lanes: ['sample'],
                     repositoryDirectoryPath,
                     rootDirectoryPath,
                     scriptName: 'dirty tree',
@@ -826,7 +824,6 @@ describe('local run logs', () => {
             withTemporaryLogRoot(async (rootDirectoryPath) => {
                 const log = await createLocalRunLog({
                     commandLineArguments: [],
-                    lanes: ['sample'],
                     repositoryDirectoryPath,
                     rootDirectoryPath,
                     scriptName: 'clean tree',

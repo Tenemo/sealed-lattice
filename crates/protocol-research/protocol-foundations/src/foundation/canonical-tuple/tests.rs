@@ -22,7 +22,6 @@ impl AsRef<[u8]> for OversizedByteSource {
 fn unchecked_single_item_tuple(item_type: CanonicalItemType, canonical_bytes: &[u8]) -> Vec<u8> {
     let mut tuple = Vec::new();
     tuple.extend_from_slice(&1_u16.to_le_bytes());
-    tuple.extend_from_slice(&1_u16.to_le_bytes());
     tuple.extend_from_slice(&1_u32.to_le_bytes());
     tuple.extend_from_slice(&item_type.canonical_code().to_le_bytes());
     tuple.extend_from_slice(
@@ -51,7 +50,6 @@ fn representative_tuple() -> CanonicalTuple {
         .expect("display text normalizes");
     CanonicalTuple::new(
         0x0110,
-        1,
         vec![
             CanonicalItem::unsigned16(1),
             CanonicalItem::ascii("sealed-lattice").expect("printable ASCII"),
@@ -71,12 +69,11 @@ fn representative_tuples_and_homogeneous_lists_round_trip_byte_identically() {
     assert_eq!(decoded.encode().expect("decoded tuple re-encodes"), encoded);
 
     let nested_values = [
-        CanonicalTuple::new(0x0111, 1, vec![CanonicalItem::unsigned16(0)]),
-        CanonicalTuple::new(0x0111, 1, vec![CanonicalItem::unsigned16(1)]),
+        CanonicalTuple::new(0x0111, vec![CanonicalItem::unsigned16(0)]),
+        CanonicalTuple::new(0x0111, vec![CanonicalItem::unsigned16(1)]),
     ];
     let list_tuple = CanonicalTuple::new(
         0x0110,
-        1,
         vec![CanonicalItem::nested_tuple_list(&nested_values).expect("tuple list")],
     );
     let encoded = list_tuple.encode().expect("encode");
@@ -97,13 +94,10 @@ fn byte_and_text_constructors_enforce_exact_framed_item_boundaries() {
     assert_eq!(fixed_item.canonical_bytes().last(), Some(&0x5a));
     drop(fixed_item);
 
-    let fixed_error =
-        CanonicalItem::fixed_bytes(OversizedByteSource::new(maximum_item_byte_length + 1))
-            .expect_err("oversized fixed bytes must refuse before copying");
-    assert_eq!(fixed_error.kind, CanonicalCodecErrorKind::LimitExceeded);
     assert_eq!(
-        fixed_error.message,
-        "fixed byte value exceeds the default item limit"
+        CanonicalItem::fixed_bytes(OversizedByteSource::new(maximum_item_byte_length + 1)),
+        Err(CanonicalCodecRefusal),
+        "oversized fixed bytes must refuse before copying"
     );
 
     let maximum_variable_payload_byte_length = maximum_item_byte_length - 4;
@@ -127,14 +121,12 @@ fn byte_and_text_constructors_enforce_exact_framed_item_boundaries() {
     assert_eq!(variable_payload.last(), Some(&0xa5));
     drop(variable_item);
 
-    let variable_error = CanonicalItem::variable_bytes(OversizedByteSource::new(
-        maximum_variable_payload_byte_length + 1,
-    ))
-    .expect_err("oversized variable bytes must refuse before allocation");
-    assert_eq!(variable_error.kind, CanonicalCodecErrorKind::LimitExceeded);
     assert_eq!(
-        variable_error.message,
-        "variable-width item exceeds the default item limit"
+        CanonicalItem::variable_bytes(OversizedByteSource::new(
+            maximum_variable_payload_byte_length + 1,
+        )),
+        Err(CanonicalCodecRefusal),
+        "oversized variable bytes must refuse before allocation"
     );
 
     let maximum_text_byte_length = maximum_item_byte_length - 4;
@@ -172,17 +164,21 @@ fn byte_and_text_constructors_enforce_exact_framed_item_boundaries() {
     drop(display_text);
 
     let oversized_text = "B".repeat(maximum_text_byte_length + 1);
-    let ascii_error = CanonicalItem::ascii(&oversized_text)
-        .expect_err("oversized ASCII must refuse before cloning");
-    assert_eq!(ascii_error.kind, CanonicalCodecErrorKind::LimitExceeded);
+    assert_eq!(
+        CanonicalItem::ascii(&oversized_text),
+        Err(CanonicalCodecRefusal),
+        "oversized ASCII must refuse before cloning"
+    );
 
     let oversized_display_text =
         StabilizedDisplayText::from_ingress_utf8(oversized_text.as_bytes())
             .expect("test text is assigned stabilized NFC");
     drop(oversized_text);
-    let display_error = CanonicalItem::display_text(&oversized_display_text)
-        .expect_err("oversized display text must refuse before cloning");
-    assert_eq!(display_error.kind, CanonicalCodecErrorKind::LimitExceeded);
+    assert_eq!(
+        CanonicalItem::display_text(&oversized_display_text),
+        Err(CanonicalCodecRefusal),
+        "oversized display text must refuse before cloning"
+    );
 }
 
 #[test]
@@ -194,44 +190,40 @@ fn hostile_counts_lengths_types_and_termination_refuse_before_allocation() {
         maximum_nesting_depth: 2,
         ..CanonicalDecodeLimits::default()
     };
-    let mut oversized_count = vec![0x10, 0x01, 1, 0];
+    let mut oversized_count = vec![0x10, 0x01];
     oversized_count.extend_from_slice(&u32::MAX.to_le_bytes());
     assert_eq!(
-        CanonicalTuple::decode(&oversized_count, &limits)
-            .expect_err("oversized count must refuse")
-            .kind,
-        CanonicalCodecErrorKind::LimitExceeded
+        CanonicalTuple::decode(&oversized_count, &limits),
+        Err(CanonicalCodecRefusal),
+        "oversized count must refuse"
     );
 
-    let mut unknown_type = CanonicalTuple::new(1, 1, vec![CanonicalItem::unsigned16(1)])
+    let mut unknown_type = CanonicalTuple::new(1, vec![CanonicalItem::unsigned16(1)])
         .encode()
         .expect("encode");
-    unknown_type[8..10].copy_from_slice(&0xffff_u16.to_le_bytes());
+    unknown_type[6..8].copy_from_slice(&0xffff_u16.to_le_bytes());
     assert_eq!(
-        CanonicalTuple::decode(&unknown_type, &limits)
-            .expect_err("unknown type must refuse")
-            .kind,
-        CanonicalCodecErrorKind::UnknownItemType
+        CanonicalTuple::decode(&unknown_type, &limits),
+        Err(CanonicalCodecRefusal),
+        "unknown type must refuse"
     );
 
     let mut hostile_length = unknown_type;
-    hostile_length[8..10]
+    hostile_length[6..8]
         .copy_from_slice(&CanonicalItemType::RawBytes.canonical_code().to_le_bytes());
-    hostile_length[10..14].copy_from_slice(&u32::MAX.to_le_bytes());
+    hostile_length[8..12].copy_from_slice(&u32::MAX.to_le_bytes());
     assert_eq!(
-        CanonicalTuple::decode(&hostile_length, &limits)
-            .expect_err("hostile length must refuse")
-            .kind,
-        CanonicalCodecErrorKind::LimitExceeded
+        CanonicalTuple::decode(&hostile_length, &limits),
+        Err(CanonicalCodecRefusal),
+        "hostile length must refuse"
     );
 
     let mut trailing = representative_tuple().encode().expect("encode");
     trailing.push(0);
     assert_eq!(
-        CanonicalTuple::decode(&trailing, &CanonicalDecodeLimits::default())
-            .expect_err("trailing byte must refuse")
-            .kind,
-        CanonicalCodecErrorKind::TrailingBytes
+        CanonicalTuple::decode(&trailing, &CanonicalDecodeLimits::default()),
+        Err(CanonicalCodecRefusal),
+        "trailing byte must refuse"
     );
 }
 
@@ -262,13 +254,13 @@ fn cumulative_budgets_refuse_recursive_scanning_and_copy_amplification() {
         ..CanonicalDecodeLimits::default()
     };
 
-    let error = CanonicalTuple::decode(&encoded, &limits)
-        .expect_err("recursive rescanning must consume one shared work budget");
-    assert_eq!(error.kind, CanonicalCodecErrorKind::LimitExceeded);
     assert_eq!(
-        error.message,
-        "canonical decoding exceeds the configured cumulative work limit"
+        CanonicalTuple::decode(&encoded, &limits),
+        Err(CanonicalCodecRefusal),
+        "recursive rescanning must consume one shared work budget"
     );
+    CanonicalTuple::decode(&encoded, &CanonicalDecodeLimits::default())
+        .expect("the default work budget decodes the same tuple");
 
     let allocation_encoded = recursively_nested_single_item_tuple(7, 1_024);
     let cumulative_allocation_byte_length = allocation_encoded
@@ -280,13 +272,13 @@ fn cumulative_budgets_refuse_recursive_scanning_and_copy_amplification() {
         ..CanonicalDecodeLimits::default()
     };
 
-    let error = CanonicalTuple::decode(&allocation_encoded, &limits)
-        .expect_err("recursive copying must consume one shared allocation budget");
-    assert_eq!(error.kind, CanonicalCodecErrorKind::LimitExceeded);
     assert_eq!(
-        error.message,
-        "canonical decoding exceeds the configured cumulative allocation limit"
+        CanonicalTuple::decode(&allocation_encoded, &limits),
+        Err(CanonicalCodecRefusal),
+        "recursive copying must consume one shared allocation budget"
     );
+    CanonicalTuple::decode(&allocation_encoded, &CanonicalDecodeLimits::default())
+        .expect("the default allocation budget decodes the same tuple");
 }
 
 #[test]
@@ -296,10 +288,11 @@ fn cumulative_budgets_enforce_exact_flat_decode_boundaries() {
         maximum_cumulative_work_byte_length: encoded.len() - 1,
         ..CanonicalDecodeLimits::default()
     };
-    let work_error = CanonicalTuple::decode(&encoded, &before_item_validation_limit)
-        .expect_err("item validation work must be precharged");
-    assert_eq!(work_error.kind, CanonicalCodecErrorKind::LimitExceeded);
-    assert_eq!(work_error.byte_offset, 14);
+    assert_eq!(
+        CanonicalTuple::decode(&encoded, &before_item_validation_limit),
+        Err(CanonicalCodecRefusal),
+        "item validation work must be precharged"
+    );
 
     let exact_work_limit = CanonicalDecodeLimits {
         maximum_cumulative_work_byte_length: encoded.len(),
@@ -313,19 +306,21 @@ fn cumulative_budgets_enforce_exact_flat_decode_boundaries() {
             - 1,
         ..CanonicalDecodeLimits::default()
     };
-    let storage_error = CanonicalTuple::decode(&encoded, &before_item_storage_limit)
-        .expect_err("item storage allocation must be precharged");
-    assert_eq!(storage_error.kind, CanonicalCodecErrorKind::LimitExceeded);
-    assert_eq!(storage_error.byte_offset, 4);
+    assert_eq!(
+        CanonicalTuple::decode(&encoded, &before_item_storage_limit),
+        Err(CanonicalCodecRefusal),
+        "item storage allocation must be precharged"
+    );
 
     let before_item_copy_limit = CanonicalDecodeLimits {
         maximum_cumulative_allocation_byte_length: CANONICAL_ITEM_LOGICAL_ALLOCATION_BYTE_LENGTH,
         ..CanonicalDecodeLimits::default()
     };
-    let copy_error = CanonicalTuple::decode(&encoded, &before_item_copy_limit)
-        .expect_err("item byte copying must be precharged");
-    assert_eq!(copy_error.kind, CanonicalCodecErrorKind::LimitExceeded);
-    assert_eq!(copy_error.byte_offset, 14);
+    assert_eq!(
+        CanonicalTuple::decode(&encoded, &before_item_copy_limit),
+        Err(CanonicalCodecRefusal),
+        "item byte copying must be precharged"
+    );
 
     let exact_limit = CanonicalDecodeLimits {
         maximum_cumulative_allocation_byte_length: CANONICAL_ITEM_LOGICAL_ALLOCATION_BYTE_LENGTH
@@ -347,53 +342,43 @@ fn prefix_decodes_share_one_cumulative_budget() {
 
     CanonicalTuple::decode_prefix(&encoded, &limits, &mut budget, 1)
         .expect("the first prefix consumes the exact work budget");
-    let error = CanonicalTuple::decode_prefix(&encoded, &limits, &mut budget, 1)
-        .expect_err("a second prefix must not receive a fresh work budget");
-
-    assert_eq!(error.kind, CanonicalCodecErrorKind::LimitExceeded);
-    assert_eq!(error.byte_offset, 0);
     assert_eq!(
-        error.message,
-        "canonical decoding exceeds the configured cumulative work limit"
+        CanonicalTuple::decode_prefix(&encoded, &limits, &mut budget, 1),
+        Err(CanonicalCodecRefusal),
+        "a second prefix must not receive a fresh work budget"
     );
 }
 
 #[test]
 fn constructors_do_not_emit_values_the_default_decoder_refuses() {
     let too_many_values = vec![
-        CanonicalTuple::new(1, 1, vec![]);
+        CanonicalTuple::new(1, vec![]);
         CanonicalDecodeLimits::default().maximum_item_count + 1
     ];
     assert_eq!(
-        CanonicalItem::nested_tuple_list(&too_many_values)
-            .expect_err("oversized list must refuse")
-            .kind,
-        CanonicalCodecErrorKind::LimitExceeded
+        CanonicalItem::nested_tuple_list(&too_many_values),
+        Err(CanonicalCodecRefusal),
+        "oversized list must refuse"
     );
 
     let too_many_items = CanonicalTuple::new(
         1,
-        1,
         vec![CanonicalItem::unsigned16(0); CanonicalDecodeLimits::default().maximum_item_count + 1],
     );
     assert_eq!(
-        too_many_items
-            .encode()
-            .expect_err("oversized tuple must refuse")
-            .kind,
-        CanonicalCodecErrorKind::LimitExceeded
+        too_many_items.encode(),
+        Err(CanonicalCodecRefusal),
+        "oversized tuple must refuse"
     );
 
     let maximum_item_byte_length = CanonicalDecodeLimits::default().maximum_item_byte_length;
     assert_eq!(
-        CanonicalItem::variable_bytes(vec![0; maximum_item_byte_length])
-            .expect_err("inner length framing must be charged before allocation")
-            .kind,
-        CanonicalCodecErrorKind::LimitExceeded
+        CanonicalItem::variable_bytes(vec![0; maximum_item_byte_length]),
+        Err(CanonicalCodecRefusal),
+        "inner length framing must be charged before allocation"
     );
 
     let half_limit_tuple = CanonicalTuple::new(
-        1,
         1,
         vec![
             CanonicalItem::fixed_bytes(vec![0; maximum_item_byte_length / 2])
@@ -401,10 +386,9 @@ fn constructors_do_not_emit_values_the_default_decoder_refuses() {
         ],
     );
     assert_eq!(
-        CanonicalItem::nested_tuple_list(&[half_limit_tuple.clone(), half_limit_tuple])
-            .expect_err("list framing must be charged before allocation")
-            .kind,
-        CanonicalCodecErrorKind::LimitExceeded
+        CanonicalItem::nested_tuple_list(&[half_limit_tuple.clone(), half_limit_tuple]),
+        Err(CanonicalCodecRefusal),
+        "list framing must be charged before allocation"
     );
 }
 

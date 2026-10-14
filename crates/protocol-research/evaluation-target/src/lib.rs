@@ -6,7 +6,7 @@ pub mod close_session;
 #[path = "completion-session.rs"]
 pub mod completion_session;
 mod interpolation;
-pub mod program;
+mod program;
 pub mod release;
 #[path = "release-body.rs"]
 pub mod release_body;

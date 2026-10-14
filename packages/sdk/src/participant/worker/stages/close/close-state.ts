@@ -1,9 +1,11 @@
 import type { ParticipantProfile } from '../../module/runtime-bounds.js';
-import { recordKeyBytes } from '../../module/runtime-bounds.js';
+import {
+    closeEventHeaderBytes,
+    recordKeyBytes,
+} from '../../module/runtime-bounds.js';
 import {
     concatenate,
     encodeText,
-    equalBytes,
     readUnsigned16,
     readUnsigned32,
     unsigned16,
@@ -12,9 +14,13 @@ import {
 import type { ParticipantStoredRecord } from '../../storage/predecessor.js';
 import { sealedLength } from '../../storage/private-records.js';
 import type { RecordContext } from '../../storage/private-records.js';
-import { closePhase, rootGeneration } from '../../storage/root-generation.js';
+import {
+    closePhase,
+    closePhaseOf,
+    rootGeneration,
+} from '../../storage/root-generation.js';
 
-// The close log beneath the authenticated root. It retains every close input
+// The close state beneath the authenticated root. It retains every close input
 // the participant's state machine accepted, in arrival order, so restoration
 // replays them into the same state. An event holds its kind, its record
 // count, the serial its records are stored under, its payload length and one
@@ -24,10 +30,6 @@ import { closePhase, rootGeneration } from '../../storage/root-generation.js';
 // response and, for the organizer, its proposal exact body, and 22 the
 // organizer's signed proposal. No event is added from generation 20 on, and
 // later generations keep the completed close unchanged.
-
-const marker = encodeText('CST2');
-
-const eventHeaderBytes = 1 + 2 + 4 + 4;
 
 // The participant's own signed ballot and the locked intent reference other
 // retained state and add no record. A held body has one record with its
@@ -68,17 +70,16 @@ export const collectingCloseState = (): CloseState => ({
     proposalPacket: new Uint8Array(),
 });
 
-// The completed close of a participant: its signed response, and for the
-// organizer its signed proposal.
-export const completedClosePhase = (isOrganizer: boolean) =>
-    isOrganizer ? closePhase.proposed : closePhase.responded;
-
-// The close phase a root generation supplies: zero while the log collects,
-// and the completed close after it.
-const phaseOf = (generation: number, isOrganizer: boolean) => {
-    if (generation > closePhase.proposed)
-        return completedClosePhase(isOrganizer);
-    return generation >= closePhase.intent ? generation : 0;
+// The signed close messages a root generation retains for publication: the
+// organizer's locked intent, the signed response and the organizer's signed
+// proposal, each from its phase on.
+export const closePublications = (generation: number, isOrganizer: boolean) => {
+    const phase = closePhaseOf(generation, isOrganizer);
+    return {
+        intent: isOrganizer && phase >= closePhase.locked,
+        response: phase >= closePhase.responded,
+        proposal: phase === closePhase.proposed,
+    };
 };
 
 // The fields each phase retains after the events.
@@ -119,7 +120,6 @@ export const encodeCloseState = (
     state: CloseState,
 ) =>
     concatenate(
-        marker,
         unsigned32(state.events.length),
         ...state.events.flatMap((event) => [
             Uint8Array.of(event.kind),
@@ -128,7 +128,11 @@ export const encodeCloseState = (
             unsigned32(event.length),
             ...event.keys,
         ]),
-        ...phaseFields(phaseOf(generation, isOrganizer), isOrganizer, state),
+        ...phaseFields(
+            closePhaseOf(generation, isOrganizer),
+            isOrganizer,
+            state,
+        ),
     );
 
 // The plaintext length of each record of an event, in record order.
@@ -192,7 +196,7 @@ const packetLength = (
     return 4 + length + signatureBytes;
 };
 
-// Decodes the close log under the phase its root generation supplies. The
+// Decodes the close state under the phase its root generation supplies. The
 // events must keep their serials ascending, the lock must be present exactly
 // from generation 19, only the organizer may take responses and only after
 // the lock, and only the organizer's phases may carry its intent signing and
@@ -204,16 +208,15 @@ export const decodeCloseState = (
     bytes: Uint8Array,
 ): CloseState => {
     const { close, registration } = profile;
-    const phase = phaseOf(generation, isOrganizer);
+    const phase = closePhaseOf(generation, isOrganizer);
     if (
         generation < rootGeneration.setupRetained ||
         (!isOrganizer &&
             (phase === closePhase.intent || phase === closePhase.proposed)) ||
-        bytes.length > close.maximumStateBytes ||
-        !equalBytes(bytes.subarray(0, marker.length), marker)
+        bytes.length > close.maximumStateBytes
     )
         throw new Error('The close state is malformed.');
-    let offset = marker.length;
+    let offset = 0;
     const take = (length: number) => {
         if (length > bytes.length - offset)
             throw new Error('The close state is truncated.');
@@ -223,19 +226,19 @@ export const decodeCloseState = (
     };
     const eventCount = readUnsigned32(take(4), 0);
     if (eventCount > close.maximumEvents)
-        throw new Error('The close log has too many events.');
+        throw new Error('The close state has too many events.');
     const events: CloseEvent[] = [];
     let records = 0;
     let locked = false;
     for (let index = 0; index < eventCount; index++) {
-        const header = take(eventHeaderBytes);
+        const header = take(closeEventHeaderBytes);
         const kind = header[0];
         const count = readUnsigned16(header, 1);
         const serial = readUnsigned32(header, 3);
         const length = readUnsigned32(header, 7);
         records += count;
         if (records > close.maximumRecords)
-            throw new Error('The close log has too many records.');
+            throw new Error('The close state has too many records.');
         const event = {
             kind,
             serial,
@@ -248,12 +251,12 @@ export const decodeCloseState = (
             (kind === closeEventKind.lock && locked) ||
             (kind === closeEventKind.response && (!isOrganizer || !locked))
         )
-            throw new Error('The close log is inconsistent.');
+            throw new Error('The close state is inconsistent.');
         if (kind === closeEventKind.lock) locked = true;
         events.push(event);
     }
     if (locked !== phase >= closePhase.locked)
-        throw new Error('The close log disagrees with its intent lock.');
+        throw new Error('The close state disagrees with its intent lock.');
     const signature = registration.signatureBytes;
     const intentPacketBytes = 4 + close.intentBodyBytes + signature;
     const state = { ...collectingCloseState(), events };
@@ -320,7 +323,7 @@ export const closeRecordAssociatedData = (
     length: number,
 ) =>
     concatenate(
-        encodeText('sealed-lattice/participant-close-record/v2'),
+        encodeText('sealed-lattice/participant-close-record'),
         context.poll,
         context.setupIdentity,
         unsigned16(context.position),

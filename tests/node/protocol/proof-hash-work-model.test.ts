@@ -1,7 +1,13 @@
-import { readFile } from 'node:fs/promises';
-
 import { describe, expect, it } from 'vitest';
 
+import {
+    shake256RateBytes,
+    spongePermutations,
+} from '#tests/node/protocol/reference/sponge-permutations.js';
+import {
+    readRustSource,
+    rustIntegerConstant,
+} from '#tests/node/rust-source.js';
 import {
     byteAlignedSpongePermutations,
     compileProofHashWork,
@@ -88,18 +94,10 @@ describe('proof hash work', () => {
     });
 
     it('uses each actual Rust descriptor word width across small and large profiles', async () => {
-        const source = await readFile(
-            new URL(
-                '../../../crates/protocol-research/supported-profile/src/relation.rs',
-                import.meta.url,
-            ),
-            'utf8',
+        const source = await readRustSource(
+            'crates/protocol-research/supported-profile/src/relation.rs',
         );
-        const fixed = BigInt(
-            source
-                .match(/const MESSAGE_BYTES: usize = ([\d_]+);/u)![1]
-                .replace(/_/gu, ''),
-        );
+        const fixed = rustIntegerConstant(source, 'MESSAGE_BYTES');
         expect(fixed).toBe(262144n);
         expect(source.match(/message_bytes: MESSAGE_BYTES/gu)).toHaveLength(2);
         expect(source).toContain(
@@ -151,26 +149,14 @@ describe('proof hash work', () => {
                     rate,
                     rate + 1,
                     2 * rate + 1,
-                ]) {
-                    const padded = Array<number>(input).fill(0);
-                    padded.push(rate === 72 ? 0x06 : 0x1f);
-                    while (padded.length % rate !== 0) padded.push(0);
-                    padded[padded.length - 1] |= 0x80;
-                    let expected = padded.length / rate;
-                    for (
-                        let produced = rate;
-                        produced < output;
-                        produced += rate
-                    )
-                        expected++;
+                ])
                     expect(
                         byteAlignedSpongePermutations(
                             BigInt(input),
                             BigInt(output),
                             BigInt(rate),
                         ),
-                    ).toBe(BigInt(expected));
-                }
+                    ).toBe(spongePermutations(input, output, rate));
     });
 
     it('includes every part length, including empty parts', () => {
@@ -195,15 +181,15 @@ describe('proof hash work', () => {
                 356n * 16n + 48n,
                 377n * 48n,
                 4n * (18n + 1147n) + 8n * 375n,
-                4n + 4n + 108n + 20n + 42n * 65536n * 109n + 31n * 65536n * 21n,
+                4n + 108n + 42n * 65536n * 109n + 31n * 65536n * 21n,
             ],
             ['ballot', 576n, 1632n, 776n, 28672136n],
             ['release', 1040n, 3360n, 1540n, 8782022n],
         ]);
         expect(profiles.map((value) => value.roleBytes)).toEqual([
-            340n,
-            334n,
-            409n,
+            335n,
+            329n,
+            404n,
         ]);
         for (const profile of profiles) {
             const costs = compileProofHashWork(completionProfile(), profile);
@@ -239,13 +225,16 @@ describe('proof hash work', () => {
             }
             return { position, permutations };
         };
-        const finish = (position: number, bytes: Uint8Array) => {
-            const padded = Array<number>(position + bytes.length).fill(0);
-            padded.push(0x1f);
-            while (padded.length % 136 !== 0) padded.push(0);
-            padded[padded.length - 1] |= 0x80;
-            return padded.length / 136;
-        };
+        // The blocks a cached prefix position and a tail fill with their
+        // padding; the 64-byte digest takes no further permutation.
+        const finish = (position: number, bytes: Uint8Array) =>
+            Number(
+                spongePermutations(
+                    position + bytes.length,
+                    64,
+                    shake256RateBytes,
+                ),
+            );
         const exponents = [
             18,
             18,
@@ -379,28 +368,23 @@ describe('proof hash work', () => {
 
     it('retains every subtree and row-job initialization under the supported helper bound', async () => {
         const [tree, rows, parallel, verifier, digest] = await Promise.all([
-            readFile('crates/protocol-research/word-proof/src/tree.rs', 'utf8'),
-            readFile('crates/protocol-research/word-proof/src/rows.rs', 'utf8'),
-            readFile(
-                'crates/protocol-research/parallel-work/src/lib.rs',
-                'utf8',
-            ),
-            readFile(
+            readRustSource('crates/protocol-research/word-proof/src/tree.rs'),
+            readRustSource('crates/protocol-research/word-proof/src/rows.rs'),
+            readRustSource('crates/protocol-research/parallel-work/src/lib.rs'),
+            readRustSource(
                 'crates/protocol-research/word-verifier/src/engine.rs',
-                'utf8',
             ),
-            readFile(
+            readRustSource(
                 'crates/protocol-research/parallel-work/src/protocol-hash.rs',
-                'utf8',
             ),
         ]);
-        expect(tree).toContain('const SUBTREE_LEAVES: usize = 1 << 14;');
-        expect(tree).toContain('const SALT_BYTES: usize = 128;');
-        expect(rows).toContain('const ROWS_PER_JOB: usize = 16_384;');
-        expect(parallel).toContain('const MAXIMUM_HELPERS: usize = 8;');
+        expect(rustIntegerConstant(tree, 'SUBTREE_LEAVES')).toBe(1n << 14n);
+        expect(rustIntegerConstant(tree, 'SALT_BYTES')).toBe(128n);
+        expect(rustIntegerConstant(rows, 'ROWS_PER_JOB')).toBe(16_384n);
+        expect(rustIntegerConstant(parallel, 'MAXIMUM_HELPERS')).toBe(8n);
         expect(verifier).toContain('role.is_empty() || role.len() > 1024');
-        expect(digest).toContain('const RATE: usize = 136;');
-        expect(digest).toContain('const PREFIX_BYTES: usize = 64;');
+        expect(rustIntegerConstant(digest, 'RATE')).toBe(136n);
+        expect(rustIntegerConstant(digest, 'PREFIX_BYTES')).toBe(64n);
         const work = compileProofHashWork(
             completionProfile(),
             proofHashProfiles(completionProfile())[0],
@@ -516,7 +500,7 @@ describe('proof hash work', () => {
         const role = proofHashProfiles(profile).find(
             (value) => value.role === 'setup',
         )!;
-        const previousRoleBytes = 8n + 4n * 6n + 4n + 36n + 2n * 64n + 2n;
+        const previousRoleBytes = 6n + 4n * 6n + 4n + 33n + 2n * 64n + 2n;
         const ownerItemBytes = 6n + 4n + 2n * 64n;
         expect(role.roleBytes).toBe(previousRoleBytes + ownerItemBytes);
         const current = compileProofHashWork(profile, role);

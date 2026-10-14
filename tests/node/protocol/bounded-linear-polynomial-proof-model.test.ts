@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { compileBoundedLinearPolynomialProofCensus } from '#tests/bounded-linear-polynomial-proof-model.js';
 
 describe('bounded linear polynomial proof', () => {
-    it('matches the two-stage soundness calculation and rejects missing degree binding', () => {
+    it('matches the two-stage soundness calculation and refuses missing degree binding', () => {
         const census = compileBoundedLinearPolynomialProofCensus();
         // One bad alpha accepts every c; every other alpha accepts only c=0.
         expect(census.falseAcceptanceCount).toBe(2 * census.prime - 1);

@@ -11,7 +11,7 @@ use protocol_foundations::{
     },
     ballot_body,
     close_signing::{
-        ClosePurpose, MAXIMUM_LISTED_ENVELOPES_PER_SLOT, close_quorum, close_response_bytes,
+        ClosePurpose, MAXIMUM_LISTED_ENVELOPES_PER_SLOT, close_response_bytes,
         maximum_close_message_bytes,
     },
     contribution_body::{self, BODY_HEADER_BYTES},
@@ -94,7 +94,8 @@ pub fn limits() -> Vec<u64> {
 pub fn profile_bounds(profile: Profile) -> Vec<u64> {
     let participants = profile.participants();
     let contribution = contribution_body::proof_lengths(profile);
-    let (checkpoint_header, checkpoint_records) = contribution_prover::checkpoint_layout(profile);
+    let (checkpoint_header, checkpoint_records) =
+        crate::contribution_session::checkpoint_layout(profile);
     let ballot = ballot_body::body_lengths(profile);
     let response = maximum_close_message_bytes(ClosePurpose::Response, participants);
     let proposal = maximum_close_message_bytes(ClosePurpose::Proposal, participants);
@@ -111,7 +112,7 @@ pub fn profile_bounds(profile: Profile) -> Vec<u64> {
         checkpoint_header,
         *ballot.start(),
         *ballot.end(),
-        close_quorum(participants),
+        profile.inventory_threshold(),
         profile.maximum_corrupt_participants(),
         profile.setup_contributors(),
         profile.setup_eligible_contributors(),

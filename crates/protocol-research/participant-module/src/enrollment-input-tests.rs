@@ -2,7 +2,7 @@
 //! accepts its exact layout and refuses changed, short and trailing bytes.
 use super::{joiner_input, organizer_input, restore_input};
 use crate::{
-    Enrollment, Error,
+    Enrollment, Refusal,
     registration_fixture::{RUNTIME, Record, registration},
 };
 use protocol_foundations::{
@@ -141,7 +141,7 @@ fn restore_bytes(poll: &VerifiedPoll, record: &Record) -> Vec<u8> {
     bytes
 }
 
-fn restored(poll: &VerifiedPoll, bytes: &[u8]) -> Option<Result<Enrollment, Error>> {
+fn restored(poll: &VerifiedPoll, bytes: &[u8]) -> Option<Result<Enrollment, Refusal>> {
     Some(restore_input(bytes, false)?.enrollment(poll))
 }
 
@@ -197,7 +197,7 @@ fn restore_input_refuses_changed_layouts() {
         ("long source capsule", long_sources),
     ] {
         assert!(
-            matches!(restored(&poll, &bytes), Some(Err(Error::Shape))),
+            matches!(restored(&poll, &bytes), Some(Err(Refusal::Shape))),
             "{case}"
         );
     }
@@ -206,7 +206,7 @@ fn restore_input_refuses_changed_layouts() {
         ("changed source capsule", changed_capsule),
     ] {
         assert!(
-            matches!(restored(&poll, &bytes), Some(Err(Error::State))),
+            matches!(restored(&poll, &bytes), Some(Err(Refusal::State))),
             "{case}"
         );
     }
@@ -245,11 +245,11 @@ fn prepared_restore_reads_the_retained_setup_after_its_length() {
         ("no frame length", vec![0; 3]),
     ] {
         assert!(
-            matches!(restored(&frame), Some(Err(Error::Shape))),
+            matches!(restored(&frame), Some(Err(Refusal::Shape))),
             "{case}"
         );
     }
     // A complete frame reaches the retained setup's own tag check.
     let frame = [&100u32.to_le_bytes()[..], &[0; 100]].concat();
-    assert!(matches!(restored(&frame), Some(Err(Error::State))));
+    assert!(matches!(restored(&frame), Some(Err(Refusal::State))));
 }

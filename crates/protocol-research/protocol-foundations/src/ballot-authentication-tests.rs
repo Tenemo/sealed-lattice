@@ -29,12 +29,25 @@ fn retained_setup_tags_bind_the_credential_poll_and_exact_reference() {
     let same_seed = Credential::from_seed([7; 32]);
     let other = Credential::from_seed([10; 32]);
     let poll = verified_poll([2; 64]);
-    let reference = [b"SAV1".as_slice(), &[5; 64], &[6; 128]].concat();
+    let reference = [[5; 64].as_slice(), &[6; 128]].concat();
     let tag = participant.retained_setup_tag(&poll, &reference);
     assert!(
         participant
             .check_retained_setup_tag(&poll, &reference, &tag)
             .is_ok()
+    );
+    // The provisional selection inputs share the reference's encoding, and
+    // only the tag's label keeps either from standing for the other.
+    let selection_tag = participant.retained_selection_inputs_tag(&poll, &reference);
+    assert!(
+        participant
+            .check_retained_setup_tag(&poll, &reference, &selection_tag)
+            .is_err()
+    );
+    assert!(
+        participant
+            .check_retained_selection_inputs_tag(&poll, &reference, &tag)
+            .is_err()
     );
     // The key is the signing seed alone, so a restored credential accepts
     // its earlier tag while every other credential refuses it.
@@ -54,7 +67,7 @@ fn retained_setup_tags_bind_the_credential_poll_and_exact_reference() {
             .is_err()
     );
     let mut changed = reference.clone();
-    changed[70] ^= 1;
+    changed[66] ^= 1;
     let extended = [reference.as_slice(), &[0]].concat();
     for candidate in [&changed[..], &reference[..reference.len() - 1], &extended] {
         assert!(
@@ -90,16 +103,13 @@ fn envelope_lengths_and_positions_are_bounded_before_body_work() {
             assert_eq!(decoded.body_length(), length);
             assert_eq!(decoded.identity(), value.identity());
             let mut retimed = *value.bytes();
-            retimed[134] ^= 1;
+            retimed[ENVELOPE_BALLOT_TIME_OFFSET] ^= 1;
             assert_ne!(
                 BallotEnvelope::decode(profile, &retimed)
                     .unwrap()
                     .identity(),
                 value.identity()
             );
-            let mut former = *value.bytes();
-            former[3] = b'1';
-            assert!(BallotEnvelope::decode(profile, &former).is_err());
             assert!(BallotEnvelope::decode(profile, &value.bytes()[..ENVELOPE_BYTES - 1]).is_err());
             let mut extended = value.bytes().to_vec();
             extended.push(0);

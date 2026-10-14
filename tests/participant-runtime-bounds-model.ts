@@ -17,7 +17,7 @@ import { compileParticipantReleaseCustody } from '#tests/participant-release-cus
 import { compileRecipientKeyCensus } from '#tests/recipient-key-model.js';
 import { compileRegistrationEnrollmentCensus } from '#tests/registration-enrollment-model.js';
 import { compileRosterProposalCensus } from '#tests/roster-proposal-model.js';
-import { compileSetupContributionRelationCensus } from '#tests/setup-contribution-relation-model.js';
+import { compileSetupContributionRelationCensus } from '#tests/setup-relation/shape.js';
 import { compileSetupSelectionWireCensus } from '#tests/setup-selection-wire-model.js';
 import {
     ballotScoreRange,
@@ -56,7 +56,8 @@ export const compileParticipantRuntimeProfile = (
         participantCount,
         optionCount,
         setupContributorCount: profile.setupContributorCount,
-        eligibleContributorCount: authentication.eligibleCount,
+        eligibleContributorCount: authentication.eligibleContributorCount,
+        quorum: number(closeWire.closeQuorum),
         proposalBytes: number(
             compileRosterProposalCensus(participantCount).proposalBytes,
         ),
@@ -126,11 +127,7 @@ export const compileParticipantRuntimeProfile = (
             recordBytes: number(ballotCustody.recordBytes),
             maximumStateBytes: number(ballotCustody.maximumStateBytes),
             headerBytes: number(ballotBody.headerBytes),
-            minimumBodyBytes: number(
-                ballotBody.headerBytes +
-                    ballotBody.ciphertextBytes +
-                    ballotBody.minimumProofBytes,
-            ),
+            minimumBodyBytes: number(ballotBody.minimumBodyBytes),
             maximumBodyBytes: number(ballotBody.maximumBodyBytes),
             envelopeBytes: number(ballotBody.envelopeBytes),
             keyIndex: ballotBody.setupKeyPolynomials[0].expandedIndex,
@@ -141,7 +138,6 @@ export const compileParticipantRuntimeProfile = (
             ),
         },
         close: {
-            quorum: number(closeWire.closeQuorum),
             submissionBytes: number(closeWire.submissionBytes),
             intentBodyBytes: number(closeWire.intentBodyBytes),
             minimumResponseBodyBytes: number(

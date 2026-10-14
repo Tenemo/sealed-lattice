@@ -1,4 +1,5 @@
-use num_bigint::{BigInt, Sign};
+use num_bigint::BigInt;
+use statement_stream::coefficient::CenteredCodec;
 use supported_profile::{Family, Profile};
 
 #[path = "offer-verifier.rs"]
@@ -17,8 +18,7 @@ pub const CHUNK_BYTES: usize = 524_288;
 /// A retained aggregate reference, provisional after the selection or
 /// verified after the setup, with its original participant's tag.
 pub fn retained_reference_bytes(profile: Profile) -> usize {
-    4 + 64
-        + 64 * profile.contribution_body_polynomials().len()
+    64 + 64 * profile.contribution_body_polynomials().len()
         + protocol_foundations::RETAINED_TAG_BYTES
 }
 
@@ -38,10 +38,10 @@ pub enum Refusal {
     Encoding,
 }
 
-/// Adds centered coefficients of a family: a sign byte of zero or one
-/// before a little-endian magnitude of at most half the modulus, rounded
-/// down, with zero never negative. It works in little-endian words.
+/// Adds canonical centered coefficient records of a family in little-endian
+/// words.
 pub(crate) struct PolynomialAdder {
+    codec: CenteredCodec,
     modulus: Vec<u64>,
     half: Vec<u64>,
     width: usize,
@@ -56,28 +56,24 @@ impl PolynomialAdder {
                 (modulus[index] >> 1) | modulus.get(index + 1).map_or(0, |next| next << 63)
             })
             .collect();
+        let codec = CenteredCodec::new(&bytes);
         Self {
+            width: codec.record_bytes(),
+            codec,
             modulus,
             half,
-            width: 1 + profile.family_magnitude_bytes(family),
         }
     }
     /// A canonical coefficient's sign, with its magnitude in the words.
     fn magnitude(&self, bytes: &[u8], words: &mut [u64]) -> Result<bool, Refusal> {
-        if bytes.len() != self.width || bytes[0] > 1 {
+        if !self.codec.is_canonical(bytes) {
             return Err(Refusal::Encoding);
         }
         read_words(&bytes[1..], words);
-        let negative = bytes[0] == 1;
-        if exceeds(words, &self.half) || (negative && words.iter().all(|word| *word == 0)) {
-            return Err(Refusal::Encoding);
-        }
-        Ok(negative)
+        Ok(bytes[0] == 1)
     }
     pub(crate) fn decode(&self, bytes: &[u8]) -> Result<BigInt, Refusal> {
-        let negative = self.magnitude(bytes, &mut vec![0; self.half.len()])?;
-        let value = BigInt::from_bytes_le(Sign::Plus, &bytes[1..]);
-        Ok(if negative { -value } else { value })
+        self.codec.decode(bytes).ok_or(Refusal::Encoding)
     }
     /// Both inputs are public canonical coefficients. The destination is scratch;
     /// refusal may leave its earlier coefficients changed and grants no capability.

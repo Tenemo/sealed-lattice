@@ -14,6 +14,7 @@ import {
     chunkBytes,
     foregroundVisitMilliseconds,
     participantDataKindMaximums,
+    requiresFheKeySources,
     tagBytes,
 } from '../../module/runtime-bounds.js';
 import { purposeBit, signingPurpose } from '../../module/signing-purpose.js';
@@ -30,7 +31,7 @@ import {
 } from '../../shared/bytes.js';
 import type { ParticipantRefusalReason } from '../../shared/operation-status.js';
 import {
-    estimateStorage,
+    hasStorageRoom,
     isEmptyParticipant,
     participantRecordStores,
     participantStores,
@@ -43,18 +44,13 @@ import {
     rootGeneration,
     targetPhase,
 } from '../../storage/root-generation.js';
-import {
-    createRootKey,
-    rootAssociatedData,
-    sealRoot,
-} from '../../storage/root-sealing.js';
+import { createRootKey, sealRoot } from '../../storage/root-sealing.js';
 import type { AuthenticatedRoot, RecordReference } from '../../storage/root.js';
 import {
     authenticateRoot,
     dataKind,
     encodeManifest,
     readDataKind,
-    requiresFheKeySources,
 } from '../../storage/root.js';
 import { commitParticipantState } from '../../storage/state-transaction.js';
 import { unusedPreparationPurposes } from '../contribution/preparation-state.js';
@@ -110,7 +106,7 @@ const lastUnsignedGeneration = [
     [signingPurpose.closeIntent, closePhase.intent],
     [signingPurpose.closeResponse, closePhase.responding],
     [signingPurpose.closeProposal, closePhase.responded],
-    [signingPurpose.target, targetPhase.intent],
+    [signingPurpose.target, targetPhase.locked],
     [signingPurpose.release, releasePhase.body],
 ] as const;
 
@@ -218,24 +214,18 @@ export const createEnrollment = async (
             if (module.validate_joiner(input.length) !== 0)
                 return 'invalid request';
         }
-        const estimate = await estimateStorage();
-        if (
-            estimate.quota === undefined ||
-            estimate.usage === undefined ||
-            estimate.quota - estimate.usage <
-                2 * limits.registration.publicKeyBytes
-        )
+        if (!(await hasStorageRoom(2 * limits.registration.publicKeyBytes)))
             return 'insufficient storage';
-        const associatedData = rootAssociatedData(runtime);
         const key = await createRootKey();
-        const intentPlaintext = concatenate(
-            encodeText('INI2'),
-            custodyIdentity(module, custodyPurpose.enrollmentInput, input),
+        const intentPlaintext = custodyIdentity(
+            module,
+            custodyPurpose.enrollmentInput,
+            input,
         );
         const intent = await sealRoot(
             key,
             rootGeneration.enrollmentIntent,
-            associatedData,
+            runtime,
             intentPlaintext,
         );
         const intentHead = {
@@ -391,7 +381,7 @@ export const createEnrollment = async (
         const sealed = await sealRoot(
             key,
             rootGeneration.registered,
-            associatedData,
+            runtime,
             plaintext,
         );
         plaintext.fill(0);
@@ -410,7 +400,7 @@ export const createEnrollment = async (
                 validateParticipantPredecessor(reader, {
                     head: intentHead,
                     manifest: intentPlaintext,
-                    rootContext: associatedData,
+                    rootContext: runtime,
                     maximumRootBytes: limits.root.maximumEnrollmentRootBytes,
                     recordStores: participantRecordStores,
                     records: [],

@@ -439,12 +439,9 @@ impl AffineValues {
 }
 
 pub struct LinearOracle {
-    pub target: Element,
-    pub claimed_sum: Element,
     pub quotient: Vec<Element>,
     pub remainder: Vec<Element>,
     pub tree: Tree,
-    pub lookup_weight: Element,
 }
 impl Drop for LinearOracle {
     fn drop(&mut self) {
@@ -458,7 +455,6 @@ impl LinearOracle {
         role: &[u8],
         evaluations: Vec<Element>,
         target: Element,
-        lookup_weight: Element,
         mask_challenge: Element,
         mask_sum: Element,
         adversarial_affine: bool,
@@ -517,12 +513,9 @@ impl LinearOracle {
         rows.absorb_extension(&quotient);
         rows.close(&mut tree);
         Self {
-            target,
-            claimed_sum,
             quotient: std::mem::take(&mut *quotient),
             remainder: std::mem::take(&mut *remainder),
             tree,
-            lookup_weight,
         }
     }
     /// The oracle's encoded values at the leaves, in their order. Only

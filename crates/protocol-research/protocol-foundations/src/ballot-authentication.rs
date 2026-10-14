@@ -1,5 +1,5 @@
 use crate::{
-    Credential, Error, RETAINED_TAG_BYTES, SIGNATURE_BYTES, SIGNING_PUBLIC_KEY_BYTES,
+    Credential, RETAINED_TAG_BYTES, Refusal, SIGNATURE_BYTES, SIGNING_PUBLIC_KEY_BYTES,
     SigningPurpose, roster_authentication::AuthenticatedRosterProposal,
 };
 use crate::{
@@ -13,30 +13,30 @@ use fips204::{
 };
 use supported_profile::Profile;
 
-pub(crate) const BALLOT_SIGNATURE_CONTEXT: &[u8] = b"sealed-lattice/ballot-envelope/v1";
-/// The envelope's fields after its four-byte marker start at these offsets:
-/// the poll, the setup identity, the author's position, the ballot time, the
-/// body length and the body identity.
-pub const ENVELOPE_POLL_OFFSET: usize = 4;
-pub const ENVELOPE_SETUP_IDENTITY_OFFSET: usize = 68;
-pub const ENVELOPE_POSITION_OFFSET: usize = 132;
-pub const ENVELOPE_BALLOT_TIME_OFFSET: usize = 134;
-pub const ENVELOPE_BODY_LENGTH_OFFSET: usize = 142;
-pub(crate) const ENVELOPE_BODY_IDENTITY_OFFSET: usize = 150;
+pub(crate) const BALLOT_SIGNATURE_CONTEXT: &[u8] = b"sealed-lattice/ballot-envelope";
+/// The envelope's fields start at these offsets: the poll, the setup
+/// identity, the author's position, the ballot time, the body length and the
+/// body identity.
+pub const ENVELOPE_POLL_OFFSET: usize = 0;
+pub const ENVELOPE_SETUP_IDENTITY_OFFSET: usize = 64;
+pub const ENVELOPE_POSITION_OFFSET: usize = 128;
+pub const ENVELOPE_BALLOT_TIME_OFFSET: usize = 130;
+pub const ENVELOPE_BODY_LENGTH_OFFSET: usize = 138;
+pub(crate) const ENVELOPE_BODY_IDENTITY_OFFSET: usize = 146;
 pub const ENVELOPE_BYTES: usize = ENVELOPE_BODY_IDENTITY_OFFSET + 64;
-pub const ENVELOPE_IDENTITY_DOMAIN: &str = "sealed-lattice/ballot-envelope-identity/v1";
-const RETAINED_SETUP_TAG_LABEL: &[u8] = b"sealed-lattice/retained-setup-reference/v2";
+pub const ENVELOPE_IDENTITY_DOMAIN: &str = "sealed-lattice/ballot-envelope-identity";
+const RETAINED_SETUP_TAG_LABEL: &[u8] = b"sealed-lattice/retained-setup-reference";
 
 /// Original credential correspondence beneath the authenticated participant root.
 /// This creates no public roster, setup, ballot, or unspent-attempt capability.
-pub struct RetainedBallotOwner {
+pub struct RetainedSetupOwner {
     poll: [u8; 64],
     setup_identity: [u8; 64],
     position: usize,
     owner_body: [u8; 64],
     signing_public: [u8; SIGNING_PUBLIC_KEY_BYTES],
 }
-impl RetainedBallotOwner {
+impl RetainedSetupOwner {
     pub fn participant_identity(
         &self,
     ) -> crate::foundation::participant_identity::ParticipantIdentity {
@@ -70,14 +70,13 @@ impl BallotEnvelope {
         ballot_time: u64,
         body_length: usize,
         body_identity: [u8; 64],
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, Refusal> {
         if position >= profile.participants()
             || !crate::ballot_body::body_lengths(profile).contains(&body_length)
         {
-            return Err(Error::Shape);
+            return Err(Refusal::Shape);
         }
         let mut bytes = [0; ENVELOPE_BYTES];
-        bytes[..ENVELOPE_POLL_OFFSET].copy_from_slice(b"LBE2");
         bytes[ENVELOPE_POLL_OFFSET..ENVELOPE_SETUP_IDENTITY_OFFSET].copy_from_slice(&poll);
         bytes[ENVELOPE_SETUP_IDENTITY_OFFSET..ENVELOPE_POSITION_OFFSET]
             .copy_from_slice(&setup_identity);
@@ -90,9 +89,9 @@ impl BallotEnvelope {
         bytes[ENVELOPE_BODY_IDENTITY_OFFSET..].copy_from_slice(&body_identity);
         Ok(Self { bytes })
     }
-    pub fn decode(profile: Profile, bytes: &[u8]) -> Result<Self, Error> {
-        if bytes.len() != ENVELOPE_BYTES || &bytes[..ENVELOPE_POLL_OFFSET] != b"LBE2" {
-            return Err(Error::Shape);
+    pub fn decode(profile: Profile, bytes: &[u8]) -> Result<Self, Refusal> {
+        if bytes.len() != ENVELOPE_BYTES {
+            return Err(Refusal::Shape);
         }
         let fields = Self {
             bytes: bytes.try_into().unwrap(),
@@ -102,7 +101,7 @@ impl BallotEnvelope {
                 .try_into()
                 .unwrap(),
         ))
-        .map_err(|_| Error::Shape)?;
+        .map_err(|_| Refusal::Shape)?;
         Self::new(
             profile,
             *fields.poll(),
@@ -181,25 +180,25 @@ impl Credential {
         poll: &VerifiedPoll,
         reference: &[u8],
         tag: &[u8],
-    ) -> Result<(), Error> {
+    ) -> Result<(), Refusal> {
         self.check_retained_tag(RETAINED_SETUP_TAG_LABEL, poll, reference, tag)
     }
-    pub(crate) fn check_ballot_owner(&self, owner: &RetainedBallotOwner) -> Result<(), Error> {
+    pub(crate) fn check_setup_owner(&self, owner: &RetainedSetupOwner) -> Result<(), Refusal> {
         if self.completed_body != Some(owner.owner_body)
             || self.signing_public != owner.signing_public
         {
-            return Err(Error::Context);
+            return Err(Refusal::Context);
         }
         Ok(())
     }
     /// Mirrors an already authenticated local ballot intent. It grants no
     /// public publication and cannot restore unused authority.
     /// No attempt starts after an authenticated close intent.
-    pub fn reserve_ballot_attempt(&mut self, owner: &RetainedBallotOwner) -> Result<(), Error> {
-        self.check_ballot_owner(owner)?;
+    pub fn reserve_ballot_attempt(&mut self, owner: &RetainedSetupOwner) -> Result<(), Refusal> {
+        self.check_setup_owner(owner)?;
         self.check_unlocked(SigningPurpose::Ballot)?;
         if self.signed_ballot.is_some() || self.close_lock.is_some() {
-            return Err(Error::Consumed);
+            return Err(Refusal::Consumed);
         }
         self.ballot_attempted = true;
         Ok(())
@@ -208,32 +207,32 @@ impl Credential {
         &self,
         poll: &VerifiedPoll,
         context: &RetainedContributionContext,
-    ) -> Result<(), Error> {
+    ) -> Result<(), Refusal> {
         self.check_confirmed_context(context)?;
         if context.poll != poll.identity()
             || context.profile().options() != poll.manifest().option_count()
             || self.completed_body != Some(context.owner_body)
         {
-            return Err(Error::Context);
+            return Err(Refusal::Context);
         }
         Ok(())
     }
     /// Every original roster member uses its own verified winning setup
     /// reference, whether its own offer or endorsement was selected or absent.
-    pub fn retain_setup_ballot_owner(
+    pub fn retain_setup_owner(
         &self,
         poll: &VerifiedPoll,
         context: &RetainedContributionContext,
         setup_identity: [u8; 64],
         reference: &[u8],
         tag: &[u8],
-    ) -> Result<RetainedBallotOwner, Error> {
+    ) -> Result<RetainedSetupOwner, Refusal> {
         self.check_owner_context(poll, context)?;
         self.check_retained_setup_tag(poll, reference, tag)?;
-        if reference.get(4..68) != Some(setup_identity.as_slice()) {
-            return Err(Error::Context);
+        if reference.get(..64) != Some(setup_identity.as_slice()) {
+            return Err(Refusal::Context);
         }
-        Ok(RetainedBallotOwner {
+        Ok(RetainedSetupOwner {
             poll: poll.identity(),
             setup_identity,
             position: context.position,
@@ -243,27 +242,27 @@ impl Credential {
     }
     pub fn sign_retained_ballot_envelope(
         &mut self,
-        owner: &RetainedBallotOwner,
+        owner: &RetainedSetupOwner,
         envelope: &BallotEnvelope,
-    ) -> Result<[u8; SIGNATURE_BYTES], Error> {
+    ) -> Result<[u8; SIGNATURE_BYTES], Refusal> {
         if self.completed_body != Some(owner.owner_body)
             || self.signing_public != owner.signing_public
             || envelope.poll() != owner.poll()
             || envelope.setup_identity() != owner.setup_identity()
             || envelope.position() != owner.position()
         {
-            return Err(Error::Context);
+            return Err(Refusal::Context);
         }
         self.sign_ballot_bytes(envelope)
     }
     pub fn restore_retained_ballot_signing(
         &mut self,
-        owner: &RetainedBallotOwner,
+        owner: &RetainedSetupOwner,
         envelope: &BallotEnvelope,
         signature: &[u8],
-    ) -> Result<(), Error> {
+    ) -> Result<(), Refusal> {
         if self.signed_ballot.is_some() {
-            return Err(Error::Consumed);
+            return Err(Refusal::Consumed);
         }
         if self.completed_body != Some(owner.owner_body)
             || self.signing_public != owner.signing_public
@@ -271,48 +270,25 @@ impl Credential {
             || envelope.setup_identity() != owner.setup_identity()
             || envelope.position() != owner.position()
         {
-            return Err(Error::Context);
+            return Err(Refusal::Context);
         }
-        let signature = signature.try_into().map_err(|_| Error::Shape)?;
-        let public =
-            ml_dsa_65::PublicKey::try_from_bytes(self.signing_public).map_err(|_| Error::Shape)?;
+        let signature = signature.try_into().map_err(|_| Refusal::Shape)?;
+        let public = ml_dsa_65::PublicKey::try_from_bytes(self.signing_public)
+            .map_err(|_| Refusal::Shape)?;
         if !public.verify(envelope.bytes(), &signature, BALLOT_SIGNATURE_CONTEXT) {
-            return Err(Error::Crypto);
+            return Err(Refusal::Crypto);
         }
         self.signed_ballot = Some((envelope.identity(), envelope.ballot_time()));
         Ok(())
     }
-    /// One signature operation beneath the authenticated participant-state boundary.
-    /// The caller must derive the envelope from the exact verified body and setup.
-    pub fn sign_ballot_envelope(
-        &mut self,
-        roster: &AuthenticatedRosterProposal,
-        envelope: &BallotEnvelope,
-    ) -> Result<[u8; SIGNATURE_BYTES], Error> {
-        if self.signed_ballot.is_some() {
-            return Err(Error::Consumed);
-        }
-        let record = roster
-            .proposal()
-            .records()
-            .get(envelope.position())
-            .ok_or(Error::Context)?;
-        if envelope.poll() != &record.header().poll
-            || record.header().signing_public != self.signing_public
-            || self.completed_body != Some(record.body_digest())
-        {
-            return Err(Error::Context);
-        }
-        self.sign_ballot_bytes(envelope)
-    }
     fn sign_ballot_bytes(
         &mut self,
         envelope: &BallotEnvelope,
-    ) -> Result<[u8; SIGNATURE_BYTES], Error> {
+    ) -> Result<[u8; SIGNATURE_BYTES], Refusal> {
         self.check_unlocked(SigningPurpose::Ballot)?;
         // An attempt locked before the close intent completes; a new one never starts.
         if self.signed_ballot.is_some() || (self.close_lock.is_some() && !self.ballot_attempted) {
-            return Err(Error::Consumed);
+            return Err(Refusal::Consumed);
         }
         self.signed_ballot = Some((envelope.identity(), envelope.ballot_time()));
         self.sign_deterministically(envelope.bytes(), BALLOT_SIGNATURE_CONTEXT)

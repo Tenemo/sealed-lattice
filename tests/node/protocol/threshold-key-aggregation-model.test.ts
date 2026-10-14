@@ -1,15 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
+import { negacyclicProduct } from '#tests/node/protocol/reference/negacyclic-ring.js';
+import { goalThresholds } from '#tests/node/protocol/reference/product-goals.js';
 import { completionProfileCounts } from '#tests/supported-profile-model.js';
 import { verifyThresholdKeyAggregationModel } from '#tests/threshold-key-aggregation-model.js';
 
 const participantCount = completionProfileCounts.participantCount;
-// Release needs shares from at least f + 1 participants, for
-// f = floor((n - 1) / 3), and never fewer than 2.
-const releaseThreshold = Math.max(
-    Math.floor((participantCount - 1) / 3) + 1,
-    2,
-);
+const releaseThreshold =
+    goalThresholds(participantCount).resultReleaseThreshold;
 
 // KLLPS26 Section 4.2 interpolates at the monomials x^0, ..., x^(n - 1) and
 // assumes n <= 2N; this is the smallest power-of-two degree allowing that.
@@ -41,20 +39,6 @@ const monomial = (exponent: number): bigint[] => {
 };
 const add = (left: readonly bigint[], right: readonly bigint[]): bigint[] =>
     left.map((value, index) => value + right[index]);
-const multiply = (
-    left: readonly bigint[],
-    right: readonly bigint[],
-): bigint[] => {
-    const result = constant(0n);
-    left.forEach((leftValue, leftIndex) => {
-        right.forEach((rightValue, rightIndex) => {
-            const exponent = leftIndex + rightIndex;
-            result[exponent % ringDegree] +=
-                (exponent >= ringDegree ? -1n : 1n) * leftValue * rightValue;
-        });
-    });
-    return result;
-};
 const oneMinusMonomial = (exponent: number): bigint[] =>
     add(
         constant(1n),
@@ -103,7 +87,7 @@ const integralLagrangeData = (releaseSet: readonly number[]) =>
             position,
             powerOfTwoTimesCoefficient: others.reduce(
                 (product, other) =>
-                    multiply(
+                    negacyclicProduct(
                         product,
                         doubledInverseOfOneMinusMonomial(position - other),
                     ),
@@ -111,7 +95,10 @@ const integralLagrangeData = (releaseSet: readonly number[]) =>
             ),
             simulationCoefficient: others.reduce(
                 (product, other) =>
-                    multiply(product, oneMinusMonomial(position - other)),
+                    negacyclicProduct(
+                        product,
+                        oneMinusMonomial(position - other),
+                    ),
                 constant(1n),
             ),
         };
@@ -129,7 +116,7 @@ describe('threshold key aggregation model', () => {
                     (sum, { position, powerOfTwoTimesCoefficient }) =>
                         add(
                             sum,
-                            multiply(
+                            negacyclicProduct(
                                 powerOfTwoTimesCoefficient,
                                 monomial(position * degree),
                             ),
@@ -148,7 +135,10 @@ describe('threshold key aggregation model', () => {
                 simulationCoefficient,
             } of data) {
                 expect(
-                    multiply(powerOfTwoTimesCoefficient, simulationCoefficient),
+                    negacyclicProduct(
+                        powerOfTwoTimesCoefficient,
+                        simulationCoefficient,
+                    ),
                 ).toEqual(constant(denominator));
             }
         }

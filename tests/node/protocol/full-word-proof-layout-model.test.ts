@@ -12,7 +12,7 @@ import { compileWideChallengeCompilerCensus } from '#tests/wide-challenge-compil
 describe('full word-proof layout and theorem operands', () => {
     it('accounts for the emitted linked ballot rows and public operator values', () => {
         const layout = compileBallotWordProofLayout(completionProfile());
-        expect(layout.headerBytes).toBe(4004n);
+        expect(layout.headerBytes).toBe(3936n);
         expect(layout.firstWidth).toBe(33n * 16n + 48n);
         expect(layout.secondWidth).toBe(34n * 48n);
         // The FHE and auxiliary adjoints and the score column, not the 32
@@ -45,7 +45,7 @@ describe('full word-proof layout and theorem operands', () => {
         const layout = compileFullWordProofLayout(completionProfile());
         expect(layout.foldCount).toBe(17);
         expect(layout.headerBytes).toBe(
-            4n + 128n + 192n + 48n + 20n * 128n + 16n * 64n + 48n,
+            64n + 192n + 48n + 20n * 128n + 16n * 64n + 48n,
         );
         expect(layout.firstWidth).toBe(356n * 16n + 48n);
         expect(layout.secondWidth).toBe(377n * 48n);
@@ -71,7 +71,7 @@ describe('full word-proof layout and theorem operands', () => {
             census.batchingAndFirstFoldNumerator,
         );
     });
-    it('exhibits the degree alias that full-domain verification must reject', () => {
+    it('exhibits the degree alias that full-domain verification must refuse', () => {
         const result = proverInterpolationAlias();
         expect(new Set(result.points).size).toBe(32);
         expect(result.evenAgreement).toBe(true);

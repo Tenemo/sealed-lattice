@@ -14,14 +14,30 @@ const cleanupFailure = (
         { cause: cleanupError },
     );
 
-export const acquireProtocolResearchLock = async (
+// Holds an exclusive lock file under the checkout's `temp/` for one run and
+// returns its release, which refuses a lock another process replaced or
+// rewrote.
+const acquireRunLock = async (
+    label: string,
+    fileName: string,
     runDirectoryPath: string,
     rootDirectoryPath: string,
 ): Promise<() => Promise<void>> => {
     const directory = path.join(rootDirectoryPath, 'temp');
     await mkdir(directory, { recursive: true });
-    const lockPath = path.join(directory, 'protocol-research.lock');
-    const handle = await open(lockPath, 'wx');
+    const lockPath = path.join(directory, fileName);
+    const handle = await open(lockPath, 'wx').catch(async (error: unknown) => {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+        const holder = await readFile(lockPath, 'utf8').catch(
+            () => 'an unreadable holder',
+        );
+        throw Object.assign(
+            new Error(
+                `${label} is held by ${holder}. If that process and run have ended, remove ${lockPath}.`,
+            ),
+            { code: 'EEXIST', cause: error },
+        );
+    });
     const value = JSON.stringify({ pid: process.pid, run: runDirectoryPath });
     let identity: BigIntStats | undefined;
     let initialized = false;
@@ -30,16 +46,16 @@ export const acquireProtocolResearchLock = async (
             const original = identity ?? (await handle.stat({ bigint: true }));
             const current = await lstat(lockPath, { bigint: true });
             if (current.dev !== original.dev || current.ino !== original.ino)
-                throw new Error('Protocol research lock was replaced.');
+                throw new Error(`${label} was replaced.`);
             if (initialized && (await readFile(lockPath, 'utf8')) !== value)
-                throw new Error('Protocol research lock contents changed.');
+                throw new Error(`${label} contents changed.`);
             await unlink(lockPath);
         } catch (error) {
             try {
                 await handle.close();
             } catch (closeError) {
                 throw cleanupFailure(
-                    'Protocol research lock release failed',
+                    `${label} release failed`,
                     error,
                     closeError,
                 );
@@ -58,7 +74,7 @@ export const acquireProtocolResearchLock = async (
             await release();
         } catch (cleanupError) {
             throw cleanupFailure(
-                'Protocol research lock acquisition failed',
+                `${label} acquisition failed`,
                 error,
                 cleanupError,
             );
@@ -66,3 +82,27 @@ export const acquireProtocolResearchLock = async (
         throw error;
     }
 };
+
+export const acquireProtocolResearchLock = (
+    runDirectoryPath: string,
+    rootDirectoryPath: string,
+): Promise<() => Promise<void>> =>
+    acquireRunLock(
+        'Protocol research lock',
+        'protocol-research.lock',
+        runDirectoryPath,
+        rootDirectoryPath,
+    );
+
+// Serializes evidence renewals, whose steps each take the protocol research
+// lock in turn.
+export const acquireEvidenceRenewalLock = (
+    runDirectoryPath: string,
+    rootDirectoryPath: string,
+): Promise<() => Promise<void>> =>
+    acquireRunLock(
+        'Evidence renewal lock',
+        'evidence-renewal.lock',
+        runDirectoryPath,
+        rootDirectoryPath,
+    );

@@ -5,8 +5,8 @@ import type { FileHandle } from 'node:fs/promises';
 import path from 'node:path';
 
 import { compileFheKeySourceScreenResources } from '#tests/fhe-key-source-resource-model.js';
-import { fileDigest } from '#tools/ci/fixture-sources.js';
 import { runArtifactDirectoryPath } from '#tools/ci/local-run-log.js';
+import { fileDigest } from '#tools/ci/run-sources.js';
 
 type NativeSourceEntry = Readonly<{
     file: string;
@@ -23,18 +23,18 @@ type NativeReferenceArtifact = Readonly<{
 
 // Diagnostics describe only this recorded native run. A consuming build
 // separately checks its actual compiled inputs against this recorded closure.
-const readNativeSourceMetadata = async (source: string, root: string) => {
-    const directory = path.resolve(source);
+const readNativeReferenceRun = async (runDirectory: string, root: string) => {
+    const directory = path.resolve(runDirectory);
     const relative = path.relative(path.join(root, 'logs'), directory);
     assert.ok(
         relative && !relative.startsWith('..') && !path.isAbsolute(relative),
-        'The source must be a repository run directory.',
+        'The native run must be a repository run directory.',
     );
     const readJson = async (name: string) => {
         const file = path.join(directory, name);
         assert.ok(
             (await stat(file)).size <= 16 * 1024 * 1024,
-            'The source diagnostic is oversized.',
+            'A native run diagnostic is oversized.',
         );
         const bytes = await readFile(file);
         return {
@@ -157,8 +157,8 @@ const readNativeSourceMetadata = async (source: string, root: string) => {
 // including manifests and native wrappers, must belong to the native compiled
 // closure.
 export const assertScalarNativeInputs = async (
-    source: Pick<
-        Awaited<ReturnType<typeof readNativeSourceMetadata>>,
+    nativeRun: Pick<
+        Awaited<ReturnType<typeof readNativeReferenceRun>>,
         'compiler' | 'sources' | 'compiledInputs'
     >,
     files: readonly string[],
@@ -167,8 +167,8 @@ export const assertScalarNativeInputs = async (
 ) => {
     assert.equal(
         compiler,
-        source.compiler,
-        'The native source used another compiler.',
+        nativeRun.compiler,
+        'The native run used another compiler.',
     );
     const adapters = new Set([
         'crates/protocol-research/parallel-work/src/scalar-allocator.rs',
@@ -184,14 +184,14 @@ export const assertScalarNativeInputs = async (
     for (const file of rustInputs) {
         const adapter = adapters.has(file);
         const previous = adapter
-            ? source.sources.get(file)
-            : source.compiledInputs.get(file);
+            ? nativeRun.sources.get(file)
+            : nativeRun.compiledInputs.get(file);
         assert.ok(
             previous,
             adapter
-                ? 'The native source did not snapshot a scalar target adapter: ' +
+                ? 'The native run did not snapshot a scalar target adapter: ' +
                       file
-                : 'The native source did not compile a scalar shared input: ' +
+                : 'The native run did not compile a scalar shared input: ' +
                       file,
         );
         const bytes = await readFile(path.join(root, file));
@@ -346,7 +346,6 @@ export const parseFheKeySourceReport = (bytes: Uint8Array) => {
         return value;
     };
     const integer = () => take(4).readUInt32LE();
-    assert.ok(take(4).equals(Buffer.from('FKS1', 'ascii')));
     const dimensions = Array.from({ length: 6 }, integer);
     assert.deepEqual(dimensions, [
         model.participantCount,
@@ -391,12 +390,14 @@ export const parseFheKeySourceReport = (bytes: Uint8Array) => {
     return { originalDigest, restoredDigest, samples };
 };
 
-export const readFheKeySourceNativeSource = async (
-    source: string,
+export const readFheKeySourceNativeRun = async (
+    runDirectory: string,
     root: string,
 ) => {
-    const { report, artifactDirectory, ...base } =
-        await readNativeSourceMetadata(source, root);
+    const { report, artifactDirectory, ...base } = await readNativeReferenceRun(
+        runDirectory,
+        root,
+    );
     const archive = path.join(artifactDirectory, 'fhe-key-source');
     assert.equal(path.resolve(String(report.output)), archive);
     const name = 'key-source.bin';
@@ -463,13 +464,13 @@ export const readFheKeySourceNativeSource = async (
 };
 
 export const assertFheKeySourceStable = async (
-    source: Pick<
-        Awaited<ReturnType<typeof readFheKeySourceNativeSource>>,
+    nativeRun: Pick<
+        Awaited<ReturnType<typeof readFheKeySourceNativeRun>>,
         'directory' | 'diagnosticDigests' | 'artifacts'
     >,
     root: string,
 ) => {
-    const current = await readFheKeySourceNativeSource(source.directory, root);
-    assert.deepEqual(current.diagnosticDigests, source.diagnosticDigests);
-    assert.deepEqual(current.artifacts, source.artifacts);
+    const current = await readFheKeySourceNativeRun(nativeRun.directory, root);
+    assert.deepEqual(current.diagnosticDigests, nativeRun.diagnosticDigests);
+    assert.deepEqual(current.artifacts, nativeRun.artifacts);
 };

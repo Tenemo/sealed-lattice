@@ -1,13 +1,9 @@
 use crate::context::BallotComputationContext;
-use crate::{
-    convolution::{Plan, RADIX, RADIX_BITS, digit},
-    gaussian,
-    packing::PackingWitness,
-    reduction,
-};
+use crate::{gaussian, packing::PackingWitness, reduction};
 use num_bigint::{BigInt, Sign};
 use protocol_foundations::poll::VerifiedPoll;
 use setup_aggregate::RetainedAggregatePolynomial;
+use statement_stream::negacyclic::{Plan, RADIX, RADIX_BITS, digit};
 use supported_profile::{
     AUXILIARY_DEGREE, AUXILIARY_PLAINTEXT_MODULUS, AUXILIARY_SECRET_SUPPORT, FHE_SECRET_SUPPORT,
     Family, PLAINTEXT_MODULUS, Profile,

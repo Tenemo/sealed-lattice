@@ -4,10 +4,7 @@ fn identity(value: u8) -> [u8; 64] {
     [value; 64]
 }
 #[test]
-fn quorum_and_maximum_lengths_follow_the_roster() {
-    for (participants, quorum) in [(3, 3), (4, 3), (6, 5), (7, 5), (10, 7), (13, 9), (20, 14)] {
-        assert_eq!(close_quorum(participants), quorum);
-    }
+fn maximum_lengths_follow_the_roster() {
     for participants in 3..=20 {
         let listed: Vec<_> = (0..participants)
             .flat_map(|author| [(author, identity(1)), (author, identity(2))])
@@ -25,7 +22,7 @@ fn quorum_and_maximum_lengths_follow_the_roster() {
             response.body().len(),
             maximum_close_message_bytes(ClosePurpose::Response, participants)
         );
-        let responses: Vec<_> = (0..close_quorum(participants))
+        let responses: Vec<_> = (0..inventory_threshold(participants))
             .map(|responder| (responder, identity(3)))
             .collect();
         let proposal = CloseProposalMessage::new(

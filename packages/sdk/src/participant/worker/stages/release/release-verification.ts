@@ -17,7 +17,7 @@ import {
 } from '../../shared/bytes.js';
 import { PublicInputFailure } from '../../shared/failures.js';
 import {
-    deliverFinalAggregate,
+    streamFinalAggregate,
     readFinalAggregate,
 } from '../setup/setup-cache.js';
 import { discardEvaluation } from '../target-vote/evaluation.js';
@@ -75,7 +75,7 @@ const completionCommand = (
 // uncertified while one of them was refused, as every vote for another target
 // is, is discarded, so that the next operation evaluates the target the public
 // close records name; missing votes alone keep it. Returns whether the target
-// is encrypted.
+// carries a result.
 export const certifyTarget = async (
     context: PublicProfileContext,
     relay: PublicRelay,
@@ -171,7 +171,7 @@ export const establishReleaseContext = async (
             position,
         ),
     )[0];
-    await deliverFinalAggregate(context, async () => {
+    await streamFinalAggregate(context, async () => {
         await stream(constant);
         await stream(words(finish())[0]);
         finish();
@@ -189,11 +189,11 @@ export const releaseCandidateKey = (position: number) =>
 export const combineReleaseShares = async (
     context: PublicProfileContext,
     relay: PublicRelay,
-    encrypted: boolean,
+    hasResult: boolean,
 ) => {
     const { profile } = context;
     const bounds = profile.release;
-    let combined = encrypted
+    let combined = hasResult
         ? undefined
         : tryCompletionCommand(context, completionOperation.result);
     const result = await scanCandidatesFairly(
@@ -290,5 +290,5 @@ export const combineReleaseShares = async (
         );
         offset += 4 + length;
     }
-    return { encrypted, identifiers };
+    return { hasResult, identifiers };
 };

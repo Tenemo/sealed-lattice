@@ -77,7 +77,7 @@ describe('zero embedding into the systematic subgroup', () => {
             }
     });
 
-    it('rejects a nondividing or empty subgroup', () => {
+    it('refuses a nondividing or empty subgroup', () => {
         expect(() => subgroupEmbeddingFactor(7n, 3, 16, 97n)).toThrow();
         expect(() => subgroupEmbeddingFactor(7n, 0, 16, 97n)).toThrow();
     });

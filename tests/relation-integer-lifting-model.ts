@@ -2,9 +2,10 @@ import assert from 'node:assert/strict';
 
 import { auxiliaryInputEncryptionParameters } from '#tests/auxiliary-input-encryption-parameters.js';
 import { compileBallotEncryptionColumnLayout } from '#tests/ballot-encryption-relation-model.js';
+import { bitLength, maximum } from '#tests/exact-integer.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import { compileLinkedReleaseColumnLayout } from '#tests/linked-release-relation-model.js';
-import { setupEquationWidths } from '#tests/setup-contribution-relation-model.js';
+import { setupEquationWidths } from '#tests/setup-relation/equations.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
 import {
     ballotScoreRange,
@@ -26,9 +27,6 @@ const proofField = compileSmallLimbProofFieldCensus().modulus;
 const fheLimbBits = 96;
 const signedRadius = (bits: number) => 1n << BigInt(bits - 1);
 const largestDigit = (limbBits: number) => (1n << BigInt(limbBits)) - 1n;
-const bitLength = (value: bigint) => value.toString(2).length;
-const maximum = (...values: readonly bigint[]) =>
-    values.reduce((left, right) => (right > left ? right : left));
 
 type LiftingTerm = Readonly<{ term: string; bound: bigint }>;
 export type IntegerLiftingFamily = Readonly<{
@@ -93,7 +91,7 @@ const setupFamilies = (profile: SupportedProfile): IntegerLiftingFamily[] => {
         (_unused, index) => fixedModulusBfvInputs.gadgetBase ** BigInt(index),
     );
     const largestGadgetDigit = maximum(
-        ...gadgetPowers.flatMap((power) =>
+        gadgetPowers.flatMap((power) =>
             Array.from(
                 { length: fheLimbs },
                 (_unused, limb) => (power / radix ** BigInt(limb)) % radix,
@@ -166,10 +164,10 @@ const setupFamilies = (profile: SupportedProfile): IntegerLiftingFamily[] => {
                     bound:
                         sharingDegree *
                         scale *
-                        maximum(
+                        maximum([
                             signedRadius(limbBits),
                             signedRadius(sharingCoefficientBits - limbBits),
-                        ),
+                        ]),
                 },
                 {
                     term: 'quotient product',
@@ -326,10 +324,10 @@ const ballotFamilies = (profile: SupportedProfile): IntegerLiftingFamily[] => {
         },
         supportFamily(
             'ballot',
-            maximum(
+            maximum([
                 fixedModulusBfvInputs.secretSupportWeight,
                 auxiliary.support,
-            ) / 2n,
+            ]) / 2n,
         ),
     ];
 };
@@ -397,10 +395,10 @@ const releaseFamilies = (profile: SupportedProfile): IntegerLiftingFamily[] => {
                     term: 'share part product',
                     bound:
                         share.scale *
-                        maximum(
+                        maximum([
                             radix / 2n,
                             signedRadius(bits('aggregate-share') - fheLimbBits),
-                        ),
+                        ]),
                 },
                 {
                     term: 'quotient product',

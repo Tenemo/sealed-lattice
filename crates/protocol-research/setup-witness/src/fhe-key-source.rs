@@ -33,11 +33,6 @@ impl FheKeySource {
         }
     }
 
-    fn matches_family(&self, modulus: &[u8], common_sample_bits: usize) -> bool {
-        self.profile.ciphertext_modulus().to_bytes() == modulus
-            && self.profile.fhe_common_sample_bits() == common_sample_bits
-    }
-
     /// Emits only b[0], using the same common polynomial, integer lifting and
     /// canonical polynomial-output contract as contribution generation.
     pub fn public_coordinate(&self, output: &mut impl PolynomialOutput) {
@@ -65,12 +60,9 @@ impl FheKeySource {
         key_with_error(&mut Witness::new(), output, input, products, &self.error);
     }
 
-    pub(crate) fn check_profile(&self, profile: Profile) -> Result<(), contribution::Error> {
-        if !self.matches_family(
-            &profile.ciphertext_modulus().to_bytes(),
-            profile.fhe_common_sample_bits(),
-        ) {
-            return Err(contribution::Error::SourceFamily);
+    pub(crate) fn check_profile(&self, profile: Profile) -> Result<(), contribution::Refusal> {
+        if !self.profile.same_fhe_key_family(profile) {
+            return Err(contribution::Refusal::SourceFamily);
         }
         Ok(())
     }

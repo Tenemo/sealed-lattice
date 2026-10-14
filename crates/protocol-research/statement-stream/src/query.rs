@@ -1,4 +1,4 @@
-use super::{Element, Error, MODULUS, ZERO, arithmetic, minus, multiply, plus};
+use super::{Element, MODULUS, Refusal, ZERO, minus, multiply, plus, proof_field};
 use supported_profile::relation::{QUERY_COUNT, SYSTEMATIC};
 
 pub(crate) const QUERY_LIMIT: usize = 2 * QUERY_COUNT;
@@ -20,7 +20,7 @@ struct Transform {
 }
 impl Transform {
     fn new(length: usize) -> Self {
-        let root = arithmetic::power(7, (MODULUS - 1) / length as u128);
+        let root = proof_field::power(7, (MODULUS - 1) / length as u128);
         let mut twiddles = vec![1; length - 1];
         let widest = length / 2 - 1;
         for index in 1..length / 2 {
@@ -114,13 +114,13 @@ impl Transform {
     }
 }
 
-pub(crate) fn validate_indices_in(indices: &[u32], domain_size: usize) -> Result<(), Error> {
+pub(crate) fn validate_indices_in(indices: &[u32], domain_size: usize) -> Result<(), Refusal> {
     if indices.is_empty()
         || indices.len() > QUERY_LIMIT
         || indices.iter().any(|index| *index as usize >= domain_size)
         || indices.windows(2).any(|pair| pair[0] >= pair[1])
     {
-        return Err(Error::Parameters);
+        return Err(Refusal::Parameters);
     }
     Ok(())
 }
@@ -130,13 +130,13 @@ pub(crate) fn check_in(
     degree: usize,
     indices: &[u32],
     systematic_size: usize,
-) -> Result<(), Error> {
+) -> Result<(), Refusal> {
     if !systematic_size.is_power_of_two() || !(2..=SYSTEMATIC).contains(&systematic_size) {
-        return Err(Error::Parameters);
+        return Err(Refusal::Parameters);
     }
     validate_indices_in(indices, 4 * systematic_size)?;
     if !degree.is_power_of_two() || degree < 2 || degree > systematic_size {
-        return Err(Error::Parameters);
+        return Err(Refusal::Parameters);
     }
     Ok(())
 }
@@ -145,7 +145,7 @@ pub(crate) fn evaluate_in(
     mut values: Vec<Element>,
     indices: &[u32],
     systematic_size: usize,
-) -> Result<Vec<Element>, Error> {
+) -> Result<Vec<Element>, Refusal> {
     check_in(values.len(), indices, systematic_size)?;
     let domain_size = 4 * systematic_size;
     let degree = values.len();
@@ -164,14 +164,14 @@ pub(crate) fn evaluate_in(
         })
         .collect();
     selected.sort_unstable_by_key(|query| (query.coset, query.position.reverse_bits()));
-    let root = arithmetic::power(7, (MODULUS - 1) / domain_size as u128);
+    let root = proof_field::power(7, (MODULUS - 1) / domain_size as u128);
     let stride = systematic_size / degree;
-    let inverse_stride = arithmetic::power(stride as u128, MODULUS - 2);
-    let inverse_degree = arithmetic::power(degree as u128, MODULUS - 2);
+    let inverse_stride = proof_field::power(stride as u128, MODULUS - 2);
+    let inverse_degree = proof_field::power(degree as u128, MODULUS - 2);
     let mut scratch = vec![ZERO; degree];
     let mut output = vec![ZERO; indices.len()];
     for group in selected.chunk_by(|left, right| left.coset == right.coset) {
-        let twist = multiply(7, arithmetic::power(root, group[0].coset as u128));
+        let twist = multiply(7, proof_field::power(root, group[0].coset as u128));
         let mut current = inverse_degree;
         for (destination, coefficient) in scratch.iter_mut().zip(&values) {
             *destination = scale(*coefficient, current);
@@ -179,7 +179,7 @@ pub(crate) fn evaluate_in(
         }
         // The auxiliary values occupy every stride-th systematic position.
         // The indicator interpolant is (1/stride) sum_j X^(degree*j).
-        let high = arithmetic::power(twist, degree as u128);
+        let high = proof_field::power(twist, degree as u128);
         // For a power-of-two stride, the geometric sum is the product
         // (1 + high) (1 + high^2) ... (1 + high^(stride/2)). This identity
         // also covers high equal to zero or one without an inversion.
@@ -187,7 +187,7 @@ pub(crate) fn evaluate_in(
         let mut indicator = 1;
         let mut remaining = stride;
         while remaining > 1 {
-            indicator = multiply(indicator, arithmetic::add(1, term));
+            indicator = multiply(indicator, proof_field::add(1, term));
             term = multiply(term, term);
             remaining /= 2;
         }

@@ -1,12 +1,13 @@
-use crate::{
-    convolution::{multiply_digits, signed_digit},
-    statement::{
-        self, DECODING_CARRY, DECODING_ERROR, DECODING_QUOTIENT, FIRST_RELEASE_CARRY, KEY_CARRY,
-        KEY_ERROR, KEY_QUOTIENT, NOISE, PublicStatement, RELEASE_QUOTIENT, SHARE,
-    },
+use crate::statement::{
+    self, DECODING_CARRY, DECODING_ERROR, DECODING_QUOTIENT, FIRST_RELEASE_CARRY, KEY_CARRY,
+    KEY_ERROR, KEY_QUOTIENT, NOISE, PublicStatement, RELEASE_QUOTIENT, SHARE,
 };
 use num_bigint::{BigInt, Sign};
 use num_traits::{Signed, ToPrimitive};
+use statement_stream::{
+    negacyclic::{Plan, digit_in},
+    proof_field::MODULUS,
+};
 use supported_profile::{
     Profile, RECIPIENT_SECRET_SUPPORT, RELEASE_DECODING_LIMB_BITS, RELEASE_LIMB_BITS, SHARE_SCALE,
     relation::*,
@@ -28,7 +29,7 @@ impl Random {
         let mut used = 0;
         while used < output.len() {
             if self.offset == self.bytes.len() {
-                word_proof::random::fill(&mut self.bytes);
+                parallel_work::random::proof(&mut self.bytes);
                 self.offset = 0;
             }
             let count = (output.len() - used).min(self.bytes.len() - self.offset);
@@ -59,6 +60,33 @@ fn reconstruct(digits: &[Vec<i128>], position: usize) -> BigInt {
     digits.iter().rev().fold(BigInt::from(0), |sum, values| {
         (sum << RELEASE_LIMB_BITS) + values[position]
     })
+}
+/// The products of the public values' digits with the private values'
+/// digits, each limb pair's product added at the sum of the two limbs.
+pub(crate) fn multiply_digits(
+    public: &[BigInt],
+    private: &[Vec<i128>],
+    bits: usize,
+    public_limbs: usize,
+) -> Zeroizing<Vec<Vec<i128>>> {
+    // Every sum of limb pair products stays within half the field modulus.
+    assert!(
+        private
+            .iter()
+            .flatten()
+            .all(|value| value.unsigned_abs() < 1 << bits)
+    );
+    assert!(
+        public.len() as u128 * private.len() as u128 * ((1u128 << bits) - 1).pow(2) < MODULUS / 2
+    );
+    let plan = Plan::new(public.len());
+    let transforms = Zeroizing::new(
+        private
+            .iter()
+            .map(|values| plan.private_transform(values.iter().copied()))
+            .collect::<Vec<_>>(),
+    );
+    Zeroizing::new(plan.limb_pair_products(public, public_limbs, bits, &transforms))
 }
 fn private_digit(value: &BigInt, limb: usize, bits: usize, total_bits: usize) -> i128 {
     if limb * bits >= total_bits {
@@ -112,7 +140,7 @@ pub struct PreparedRelease {
     pub(crate) columns: Zeroizing<Vec<Vec<u16>>>,
 }
 #[derive(Debug)]
-pub enum ReleaseInputError {
+pub enum ReleaseInputRefusal {
     Shape,
     Key,
     Share,
@@ -126,7 +154,7 @@ impl ReleaseInputs {
         encrypted_linear: Vec<BigInt>,
         target_linear: Vec<BigInt>,
         secret: Zeroizing<Vec<i128>>,
-    ) -> Result<Self, ReleaseInputError> {
+    ) -> Result<Self, ReleaseInputRefusal> {
         let share_half = statement::share_modulus() >> 1usize;
         let release_half = statement::release_modulus(profile) >> 1usize;
         let half_support = RECIPIENT_SECRET_SUPPORT / 2;
@@ -142,7 +170,7 @@ impl ReleaseInputs {
             || secret.iter().filter(|value| **value == -1).count() != half_support
             || secret.iter().any(|value| !(-1..=1).contains(value))
         {
-            return Err(ReleaseInputError::Shape);
+            return Err(ReleaseInputRefusal::Shape);
         }
         Ok(Self {
             profile,
@@ -156,17 +184,17 @@ impl ReleaseInputs {
     }
 }
 /// Derives the release of the header's roster position.
-pub fn derive_bound(
+pub fn prepare_release(
     inputs: ReleaseInputs,
     header: [u8; RELEASE_HEADER_BYTES],
-) -> Result<PreparedRelease, ReleaseInputError> {
-    release_header_position(inputs.profile, &header).ok_or(ReleaseInputError::Shape)?;
+) -> Result<PreparedRelease, ReleaseInputRefusal> {
+    release_header_position(inputs.profile, &header).ok_or(ReleaseInputRefusal::Shape)?;
     derive_inner(inputs, header)
 }
 fn derive_inner(
     inputs: ReleaseInputs,
     header: [u8; RELEASE_HEADER_BYTES],
-) -> Result<PreparedRelease, ReleaseInputError> {
+) -> Result<PreparedRelease, ReleaseInputRefusal> {
     let profile = inputs.profile;
     let (starts, words) = release_variable_starts(profile);
     let layout = Layout {
@@ -201,7 +229,7 @@ fn derive_inner(
         let raw_key = reconstruct(&key_product, position) + &inputs.public_key[position];
         let error = center(raw_key.clone(), &modulus);
         if error < -&key_error_radius || error >= key_error_radius {
-            return Err(ReleaseInputError::Key);
+            return Err(ReleaseInputRefusal::Key);
         }
         let quotient = (&raw_key - &error) / &modulus;
         assert!(
@@ -209,8 +237,8 @@ fn derive_inner(
             "Recipient-key reconstruction differs"
         );
         let key_low = decoding_limb(&key_product, position)
-            + signed_digit(&inputs.public_key[position], 0, RELEASE_DECODING_LIMB_BITS)
-            - signed_digit(&modulus, 0, RELEASE_DECODING_LIMB_BITS) * quotient.to_i128().unwrap()
+            + digit_in(&inputs.public_key[position], 0, RELEASE_DECODING_LIMB_BITS)
+            - digit_in(&modulus, 0, RELEASE_DECODING_LIMB_BITS) * quotient.to_i128().unwrap()
             - error.to_i128().unwrap();
         assert!(key_low % radix == 0, "Recipient-key carry is not integral");
         layout.signed_column(&mut columns, KEY_QUOTIENT, position, &quotient);
@@ -233,7 +261,7 @@ fn derive_inner(
             || error < -&decoding_error_radius
             || error >= decoding_error_radius
         {
-            return Err(ReleaseInputError::Share);
+            return Err(ReleaseInputRefusal::Share);
         }
         let quotient = (&raw_phase - scale * &share - &error) / &modulus;
         assert!(
@@ -244,14 +272,14 @@ fn derive_inner(
         let lower = shares[position].rem_euclid(radix) - radix / 2;
         let offset = BigInt::from(SHARE_SCALE) * (radix / 2);
         let raw = decoding_limb(&decryption_product, position)
-            + signed_digit(
+            + digit_in(
                 &inputs.encrypted_constant[position],
                 0,
                 RELEASE_DECODING_LIMB_BITS,
             )
             - scale * lower
-            - signed_digit(&offset, 0, RELEASE_DECODING_LIMB_BITS)
-            - signed_digit(&modulus, 0, RELEASE_DECODING_LIMB_BITS) * quotient.to_i128().unwrap()
+            - digit_in(&offset, 0, RELEASE_DECODING_LIMB_BITS)
+            - digit_in(&modulus, 0, RELEASE_DECODING_LIMB_BITS) * quotient.to_i128().unwrap()
             - error.to_i128().unwrap();
         assert!(
             raw % radix == 0,
@@ -313,11 +341,11 @@ fn derive_inner(
         for limb in 0..output_limbs {
             let mut residual = carry
                 + clearing * product.get(limb).map_or(0, |values| values[position])
-                - signed_digit(&value, limb, RELEASE_LIMB_BITS)
+                - digit_in(&value, limb, RELEASE_LIMB_BITS)
                 + clearing * private_digit(&noise, limb, RELEASE_LIMB_BITS, noise_bits);
             for public_limb in 0..public_limbs.min(limb + 1) {
                 if limb - public_limb < quotient_limbs {
-                    residual -= signed_digit(&release_modulus, public_limb, RELEASE_LIMB_BITS)
+                    residual -= digit_in(&release_modulus, public_limb, RELEASE_LIMB_BITS)
                         * private_digit(
                             &quotient,
                             limb - public_limb,

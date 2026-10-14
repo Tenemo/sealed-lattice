@@ -17,6 +17,7 @@ use protocol_foundations::{
     poll::{SignedPoll, VerifiedPoll},
     roster::RetainedContributionContext,
     setup_selection::AuthenticatedSelectionCertificate,
+    signed_packet,
 };
 use setup_aggregate::verified::VerifiedSetupAggregate;
 use std::{
@@ -25,7 +26,7 @@ use std::{
     path::{Path, PathBuf},
     sync::Arc,
 };
-use supported_profile::{MAXIMUM_SCORE, Profile};
+use supported_profile::{MAXIMUM_SCORE, Profile, relation::PROOF_HEADER_BYTES};
 
 /// The public body file of each ballot source. The wrong-position source
 /// reuses position zero's body.
@@ -84,9 +85,7 @@ impl BallotInputs<'_> {
         let control = [
             self.poll.identity().as_slice(),
             self.poll.runtime().as_slice(),
-            (self.definition.body.len() as u32).to_le_bytes().as_slice(),
-            self.definition.body.as_slice(),
-            self.definition.signature.as_slice(),
+            signed_packet::encode(&self.definition.body, &self.definition.signature).as_slice(),
             self.setup.identity().as_slice(),
             retained_reference.as_slice(),
         ]
@@ -235,9 +234,7 @@ pub(crate) fn run(
         [
             poll.identity().as_slice(),
             poll.runtime().as_slice(),
-            (packet.body.len() as u32).to_le_bytes().as_slice(),
-            packet.body.as_slice(),
-            packet.signature.as_slice(),
+            signed_packet::encode(&packet.body, &packet.signature).as_slice(),
             setup.identity().as_slice(),
             reference,
         ]
@@ -416,7 +413,7 @@ pub(crate) fn run(
                 0,
                 &timed_scores
             ),
-            Err(protocol_foundations::Error::Consumed)
+            Err(protocol_foundations::Refusal::Consumed)
         ));
     }
     // Refused inputs consume neither the ballot attempt nor the keys already
@@ -446,7 +443,7 @@ pub(crate) fn run(
                 0,
                 &input
             ),
-            Err(protocol_foundations::Error::Shape)
+            Err(protocol_foundations::Refusal::Shape)
         ));
     }
     work.command(
@@ -494,6 +491,9 @@ pub(crate) fn run(
     .unwrap();
     let mut proof_file =
         public_output::PublicOutput::create(ballot_directory.join("proof.bin")).unwrap();
+    proof_file
+        .write_all(&header[header.len() - PROOF_HEADER_BYTES..])
+        .unwrap();
     std::io::copy(&mut body_input, &mut proof_file).unwrap();
     proof_file.finish().unwrap();
     let body =
@@ -645,7 +645,7 @@ pub(crate) fn run(
     // unlocks a purpose that the root's records show unused.
     assert!(matches!(
         restored.sign_retained_ballot_envelope(&restored_owner, &changed_envelope),
-        Err(protocol_foundations::Error::Consumed)
+        Err(protocol_foundations::Refusal::Consumed)
     ));
     // Restoring the completed ballot consumes the purpose even after an unlock.
     restored
@@ -673,7 +673,7 @@ pub(crate) fn run(
     assert!(
         enrollments[0]
             .credential
-            .sign_ballot_envelope(setup.roster(), &envelope)
+            .sign_retained_ballot_envelope(&owner, &envelope)
             .is_err()
     );
     let authenticated =
@@ -700,7 +700,7 @@ pub(crate) fn run(
     assert!(
         enrollments[1]
             .credential
-            .sign_ballot_envelope(setup.roster(), &envelope)
+            .sign_retained_ballot_envelope(&owner, &envelope)
             .is_err()
     );
     let mut submissions: Vec<Option<close::Submission>> = vec![None; enrollments.len()];
@@ -724,9 +724,10 @@ pub(crate) fn run(
             *body.identity(),
         )
         .unwrap();
+        let author_owner = close::owner_of(&enrollments[author].credential, poll, setup, author);
         let wrong_position_signature = enrollments[author]
             .credential
-            .sign_ballot_envelope(setup.roster(), &wrong_position)
+            .sign_retained_ballot_envelope(&author_owner, &wrong_position)
             .unwrap();
         let authentication = ballot_proof::submission::authenticate_envelope(
             setup,
@@ -757,9 +758,9 @@ pub(crate) fn run(
         let mut source = File::open(&body_path).unwrap();
         let mut modified_header = [0; protocol_foundations::ballot_body::HEADER_BYTES];
         source.read_exact(&mut modified_header).unwrap();
-        // The statement position follows the body header's magic, proof
-        // length, statement magic, poll and setup identity.
-        let position = 12 + 4 + 64 + 64;
+        // The statement position follows the body header's proof length and
+        // the statement's magic, poll and setup identity.
+        let position = 8 + 4 + 64 + 64;
         modified_header[position..position + 2].copy_from_slice(&(author as u16).to_le_bytes());
         let mut destination = public_output::PublicOutput::create(&invalid_proof_path).unwrap();
         let mut hash =
@@ -787,9 +788,10 @@ pub(crate) fn run(
             hash.finish().unwrap(),
         )
         .unwrap();
+        let author_owner = close::owner_of(&enrollments[author].credential, poll, setup, author);
         let invalid_proof_signature = enrollments[author]
             .credential
-            .sign_ballot_envelope(setup.roster(), &invalid_proof_envelope)
+            .sign_retained_ballot_envelope(&author_owner, &invalid_proof_envelope)
             .unwrap();
         write(
             ballot_directory.join("invalid-proof-envelope.bin"),

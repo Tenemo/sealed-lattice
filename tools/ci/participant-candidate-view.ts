@@ -30,10 +30,9 @@ const identity = (domain: string, bytes: Uint8Array) => {
         prefix.writeUInt32LE(value.length, 6);
         return Buffer.concat([prefix, value]);
     };
-    const header = Buffer.alloc(8);
+    const header = Buffer.alloc(6);
     header.writeUInt16LE(1);
-    header.writeUInt16LE(1, 2);
-    header.writeUInt32LE(2, 4);
+    header.writeUInt32LE(2, 2);
     return createHash('shake256', { outputLength: 64 })
         .update(header)
         .update(item(2, purpose))
@@ -56,12 +55,13 @@ export const participantCandidateView = (store: Store, directory: string) => {
         if (metadata === undefined || metadata.length > maximum)
             return undefined;
         const pieces = [];
-        for (const id of metadata.chunks) pieces.push(await store.chunk(id));
+        for (const locator of metadata.chunks)
+            pieces.push(await store.chunk(locator));
         const bytes = Buffer.concat(pieces);
         return bytes.length === metadata.length ? bytes : undefined;
     };
     const project = async (candidate: StoredParticipantCandidate) => {
-        const mapped = paths.get(candidate.id);
+        const mapped = paths.get(candidate.locator);
         if (mapped !== undefined) return mapped;
         const key = candidate.key;
         const ballot = /^ballot-\d+$/u.test(key)
@@ -71,11 +71,11 @@ export const participantCandidateView = (store: Store, directory: string) => {
             ballot === undefined
                 ? undefined
                 : identity(
-                      'sealed-lattice/ballot-envelope-identity/v1',
+                      'sealed-lattice/ballot-envelope-identity',
                       ballot,
                   ).toString('hex');
         if (envelopeIdentity !== undefined)
-            ballotIdentities.set(candidate.id, envelopeIdentity);
+            ballotIdentities.set(candidate.locator, envelopeIdentity);
         const result = new Map(
             candidate.manifest.files.map((file) => {
                 let route = key + '/' + file.name;
@@ -132,11 +132,12 @@ export const participantCandidateView = (store: Store, directory: string) => {
                             : 'release-envelope-' +
                               key.slice('release-'.length)) +
                         '.bin';
-                for (const id of file.chunks) chunkRoutes.set(id, route);
+                for (const locator of file.chunks)
+                    chunkRoutes.set(locator, route);
                 return [file.name, route] as const;
             }),
         );
-        paths.set(candidate.id, result);
+        paths.set(candidate.locator, result);
         return result;
     };
     const viewedBytes = async (value: ViewedParticipantRecord) => {
@@ -153,14 +154,14 @@ export const participantCandidateView = (store: Store, directory: string) => {
                 const handle = await open(destination, 'w');
                 try {
                     for await (const bytes of (
-                        await store.file(candidate.id, name)
+                        await store.file(candidate.locator, name)
                     ).read())
                         await handle.writeFile(bytes);
                 } finally {
                     await handle.close();
                 }
             }
-            const ballotIdentity = ballotIdentities.get(candidate.id);
+            const ballotIdentity = ballotIdentities.get(candidate.locator);
             if (ballotIdentity !== undefined) {
                 const handle = await open(
                     path.join(directory, candidate.key, 'submission.bin'),
@@ -178,13 +179,9 @@ export const participantCandidateView = (store: Store, directory: string) => {
                     'certificate.bin',
                     1 << 20,
                 );
-                if (
-                    bytes !== undefined &&
-                    bytes.length >= 8 &&
-                    bytes.subarray(0, 4).toString() === 'SSC1'
-                ) {
-                    const length = bytes.readUInt32LE(4);
-                    if (length <= bytes.length - 8) {
+                if (bytes !== undefined && bytes.length >= 4) {
+                    const length = bytes.readUInt32LE(0);
+                    if (length <= bytes.length - 4) {
                         const handle = await open(
                             path.join(directory, 'setup-identity.bin'),
                             'w',
@@ -192,8 +189,8 @@ export const participantCandidateView = (store: Store, directory: string) => {
                         try {
                             await handle.writeFile(
                                 identity(
-                                    'sealed-lattice/setup-selection-identity/v1',
-                                    bytes.subarray(8, 8 + length),
+                                    'sealed-lattice/setup-selection-identity',
+                                    bytes.subarray(4, 4 + length),
                                 ),
                             );
                         } finally {
@@ -212,28 +209,31 @@ export const participantCandidateView = (store: Store, directory: string) => {
                 if (!/^ballot-\d+$/u.test(key) || !view.has(pointer))
                     return store.page(key, offset);
                 const selected = await viewedBytes(view.get(pointer));
-                if (selected === undefined) return { total: 0, ids: [] };
-                const ids = [];
+                if (selected === undefined) return { total: 0, locators: [] };
+                const locators = [];
                 let total = 0;
                 let end: number | undefined;
                 do {
                     const page = await store.page(key, total);
                     end ??= page.total;
-                    const visible = page.ids.slice(0, end - total);
-                    for (const id of visible) {
-                        await project(await store.candidate(id));
+                    const visible = page.locators.slice(0, end - total);
+                    for (const locator of visible) {
+                        await project(await store.candidate(locator));
                         if (
-                            ballotIdentities.get(id) ===
+                            ballotIdentities.get(locator) ===
                             selected.toString('hex')
                         )
-                            ids.push(id);
+                            locators.push(locator);
                     }
                     total += visible.length;
                     if (visible.length === 0) break;
                 } while (total < end);
                 return {
-                    total: ids.length,
-                    ids: ids.slice(offset, offset + candidatePageEntries),
+                    total: locators.length,
+                    locators: locators.slice(
+                        offset,
+                        offset + candidatePageEntries,
+                    ),
                 };
             },
             manifest: async (candidate: StoredParticipantCandidate) => {
@@ -253,14 +253,14 @@ export const participantCandidateView = (store: Store, directory: string) => {
                         offset < bytes.length;
                         offset += candidateChunkBytes
                     ) {
-                        const id = await store.putChunk(
+                        const locator = await store.putChunk(
                             bytes.subarray(
                                 offset,
                                 offset + candidateChunkBytes,
                             ),
                         );
-                        chunkRoutes.set(id, route);
-                        chunks.push(id);
+                        chunkRoutes.set(locator, route);
+                        chunks.push(locator);
                     }
                     files.push({
                         name: file.name,
@@ -272,8 +272,8 @@ export const participantCandidateView = (store: Store, directory: string) => {
                     ? undefined
                     : encodeCandidateManifest({ files });
             },
-            chunk: async (id: string, original: Uint8Array) => {
-                const route = chunkRoutes.get(id);
+            chunk: async (locator: string, original: Uint8Array) => {
+                const route = chunkRoutes.get(locator);
                 if (route === undefined) return original;
                 const record = view.get(route);
                 if (record !== undefined && !Buffer.isBuffer(record))

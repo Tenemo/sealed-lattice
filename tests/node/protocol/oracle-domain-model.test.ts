@@ -1,14 +1,16 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-    compileLocalOracleUpdate,
     compileOracleCellController,
     compileOraclePrefixReplacement,
-    compilePrefixCopy,
-    compileSparseRouting,
     oracleCellControllerWork,
     prefixOracleWork,
     runOracleCellController,
+} from '#tests/compressed-oracle/oracle-access.js';
+import { compileSparseRouting } from '#tests/compressed-oracle/sparse-routing.js';
+import {
+    compileLocalOracleUpdate,
+    compilePrefixCopy,
 } from '#tests/compressed-oracle-model.js';
 import {
     oracleDomainCells,
@@ -250,7 +252,7 @@ describe('full-domain oracle adapter', () => {
         expect(queries * 24n * 1600n).toBeLessThan(1n << 80n);
     });
 
-    it('rejects invalid shapes instead of changing the domain', () => {
+    it('refuses invalid shapes instead of changing the domain', () => {
         expect(() => oracleDomainCells(-1n, 1n, 1n)).toThrow();
         expect(() => oracleDomainCells(1n, -1n, 1n)).toThrow();
         expect(() => oracleDomainCells(1n, 1n, 0n)).toThrow();

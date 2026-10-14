@@ -48,13 +48,13 @@ fn restored_signing_keys_cannot_recreate_authority_the_root_does_not_unlock() {
         assert!(original.check_unlocked(purpose).is_ok());
         assert!(matches!(
             restored.check_unlocked(purpose),
-            Err(Error::Consumed)
+            Err(Refusal::Consumed)
         ));
     }
     for undefined in [SigningPurpose::Release.mask() << 1, u16::MAX] {
         assert!(matches!(
             restored.unlock_unused_purposes(undefined),
-            Err(Error::Shape)
+            Err(Refusal::Shape)
         ));
     }
     restored.unlock_unused_purposes(0).unwrap();
@@ -76,9 +76,7 @@ fn restored_signing_keys_cannot_recreate_authority_the_root_does_not_unlock() {
     changed[20] ^= 1;
     assert!(open(&sealed.key, &changed, body).is_err());
     // A capsule that authenticates but holds another signing seed.
-    let mut wrong_seed = Vec::from(b"RCS1".as_slice());
-    wrong_seed.extend([6u8; 32]);
-    let wrong_seed = parallel_work::sealing::seal(&wrong_seed, &associated(body));
+    let wrong_seed = parallel_work::sealing::seal(&[6u8; 32], &associated(body));
     assert!(open(&wrong_seed.key, &wrong_seed.bytes, body).is_err());
     let mut extra = sealed.bytes.clone();
     extra.push(0);

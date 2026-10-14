@@ -22,15 +22,19 @@ import { snapshotParticipant } from '../../storage/database.js';
 import { openDelivery } from '../../storage/delivery.js';
 import type { SealedRecord } from '../../storage/private-records.js';
 import { openRecord, sealRecord } from '../../storage/private-records.js';
-import { releasePhase, targetPhase } from '../../storage/root-generation.js';
+import {
+    completedClosePhase,
+    releasePhase,
+    targetPhase,
+} from '../../storage/root-generation.js';
 import { commitRoot, dataRecordInventory } from '../../storage/root.js';
 import { retainedBallotRecords } from '../ballot/ballot.js';
-import { completedClosePhase } from '../close/close-state.js';
-import type { CloseSession } from '../close/close.js';
+import type { CloseSession } from '../close/close-custody.js';
 import {
     completedCloseRecords,
+    generationOf,
     restoreCompletedClose,
-} from '../close/close.js';
+} from '../close/close-custody.js';
 import { discardEvaluation } from '../target-vote/evaluation.js';
 import type {
     BallotInclusion,
@@ -89,9 +93,6 @@ const releaseTarget = (session: ReleaseSession) => {
         throw new Error('No certified target is retained.');
     return session.target;
 };
-
-const generationOf = (session: ReleaseSession) =>
-    session.close.participant.root.head.generation;
 
 // Decodes the retained release state beneath its predecessor. A release that
 // follows the completed close keeps an empty target field. Every listed
@@ -276,7 +277,7 @@ const lockRelease = async (
     session: ReleaseSession,
     ballotInclusion: BallotInclusion,
 ) => {
-    if (generationOf(session) < releasePhase.locked)
+    if (generationOf(session.close) < releasePhase.locked)
         await commitRelease(session, {
             generation: releasePhase.locked,
             state: {
@@ -293,7 +294,7 @@ const lockRelease = async (
                 signature: new Uint8Array(),
             },
         });
-    if (generationOf(session) === releasePhase.locked) {
+    if (generationOf(session.close) === releasePhase.locked) {
         const { state } = session;
         if (state === undefined)
             throw new Error('No locked release is retained.');
@@ -448,15 +449,15 @@ export const advanceRelease = async (
             'The public close records name another target.',
         );
     }
-    const encrypted = await certifyTarget(context, relay, evaluated.restored);
+    const hasResult = await certifyTarget(context, relay, evaluated.restored);
     const ballotInclusion =
         session.signed?.ballotInclusion ?? certifiedBallotInclusion(context);
     if (
         session.state !== undefined &&
         session.state.ballotInclusion !== ballotInclusion
     )
-        throw new Error('The release names another ballot status.');
-    if (!encrypted) return { encrypted, ballotInclusion };
+        throw new Error('The release names another ballot inclusion.');
+    if (!hasResult) return { hasResult, ballotInclusion };
     // A release that follows the completed close takes the certified target.
     session.target ??= {
         body: evaluated.body,
@@ -468,11 +469,11 @@ export const advanceRelease = async (
     };
     await establishReleaseContext(context, close.records.position);
     await lockRelease(session, ballotInclusion);
-    if (generationOf(session) === releasePhase.ready)
+    if (generationOf(session.close) === releasePhase.ready)
         await proveRelease(session);
     else await restoreReleaseBody(session);
     await signRelease(session);
-    return { encrypted, ballotInclusion };
+    return { hasResult, ballotInclusion };
 };
 
 // Delivers the signed release body and then its envelope packet, inspecting
@@ -482,7 +483,10 @@ export const publishRelease = async (
     relay: PublicRelay,
 ) => {
     const { state } = session;
-    if (state === undefined || generationOf(session) < releasePhase.signed)
+    if (
+        state === undefined ||
+        generationOf(session.close) < releasePhase.signed
+    )
         return;
     const { context, root } = session.close.participant;
     const delivery = await openDelivery(context, root, {

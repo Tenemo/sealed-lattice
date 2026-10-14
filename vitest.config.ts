@@ -4,7 +4,11 @@ import { fileURLToPath } from 'node:url';
 
 import { playwright } from '@vitest/browser-playwright';
 import { defineConfig, type UserWorkspaceConfig } from 'vitest/config';
-import type { BrowserInstanceOption } from 'vitest/node';
+import {
+    BaseSequencer,
+    type BrowserInstanceOption,
+    type TestSpecification,
+} from 'vitest/node';
 
 import { resolveTestDiagnosticPaths } from './tools/ci/test-diagnostic-environment.js';
 
@@ -13,7 +17,8 @@ const resolveFromRepoRoot = (...segments: string[]): string =>
     path.resolve(repoRoot, ...segments);
 
 const browserServerHost = '127.0.0.1';
-// Without an explicit port, vitest's browser server auto-selects one that, on
+// Without an explicit port, the Vitest server that browser mode runs on
+// auto-selects one that, on
 // Windows hosts running Hyper-V or WSL, can land in a reserved excluded range
 // (for example 62744-65187 or 50000-50059) where bind fails with EACCES.
 // strictPort: false only falls through on EADDRINUSE, not EACCES, so the run
@@ -26,7 +31,7 @@ const nodeTestTimeoutMilliseconds = 60_000;
 const participantModuleTestTimeoutMilliseconds = 15 * 60_000;
 
 const participantModuleNodeTestGlobs = [
-    'tests/node/participant-module/**/*.test.ts',
+    'packages/sdk/tests/node/participant-module/**/*.test.ts',
 ] as const;
 const censusNodeTestGlobs = [
     'tests/node/tools/documentation-census.test.ts',
@@ -44,8 +49,6 @@ const nodeTestProjectDefinitions = [
     {
         // Rendering the complete deterministic model census exceeds a fast
         // unit-test interval, so it keeps the fixture-initialization budget.
-        // The census, the participant-module files and the other model files
-        // all run together.
         include: censusNodeTestGlobs,
         projectName: 'node-census',
         testTimeout: nodeHookTimeoutMilliseconds,
@@ -86,25 +89,9 @@ for (const diagnosticDirectoryPath of [
     }
 }
 
-const rootPrivateAliases = [
-    {
-        find: '#packages',
-        replacement: resolveFromRepoRoot('packages'),
-    },
-    {
-        find: '#tests',
-        replacement: resolveFromRepoRoot('tests'),
-    },
-    {
-        find: '#tools',
-        replacement: resolveFromRepoRoot('tools'),
-    },
-] as const;
-
-const testResolve = {
-    alias: rootPrivateAliases,
-    tsconfigPaths: true,
-} as const;
+// The repository-private subpath imports resolve through the TypeScript
+// paths that mirror them. Every project inherits the root configuration.
+const testResolve = { tsconfigPaths: true } as const;
 
 // A run log keeps each project's attachments, including failure screenshots,
 // inside its run directory instead of the default repository-root directory.
@@ -138,7 +125,6 @@ const makeNodeProject = ({
     projectName,
     testTimeout,
 }: NodeProjectInput): UserWorkspaceConfig => ({
-    resolve: testResolve,
     test: {
         name: projectName,
         include: [...include],
@@ -149,72 +135,75 @@ const makeNodeProject = ({
             : { execArgv: nodeDiagnosticReportArguments }),
         setupFiles: [
             resolveFromRepoRoot('tools/ci/test-process-exit-diagnostics.ts'),
+            resolveFromRepoRoot('tools/ci/supported-profile-setup.ts'),
         ],
         testTimeout,
         hookTimeout: nodeHookTimeoutMilliseconds,
     },
 });
 
-type BrowserProjectInput = {
-    readonly include: readonly string[];
-    readonly instances: BrowserInstanceOption[];
-    readonly projectName: string;
+const browserProjectName = 'browser-desktop';
+const browserAttachmentDirectoryPath =
+    testAttachmentDirectoryPath === undefined
+        ? undefined
+        : path.join(testAttachmentDirectoryPath, browserProjectName);
+const browserProject: UserWorkspaceConfig = {
+    test: {
+        name: browserProjectName,
+        include: [...desktopBrowserTestGlobs],
+        ...projectAttachments(browserProjectName),
+        // Each real-WASM browser file can instantiate a large module and
+        // create workers. Keep the canonical Chromium lane serialized so
+        // concurrent files cannot inflate the measured working set.
+        fileParallelism: false,
+        ...(nodeDiagnosticReportArguments.length === 0
+            ? {}
+            : { execArgv: nodeDiagnosticReportArguments }),
+        browser: {
+            enabled: true,
+            provider: playwright(),
+            headless: true,
+            instances: desktopBrowserInstances,
+            ...(browserAttachmentDirectoryPath === undefined
+                ? {}
+                : {
+                      screenshotDirectory: path.join(
+                          browserAttachmentDirectoryPath,
+                          'screenshots',
+                      ),
+                      screenshotFailures: true,
+                  }),
+        },
+    },
 };
 
-const makeBrowserProject = ({
-    include,
-    instances,
-    projectName,
-}: BrowserProjectInput): UserWorkspaceConfig => {
-    const projectAttachmentDirectoryPath =
-        testAttachmentDirectoryPath === undefined
-            ? undefined
-            : path.join(testAttachmentDirectoryPath, projectName);
-    return {
-        resolve: testResolve,
-        test: {
-            name: projectName,
-            include: [...include],
-            ...projectAttachments(projectName),
-            // Each real-WASM browser file can instantiate a large module and
-            // create workers. Keep the canonical Chromium lane serialized so
-            // concurrent files cannot inflate the measured working set.
-            fileParallelism: false,
-            ...(nodeDiagnosticReportArguments.length === 0
-                ? {}
-                : { execArgv: nodeDiagnosticReportArguments }),
-            browser: {
-                enabled: true,
-                api: {
-                    host: browserServerHost,
-                    port: browserServerBasePort,
-                    strictPort: false,
-                },
-                provider: playwright(),
-                headless: true,
-                instances,
-                // Playwright writes active .network chunks to one project-level
-                // directory before Vitest can add worker identity. Routine
-                // coverage therefore keeps tracing off. Each manual evidence
-                // command selects one isolated instance.
-                trace: 'off' as const,
-                ...(projectAttachmentDirectoryPath === undefined
-                    ? {}
-                    : {
-                          screenshotDirectory: path.join(
-                              projectAttachmentDirectoryPath,
-                              'screenshots',
-                          ),
-                          screenshotFailures: true,
-                      }),
-            },
-        },
-    };
-};
+// The census and participant-module projects hold the longest files. The
+// default order runs projects by name, so they would start only after every
+// other Node file.
+class HeavyProjectsFirstSequencer extends BaseSequencer {
+    override async sort(
+        files: TestSpecification[],
+    ): Promise<TestSpecification[]> {
+        const sorted = await super.sort(files);
+        return [
+            ...sorted.filter(({ project }) => project.name !== 'node'),
+            ...sorted.filter(({ project }) => project.name === 'node'),
+        ];
+    }
+}
 
 export default defineConfig({
     resolve: testResolve,
     test: {
+        api: {
+            host: browserServerHost,
+            port: browserServerBasePort,
+            strictPort: false,
+        },
+        sequence: { sequencer: HeavyProjectsFirstSequencer },
+        globalSetup: [
+            resolveFromRepoRoot('tools/ci/supported-profile-global-setup.ts'),
+        ],
         reporters: [
             'default' as const,
             ...(process.env.GITHUB_ACTIONS === 'true'
@@ -229,11 +218,7 @@ export default defineConfig({
             ...nodeTestProjectDefinitions.map((projectDefinition) =>
                 makeNodeProject(projectDefinition),
             ),
-            makeBrowserProject({
-                include: desktopBrowserTestGlobs,
-                instances: desktopBrowserInstances,
-                projectName: 'browser-desktop',
-            }),
+            browserProject,
         ],
     },
 });

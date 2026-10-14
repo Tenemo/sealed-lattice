@@ -9,7 +9,7 @@ use zeroize::Zeroize;
 
 const RATE: usize = 136;
 const PREFIX_BYTES: usize = 64;
-const DOMAIN: &[u8] = b"sealed-lattice/fixed-hash/v1";
+const DOMAIN: &[u8] = b"sealed-lattice/fixed-hash";
 
 #[derive(Clone)]
 pub struct ProtocolHash {

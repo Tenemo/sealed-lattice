@@ -34,10 +34,10 @@ fn release_framing_bounds_context_and_exact_body_length() {
             excess.push(0);
             assert!(ReleaseEnvelope::decode(profile, &excess).is_err());
             let mut changed = envelope.bytes().to_vec();
-            changed[196..198].copy_from_slice(&(participants as u16).to_le_bytes());
+            changed[192..194].copy_from_slice(&(participants as u16).to_le_bytes());
             assert!(ReleaseEnvelope::decode(profile, &changed).is_err());
             changed = envelope.bytes().to_vec();
-            changed[198..206].copy_from_slice(&u64::MAX.to_le_bytes());
+            changed[194..202].copy_from_slice(&u64::MAX.to_le_bytes());
             assert!(ReleaseEnvelope::decode(profile, &changed).is_err());
         }
         for length in [bodies.start() - 1, bodies.end() + 1, usize::MAX] {
@@ -55,7 +55,8 @@ fn release_framing_bounds_context_and_exact_body_length() {
             changed.push(0);
             assert!(proof_length(profile, &changed).is_err());
             assert!(proof_length(profile, &bytes[..bytes.len() - 1]).is_err());
-            for offset in [0, 12] {
+            // The proof length's top byte and the statement header's marker.
+            for offset in [7, 8] {
                 let mut changed = bytes.clone();
                 changed[offset] ^= 1;
                 assert!(proof_length(profile, &changed).is_err());
@@ -82,7 +83,7 @@ fn release_digest_matches_canonical_hash_across_chunk_boundaries() {
     let mut body = body_header(profile, &context(0), PROOF_HEADER_BYTES).unwrap();
     body.extend((0..partial + PROOF_HEADER_BYTES).map(|index| (index % 251) as u8));
     let expected = hash_foundation_tuple_512(
-        "sealed-lattice/release-body/v1",
+        "sealed-lattice/release-body",
         &[CanonicalItem::variable_bytes(&body).unwrap()],
     )
     .unwrap()

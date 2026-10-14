@@ -112,12 +112,10 @@ export const proofRelationCatalogueEntry = (profile: SupportedProfile) =>
                 ];
                 header = Buffer.concat([
                     Buffer.from('SCO2'),
-                    words([degree]),
                     proofCatalogueInteger(
                         profile.ciphertext.modulus,
                         width(profile.ciphertext.modulus),
                     ),
-                    proofCatalogueInteger(sharing.modulus, 20),
                 ]);
                 families = [
                     {
@@ -269,13 +267,19 @@ export const proofRelationCatalogue = () =>
 // Checks the actual context operands and complete centered-polynomial grammar.
 // It does not decide arithmetic truth, authenticate the PID or infer omitted
 // roster/provenance predicates. Compatible profiles may be aliases.
-export const resolveProofContext = (fields: readonly Buffer[]) => {
+// The relations a context's fields name whose canonical statement is the
+// one its statement digest resolves to.
+export const resolveProofContext = (
+    fields: readonly Buffer[],
+    statement: Buffer,
+) => {
     if (
         fields.length !== 7 ||
         !fields[1].equals(proofCatalogueInteger(2n, 16)) ||
         !fields[2].equals(proofCatalogueInteger(field.transformRoot, 16)) ||
         !fields[3].equals(proofCatalogueInteger(7n, 16)) ||
-        !fields[5].equals(proofCatalogueInteger(field.modulus - 1n, 16))
+        !fields[5].equals(proofCatalogueInteger(field.modulus - 1n, 16)) ||
+        fields[6].length !== 64
     )
         return [];
     const canonicalPayloads = new Map<string, boolean>();
@@ -283,10 +287,9 @@ export const resolveProofContext = (fields: readonly Buffer[]) => {
         if (
             !fields[0].equals(Buffer.from(entry.relationTag)) ||
             !fields[4].equals(entry.encodedParameters) ||
-            BigInt(fields[6].length) !== entry.statementBytes
+            BigInt(statement.length) !== entry.statementBytes
         )
             return false;
-        const statement = fields[6];
         if (!statement.subarray(0, entry.header.length).equals(entry.header))
             return false;
         let offset = entry.header.length;

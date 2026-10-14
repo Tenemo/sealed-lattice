@@ -1,8 +1,8 @@
 use evaluation_target::close::ClosedSlot;
 use evaluation_target::target::VerifiedEvaluationTarget;
 use protocol_foundations::{
-    Credential, Error,
-    ballot_authentication::RetainedBallotOwner,
+    Credential, Refusal,
+    ballot_authentication::RetainedSetupOwner,
     target_signing::{TargetMessage, TargetVote},
 };
 use std::sync::Arc;
@@ -56,26 +56,26 @@ pub fn classified_ballot_inclusion(
 /// classified closed inventory it keeps. Persistence stays in the root
 /// worker.
 pub struct FinalityWork {
-    owner: Arc<RetainedBallotOwner>,
+    owner: Arc<RetainedSetupOwner>,
     target: Arc<VerifiedEvaluationTarget>,
     message: TargetMessage,
 }
 impl FinalityWork {
     pub fn new(
-        owner: Arc<RetainedBallotOwner>,
+        owner: Arc<RetainedSetupOwner>,
         target: Arc<VerifiedEvaluationTarget>,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, Refusal> {
         let count = target.setup().profile().participants();
         if target.classified().is_none()
             || owner.poll() != &target.poll().identity()
             || owner.setup_identity() != &target.setup().identity()
             || owner.position() >= count
         {
-            return Err(Error::Context);
+            return Err(Refusal::Context);
         }
         let message = TargetMessage::parse(target.body(), count)?;
         if message.identity() != target.identity() {
-            return Err(Error::Context);
+            return Err(Refusal::Context);
         }
         Ok(Self {
             owner,
@@ -119,16 +119,21 @@ impl FinalityWork {
         &self,
         credential: &mut Credential,
         retained_body: &[u8],
-    ) -> Result<TargetVote, Error> {
+    ) -> Result<TargetVote, Refusal> {
         if retained_body != self.body() {
-            return Err(Error::Context);
+            return Err(Refusal::Context);
         }
         let barrier = self.barrier();
-        if barrier.responses().iter().any(|response| {
-            response.message().responder() == self.owner.position()
-                && Some(response.message().identity()) != credential.close_response_identity()
-        }) {
-            return Err(Error::Context);
+        if barrier
+            .proposal()
+            .responses()
+            .iter()
+            .any(|(responder, identity)| {
+                *responder == self.owner.position()
+                    && Some(identity) != credential.close_response_identity()
+            })
+        {
+            return Err(Refusal::Context);
         }
         credential.sign_target(&self.owner, self.target.setup().roster(), &self.message)
     }

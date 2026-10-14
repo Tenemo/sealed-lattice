@@ -5,7 +5,7 @@
 
 use aes_gcm::{
     Aes256Gcm, Nonce,
-    aead::{AeadInPlace, KeyInit},
+    aead::{AeadInOut, KeyInit},
 };
 use zeroize::Zeroizing;
 
@@ -28,7 +28,7 @@ pub fn seal(plaintext: &[u8], associated: &[u8]) -> Sealed {
     let mut bytes = Zeroizing::new(Vec::with_capacity(plaintext.len() + TAG_BYTES));
     bytes.extend_from_slice(plaintext);
     Aes256Gcm::new((&*key).into())
-        .encrypt_in_place(Nonce::from_slice(&[0; 12]), associated, &mut *bytes)
+        .encrypt_in_place(&Nonce::default(), associated, &mut *bytes)
         .expect("A record within the cipher's bound seals.");
     Sealed {
         key,
@@ -41,7 +41,7 @@ pub fn seal(plaintext: &[u8], associated: &[u8]) -> Sealed {
 pub fn open(key: &[u8; KEY_BYTES], associated: &[u8], sealed: &[u8]) -> Option<Zeroizing<Vec<u8>>> {
     let mut bytes = Zeroizing::new(sealed.to_vec());
     Aes256Gcm::new(key.into())
-        .decrypt_in_place(Nonce::from_slice(&[0; 12]), associated, &mut *bytes)
+        .decrypt_in_place(&Nonce::default(), associated, &mut *bytes)
         .ok()?;
     Some(bytes)
 }

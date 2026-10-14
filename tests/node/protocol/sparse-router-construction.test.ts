@@ -1,15 +1,10 @@
-import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
-import { stripTypeScriptTypes } from 'node:module';
-import { createContext, Script } from 'node:vm';
+import { describe, expect, it, vi } from 'vitest';
 
-import { describe, expect, it } from 'vitest';
-
+import { compileOraclePrefixReplacement } from '#tests/compressed-oracle/oracle-access.js';
 import {
-    compileOraclePrefixReplacement,
     compileSparseRouting,
     sparseRoutingWork,
-} from '#tests/compressed-oracle-model.js';
+} from '#tests/compressed-oracle/sparse-routing.js';
 
 describe('sparse-router circuit construction', () => {
     it('keeps full replacement-record validation visible even when no record fits the query', () => {
@@ -39,36 +34,33 @@ describe('sparse-router circuit construction', () => {
         expect(gateCounts[0]).toBe(gateCounts[1]);
     });
 
-    it('constructs row-index arrays linearly in their width while preserving the gate program', async () => {
-        const source = await readFile(
-            'tests/compressed-oracle-model.ts',
-            'utf8',
-        );
-        const javascript = stripTypeScriptTypes(
-            source
-                .replace(/^import assert from 'node:assert\/strict';\r?$/mu, '')
-                .replace(/^export /gmu, ''),
-            { mode: 'transform' },
-        );
+    it('constructs row-index arrays linearly in their width while preserving the gate program', () => {
         let words = 0;
-        // Count real Array.from results in an isolated evaluation. No gate,
-        // wire, predicate, or circuit output is overridden by this observer.
-        const countedArray = new Proxy(Array, {
-            get(target, property, receiver) {
-                if (property !== 'from')
-                    return Reflect.get(target, property, receiver) as unknown;
-                return (...args: Parameters<typeof Array.from>) => {
-                    const result = Reflect.apply(Array.from, Array, args);
-                    words += result.length;
-                    return result;
-                };
-            },
-        });
-        const compile = new Script(
-            javascript + '\ncompileSparseRouting;',
-        ).runInContext(
-            createContext({ assert, Array: countedArray }),
-        ) as typeof compileSparseRouting;
+        // Observe only this synchronous construction, restoring Array.from
+        // before assertions or any other test work runs.
+        const compile = (
+            ...parameters: Parameters<typeof compileSparseRouting>
+        ) => {
+            const arrayFrom = Array.from;
+            const observer = vi.spyOn(Array, 'from').mockImplementation(
+                new Proxy(arrayFrom, {
+                    apply(target, receiver, argumentsList) {
+                        const result = Reflect.apply(
+                            target,
+                            receiver,
+                            argumentsList,
+                        ) as unknown[];
+                        words += result.length;
+                        return result;
+                    },
+                }),
+            );
+            try {
+                return compileSparseRouting(...parameters);
+            } finally {
+                observer.mockRestore();
+            }
+        };
         for (const capacity of [0, 1, 4, 16])
             for (const inputBits of [1, 7, 32])
                 for (const outputBits of [1, 16, 128]) {

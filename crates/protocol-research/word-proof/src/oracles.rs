@@ -13,7 +13,7 @@ pub fn random_base(count: usize) -> Vec<u128> {
     let mut output = Vec::with_capacity(count);
     let mut bytes = Zeroizing::new(vec![0; RANDOM_READ_BYTES]);
     while output.len() < count {
-        crate::random::fill(&mut bytes);
+        parallel_work::random::proof(&mut bytes);
         for word in bytes.chunks_exact(RANDOM_WORD_BYTES) {
             let value = u128::from_le_bytes(word.try_into().unwrap());
             if value < MODULUS {
@@ -26,7 +26,7 @@ pub fn random_base(count: usize) -> Vec<u128> {
     }
     output
 }
-pub(crate) fn random_extension(count: usize) -> Vec<Element> {
+fn random_extension(count: usize) -> Vec<Element> {
     Zeroizing::new(random_base(3 * count))
         .chunks_exact(3)
         .map(|values| [values[0], values[1], values[2]])
@@ -490,22 +490,19 @@ fn extension_values_inner(
     }
 }
 impl FirstOracle {
-    pub fn create(role: &[u8], witness: &Witness, excess_degree: bool) -> Self {
-        let mut result = Self::initialize(&witness.relation, role, excess_degree);
+    pub fn create(role: &[u8], witness: &Witness) -> Self {
+        let mut result = Self::initialize(&witness.relation, role);
         for column in 0..witness.relation.columns() + 2 {
             result.commit_column(witness, column);
         }
         result.finish_commitment();
         result
     }
-    pub fn initialize(relation: &Relation, role: &[u8], excess_degree: bool) -> Self {
+    pub fn initialize(relation: &Relation, role: &[u8]) -> Self {
         let masks = (0..relation.columns() + 1)
             .map(|_| random_base(MASKS))
             .collect();
-        let mut degree_mask = random_extension(MAXIMUM_DEGREE + 1);
-        if excess_degree {
-            degree_mask.push(field::ONE);
-        }
+        let degree_mask = random_extension(MAXIMUM_DEGREE + 1);
         let tree = Tree::new(role, 0, EVALUATION_DOMAIN_SIZE, relation.first_width());
         let rows = Some(RowShards::open(&tree));
         Self {

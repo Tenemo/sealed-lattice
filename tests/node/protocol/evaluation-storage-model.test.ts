@@ -7,6 +7,10 @@ import {
     compileRankingProgramModel,
     compileScalarEvaluationCapacity,
 } from '#tests/evaluation-storage-model.js';
+import {
+    rustIntegerConstant,
+    stripRustComments,
+} from '#tests/node/rust-source.js';
 import { deriveSupportedProfile } from '#tests/supported-profile-model.js';
 
 describe('scalar evaluation storage schedule', () => {
@@ -14,7 +18,7 @@ describe('scalar evaluation storage schedule', () => {
         const profile = deriveSupportedProfile(10, 10);
         const complete = compileRankingProgramModel(profile);
         expect(complete.identity).toBe(
-            'fea389f6318ffe0fcb36050c9ba22fb24aa60b8462fe026eb20a63b0f8d312a0d6e2fb3666fc6655f0bd602178c808b42fe8a1682ab566a41184042ccae83cf8',
+            '017f859de532edf89af14dc72c7aea96b7917da7ffdebb01b4a853cf087d7d48d747640bc29f8a201fd5f699612f13de57dec36a18ded4d883deec289d3ac421',
         );
         expect(complete.instructions).toHaveLength(284);
         for (let top = 1; top < 10; top++) {
@@ -62,22 +66,32 @@ describe('scalar evaluation storage schedule', () => {
                 result.rns.keyProductPrimes,
             ]).toEqual(primes);
             expect(result.jobBytes).toBe(job);
-            const source = readFileSync(
+            const engine = readFileSync(
                 'crates/protocol-research/encrypted-ranking/src/ranking.rs',
                 'utf8',
             );
-            for (const operand of [
-                '402_653_184',
-                '67_108_864',
-                '2_097_152',
-                'const TRANSFORM_TABLES: usize = 2',
-                'const KEPT_SOURCES: usize = 3',
-            ])
-                expect(source).toContain(operand);
-            expect(source).toContain(
+            const memory = stripRustComments(
+                readFileSync(
+                    'crates/protocol-research/encrypted-ranking/src/ranking-memory.rs',
+                    'utf8',
+                ),
+            );
+            const storage = readFileSync(
+                'crates/protocol-research/encrypted-ranking/src/ranking-storage.rs',
+                'utf8',
+            );
+            for (const [name, value] of [
+                ['MEMORY_BYTES', 402_653_184n],
+                ['RUNTIME_RESERVE_BYTES', 67_108_864n],
+                ['TRANSFER_RESERVE_BYTES', 2_097_152n],
+                ['TRANSFORM_TABLES', 2n],
+                ['KEPT_SOURCES', 3n],
+            ] as const)
+                expect(rustIntegerConstant(memory, name), name).toBe(value);
+            expect(storage).toContain(
                 '.max_by_key(|index| (next_use(**index), **index))',
             );
-            expect(source).toContain('reloads.len() + 1');
+            expect(engine).toContain('reloads.len() + 1');
         },
     );
 

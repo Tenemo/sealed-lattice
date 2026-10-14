@@ -1,12 +1,14 @@
+use super::query_domain::CORRECTED_DEGREES;
+use super::transcript::hash;
 use super::*;
 use supported_profile::{
     Profile,
-    relation::{PROOF_HEADER_BYTES, ballot_relation},
+    relation::{MAXIMUM_DEGREE, PROOF_HEADER_BYTES, SYSTEMATIC, ballot_relation},
 };
 
 // A statement that refuses every byte, so no proof it opens completes.
-struct Refused;
-impl Statement for Refused {
+struct RefusingStatement;
+impl Statement for RefusingStatement {
     fn push(&mut self, _bytes: &[u8]) -> bool {
         false
     }
@@ -14,60 +16,59 @@ impl Statement for Refused {
         None
     }
 }
-fn open(role: &[u8], statement: [u8; 64], bytes: &[u8]) -> Result<Verifier<Refused>, Refusal> {
+fn open(role: &[u8], bytes: &[u8]) -> Result<Verifier<RefusingStatement>, Refusal> {
     Verifier::open(
         ballot_relation(Profile::new(3, 2).unwrap()),
         role,
-        statement,
         bytes,
-        |_, _| Some(Refused),
+        |_, _, _| Some(RefusingStatement),
     )
 }
 fn header() -> Vec<u8> {
-    let mut bytes = vec![0; HEADER_LENGTH];
-    bytes[..4].copy_from_slice(ballot_relation(Profile::new(3, 2).unwrap()).proof_magic);
-    bytes
+    vec![0; HEADER_LENGTH]
 }
 #[test]
 fn malformed_headers_and_unfinished_streams_cannot_verify() {
     assert_eq!(HEADER_LENGTH, PROOF_HEADER_BYTES);
     let bytes = header();
-    assert!(open(b"role", [0; 64], &bytes).is_ok());
-    assert!(!open(b"role", [0; 64], &bytes).unwrap().finish());
-    assert!(open(b"", [0; 64], &bytes).is_err());
-    assert!(open(b"role", [1; 64], &bytes).is_err());
-    assert!(open(b"role", [0; 64], &bytes[..HEADER_LENGTH - 1]).is_err());
-    let mut other = bytes.clone();
-    other[..4].copy_from_slice(b"SWP3");
-    assert!(matches!(
-        open(b"role", [0; 64], &other),
-        Err(Refusal::Encoding)
-    ));
-    assert!(matches!(
-        Verifier::<Refused>::open(
+    assert!(open(b"role", &bytes).is_ok());
+    assert!(!open(b"role", &bytes).unwrap().finish());
+    assert!(open(b"", &bytes).is_err());
+    // The statement parser receives the digest the header declares, which
+    // it must recompute.
+    let mut declared = bytes.clone();
+    declared[..64].fill(7);
+    assert!(
+        Verifier::open(
             ballot_relation(Profile::new(3, 2).unwrap()),
             b"role",
-            [0; 64],
+            &declared,
+            |statement, _, _| (statement == [7; 64]).then_some(RefusingStatement),
+        )
+        .is_ok()
+    );
+    assert!(open(b"role", &bytes[..HEADER_LENGTH - 1]).is_err());
+    assert!(matches!(
+        Verifier::<RefusingStatement>::open(
+            ballot_relation(Profile::new(3, 2).unwrap()),
+            b"role",
             &bytes,
-            |_, _| { None }
+            |_, _, _| { None }
         ),
         Err(Refusal::Context)
     ));
-    for offset in [324, HEADER_LENGTH - 48] {
+    for offset in [256, HEADER_LENGTH - 48] {
         let mut changed = bytes.clone();
         changed[offset..offset + 16].copy_from_slice(&MODULUS.to_le_bytes());
-        assert!(matches!(
-            open(b"role", [0; 64], &changed),
-            Err(Refusal::Encoding)
-        ));
+        assert!(matches!(open(b"role", &changed), Err(Refusal::Encoding)));
     }
-    let mut verifier = open(b"role", [0; 64], &bytes).unwrap();
-    assert!(matches!(verifier.push_proof(&[0]), Err(Refusal::Stage)));
+    let mut verifier = open(b"role", &bytes).unwrap();
+    assert!(matches!(verifier.push_proof(&[0]), Err(Refusal::Phase)));
     assert!(matches!(
         verifier.push_statement(&[0]),
         Err(Refusal::Encoding)
     ));
-    assert!(matches!(verifier.finish_statement(), Err(Refusal::Stage)));
+    assert!(matches!(verifier.finish_statement(), Err(Refusal::Phase)));
     assert!(!verifier.finish());
 }
 // The table-driven values at a point equal direct powers of the point

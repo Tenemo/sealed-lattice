@@ -1,17 +1,13 @@
 use crate::close::VerifiedCloseBarrier;
 use crate::target::{
-    ClassifiedClosedInventory, Error, EvaluationSession, VerifiedEvaluationTarget,
+    BallotReader, ClassifiedClosedInventory, KeyReader, Refusal, RunningEvaluation,
+    VerifiedEvaluationTarget,
 };
 use ballot_proof::body::BallotBodyClassification;
 use encrypted_ranking::ranking::{
-    DEGREE, Engine, KEY_RECORD_BYTES, PolynomialDecoder, Progress, RecordRequest, Refusal,
-    StoredValueRead, stored_value_bytes,
+    DEGREE, Engine, KEY_RECORD_BYTES, Progress, RecordRequest, StoredValueRead, stored_value_bytes,
 };
-use protocol_foundations::{
-    ballot_body::{self, HEADER_BYTES},
-    identity::{BodyHasher, IdentityHasher, PUBLIC_POLYNOMIAL_DOMAIN},
-    poll::VerifiedPoll,
-};
+use protocol_foundations::poll::VerifiedPoll;
 use setup_aggregate::verified::VerifiedSetupAggregate;
 use std::sync::Arc;
 
@@ -50,23 +46,11 @@ pub trait EvaluationInputs {
     fn release_ballot_inputs(&mut self);
     fn take_barrier(&mut self) -> Option<VerifiedCloseBarrier>;
 }
-/// What an incoming stream becomes as its pieces arrive: a key polynomial
-/// of the ordinal, a ballot body of the author, whose FHE ciphertext's two
-/// components follow its header, or a stored value; each with the identity
-/// its bytes must have.
+/// What an incoming stream becomes as its pieces arrive: a setup aggregate
+/// key polynomial, an accepted ballot body or a stored value.
 enum Payload {
-    Key {
-        ordinal: usize,
-        hash: IdentityHasher,
-        expected: [u8; 64],
-        decoder: PolynomialDecoder,
-    },
-    Ballot {
-        author: usize,
-        hash: BodyHasher,
-        expected: [u8; 64],
-        components: [PolynomialDecoder; 2],
-    },
+    Key(KeyReader),
+    Ballot(BallotReader),
     Stored(StoredValueRead),
 }
 struct Incoming {
@@ -81,7 +65,7 @@ pub struct TargetSession {
     output: Vec<u8>,
     context: Option<(Arc<VerifiedPoll>, Arc<VerifiedSetupAggregate>)>,
     classifications: Vec<Option<BallotBodyClassification>>,
-    session: Option<EvaluationSession>,
+    session: Option<RunningEvaluation>,
     incoming: Option<Incoming>,
     target: Option<Arc<VerifiedEvaluationTarget>>,
 }
@@ -127,18 +111,18 @@ impl TargetSession {
             .and_then(|session| session.engine.as_ref())
             .is_some_and(Engine::finished)
     }
-    fn session(&mut self) -> Result<&mut EvaluationSession, Error> {
-        self.session.as_mut().ok_or(Error::Context)
+    fn session(&mut self) -> Result<&mut RunningEvaluation, Refusal> {
+        self.session.as_mut().ok_or(Refusal::Context)
     }
-    fn engine(&mut self) -> Result<&mut Engine, Error> {
-        self.session()?.engine.as_mut().ok_or(Error::Arithmetic)
+    fn engine(&mut self) -> Result<&mut Engine, Refusal> {
+        self.session()?.engine.as_mut().ok_or(Refusal::Arithmetic)
     }
     fn word(&mut self, value: usize) {
         self.output.extend((value as u32).to_le_bytes());
     }
-    fn begin(&mut self, length: usize, payload: Payload) -> Result<(), Error> {
+    fn begin(&mut self, length: usize, payload: Payload) -> Result<(), Refusal> {
         if self.incoming.is_some() {
-            return Err(Error::Incomplete);
+            return Err(Refusal::Incomplete);
         }
         self.incoming = Some(Incoming {
             length,
@@ -147,98 +131,42 @@ impl TargetSession {
         });
         Ok(())
     }
-    fn push(&mut self, length: usize) -> Result<(), Error> {
+    fn push(&mut self, length: usize) -> Result<(), Refusal> {
         let Self {
             input,
             session,
             incoming,
             ..
         } = self;
-        let value = incoming.as_mut().ok_or(Error::Incomplete)?;
+        let value = incoming.as_mut().ok_or(Refusal::Incomplete)?;
         if length == 0 || length > value.length - value.received {
-            return Err(Error::PublicInput);
+            return Err(Refusal::PublicInput);
         }
         let engine = session
             .as_ref()
             .and_then(|session| session.engine.as_ref())
-            .ok_or(Error::Arithmetic)?;
+            .ok_or(Refusal::Arithmetic)?;
         let bytes = &input[..length];
-        let received = value.received;
         match &mut value.payload {
-            Payload::Key { hash, decoder, .. } => {
-                hash.absorb(bytes).map_err(|_| Error::PublicInput)?;
-                engine
-                    .decode_into(decoder, bytes)
-                    .map_err(|_| Error::PublicInput)?;
-            }
-            Payload::Ballot {
-                hash, components, ..
-            } => {
-                hash.push(bytes).map_err(|_| Error::PublicInput)?;
-                let split = DEGREE * engine.coefficient_bytes();
-                for (index, component) in components.iter_mut().enumerate() {
-                    let start = HEADER_BYTES + index * split;
-                    let first = received.max(start);
-                    let last = (received + length).min(start + split);
-                    if first < last {
-                        engine
-                            .decode_into(component, &bytes[first - received..last - received])
-                            .map_err(|_| Error::PublicInput)?;
-                    }
-                }
-            }
+            Payload::Key(reader) => reader.push(engine, bytes)?,
+            Payload::Ballot(reader) => reader.push(engine, bytes)?,
             Payload::Stored(read) => engine
                 .push_read(read, bytes)
-                .map_err(|_| Error::PublicInput)?,
+                .map_err(|_| Refusal::PublicInput)?,
         }
         value.received += length;
         Ok(())
     }
-    fn finish_incoming(&mut self) -> Result<(), Error> {
-        let incoming = self.incoming.take().ok_or(Error::Incomplete)?;
+    fn finish_incoming(&mut self) -> Result<(), Refusal> {
+        let incoming = self.incoming.take().ok_or(Refusal::Incomplete)?;
         if incoming.received != incoming.length {
-            return Err(Error::Incomplete);
+            return Err(Refusal::Incomplete);
         }
         let engine = self.engine()?;
         match incoming.payload {
-            Payload::Key {
-                ordinal,
-                hash,
-                expected,
-                decoder,
-            } => {
-                if hash.finish().map_err(|_| Error::PublicInput)? != expected {
-                    return Err(Error::PublicInput);
-                }
-                let polynomial = engine
-                    .finish_polynomial(decoder)
-                    .map_err(|_| Error::PublicInput)?;
-                engine
-                    .load_key(ordinal, polynomial)
-                    .map_err(|_| Error::Arithmetic)
-            }
-            Payload::Ballot {
-                author,
-                hash,
-                expected,
-                components: [first, second],
-            } => {
-                if hash.finish().map_err(|_| Error::PublicInput)? != expected {
-                    return Err(Error::PublicInput);
-                }
-                let value = [
-                    engine
-                        .finish_polynomial(first)
-                        .map_err(|_| Error::PublicInput)?,
-                    engine
-                        .finish_polynomial(second)
-                        .map_err(|_| Error::PublicInput)?,
-                ];
-                engine
-                    .load_input(author, value)
-                    .map_err(|_| Error::Arithmetic)
-            }
-            Payload::Stored(read) => engine.finish_read(read).map_err(|_| Error::Storage),
+            Payload::Key(reader) => reader.finish(engine),
+            Payload::Ballot(reader) => reader.finish(engine),
+            Payload::Stored(read) => engine.finish_read(read).map_err(|_| Refusal::Storage),
         }
     }
     pub fn command(
@@ -247,58 +175,58 @@ impl TargetSession {
         operation: u32,
         argument: usize,
         length: usize,
-    ) -> Result<(), Error> {
+    ) -> Result<(), Refusal> {
         if length > EVALUATION_INPUT_BYTES {
-            return Err(Error::Encoding);
+            return Err(Refusal::Encoding);
         }
         let operation = EvaluationOperation::from_code(operation);
         self.output.clear();
         if self.target.is_some() {
-            return Err(Error::Context);
+            return Err(Refusal::Context);
         }
         if !matches!(
             operation,
             Some(EvaluationOperation::PushInput | EvaluationOperation::FinishInput)
         ) && self.incoming.is_some()
         {
-            return Err(Error::Incomplete);
+            return Err(Refusal::Incomplete);
         }
         match operation {
             Some(EvaluationOperation::Begin) => {
                 if argument != 0 || length != 0 || self.context.is_some() || self.session.is_some()
                 {
-                    return Err(Error::Context);
+                    return Err(Refusal::Context);
                 }
-                self.context = Some(inputs.setup().ok_or(Error::Context)?);
+                self.context = Some(inputs.setup().ok_or(Refusal::Context)?);
                 // Inputs an earlier, unfinished classification kept.
                 inputs.release_ballot_inputs();
                 Ok(())
             }
             Some(EvaluationOperation::TakeClassification) => {
                 if argument != 0 || length != 0 || self.session.is_some() {
-                    return Err(Error::Context);
+                    return Err(Refusal::Context);
                 }
-                let (_, setup) = self.context.as_ref().ok_or(Error::Context)?;
+                let (_, setup) = self.context.as_ref().ok_or(Refusal::Context)?;
                 if self.classifications.len() >= setup.profile().participants() {
-                    return Err(Error::Incomplete);
+                    return Err(Refusal::Incomplete);
                 }
                 self.classifications.push(inputs.take_classification());
                 Ok(())
             }
             Some(EvaluationOperation::Start) => {
                 if argument != 0 || length != 0 || self.session.is_some() {
-                    return Err(Error::Context);
+                    return Err(Refusal::Context);
                 }
-                let (poll, setup) = self.context.take().ok_or(Error::Context)?;
+                let (poll, setup) = self.context.take().ok_or(Refusal::Context)?;
                 // Every classification is taken, so the ballots' shared
                 // inputs are not held through the evaluation.
                 inputs.release_ballot_inputs();
-                let barrier = inputs.take_barrier().ok_or(Error::Incomplete)?;
+                let barrier = inputs.take_barrier().ok_or(Refusal::Incomplete)?;
                 // The barrier must come from this instance's own setup verifier.
                 if barrier.poll().identity() != poll.identity()
                     || barrier.setup().identity() != setup.identity()
                 {
-                    return Err(Error::Context);
+                    return Err(Refusal::Context);
                 }
                 let session = ClassifiedClosedInventory::new(
                     barrier,
@@ -314,15 +242,16 @@ impl TargetSession {
             }
             Some(EvaluationOperation::Requirements) => {
                 if argument != 0 || length != 0 {
-                    return Err(Error::Encoding);
+                    return Err(Refusal::Encoding);
                 }
                 let session = self.session()?;
-                let engine = session.engine.as_mut().ok_or(Error::Arithmetic)?;
-                let required = engine.requirements().map_err(|_| Error::Arithmetic)?;
+                let engine = session.engine.as_mut().ok_or(Refusal::Arithmetic)?;
+                let required = engine.requirements().map_err(|_| Refusal::Arithmetic)?;
                 let loaded = engine.key_count();
-                let input_kind = required.input_position.map_or(0, |author| {
-                    usize::from(session.inventory.accepted[author].is_some())
-                });
+                let input_kind = match required.input_position {
+                    Some(author) => usize::from(session.inventory.accepted(author)?.is_some()),
+                    None => 0,
+                };
                 for value in [
                     required.step,
                     loaded,
@@ -341,60 +270,22 @@ impl TargetSession {
             }
             Some(EvaluationOperation::NextKey) => {
                 if argument != 0 || length != 0 {
-                    return Err(Error::Encoding);
+                    return Err(Refusal::Encoding);
                 }
                 let session = self.session()?;
-                let engine = session.engine.as_mut().ok_or(Error::Arithmetic)?;
-                let required = engine.requirements().map_err(|_| Error::Arithmetic)?;
-                let ordinal = engine.key_count();
-                if ordinal >= required.key_count {
-                    return Err(Error::Incomplete);
-                }
-                let profile = engine.profile();
-                let width = engine.coefficient_bytes();
-                let (common, index) = Engine::key_identity(
-                    profile,
-                    required.cache.ok_or(Error::Arithmetic)?,
-                    ordinal,
-                )
-                .map_err(|_| Error::Arithmetic)?;
-                if common {
-                    let bytes = setup_witness::contribution::common_records(profile, index)
-                        .map_err(|_| Error::PublicInput)?;
-                    if bytes.len() != DEGREE * width {
-                        return Err(Error::PublicInput);
+                let engine = session.engine.as_mut().ok_or(Refusal::Arithmetic)?;
+                match session.inventory.next_key(engine)? {
+                    None => self.word(u32::MAX as usize),
+                    Some((index, reader)) => {
+                        self.begin(reader.length(), Payload::Key(reader))?;
+                        self.word(index);
                     }
-                    let value = engine
-                        .decode_polynomial(&bytes)
-                        .map_err(|_| Error::PublicInput)?;
-                    engine
-                        .load_key(ordinal, value)
-                        .map_err(|_| Error::Arithmetic)?;
-                    self.word(u32::MAX as usize);
-                } else {
-                    let metadata = session
-                        .inventory
-                        .setup
-                        .polynomials()
-                        .iter()
-                        .find(|value| value.index() == index)
-                        .ok_or(Error::Context)?;
-                    let bytes = metadata.bytes();
-                    let payload = Payload::Key {
-                        ordinal,
-                        hash: IdentityHasher::new(PUBLIC_POLYNOMIAL_DOMAIN, &[], bytes)
-                            .map_err(|_| Error::Context)?,
-                        expected: *metadata.digest(),
-                        decoder: engine.polynomial_decoder(),
-                    };
-                    self.begin(bytes, payload)?;
-                    self.word(index);
                 }
                 Ok(())
             }
             Some(EvaluationOperation::PushInput) => {
                 if argument != 0 {
-                    return Err(Error::Encoding);
+                    return Err(Refusal::Encoding);
                 }
                 let result = self.push(length);
                 if result.is_err() {
@@ -404,51 +295,29 @@ impl TargetSession {
             }
             Some(EvaluationOperation::FinishInput) => {
                 if argument != 0 || length != 0 {
-                    return Err(Error::Encoding);
+                    return Err(Refusal::Encoding);
                 }
                 self.finish_incoming()
             }
             Some(EvaluationOperation::BeginBallotInput) => {
                 if length != 0 {
-                    return Err(Error::Encoding);
+                    return Err(Refusal::Encoding);
                 }
                 let session = self.session()?;
-                let engine = session.engine.as_mut().ok_or(Error::Arithmetic)?;
-                let required = engine.requirements().map_err(|_| Error::Arithmetic)?;
-                if required.input_position != Some(argument) {
-                    return Err(Error::Context);
-                }
-                if let Some(envelope) = session
-                    .inventory
-                    .accepted
-                    .get(argument)
-                    .ok_or(Error::Context)?
-                    .as_ref()
-                {
-                    let bytes = envelope.body_length();
-                    // The body carries the FHE ciphertext's two components
-                    // first.
-                    let payload = Payload::Ballot {
-                        author: argument,
-                        hash: ballot_body::body_hasher(engine.profile(), bytes)
-                            .map_err(|_| Error::PublicInput)?,
-                        expected: *envelope.body_identity(),
-                        components: [engine.polynomial_decoder(), engine.polynomial_decoder()],
-                    };
-                    self.begin(bytes, payload)?;
-                    self.word(bytes);
-                } else {
-                    let zero = engine.zero_value();
-                    engine
-                        .load_input(argument, zero)
-                        .map_err(|_| Error::Arithmetic)?;
-                    self.word(0);
+                let engine = session.engine.as_mut().ok_or(Refusal::Arithmetic)?;
+                match session.inventory.ballot_input(engine, argument)? {
+                    None => self.word(0),
+                    Some(reader) => {
+                        let bytes = reader.length();
+                        self.begin(bytes, Payload::Ballot(reader))?;
+                        self.word(bytes);
+                    }
                 }
                 Ok(())
             }
             Some(EvaluationOperation::Execute) => {
                 if argument != 0 || length != 0 {
-                    return Err(Error::Encoding);
+                    return Err(Refusal::Encoding);
                 }
                 // Executed: the values whose last use it was. Records: the
                 // request the host delivers next and those that follow it,
@@ -477,21 +346,24 @@ impl TargetSession {
                         self.word(3);
                         self.word(number as usize);
                     }
-                    Err(Refusal::Identity) => {
+                    Err(encrypted_ranking::ranking::Refusal::Identity) => {
                         self.session = None;
                         self.word(2);
                     }
-                    Err(_) => return Err(Error::Arithmetic),
+                    Err(_) => return Err(Refusal::Arithmetic),
                 }
                 Ok(())
             }
             Some(EvaluationOperation::ReadValue) => {
                 if length != 8 {
-                    return Err(Error::Encoding);
+                    return Err(Refusal::Encoding);
                 }
                 let offset = u32::from_le_bytes(self.input[..4].try_into().unwrap()) as usize;
                 let count = u32::from_le_bytes(self.input[4..8].try_into().unwrap()) as usize;
-                let value = self.engine()?.value(argument).map_err(|_| Error::Storage)?;
+                let value = self
+                    .engine()?
+                    .value(argument)
+                    .map_err(|_| Refusal::Storage)?;
                 // The stored value's coefficients in order: both components'
                 // words.
                 let words = value[0].len() / DEGREE;
@@ -499,7 +371,7 @@ impl TargetSession {
                     || count > EVALUATION_INPUT_BYTES / (8 * words)
                     || offset.checked_add(count).is_none_or(|end| end > 2 * DEGREE)
                 {
-                    return Err(Error::Encoding);
+                    return Err(Refusal::Encoding);
                 }
                 let mut output = Vec::with_capacity(count * 8 * words);
                 for position in offset..offset + count {
@@ -513,31 +385,31 @@ impl TargetSession {
             }
             Some(EvaluationOperation::ReadBack | EvaluationOperation::Reload) => {
                 if length != 0 {
-                    return Err(Error::Encoding);
+                    return Err(Refusal::Encoding);
                 }
                 let engine = self.engine()?;
-                let required = engine.requirements().map_err(|_| Error::Arithmetic)?;
+                let required = engine.requirements().map_err(|_| Refusal::Arithmetic)?;
                 let read = if operation == Some(EvaluationOperation::ReadBack) {
                     if !required.spills.contains(&argument) {
-                        return Err(Error::Storage);
+                        return Err(Refusal::Storage);
                     }
                     engine.begin_readback(argument)
                 } else {
                     if !required.reloads.contains(&argument) {
-                        return Err(Error::Storage);
+                        return Err(Refusal::Storage);
                     }
                     engine.begin_reload(argument)
                 }
-                .map_err(|_| Error::Storage)?;
+                .map_err(|_| Refusal::Storage)?;
                 let bytes = stored_value_bytes(engine.profile());
                 self.begin(bytes, Payload::Stored(read))
             }
             Some(EvaluationOperation::Finish) => {
                 if argument != 0 || length != 0 || !self.engine()?.finished() {
-                    return Err(Error::Incomplete);
+                    return Err(Refusal::Incomplete);
                 }
                 self.target = Some(Arc::new(
-                    self.session.take().ok_or(Error::Context)?.finish()?,
+                    self.session.take().ok_or(Refusal::Context)?.finish()?,
                 ));
                 Ok(())
             }
@@ -545,33 +417,34 @@ impl TargetSession {
                 // The request's next key record of the ordinal, after its
                 // prime.
                 if length != 4 + KEY_RECORD_BYTES {
-                    return Err(Error::Encoding);
+                    return Err(Refusal::Encoding);
                 }
                 let prime = u32::from_le_bytes(self.input[..4].try_into().unwrap()) as usize;
                 let record = &self.input[4..length];
                 self.session
                     .as_mut()
                     .and_then(|session| session.engine.as_mut())
-                    .ok_or(Error::Arithmetic)?
+                    .ok_or(Refusal::Arithmetic)?
                     .key_record(argument, prime, record)
-                    .map_err(|_| Error::Storage)
+                    .map_err(|_| Refusal::Storage)
             }
             Some(EvaluationOperation::SharedKeyRecords) => {
                 // The request's key records, which the host shared itself
                 // one after another: their handle, and the request's first
                 // ordinal, count and prime and the records' length.
                 if length != 16 {
-                    return Err(Error::Encoding);
+                    return Err(Refusal::Encoding);
                 }
                 let [first, count, prime, bytes] = std::array::from_fn(|index| {
                     u32::from_le_bytes(self.input[4 * index..4 * (index + 1)].try_into().unwrap())
                         as usize
                 });
-                let records = parallel_work::adopt(argument as u32, bytes).ok_or(Error::Storage)?;
+                let records =
+                    parallel_work::adopt(argument as u32, bytes).ok_or(Refusal::Storage)?;
                 self.session
                     .as_mut()
                     .and_then(|session| session.engine.as_mut())
-                    .ok_or(Error::Arithmetic)?
+                    .ok_or(Refusal::Arithmetic)?
                     .shared_key_records(
                         RecordRequest {
                             first,
@@ -580,13 +453,13 @@ impl TargetSession {
                         },
                         records,
                     )
-                    .map_err(|_| Error::Storage)
+                    .map_err(|_| Refusal::Storage)
             }
             Some(EvaluationOperation::TakeKeyRecord) => {
                 // The last loaded key's next record for the host to store,
                 // after its prime, or nothing once every record is stored.
                 if argument != 0 || length != 0 {
-                    return Err(Error::Encoding);
+                    return Err(Refusal::Encoding);
                 }
                 if let Some((prime, record)) = self.engine()?.take_record() {
                     self.word(prime);
@@ -594,7 +467,7 @@ impl TargetSession {
                 }
                 Ok(())
             }
-            None => Err(Error::Encoding),
+            None => Err(Refusal::Encoding),
         }
     }
 }

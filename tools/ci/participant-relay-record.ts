@@ -4,16 +4,16 @@ import path from 'node:path';
 
 import {
     candidateChunkBytes,
-    candidateIdentifierBytes,
+    candidateLocatorBytes,
     candidatePageEntries,
     decodeCandidateManifest,
-    isCandidateId,
+    isCandidateLocator,
     isCandidateKey,
     type CandidateManifest,
 } from '#packages/sdk/src/participant/worker/relay/candidate-codec.js';
 
 export type StoredParticipantCandidate = Readonly<{
-    id: string;
+    locator: string;
     key: string;
     manifest: CandidateManifest;
     bytes: Buffer;
@@ -39,18 +39,19 @@ export const participantRelayStore = (directory: string) => {
             unlock();
         }
     };
-    const objectDirectory = (kind: string, id: string) => {
-        if (!isCandidateId(id)) throw new Error('Invalid transport locator.');
-        return path.join(directory, kind, id);
+    const objectDirectory = (kind: string, locator: string) => {
+        if (!isCandidateLocator(locator))
+            throw new Error('Invalid transport locator.');
+        return path.join(directory, kind, locator);
     };
     const allocate = async (kind: string) => {
         await mkdir(path.join(directory, kind), { recursive: true });
         for (;;) {
-            const id = randomBytes(candidateIdentifierBytes).toString('hex');
-            const target = objectDirectory(kind, id);
+            const locator = randomBytes(candidateLocatorBytes).toString('hex');
+            const target = objectDirectory(kind, locator);
             try {
                 await mkdir(target);
-                return { id, target };
+                return { locator, target };
             } catch (error) {
                 if (
                     error === null ||
@@ -66,7 +67,7 @@ export const participantRelayStore = (directory: string) => {
         const temporary =
             file +
             '.pending-' +
-            randomBytes(candidateIdentifierBytes).toString('hex');
+            randomBytes(candidateLocatorBytes).toString('hex');
         const handle = await open(temporary, 'wx');
         try {
             await handle.writeFile(bytes);
@@ -109,19 +110,24 @@ export const participantRelayStore = (directory: string) => {
         return { target, complete };
     };
     const candidate = async (
-        id: string,
+        locator: string,
     ): Promise<StoredParticipantCandidate> => {
-        const target = objectDirectory('candidates', id);
+        const target = objectDirectory('candidates', locator);
         const [bytes, key] = await Promise.all([
             readFile(path.join(target, 'manifest.bin')),
             readFile(path.join(target, 'key.txt'), 'utf8'),
         ]);
         if (!isCandidateKey(key))
             throw new Error('Invalid stored candidate key.');
-        return { id, key, bytes, manifest: decodeCandidateManifest(bytes) };
+        return {
+            locator,
+            key,
+            bytes,
+            manifest: decodeCandidateManifest(bytes),
+        };
     };
-    const chunk = async (id: string) => {
-        const file = path.join(objectDirectory('chunks', id), 'body.bin');
+    const chunk = async (locator: string) => {
+        const file = path.join(objectDirectory('chunks', locator), 'body.bin');
         const size = (await stat(file)).size;
         if (size > candidateChunkBytes)
             throw new Error('A stored chunk exceeds its transport bound.');
@@ -131,9 +137,9 @@ export const participantRelayStore = (directory: string) => {
         putChunk: async (bytes: Uint8Array) => {
             if (bytes.length > candidateChunkBytes)
                 throw new Error('A publication chunk exceeds its bound.');
-            const { id, target } = await allocate('chunks');
+            const { locator, target } = await allocate('chunks');
             await durableFile(path.join(target, 'body.bin'), bytes);
-            return id;
+            return locator;
         },
         chunk,
         append: async (key: string, bytes: Uint8Array) => {
@@ -157,7 +163,7 @@ export const participantRelayStore = (directory: string) => {
                     remaining -= length;
                 }
             }
-            const { id, target } = await allocate('candidates');
+            const { locator, target } = await allocate('candidates');
             await durableFile(path.join(target, 'key.txt'), Buffer.from(key));
             await durableFile(path.join(target, 'manifest.bin'), bytes);
             return locked(key, async () => {
@@ -166,9 +172,9 @@ export const participantRelayStore = (directory: string) => {
                 const index = complete.length;
                 await durableFile(
                     path.join(log, entryName(index)),
-                    Buffer.from(id, 'hex'),
+                    Buffer.from(locator, 'hex'),
                 );
-                return { id, index };
+                return { locator, index };
             });
         },
         candidate,
@@ -181,21 +187,21 @@ export const participantRelayStore = (directory: string) => {
                     offset,
                     offset + candidatePageEntries,
                 );
-                const ids = await Promise.all(
+                const locators = await Promise.all(
                     names.map(async (name) => {
                         const value = await readFile(path.join(target, name));
-                        if (value.length !== candidateIdentifierBytes)
+                        if (value.length !== candidateLocatorBytes)
                             throw new Error(
                                 'A candidate discovery entry is incomplete.',
                             );
                         return value.toString('hex');
                     }),
                 );
-                return { total: complete.length, ids };
+                return { total: complete.length, locators };
             });
         },
-        file: async (id: string, name: string) => {
-            const stored = await candidate(id);
+        file: async (locator: string, name: string) => {
+            const stored = await candidate(locator);
             const file = stored.manifest.files.find(
                 (entry) => entry.name === name,
             );
@@ -205,8 +211,8 @@ export const participantRelayStore = (directory: string) => {
                 length: file.length,
                 read: async function* () {
                     let remaining = file.length;
-                    for (const locator of file.chunks) {
-                        const bytes = await chunk(locator);
+                    for (const chunkLocator of file.chunks) {
+                        const bytes = await chunk(chunkLocator);
                         if (
                             bytes.length !==
                             Math.min(candidateChunkBytes, remaining)

@@ -14,43 +14,42 @@ use supported_profile::{
 use word_proof::oracles::Witness;
 
 #[derive(Debug)]
-pub enum Error {
+pub enum Refusal {
     Context,
     Encoding,
     Proof,
 }
 
+/// Verifies a proof, given as its header and the rest of its bytes, over
+/// the expanded statement.
 fn verify_expanded(
     context: &ballot_encryption::context::BallotComputationContext,
     public: &PublicStatement,
+    proof_header: &[u8],
     proof: &[u8],
-) -> Result<(), Error> {
+) -> Result<(), Refusal> {
     let profile = context.profile();
-    if !ballot_body::proof_lengths(profile).contains(&proof.len()) {
-        return Err(Error::Encoding);
+    if proof_header.len() != PROOF_HEADER_BYTES
+        || !ballot_body::proof_lengths(profile).contains(&(PROOF_HEADER_BYTES + proof.len()))
+    {
+        return Err(Refusal::Encoding);
     }
-    let role = private_proof_role(context).map_err(|_| Error::Context)?;
-    let mut verifier = crate::verifier(
-        profile,
-        &role,
-        public.digest(),
-        &proof[..PROOF_HEADER_BYTES],
-    )
-    .map_err(|_| Error::Proof)?;
+    let role = private_proof_role(context).map_err(|_| Refusal::Context)?;
+    let mut verifier = crate::verifier(profile, &role, proof_header).map_err(|_| Refusal::Proof)?;
     verifier
         .push_statement(&public.header)
-        .map_err(|_| Error::Proof)?;
+        .map_err(|_| Refusal::Proof)?;
     for polynomial in &public.polynomials {
         for bytes in polynomial.chunks(crate::CHUNK_LIMIT) {
-            verifier.push_statement(bytes).map_err(|_| Error::Proof)?;
+            verifier.push_statement(bytes).map_err(|_| Refusal::Proof)?;
         }
     }
-    verifier.finish_statement().map_err(|_| Error::Proof)?;
-    for bytes in proof[PROOF_HEADER_BYTES..].chunks(crate::CHUNK_LIMIT) {
-        verifier.push_proof(bytes).map_err(|_| Error::Proof)?;
+    verifier.finish_statement().map_err(|_| Refusal::Proof)?;
+    for bytes in proof.chunks(crate::CHUNK_LIMIT) {
+        verifier.push_proof(bytes).map_err(|_| Refusal::Proof)?;
     }
     if !verifier.finish() {
-        return Err(Error::Proof);
+        return Err(Refusal::Proof);
     }
     Ok(())
 }
@@ -58,11 +57,11 @@ fn envelope(
     context: &BallotComputationContext,
     ballot_time: u64,
     bytes: &[u8],
-) -> Result<BallotEnvelope, Error> {
+) -> Result<BallotEnvelope, Refusal> {
     let profile = context.profile();
-    let mut hash = ballot_body::body_hasher(profile, bytes.len()).map_err(|_| Error::Encoding)?;
+    let mut hash = ballot_body::body_hasher(profile, bytes.len()).map_err(|_| Refusal::Encoding)?;
     for bytes in bytes.chunks(crate::CHUNK_LIMIT) {
-        hash.push(bytes).map_err(|_| Error::Encoding)?;
+        hash.push(bytes).map_err(|_| Refusal::Encoding)?;
     }
     BallotEnvelope::new(
         profile,
@@ -71,9 +70,9 @@ fn envelope(
         context.position(),
         ballot_time,
         bytes.len(),
-        hash.finish().map_err(|_| Error::Encoding)?,
+        hash.finish().map_err(|_| Refusal::Encoding)?,
     )
-    .map_err(|_| Error::Context)
+    .map_err(|_| Refusal::Context)
 }
 
 /// Whether this build is a corrupt participant's, whose ballot creation
@@ -98,36 +97,37 @@ pub fn create(
     fhe: RetainedAggregatePolynomial,
     scores: &[u8],
     ballot_time: u64,
-) -> Result<(Vec<u8>, BallotEnvelope), Error> {
+) -> Result<(Vec<u8>, BallotEnvelope), Refusal> {
     let encryption = LinkedBallotWitness::create_with_context(context, fhe, scores)
-        .map_err(|_| Error::Context)?;
+        .map_err(|_| Refusal::Context)?;
     let profile = encryption.context.profile();
-    let public = PublicStatement::from_encryption(&encryption).map_err(|_| Error::Encoding)?;
+    let public = PublicStatement::from_encryption(&encryption).map_err(|_| Refusal::Encoding)?;
     #[cfg(feature = "invalid-ballot")]
     let public = falsify(public);
-    let mut columns = columns::from_encryption(&encryption).map_err(|_| Error::Encoding)?;
+    let mut columns = columns::from_encryption(&encryption).map_err(|_| Refusal::Encoding)?;
     let witness = Witness::from_columns(
         &ballot_relation(profile),
         public.digest(),
         std::mem::take(&mut *columns),
     )
-    .map_err(|_| Error::Encoding)?;
-    let role = private_proof_role(&encryption.context).map_err(|_| Error::Context)?;
+    .map_err(|_| Refusal::Encoding)?;
+    let role = private_proof_role(&encryption.context).map_err(|_| Refusal::Context)?;
     let context = encryption.into_context();
     let proof = prove(&role, &public, witness, FALSE_STATEMENT);
     let mut proof_bytes = Vec::with_capacity(*ballot_body::proof_lengths(profile).end());
     proof.write(&mut proof_bytes);
     drop(proof);
+    let (proof_header, proof) = proof_bytes.split_at(PROOF_HEADER_BYTES);
     if !FALSE_STATEMENT {
-        verify_expanded(&context, &public, &proof_bytes)?;
+        verify_expanded(&context, &public, proof_header, proof)?;
     }
-    let mut body = ballot_body::header(profile, &public.header, proof_bytes.len())
-        .map_err(|_| Error::Encoding)?;
-    body.reserve_exact(ballot_body::ciphertext_bytes(profile) + proof_bytes.len());
+    let mut body = ballot_body::header(profile, &public.header, &proof_bytes)
+        .map_err(|_| Refusal::Encoding)?;
+    body.reserve_exact(ballot_body::body_length(profile, proof_bytes.len()) - body.len());
     for (index, _) in ballot_body::polynomials(profile) {
         body.extend(&public.polynomials[index]);
     }
-    body.extend(proof_bytes);
+    body.extend(proof);
     let envelope = envelope(&context, ballot_time, &body)?;
     Ok((body, envelope))
 }
@@ -139,18 +139,16 @@ pub fn verify(
     key: &RetainedAggregatePolynomial,
     body: &[u8],
     ballot_time: u64,
-) -> Result<BallotEnvelope, Error> {
+) -> Result<BallotEnvelope, Refusal> {
     let profile = context.profile();
     let header = body
         .get(..ballot_body::HEADER_BYTES)
-        .ok_or(Error::Encoding)?;
-    let proof_length = ballot_body::proof_length(profile, header).map_err(|_| Error::Encoding)?;
-    if body.len()
-        != ballot_body::HEADER_BYTES + ballot_body::ciphertext_bytes(profile) + proof_length
-    {
-        return Err(Error::Encoding);
+        .ok_or(Refusal::Encoding)?;
+    let header = ballot_body::parse_header(profile, header).map_err(|_| Refusal::Encoding)?;
+    if body.len() != ballot_body::body_length(profile, header.proof_length) {
+        return Err(Refusal::Encoding);
     }
-    let statement = &header[12..];
+    let statement = header.context;
     if statement[4..68] != context.poll().identity()
         || statement[68..132] != *context.setup_identity()
         || u16::from_le_bytes(statement[132..134].try_into().unwrap()) as usize
@@ -158,7 +156,7 @@ pub fn verify(
         || statement[134] as usize != context.poll().manifest().option_count()
         || u16::from(statement[135]) != context.poll().top_count()
     {
-        return Err(Error::Context);
+        return Err(Refusal::Context);
     }
     let mut polynomials = Vec::with_capacity(8);
     let mut offset = ballot_body::HEADER_BYTES;
@@ -167,15 +165,15 @@ pub fn verify(
         || key.setup_identity() != context.setup_identity()
         || key.coefficients().len() != profile.family_degree(Family::Fhe)
     {
-        return Err(Error::Context);
+        return Err(Refusal::Context);
     }
     for (family, common, public_key) in [
         (
             Family::Fhe,
             setup_witness::contribution::common_records(profile, common)
-                .map_err(|_| Error::Encoding)?,
+                .map_err(|_| Refusal::Encoding)?,
             encode_polynomial(key.coefficients(), coefficient_bytes(profile, Family::Fhe))
-                .map_err(|_| Error::Encoding)?,
+                .map_err(|_| Refusal::Encoding)?,
         ),
         (
             Family::Auxiliary,
@@ -197,6 +195,6 @@ pub fn verify(
         header: statement.to_vec(),
         polynomials,
     };
-    verify_expanded(context, &public, &body[offset..])?;
+    verify_expanded(context, &public, header.proof_header, &body[offset..])?;
     envelope(context, ballot_time, body)
 }

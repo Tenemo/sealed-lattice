@@ -96,17 +96,17 @@ pub extern "C" fn roster_usernames() -> u32 {
         let mut state = state.borrow_mut();
         let Session {
             proposal,
-            contribution_output,
+            participant_output,
             ..
         } = &mut *state;
-        contribution_output.clear();
+        participant_output.clear();
         let Some(proposal) = proposal.as_ref() else {
             return 1;
         };
         for record in proposal.records() {
             let username = record.header().username.as_str().as_bytes();
-            contribution_output.extend((username.len() as u32).to_le_bytes());
-            contribution_output.extend(username);
+            participant_output.extend((username.len() as u32).to_le_bytes());
+            participant_output.extend(username);
         }
         0
     })

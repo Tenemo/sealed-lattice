@@ -3,15 +3,15 @@ import {
     mlDsa65ChallengeSeedBytes,
     mlDsa65MaskNonceBytes,
     mlDsa65Parameters,
+    mlDsa65Sizes,
 } from '#tests/ml-dsa-65-parameters.js';
 import { participantReleaseEnvelopeBytes } from '#tests/participant-release-custody-model.js';
 import { byteAlignedSpongePermutations } from '#tests/proof-hash-work-model.js';
 import { rejectionSubsetBound } from '#tests/proof-randomness-budget-model.js';
-import { compileRegistrationEnrollmentCensus } from '#tests/registration-enrollment-model.js';
 import { compileSetupSelectionCensus } from '#tests/setup-selection-model.js';
 
 const envelopeBytes = ballotEnvelopeBytes;
-const signatureBytes = compileRegistrationEnrollmentCensus().signatureBytes;
+const signatureBytes = mlDsa65Sizes.signatureBytes;
 
 export const authenticationPurposes = [
     'poll-definition',
@@ -35,13 +35,13 @@ type CompleteAuthenticationPurpose =
     (typeof completeAuthenticationPurposes)[number];
 
 export const authenticationContext = (purpose: CompleteAuthenticationPurpose) =>
-    `sealed-lattice/${purpose}/${purpose === 'poll-definition' || purpose === 'roster-proposal' ? 'v2' : 'v1'}`;
+    `sealed-lattice/${purpose}`;
 
 // One original credential through ballot completion, under the original-state
 // invariant. Each purpose has one fixed first-evaluated intent; repeated
 // deterministic reevaluation is still work, but not another oracle query.
 // Closing/release purposes and the population of credential creations are absent.
-export const compileCurrentCredentialIntentBounds = () => {
+export const compileCredentialIntentBoundsThroughBallot = () => {
     const owners: Record<AuthenticationPurpose, 'organizer' | 'everyone'> = {
         'poll-definition': 'organizer',
         registration: 'everyone',
@@ -130,7 +130,7 @@ export const compileCompleteCredentialIntentBounds = (
         },
     ] as const;
     return branches.flatMap((branch) =>
-        compileCurrentCredentialIntentBounds().map((participant) => {
+        compileCredentialIntentBoundsThroughBallot().map((participant) => {
             const fixedPurposes: CompleteAuthenticationPurpose[] = [
                 ...participant.purposes.filter(
                     (purpose) => purpose !== 'ballot-envelope',
@@ -159,7 +159,7 @@ export const compileCompleteCredentialIntentBounds = (
 
 // Participant-credential hash input shapes for pure ML-DSA-65. A null
 // output length denotes a source-level rejection sampler, not zero work.
-export const compileCurrentSignatureHashInputs = () => {
+export const compileSignatureHashInputs = () => {
     const parameters = mlDsa65Parameters;
     const highBitAlphabet =
         (parameters.modulus - 1n) / (2n * parameters.roundingBound);
@@ -178,8 +178,7 @@ export const compileCurrentSignatureHashInputs = () => {
         {
             purpose: 'Public key digest',
             family: 'SHAKE256',
-            inputBytes:
-                compileRegistrationEnrollmentCensus().signingPublicKeyBytes,
+            inputBytes: mlDsa65Sizes.publicKeyBytes,
             outputBytes: 64n,
         },
         {
@@ -238,7 +237,7 @@ export const compileCurrentSignatureHashInputs = () => {
 
 // An ideal-XOF property of every possible sampler seed, established before
 // adaptive input selection. These analytical caps do not alter the library.
-export const compileCurrentSignatureSamplingBounds = () => {
+export const compileSignatureSamplingBounds = () => {
     const parameters = mlDsa65Parameters;
     return [
         {
@@ -325,13 +324,10 @@ export const compileBallotSignatureHashWork = (
     )
         throw new RangeError('Invalid checked signing-loop prefix.');
     const inputs = new Map(
-            compileCurrentSignatureHashInputs().rows.map((row) => [
-                row.purpose,
-                row,
-            ]),
+            compileSignatureHashInputs().rows.map((row) => [row.purpose, row]),
         ),
         caps = new Map(
-            compileCurrentSignatureSamplingBounds().map((row) => [
+            compileSignatureSamplingBounds().map((row) => [
                 row.purpose,
                 row.outputBytes,
             ]),
@@ -414,7 +410,7 @@ export const compileCompletedAuthenticationCensus = (
         throw new RangeError('Invalid completed authentication population.');
     const participants = BigInt(participantCount);
     const eligible = BigInt(
-        compileSetupSelectionCensus(participantCount).eligibleCount,
+        compileSetupSelectionCensus(participantCount).eligibleContributorCount,
     );
     const counts: Record<AuthenticationPurpose, bigint> = {
         'poll-definition': 1n,

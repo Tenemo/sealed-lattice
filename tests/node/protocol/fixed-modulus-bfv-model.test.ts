@@ -154,7 +154,7 @@ describe('fixed-modulus BFV noise', () => {
             // Without either changed term, the former zero-noise box gives 247.
             expect(error).toBeGreaterThan(247n);
             const model = createFixedModulusBfvNoiseModel({
-                contributorCount: 3n,
+                setupContributorCount: 3n,
                 polynomialDegree: 8n,
                 plaintextSubringDegree: 4n,
                 plaintextModulus: 17n,
@@ -209,7 +209,7 @@ describe('fixed-modulus BFV noise', () => {
             const delta = 1n << 112n;
             const gadgetBase = 16n;
             const model = createFixedModulusBfvNoiseModel({
-                contributorCount: 3n,
+                setupContributorCount: 3n,
                 polynomialDegree: BigInt(degree),
                 plaintextSubringDegree: BigInt(degree / 2),
                 plaintextModulus,

@@ -1,10 +1,12 @@
 import { operationSeedBytes } from '../../module/participant-module.js';
 import type { ParticipantProfile } from '../../module/runtime-bounds.js';
-import { recordKeyBytes } from '../../module/runtime-bounds.js';
+import {
+    recordKeyBytes,
+    releasePrefixBytes,
+} from '../../module/runtime-bounds.js';
 import {
     concatenate,
     encodeText,
-    equalBytes,
     readUnsigned16,
     readUnsigned32,
     unsigned16,
@@ -14,11 +16,11 @@ import type { ParticipantStoredRecord } from '../../storage/predecessor.js';
 import { sealedLength } from '../../storage/private-records.js';
 import type { RecordContext } from '../../storage/private-records.js';
 import {
+    completedClosePhase,
     isRootGeneration,
     releasePhase,
     targetPhase,
 } from '../../storage/root-generation.js';
-import { completedClosePhase } from '../close/close-state.js';
 import { ballotInclusions } from '../target-vote/target-state.js';
 import type { BallotInclusion } from '../target-vote/target-state.js';
 
@@ -30,9 +32,6 @@ import type { BallotInclusion } from '../target-vote/target-state.js';
 // retains the generated body's records and its envelope, retiring the seed;
 // that same transaction locks signing, and generation 29 retains the
 // signature.
-
-const marker = encodeText('RST4');
-const prefixBytes = marker.length + 2 + 2 + 4 + 2;
 
 export type ReleaseState = Readonly<{
     // The signed-target or completed-close generation the release follows.
@@ -50,13 +49,8 @@ export type ReleaseState = Readonly<{
     signature: Uint8Array;
 }>;
 
-const phaseOf = (generation: number) =>
-    Math.min(generation, releasePhase.signed);
-
 export const encodeReleaseState = (generation: number, state: ReleaseState) => {
-    const phase = phaseOf(generation);
     return concatenate(
-        marker,
         Uint8Array.of(
             state.predecessor,
             ballotInclusions.indexOf(state.ballotInclusion),
@@ -67,8 +61,8 @@ export const encodeReleaseState = (generation: number, state: ReleaseState) => {
         state.target,
         state.seed,
         ...state.bodyKeys,
-        ...(phase >= releasePhase.body ? [state.envelope] : []),
-        ...(phase === releasePhase.signed ? [state.signature] : []),
+        ...(generation >= releasePhase.body ? [state.envelope] : []),
+        ...(generation === releasePhase.signed ? [state.signature] : []),
     );
 };
 
@@ -93,23 +87,22 @@ export const decodeReleaseState = (
     bytes: Uint8Array,
 ): ReleaseState => {
     const bounds = profile.release;
-    const phase = phaseOf(generation);
     if (
         generation < releasePhase.locked ||
         !isRootGeneration(generation) ||
-        bytes.length < prefixBytes ||
+        bytes.length < releasePrefixBytes ||
         bytes.length > bounds.maximumStateBytes ||
-        !equalBytes(bytes.subarray(0, marker.length), marker) ||
-        (bytes[marker.length] !== targetPhase.signed &&
-            bytes[marker.length] !== completedClosePhase(isOrganizer)) ||
-        bytes[marker.length + 1] >= ballotInclusions.length
+        (bytes[0] !== targetPhase.signed &&
+            bytes[0] !== completedClosePhase(isOrganizer)) ||
+        bytes[1] >= ballotInclusions.length
     )
         throw new Error('The release state is malformed.');
-    const targetLength = readUnsigned16(bytes, marker.length + 2);
-    const bodyLength = readUnsigned32(bytes, marker.length + 4);
-    const bodyCount = readUnsigned16(bytes, marker.length + 8);
-    const seedLength = phase === releasePhase.ready ? operationSeedBytes : 0;
-    const withBody = phase >= releasePhase.body;
+    const targetLength = readUnsigned16(bytes, 2);
+    const bodyLength = readUnsigned32(bytes, 4);
+    const bodyCount = readUnsigned16(bytes, 8);
+    const seedLength =
+        generation === releasePhase.ready ? operationSeedBytes : 0;
+    const withBody = generation >= releasePhase.body;
     if (
         targetLength === 0 ||
         targetLength > profile.target.maximumBodyBytes ||
@@ -122,19 +115,19 @@ export const decodeReleaseState = (
         throw new Error('The release state has other counts.');
     const tail =
         (withBody ? bounds.envelopeBytes : 0) +
-        (phase === releasePhase.signed
+        (generation === releasePhase.signed
             ? profile.registration.signatureBytes
             : 0);
-    const seedStart = prefixBytes + targetLength;
+    const seedStart = releasePrefixBytes + targetLength;
     const keysStart = seedStart + seedLength;
     const tailStart = keysStart + recordKeyBytes * bodyCount;
     if (bytes.length !== tailStart + tail)
         throw new Error('The release state has another length.');
     const envelopeEnd = tailStart + (withBody ? bounds.envelopeBytes : 0);
     return {
-        predecessor: bytes[marker.length],
-        ballotInclusion: ballotInclusions[bytes[marker.length + 1]],
-        target: bytes.slice(prefixBytes, seedStart),
+        predecessor: bytes[0],
+        ballotInclusion: ballotInclusions[bytes[1]],
+        target: bytes.slice(releasePrefixBytes, seedStart),
         seed: bytes.slice(seedStart, keysStart),
         bodyLength,
         bodyKeys: Array.from({ length: bodyCount }, (_unused, index) =>
@@ -145,7 +138,7 @@ export const decodeReleaseState = (
         ),
         envelope: bytes.slice(tailStart, envelopeEnd),
         signature:
-            phase === releasePhase.signed
+            generation === releasePhase.signed
                 ? bytes.slice(envelopeEnd)
                 : new Uint8Array(),
     };
@@ -161,7 +154,7 @@ export const releaseRecordAssociatedData = (
     length: number,
 ) =>
     concatenate(
-        encodeText('sealed-lattice/participant-release-record/v3'),
+        encodeText('sealed-lattice/participant-release-record'),
         context.poll,
         context.setupIdentity,
         unsigned16(context.position),

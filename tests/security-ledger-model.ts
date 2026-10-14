@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import {
     compileCompleteAuthenticationFrameWork,
     compileCompleteCredentialIntentBounds,
-    compileCurrentSignatureHashInputs,
-    compileCurrentSignatureSamplingBounds,
+    compileSignatureHashInputs,
+    compileSignatureSamplingBounds,
 } from '#tests/authentication-work-model.js';
 import { auxiliaryInputEncryptionParameters } from '#tests/auxiliary-input-encryption-parameters.js';
 import { compileCommonAgreementDegreeCensus } from '#tests/common-agreement-degree-model.js';
@@ -33,18 +33,34 @@ import {
 import { compileProofRandomnessBudgets } from '#tests/proof-randomness-budget-model.js';
 import { compileRecipientKeyUniquenessBound } from '#tests/recipient-key-uniqueness-model.js';
 import {
-    budgetSplitBits,
-    compileLatticePopulationLimits,
-    decisiveExperimentGates,
-    largestPopulationWithin,
+    type Rational,
+    rational,
+    addRationals,
+    scale,
+    divide,
+    atMost,
+    largest,
+    ceilingSquareRoot,
+} from '#tests/security-ledger/rational.js';
+import {
     latticeAssumptionGroups,
-    latticeGroupComparisons,
     latticeGroupFloors,
-    latticeRequirementAt,
+    type LatticeAssumptionGroup,
+} from '#tests/security-margin/attack-screens.js';
+import {
+    compileLatticePopulationLimits,
+    largestPopulationWithin,
+} from '#tests/security-margin/population-limits.js';
+import {
+    budgetSplitBits,
+    decisiveExperimentGates,
     securityTargetBits,
     supportedLevelBits,
     unpricedWorkAllowance,
-    type LatticeAssumptionGroup,
+} from '#tests/security-margin/reduction-work.js';
+import {
+    latticeGroupComparisons,
+    latticeRequirementAt,
 } from '#tests/security-margin-screen-model.js';
 import { compileSetupRandomnessCensus } from '#tests/setup-randomness-model.js';
 import {
@@ -59,68 +75,6 @@ import {
     compileProofCompilerCapCensus,
     compileProofRoundErrorCensus,
 } from '#tests/wide-challenge-compiler-model.js';
-
-// Exact nonnegative rationals for probabilities and cost ratios.
-export type Rational = Readonly<{ numerator: bigint; denominator: bigint }>;
-
-export const rational = (numerator: bigint, denominator = 1n): Rational => {
-    assert.ok(numerator >= 0n && denominator > 0n);
-    return { numerator, denominator };
-};
-
-const addRationals = (...values: readonly Rational[]): Rational =>
-    values.reduce(
-        (sum, value) =>
-            rational(
-                sum.numerator * value.denominator +
-                    value.numerator * sum.denominator,
-                sum.denominator * value.denominator,
-            ),
-        rational(0n),
-    );
-
-const scale = (value: Rational, factor: bigint): Rational =>
-    rational(value.numerator * factor, value.denominator);
-
-const divide = (value: Rational, divisor: bigint): Rational =>
-    rational(value.numerator, value.denominator * divisor);
-
-export const atMost = (left: Rational, right: Rational) =>
-    left.numerator * right.denominator <= right.numerator * left.denominator;
-
-const largest = (values: readonly Rational[]) =>
-    values.reduce((maximum, value) =>
-        atMost(value, maximum) ? maximum : value,
-    );
-
-// Smallest integer r with value <= r^2. Newton's iteration from above
-// descends to the integer square root's floor.
-export const ceilingSquareRoot = (value: bigint) => {
-    assert.ok(value >= 0n);
-    if (value < 2n) return value;
-    let root = value;
-    let next = (value + 1n) / 2n;
-    while (next < root) {
-        root = next;
-        next = (root + value / root) / 2n;
-    }
-    return root * root < value ? root + 1n : root;
-};
-
-// Smallest integer k with value <= 2^k, for a positive value.
-export const rationalCeilingLog2 = (value: Rational) => {
-    assert.ok(value.numerator > 0n);
-    const fits = (exponent: bigint) =>
-        exponent >= 0n
-            ? value.numerator <= value.denominator << exponent
-            : value.numerator << -exponent <= value.denominator;
-    let exponent =
-        BigInt(value.numerator.toString(2).length) -
-        BigInt(value.denominator.toString(2).length);
-    while (!fits(exponent)) exponent += 1n;
-    while (fits(exponent - 1n)) exponent -= 1n;
-    return exponent;
-};
 
 // Each of the seven assumption groups may contribute at most T/2^(80+3) to
 // an adversary's advantage at every experiment cost T up to 2^80 gates, so
@@ -164,6 +118,7 @@ export const maximumChargedQueries = () =>
 // reduction therefore costs at most (1+rho)T, with rho the comparison work
 // over that verification work.
 const mlDsaSecurityExponent = 192n;
+
 const frameDigestBits = 512n;
 
 export const compileAuthenticationGroup = () => {
@@ -184,7 +139,7 @@ export const compileAuthenticationGroup = () => {
             0n,
         );
     const comparisonGates = signedFramesPerKey * (2n * frameDigestBits + 1n);
-    const challengeDigest = compileCurrentSignatureHashInputs().rows.find(
+    const challengeDigest = compileSignatureHashInputs().rows.find(
         (row) => row.purpose === 'Challenge digest',
     );
     assert.ok(
@@ -310,6 +265,7 @@ type SoundnessCharge = Readonly<{
     messageBits: bigint;
     coefficients: readonly Rational[];
 }>;
+
 let soundnessCharge: SoundnessCharge | undefined;
 
 export const compileSoundnessCharge = (): SoundnessCharge => {
@@ -386,6 +342,7 @@ type SuiteTerms = Readonly<{
     matrixInitialization: Rational;
     largestStreamProgramming: Rational;
 }>;
+
 let suiteTerms: SuiteTerms | undefined;
 
 // The suite's fixed common matrices are global, so every profile's sampling
@@ -518,15 +475,13 @@ export const compileStatisticalTerms = (
                 ),
             ),
         },
-        ...compileCurrentSignatureSamplingBounds().map(
-            (row): StatisticalTerm => ({
-                name: `ML-DSA ${row.purpose.toLowerCase()} over every seed`,
-                scope: 'outside the proofs',
-                ratioAt: perCharge(
-                    rational(row.numerator, 1n << row.denominatorBits),
-                ),
-            }),
-        ),
+        ...compileSignatureSamplingBounds().map((row): StatisticalTerm => ({
+            name: `ML-DSA ${row.purpose.toLowerCase()} over every seed`,
+            scope: 'outside the proofs',
+            ratioAt: perCharge(
+                rational(row.numerator, 1n << row.denominatorBits),
+            ),
+        })),
         {
             // The FHE and circular comparisons are linear in the
             // registrations, each of which costs at least c.

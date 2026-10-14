@@ -6,7 +6,7 @@ use crate::{
     verified::{SetupAggregator, VerifiedSelectionInputs, VerifiedSetupAggregate, build_selection},
 };
 use protocol_foundations::{
-    Credential, SIGNATURE_BYTES,
+    Credential,
     contribution_body::BODY_HEADER_BYTES,
     contribution_offer::{AuthenticatedContributionOffer, MAXIMUM_OFFER_BYTES, authenticate_offer},
     poll::VerifiedPoll,
@@ -19,23 +19,17 @@ use protocol_foundations::{
         authenticate_certificate, authenticate_endorsement, authenticate_selection,
         encode_certificate,
     },
+    signed_packet,
 };
 use std::sync::Arc;
 use supported_profile::relation::PROOF_HEADER_BYTES;
 
 pub const SETUP_INPUT_BYTES: usize = 1_572_864;
-/// A refused setup verification step.
+/// The refusal of a setup verification step.
 #[derive(Debug)]
-pub struct Refused;
-fn refused(failed: bool) -> Result<(), Refused> {
-    if failed { Err(Refused) } else { Ok(()) }
-}
-fn packet(bytes: &[u8], maximum: usize) -> Option<(&[u8], &[u8])> {
-    let length = u32::from_le_bytes(bytes.get(..4)?.try_into().ok()?) as usize;
-    if length > maximum || bytes.len() != 4 + length + SIGNATURE_BYTES {
-        return None;
-    }
-    Some((&bytes[4..4 + length], &bytes[4 + length..]))
+pub struct Refusal;
+fn refused(failed: bool) -> Result<(), Refusal> {
+    if failed { Err(Refusal) } else { Ok(()) }
 }
 
 struct OfferInput<'a> {
@@ -47,22 +41,17 @@ fn offer_input(
     roster: Arc<AuthenticatedRosterProposal>,
     bytes: &[u8],
 ) -> Result<OfferInput<'_>, ()> {
-    let envelope_length =
-        u32::from_le_bytes(bytes.get(..4).ok_or(())?.try_into().unwrap()) as usize;
-    if envelope_length > MAXIMUM_OFFER_BYTES
-        || bytes.len()
-            != 4 + envelope_length + SIGNATURE_BYTES + BODY_HEADER_BYTES + PROOF_HEADER_BYTES
-    {
+    let (envelope, signature, headers) =
+        signed_packet::leading(bytes, MAXIMUM_OFFER_BYTES).ok_or(())?;
+    if headers.len() != BODY_HEADER_BYTES + PROOF_HEADER_BYTES {
         return Err(());
     }
-    let end = 4 + envelope_length;
-    let offer = authenticate_offer(roster, &bytes[4..end], &bytes[end..end + SIGNATURE_BYTES])
-        .map_err(|_| ())?;
-    let header = end + SIGNATURE_BYTES;
+    let offer = authenticate_offer(roster, envelope, signature).map_err(|_| ())?;
+    let (body_header, proof_header) = headers.split_at(BODY_HEADER_BYTES);
     Ok(OfferInput {
         offer: Arc::new(offer),
-        body_header: &bytes[header..header + BODY_HEADER_BYTES],
-        proof_header: &bytes[header + BODY_HEADER_BYTES..],
+        body_header,
+        proof_header,
     })
 }
 fn keep_offer(
@@ -143,9 +132,9 @@ impl SetupSession {
     }
     /// Starts a setup verification with the roster that the input's first
     /// `length` bytes begin.
-    pub fn begin_roster_input(&mut self, length: usize) -> Result<(), Refused> {
-        let roster = RosterInputVerifier::new(self.input.get(..length).ok_or(Refused)?)
-            .map_err(|_| Refused)?;
+    pub fn begin_roster_input(&mut self, length: usize) -> Result<(), Refusal> {
+        let roster = RosterInputVerifier::new(self.input.get(..length).ok_or(Refusal)?)
+            .map_err(|_| Refusal)?;
         self.begin_roster(roster);
         Ok(())
     }
@@ -168,7 +157,7 @@ impl SetupSession {
         step: RecordStep,
         position: usize,
         length: usize,
-    ) -> Result<(), Refused> {
+    ) -> Result<(), Refusal> {
         let Self {
             input,
             roster,
@@ -176,38 +165,38 @@ impl SetupSession {
             ..
         } = self;
         if proposal.is_some() {
-            return Err(Refused);
+            return Err(Refusal);
         }
         let Some(bytes) = input.get(..length) else {
-            return Err(Refused);
+            return Err(Refusal);
         };
         let Some(roster) = roster.as_mut() else {
-            return Err(Refused);
+            return Err(Refusal);
         };
         refused(roster.record_step(step, position, bytes).is_err())
     }
-    pub fn finish_roster(&mut self, length: usize) -> Result<(), Refused> {
+    pub fn finish_roster(&mut self, length: usize) -> Result<(), Refusal> {
         if self.proposal.is_some() {
-            return Err(Refused);
+            return Err(Refusal);
         }
         let Self { input, roster, .. } = self;
         let Some((body, signature)) = input
             .get(..length)
-            .and_then(|bytes| packet(bytes, MAXIMUM_PROPOSAL_BYTES))
+            .and_then(|bytes| signed_packet::split(bytes, MAXIMUM_PROPOSAL_BYTES))
         else {
-            return Err(Refused);
+            return Err(Refusal);
         };
         let Some(roster) = roster.as_mut() else {
-            return Err(Refused);
+            return Err(Refusal);
         };
         let Ok(proposal) = roster.finish() else {
-            return Err(Refused);
+            return Err(Refusal);
         };
         if proposal.body() != body {
-            return Err(Refused);
+            return Err(Refusal);
         }
         let Ok(proposal) = authenticate_roster_proposal(proposal, signature) else {
-            return Err(Refused);
+            return Err(Refusal);
         };
         self.proposal = Some(Arc::new(proposal));
         self.poll = Some(Arc::new(self.roster.take().unwrap().into_poll()));
@@ -246,7 +235,7 @@ impl SetupSession {
     }
     /// Authenticated envelope and bounded body/proof-header lookahead. No pending
     /// offer replaces an already verified offer until its entire proof succeeds.
-    pub fn begin_offer(&mut self, length: usize) -> Result<(), Refused> {
+    pub fn begin_offer(&mut self, length: usize) -> Result<(), Refusal> {
         let result = (|| {
             let roster = self.proposal.clone().ok_or(())?;
             let bytes = self.input.get(..length).ok_or(())?;
@@ -264,7 +253,7 @@ impl SetupSession {
             }
             Err(()) => {
                 self.offer = None;
-                Err(Refused)
+                Err(Refusal)
             }
         }
     }
@@ -273,10 +262,10 @@ impl SetupSession {
         index: usize,
         offset: usize,
         length: usize,
-    ) -> Result<(), Refused> {
+    ) -> Result<(), Refusal> {
         let Self { input, offer, .. } = self;
         let Some(bytes) = input.get(..length) else {
-            return Err(Refused);
+            return Err(Refusal);
         };
         refused(
             offer
@@ -284,10 +273,10 @@ impl SetupSession {
                 .is_none_or(|offer| offer.polynomial(index, offset, bytes).is_err()),
         )
     }
-    pub fn offer_proof(&mut self, offset: usize, length: usize) -> Result<(), Refused> {
+    pub fn offer_proof(&mut self, offset: usize, length: usize) -> Result<(), Refusal> {
         let Self { input, offer, .. } = self;
         let Some(bytes) = input.get(..length) else {
-            return Err(Refused);
+            return Err(Refusal);
         };
         refused(
             offer
@@ -295,12 +284,12 @@ impl SetupSession {
                 .is_none_or(|offer| offer.proof(offset, bytes).is_err()),
         )
     }
-    pub fn finish_offer(&mut self) -> Result<(), Refused> {
+    pub fn finish_offer(&mut self) -> Result<(), Refusal> {
         let Some(offer) = self.offer.take() else {
-            return Err(Refused);
+            return Err(Refusal);
         };
         let Ok(offer) = offer.finish() else {
-            return Err(Refused);
+            return Err(Refusal);
         };
         keep_offer(&mut self.offers, Arc::new(offer));
         Ok(())
@@ -316,10 +305,10 @@ impl SetupSession {
     }
     /// Requested original positions only; every body identity comes from this
     /// verifier's completed offer results.
-    pub fn propose_selection(&mut self, length: usize) -> Result<(), Refused> {
+    pub fn propose_selection(&mut self, length: usize) -> Result<(), Refusal> {
         self.output.clear();
         if self.verified.is_some() {
-            return Err(Refused);
+            return Err(Refusal);
         }
         let result = (|| {
             let roster = self.proposal.as_ref().ok_or(())?;
@@ -345,7 +334,7 @@ impl SetupSession {
                 self.unsigned = Some(selection);
                 Ok(())
             }
-            Err(()) => Err(Refused),
+            Err(()) => Err(Refusal),
         }
     }
     fn install_selection(&mut self, selected: Arc<AuthenticatedSelectionProposal>) {
@@ -360,14 +349,15 @@ impl SetupSession {
         }
         self.selected = Some(selected);
     }
-    pub fn begin_selection(&mut self, length: usize) -> Result<(), Refused> {
+    pub fn begin_selection(&mut self, length: usize) -> Result<(), Refusal> {
         if self.verified.is_some() {
-            return Err(Refused);
+            return Err(Refusal);
         }
         let result = (|| {
             let roster = self.proposal.clone().ok_or(())?;
             let (body, signature) =
-                packet(self.input.get(..length).ok_or(())?, MAXIMUM_SELECTION_BYTES).ok_or(())?;
+                signed_packet::split(self.input.get(..length).ok_or(())?, MAXIMUM_SELECTION_BYTES)
+                    .ok_or(())?;
             authenticate_selection(roster, body, signature).map_err(|_| ())
         })();
         match result {
@@ -375,13 +365,13 @@ impl SetupSession {
                 self.install_selection(Arc::new(selected));
                 Ok(())
             }
-            Err(()) => Err(Refused),
+            Err(()) => Err(Refusal),
         }
     }
     /// Writes the authenticated selection to the output: its identity, then
     /// each selected offer's position as four bytes and its body identity.
-    pub fn output_selection(&mut self) -> Result<(), Refused> {
-        let selection = self.selected.as_ref().ok_or(Refused)?.selection();
+    pub fn output_selection(&mut self) -> Result<(), Refusal> {
+        let selection = self.selected.as_ref().ok_or(Refusal)?.selection();
         let mut output = selection.identity().to_vec();
         for (position, identity) in selection.selected() {
             output.extend((*position as u32).to_le_bytes());
@@ -392,7 +382,7 @@ impl SetupSession {
     }
     /// Begins the selected aggregation, discarding any earlier unfinished
     /// progress, which is disposable.
-    pub fn aggregate_selection(&mut self) -> Result<(), Refused> {
+    pub fn aggregate_selection(&mut self) -> Result<(), Refusal> {
         self.aggregator = None;
         let result = (|| {
             let selected = self.selected.clone().ok_or(())?;
@@ -417,7 +407,7 @@ impl SetupSession {
                 self.aggregator = Some(aggregate);
                 Ok(())
             }
-            Err(()) => Err(Refused),
+            Err(()) => Err(Refusal),
         }
     }
     /// Discards only disposable aggregate progress. Positive offer holders,
@@ -425,7 +415,7 @@ impl SetupSession {
     pub fn discard_aggregation(&mut self) {
         self.aggregator = None;
     }
-    pub fn begin_selected_offer_verification(&mut self, length: usize) -> Result<(), Refused> {
+    pub fn begin_selected_offer_verification(&mut self, length: usize) -> Result<(), Refusal> {
         let result = (|| {
             let roster = self.proposal.clone().ok_or(())?;
             let OfferInput {
@@ -441,12 +431,12 @@ impl SetupSession {
         })();
         refused(result.is_err())
     }
-    pub fn selected_offer_proof(&mut self, offset: usize, length: usize) -> Result<(), Refused> {
+    pub fn selected_offer_proof(&mut self, offset: usize, length: usize) -> Result<(), Refusal> {
         let Self {
             input, aggregator, ..
         } = self;
         let Some(bytes) = input.get(..length) else {
-            return Err(Refused);
+            return Err(Refusal);
         };
         refused(
             aggregator
@@ -454,7 +444,7 @@ impl SetupSession {
                 .is_none_or(|aggregate| aggregate.proof(offset, bytes).is_err()),
         )
     }
-    pub fn begin_selected_offer(&mut self, position: usize) -> Result<(), Refused> {
+    pub fn begin_selected_offer(&mut self, position: usize) -> Result<(), Refusal> {
         refused(
             self.aggregator
                 .as_mut()
@@ -466,12 +456,12 @@ impl SetupSession {
         index: usize,
         offset: usize,
         length: usize,
-    ) -> Result<(), Refused> {
+    ) -> Result<(), Refusal> {
         let Self {
             input, aggregator, ..
         } = self;
         if length > CHUNK_BYTES {
-            return Err(Refused);
+            return Err(Refusal);
         }
         let (incoming, previous) = input.split_at_mut(CHUNK_BYTES);
         refused(aggregator.as_mut().is_none_or(|aggregate| {
@@ -480,13 +470,13 @@ impl SetupSession {
                 .is_err()
         }))
     }
-    pub fn finish_selected_offer(&mut self) -> Result<(), Refused> {
+    pub fn finish_selected_offer(&mut self) -> Result<(), Refusal> {
         let Some(Ok(offer)) = self
             .aggregator
             .as_mut()
             .map(SetupAggregator::finish_contribution)
         else {
-            return Err(Refused);
+            return Err(Refusal);
         };
         keep_offer(&mut self.offers, offer);
         Ok(())
@@ -496,28 +486,28 @@ impl SetupSession {
             .as_ref()
             .map_or(0, SetupAggregator::accepted)
     }
-    pub fn finish_selection(&mut self) -> Result<(), Refused> {
+    pub fn finish_selection(&mut self) -> Result<(), Refusal> {
         if self
             .aggregator
             .as_ref()
             .is_none_or(|aggregate| !aggregate.complete())
         {
-            return Err(Refused);
+            return Err(Refusal);
         }
         let Ok(inputs) = self.aggregator.take().unwrap().finish() else {
-            return Err(Refused);
+            return Err(Refusal);
         };
         if self.inputs.as_ref().is_some_and(|known| {
             known.identity() != inputs.identity() || known.polynomials() != inputs.polynomials()
         }) || self.verified.as_ref().is_some_and(|known| {
             known.identity() != inputs.identity() || known.polynomials() != inputs.polynomials()
         }) {
-            return Err(Refused);
+            return Err(Refusal);
         }
         self.inputs = Some(Arc::new(inputs));
         Ok(())
     }
-    pub fn add_endorsement(&mut self, length: usize) -> Result<(), Refused> {
+    pub fn add_endorsement(&mut self, length: usize) -> Result<(), Refusal> {
         let result = (|| {
             let selected = self.selected.as_ref().ok_or(())?;
             authenticate_endorsement(
@@ -528,7 +518,7 @@ impl SetupSession {
             .map_err(|_| ())
         })();
         let Ok(endorsement) = result else {
-            return Err(Refused);
+            return Err(Refusal);
         };
         if let Some(old) = self
             .endorsements
@@ -542,7 +532,7 @@ impl SetupSession {
             .sort_by_key(AuthenticatedSelectionEndorsement::position);
         Ok(())
     }
-    pub fn build_certificate(&mut self) -> Result<(), Refused> {
+    pub fn build_certificate(&mut self) -> Result<(), Refusal> {
         self.output.clear();
         let result = (|| {
             let selected = self.selected.as_ref().ok_or(())?;
@@ -554,35 +544,35 @@ impl SetupSession {
                 self.output = bytes;
                 Ok(())
             }
-            Err(()) => Err(Refused),
+            Err(()) => Err(Refusal),
         }
     }
-    pub fn begin_certificate(&mut self, length: usize) -> Result<(), Refused> {
+    pub fn begin_certificate(&mut self, length: usize) -> Result<(), Refusal> {
         let result = (|| {
             let roster = self.proposal.clone().ok_or(())?;
             authenticate_certificate(roster, self.input.get(..length).ok_or(())?).map_err(|_| ())
         })();
         let Ok(certificate) = result else {
-            return Err(Refused);
+            return Err(Refusal);
         };
         if self
             .verified
             .as_ref()
             .is_some_and(|verified| verified.identity() != certificate.identity())
         {
-            return Err(Refused);
+            return Err(Refusal);
         }
         self.install_selection(Arc::new(certificate.proposal().clone()));
         self.certificate = Some(certificate);
         Ok(())
     }
-    pub fn finish_certificate(&mut self) -> Result<(), Refused> {
+    pub fn finish_certificate(&mut self) -> Result<(), Refusal> {
         let (Some(inputs), Some(certificate)) = (self.inputs.as_ref(), self.certificate.as_ref())
         else {
-            return Err(Refused);
+            return Err(Refusal);
         };
         let Ok(verified) = inputs.certify(certificate) else {
-            return Err(Refused);
+            return Err(Refusal);
         };
         self.verified = Some(Arc::new(verified));
         Ok(())

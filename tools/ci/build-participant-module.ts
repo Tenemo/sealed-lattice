@@ -53,14 +53,14 @@ const buildDefinitions = [
     'tools/ci/build-sdk-package.ts',
     'tools/ci/compiled-inputs.ts',
     'tools/ci/rust-toolchain.ts',
-    'tools/ci/sdk-package-tsdown.config.ts',
+    'tools/ci/sdk-package-options.ts',
     'tsconfig.base.json',
 ];
 // The packages whose installed versions bundle the worker and the SDK entry
 // and emit the entry's declarations.
 const buildTools = ['rolldown', 'tsdown', 'typescript'];
 
-export type ParticipantModuleBuild = Readonly<{
+type ParticipantModuleBuild = Readonly<{
     module: Buffer;
     // The compiler's version report without its host line, and the compiler
     // flags with the machine's paths replaced by their names, so neither

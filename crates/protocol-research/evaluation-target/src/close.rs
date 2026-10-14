@@ -1,6 +1,6 @@
 use ballot_proof::submission::{AuthenticatedBallotBody, AuthenticatedBallotEnvelope};
 use protocol_foundations::{
-    SIGNATURE_BYTES, SIGNING_PUBLIC_KEY_BYTES,
+    SIGNING_PUBLIC_KEY_BYTES,
     close_signing::{
         CloseIntentMessage, CloseProposalMessage, ClosePurpose, CloseResponseMessage,
         MAXIMUM_LISTED_ENVELOPES_PER_SLOT, verify_close_signature,
@@ -11,7 +11,7 @@ use setup_aggregate::verified::VerifiedSetupAggregate;
 use std::sync::Arc;
 
 #[derive(Debug, PartialEq, Eq)]
-pub enum Error {
+pub enum Refusal {
     Shape,
     Context,
     Signature,
@@ -28,35 +28,22 @@ pub struct CloseContext {
 #[derive(Clone)]
 pub struct AuthenticatedCloseIntent {
     message: CloseIntentMessage,
-    signature: [u8; SIGNATURE_BYTES],
 }
 impl AuthenticatedCloseIntent {
     pub fn message(&self) -> &CloseIntentMessage {
         &self.message
     }
-    pub fn signature(&self) -> &[u8; SIGNATURE_BYTES] {
-        &self.signature
-    }
 }
 
-/// An authenticated close response together with the exact authenticated
-/// envelope of every entry it lists. It creates no inventory.
+/// An authenticated close response whose every listed entry has its exact
+/// authenticated envelope. It creates no inventory.
 #[derive(Clone)]
 pub struct AuthenticatedCloseResponse {
     message: CloseResponseMessage,
-    signature: [u8; SIGNATURE_BYTES],
-    listed: Vec<AuthenticatedBallotEnvelope>,
 }
 impl AuthenticatedCloseResponse {
     pub fn message(&self) -> &CloseResponseMessage {
         &self.message
-    }
-    pub fn signature(&self) -> &[u8; SIGNATURE_BYTES] {
-        &self.signature
-    }
-    /// The listed envelopes in listing order.
-    pub fn listed(&self) -> &[AuthenticatedBallotEnvelope] {
-        &self.listed
     }
 }
 
@@ -78,8 +65,6 @@ pub struct VerifiedCloseBarrier {
     setup: Arc<VerifiedSetupAggregate>,
     intent: AuthenticatedCloseIntent,
     proposal: CloseProposalMessage,
-    signature: [u8; SIGNATURE_BYTES],
-    responses: Vec<AuthenticatedCloseResponse>,
     slots: Vec<ClosedSlot>,
 }
 impl VerifiedCloseBarrier {
@@ -95,20 +80,16 @@ impl VerifiedCloseBarrier {
     pub fn proposal(&self) -> &CloseProposalMessage {
         &self.proposal
     }
-    pub fn proposal_signature(&self) -> &[u8; SIGNATURE_BYTES] {
-        &self.signature
-    }
-    /// The used responses in ascending responder order.
-    pub fn responses(&self) -> &[AuthenticatedCloseResponse] {
-        &self.responses
-    }
     pub fn slots(&self) -> &[ClosedSlot] {
         &self.slots
     }
 }
 
 impl CloseContext {
-    pub fn new(poll: Arc<VerifiedPoll>, setup: Arc<VerifiedSetupAggregate>) -> Result<Self, Error> {
+    pub fn new(
+        poll: Arc<VerifiedPoll>,
+        setup: Arc<VerifiedSetupAggregate>,
+    ) -> Result<Self, Refusal> {
         let proposal = setup.roster().proposal();
         if !supported_profile::Profile::participant_range().contains(&proposal.records().len())
             || proposal
@@ -120,7 +101,7 @@ impl CloseContext {
                 .signing_public
                 != *poll.organizer()
         {
-            return Err(Error::Context);
+            return Err(Refusal::Context);
         }
         Ok(Self { poll, setup })
     }
@@ -136,34 +117,34 @@ impl CloseContext {
     pub fn organizer(&self) -> usize {
         self.setup.roster().proposal().organizer_position()
     }
-    fn key(&self, position: usize) -> Result<&[u8; SIGNING_PUBLIC_KEY_BYTES], Error> {
+    fn key(&self, position: usize) -> Result<&[u8; SIGNING_PUBLIC_KEY_BYTES], Refusal> {
         Ok(&self
             .setup
             .roster()
             .proposal()
             .records()
             .get(position)
-            .ok_or(Error::Context)?
+            .ok_or(Refusal::Context)?
             .header()
             .signing_public)
     }
     fn setup_identity(&self) -> [u8; 64] {
         self.setup.identity()
     }
-    pub fn intent(&self, close_time: u64) -> Result<CloseIntentMessage, Error> {
+    pub fn intent(&self, close_time: u64) -> Result<CloseIntentMessage, Refusal> {
         CloseIntentMessage::new(self.poll.identity(), self.setup_identity(), close_time)
-            .map_err(|_| Error::Shape)
+            .map_err(|_| Refusal::Shape)
     }
     pub fn authenticate_intent(
         &self,
         body: &[u8],
         signature: &[u8],
-    ) -> Result<AuthenticatedCloseIntent, Error> {
-        let message = CloseIntentMessage::parse(body).map_err(|_| Error::Shape)?;
+    ) -> Result<AuthenticatedCloseIntent, Refusal> {
+        let message = CloseIntentMessage::parse(body).map_err(|_| Refusal::Shape)?;
         if *message.poll() != self.poll.identity()
             || *message.setup_identity() != self.setup_identity()
         {
-            return Err(Error::Context);
+            return Err(Refusal::Context);
         }
         if !verify_close_signature(
             self.key(self.organizer())?,
@@ -171,12 +152,9 @@ impl CloseContext {
             message.identity(),
             signature,
         ) {
-            return Err(Error::Signature);
+            return Err(Refusal::Signature);
         }
-        Ok(AuthenticatedCloseIntent {
-            message,
-            signature: signature.try_into().map_err(|_| Error::Shape)?,
-        })
+        Ok(AuthenticatedCloseIntent { message })
     }
     /// The on-time envelope identities known for each slot, from the known
     /// envelopes and the envelopes of the held bodies.
@@ -212,7 +190,7 @@ impl CloseContext {
         responder: usize,
         known: &[AuthenticatedBallotEnvelope],
         held: &[AuthenticatedBallotBody],
-    ) -> Result<CloseResponseMessage, Error> {
+    ) -> Result<CloseResponseMessage, Refusal> {
         let listed = honest_listing(
             &self.known_slots(intent, known, held),
             &held_identities(held),
@@ -225,7 +203,7 @@ impl CloseContext {
             self.participant_count(),
             &listed,
         )
-        .map_err(|_| Error::Context)
+        .map_err(|_| Refusal::Context)
     }
     /// A response is usable only with the exact authenticated envelope of
     /// every listed entry. A missing envelope leaves it pending; a late or
@@ -237,14 +215,14 @@ impl CloseContext {
         body: &[u8],
         signature: &[u8],
         available: &[AuthenticatedBallotEnvelope],
-    ) -> Result<AuthenticatedCloseResponse, Error> {
+    ) -> Result<AuthenticatedCloseResponse, Refusal> {
         let message = CloseResponseMessage::parse(body, self.participant_count())
-            .map_err(|_| Error::Shape)?;
+            .map_err(|_| Refusal::Shape)?;
         if *message.poll() != self.poll.identity()
             || *message.setup_identity() != self.setup_identity()
             || message.intent() != intent.message.identity()
         {
-            return Err(Error::Context);
+            return Err(Refusal::Context);
         }
         if !verify_close_signature(
             self.key(message.responder())?,
@@ -252,27 +230,21 @@ impl CloseContext {
             message.identity(),
             signature,
         ) {
-            return Err(Error::Signature);
+            return Err(Refusal::Signature);
         }
-        let mut listed = Vec::with_capacity(message.listed().len());
         for (author, identity) in message.listed() {
-            let authentication = available
+            let envelope = available
                 .iter()
                 .find(|value| value.envelope().identity() == *identity)
-                .ok_or(Error::Incomplete)?;
-            let envelope = authentication.envelope();
+                .ok_or(Refusal::Incomplete)?
+                .envelope();
             if envelope.position() != *author
                 || envelope.ballot_time() > intent.message.close_time()
             {
-                return Err(Error::Context);
+                return Err(Refusal::Context);
             }
-            listed.push(authentication.clone());
         }
-        Ok(AuthenticatedCloseResponse {
-            message,
-            signature: signature.try_into().map_err(|_| Error::Shape)?,
-            listed,
-        })
+        Ok(AuthenticatedCloseResponse { message })
     }
     /// Whether an organizer with these known envelopes and held bodies can
     /// include this response: every slot it lists where only one on-time
@@ -313,12 +285,12 @@ impl CloseContext {
         &self,
         intent: &AuthenticatedCloseIntent,
         responses: &[AuthenticatedCloseResponse],
-    ) -> Result<CloseProposalMessage, Error> {
+    ) -> Result<CloseProposalMessage, Refusal> {
         if responses
             .iter()
             .any(|response| response.message.intent() != intent.message.identity())
         {
-            return Err(Error::Context);
+            return Err(Refusal::Context);
         }
         let mut entries: Vec<(usize, [u8; 64])> = responses
             .iter()
@@ -333,38 +305,40 @@ impl CloseContext {
             self.organizer(),
             &entries,
         )
-        .map_err(|_| Error::Context)
+        .map_err(|_| Refusal::Context)
     }
+    // Finds each response the proposal names, from its responder and for
+    // the intent, and returns the distinct listed identities of each slot in
+    // the union of those responses.
     fn select(
         &self,
         intent: &AuthenticatedCloseIntent,
         proposal: &CloseProposalMessage,
         responses: &[AuthenticatedCloseResponse],
-    ) -> Result<Selection, Error> {
+    ) -> Result<Vec<Vec<[u8; 64]>>, Refusal> {
         if *proposal.poll() != self.poll.identity()
             || *proposal.setup_identity() != self.setup_identity()
             || proposal.intent() != intent.message.identity()
         {
-            return Err(Error::Context);
+            return Err(Refusal::Context);
         }
         let mut used = Vec::with_capacity(proposal.responses().len());
         for (responder, identity) in proposal.responses() {
             let response = responses
                 .iter()
                 .find(|response| response.message.identity() == identity)
-                .ok_or(Error::Incomplete)?;
+                .ok_or(Refusal::Incomplete)?;
             if response.message.responder() != *responder
                 || response.message.intent() != intent.message.identity()
             {
-                return Err(Error::Context);
+                return Err(Refusal::Context);
             }
-            used.push(response.clone());
+            used.push(response);
         }
-        let slots = union(
+        Ok(union(
             self.participant_count(),
             used.iter().map(|response| response.message.listed()),
-        );
-        Ok(Selection { used, slots })
+        ))
     }
     /// The author and envelope identity of every usable slot of a proposal's
     /// union: the only bodies its barrier requires. Conflicting slots need
@@ -374,8 +348,8 @@ impl CloseContext {
         intent: &AuthenticatedCloseIntent,
         proposal: &CloseProposalMessage,
         responses: &[AuthenticatedCloseResponse],
-    ) -> Result<Vec<(usize, [u8; 64])>, Error> {
-        Ok(singletons(&self.select(intent, proposal, responses)?.slots))
+    ) -> Result<Vec<(usize, [u8; 64])>, Refusal> {
+        Ok(singletons(&self.select(intent, proposal, responses)?))
     }
     /// The only producer of `VerifiedCloseBarrier`. It authenticates the
     /// organizer's proposal, selects exactly its named responses, and derives
@@ -388,18 +362,18 @@ impl CloseContext {
         signature: &[u8],
         responses: &[AuthenticatedCloseResponse],
         bodies: &[AuthenticatedBallotBody],
-    ) -> Result<VerifiedCloseBarrier, Error> {
+    ) -> Result<VerifiedCloseBarrier, Refusal> {
         let proposal =
             CloseProposalMessage::parse(body, self.participant_count(), self.organizer())
-                .map_err(|_| Error::Shape)?;
-        let Selection { used, slots } = self.select(&intent, &proposal, responses)?;
+                .map_err(|_| Refusal::Shape)?;
+        let slots = self.select(&intent, &proposal, responses)?;
         if !verify_close_signature(
             self.key(self.organizer())?,
             ClosePurpose::Proposal,
             proposal.identity(),
             signature,
         ) {
-            return Err(Error::Signature);
+            return Err(Refusal::Signature);
         }
         let slots = slots
             .into_iter()
@@ -409,27 +383,18 @@ impl CloseContext {
                     .iter()
                     .find(|body| body.authentication().envelope().identity() == *identity)
                     .map(|body| ClosedSlot::Usable(Box::new(body.clone())))
-                    .ok_or(Error::Incomplete),
+                    .ok_or(Refusal::Incomplete),
                 _ => Ok(ClosedSlot::Conflicting(identities)),
             })
-            .collect::<Result<Vec<_>, Error>>()?;
+            .collect::<Result<Vec<_>, Refusal>>()?;
         Ok(VerifiedCloseBarrier {
             poll: self.poll.clone(),
             setup: self.setup.clone(),
             intent,
             proposal,
-            signature: signature.try_into().map_err(|_| Error::Shape)?,
-            responses: used,
             slots,
         })
     }
-}
-
-/// The named responses of a proposal and the distinct listed identities of
-/// each slot in their union.
-struct Selection {
-    used: Vec<AuthenticatedCloseResponse>,
-    slots: Vec<Vec<[u8; 64]>>,
 }
 
 fn held_identities(held: &[AuthenticatedBallotBody]) -> Vec<[u8; 64]> {

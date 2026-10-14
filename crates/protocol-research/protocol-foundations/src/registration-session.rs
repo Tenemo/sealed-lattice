@@ -8,7 +8,7 @@
 use super::{KEY_BYTES, RegistrationVerifier, VerifiedRegistration};
 use crate::registration::CHUNK_LIMIT;
 use crate::{
-    Error, SIGNATURE_BYTES, checked_header, foundation::RegistrationHeader, poll::VerifiedPoll,
+    Refusal, SIGNATURE_BYTES, checked_header, foundation::RegistrationHeader, poll::VerifiedPoll,
 };
 use parallel_work::{Job, Part, Ticket, session, submit};
 use std::{cell::RefCell, collections::HashMap};
@@ -27,24 +27,24 @@ const VERDICT_BYTES: usize = 65;
 
 thread_local! {
     // Each open session's verifier, or the refusal that ended it.
-    static SESSIONS: RefCell<HashMap<u64, Result<RegistrationVerifier, Error>>> =
+    static SESSIONS: RefCell<HashMap<u64, Result<RegistrationVerifier, Refusal>>> =
         RefCell::default();
 }
 
-fn code(error: &Error) -> u8 {
+fn code(error: &Refusal) -> u8 {
     match error {
-        Error::Shape => 1,
-        Error::Context => 2,
-        Error::Consumed => 3,
-        Error::Crypto => 4,
+        Refusal::Shape => 1,
+        Refusal::Context => 2,
+        Refusal::Consumed => 3,
+        Refusal::Crypto => 4,
     }
 }
-fn refusal(code: u8) -> Error {
+fn refusal(code: u8) -> Refusal {
     match code {
-        1 => Error::Shape,
-        2 => Error::Context,
-        3 => Error::Consumed,
-        _ => Error::Crypto,
+        1 => Refusal::Shape,
+        2 => Refusal::Context,
+        3 => Refusal::Consumed,
+        _ => Refusal::Crypto,
     }
 }
 
@@ -71,7 +71,7 @@ fn run(input: &[u8]) -> Vec<u8> {
                 let state = sessions.remove(&session).expect("An open session");
                 let result = state.and_then(|verifier| {
                     if !bytes.is_empty() {
-                        return Err(Error::Shape);
+                        return Err(Refusal::Shape);
                     }
                     verifier.finish()
                 });
@@ -94,7 +94,7 @@ fn run(input: &[u8]) -> Vec<u8> {
 }
 
 // The poll identity, the header's length, the header and the signature.
-fn open(bytes: &[u8]) -> Result<RegistrationVerifier, Error> {
+fn open(bytes: &[u8]) -> Result<RegistrationVerifier, Refusal> {
     let length = u32::from_le_bytes(bytes[64..68].try_into().unwrap()) as usize;
     RegistrationVerifier::open(
         bytes[..64].try_into().unwrap(),
@@ -104,7 +104,7 @@ fn open(bytes: &[u8]) -> Result<RegistrationVerifier, Error> {
 }
 
 // Checks a complete key at its owning verifier.
-fn feed(verifier: &mut RegistrationVerifier, bytes: &[u8]) -> Result<(), Error> {
+fn feed(verifier: &mut RegistrationVerifier, bytes: &[u8]) -> Result<(), Refusal> {
     for part in bytes.chunks(CHUNK_LIMIT) {
         verifier.push_key(part)?;
     }
@@ -145,10 +145,10 @@ impl RegistrationSession {
         shard: usize,
         header_bytes: &[u8],
         signature: &[u8],
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, Refusal> {
         let header = checked_header(header_bytes, poll)?;
         if signature.len() != SIGNATURE_BYTES {
-            return Err(Error::Shape);
+            return Err(Refusal::Shape);
         }
         let mut input = Vec::with_capacity(68 + header_bytes.len() + signature.len());
         input.extend(poll.identity());
@@ -173,23 +173,23 @@ impl RegistrationSession {
     pub fn shard(&self) -> usize {
         self.shard
     }
-    pub fn push_key(&mut self, bytes: &[u8]) -> Result<(), Error> {
+    pub fn push_key(&mut self, bytes: &[u8]) -> Result<(), Refusal> {
         if self.failed
             || self.key_sent
             || bytes.len() > CHUNK_LIMIT
             || bytes.len() > KEY_BYTES - self.key.len()
         {
             self.failed = true;
-            return Err(Error::Shape);
+            return Err(Refusal::Shape);
         }
         self.key.extend_from_slice(bytes);
         Ok(())
     }
     /// Sends the complete key, whose hash the session checks.
-    pub fn finish_key(&mut self) -> Result<(), Error> {
+    pub fn finish_key(&mut self) -> Result<(), Refusal> {
         if self.failed || self.key_sent || self.key.len() != KEY_BYTES {
             self.failed = true;
-            return Err(Error::Shape);
+            return Err(Refusal::Shape);
         }
         self.key_sent = true;
         let ticket = send(self.session, self.shard, KEY, &self.key, 0);
@@ -198,9 +198,9 @@ impl RegistrationSession {
     }
 
     /// Requests the owning verifier's verdict for the complete record.
-    pub fn finish(mut self) -> Result<PendingRegistration, Error> {
+    pub fn finish(mut self) -> Result<PendingRegistration, Refusal> {
         if self.failed || !self.key_sent {
-            return Err(Error::Consumed);
+            return Err(Refusal::Consumed);
         }
         let ticket = send(self.session, self.shard, FINISH, &[], VERDICT_BYTES);
         self.finished = true;
@@ -232,7 +232,7 @@ pub struct PendingRegistration {
 }
 impl PendingRegistration {
     /// The verified registration, or the refusal of its verifier.
-    pub fn wait(self) -> Result<VerifiedRegistration, Error> {
+    pub fn wait(self) -> Result<VerifiedRegistration, Refusal> {
         let verdict = self.ticket.wait();
         if verdict[0] != 0 {
             return Err(refusal(verdict[0]));

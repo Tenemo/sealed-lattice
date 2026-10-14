@@ -1,3 +1,4 @@
+import { mlDsa65Sizes } from '#tests/ml-dsa-65-parameters.js';
 import { compileRecipientKeyCensus } from '#tests/recipient-key-model.js';
 import { compileRegistrationSetupBindingScreen } from '#tests/registration-setup-binding-model.js';
 import {
@@ -5,7 +6,6 @@ import {
     supportedProfileRanges,
 } from '#tests/supported-profile-model.js';
 
-export const registrationSigningPublicKeyBytes = 1952n;
 // ParticipantIdentity renders its foundation Hash512 as lowercase hex.
 export const participantIdentityAsciiBytes = 2n * 64n;
 
@@ -22,8 +22,8 @@ export const compileRegistrationSourceCustody = (
     return {
         familyCount: source.coordinateCount,
         commitmentListBytes: 2n + 4n + source.commitmentDigestPayloadBytes,
-        capsulePlaintextBytes: 4n + source.privateSeedAndSaltPayloadBytes,
-        capsuleBytes: 4n + source.privateSeedAndSaltPayloadBytes + 16n,
+        capsulePlaintextBytes: source.privateSeedAndSaltPayloadBytes,
+        capsuleBytes: source.privateSeedAndSaltPayloadBytes + 16n,
     };
 };
 
@@ -48,21 +48,21 @@ const maximumSourceInventory = () => {
         ) {
             const profile = deriveSupportedProfile(count, option);
             const polynomials = 4n * profile.gadgetLength + 2n * BigInt(count);
-            const bytes = 4n + 64n + 64n * polynomials + 64n;
+            const bytes = 64n + 64n * polynomials + 64n;
             if (bytes > retainedSetupBytes) retainedSetupBytes = bytes;
         }
     }
     sourceMaximums = {
         familyCount,
-        capsuleBytes: 4n + familyCount * 128n + 16n,
+        capsuleBytes: familyCount * 128n + 16n,
         retainedSetupBytes,
     };
     return sourceMaximums;
 };
 
 const registrationEnrollmentInputs = {
-    signingPublicKeyBytes: registrationSigningPublicKeyBytes,
-    signatureBytes: 3309n,
+    signingPublicKeyBytes: mlDsa65Sizes.publicKeyBytes,
+    signatureBytes: mlDsa65Sizes.signatureBytes,
     maximumUsernameBytes: 128n,
     maximumUsernameIngressBytes: 512n,
     maximumHeaderInputBytes: 4096n,
@@ -79,10 +79,10 @@ export const compileRegistrationEnrollmentCensus = () => {
         (value + divisor - 1n) / divisor;
     const bytes = (value: string) => BigInt(Buffer.byteLength(value, 'utf8'));
     const maximumHeaderBytes =
-        8n +
+        6n +
         6n * 6n +
         4n +
-        bytes('sealed-lattice/registration-header/v6') +
+        bytes('sealed-lattice/registration-header') +
         2n * 64n +
         inputs.signingPublicKeyBytes +
         4n +
@@ -90,13 +90,13 @@ export const compileRegistrationEnrollmentCensus = () => {
         2n +
         4n +
         64n * source.familyCount;
-    const recipientCapsuleBytes = 4n + key.support * 2n + 16n;
-    const signingCapsuleBytes = 4n + 32n + 16n;
+    const recipientCapsuleBytes = key.support * 2n + 16n;
+    const signingCapsuleBytes = 32n + 16n;
     const maximumEnrollmentRecords =
         ceiling(key.publicKeyBytes, 1_048_576n) + 7n;
     // The proposal and its signature.
     const maximumRecords = maximumEnrollmentRecords + 2n;
-    const manifestPrefixBytes = 4n + 3n * 32n + 64n + 4n;
+    const manifestPrefixBytes = 3n * 32n + 64n + 4n;
     const preparedManifestPrefixBytes = manifestPrefixBytes - 32n;
     const maximumEnrollmentManifestBytes =
         manifestPrefixBytes + maximumEnrollmentRecords * 73n;
@@ -107,10 +107,10 @@ export const compileRegistrationEnrollmentCensus = () => {
     // Seven items: the purpose, runtime, nonce, organizer key, manifest,
     // result length and participant maximum.
     const pollDefinitionOverheadBytes =
-        8n +
+        6n +
         7n * 6n +
         4n +
-        bytes('sealed-lattice/poll-definition/v2') +
+        bytes('sealed-lattice/poll-definition') +
         64n +
         32n +
         inputs.signingPublicKeyBytes +
@@ -118,7 +118,7 @@ export const compileRegistrationEnrollmentCensus = () => {
         2n +
         2n;
     // The canonical manifest inside the poll definition frames the question
-    // and labels: its eight-byte tuple header, two six-byte item headers, the
+    // and labels: its six-byte tuple header, two six-byte item headers, the
     // question's four-byte length and the option list's two-byte element type
     // and four-byte count, then per option its own tuple header, three item
     // headers, its two-byte index and the four-byte lengths of its identifier
@@ -127,7 +127,7 @@ export const compileRegistrationEnrollmentCensus = () => {
         let identifierBytes = 0n;
         for (let index = 0n; index < options; index++)
             identifierBytes += bytes(`option-${String(index)}`);
-        return 30n + 36n * options + identifierBytes;
+        return 28n + 34n * options + identifierBytes;
     };
     // The organizer input carries the runtime, the result length, the
     // participant maximum, the question, the option count, each label and
@@ -181,15 +181,15 @@ export const compileRegistrationEnrollmentCensus = () => {
             inputs.maximumUsernameIngressBytes +
             96n,
         recipientAssociatedBytes:
-            bytes('sealed-lattice/recipient-key-custody/v1') + 64n,
-        signingAssociatedBytes: bytes('registration-signing-seed/1') + 64n,
+            bytes('sealed-lattice/recipient-key-custody') + 64n,
+        signingAssociatedBytes: bytes('registration-signing-seed') + 64n,
         sourceAssociatedBytes:
-            8n +
+            6n +
             2n * 6n +
             4n +
-            bytes('sealed-lattice/fhe-source-custody/v1') +
+            bytes('sealed-lattice/fhe-source-custody') +
             64n,
-        rootAssociatedBytes: 4n + 64n,
+        rootAssociatedBytes: 64n,
         // The restore control ends with the two-byte mask of signing
         // purposes that the authenticated root shows unused.
         maximumRestoreInputBytes:
@@ -219,7 +219,7 @@ export const compileRegistrationEnrollmentCensus = () => {
         initialRootDistinctBlockInputs:
             1n +
             2n +
-            ceiling(68n, 16n) +
+            ceiling(64n, 16n) +
             ceiling(maximumEnrollmentManifestBytes, 16n),
         // Proposal transitions each use a fresh root key for one encryption.
         rootDistinctBlockInputs: 2n + ceiling(maximumManifestBytes, 16n),

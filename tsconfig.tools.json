@@ -8,9 +8,11 @@
     },
     "include": [
         "packages/*/tests/**/*.ts",
+        "packages/*/tests/**/*.mjs",
         "tools/**/*.ts",
         "tools/**/*.mjs",
         "tests/**/*.ts",
+        "tests/**/*.mjs",
         "vitest.config.ts",
         "eslint.config.js"
     ],

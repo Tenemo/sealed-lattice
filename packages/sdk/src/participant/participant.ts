@@ -1,24 +1,23 @@
+import type {
+    OutcomeVerification,
+    OutcomeVerificationOptions,
+    Participant,
+    ParticipantOptions,
+} from './participant-contract.js';
 import { helperRole } from './worker/module/parallel-helper-instance.js';
 import {
     affordedHelpers,
     allStartedInTime,
 } from './worker/module/parallel-helpers.js';
 import type {
-    VerificationCommand,
-    WorkerCommand,
+    VerificationWorkerCommand,
+    ParticipantWorkerCommand,
     WorkerResult,
+    ParticipantWorkerResult,
+    VerificationWorkerResult,
 } from './worker/runtime/worker-messages.js';
-import type {
-    IncompleteOperation,
-    ParticipantPendingCause,
-    ParticipantRefusalReason,
-} from './worker/shared/operation-status.js';
+import { isDigest } from './worker/shared/bytes.js';
 import { participantNamespacePattern } from './worker/storage/database.js';
-
-export type {
-    ParticipantPendingCause,
-    ParticipantRefusalReason,
-} from './worker/shared/operation-status.js';
 
 // The application page's side of the participant runtime. The SDK carries the
 // packaged worker's source, so no server can alter it, and runs every request
@@ -40,264 +39,115 @@ declare const __SEALED_LATTICE_PARTICIPANT_RUNTIME__:
 
 const participantModuleUrl = new URL('./participant.wasm', import.meta.url);
 
-export type ParticipantOptions = Readonly<{
-    /**
-     * Names the local state of one participant on this origin: 1 to 64
-     * lower-case letters, digits and inner hyphens.
-     */
-    namespace: string;
-    /**
-     * The relay's absolute HTTP or HTTPS base URL, ending with a slash,
-     * without credentials, a query or a fragment. The package README's relay
-     * section lists the routes it serves.
-     */
-    relay: string;
-}>;
-
-/**
- * Creates a poll as its organizer from its question and option labels, or
- * joins a poll from its signed definition. Bytes are lower-case hexadecimal.
- */
-export type ParticipantEnrollment = Readonly<
-    | {
-          role: 'organizer';
-          question: string;
-          /** The option labels in order; the result names option `i` as `option-i`. */
-          options: readonly string[];
-          /** How many option identifiers the result lists. */
-          topCount: number;
-          /** The largest roster the poll admits. */
-          maximumParticipants: number;
-          username: string;
-      }
-    | {
-          role: 'joiner';
-          poll: string;
-          definition: string;
-          definitionSignature: string;
-          username: string;
-      }
->;
-
-/** A retained participant's operations refuse another poll's identity when `poll` names one. */
-type PollBinding = Readonly<{ poll?: string }>;
-
-export type ParticipantRequest = Readonly<
-    | { operation: 'create'; parameters: ParticipantEnrollment }
-    | {
-          operation: 'propose-roster' | 'accept-roster';
-          parameters: PollBinding &
-              Readonly<{ registrationBodyDigests: readonly string[] }>;
-      }
-    | {
-          operation: 'cast-ballot';
-          parameters?: PollBinding & Readonly<{ scores?: readonly number[] }>;
-      }
-    | {
-          operation: 'close';
-          parameters?: PollBinding &
-              Readonly<{
-                  /** The organizer's close time in Unix milliseconds. */
-                  closeTime?: number;
-              }>;
-      }
-    | {
-          operation:
-              | 'status'
-              | 'publish'
-              | 'contribute'
-              | 'confirm'
-              | 'select-setup'
-              | 'endorse-setup'
-              | 'verify-setup'
-              | 'sign-target'
-              | 'release'
-              | 'compute-result';
-          parameters?: PollBinding;
-      }
->;
-
-/** What the participant retains, after every completed operation. */
-export type ParticipantSummary = Readonly<{
-    generation: number;
-    poll: string;
-    registrationBodyDigest: string;
-    username: string;
-    isOrganizer: boolean;
-    /** The poll's question, as the participant module verified it from the signed poll definition. */
-    question: string;
-    /** The poll's options in order, each with the identifier the result names it by. */
-    options: readonly Readonly<{ identifier: string; label: string }>[];
-    /** How many option identifiers the result lists. */
-    topCount: number;
-    /** Whether the participant may offer setup key material, once its roster is retained. */
-    isEligibleContributor: boolean | undefined;
-    /**
-     * The current local ballot state. `could not vote` means submission is
-     * closed without an own ballot; it does not identify the cause of absence.
-     */
-    ballotState:
-        'open' | 'in progress' | 'signed' | 'could not vote' | undefined;
-    /**
-     * The own ballot's inclusion in the target the participant signs, once
-     * it has evaluated that target. A participant that signs no target reads
-     * it from the certified target in its release and result operations, and
-     * every operation reports it again once its release is locked.
-     */
-    ballotInclusion: 'not cast' | 'late' | 'included' | 'omitted' | undefined;
-    /**
-     * Whether the browser keeps the origin's storage under storage pressure.
-     * It may evict best-effort storage, which stops the participant.
-     */
-    isStoragePersistent: boolean;
-}>;
-
-/**
- * A refused request changed nothing, and its reason says why; a pending one
- * waits for public input, storage or a device resource such as memory, or
- * follows a module or worker failure, as its cause names and its detail
- * describes, and a later operation continues from the participant's last
- * committed state. A stopped one ended on missing or inconsistent local
- * state, as its detail describes; once its stop persistence is confirmed,
- * the participant never acts again, and after an unconfirmed stop a later
- * operation stops again unless the participant's last committed state reads
- * back intact, from which it continues. Enrollment that ends after its intent
- * is retained but before its secrets are retained stops, since that intent
- * cannot resume private generation. A participant that another runtime
- * created is refused, naming that runtime, so the application can open it
- * with the SDK of that runtime.
- */
-export type ParticipantResponse =
-    | Readonly<{
-          status: 'completed';
-          details: ParticipantSummary & Readonly<Record<string, unknown>>;
-      }>
-    | IncompleteOperation;
-
-export type Participant = Readonly<{
-    run: (request: ParticipantRequest) => Promise<ParticipantResponse>;
-}>;
-
-/** What the outcome verifier reads. */
-export type OutcomeVerificationOptions = Readonly<{
-    /** The poll's identity in lower-case hexadecimal. */
-    poll: string;
-    /**
-     * The relay's absolute HTTP or HTTPS base URL, ending with a slash,
-     * without credentials, a query or a fragment. The package README's relay
-     * section lists the routes it serves.
-     */
-    relay: string;
-}>;
-
-/**
- * A completed verification names whether the certified target carries an
- * encrypted result, and the result's ordered option identifiers, none for a
- * certified no-result target. A refused request changed nothing, and its
- * reason says why; a pending one waits for public records that verify, or
- * ended on a device resource or a module or worker failure, as its cause
- * names and its detail describes.
- */
-export type OutcomeVerification = Readonly<
-    | {
-          status: 'completed';
-          details: Readonly<{
-              poll: string;
-              encrypted: boolean;
-              identifiers: readonly string[];
-          }> &
-              Readonly<Record<string, unknown>>;
-      }
-    | {
-          status: 'refused';
-          reason: Extract<
-              ParticipantRefusalReason,
-              'unsupported browser' | 'invalid request'
-          >;
-      }
-    | { status: 'pending'; cause: ParticipantPendingCause; detail: string }
->;
-
 // Starts the helpers this context affords from the worker source and waits
 // until each listens on its port, whose other ends the operation's worker
 // takes. A helper that fails to load or does not listen in time leaves the
 // worker without helpers.
 const openHelpers = async (url: string) => {
     const count = affordedHelpers();
-    if (count === 0) return { workers: [], ports: [] };
     const workers: Worker[] = [];
     const ports: MessagePort[] = [];
-    const listening = await allStartedInTime(
-        Array.from(
-            { length: count },
-            () =>
-                new Promise<boolean>((resolve) => {
-                    const worker = new Worker(url, { type: 'module' });
-                    const channel = new MessageChannel();
-                    workers.push(worker);
-                    ports.push(channel.port2);
-                    worker.onmessage = () => {
-                        resolve(true);
-                    };
-                    worker.onerror = () => {
-                        resolve(false);
-                    };
-                    worker.postMessage(helperRole, [channel.port1]);
-                }),
-        ),
-    );
-    for (const worker of workers) {
-        worker.onmessage = null;
-        worker.onerror = null;
+    const ownedPorts: MessagePort[] = [];
+    const stop = () => {
+        for (const worker of workers) {
+            worker.onmessage = null;
+            worker.onerror = null;
+            worker.terminate();
+        }
+        for (const port of ownedPorts) port.close();
+        workers.length = ports.length = ownedPorts.length = 0;
+    };
+    if (count === 0) return { workers, ports, stop };
+    try {
+        const listening = await allStartedInTime(
+            Array.from(
+                { length: count },
+                () =>
+                    new Promise<boolean>((resolve) => {
+                        const worker = new Worker(url, { type: 'module' });
+                        workers.push(worker);
+                        const channel = new MessageChannel();
+                        ownedPorts.push(channel.port1, channel.port2);
+                        ports.push(channel.port2);
+                        worker.onmessage = () => {
+                            resolve(true);
+                        };
+                        worker.onerror = () => {
+                            resolve(false);
+                        };
+                        worker.postMessage(helperRole, [channel.port1]);
+                    }),
+            ),
+        );
+        for (const worker of workers) {
+            worker.onmessage = null;
+            worker.onerror = null;
+        }
+        if (!listening) stop();
+    } catch {
+        // Optional helpers that cannot start leave the operation scalar.
+        stop();
     }
-    if (!listening) {
-        for (const worker of workers) worker.terminate();
-        for (const port of ports) port.close();
-        return { workers: [], ports: [] };
-    }
-    return { workers, ports };
+    return { workers, ports, stop };
 };
 
 // Runs the command in a worker of its own beside helpers of their own, and
 // ends them all once the worker answers.
-const runWorkerOnce = async (
+function runWorkerOnce(
     url: string,
-    command: WorkerCommand | VerificationCommand,
-) => {
+    command: ParticipantWorkerCommand,
+): Promise<ParticipantWorkerResult>;
+function runWorkerOnce(
+    url: string,
+    command: VerificationWorkerCommand,
+): Promise<VerificationWorkerResult>;
+async function runWorkerOnce(
+    url: string,
+    command: ParticipantWorkerCommand | VerificationWorkerCommand,
+): Promise<WorkerResult> {
     const helpers = await openHelpers(url);
-    return new Promise<WorkerResult>((resolve) => {
-        const worker = new Worker(url, { type: 'module' });
-        let finished = false;
-        const finish = (result: WorkerResult) => {
-            if (finished) return;
-            finished = true;
-            worker.terminate();
-            for (const helper of helpers.workers) helper.terminate();
-            resolve(result);
-        };
-        worker.onmessage = (event: MessageEvent<WorkerResult>) => {
-            finish(event.data);
-        };
-        worker.onerror = (event) => {
-            finish({
-                status: 'pending',
-                cause: 'worker',
-                detail: event.message || 'The participant worker failed.',
-            });
-        };
-        // The worker would wait for a failed helper's jobs, so the operation
-        // ends as pending, as when the browser closes.
-        for (const helper of helpers.workers)
-            helper.onerror = (event) => {
-                finish({
-                    status: 'pending',
-                    cause: 'worker',
-                    detail: event.message || 'A participant helper failed.',
-                });
-            };
-        worker.postMessage(command, helpers.ports);
+    let worker: Worker | undefined;
+    const pending = (detail: string): WorkerResult => ({
+        status: 'pending',
+        cause: 'worker',
+        detail,
     });
-};
+    try {
+        return await new Promise<WorkerResult>((resolve) => {
+            worker = new Worker(url, { type: 'module' });
+            worker.onmessage = (event: MessageEvent<WorkerResult>) => {
+                resolve(event.data);
+            };
+            worker.onerror = (event) => {
+                resolve(
+                    pending(event.message || 'The participant worker failed.'),
+                );
+            };
+            worker.onmessageerror = () =>
+                resolve(
+                    pending(
+                        'The participant worker message could not be read.',
+                    ),
+                );
+            // The worker would wait for a failed helper's jobs, so the operation
+            // ends as pending, as when the browser closes.
+            for (const helper of helpers.workers)
+                helper.onerror = (event) => {
+                    resolve(
+                        pending(
+                            event.message || 'A participant helper failed.',
+                        ),
+                    );
+                };
+            worker.postMessage(command, helpers.ports);
+        });
+    } catch (error) {
+        return pending(error instanceof Error ? error.message : String(error));
+    } finally {
+        worker?.terminate();
+        helpers.stop();
+    }
+}
 
 // Runs the request's command. An instance's memory never shrinks and ends
 // only with its worker, so a worker that retained the target it evaluated
@@ -306,8 +156,8 @@ const runWorkerOnce = async (
 // the evaluating worker's memory.
 const runWorker = async (
     source: string,
-    command: Omit<WorkerCommand, 'separateEvaluation'>,
-) => {
+    command: Omit<ParticipantWorkerCommand, 'separateEvaluation'>,
+): Promise<Exclude<ParticipantWorkerResult, { status: 'evaluated' }>> => {
     const url = URL.createObjectURL(
         new Blob([source], { type: 'text/javascript' }),
     );
@@ -316,7 +166,7 @@ const runWorker = async (
             ...command,
             separateEvaluation: true,
         });
-        if (first.status !== 'evaluated') return first as ParticipantResponse;
+        if (first.status !== 'evaluated') return first;
         const result = await runWorkerOnce(url, {
             ...command,
             separateEvaluation: false,
@@ -327,17 +177,15 @@ const runWorker = async (
                 cause: 'worker',
                 detail: 'The participant worker evaluated again.',
             } as const;
-        return (
-            result.status === 'completed'
-                ? {
-                      status: 'completed',
-                      details: {
-                          ...result.details,
-                          evaluationMemory: first.memory,
-                      },
-                  }
-                : result
-        ) as ParticipantResponse;
+        return result.status === 'completed'
+            ? {
+                  status: 'completed',
+                  details: {
+                      ...result.details,
+                      evaluationMemory: first.memory,
+                  },
+              }
+            : result;
     } finally {
         URL.revokeObjectURL(url);
     }
@@ -446,7 +294,7 @@ export const verifyOutcome = async (
 ): Promise<OutcomeVerification> => {
     const runtime = packagedRuntime();
     const { poll } = options;
-    if (typeof poll !== 'string' || !/^[0-9a-f]{128}$/u.test(poll))
+    if (!isDigest(poll))
         throw new TypeError(
             'A poll identity is 64 bytes in lower-case hexadecimal.',
         );
@@ -455,13 +303,13 @@ export const verifyOutcome = async (
         new Blob([runtime.worker], { type: 'text/javascript' }),
     );
     try {
-        return (await runWorkerOnce(url, {
+        return await runWorkerOnce(url, {
             operation: 'verify-outcome',
             poll,
             relay,
             module: participantModuleUrl.href,
             identity: runtime.identity,
-        })) as OutcomeVerification;
+        });
     } finally {
         URL.revokeObjectURL(url);
     }

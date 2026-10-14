@@ -4,8 +4,8 @@ import {
     compileOraclePrefixReplacement,
     oraclePrefixReplacementWork,
     runOraclePrefixReplacement,
-    verifyProgrammedLocalOracle,
-} from '#tests/compressed-oracle-model.js';
+} from '#tests/compressed-oracle/oracle-access.js';
+import { verifyProgrammedLocalOracle } from '#tests/compressed-oracle-model.js';
 import {
     oracleDomainWork,
     programmedOracleDomainWork,

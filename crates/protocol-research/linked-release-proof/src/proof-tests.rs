@@ -1,11 +1,11 @@
 use super::*;
 use crate::{
-    CHUNK_LIMIT, HEADER_LENGTH, ReleaseInputs, derive_bound, statement::share_modulus, verifier,
+    CHUNK_LIMIT, HEADER_LENGTH, ReleaseInputs, prepare_release, statement::share_modulus, verifier,
     witness::tests::synthetic_release,
 };
 use num_bigint::BigInt;
 use parallel_work::random::{self, Purpose};
-use setup_witness::{contribution::common_share_polynomial, registration::RegistrationKey};
+use setup_witness::{contribution::common_share_polynomial, registration::RecipientKey};
 use sha3::{
     Digest, Sha3_512, Shake256, Shake256Reader,
     digest::{ExtendableOutput, Update, XofReader},
@@ -14,8 +14,7 @@ use std::cell::RefCell;
 use supported_profile::{DEGREE, Profile, RECIPIENT_SECRET_SUPPORT, SHARE_SCALE};
 
 fn verify(profile: Profile, role: &[u8], statement: &PublicStatement, proof: &[u8]) -> bool {
-    let Ok(mut verifier) = verifier(profile, role, statement.digest(), &proof[..HEADER_LENGTH])
-    else {
+    let Ok(mut verifier) = verifier(profile, role, &proof[..HEADER_LENGTH]) else {
         return false;
     };
     for part in std::iter::once(&statement.header).chain(&statement.polynomials) {
@@ -73,11 +72,9 @@ fn release_proofs_verify_only_for_their_role_and_true_partial() {
     )
     .unwrap();
     let statement = &prepared.statement;
-    let proof = OneShotProof::create(
+    let proof = InMemoryProof::create(
         role,
         witness,
-        &statement.header,
-        &statement.polynomials,
         |alpha| statement.operator(alpha).unwrap(),
         true,
     );
@@ -86,10 +83,9 @@ fn release_proofs_verify_only_for_their_role_and_true_partial() {
     assert!(!verify(profile, role, &prepared.statement, &bytes));
 }
 
-// The statement and proof digest of the seed-one release below, recorded
-// while the setup witness still prepared the release's inputs.
-const REPLAYED_RELEASE: &str = "9cd4a46a493e88376e9a28a084330ff19a45d423ddf11094334ac8df02615e63\
-                                69429f806e19a8106298d565b4d567cfe9235b06a83502acbbdd78be8b86e46c";
+// The digest of the seed-one release's statement digest and proof below.
+const REPLAYED_RELEASE: &str = "dc79d587ea0caa30ab072385b36e24343fd6510f9293b760a8592a9fffb63b05\
+                                e36459bc59a6baee455f15d350b9602f8025136675982f2f478abe5768a2e4b2";
 
 thread_local! {
     // The fixture's witness and proof streams, which serve the key's and
@@ -170,7 +166,7 @@ fn centered(value: BigInt, modulus: &BigInt) -> BigInt {
 // The last position's release header and its public inputs: an encryption
 // of small shares under the key with small errors, and a target.
 fn release_inputs(
-    key: &RegistrationKey,
+    key: &RecipientKey,
     profile: Profile,
     seed: u8,
 ) -> ([u8; RELEASE_HEADER_BYTES], [Vec<BigInt>; 3]) {
@@ -200,7 +196,7 @@ fn release_inputs(
     (header, [constant, linear, target])
 }
 
-// The digest of the statement and proof of a release to a registration key
+// The digest of the statement and proof of a release to a recipient key
 // generated from the seed's witness stream and proved from its proof stream,
 // as the participant's release proves it with the key's lent secret.
 fn replayed_release(seed: u8) -> String {
@@ -210,7 +206,7 @@ fn replayed_release(seed: u8) -> String {
         *draws.borrow_mut() = Some([stream("witness", seed), stream("proof", seed)]);
     });
     random::install(serve);
-    let key = RegistrationKey::new();
+    let key = RecipientKey::new();
     let (header, [constant, linear, target]) = release_inputs(&key, profile, seed);
     let (statement, proof) = key
         .lend_secret(|secret| {
@@ -224,7 +220,7 @@ fn replayed_release(seed: u8) -> String {
                 secret,
             )
             .unwrap();
-            prove(role, derive_bound(inputs, header).unwrap())
+            prove(role, prepare_release(inputs, header).unwrap())
         })
         .unwrap();
     random::release();

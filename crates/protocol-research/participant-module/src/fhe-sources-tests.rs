@@ -79,9 +79,8 @@ fn source_stream_matches_canonical_tuple_and_binds_each_original_context() {
     let seed = [29; 64];
     let canonical = CanonicalTuple::new(
         1,
-        1,
         vec![
-            CanonicalItem::nonempty_ascii("sealed-lattice/fhe-source-randomness/v2").unwrap(),
+            CanonicalItem::nonempty_ascii("sealed-lattice/fhe-source-randomness").unwrap(),
             CanonicalItem::fixed_bytes(owner).unwrap(),
             CanonicalItem::hash512([3; 64]),
             CanonicalItem::variable_bytes(profile.ciphertext_modulus().to_bytes()).unwrap(),
@@ -111,6 +110,21 @@ fn source_stream_matches_canonical_tuple_and_binds_each_original_context() {
         .find(|candidate| candidate.ciphertext_modulus() != profile.ciphertext_modulus())
         .unwrap();
     assert_ne!(output([3; 64], &owner, other, &seed), expected);
+}
+
+// A SHAKE256 prefix computed outside this crate from the canonical source
+// tuple of the (3, 2) profile's family. A retained source seed must keep
+// deriving its registered key, so no change to the framing may alter it.
+#[test]
+fn keeps_the_source_stream_prefix_byte_identical() {
+    let profile = Profile::new(3, 2).unwrap();
+    let mut bytes = [0; 32];
+    stream([3; 64], &[23; SIGNING_PUBLIC_KEY_BYTES], profile, &[29; 64]).read(&mut bytes);
+    let actual: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
+    assert_eq!(
+        actual,
+        "fa9cbfcb4d66d97a1320f1688b7c58e943d85aa9cc267ba869339ec64f1be3c2"
+    );
 }
 
 #[test]

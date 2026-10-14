@@ -15,7 +15,7 @@ describe('release version preparation', () => {
         expect(incrementPrototypeVersion('0.9.73', 'minor')).toBe('0.10.0');
     });
 
-    it('rejects prerelease, malformed, leading-zero, and post-1.0 versions', () => {
+    it('refuses prerelease, malformed, leading-zero, and post-1.0 versions', () => {
         for (const version of [
             '0.1.0-beta.1',
             '0.01.0',
@@ -48,6 +48,7 @@ describe('release version preparation', () => {
             const result = await prepareReleaseVersion({
                 increment: 'minor',
                 manifestPath,
+                releaseTags: ['v0.4.8', 'v0.4.9', 'v0.10.0-beta.1', 'other'],
             });
 
             expect(result).toEqual({
@@ -64,7 +65,7 @@ describe('release version preparation', () => {
         }
     });
 
-    it('rejects unrelated and malformed manifests without rewriting them', async () => {
+    it('refuses unrelated and malformed manifests without rewriting them', async () => {
         const temporaryDirectoryPath = await mkdtemp(
             path.join(tmpdir(), 'sealed-lattice-release-invalid-'),
         );
@@ -77,7 +78,11 @@ describe('release version preparation', () => {
                 'utf8',
             );
             await expect(
-                prepareReleaseVersion({ increment: 'patch', manifestPath }),
+                prepareReleaseVersion({
+                    increment: 'patch',
+                    manifestPath,
+                    releaseTags: [],
+                }),
             ).rejects.toThrow('must identify sealed-lattice');
             expect(await readFile(manifestPath, 'utf8')).toBe(
                 '{"name":"other-package","version":"0.1.0"}\n',
@@ -85,9 +90,39 @@ describe('release version preparation', () => {
 
             await writeFile(manifestPath, '{not-json}\n', 'utf8');
             await expect(
-                prepareReleaseVersion({ increment: 'patch', manifestPath }),
+                prepareReleaseVersion({
+                    increment: 'patch',
+                    manifestPath,
+                    releaseTags: [],
+                }),
             ).rejects.toThrow(SyntaxError);
             expect(await readFile(manifestPath, 'utf8')).toBe('{not-json}\n');
+        } finally {
+            await rm(temporaryDirectoryPath, { recursive: true, force: true });
+        }
+    });
+
+    it('refuses a manifest that does not name the latest release tag', async () => {
+        const temporaryDirectoryPath = await mkdtemp(
+            path.join(tmpdir(), 'sealed-lattice-release-tag-'),
+        );
+        const manifestPath = path.join(temporaryDirectoryPath, 'package.json');
+        const manifest = '{"name":"sealed-lattice","version":"0.1.0"}\n';
+
+        try {
+            await writeFile(manifestPath, manifest, 'utf8');
+            for (const releaseTags of [
+                ['v0.0.19', 'v0.2.0'],
+                ['v0.0.9', 'v0.0.19'],
+            ])
+                await expect(
+                    prepareReleaseVersion({
+                        increment: 'patch',
+                        manifestPath,
+                        releaseTags,
+                    }),
+                ).rejects.toThrow('latest release tag');
+            expect(await readFile(manifestPath, 'utf8')).toBe(manifest);
         } finally {
             await rm(temporaryDirectoryPath, { recursive: true, force: true });
         }

@@ -28,7 +28,7 @@ export const compileSetupRandomnessCensus = (
     const participants = BigInt(profile.participantCount);
     const eligibleContributorCount = compileSetupSelectionCensus(
         profile.participantCount,
-    ).eligibleCount;
+    ).eligibleContributorCount;
     const contributors = BigInt(eligibleContributorCount);
     const degree = fixedModulusBfvInputs.polynomialDegree;
     const samplesPerContribution =

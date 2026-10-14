@@ -1,7 +1,7 @@
 import { compileBallotEncryptionRelationCensus } from '#tests/ballot-encryption-relation-model.js';
 import { compileCommonAgreementDegreeCensus } from '#tests/common-agreement-degree-model.js';
 import { compileLinkedReleaseRelationCensus } from '#tests/linked-release-relation-model.js';
-import { deriveSetupContributionShape } from '#tests/setup-contribution-relation-model.js';
+import { deriveSetupContributionShape } from '#tests/setup-relation/shape.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
 import {
     listSupportedProfiles,
@@ -353,11 +353,10 @@ export const compileFamilyRoundErrorCensus = () => {
     };
 };
 
-// Ordinary IOP event counts for one profile's full word relation, which is
-// the largest proof operator of that profile: the union over accepted proof
-// roles charges every role these counts, so the ballot and
-// release relations must not exceed them in any count. The QROM compilation
-// and whole-protocol assumptions remain separate obligations.
+// Ordinary IOP event counts for one profile's full word relation, the
+// largest proof operator of that profile, whose counts the ballot and release
+// relations must not exceed. The QROM compilation and whole-protocol
+// assumptions remain separate obligations.
 export const compileWideChallengeCompilerCensus = (
     profile: SupportedProfile,
 ) => {
@@ -394,16 +393,7 @@ export const compileWideChallengeCompilerCensus = (
         queryCount,
         (relation.lookupEntries + 2) * 48,
     );
-    const density = jointModuloDensityBound(
-        prime,
-        256,
-        layout.baseFieldSamples,
-    );
-    if (density.numerator > 2n * density.denominator)
-        throw new Error('The compiler charged an insufficient density factor.');
     const caps = compileProofCompilerCapCensus();
-    const { chargedQueries } = caps;
-    const fieldSize = prime ** 3n;
     const lookupEntryCount =
         BigInt(relation.lookupEntries) * BigInt(agreement.systematicSize);
     if (lookupEntryCount >= prime)
@@ -425,27 +415,6 @@ export const compileWideChallengeCompilerCensus = (
         affineRootDegree + 1n,
         batchingAndFirstFoldNumerator,
     ].reduce((maximum, value) => (value > maximum ? value : maximum), 0n);
-    const queryDenominator =
-        BigInt(agreement.distanceDenominator) ** BigInt(queryCount);
-    const roundErrorNumerator =
-        BigInt(agreement.distanceDenominator - agreement.distanceNumerator) **
-            BigInt(queryCount) *
-            fieldSize +
-        ordinaryAlgebraicNumerator * queryDenominator;
-    const roundErrorDenominator = queryDenominator * fieldSize;
-    const tagSpace = 1n << tagBits;
-    // Historical role-union reference arithmetic: retain its conservative
-    // two-fold density charge and query-plus-algebraic sum. The current
-    // per-role exact maximum above has no assumed corrupt-role population.
-    const failureNumerator =
-        roleBudget *
-        (24n * chargedQueries ** 2n * roundErrorNumerator * tagSpace +
-            (120n * chargedQueries ** 3n + 2n * chargedQueries) *
-                roundErrorDenominator);
-    const failureDenominator = roundErrorDenominator * tagSpace;
-    let failureBits = 0;
-    while (failureNumerator << BigInt(failureBits + 1) <= failureDenominator)
-        failureBits++;
     return {
         ...caps,
         ...layout,
@@ -461,8 +430,5 @@ export const compileWideChallengeCompilerCensus = (
         ordinaryAlgebraicNumerator,
         weightedFri: sampledRounds.weightedFri,
         sampledRoundError: sampledRounds.maximumRoundError,
-        failureNumerator,
-        failureDenominator,
-        failureBits,
     };
 };

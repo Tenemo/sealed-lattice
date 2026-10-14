@@ -6,6 +6,22 @@ fn integer(bytes: &[u8]) -> BigUint {
 }
 
 #[test]
+fn an_fhe_key_family_is_one_modulus_and_common_sampler_width() {
+    let profile = Profile::new(3, 2).unwrap();
+    let mut resized = profile;
+    resized.participants = 20;
+    resized.options = 20;
+    assert!(profile.same_fhe_key_family(resized));
+    let mut wider = profile;
+    wider.common_sample_bits += 8;
+    assert!(!profile.same_fhe_key_family(wider));
+    let other = Profile::all()
+        .find(|candidate| candidate.ciphertext.to_bytes() != profile.ciphertext.to_bytes())
+        .unwrap();
+    assert!(!profile.same_fhe_key_family(other));
+}
+
+#[test]
 fn every_modulus_is_a_certified_prime_of_its_form() {
     let plaintext = 65_537u32;
     for profile in Profile::all() {
@@ -169,10 +185,11 @@ fn setup_polynomials_are_numbered_once_by_family() {
         assert_eq!(profile.setup_family(profile.setup_polynomials()), None);
     }
     let completion = Profile::new(10, 10).unwrap();
-    assert_eq!(completion.setup_statement_header().len(), 136);
+    // The magic and the 108-byte ciphertext modulus.
+    assert_eq!(completion.setup_statement_header().len(), 4 + 108);
     assert_eq!(
         completion.setup_statement_length(),
-        136 + 42 * DEGREE * 109 + 31 * DEGREE * 21
+        4 + 108 + 42 * DEGREE * 109 + 31 * DEGREE * 21
     );
     assert_eq!(completion.setup_polynomials(), 73);
     assert_eq!(completion.share_common_polynomial(), 42);

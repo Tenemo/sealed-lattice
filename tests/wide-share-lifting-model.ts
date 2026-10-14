@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 
+import { absolute, bitLength } from '#tests/exact-integer.js';
 import {
     fixedModulusBfvInputs,
     verifyProthCertificate,
@@ -19,8 +20,6 @@ const sharedSecretSupportWeight = fixedModulusBfvInputs.secretSupportWeight;
 // Every supported roster keeps the summed decryption error of all its setup
 // contributors' shares below this radius; the layout derivation checks it.
 const aggregateDecryptionErrorRadius = 1n << 23n;
-const bitLength = (value: bigint): number => value.toString(2).length;
-
 // Share encryption is the same for every supported profile.
 export const shareEncryptionParameters = {
     proofPrime,
@@ -34,7 +33,7 @@ export const shareEncryptionParameters = {
 
 type WideShareLiftingInput = Readonly<{
     // The setup contributors, whose shares each aggregate share sums.
-    contributorCount: bigint;
+    setupContributorCount: bigint;
     sharingDegree: number;
 }>;
 
@@ -46,10 +45,10 @@ const wideShareLiftingBounds = (
     input: WideShareLiftingInput,
     limbBits: number,
 ) => {
-    const { contributorCount, sharingDegree } = input;
+    const { setupContributorCount, sharingDegree } = input;
     const radix = 1n << BigInt(limbBits);
     const privacyNumerator =
-        contributorCount *
+        setupContributorCount *
         ((1n << BigInt(sharingDegree)) - 1n) *
         2n *
         sharedSecretSupportWeight;
@@ -85,7 +84,8 @@ const wideShareLiftingBounds = (
         sharingCoefficientBits,
         sharingRadius,
         aggregateSharingMaximum:
-            contributorCount * (1n + BigInt(sharingDegree) * sharingRadius),
+            setupContributorCount *
+            (1n + BigInt(sharingDegree) * sharingRadius),
         trueQuotientBound,
         trueCarryBound,
         carryBound,
@@ -103,8 +103,8 @@ const wideShareLiftingBounds = (
 
 // The widest limb, at most maximumLimbBits, whose bounds hold.
 export const deriveWideShareLiftingLayout = (input: WideShareLiftingInput) => {
-    const { contributorCount, sharingDegree } = input;
-    assert.ok(contributorCount > 0n && sharingDegree > 0);
+    const { setupContributorCount, sharingDegree } = input;
+    assert.ok(setupContributorCount > 0n && sharingDegree > 0);
     for (let limbBits = maximumLimbBits; limbBits > 0; limbBits--) {
         const bounds = wideShareLiftingBounds(input, limbBits);
         if (!bounds.holds) continue;
@@ -116,7 +116,7 @@ export const deriveWideShareLiftingLayout = (input: WideShareLiftingInput) => {
         );
         assert.ok(2n * bounds.aggregateSharingMaximum < proofPrime);
         assert.ok(
-            contributorCount *
+            setupContributorCount *
                 (2n * encryptionSupportWeight + 1n) *
                 errorBound <
                 aggregateDecryptionErrorRadius,
@@ -128,7 +128,6 @@ export const deriveWideShareLiftingLayout = (input: WideShareLiftingInput) => {
 };
 
 type Polynomial = readonly bigint[];
-const abs = (value: bigint): bigint => (value < 0n ? -value : value);
 const mod = (value: bigint, coefficientModulus: bigint): bigint =>
     ((value % coefficientModulus) + coefficientModulus) % coefficientModulus;
 const center = (value: bigint): bigint => {
@@ -157,7 +156,8 @@ const monomial = (exponent: number): bigint[] =>
             : 0n,
     );
 const digit = (value: bigint, index: number, radix: bigint): bigint =>
-    (value < 0n ? -1n : 1n) * ((abs(value) / radix ** BigInt(index)) % radix);
+    (value < 0n ? -1n : 1n) *
+    ((absolute(value) / radix ** BigInt(index)) % radix);
 const rowProduct = (left: Polynomial, right: Polynomial, row: number): bigint =>
     left.reduce(
         (sum, value, index) =>
@@ -296,8 +296,8 @@ export const compileWideShareLiftingCensus = (input: WideShareLiftingInput) => {
             const result = numerator / modulus;
             signedRange(result, 16);
             maximumObservedQuotient =
-                abs(result) > maximumObservedQuotient
-                    ? abs(result)
+                absolute(result) > maximumObservedQuotient
+                    ? absolute(result)
                     : maximumObservedQuotient;
             return result;
         });
@@ -329,8 +329,8 @@ export const compileWideShareLiftingCensus = (input: WideShareLiftingInput) => {
                 const next = residual / radix;
                 signedRange(next, carryBits);
                 maximumObservedCarry =
-                    abs(next) > maximumObservedCarry
-                        ? abs(next)
+                    absolute(next) > maximumObservedCarry
+                        ? absolute(next)
                         : maximumObservedCarry;
                 checkedEquations++;
                 return next;

@@ -11,7 +11,6 @@ pub mod plaintext;
 pub mod relation;
 
 const TABLE: &[u8] = include_bytes!("../profiles.bin");
-const MAGIC: &[u8; 4] = b"SPT1";
 const RECORD_BYTES: usize = 30;
 const STATEMENT_MAGIC: &[u8; 4] = b"SCO2";
 
@@ -84,8 +83,7 @@ struct Table {
 // The correspondence test owns the table bytes, so a malformed table is a
 // build defect rather than an input to refuse.
 fn table() -> Table {
-    assert_eq!(&TABLE[..4], MAGIC);
-    let share_end = 5 + usize::from(TABLE[4]);
+    let share_end = 1 + usize::from(TABLE[0]);
     let auxiliary_end = share_end + 1 + usize::from(TABLE[share_end]);
     let fixed_sample_bits = usize::from(u16::from_le_bytes([
         TABLE[auxiliary_end],
@@ -100,7 +98,7 @@ fn table() -> Table {
         participants.clone().count() * options.clone().count() * RECORD_BYTES
     );
     Table {
-        share: &TABLE[5..share_end],
+        share: &TABLE[1..share_end],
         auxiliary: &TABLE[share_end + 1..auxiliary_end],
         fixed_sample_bits,
         participants,
@@ -171,7 +169,8 @@ pub struct SetupShape {
     pub sparse_supports: Vec<(usize, usize)>,
 }
 
-/// Coefficient families of the setup statement.
+/// Coefficient families of the setup and ballot statements, each with its own
+/// modulus and ring degree.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Family {
     Fhe,
@@ -192,6 +191,20 @@ pub fn auxiliary_modulus() -> &'static [u8] {
 /// the profile, is known, so these families have one width.
 pub fn fixed_common_sample_bits() -> usize {
     table().fixed_sample_bits
+}
+
+/// At most f = floor((n - 1) / 3) of n participants are corrupt.
+pub fn maximum_corrupt_participants(participants: usize) -> usize {
+    participants.saturating_sub(1) / 3
+}
+/// Inventory certificates and closing need n - f participants.
+pub fn inventory_threshold(participants: usize) -> usize {
+    participants - maximum_corrupt_participants(participants)
+}
+/// A result needs f + 2 accepted ballots, so it combines at least two honest
+/// ballots; a smaller accepted set takes the no-result branch.
+pub fn minimum_turnout(participants: usize) -> usize {
+    maximum_corrupt_participants(participants) + 2
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -252,13 +265,11 @@ impl Profile {
     pub fn options(self) -> usize {
         self.options
     }
-    /// At most f = floor((n - 1) / 3) participants are corrupt.
     pub fn maximum_corrupt_participants(self) -> usize {
-        (self.participants - 1) / 3
+        maximum_corrupt_participants(self.participants)
     }
-    /// Inventory certificates and closing need n - f participants.
     pub fn inventory_threshold(self) -> usize {
-        self.participants - self.maximum_corrupt_participants()
+        inventory_threshold(self.participants)
     }
     /// Result release needs d = max(f + 1, 2) shares.
     pub fn release_threshold(self) -> usize {
@@ -273,9 +284,8 @@ impl Profile {
     pub fn setup_eligible_contributors(self) -> usize {
         self.setup_contributors() + self.maximum_corrupt_participants()
     }
-    /// A result needs f + 2 accepted ballots.
     pub fn minimum_turnout(self) -> usize {
-        self.maximum_corrupt_participants() + 2
+        minimum_turnout(self.participants)
     }
     /// Sharing polynomials have degree d - 1, so they have d - 1 random
     /// coefficients.
@@ -311,6 +321,12 @@ impl Profile {
     /// Bits of each uniform sample of an FHE common polynomial coefficient.
     pub fn fhe_common_sample_bits(self) -> usize {
         self.common_sample_bits
+    }
+    /// Whether the profiles share an FHE key family: one ciphertext modulus
+    /// and one common-sampler width, whatever their dimensions.
+    pub fn same_fhe_key_family(self, other: Self) -> bool {
+        self.ciphertext.to_bytes() == other.ciphertext.to_bytes()
+            && self.common_sample_bits == other.common_sample_bits
     }
     pub fn sharing_coefficient_bits(self) -> usize {
         self.sharing_coefficient_bits
@@ -443,7 +459,7 @@ impl Profile {
     /// gadget coordinate's encryption, two relinearization and automorphism
     /// key equations and each recipient's constant and linear share equations.
     /// Each equation has its quotient, its carries and its error.
-    pub fn setup_variable_bits(self) -> Vec<usize> {
+    fn setup_variable_bits(self) -> Vec<usize> {
         let mut bits = Vec::new();
         for _ in 0..self.sharing_degree() {
             bits.extend([
@@ -497,13 +513,12 @@ impl Profile {
             sparse_supports,
         }
     }
-    /// The setup statement header: its magic, the ring degree and the FHE
-    /// and share-encryption moduli.
+    /// The setup statement header: its magic and the profile's ciphertext
+    /// modulus. The ring degree and the share-encryption modulus are the
+    /// suite's.
     pub fn setup_statement_header(self) -> Vec<u8> {
         let mut header = STATEMENT_MAGIC.to_vec();
-        header.extend((DEGREE as u32).to_le_bytes());
         header.extend(self.ciphertext_modulus().to_bytes());
-        header.extend(share_modulus());
         header
     }
     /// Bytes of one setup polynomial: a sign byte and a magnitude for each

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { goalThresholds } from '#tests/node/protocol/reference/product-goals.js';
 import {
     participantDepartureBoundaries,
     scheduleParticipantDepartures,
@@ -47,10 +48,11 @@ describe('participant browser cohort selection', () => {
 
     it('spreads every tolerated departure so that exactly the quorum remains', () => {
         for (let participants = 4; participants <= 20; participants++) {
-            // The frozen thresholds, independent of the profile model.
-            const faults = Math.floor((participants - 1) / 3);
-            const selectedCount = Math.max(faults + 1, 2);
-            const eligibleCount = selectedCount + faults;
+            const {
+                maximumCorruptParticipantCount: faults,
+                resultReleaseThreshold: setupContributorCount,
+            } = goalThresholds(participants);
+            const eligibleContributorCount = setupContributorCount + faults;
             const { departures, selectedPositions } =
                 scheduleParticipantDepartures(participants, 2);
             expect(departures).toHaveLength(faults);
@@ -80,18 +82,23 @@ describe('participant browser cohort selection', () => {
                 )
                 .map(({ position }) => position);
             expect(selectedPositions).toEqual(
-                Array.from({ length: eligibleCount }, (_, position) => position)
+                Array.from(
+                    { length: eligibleContributorCount },
+                    (_, position) => position,
+                )
                     .filter((position) => !unoffered.includes(position))
-                    .slice(0, selectedCount),
+                    .slice(0, setupContributorCount),
             );
-            expect(selectedPositions).toHaveLength(selectedCount);
+            expect(selectedPositions).toHaveLength(setupContributorCount);
             for (const { boundary, position } of departures)
                 expect(selectedPositions.includes(position), boundary).toBe(
                     boundary === 'before-selection' ||
                         boundary === 'before-target-vote',
                 );
             expect(
-                unoffered.every((position) => position < eligibleCount),
+                unoffered.every(
+                    (position) => position < eligibleContributorCount,
+                ),
             ).toBe(true);
         }
     });
@@ -178,7 +185,7 @@ describe('participant browser cohort selection', () => {
             'plain',
             '--scalar',
             '--sequential',
-            '--profile',
+            '--cpu-profile',
             '--top-count=3',
             '--base-port=44000',
         ];
@@ -191,7 +198,7 @@ describe('participant browser cohort selection', () => {
             topCount: 3,
             scalar: true,
             sequential: true,
-            profiling: true,
+            cpuProfiling: true,
             basePort: 44000,
             commandLineArguments: commandLineArguments.slice(1),
         });
@@ -243,7 +250,7 @@ describe('participant browser cohort selection', () => {
             ['--scalar', '--scalar'],
             ['--scalar=true'],
             ['--helpers=0'],
-            ['--profile', '--profile'],
+            ['--cpu-profile', '--cpu-profile'],
             ['--foreign-poll= '],
             ['--base-port=65530'],
             ['--base-port=1023'],

@@ -26,9 +26,9 @@ import {
 import type { SignedPacket } from '../../shared/signed-packet.js';
 import { openDelivery } from '../../storage/delivery.js';
 import { rootGeneration } from '../../storage/root-generation.js';
-import { commitPreparation } from '../contribution/contribution.js';
-import type { ParticipantSession } from '../contribution/contribution.js';
 import type { PreparationEndorsement } from '../contribution/preparation-state.js';
+import type { ParticipantSession } from '../participant-session.js';
+import { commitPreparation } from '../participant-session.js';
 
 import {
     authenticateSelection,

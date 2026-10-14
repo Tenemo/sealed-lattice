@@ -4,25 +4,31 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 import { proofRelationCatalogue } from '#tests/proof-relation-catalogue-model.js';
-import { compileSetupContributionColumnLayout } from '#tests/setup-contribution-relation-model.js';
+import { compileSetupContributionColumnLayout } from '#tests/setup-relation/shape.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
 import { deriveSupportedProfile } from '#tests/supported-profile-model.js';
 import {
-    catalogueWordRelation,
     evaluateSystematicColumns,
     type Extension,
     lookupTableCoefficients,
-    productionWordProofDomain,
-    proveWordRelation,
-    verifyWordProof,
-    wordContextParameters,
     wordFieldArithmetic as arithmetic,
-    type WordProofInput,
-    wordProofDomain,
+} from '#tests/word-proof-reference/field.js';
+import {
+    proveWordRelation,
     type WordProverMode,
+} from '#tests/word-proof-reference/prover.js';
+import {
+    catalogueWordRelation,
+    productionWordProofDomain,
+    wordContextParameters,
+    wordProofDomain,
     type WordRelation,
     wordRelationShape,
     type WordStatementParser,
+} from '#tests/word-proof-reference/transcript.js';
+import {
+    verifyWordProof,
+    type WordProofInput,
 } from '#tests/word-verifier-reference-model.js';
 
 const census = compileSmallLimbProofFieldCensus();
@@ -40,8 +46,7 @@ const statementMagic = Buffer.from('TOY1');
 const statementBytes = 4 + 16 * systematic + 16;
 const relation: WordRelation = (() => {
     const shape = {
-        tag: Buffer.from('reference-toy/1'),
-        magic: Buffer.from('TPR1'),
+        tag: Buffer.from('reference-toy'),
         words: 3,
         booleans: 2,
         lookups: [
@@ -51,7 +56,6 @@ const relation: WordRelation = (() => {
             { column: 2, factor: 8n },
         ],
         zeroProducts: [[3, 4]] as const,
-        statementBytes,
         parameters: [3, 2, 4],
     };
     const oracles = wordRelationShape(
@@ -156,8 +160,9 @@ const toyOperator = (affine: Extension, targets: bigint[], support: bigint) => {
     };
 };
 // The verifier's parser of the toy statement: it refuses bytes beyond the
-// statement, then a wrong length, magic or noncanonical field word.
+// statement, then a wrong length, magic, noncanonical field word or digest.
 const toyParser = (
+    statement: Uint8Array,
     affine: Extension,
     positions: readonly number[],
 ): WordStatementParser => {
@@ -173,7 +178,8 @@ const toyParser = (
             const bytes = Buffer.concat(received);
             if (
                 bytes.length !== statementBytes ||
-                !bytes.subarray(0, 4).equals(statementMagic)
+                !bytes.subarray(0, 4).equals(statementMagic) ||
+                !createHash('sha3-512').update(bytes).digest().equals(statement)
             )
                 return undefined;
             const words = Array.from(
@@ -233,7 +239,6 @@ const verify = (proof: ToyProof, overrides: Partial<WordProofInput> = {}) =>
         relation,
         domain,
         role,
-        expectedStatement: proof.digest,
         header: proof.header,
         statement: chunks(proof.statement, 101),
         openStatement: toyParser,
@@ -262,7 +267,7 @@ describe('reference word verifier', () => {
             folds: 17,
             maximumDegree: 131071,
             witnessDegree: 66944,
-            headerBytes: 4004,
+            headerBytes: 3936,
         });
         for (const [size, queries] of [
             [63, 1],
@@ -306,7 +311,7 @@ describe('reference word verifier', () => {
                 );
             }
             expect(source).toContain(
-                `proof_magic: b"${Buffer.from(supported.magic).toString('ascii')}"`,
+                `tag: b"${Buffer.from(supported.tag).toString('ascii')}"`,
             );
         }
         for (const [participants, options] of [
@@ -376,7 +381,7 @@ describe('reference word verifier', () => {
         expect(verify(other)).toEqual({ accepted: true });
     });
 
-    it('refuses malformed headers and contexts before the openings', () => {
+    it('refuses malformed headers, contexts and statements before the openings', () => {
         const proof = prove(toyWitness(3));
         const refused = (refusal: string, stage: string | number) => ({
             accepted: false,
@@ -392,14 +397,9 @@ describe('reference word verifier', () => {
         expect(verify(proof, { header: proof.header.subarray(0, -1) })).toEqual(
             refused('Length', 'open'),
         );
-        expect(
-            verify(proof, {
-                header: changed(proof.header, (copy) => (copy[0] ^= 1)),
-            }),
-        ).toEqual(refused('Encoding', 'open'));
-        // The mask sum follows the magic, both digests and three roots; the
+        // The mask sum follows the statement digest and three roots; the
         // terminal ends the header.
-        for (const offset of [4 + 64 + 64 + 3 * 64, domain.headerBytes - 48])
+        for (const offset of [64 + 3 * 64, domain.headerBytes - 48])
             expect(
                 verify(proof, {
                     header: changed(proof.header, (copy) =>
@@ -407,14 +407,12 @@ describe('reference word verifier', () => {
                     ),
                 }),
             ).toEqual(refused('Encoding', 'open'));
+        // The parser recomputes the statement digest the header declares.
         expect(
             verify(proof, {
-                expectedStatement: changed(
-                    proof.digest,
-                    (copy) => (copy[0] ^= 1),
-                ),
+                header: changed(proof.header, (copy) => (copy[0] ^= 1)),
             }),
-        ).toEqual(refused('Context', 'open'));
+        ).toEqual(refused('Encoding', 'statement'));
         expect(verify(proof, { openStatement: () => undefined })).toEqual(
             refused('Context', 'open'),
         );
@@ -429,23 +427,19 @@ describe('reference word verifier', () => {
                     changed(proof.statement, (copy) => (copy[10] ^= 1)),
                 ],
             }),
-        ).toEqual(refused('Context', 'statement'));
+        ).toEqual(refused('Encoding', 'statement'));
+        // Another role or a changed root draws other challenges, so the
+        // openings name positions the verifier did not request.
         expect(
             verify(proof, { role: Buffer.from('another-word-proof/role') }),
-        ).toEqual(refused('Context', 'statement'));
+        ).toEqual(refused('Encoding', 0));
         expect(
             verify(proof, {
-                header: changed(proof.header, (copy) => (copy[4 + 64] ^= 1)),
-            }),
-        ).toEqual(refused('Context', 'statement'));
-        // A changed root draws other challenges, so the openings name
-        // positions the verifier did not request.
-        expect(
-            verify(proof, {
-                header: changed(proof.header, (copy) => (copy[4 + 128] ^= 1)),
+                header: changed(proof.header, (copy) => (copy[64] ^= 1)),
             }),
         ).toEqual(refused('Encoding', 0));
-        // A statement whose context matches but which its parser refuses.
+        // A statement whose digest the proof binds but which its parser
+        // refuses.
         const toy = toyWitness(3);
         const noncanonical = encodeStatement(toy);
         littleEndianPrime().copy(noncanonical, 4);

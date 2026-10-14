@@ -4,7 +4,132 @@ import {
     installProcessSignalChildCleanup,
     killProcessTree,
     runCommandAndCaptureOutput,
+    runCommandsInSeries,
 } from '#tools/ci/command-runner';
+import type { ActiveLocalRunLog } from '#tools/ci/local-run-log';
+
+// A Node child that idles for a minute unless something stops it.
+const idleCommand = {
+    args: ['--eval', 'setTimeout(() => undefined, 60_000);'],
+    command: process.execPath,
+    description: 'Idle for a minute',
+};
+
+// A run log that records only its events.
+const eventLog = () => {
+    const events: { eventType: string; details?: unknown }[] = [];
+    const runLog: ActiveLocalRunLog = {
+        artifactDirectoryPath: '',
+        runDirectoryPath: '',
+        createCommandLogFiles: () => ({
+            commandId: 'idle',
+            combinedPath: '',
+        }),
+        finish: () => Promise.resolve(),
+        writeCommandOutput: () => undefined,
+        writeEvent: (event) => {
+            events.push(event);
+        },
+    };
+    return { events, runLog };
+};
+
+describe('guarded command execution', () => {
+    it('stops a command at its timeout and fails as its own limit', async () => {
+        const { events, runLog } = eventLog();
+        const started = performance.now();
+        await expect(
+            runCommandAndCaptureOutput(idleCommand, {
+                guard: { timeoutMilliseconds: 200 },
+                runLog,
+            }),
+        ).rejects.toThrow(
+            'Idle for a minute exceeded its 200-millisecond limit.',
+        );
+        expect(performance.now() - started).toBeLessThan(30_000);
+        const finished = events.find(
+            (event) => event.eventType === 'command-finished',
+        );
+        expect(finished?.details).toMatchObject({
+            terminationReason: {
+                classification: 'lane-timeout',
+                limitMilliseconds: 200,
+            },
+            terminationRequested: true,
+        });
+    });
+
+    it('records each memory sample and stops a command above the limit', async () => {
+        const { events, runLog } = eventLog();
+        const samples: number[] = [];
+        await expect(
+            runCommandsInSeries([idleCommand], {
+                guard: {
+                    memory: {
+                        limitBytes: 1,
+                        exceededMessage: 'The test guard was exceeded.',
+                        sampleEventType: 'test-process-memory',
+                        onSample: (bytes) => samples.push(bytes),
+                    },
+                },
+                outputMode: 'capture',
+                runLog,
+            }),
+        ).rejects.toThrow('The test guard was exceeded.');
+        expect(samples).toHaveLength(1);
+        expect(
+            events.filter((event) => event.eventType === 'test-process-memory'),
+        ).toEqual([
+            {
+                commandId: 'idle',
+                details: { bytes: samples[0], memoryLimit: 1 },
+                eventType: 'test-process-memory',
+            },
+        ]);
+    });
+
+    it('starts nothing once its signal is aborted', async () => {
+        const onSample = vi.fn();
+        const result = await runCommandAndCaptureOutput(idleCommand, {
+            guard: {
+                timeoutMilliseconds: 60_000,
+                memory: {
+                    limitBytes: 1,
+                    exceededMessage: 'The test guard was exceeded.',
+                    sampleEventType: 'test-process-memory',
+                    onSample,
+                },
+            },
+            signal: AbortSignal.abort(),
+        });
+        expect(result.exitCode).toBe(1);
+        expect(onSample).not.toHaveBeenCalled();
+    });
+
+    it('returns a fast command within its limits unchanged', async () => {
+        const started = performance.now();
+        const result = await runCommandAndCaptureOutput(
+            {
+                args: ['--eval', "process.stdout.write('done');"],
+                command: process.execPath,
+                description: 'Exit at once',
+            },
+            {
+                guard: {
+                    timeoutMilliseconds: 60_000,
+                    memory: {
+                        limitBytes: Number.MAX_SAFE_INTEGER,
+                        exceededMessage: 'The test guard was exceeded.',
+                        sampleEventType: 'test-process-memory',
+                        sampleIntervalMilliseconds: 3_600_000,
+                    },
+                },
+            },
+        );
+        expect(result).toMatchObject({ exitCode: 0, stdout: 'done' });
+        expect(performance.now() - started).toBeLessThan(30_000);
+    });
+});
 
 describe('command execution', () => {
     it('captures asynchronous output and a nonzero process status', async () => {

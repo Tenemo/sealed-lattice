@@ -69,7 +69,7 @@ export const compileSetupAggregateResources = (profile: SupportedProfile) => {
         0n,
     );
     // The verifier folds every setup contributor's body into the cache.
-    const contributorCount = BigInt(body.setupContributorCount);
+    const setupContributorCount = BigInt(body.setupContributorCount);
     return {
         polynomials,
         aggregateBytes,
@@ -92,9 +92,9 @@ export const compileSetupAggregateResources = (profile: SupportedProfile) => {
         // This bounds logical payload, not physical database journals/GC.
         maximumLogicalCachePayloadBytes:
             aggregateBytes + maximumReplacementChunkBytes,
-        contributionReadBytes: contributorCount * aggregateBytes,
-        previousCacheReadBytes: (contributorCount - 1n) * aggregateBytes,
-        provisionalCacheWriteBytes: contributorCount * aggregateBytes,
+        contributionReadBytes: setupContributorCount * aggregateBytes,
+        previousCacheReadBytes: (setupContributorCount - 1n) * aggregateBytes,
+        provisionalCacheWriteBytes: setupContributorCount * aggregateBytes,
         completeReadbackBytes: aggregateBytes,
     };
 };

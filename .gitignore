@@ -3,8 +3,6 @@ node_modules/
 *.tgz
 npm-debug.log
 pnpm-debug.log*
-.tmp/
-.tmp-*
 debug.log
 *.stackdump
 
@@ -12,9 +10,7 @@ debug.log
 dist/
 target/
 *.tsbuildinfo
-.vitest-attachments/
-**/__screenshots__/
-**/__traces__/
+.vitest/
 
 # Miscellaneous
 .DS_Store

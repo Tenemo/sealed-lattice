@@ -1,5 +1,5 @@
 import type { PublicProfileContext } from '../../module/context.js';
-import { PublicInputFailure, ResourceFailure } from '../../shared/failures.js';
+import { ResourceFailure, StorageFailure } from '../../shared/failures.js';
 import {
     namespacedName,
     requestResult,
@@ -8,20 +8,19 @@ import {
 } from '../../storage/database.js';
 
 // The public aggregate cache. It supplies only bytes that the owning Rust
-// verifiers check against their exact verified predecessors, and a cache
-// failure leaves the participant pending, like any other public input.
+// verifiers check against their exact verified predecessors. A browser
+// failure of the cache, or a chunk it lost, leaves the participant pending on
+// storage; a consumer that refuses cached bytes discards the cache.
 
 const cacheStore = 'aggregate';
 
-// The aggregate cache holds only public bytes; a cache failure leaves the
-// participant pending, like any other public input.
 export const openSetupCache = async (namespace: string) => {
     const opened = indexedDB.open(namespacedName(setupCacheName, namespace), 1);
     opened.onupgradeneeded = () => opened.result.createObjectStore(cacheStore);
     try {
         return await requestResult(opened);
     } catch {
-        throw new PublicInputFailure('The setup cache is unavailable.');
+        throw new StorageFailure('The setup cache is unavailable.');
     }
 };
 
@@ -37,7 +36,7 @@ export const writeCache = async (
         write(transaction.objectStore(cacheStore));
         await done;
     } catch {
-        throw new PublicInputFailure('The setup cache refused a write.');
+        throw new StorageFailure('The setup cache refused a write.');
     }
 };
 
@@ -113,7 +112,7 @@ export const holdsFinalAggregate = async (context: PublicProfileContext) => {
             })
         );
     } catch {
-        throw new PublicInputFailure('The setup cache refused a read.');
+        throw new StorageFailure('The setup cache refused a read.');
     } finally {
         cache.close();
     }
@@ -123,7 +122,7 @@ export const holdsFinalAggregate = async (context: PublicProfileContext) => {
 // bytes are not the ones the retained setup reference names, so the cache
 // is discarded and the next operation verifies the setup again, which rewrites
 // it.
-export const deliverFinalAggregate = async (
+export const streamFinalAggregate = async (
     context: PublicProfileContext,
     deliver: () => Promise<void>,
 ) => {
@@ -155,15 +154,15 @@ export const readCachedAggregateChunk = async (
             transactionCompletion(transaction),
         ]);
     } catch {
-        throw new PublicInputFailure('The setup cache refused a read.');
+        throw new StorageFailure('The setup cache refused a read.');
     }
     if (!(value instanceof Blob) || value.size !== chunk.length)
-        throw new PublicInputFailure('A cached aggregate chunk is missing.');
+        throw new StorageFailure('A cached aggregate chunk is missing.');
     try {
         return new Uint8Array(await value.arrayBuffer());
     } catch (error) {
         throw error instanceof DOMException
-            ? new PublicInputFailure('The setup cache refused a read.')
+            ? new StorageFailure('The setup cache refused a read.')
             : error;
     }
 };

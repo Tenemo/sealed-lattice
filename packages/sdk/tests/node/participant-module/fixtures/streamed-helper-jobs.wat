@@ -1,0 +1,33 @@
+(module
+  (import "parallel" "read" (func $read (param i32 i32 i32)))
+  (memory (export "memory") 2)
+  (global $streamed (mut i32) (i32.const 0))
+  (func (export "parallel_reserve") (param i32 i32) (result i32)
+    (i32.const 0))
+  (func (export "parallel_input") (param i32) (result i32)
+    (i32.const 65536))
+  (func (export "parallel_streamed") (param $length i32) (result i32)
+    (global.set $streamed (local.get $length))
+    (i32.const 1))
+  (func (export "parallel_run") (param $kind i32) (result i32)
+    (if (i32.eq (local.get $kind) (i32.const 5))
+      (then
+        (call $read (i32.const 0) (i32.const 2048) (i32.const 8))
+        (return (i32.const 0))))
+    (if (i32.eq (local.get $kind) (i32.const 6))
+      (then
+        (call $read (global.get $streamed) (i32.const 2048) (i32.const 1))
+        (return (i32.const 0))))
+    (if (i32.eq (local.get $kind) (i32.const 7))
+      (then
+        (loop $closed
+          (call $read (i32.const 0) (i32.const 2048) (i32.const 1))
+          (br_if $closed (i32.eqz (i32.load8_u (i32.const 2048)))))
+        (call $read (i32.const 0) (i32.const 2048) (i32.const 8))
+        (return (i32.const 0))))
+    (i32.const 1))
+  (func (export "parallel_output_length") (result i32)
+    (i32.const 8))
+  (func (export "parallel_output_pointer") (result i32)
+    (i32.const 2048))
+  (func (export "parallel_clear")))

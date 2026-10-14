@@ -31,7 +31,7 @@ type ProtocolResearchSelection = {
     | { name: 'native-setup-departure' | 'native-selection-fork' }
     | {
           name: 'scalar-fhe-key-source' | 'browser-fhe-key-source';
-          source: string;
+          nativeRun: string;
       }
 );
 
@@ -75,12 +75,16 @@ export const selectProtocolResearchCase = (
                 );
             return { name: values[0], ...settings };
         }
-        const source = values[1];
-        if (values.length !== 2 || !source?.trim() || source.startsWith('--'))
+        const nativeRun = values[1];
+        if (
+            values.length !== 2 ||
+            !nativeRun?.trim() ||
+            nativeRun.startsWith('--')
+        )
             throw new Error(
-                'A scalar or browser FHE key source screen requires exactly one native source.',
+                'A scalar or browser FHE key source screen requires exactly one native run.',
             );
-        return { name: values[0], source, ...settings };
+        return { name: values[0], nativeRun, ...settings };
     }
     const option = values.indexOf('--simulated-helpers');
     const helpers = option === -1 ? undefined : values[option + 1];

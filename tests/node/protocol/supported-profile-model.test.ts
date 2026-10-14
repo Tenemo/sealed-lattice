@@ -1,11 +1,13 @@
-import { readFile } from 'node:fs/promises';
-
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
     fixedModulusBfvInputs,
     verifyProthCertificate,
 } from '#tests/fixed-modulus-bfv-model.js';
+import {
+    readRustSource,
+    rustIntegerConstant,
+} from '#tests/node/rust-source.js';
 import { compileReleaseShareLiftingCensus } from '#tests/release-share-lifting-model.js';
 import {
     clearedReconstructionCoefficient,
@@ -15,9 +17,11 @@ import {
     deriveSupportedProfile,
     interpolationRingDegree,
     largestTransformPrimeBelow,
+    listSupportedProfiles,
+    primeSupportedProfiles,
     supportedProfileRules,
 } from '#tests/supported-profile-model.js';
-import { compileThresholdCompletionProfile } from '#tests/threshold-completion-model.js';
+import { thresholdProfileFor } from '#tests/threshold-completion-model.js';
 import { compileThresholdReleaseNoiseCensus } from '#tests/threshold-release-noise-model.js';
 import { compileWideShareLiftingCensus } from '#tests/wide-share-lifting-model.js';
 
@@ -114,12 +118,11 @@ describe('supported profile parameters', () => {
         expect(profile.shareLifting.limbBits).toBe(96);
         expect(profile.releaseLifting.shareBits).toBe(120);
         // The shared Rust profile crate fixes the FHE and release radices.
-        const shared = await readFile(
+        const shared = await readRustSource(
             'crates/protocol-research/supported-profile/src/lib.rs',
-            'utf8',
         );
-        expect(shared).toContain('pub const FHE_LIMB_BITS: usize = 96;');
-        expect(shared).toContain('pub const RELEASE_LIMB_BITS: usize = 48;');
+        expect(rustIntegerConstant(shared, 'FHE_LIMB_BITS')).toBe(96n);
+        expect(rustIntegerConstant(shared, 'RELEASE_LIMB_BITS')).toBe(48n);
     });
 
     it('derives degree-one sharing and two-share release for three participants', () => {
@@ -137,7 +140,7 @@ describe('supported profile parameters', () => {
         const failedIdentities: string[] = [];
         for (const participantCount of census.participantCounts) {
             const { resultReleaseThreshold: threshold } =
-                compileThresholdCompletionProfile(participantCount);
+                thresholdProfileFor(participantCount);
             const degree = interpolationRingDegree(participantCount);
             expect(2 * degree).toBeGreaterThanOrEqual(participantCount);
             expect(degree).toBeLessThan(participantCount);
@@ -334,5 +337,33 @@ describe('supported profile parameters', () => {
         expect(() => deriveSupportedProfile(10, 1)).toThrow();
         expect(() => deriveSupportedProfile(10, 21)).toThrow();
         expect(() => deriveSupportedProfile(10, 2.5)).toThrow();
+    });
+
+    it('primes only empty caches, and only with the complete supported grid', async () => {
+        const listed = listSupportedProfiles();
+        expect(() => primeSupportedProfiles(listed)).toThrow(
+            'Only empty profile caches can be primed.',
+        );
+        vi.resetModules();
+        const fresh = await import('#tests/supported-profile-model.js');
+        for (const altered of [
+            listed.slice(1),
+            [...listed, listed[0]],
+            listed.map((profile, index) =>
+                index === 0 ? { ...profile, optionCount: 21 } : profile,
+            ),
+        ])
+            expect(() => fresh.primeSupportedProfiles(altered)).toThrow(
+                'The primed profiles differ from the supported profile grid.',
+            );
+        fresh.primeSupportedProfiles(listed);
+        const completion = listed.find(
+            ({ participantCount, optionCount }) =>
+                participantCount === 10 && optionCount === 10,
+        );
+        expect(fresh.deriveSupportedProfile(10, 10)).toBe(completion);
+        expect(fresh.deriveReleaseInterpolation(10)).toBe(
+            completion?.interpolation,
+        );
     });
 });

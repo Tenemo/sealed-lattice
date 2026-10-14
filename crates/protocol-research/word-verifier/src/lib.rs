@@ -1,7 +1,10 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 pub mod engine;
 pub use engine::{CHUNK_LIMIT, HEADER_LENGTH, Refusal};
-use statement_stream::{SetupStatementStream, StatementOutput};
+use statement_stream::{
+    SetupStatementStream, StatementOutput,
+    affine::{HeaderThenPolynomials, OperatorBuilder},
+};
 use supported_profile::{Profile, relation::setup_relation};
 
 impl engine::Statement for SetupStatementStream {
@@ -12,22 +15,28 @@ impl engine::Statement for SetupStatementStream {
         SetupStatementStream::finish(self).ok()
     }
 }
+impl<B: OperatorBuilder> engine::Statement for HeaderThenPolynomials<B> {
+    fn push(&mut self, bytes: &[u8]) -> bool {
+        HeaderThenPolynomials::push(self, bytes).is_ok()
+    }
+    fn finish(self) -> Option<StatementOutput> {
+        HeaderThenPolynomials::finish(self).ok()
+    }
+}
 
-pub type Verifier = engine::Verifier<SetupStatementStream>;
+pub type SetupContributionVerifier = engine::Verifier<SetupStatementStream>;
 /// Verifies a complete setup contribution proof of one profile.
-pub fn verifier(
+pub fn setup_contribution_verifier(
     profile: Profile,
     role: &[u8],
-    expected_statement: [u8; 64],
     proof_header: &[u8],
-) -> Result<Verifier, Refusal> {
-    Verifier::open(
+) -> Result<SetupContributionVerifier, Refusal> {
+    SetupContributionVerifier::open(
         setup_relation(profile),
         role,
-        expected_statement,
         proof_header,
-        |alpha, queries| {
-            SetupStatementStream::new(profile, expected_statement, alpha, queries).ok()
+        |statement, alpha, queries| {
+            SetupStatementStream::new(profile, statement, alpha, queries).ok()
         },
     )
 }

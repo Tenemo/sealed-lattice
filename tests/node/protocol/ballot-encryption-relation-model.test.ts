@@ -51,7 +51,7 @@ describe('linked scored ballot encryption', () => {
         ).toBe(4194304n);
     });
 
-    it('rejects truncated FHE limbs and direct auxiliary proof-field aliases', () => {
+    it('refuses truncated FHE limbs and direct auxiliary proof-field aliases', () => {
         const model = createBallotEncryptionRelationModel(completionProfile(), [
             1n,
             10n,
@@ -149,7 +149,7 @@ describe('linked scored ballot encryption', () => {
         }
     });
 
-    it('rejects individually valid encryptions of different scores and a forged error repair', () => {
+    it('refuses individually valid encryptions of different scores and a forged error repair', () => {
         const model = createBallotEncryptionRelationModel(
             completionProfile(),
             [1n, 10n],
@@ -172,7 +172,7 @@ describe('linked scored ballot encryption', () => {
         expect(model.rangeValid()).toBe(false);
     });
 
-    it('rejects out-of-domain scores even when every encryption equality holds', () => {
+    it('refuses out-of-domain scores even when every encryption equality holds', () => {
         for (const scores of [
             [0n, 1n],
             [1n, 11n],

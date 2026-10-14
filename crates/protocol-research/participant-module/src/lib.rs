@@ -3,14 +3,18 @@ use protocol_foundations::{
     BodyDigest, Credential,
     foundation::{RegistrationHeader, normalize_username},
 };
-use setup_witness::registration::RegistrationKey;
+use setup_witness::registration::RecipientKey;
 
 use std::io::{self, Write};
 use zeroize::Zeroizing;
 
+#[cfg(target_arch = "wasm32")]
+mod abi;
 pub mod ballot;
 #[path = "close-work.rs"]
 pub mod close_work;
+#[path = "contribution-session.rs"]
+pub mod contribution_session;
 #[path = "custody-identity.rs"]
 pub mod custody_identity;
 #[cfg(any(target_arch = "wasm32", test))]
@@ -31,8 +35,8 @@ pub mod offer_signing;
 #[path = "operation-random.rs"]
 mod operation_random;
 #[cfg(any(target_arch = "wasm32", test))]
-#[path = "own-verification.rs"]
-mod own_verification;
+#[path = "own-registration.rs"]
+mod own_registration;
 #[path = "participant-bounds.rs"]
 pub mod participant_bounds;
 #[cfg(test)]
@@ -46,12 +50,6 @@ mod registration_session_tests;
 mod release_body;
 #[path = "release-work.rs"]
 pub mod release_work;
-#[cfg(any(target_arch = "wasm32", test))]
-#[path = "signed-packet.rs"]
-mod signed_packet;
-
-#[cfg(target_arch = "wasm32")]
-mod abi;
 
 /// Every job a helper instance runs. Every proof crate proves with the one
 /// shared engine, so its jobs serve every proof kind.
@@ -71,12 +69,12 @@ static ALLOCATOR: parallel_work::scalar_allocator::ScalarAllocator =
     parallel_work::scalar_allocator::ScalarAllocator::new();
 
 pub struct Enrollment {
-    pub key: RegistrationKey,
+    pub key: RecipientKey,
     pub credential: Credential,
     sources: Option<fhe_sources::Sources>,
 }
 #[derive(Debug)]
-pub enum Error {
+pub enum Refusal {
     Shape,
     State,
 }
@@ -129,7 +127,7 @@ impl<F: FnMut(u32, usize, &[u8])> Write for RecordWriter<'_, F> {
 }
 pub(crate) fn key_associated(body_digest: [u8; 64]) -> Vec<u8> {
     [
-        b"sealed-lattice/recipient-key-custody/v1".as_slice(),
+        b"sealed-lattice/recipient-key-custody".as_slice(),
         &body_digest,
     ]
     .concat()
@@ -159,24 +157,24 @@ impl Enrollment {
         runtime: [u8; 64],
         username: &[u8],
         output: impl FnMut(u32, usize, &[u8]),
-    ) -> Result<(protocol_foundations::poll::SignedPoll, Self, DataKeys), Error> {
-        normalize_username(username).map_err(|_| Error::Shape)?;
+    ) -> Result<(protocol_foundations::poll::SignedPoll, Self, DataKeys), Refusal> {
+        normalize_username(username).map_err(|_| Refusal::Shape)?;
         let mut credential = fresh_credential();
         let nonce = random::<32>();
         let packet = credential
             .create_poll(draft, runtime, *nonce)
-            .map_err(|_| Error::State)?;
+            .map_err(|_| Refusal::State)?;
         let verified = protocol_foundations::poll::verify_poll(
             packet.identity,
             runtime,
             &packet.body,
             &packet.signature,
         )
-        .map_err(|_| Error::State)?;
+        .map_err(|_| Refusal::State)?;
         let (enrollment, data_keys) =
             Self::create_with_credential(&verified, username, credential, output)?;
         if enrollment.credential.signing_public() != verified.organizer() {
-            return Err(Error::State);
+            return Err(Refusal::State);
         }
         Ok((packet, enrollment, data_keys))
     }
@@ -184,8 +182,8 @@ impl Enrollment {
         poll: &protocol_foundations::poll::VerifiedPoll,
         username: &[u8],
         output: impl FnMut(u32, usize, &[u8]),
-    ) -> Result<(Self, DataKeys), Error> {
-        normalize_username(username).map_err(|_| Error::Shape)?;
+    ) -> Result<(Self, DataKeys), Refusal> {
+        normalize_username(username).map_err(|_| Refusal::Shape)?;
         Self::create_with_credential(poll, username, fresh_credential(), output)
     }
     fn create_with_credential(
@@ -193,11 +191,11 @@ impl Enrollment {
         username: &[u8],
         mut credential: Credential,
         mut output: impl FnMut(u32, usize, &[u8]),
-    ) -> Result<(Self, DataKeys), Error> {
-        let username = normalize_username(username).map_err(|_| Error::Shape)?;
+    ) -> Result<(Self, DataKeys), Refusal> {
+        let username = normalize_username(username).map_err(|_| Refusal::Shape)?;
         let poll = verified_poll.identity();
         let mut sources = fhe_sources::Sources::create(verified_poll, &credential)?;
-        let mut key = RegistrationKey::new();
+        let mut key = RecipientKey::new();
         let public = key.public_key_bytes();
         let key_hash = ProtocolHash::digest(&public);
         let mut key_output = RecordWriter::new(data_kind::PUBLIC_KEY, &mut output);
@@ -212,17 +210,17 @@ impl Enrollment {
             fhe_key_commitments: sources.commitments().to_vec(),
         }
         .encode()
-        .map_err(|_| Error::Shape)?;
-        let body = BodyDigest::from_header(&header, poll).map_err(|_| Error::State)?;
+        .map_err(|_| Refusal::Shape)?;
+        let body = BodyDigest::from_header(&header, poll).map_err(|_| Refusal::State)?;
         let body_digest = body.bytes();
         let sealed_sources = sources.seal(body_digest)?;
         let signature = credential
             .sign_registration(body)
-            .map_err(|_| Error::State)?;
+            .map_err(|_| Refusal::State)?;
         let sealed_key = key
             .seal_retained(&key_associated(body_digest))
-            .map_err(|_| Error::State)?;
-        let sealed_credential = credential.seal_complete().map_err(|_| Error::State)?;
+            .map_err(|_| Refusal::State)?;
+        let sealed_credential = credential.seal_complete().map_err(|_| Refusal::State)?;
         for (kind, bytes) in [
             (data_kind::HEADER, header.as_slice()),
             (data_kind::SIGNATURE, signature.as_slice()),
@@ -256,17 +254,17 @@ impl Enrollment {
     pub fn contribution_source(
         &self,
         profile: supported_profile::Profile,
-    ) -> Result<setup_witness::fhe_key_source::FheKeySource, Error> {
-        self.sources.as_ref().ok_or(Error::State)?.source(profile)
+    ) -> Result<setup_witness::fhe_key_source::FheKeySource, Refusal> {
+        self.sources.as_ref().ok_or(Refusal::State)?.source(profile)
     }
     pub fn contribution_header(
         &self,
         profile: supported_profile::Profile,
         proof_length: usize,
-    ) -> Result<[u8; protocol_foundations::contribution_body::BODY_HEADER_BYTES], Error> {
+    ) -> Result<[u8; protocol_foundations::contribution_body::BODY_HEADER_BYTES], Refusal> {
         self.sources
             .as_ref()
-            .ok_or(Error::State)?
+            .ok_or(Refusal::State)?
             .body_header(profile, proof_length)
     }
     /// Retires the seed material that could reconstruct contribution secrets.
@@ -285,7 +283,7 @@ impl Enrollment {
         body_digest: [u8; 64],
         data_keys: &[u8; 96],
         records: [&[u8]; 3],
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, Refusal> {
         let mut result = Self::restore_base(
             poll,
             header,
@@ -314,7 +312,7 @@ impl Enrollment {
         body_digest: [u8; 64],
         data_keys: &[u8; 64],
         records: [&[u8]; 3],
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, Refusal> {
         let mut result = Self::restore_base(
             poll,
             header,
@@ -326,12 +324,12 @@ impl Enrollment {
         let tag_start = records[2]
             .len()
             .checked_sub(protocol_foundations::RETAINED_TAG_BYTES)
-            .ok_or(Error::Shape)?;
+            .ok_or(Refusal::Shape)?;
         let (reference, tag) = records[2].split_at(tag_start);
         result
             .credential
             .check_retained_setup_tag(poll, reference, tag)
-            .map_err(|_| Error::State)?;
+            .map_err(|_| Refusal::State)?;
         result.credential.retire_preparation();
         Ok(result)
     }
@@ -343,38 +341,31 @@ impl Enrollment {
         body_digest: [u8; 64],
         data_keys: &[u8; 64],
         records: [&[u8]; 2],
-    ) -> Result<Self, Error> {
-        use num_bigint::{BigInt, Sign};
+    ) -> Result<Self, Refusal> {
+        use statement_stream::coefficient::CenteredCodec;
         if poll.identity() != header.poll
             || public_bytes.len() != 65536 * 21
             || ProtocolHash::digest(public_bytes) != header.recipient_key_hash
         {
-            return Err(Error::Shape);
+            return Err(Refusal::Shape);
         }
-        let modulus = BigInt::from_bytes_le(Sign::Plus, supported_profile::share_modulus());
-        let half = modulus >> 1usize;
-        let mut public = Vec::with_capacity(65536);
-        for bytes in public_bytes.chunks_exact(21) {
-            let value = BigInt::from_bytes_le(Sign::Plus, &bytes[1..]);
-            if bytes[0] > 1 || value > half || (bytes[0] == 1 && value == BigInt::from(0)) {
-                return Err(Error::Shape);
-            }
-            public.push(if bytes[0] == 1 { -value } else { value });
-        }
+        let public = CenteredCodec::new(supported_profile::share_modulus())
+            .decode_all(public_bytes)
+            .ok_or(Refusal::Shape)?;
         let credential = Credential::open_complete(
             header.signing_public,
             body_digest,
             data_keys[32..].try_into().unwrap(),
             records[1],
         )
-        .map_err(|_| Error::State)?;
-        let key = RegistrationKey::open_retained(
+        .map_err(|_| Refusal::State)?;
+        let key = RecipientKey::open_retained(
             public,
             data_keys[..32].try_into().unwrap(),
             &key_associated(body_digest),
             records[0],
         )
-        .map_err(|_| Error::State)?;
+        .map_err(|_| Refusal::State)?;
         Ok(Self {
             key,
             credential,

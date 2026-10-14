@@ -5,7 +5,7 @@ import { compileParticipantBallotCustody } from '#tests/participant-ballot-custo
 import { compileParticipantCloseCustody } from '#tests/participant-close-custody-model.js';
 import { compileParticipantReleaseCustody } from '#tests/participant-release-custody-model.js';
 import { compileRegistrationEnrollmentCensus } from '#tests/registration-enrollment-model.js';
-import { compileSetupContributionRelationCensus } from '#tests/setup-contribution-relation-model.js';
+import { compileSetupContributionRelationCensus } from '#tests/setup-relation/shape.js';
 import { compileSetupSelectionWireCensus } from '#tests/setup-selection-wire-model.js';
 import type { SupportedProfile } from '#tests/supported-profile-model.js';
 import { compileTargetSigningStateCensus } from '#tests/target-signing-state-model.js';
@@ -91,7 +91,8 @@ export const projectContributionProofPadding = (
         additionalProofReadBytes:
             completeReadPasses * additionalProofCiphertextBytes,
         additionalProofVerificationCalls: completeReadPasses * addedRecords,
-        // The source-opening salt stays in SCB2; padding changes no proof bytes.
+        // The source-opening salt stays in the body header; padding changes
+        // no proof bytes.
         publishedProofBytes: observedProofBytes,
     };
 };
@@ -131,8 +132,9 @@ export const compileParticipantCustodyCensus = (profile: SupportedProfile) => {
         return lengths;
     });
     const maximumProofRecords = chunks(body.maximumProofBytes);
-    // PCS5 owns its phase independently of global preparation generation.
-    const metadataPrefixBytes = 4n + 1n + 2n + 4n * 4n;
+    // The own offer's state carries its phase independently of the global
+    // preparation generation.
+    const metadataPrefixBytes = 1n + 2n + 4n * 4n;
     const maximumCheckpointMetadataBytes =
         metadataPrefixBytes +
         checkpoint.maximumHeaderBytes +
@@ -148,13 +150,14 @@ export const compileParticipantCustodyCensus = (profile: SupportedProfile) => {
         maximumCheckpointMetadataBytes > maximumCompletedMetadataBytes
             ? maximumCheckpointMetadataBytes
             : maximumCompletedMetadataBytes;
-    // SAV1 and SPI1 contain the semantic selection identity, ordered aggregate
-    // polynomial identities and the owning verifier's credential-keyed tag.
+    // The setup and selection references contain the semantic selection
+    // identity, ordered aggregate polynomial identities and the owning
+    // verifier's credential-keyed tag, whose label names which they are.
     const setupReferenceBytes =
-        4n + 64n + 64n * BigInt(body.polynomials.length) + 64n;
+        64n + 64n * BigInt(body.polynomials.length) + 64n;
     const selectionReferenceBytes = setupReferenceBytes;
     const setupCertificateBytes = wire.certificateBytes;
-    const emptyPreparationBytes = 4n + 3n * 4n;
+    const emptyPreparationBytes = 3n * 4n;
     const maximumSelectionSlotBytes =
         1n + wire.selectionBodyBytes + wire.signatureBytes;
     const maximumEndorsementSlotBytes =
@@ -364,9 +367,7 @@ export const compileParticipantVaultKeyClasses = (
     // object, offset and length.
     const contributionAssociatedBytes =
         BigInt(
-            Buffer.byteLength(
-                'sealed-lattice/participant-contribution-record/v2',
-            ),
+            Buffer.byteLength('sealed-lattice/participant-contribution-record'),
         ) +
         64n +
         64n +
@@ -377,17 +378,13 @@ export const compileParticipantVaultKeyClasses = (
     // The poll and setup inventory, the position, a release's certified
     // target digest, and the record's index and length.
     const ballotAssociatedBytes =
-        BigInt(
-            Buffer.byteLength('sealed-lattice/participant-ballot-record/v3'),
-        ) +
+        BigInt(Buffer.byteLength('sealed-lattice/participant-ballot-record')) +
         2n * 64n +
         2n +
         2n +
         4n;
     const releaseAssociatedBytes =
-        BigInt(
-            Buffer.byteLength('sealed-lattice/participant-release-record/v3'),
-        ) +
+        BigInt(Buffer.byteLength('sealed-lattice/participant-release-record')) +
         2n * 64n +
         2n +
         64n +
@@ -403,7 +400,7 @@ export const compileParticipantVaultKeyClasses = (
             name: 'Initial root',
             maximumPerCompletedCorpus: 1n,
             encryptions: [
-                invocation(68n, enrollment.rootAssociatedBytes),
+                invocation(64n, enrollment.rootAssociatedBytes),
                 invocation(
                     enrollment.maximumEnrollmentManifestBytes,
                     enrollment.rootAssociatedBytes,
@@ -464,7 +461,7 @@ export const compileParticipantVaultKeyClasses = (
             encryptions: [
                 invocation(
                     checkpoint.maximumPlaintextRecordBytes,
-                    BigInt(Buffer.byteLength('first-oracle-checkpoint/1')) +
+                    BigInt(Buffer.byteLength('first-oracle-checkpoint')) +
                         64n +
                         4n,
                 ),

@@ -1,5 +1,5 @@
 use super::*;
-use num_bigint::BigUint;
+use num_bigint::{BigUint, Sign};
 fn encode(value: &BigInt, width: usize) -> Vec<u8> {
     let (sign, magnitude) = value.to_bytes_le();
     let mut bytes = vec![0; width];

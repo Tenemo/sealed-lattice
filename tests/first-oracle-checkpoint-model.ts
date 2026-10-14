@@ -5,7 +5,7 @@ import {
     merkleSaltSeedBytes,
 } from '#tests/full-word-proof-layout-model.js';
 import { compileRosterProposalCensus } from '#tests/roster-proposal-model.js';
-import { compileSetupContributionRelationCensus } from '#tests/setup-contribution-relation-model.js';
+import { compileSetupContributionRelationCensus } from '#tests/setup-relation/shape.js';
 import type { SupportedProfile } from '#tests/supported-profile-model.js';
 
 // The most plaintext bytes one checkpoint record seals.
@@ -60,15 +60,13 @@ export const compileFirstOracleCheckpointCensus = (
                 count + (polynomial.bytes + (1n << 20n) - 1n) / (1n << 20n),
             0n,
         );
-    // Fixed fields: magic, participant and option counts, column, role
-    // length, expected/context digests, statement header and complete
-    // original recipient-key hash list. Only the role payload varies.
+    // Fixed fields: participant and option counts, column, role length,
+    // statement digest, statement header and complete original recipient-key
+    // hash list. Only the role payload varies.
     const fixedHeaderBytes =
-        4n +
         2n +
         4n +
         2n +
-        64n +
         64n +
         relation.expandedStatementHeaderByteLength +
         2n +

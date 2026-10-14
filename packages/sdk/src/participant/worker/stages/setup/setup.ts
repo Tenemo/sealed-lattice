@@ -24,9 +24,9 @@ import {
     collectingCloseState,
     encodeCloseState,
 } from '../close/close-state.js';
-import type { ParticipantSession } from '../contribution/contribution.js';
-import { contributionRecords } from '../contribution/contribution.js';
 import { encodePreparationState } from '../contribution/preparation-state.js';
+import { contributionRecords } from '../participant-session.js';
+import type { ParticipantSession } from '../participant-session.js';
 import {
     proposalRegistrationBodyDigests,
     rosterBegin,
@@ -38,7 +38,7 @@ import {
     aggregateSelection,
     authenticateCertificate,
     authenticateSelection,
-    preparedRosters,
+    modulesWithReplayedRoster,
     readSetupCertificate,
     verifyCertificateInputs,
 } from './setup-verification.js';
@@ -51,14 +51,18 @@ import {
 // when the cache lost it.
 
 export const verifySetupRoster = async (
-    session: ParticipantSession,
+    session: Pick<ParticipantSession, 'context' | 'root'>,
     relay: PublicRelay,
 ) => {
     const { context } = session;
     const { module, profile } = context;
-    if (preparedRosters.has(module)) return;
+    if (modulesWithReplayedRoster.has(module)) return;
     const { manifest } = session.root;
-    const proposal = await readDataKind(context, manifest, dataKind.proposal);
+    const proposal = await readDataKind(
+        context,
+        manifest,
+        dataKind.rosterProposal,
+    );
     const definition = await readDataKind(
         context,
         manifest,
@@ -101,7 +105,7 @@ export const verifySetupRoster = async (
     const proposalSignature = await readDataKind(
         context,
         manifest,
-        dataKind.proposalSignature,
+        dataKind.rosterProposalSignature,
     );
     const proposalPacket = concatenate(
         unsigned32(proposal.length),
@@ -115,7 +119,7 @@ export const verifySetupRoster = async (
         throw new PublicInputFailure(
             'The published registrations are not the retained proposal.',
         );
-    preparedRosters.add(module);
+    modulesWithReplayedRoster.add(module);
 };
 
 export const verifySelectionInputs = async (
@@ -145,7 +149,7 @@ type VerifiedSetup = Readonly<{
 }>;
 
 const referenceSetupIdentity = (reference: Uint8Array) =>
-    reference.subarray(4, 68);
+    reference.subarray(0, 64);
 
 const certifyRetainedSelection = (
     session: ParticipantSession,
@@ -215,7 +219,7 @@ export const verifySetup = async (
 };
 
 export const ensureFinalAggregate = async (
-    session: ParticipantSession,
+    session: Pick<ParticipantSession, 'context' | 'root'>,
     relay: PublicRelay,
 ) => {
     if (session.root.head.generation < rootGeneration.setupRetained)
@@ -223,7 +227,7 @@ export const ensureFinalAggregate = async (
     if (await holdsFinalAggregate(session.context)) return false;
     // A cache loss can also occur after certification in this same operation.
     // Rebuild from fresh owning verification, not an existing aggregate flag.
-    preparedRosters.delete(session.context.module);
+    modulesWithReplayedRoster.delete(session.context.module);
     await verifySetupRoster(session, relay);
     const certificate = await readDataKind(
         session.context,
@@ -269,7 +273,7 @@ export const restoreSetup = async (
 
 // The record context of a participant whose setup is retained.
 export const retainedRecordContext = async (
-    session: ParticipantSession,
+    session: Pick<ParticipantSession, 'context' | 'root'>,
 ): Promise<RecordContext> => ({
     poll: session.root.manifest.poll,
     setupIdentity: referenceSetupIdentity(
@@ -279,7 +283,7 @@ export const retainedRecordContext = async (
             dataKind.setupReference,
         ),
     ).slice(),
-    position: session.records.position,
+    position: session.context.position,
 });
 
 export const retainSetup = async (
@@ -305,7 +309,11 @@ export const retainSetup = async (
                 ...root.manifest.suffixes,
                 preparation: encodePreparationState({}),
                 ballot: new Uint8Array(),
-                close: encodeCloseState(12, false, collectingCloseState()),
+                close: encodeCloseState(
+                    rootGeneration.setupRetained,
+                    false,
+                    collectingCloseState(),
+                ),
             },
         },
         predecessorRecords: [
@@ -322,7 +330,7 @@ export const retainSetup = async (
     // Both storage and live private sources retire only after the exact
     // predecessor and committed successor have authenticated.
     root.manifest.dataKeys.subarray(64).fill(0);
-    root.plaintext.subarray(4 + 64, 4 + 96).fill(0);
+    root.plaintext.subarray(64, 96).fill(0);
     if (context.module.retire_contribution_sources() !== 0)
         throw new Error('The original key sources could not be retired.');
     session.root = retained;

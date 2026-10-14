@@ -1,48 +1,21 @@
-use core::{fmt, str};
+use core::str;
 
 use super::canonical_tuple::CanonicalDecodeBudget;
 use super::{
-    CanonicalCodecError, CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple,
-    RefusalReason,
+    CanonicalCodecRefusal, CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple,
 };
 
-pub(super) const FOUNDATION_SCHEMA_VERSION: u16 = 1;
+/// A foundation value whose tuple does not have its schema's shape.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FoundationSchemaRefusal;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FoundationSchemaError {
-    pub refusal_reason: RefusalReason,
-    pub message: &'static str,
-}
-
-impl FoundationSchemaError {
-    pub(super) const fn new(refusal_reason: RefusalReason, message: &'static str) -> Self {
-        Self {
-            refusal_reason,
-            message,
-        }
+impl From<CanonicalCodecRefusal> for FoundationSchemaRefusal {
+    fn from(_: CanonicalCodecRefusal) -> Self {
+        Self
     }
 }
 
-impl fmt::Display for FoundationSchemaError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(self.message)
-    }
-}
-
-impl std::error::Error for FoundationSchemaError {}
-
-impl From<CanonicalCodecError> for FoundationSchemaError {
-    fn from(error: CanonicalCodecError) -> Self {
-        let refusal_reason = if error.kind == super::CanonicalCodecErrorKind::LimitExceeded {
-            RefusalReason::OutsideSupportedProfile
-        } else {
-            RefusalReason::MalformedEncoding
-        };
-        Self::new(refusal_reason, "foundation value is not canonical")
-    }
-}
-
-pub(super) type SchemaResult<Value> = Result<Value, FoundationSchemaError>;
+pub(super) type SchemaResult<Value> = Result<Value, FoundationSchemaRefusal>;
 
 pub(super) fn require_header(
     tuple: &CanonicalTuple,
@@ -50,22 +23,10 @@ pub(super) fn require_header(
     item_count: usize,
 ) -> SchemaResult<()> {
     if tuple.schema_identifier != schema_identifier {
-        return Err(FoundationSchemaError::new(
-            RefusalReason::WrongTypeOrLength,
-            "foundation tuple has the wrong schema",
-        ));
-    }
-    if tuple.schema_version != FOUNDATION_SCHEMA_VERSION {
-        return Err(FoundationSchemaError::new(
-            RefusalReason::UnsupportedVersionOrSuite,
-            "foundation tuple schema version is unsupported",
-        ));
+        return Err(FoundationSchemaRefusal);
     }
     if tuple.items.len() != item_count {
-        return Err(FoundationSchemaError::new(
-            RefusalReason::WrongTypeOrLength,
-            "foundation tuple has the wrong item count",
-        ));
+        return Err(FoundationSchemaRefusal);
     }
     Ok(())
 }
@@ -75,10 +36,7 @@ pub(super) fn read_item(
     expected_type: CanonicalItemType,
 ) -> SchemaResult<&[u8]> {
     if item.item_type() != expected_type {
-        return Err(FoundationSchemaError::new(
-            RefusalReason::WrongTypeOrLength,
-            "foundation tuple item has the wrong semantic type",
-        ));
+        return Err(FoundationSchemaRefusal);
     }
     Ok(item.canonical_bytes())
 }
@@ -88,10 +46,7 @@ pub(super) fn read_variable_item(
     expected_type: CanonicalItemType,
 ) -> SchemaResult<&[u8]> {
     if item.item_type() != expected_type {
-        return Err(FoundationSchemaError::new(
-            RefusalReason::WrongTypeOrLength,
-            "foundation tuple item has the wrong semantic type",
-        ));
+        return Err(FoundationSchemaRefusal);
     }
     item.variable_value_bytes().map_err(Into::into)
 }
@@ -99,14 +54,13 @@ pub(super) fn read_variable_item(
 pub(super) fn read_u16(item: &CanonicalItem) -> SchemaResult<u16> {
     let bytes: [u8; 2] = read_item(item, CanonicalItemType::Unsigned16)?
         .try_into()
-        .map_err(|_| FoundationSchemaError::new(RefusalReason::MalformedEncoding, "u16 length"))?;
+        .map_err(|_| FoundationSchemaRefusal)?;
     Ok(u16::from_le_bytes(bytes))
 }
 
 pub(super) fn read_ascii(item: &CanonicalItem) -> SchemaResult<&str> {
-    str::from_utf8(read_variable_item(item, CanonicalItemType::Ascii)?).map_err(|_| {
-        FoundationSchemaError::new(RefusalReason::MalformedEncoding, "ASCII item is invalid")
-    })
+    str::from_utf8(read_variable_item(item, CanonicalItemType::Ascii)?)
+        .map_err(|_| FoundationSchemaRefusal)
 }
 
 fn read_nested_tuple_list_header(item: &CanonicalItem) -> SchemaResult<(usize, &[u8])> {
@@ -115,10 +69,7 @@ fn read_nested_tuple_list_header(item: &CanonicalItem) -> SchemaResult<(usize, &
         || u16::from_le_bytes([bytes[0], bytes[1]])
             != CanonicalItemType::NestedTuple.canonical_code()
     {
-        return Err(FoundationSchemaError::new(
-            RefusalReason::WrongTypeOrLength,
-            "homogeneous list has the wrong element type",
-        ));
+        return Err(FoundationSchemaRefusal);
     }
     Ok((
         u32::from_le_bytes([bytes[2], bytes[3], bytes[4], bytes[5]]) as usize,
@@ -133,28 +84,19 @@ pub(super) fn read_nested_tuple_list_with_budget(
 ) -> SchemaResult<Vec<CanonicalTuple>> {
     let (count, bytes) = read_nested_tuple_list_header(item)?;
     if count > limits.maximum_item_count {
-        return Err(FoundationSchemaError::new(
-            RefusalReason::OutsideSupportedProfile,
-            "nested tuple list exceeds the configured count limit",
-        ));
+        return Err(FoundationSchemaRefusal);
     }
     let mut tuples = Vec::with_capacity(count);
     let mut offset = 0usize;
     for _ in 0..count {
         let (tuple, consumed) = CanonicalTuple::decode_prefix(&bytes[offset..], limits, budget, 1)?;
-        offset = offset.checked_add(consumed).ok_or_else(|| {
-            FoundationSchemaError::new(
-                RefusalReason::MalformedEncoding,
-                "nested tuple list offset overflows",
-            )
-        })?;
+        offset = offset
+            .checked_add(consumed)
+            .ok_or(FoundationSchemaRefusal)?;
         tuples.push(tuple);
     }
     if offset != bytes.len() {
-        return Err(FoundationSchemaError::new(
-            RefusalReason::MalformedEncoding,
-            "nested tuple list contains trailing bytes",
-        ));
+        return Err(FoundationSchemaRefusal);
     }
     Ok(tuples)
 }

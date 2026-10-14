@@ -5,8 +5,7 @@
 use crate::{
     AUXILIARY_DEGREE, AUXILIARY_SECRET_SUPPORT, DEGREE, FHE_SECRET_SUPPORT, MAXIMUM_SCORE, Profile,
     RECIPIENT_SECRET_SUPPORT, RELEASE_DECODING_LIMB_BITS, RELEASE_LIMB_BITS, SETUP_ERROR_BITS,
-    SETUP_QUOTIENT_BITS, SHARE_EPHEMERAL_SUPPORT, SHARE_SCALE, WORD_BITS, auxiliary_modulus,
-    share_modulus,
+    SETUP_QUOTIENT_BITS, SHARE_EPHEMERAL_SUPPORT, SHARE_SCALE, WORD_BITS, share_modulus,
 };
 
 /// Witness columns have one row per ring coefficient.
@@ -26,18 +25,16 @@ const SALT_BYTES: usize = 128;
 pub const RANDOM_WORD_BYTES: usize = 16;
 pub const RANDOM_READ_BYTES: usize = 65_536;
 const EXTENSION_BYTES: usize = 48;
-/// The proof header: its magic, the statement and context digests, three
-/// oracle roots, the mask sum, a salt per round, the fold roots and the
-/// terminal value.
-pub const PROOF_HEADER_BYTES: usize = 4
-    + 5 * DIGEST_BYTES
+/// The proof header: the statement digest, three oracle roots, the mask
+/// sum, a salt per round, the fold roots and the terminal value.
+pub const PROOF_HEADER_BYTES: usize = 4 * DIGEST_BYTES
     + EXTENSION_BYTES
     + (FOLDS + 3) * SALT_BYTES
     + (FOLDS - 1) * DIGEST_BYTES
     + EXTENSION_BYTES;
 /// Challenges fill messages of this many bytes unless a relation needs more.
 const MESSAGE_BYTES: usize = 262_144;
-/// Registration, ballot and release statement headers.
+/// Ballot and release statement header bytes.
 pub const BALLOT_HEADER_BYTES: usize = 4 + 2 * DIGEST_BYTES + 2 + 1 + 1;
 pub const RELEASE_HEADER_BYTES: usize = 4 + 3 * DIGEST_BYTES + 2;
 /// The magic that opens a release statement's header.
@@ -61,9 +58,8 @@ pub fn release_header_position(profile: Profile, header: &[u8]) -> Option<usize>
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Relation {
-    /// The domain tag of the relation's proofs and their encoding's magic.
+    /// The domain tag of the relation's proofs.
     pub tag: &'static [u8],
-    pub proof_magic: &'static [u8; 4],
     pub words: usize,
     pub booleans: usize,
     /// Lookups after the whole words: each narrow column and the factor
@@ -76,7 +72,6 @@ pub struct Relation {
     /// half of its support.
     pub supports: Vec<(usize, u64)>,
     pub message_bytes: usize,
-    pub statement_bytes: usize,
     /// Relation parameters after the shared proof parameters.
     pub parameters: Vec<usize>,
 }
@@ -115,9 +110,6 @@ impl Relation {
     }
     pub fn message_bytes(&self) -> usize {
         self.message_bytes
-    }
-    pub fn statement_bytes(&self) -> usize {
-        self.statement_bytes
     }
     /// Committed oracles: the columns, the multiplicities, each lookup's
     /// reciprocals, the table reciprocals, the sum mask and the affine
@@ -207,8 +199,7 @@ pub fn setup_relation(profile: Profile) -> Relation {
     let shape = profile.setup_shape();
     let words = shape.word_columns;
     let mut relation = Relation {
-        tag: b"complete-setup-words/2",
-        proof_magic: b"SWP3",
+        tag: b"complete-setup-words",
         words,
         booleans: shape.boolean_columns,
         narrow: shape
@@ -225,7 +216,6 @@ pub fn setup_relation(profile: Profile) -> Relation {
             .map(|(stride, half)| (*stride, *half as u64))
             .collect(),
         message_bytes: 0,
-        statement_bytes: profile.setup_statement_length(),
         parameters: Vec::new(),
     };
     relation.message_bytes = relation.minimum_message_bytes();
@@ -311,8 +301,7 @@ pub fn ballot_relation(profile: Profile) -> Relation {
     let words = columns.words();
     let error = narrow_factor(SETUP_ERROR_BITS);
     let mut relation = Relation {
-        tag: b"linked-scored-ballot/1",
-        proof_magic: b"LBP1",
+        tag: b"linked-scored-ballot",
         words,
         booleans: 5,
         narrow: vec![
@@ -339,9 +328,6 @@ pub fn ballot_relation(profile: Profile) -> Relation {
             half_support(DEGREE / AUXILIARY_DEGREE, AUXILIARY_SECRET_SUPPORT),
         ],
         message_bytes: MESSAGE_BYTES,
-        statement_bytes: BALLOT_HEADER_BYTES
-            + 4 * DEGREE * (1 + profile.ciphertext_modulus().byte_length())
-            + 4 * AUXILIARY_DEGREE * (1 + auxiliary_modulus().len()),
         parameters: Vec::new(),
     };
     relation.parameters = vec![
@@ -402,8 +388,7 @@ pub fn release_relation(profile: Profile) -> Relation {
     let bits = profile.release_variable_bits();
     let (starts, words) = release_variable_starts(profile);
     let mut relation = Relation {
-        tag: b"linked-threshold-release/1",
-        proof_magic: b"LRP1",
+        tag: b"linked-threshold-release",
         words,
         booleans: 2,
         narrow: bits
@@ -420,9 +405,6 @@ pub fn release_relation(profile: Profile) -> Relation {
         zero_product_pairs: vec![(words, words + 1)],
         supports: vec![half_support(1, RECIPIENT_SECRET_SUPPORT)],
         message_bytes: MESSAGE_BYTES,
-        statement_bytes: RELEASE_HEADER_BYTES
-            + 4 * DEGREE * (1 + share_modulus().len())
-            + 2 * DEGREE * (1 + profile.release_modulus().byte_length()),
         parameters: Vec::new(),
     };
     relation.parameters = vec![

@@ -95,7 +95,7 @@ const differenceCollisions = (
 };
 
 describe('recipient key uniqueness under uniform common randomness', () => {
-    it('uses the current registration ring instead of the historical sharing ring', () => {
+    it('uses the registration ring, not the sharing ring', () => {
         const bound = compileRecipientKeyUniquenessBound();
         expect(bound.polynomialModulusDegree).toBe(65_536n);
         expect(bound.primeModulus).toBe((1n << 128n) - 133n * (1n << 64n) + 1n);
@@ -118,8 +118,8 @@ describe('recipient key uniqueness under uniform common randomness', () => {
         const direct = directCollisions(17, 2);
         const difference = differenceCollisions(17, 4, 2);
         expect(direct).toEqual(difference.collisions);
-        // More bounded witnesses than public keys force collisions for every a.
-        expect(5 ** 4).toBeGreaterThan(17 ** 2);
+        // More bounded witnesses (5 ** 4) than public keys force collisions
+        // for every a.
         expect(direct.size).toBe(17 ** 2);
         expect(difference.zeroDivisorDifferenceCount).toBeGreaterThan(0);
     });

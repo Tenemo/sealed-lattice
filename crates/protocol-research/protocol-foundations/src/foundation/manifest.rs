@@ -4,12 +4,12 @@ use supported_profile::Profile;
 
 use super::canonical_tuple::CanonicalDecodeBudget;
 use super::schemas::{
-    FOUNDATION_SCHEMA_VERSION, SchemaResult, read_ascii, read_nested_tuple_list_with_budget,
-    read_u16, read_variable_item, require_header,
+    SchemaResult, read_ascii, read_nested_tuple_list_with_budget, read_u16, read_variable_item,
+    require_header,
 };
 use super::{
-    CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple, FoundationSchemaError,
-    RefusalReason, StabilizedDisplayText,
+    CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple,
+    FoundationSchemaRefusal, StabilizedDisplayText,
 };
 
 const MANIFEST_SCHEMA_IDENTIFIER: u16 = 0x0110;
@@ -45,27 +45,19 @@ impl OptionDefinition {
 
     fn validate(&self) -> SchemaResult<()> {
         if usize::from(self.option_index) >= *Profile::option_range().end() {
-            return Err(FoundationSchemaError::new(
-                RefusalReason::OutsideSupportedProfile,
-                "option index is outside the supported profile",
-            ));
+            return Err(FoundationSchemaRefusal);
         }
         CanonicalItem::nonempty_ascii(self.option_identifier())?;
         if self.display_label().as_str().is_empty() {
-            return Err(FoundationSchemaError::new(
-                RefusalReason::WrongTypeOrLength,
-                "option display label must be nonempty",
-            ));
+            return Err(FoundationSchemaRefusal);
         }
         CanonicalItem::display_text(self.display_label())?;
         Ok(())
     }
 
     fn canonical_tuple(&self) -> SchemaResult<CanonicalTuple> {
-        self.validate()?;
         Ok(CanonicalTuple::new(
             OPTION_DEFINITION_SCHEMA_IDENTIFIER,
-            FOUNDATION_SCHEMA_VERSION,
             vec![
                 CanonicalItem::unsigned16(self.option_index),
                 CanonicalItem::nonempty_ascii(&self.option_identifier)?,
@@ -109,54 +101,39 @@ impl Manifest {
             display_title,
             options,
         };
-        manifest.validate()?;
+        manifest.validate_components()?;
+        // Construction also checks the combined nested-item size bound.
+        manifest.canonical_tuple()?;
         Ok(manifest)
     }
 
     fn validate_components(&self) -> SchemaResult<()> {
         if !Profile::option_range().contains(&self.option_count()) {
-            return Err(FoundationSchemaError::new(
-                RefusalReason::OutsideSupportedProfile,
-                "manifest option count is outside the configurable range",
-            ));
+            return Err(FoundationSchemaRefusal);
         }
         if self.display_title().as_str().is_empty() {
-            return Err(FoundationSchemaError::new(
-                RefusalReason::WrongTypeOrLength,
-                "manifest display title must be nonempty",
-            ));
+            return Err(FoundationSchemaRefusal);
         }
         CanonicalItem::display_text(self.display_title())?;
         let mut option_identifiers = BTreeSet::new();
         let mut display_labels = BTreeSet::new();
         for (option_position, option) in self.options().iter().enumerate() {
-            option.validate()?;
             if usize::from(option.option_index) != option_position {
-                return Err(FoundationSchemaError::new(
-                    RefusalReason::WrongTypeOrLength,
-                    "manifest option indexes must be consecutive and canonically ordered",
-                ));
+                return Err(FoundationSchemaRefusal);
             }
             if !option_identifiers.insert(option.option_identifier.as_str()) {
-                return Err(FoundationSchemaError::new(
-                    RefusalReason::DuplicateIdentity,
-                    "manifest option identifiers must be unique",
-                ));
+                return Err(FoundationSchemaRefusal);
             }
             // Stabilized labels are NFC, so canonically equivalent input
             // spellings compare equal here.
             if !display_labels.insert(option.display_label.as_str()) {
-                return Err(FoundationSchemaError::new(
-                    RefusalReason::DuplicateIdentity,
-                    "manifest option display labels must be unique",
-                ));
+                return Err(FoundationSchemaRefusal);
             }
         }
         Ok(())
     }
 
     fn canonical_tuple(&self) -> SchemaResult<CanonicalTuple> {
-        self.validate_components()?;
         let options = self
             .options
             .iter()
@@ -164,16 +141,11 @@ impl Manifest {
             .collect::<SchemaResult<Vec<_>>>()?;
         Ok(CanonicalTuple::new(
             MANIFEST_SCHEMA_IDENTIFIER,
-            FOUNDATION_SCHEMA_VERSION,
             vec![
                 CanonicalItem::display_text(&self.display_title)?,
                 CanonicalItem::nested_tuple_list(&options)?,
             ],
         ))
-    }
-
-    fn validate(&self) -> SchemaResult<()> {
-        self.canonical_tuple().map(|_| ())
     }
 
     pub fn encode(&self) -> SchemaResult<Vec<u8>> {
@@ -195,9 +167,7 @@ impl Manifest {
 
 fn read_display_text(item: &CanonicalItem) -> SchemaResult<StabilizedDisplayText> {
     let bytes = read_variable_item(item, CanonicalItemType::DisplayText)?;
-    StabilizedDisplayText::from_canonical_utf8(bytes).map_err(|error| {
-        FoundationSchemaError::new(error.refusal_reason(), "display text is not canonical")
-    })
+    StabilizedDisplayText::from_canonical_utf8(bytes).map_err(|_| FoundationSchemaRefusal)
 }
 
 #[cfg(test)]

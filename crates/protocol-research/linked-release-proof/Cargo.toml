@@ -16,7 +16,7 @@ word-verifier = { path = "../word-verifier" }
 
 [dev-dependencies]
 # The tests take the common share polynomial, the error sampler and the
-# registration key from the setup witness, and replay seeded streams.
+# recipient key from the setup witness, and replay seeded streams.
 setup-witness = { path = "../setup-witness" }
 sha3.workspace = true
-word-proof = { path = "../word-proof", features = ["test-support"] }
+statement-stream = { path = "../statement-stream", features = ["test-support"] }

@@ -1,12 +1,18 @@
-import { readFile } from 'node:fs/promises';
-
 import { expect, it } from 'vitest';
 
-import { compileCurrentSignatureHashInputs } from '#tests/authentication-work-model.js';
+import { compileSignatureHashInputs } from '#tests/authentication-work-model.js';
 import {
     compileOracleMaskRouting,
     runOracleSliceRouting,
-} from '#tests/compressed-oracle-model.js';
+} from '#tests/compressed-oracle/oracle-access.js';
+import {
+    ascii,
+    item,
+    itemType,
+    tuple,
+    unsigned,
+    variable,
+} from '#tests/node/protocol/reference/canonical-tuple.js';
 import { compileRegistrationSetupBindingScreen } from '#tests/registration-setup-binding-model.js';
 import {
     registrationSourceMask,
@@ -14,73 +20,36 @@ import {
     minimumRegistrationSourceInputBytes,
 } from '#tests/registration-source-domain-model.js';
 import { compileRegistrationSourceRandomness } from '#tests/registration-source-randomness-model.js';
+import { protocolHashPrefix } from '#tests/word-proof-reference/transcript.js';
 
-// The canonical item type codes of the production codec, so that the
-// independent frames below carry the bytes the real commitment hashes.
-const itemTypes = new Map(
-    [
-        ...(
-            /pub enum CanonicalItemType \{([^}]*)\}/u.exec(
-                await readFile(
-                    new URL(
-                        '../../../crates/protocol-research/protocol-foundations/src/foundation/canonical-tuple/value.rs',
-                        import.meta.url,
-                    ),
-                    'utf8',
-                ),
-            )?.[1] ?? ''
-        ).matchAll(/(\w+) = 0x([0-9a-f]+),/gu),
-    ].map(([, name, code]) => [name, Number.parseInt(code, 16)]),
-);
-const itemType = (name: string) => {
-    const code = itemTypes.get(name);
-    if (code === undefined)
-        throw new Error('The codec defines no item type ' + name + '.');
-    return code;
-};
+// The item types of a registration source commitment, in order.
 const sourceItemTypes = [
-    'Ascii',
-    'RawBytes',
-    'RawBytes',
-    'Hash512',
-    'RawBytes',
-    'Unsigned64',
-    'RawBytes',
-].map(itemType);
-
-const uint = (width: number, value: number | bigint) => {
-    const bytes = Buffer.alloc(width);
-    if (width === 2) bytes.writeUInt16LE(Number(value));
-    else if (width === 4) bytes.writeUInt32LE(Number(value));
-    else bytes.writeBigUInt64LE(BigInt(value));
-    return bytes;
-};
-const field = (type: number, bytes: Buffer) =>
-    Buffer.concat([uint(2, type), uint(4, bytes.length), bytes]);
-const variable = (bytes: Buffer) =>
-    Buffer.concat([uint(4, bytes.length), bytes]);
+    itemType.ascii,
+    itemType.rawBytes,
+    itemType.rawBytes,
+    itemType.hash512,
+    itemType.rawBytes,
+    itemType.unsigned64,
+    itemType.rawBytes,
+];
 const frame = (
     owner: Buffer,
     modulus: Buffer,
     sampleBits: bigint,
     coordinate: Buffer,
 ) =>
-    Buffer.concat([
-        Buffer.from('0100010007000000', 'hex'),
-        field(
-            sourceItemTypes[0],
-            variable(Buffer.from('sealed-lattice/registered-fhe-key/v2')),
-        ),
-        field(sourceItemTypes[1], owner),
-        field(sourceItemTypes[2], Buffer.alloc(64, 3)),
-        field(sourceItemTypes[3], Buffer.alloc(64, 5)),
-        field(sourceItemTypes[4], variable(modulus)),
-        field(sourceItemTypes[5], uint(8, sampleBits)),
-        field(sourceItemTypes[6], variable(coordinate)),
+    tuple([
+        ascii('sealed-lattice/registered-fhe-key'),
+        item(itemType.rawBytes, owner),
+        item(itemType.rawBytes, Buffer.alloc(64, 3)),
+        item(itemType.hash512, Buffer.alloc(64, 5)),
+        item(itemType.rawBytes, variable(modulus)),
+        item(itemType.unsigned64, unsigned(sampleBits, 8)),
+        item(itemType.rawBytes, variable(coordinate)),
     ]);
 
 it('separates the credential hash inputs from the source language by exact lengths', () => {
-    const signature = compileCurrentSignatureHashInputs();
+    const signature = compileSignatureHashInputs();
     // FIPS 204 ML-DSA-65: rho, followed by k encodings of 256 ten-bit t1
     // coefficients. This is larger than the other current signature inputs.
     const publicKeyBytes = 32n + (6n * 256n * 10n) / 8n;
@@ -107,8 +76,7 @@ it('separates the credential hash inputs from the source language by exact lengt
     }
     // Custody's ProtocolHash prefix is distinct before any secret or body
     // bytes. Unbounded retained-body length cannot change that distinction.
-    const retainedPrefix = Buffer.alloc(64);
-    retainedPrefix.write('sealed-lattice/fixed-hash/v1');
+    const retainedPrefix = protocolHashPrefix;
     expect(retainedPrefix[0]).not.toBe(encoded[0]);
     expect(
         smallest.matches(
@@ -174,13 +142,12 @@ it('routes raw source families and salts without reordering or aliasing their or
 // An independent length-delimited decoder, not the mask's offsets.
 const decode = (bytes: Buffer, degree: number) => {
     if (
-        bytes.length < 8 ||
+        bytes.length < 6 ||
         bytes.readUInt16LE() !== 1 ||
-        bytes.readUInt16LE(2) !== 1 ||
-        bytes.readUInt32LE(4) !== 7
+        bytes.readUInt32LE(2) !== 7
     )
         return undefined;
-    let offset = 8;
+    let offset = 6;
     const fields: { type: number; bytes: Buffer }[] = [];
     for (let index = 0; index < 7; index++) {
         if (offset + 6 > bytes.length) return undefined;
@@ -204,7 +171,7 @@ const decode = (bytes: Buffer, degree: number) => {
         modulus = unwrap(fields[4].bytes),
         coordinate = unwrap(fields[6].bytes);
     if (
-        domain?.toString() !== 'sealed-lattice/registered-fhe-key/v2' ||
+        domain?.toString() !== 'sealed-lattice/registered-fhe-key' ||
         fields[1].bytes.length !== 1952 ||
         fields[2].bytes.length !== 64 ||
         fields[3].bytes.length !== 64 ||

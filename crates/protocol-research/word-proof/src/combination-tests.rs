@@ -5,14 +5,12 @@ fn secret_job_inputs_have_their_exact_length() {
     // Groups with and without lookups and zero products.
     let relation = Relation {
         tag: b"combination-test",
-        proof_magic: b"TEST",
         words: 3,
         booleans: 4,
         narrow: vec![(1, 512), (2, 8)],
         zero_product_pairs: vec![(3, 4), (5, 6)],
         supports: vec![(1, 512)],
         message_bytes: 1,
-        statement_bytes: 1,
         parameters: Vec::new(),
     };
     let witness = Witness {
@@ -51,14 +49,12 @@ fn collected_reciprocal_terms_equal_the_direct_constraint_for_every_lookup_scale
     for narrow in [vec![(2, 512)], vec![(6, 8), (9, 512)], vec![(22, 7281)]] {
         let relation = Relation {
             tag: b"combination-test",
-            proof_magic: b"TEST",
             words: 27,
             booleans: 5,
             narrow,
             zero_product_pairs: vec![(27, 28), (29, 30), (20, 31)],
             supports: vec![(1, 512), (16, 128)],
             message_bytes: 1 << 18,
-            statement_bytes: 1,
             parameters: Vec::new(),
         };
         let (words_count, lookups) = (relation.words(), relation.lookups());

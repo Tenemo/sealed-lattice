@@ -508,19 +508,19 @@ pub fn classify_ballot(
     path: &Path,
     keys: &Path,
     mode: &str,
-) -> Result<ballot_proof::body::BallotBodyClassification, ballot_proof::body::Error> {
-    use ballot_proof::body::{Error, SignedBallotVerifier};
+) -> Result<ballot_proof::body::BallotBodyClassification, ballot_proof::body::Refusal> {
+    use ballot_proof::body::{BallotBodyClassifier, Refusal};
     let profile = setup.profile();
     let authentication =
         ballot_proof::submission::authenticate_envelope(&setup, envelope, signature)
-            .map_err(|_| Error::Context)?;
+            .map_err(|_| Refusal::Context)?;
     let mut file = File::open(path).unwrap();
     let mut header = [0; protocol_foundations::ballot_body::HEADER_BYTES];
     file.read_exact(&mut header).unwrap();
     if mode == "header" {
         header[0] ^= 1;
     }
-    let mut verifier = SignedBallotVerifier::new(poll, setup, authentication, &header, None)?;
+    let mut verifier = BallotBodyClassifier::new(poll, setup, authentication, &header, None)?;
     let index = ballot_key(profile);
     if verifier.requires_key() {
         verifier.begin_key(index)?;
@@ -544,9 +544,7 @@ pub fn classify_ballot(
     let total = file.metadata().unwrap().len() as usize - usize::from(mode == "truncated");
     let mut offset = header.len();
     let mut buffer = vec![0; 65521];
-    let changed = header.len()
-        + protocol_foundations::ballot_body::ciphertext_bytes(profile)
-        + PROOF_HEADER_BYTES;
+    let changed = header.len() + protocol_foundations::ballot_body::ciphertext_bytes(profile);
     while offset < total {
         let count = buffer.len().min(total - offset);
         file.read_exact(&mut buffer[..count]).unwrap();

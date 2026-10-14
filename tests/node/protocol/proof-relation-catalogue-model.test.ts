@@ -3,6 +3,14 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 import {
+    ascii,
+    item,
+    itemType,
+    tuple,
+    unsigned,
+    variable,
+} from '#tests/node/protocol/reference/canonical-tuple.js';
+import {
     compileProofHashDomainCensus,
     hasProofHashLayout,
     isProofChallengeInput,
@@ -16,34 +24,23 @@ import {
 } from '#tests/proof-relation-catalogue-model.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
 import { deriveSupportedProfile } from '#tests/supported-profile-model.js';
+import { protocolHashPrefix } from '#tests/word-proof-reference/transcript.js';
 
 const field = compileSmallLimbProofFieldCensus();
-const integer = (value: number, bytes = 4) => {
-    const result = Buffer.alloc(bytes);
-    result.writeUIntLE(value, 0, bytes);
-    return result;
-};
-const item = (type: number, value: Buffer) =>
-    Buffer.concat([integer(type, 2), integer(value.length), value]);
-const ascii = (value: string) =>
-    item(2, Buffer.concat([integer(value.length), Buffer.from(value)]));
 const owner = 'ab'.repeat(64);
 const role = (purpose: string, release = false) =>
-    Buffer.concat([
-        integer(1, 2),
-        integer(1, 2),
-        integer(release ? 6 : 5),
+    tuple([
         ascii(purpose),
         ascii(owner),
         ...Array.from({ length: release ? 3 : 2 }, () =>
-            item(6, Buffer.alloc(64)),
+            item(itemType.hash512, Buffer.alloc(64)),
         ),
-        item(3, integer(1, 2)),
+        item(itemType.unsigned16, unsigned(1, 2)),
     ]);
 const roles = {
-    setup: role('sealed-lattice/setup-contribution/v3'),
-    ballot: role('sealed-lattice/ballot-proof/v3'),
-    release: role('sealed-lattice/certified-release/v3', true),
+    setup: role('sealed-lattice/setup-contribution'),
+    ballot: role('sealed-lattice/ballot-proof'),
+    release: role('sealed-lattice/certified-release', true),
 };
 const frame = (
     purpose: keyof typeof roles,
@@ -51,22 +48,20 @@ const frame = (
     domain: string,
     parts: Buffer[],
 ) => {
-    const prefix = Buffer.alloc(64);
-    prefix.write('sealed-lattice/fixed-hash/v1');
     return Buffer.concat([
-        ...(fixed ? [prefix] : []),
+        ...(fixed ? [protocolHashPrefix] : []),
         ...[
             Buffer.from(`bounded-proof/${domain}`),
             roles[purpose],
             ...parts,
-        ].flatMap((part) => [integer(part.length), part]),
+        ].map((part) => variable(part)),
     ]);
 };
 
 describe('fixed three-purpose raw-domain catalogue', () => {
     it('uses the independently pinned original-PID role widths and complete state widths', () => {
         expect(Object.values(roles).map((value) => value.length)).toEqual([
-            340, 334, 409,
+            335, 329, 404,
         ]);
         const shapes = [
             [3, 2, 131072],
@@ -86,7 +81,7 @@ describe('fixed three-purpose raw-domain catalogue', () => {
                 const input = frame(entry.role, false, 'verifier-message', [
                     Buffer.alloc(64),
                     Buffer.alloc(Number(entry.messageBytes)),
-                    integer(1),
+                    unsigned(1, 4),
                 ]);
                 const parsed = parseProofHashInput(input)!;
                 expect(parsed.purpose).toBe(entry.role);
@@ -117,7 +112,7 @@ describe('fixed three-purpose raw-domain catalogue', () => {
         expect(
             new Set(parsed.candidates.map((entry) => entry.arithmeticKey)).size,
         ).toBeGreaterThan(1);
-        expect(resolveProofContext(parsed.fields)).toEqual([]);
+        expect(resolveProofContext(parsed.fields, Buffer.alloc(0))).toEqual([]);
         expect(
             parseProofHashInput(
                 frame('ballot', false, 'chain-state', [
@@ -132,7 +127,7 @@ describe('fixed three-purpose raw-domain catalogue', () => {
             frame('release', false, 'verifier-message', [
                 Buffer.alloc(64),
                 Buffer.alloc(262144),
-                integer(0xffffffff),
+                unsigned(0xffffffff, 4),
             ]),
         )!;
         expect(hasProofHashLayout(malformed)).toBe(false);
@@ -142,10 +137,10 @@ describe('fixed three-purpose raw-domain catalogue', () => {
         const census = compileProofHashDomainCensus();
         expect(census.rows).toHaveLength(342 * 3);
         expect(census.sentinelCount).toBe(1n);
-        expect(census.maximumAcceptedExpansionQueries).toBe(97827n);
+        expect(census.maximumAcceptedExpansionQueries).toBe(97828n);
         expect(census.minimumMessageBits).toBe(8n * 131072n);
         expect(census.maximumMessageBits).toBe(8n * 524288n);
-        // The maximum is a full setup context, not its short identifier.
+        // The maximum is a full setup statement, which its digest hashes.
         const maximum = census.rows.find(
             (row) => row.maximumInputBits === census.maximumInputBits,
         )!;
@@ -163,9 +158,9 @@ describe('fixed three-purpose raw-domain catalogue', () => {
             'utf8',
         );
         for (const tag of [
-            'complete-setup-words/2',
-            'linked-scored-ballot/1',
-            'linked-threshold-release/1',
+            'complete-setup-words',
+            'linked-scored-ballot',
+            'linked-threshold-release',
         ])
             expect(source).toContain(`tag: b"${tag}"`);
         // Independent completion operands pinned by the Rust descriptor's
@@ -178,14 +173,14 @@ describe('fixed three-purpose raw-domain catalogue', () => {
                 [
                     65536, 704, 1409, 262144, 131071, 2, 262144, 65536, 331, 24,
                     375, 1024, 256, 112, 96, 16, 7, 32,
-                ].map((value) => integer(value)),
+                ].map((value) => unsigned(value, 4)),
             ),
         );
         expect(completion[1].encodedParameters.subarray(28, 80)).toEqual(
             Buffer.concat(
                 [
                     27, 5, 32, 1024, 256, 32768, 65536, 27, 28, 29, 30, 20, 31,
-                ].map((value) => integer(value)),
+                ].map((value) => unsigned(value, 4)),
             ),
         );
         expect(completion[2].encodedParameters.subarray(28, 128)).toEqual(
@@ -216,14 +211,14 @@ describe('fixed three-purpose raw-domain catalogue', () => {
                     998244353,
                     20,
                     Number((field.modulus * 998244353n) & 0xffffffffn),
-                ].map((value) => integer(value)),
+                ].map((value) => unsigned(value, 4)),
             ),
         );
         expect(source).toContain('pub zero_product_pairs: Vec<(usize, usize)>');
         expect(source).toContain('pub narrow: Vec<(usize, u128)>');
         expect(
             completion[0].encodedParameters.subarray(-44 * 8, -43 * 8),
-        ).toEqual(Buffer.concat([integer(30), integer(512)]));
+        ).toEqual(Buffer.concat([unsigned(30, 4), unsigned(512, 4)]));
         // Those generic fields are not a public constructor input here.
         expect(
             new Set(proofRelationCatalogue().map((entry) => entry.role)),
@@ -247,7 +242,7 @@ describe('fixed three-purpose raw-domain catalogue', () => {
         ).toBe(true);
     });
 
-    it('resolves complete canonical contexts, retains profile aliases and refuses field/header/encoding changes', () => {
+    it('resolves canonical contexts and statements, retains profile aliases and refuses field/header/encoding changes', () => {
         const entries = proofRelationCatalogueEntry(
             deriveSupportedProfile(3, 2),
         );
@@ -265,9 +260,9 @@ describe('fixed three-purpose raw-domain catalogue', () => {
                 proofCatalogueInteger(7n, 16),
                 entry.encodedParameters,
                 proofCatalogueInteger(field.modulus - 1n, 16),
-                statement,
+                Buffer.alloc(64, 25),
             ];
-            const aliases = resolveProofContext(fields);
+            const aliases = resolveProofContext(fields, statement);
             expect(
                 new Set(aliases.map((candidate) => candidate.arithmeticKey)),
             ).toEqual(new Set([entry.arithmeticKey]));
@@ -283,6 +278,7 @@ describe('fixed three-purpose raw-domain catalogue', () => {
                     fields.map((value, index) =>
                         index === 4 ? changedParameters : value,
                     ),
+                    statement,
                 ),
             ).toEqual([]);
             expect(
@@ -290,7 +286,11 @@ describe('fixed three-purpose raw-domain catalogue', () => {
                     fields.map((value, index) =>
                         index === 6 ? value.subarray(0, -1) : value,
                     ),
+                    statement,
                 ),
+            ).toEqual([]);
+            expect(
+                resolveProofContext(fields, statement.subarray(0, -1)),
             ).toEqual([]);
             const coefficientOffset =
                 entry.role === 'ballot'
@@ -299,12 +299,12 @@ describe('fixed three-purpose raw-domain catalogue', () => {
                       ? 198
                       : entry.header.length;
             statement[coefficientOffset] = 1; // Negative zero is not canonical.
-            expect(resolveProofContext(fields)).toEqual([]);
+            expect(resolveProofContext(fields, statement)).toEqual([]);
             statement[coefficientOffset] = 2;
-            expect(resolveProofContext(fields)).toEqual([]);
+            expect(resolveProofContext(fields, statement)).toEqual([]);
             statement[coefficientOffset] = 0;
             statement[0] ^= 1;
-            expect(resolveProofContext(fields)).toEqual([]);
+            expect(resolveProofContext(fields, statement)).toEqual([]);
         }
     });
 
@@ -349,9 +349,9 @@ describe('fixed three-purpose raw-domain catalogue', () => {
                 proofCatalogueInteger(7n, 16),
                 first.encodedParameters,
                 proofCatalogueInteger(field.modulus - 1n, 16),
-                statement,
+                Buffer.alloc(64),
             ];
-            const resolved = resolveProofContext(fields);
+            const resolved = resolveProofContext(fields, statement);
             expect(
                 resolved.some((entry) => entry.profile === first.profile),
             ).toBe(false);

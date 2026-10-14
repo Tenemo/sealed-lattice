@@ -1,5 +1,5 @@
 use crate::{
-    BodyDigest, Error, SIGNATURE_BYTES, foundation::RegistrationHeader, poll::VerifiedPoll,
+    BodyDigest, Refusal, SIGNATURE_BYTES, foundation::RegistrationHeader, poll::VerifiedPoll,
     verify_registration_signature,
 };
 use parallel_work::ProtocolHash;
@@ -65,56 +65,60 @@ pub struct RegistrationVerifier {
     failed: bool,
 }
 impl RegistrationVerifier {
-    pub fn new(poll: &VerifiedPoll, header_bytes: &[u8], signature: &[u8]) -> Result<Self, Error> {
+    pub fn new(
+        poll: &VerifiedPoll,
+        header_bytes: &[u8],
+        signature: &[u8],
+    ) -> Result<Self, Refusal> {
         crate::checked_header(header_bytes, poll)?;
         Self::open(poll.identity(), header_bytes, signature)
     }
-    fn open(poll: [u8; 64], header_bytes: &[u8], signature: &[u8]) -> Result<Self, Error> {
+    fn open(poll: [u8; 64], header_bytes: &[u8], signature: &[u8]) -> Result<Self, Refusal> {
         let (header, consumed) = RegistrationHeader::decode_prefix(header_bytes)?;
         if consumed != header_bytes.len() {
-            return Err(Error::Shape);
+            return Err(Refusal::Shape);
         }
         let body = BodyDigest::from_header(header_bytes, poll)?;
         Ok(Self {
             header,
             body,
-            signature: signature.try_into().map_err(|_| Error::Shape)?,
+            signature: signature.try_into().map_err(|_| Refusal::Shape)?,
             key: Vec::with_capacity(KEY_BYTES),
             key_finished: false,
             failed: false,
         })
     }
-    pub fn push_key(&mut self, bytes: &[u8]) -> Result<(), Error> {
+    pub fn push_key(&mut self, bytes: &[u8]) -> Result<(), Refusal> {
         if self.failed
             || self.key_finished
             || bytes.len() > CHUNK_LIMIT
             || bytes.len() > KEY_BYTES - self.key.len()
         {
             self.failed = true;
-            return Err(Error::Shape);
+            return Err(Refusal::Shape);
         }
         self.key.extend(bytes);
         Ok(())
     }
-    pub fn finish_key(&mut self) -> Result<(), Error> {
+    pub fn finish_key(&mut self) -> Result<(), Refusal> {
         if self.failed
             || self.key_finished
             || !canonical_key(&self.key)
             || ProtocolHash::digest(&self.key) != self.header.recipient_key_hash
         {
             self.failed = true;
-            return Err(Error::Shape);
+            return Err(Refusal::Shape);
         }
         self.key_finished = true;
         Ok(())
     }
-    pub fn finish(self) -> Result<VerifiedRegistration, Error> {
+    pub fn finish(self) -> Result<VerifiedRegistration, Refusal> {
         if self.failed || !self.key_finished {
-            return Err(Error::Consumed);
+            return Err(Refusal::Consumed);
         }
         let body_digest = self.body.bytes();
         if !verify_registration_signature(self.body, &self.signature) {
-            return Err(Error::Crypto);
+            return Err(Refusal::Crypto);
         }
         Ok(VerifiedRegistration {
             header: self.header,

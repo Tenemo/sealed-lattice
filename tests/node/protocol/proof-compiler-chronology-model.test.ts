@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { goalThresholds } from '#tests/node/protocol/reference/product-goals.js';
 import {
     compileProofCompilerChronology,
     proofPurposes,
@@ -8,14 +9,13 @@ import { framedProofHashBytes } from '#tests/proof-hash-work-model.js';
 import { deriveSupportedProfile } from '#tests/supported-profile-model.js';
 import { proofCompilerCaps } from '#tests/wide-challenge-compiler-model.js';
 
-// Every position in the first max(f + 1, 2)+f may prove an offer, with
-// f = floor((n - 1) / 3); every position may prove its ballot and
-// release.
-const setupContributors = (participantCount: number) =>
-    BigInt(
-        Math.max(Math.floor((participantCount - 1) / 3) + 1, 2) +
-            Math.floor((participantCount - 1) / 3),
-    );
+// Every position in the first max(f + 1, 2) + f may prove an offer; every
+// position may prove its ballot and release.
+const setupContributors = (participantCount: number) => {
+    const { maximumCorruptParticipantCount, resultReleaseThreshold } =
+        goalThresholds(participantCount);
+    return BigInt(resultReleaseThreshold + maximumCorruptParticipantCount);
+};
 const rosterRoles = (participantCount: number) =>
     2n * BigInt(participantCount) + setupContributors(participantCount);
 

@@ -5,12 +5,11 @@
     "author": "Piotr Piech <piotr@piech.dev>",
     "license": "MPL-2.0",
     "type": "module",
-    "main": "dist/index.js",
-    "types": "dist/index.d.ts",
     "files": [
         "dist",
         "README.md",
-        "LICENSE"
+        "LICENSE",
+        "THIRD-PARTY-NOTICES.txt"
     ],
     "exports": {
         ".": {
@@ -26,14 +25,12 @@
         "url": "https://github.com/Tenemo/sealed-lattice/issues"
     },
     "homepage": "https://github.com/Tenemo/sealed-lattice",
-    "engines": {
-        "node": ">=24.14.1"
-    },
     "scripts": {
         "build": "tsx ../../tools/ci/build-sdk-package.ts"
     },
     "devDependencies": {
-        "vitest": "^4.1.11"
+        "binaryen": "^132.0.0",
+        "vitest": "^5.0.4"
     },
     "keywords": [
         "cryptography",

@@ -1,416 +1,36 @@
+#[path = "close-delivery.rs"]
+mod delivery;
+#[path = "close-records.rs"]
+mod records;
+#[path = "close-work.rs"]
+mod work;
+pub use records::{Submission, authenticate, envelope, split, write_records};
+use records::{control, wanted_bytes};
+pub use work::{
+    authenticate_responses, close_work, deliver, now_milliseconds, open, organize, owner_of,
+    replay, respond, sign,
+};
+use work::{conclude, gather};
+
 use crate::scenario::Scenario;
-use ballot_proof::submission::{
-    AuthenticatedBallotBody, AuthenticatedBallotEnvelope, BallotBodyAuthentication,
-    authenticate_envelope,
-};
+use ballot_proof::submission::{AuthenticatedBallotBody, AuthenticatedBallotEnvelope};
 use evaluation_target::close::{
-    AuthenticatedCloseIntent, AuthenticatedCloseResponse, CloseContext, ClosedSlot,
-    Error as CloseError, VerifiedCloseBarrier,
+    CloseContext, ClosedSlot, Refusal as CloseRefusal, VerifiedCloseBarrier,
 };
-use participant_module::{
-    Enrollment,
-    close_work::{CloseOperation, CloseWork},
-};
+use participant_module::close_work::CloseOperation;
 use protocol_foundations::{
-    Credential, Error, RETAINED_TAG_BYTES, SIGNATURE_BYTES,
-    ballot_authentication::{BallotEnvelope, RetainedBallotOwner},
+    Credential, Refusal,
+    ballot_authentication::{BallotEnvelope, RetainedSetupOwner},
     close_signing::{
-        CloseIntentMessage, CloseMessage, ClosePurpose, CloseResponseMessage, close_quorum,
+        CloseIntentMessage, CloseMessage, ClosePurpose, CloseResponseMessage,
         maximum_close_message_bytes,
     },
     foundation::{CanonicalItem, CanonicalTuple},
     poll::VerifiedPoll,
-    roster::RetainedContributionContext,
+    signed_packet,
 };
 use setup_aggregate::verified::VerifiedSetupAggregate;
-use std::{
-    fs::File,
-    io::Read,
-    ops::{Deref, DerefMut},
-    path::{Path, PathBuf},
-    sync::Arc,
-    time::Instant,
-};
-
-/// One signed submission and its public body file.
-#[derive(Clone)]
-pub struct Submission {
-    pub envelope: BallotEnvelope,
-    pub signature: [u8; SIGNATURE_BYTES],
-    pub body: PathBuf,
-}
-
-pub fn packet(body: &[u8], signature: &[u8]) -> Vec<u8> {
-    let mut bytes = Vec::from((body.len() as u32).to_le_bytes());
-    bytes.extend(body);
-    bytes.extend(signature);
-    bytes
-}
-fn read_chunks(path: &Path, mut consume: impl FnMut(&[u8])) -> usize {
-    let mut file = File::open(path).unwrap();
-    let mut buffer = vec![0; 1 << 20];
-    let mut total = 0;
-    loop {
-        let count = file.read(&mut buffer).unwrap();
-        if count == 0 {
-            break;
-        }
-        consume(&buffer[..count]);
-        total += count;
-    }
-    total
-}
-/// The owning envelope authentication, without the body.
-pub fn envelope(
-    setup: &VerifiedSetupAggregate,
-    submission: &Submission,
-) -> AuthenticatedBallotEnvelope {
-    authenticate_envelope(setup, submission.envelope.bytes(), &submission.signature).unwrap()
-}
-/// Streams the complete body through the owning envelope and body checks.
-pub fn authenticate(
-    setup: &VerifiedSetupAggregate,
-    submission: &Submission,
-    hashed: &mut usize,
-) -> AuthenticatedBallotBody {
-    let authentication =
-        authenticate_envelope(setup, submission.envelope.bytes(), &submission.signature).unwrap();
-    let mut body = BallotBodyAuthentication::new(authentication).unwrap();
-    *hashed += read_chunks(&submission.body, |bytes| body.push(bytes).unwrap());
-    body.finish().unwrap()
-}
-/// Every original participant's owner comes from its credential-authenticated
-/// reference to the certified selected setup.
-pub fn owner_of(
-    credential: &Credential,
-    poll: &VerifiedPoll,
-    setup: &VerifiedSetupAggregate,
-    position: usize,
-) -> RetainedBallotOwner {
-    let retained = RetainedContributionContext::parse(
-        credential,
-        &setup.roster().proposal().records()[position],
-        poll,
-        position,
-        setup.roster().proposal().body(),
-    )
-    .unwrap();
-    let reference =
-        participant_module::ballot::retained_setup_reference(credential, poll, setup).unwrap();
-    let (reference, tag) = reference.split_at(reference.len() - RETAINED_TAG_BYTES);
-    credential
-        .retain_setup_ballot_owner(poll, &retained, setup.identity(), reference, tag)
-        .unwrap()
-}
-/// An input a participant's close state accepted, as its persistent close log
-/// retains it: a held submission, the locked intent, or a response the
-/// organizer took with the envelopes delivered with it.
-enum Event {
-    Held(Box<Submission>),
-    Lock(Vec<u8>),
-    Response(Vec<u8>),
-}
-/// A participant's close state and the ordered log of its accepted inputs.
-/// The lock retires the logged submissions timed after the close time, as
-/// the state does.
-pub struct LoggedWork {
-    work: CloseWork,
-    events: Vec<Event>,
-}
-impl Deref for LoggedWork {
-    type Target = CloseWork;
-    fn deref(&self) -> &CloseWork {
-        &self.work
-    }
-}
-impl DerefMut for LoggedWork {
-    fn deref_mut(&mut self) -> &mut CloseWork {
-        &mut self.work
-    }
-}
-pub fn close_work(
-    enrollment: &Enrollment,
-    poll: &Arc<VerifiedPoll>,
-    setup: &Arc<VerifiedSetupAggregate>,
-    position: usize,
-) -> LoggedWork {
-    LoggedWork {
-        work: CloseWork::new(
-            owner_of(&enrollment.credential, poll, setup, position),
-            poll.clone(),
-            setup.clone(),
-        )
-        .unwrap(),
-        events: Vec::new(),
-    }
-}
-/// Delivers one held submission and its complete body to a close work.
-pub fn deliver(
-    work: &mut LoggedWork,
-    credential: &mut Credential,
-    submission: &Submission,
-    hashed: &mut usize,
-) {
-    work.command(
-        credential,
-        CloseOperation::BeginHeldBody,
-        0,
-        &control(submission),
-    )
-    .unwrap();
-    *hashed += read_chunks(&submission.body, |bytes| {
-        work.command(credential, CloseOperation::PushHeldBody, 0, bytes)
-            .unwrap();
-    });
-    work.command(credential, CloseOperation::FinishHeldBody, 0, &[])
-        .unwrap();
-    work.events.push(Event::Held(Box::new(submission.clone())));
-}
-/// Replays a participant's close log into a fresh state, which must accept
-/// every event and prepare the same response. As in the organizer's close,
-/// its credential then refuses to sign that response again, which consumes
-/// the prepared body, and the fresh state takes the completed response and
-/// must prepare the same proposal.
-pub fn replay(
-    logged: &LoggedWork,
-    mut fresh: LoggedWork,
-    credential: &mut Credential,
-    response: &[u8],
-    proposal: Option<&[u8]>,
-) {
-    let mut hashed = 0;
-    for event in &logged.events {
-        match event {
-            Event::Held(submission) => deliver(&mut fresh, credential, submission, &mut hashed),
-            Event::Lock(intent) => {
-                fresh
-                    .command(credential, CloseOperation::LockIntent, 0, intent)
-                    .unwrap();
-            }
-            Event::Response(input) => {
-                fresh
-                    .command(credential, CloseOperation::AdmitResponse, 0, input)
-                    .unwrap();
-            }
-        }
-    }
-    let body = fresh
-        .command(credential, CloseOperation::PrepareResponse, 0, &[])
-        .unwrap();
-    assert_eq!(body, split(response).0);
-    if let Some(proposal) = proposal {
-        assert!(matches!(
-            sign(&mut fresh, credential, &body),
-            Err(Error::Consumed)
-        ));
-        fresh
-            .command(credential, CloseOperation::AdmitResponse, 0, response)
-            .unwrap();
-        assert_eq!(
-            fresh
-                .command(credential, CloseOperation::PrepareProposal, 0, &[])
-                .unwrap(),
-            split(proposal).0
-        );
-    }
-}
-/// Signs the prepared body after the root would have committed it.
-pub fn sign(
-    work: &mut CloseWork,
-    credential: &mut Credential,
-    body: &[u8],
-) -> Result<Vec<u8>, Error> {
-    work.command(credential, CloseOperation::Sign, 0, body)
-}
-pub fn now_milliseconds() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_millis() as u64
-}
-/// The organizer signs its intent; every participant authenticates and locks it.
-pub fn open(
-    works: &mut [LoggedWork],
-    enrollments: &mut crate::OriginalEnrollments,
-    close_time: u64,
-) -> (Vec<u8>, Vec<u8>) {
-    let body = works[0]
-        .command(
-            &mut enrollments[0].credential,
-            CloseOperation::PrepareIntent,
-            0,
-            &close_time.to_le_bytes(),
-        )
-        .unwrap();
-    let signature = sign(&mut works[0], &mut enrollments[0].credential, &body).unwrap();
-    let intent = packet(&body, &signature);
-    for (work, enrollment) in works
-        .iter_mut()
-        .zip(enrollments.iter_mut().map(|(_, enrollment)| enrollment))
-    {
-        work.command(
-            &mut enrollment.credential,
-            CloseOperation::LockIntent,
-            0,
-            &intent,
-        )
-        .unwrap();
-        work.events.retain(|event| match event {
-            Event::Held(submission) => submission.envelope.ballot_time() <= close_time,
-            _ => true,
-        });
-        work.events.push(Event::Lock(intent.clone()));
-    }
-    (body, signature)
-}
-/// A participant's response from its held submissions.
-pub fn respond(
-    work: &mut LoggedWork,
-    credential: &mut Credential,
-    held: &[&Submission],
-    hashed: &mut usize,
-) -> Vec<u8> {
-    for submission in held {
-        deliver(work, credential, submission, hashed);
-    }
-    let body = work
-        .command(credential, CloseOperation::PrepareResponse, 0, &[])
-        .unwrap();
-    let signature = sign(work, credential, &body).unwrap();
-    // One response per participant.
-    let again = work
-        .command(credential, CloseOperation::PrepareResponse, 0, &[])
-        .unwrap();
-    assert!(matches!(
-        sign(work, credential, &again),
-        Err(Error::Consumed)
-    ));
-    packet(&body, &signature)
-}
-fn split(packet: &[u8]) -> (&[u8], &[u8]) {
-    let length = u32::from_le_bytes(packet[..4].try_into().unwrap()) as usize;
-    (&packet[4..4 + length], &packet[4 + length..])
-}
-pub fn authenticate_responses(
-    context: &CloseContext,
-    intent: &AuthenticatedCloseIntent,
-    responses: &[Vec<u8>],
-    available: &[AuthenticatedBallotEnvelope],
-) -> Vec<AuthenticatedCloseResponse> {
-    responses
-        .iter()
-        .map(|packet| {
-            let (body, signature) = split(packet);
-            context
-                .authenticate_response(intent, body, signature, available)
-                .unwrap()
-        })
-        .collect()
-}
-fn control(submission: &Submission) -> Vec<u8> {
-    [
-        submission.envelope.bytes().as_slice(),
-        &submission.signature,
-    ]
-    .concat()
-}
-/// Delivers every other response in arrival order, each with the envelopes it
-/// lists from those the organizer lacks and has not yet been given, without
-/// their bodies.
-fn gather(
-    work: &mut LoggedWork,
-    credential: &mut Credential,
-    participants: usize,
-    lacked: &[&Submission],
-    arrivals: &[&Vec<u8>],
-) {
-    let mut given = Vec::new();
-    for response in arrivals {
-        let listing = CloseResponseMessage::parse(split(response).0, participants).unwrap();
-        let mut input = response.to_vec();
-        for submission in lacked {
-            let identity = submission.envelope.identity();
-            if !given.contains(&identity)
-                && listing.listed().iter().any(|(_, value)| *value == identity)
-            {
-                given.push(identity);
-                input.extend(control(submission));
-            }
-        }
-        work.command(credential, CloseOperation::AdmitResponse, 0, &input)
-            .unwrap();
-        work.events.push(Event::Response(input));
-    }
-}
-/// The organizer's own response, once `q-1` other responses are ready, and
-/// its proposal. It needs only the bodies of usable slots, which it holds.
-fn conclude(work: &mut CloseWork, credential: &mut Credential) -> (Vec<u8>, Vec<u8>) {
-    let body = work
-        .command(credential, CloseOperation::PrepareResponse, 0, &[])
-        .unwrap();
-    let signature = sign(work, credential, &body).unwrap();
-    let own = packet(&body, &signature);
-    // One response per participant.
-    let again = work
-        .command(credential, CloseOperation::PrepareResponse, 0, &[])
-        .unwrap();
-    assert!(matches!(
-        sign(work, credential, &again),
-        Err(Error::Consumed)
-    ));
-    work.command(credential, CloseOperation::AdmitResponse, 0, &own)
-        .unwrap();
-    let body = work
-        .command(credential, CloseOperation::PrepareProposal, 0, &[])
-        .unwrap();
-    let signature = sign(work, credential, &body).unwrap();
-    (own, packet(&body, &signature))
-}
-/// The organizer, which knows every listed envelope, authenticates the other
-/// responses and then signs its own response and the proposal.
-pub fn organize(
-    work: &mut LoggedWork,
-    credential: &mut Credential,
-    participants: usize,
-    arrivals: &[&Vec<u8>],
-) -> (Vec<u8>, Vec<u8>) {
-    gather(work, credential, participants, &[], arrivals);
-    conclude(work, credential)
-}
-/// Writes the public close records and the index of every listed submission.
-pub fn write_records<'a>(
-    directory: &Path,
-    output: &Path,
-    intent: &[u8],
-    responses: impl IntoIterator<Item = (usize, &'a Vec<u8>)>,
-    proposal: &[u8],
-    listed: &[&Submission],
-) {
-    std::fs::create_dir(directory).unwrap();
-    crate::write(directory.join("intent.bin"), intent);
-    for (position, response) in responses {
-        crate::write(directory.join(format!("response-{position}.bin")), response);
-    }
-    crate::write(directory.join("proposal.bin"), proposal);
-    let mut index = String::new();
-    for (ordinal, submission) in listed.iter().enumerate() {
-        let name = format!("submission-{ordinal}.bin");
-        crate::write(
-            directory.join(&name),
-            &[
-                submission.envelope.bytes().as_slice(),
-                &submission.signature,
-            ]
-            .concat(),
-        );
-        let body = submission.body.strip_prefix(output).unwrap();
-        index.push_str(&format!(
-            "{name} {}\n",
-            body.to_str().unwrap().replace('\\', "/")
-        ));
-    }
-    crate::write(directory.join("submissions.txt"), index.as_bytes());
-}
+use std::{path::Path, sync::Arc, time::Instant};
 
 /// A corrupt equivocator's credentials restored from its sealed capsule.
 /// Forking its own signing state models permitted corruption, not honest
@@ -447,8 +67,7 @@ pub fn run(
     let profile = scenario.profile();
     let count = enrollments.len();
     assert_eq!(count, profile.participants());
-    let quorum = close_quorum(count);
-    assert_eq!(quorum, profile.inventory_threshold());
+    let quorum = profile.inventory_threshold();
     let context = CloseContext::new(poll.clone(), setup.clone()).unwrap();
     let roster = setup.roster();
     let mut hashed = 0;
@@ -465,7 +84,7 @@ pub fn run(
         equivocator,
         organizer: mut organizer_restored,
     } = restored;
-    let (mut equivocation, forged) = equivocator
+    let (mut equivocation, equivocated) = equivocator
         .map(|equivocator| {
             let position = scenario.equivocator.unwrap();
             let Equivocator {
@@ -493,9 +112,12 @@ pub fn run(
                     body: base.body.clone(),
                 }
             };
-            let a = equivocate(&mut first, close_time - 2);
-            let b = equivocate(&mut second, close_time - 1);
-            assert_ne!(a.envelope.identity(), b.envelope.identity());
+            let first_on_time = equivocate(&mut first, close_time - 2);
+            let second_on_time = equivocate(&mut second, close_time - 1);
+            assert_ne!(
+                first_on_time.envelope.identity(),
+                second_on_time.envelope.identity()
+            );
             let late = equivocate(&mut late_fork, close_time + 1);
             (
                 Equivocation {
@@ -504,11 +126,15 @@ pub fn run(
                     late_fork,
                     restored,
                 },
-                Forged { a, b, late },
+                EquivocatedSubmissions {
+                    first_on_time,
+                    second_on_time,
+                    late,
+                },
             )
         })
         .unzip();
-    if let Some(forged) = &forged {
+    if let Some(equivocated) = &equivocated {
         let position = scenario.equivocator.unwrap();
         // The late envelope reaches the organizer and the first honest
         // responder before the intent; their locks discard its body and
@@ -517,13 +143,13 @@ pub fn run(
             deliver(
                 &mut works[position],
                 &mut enrollments[position].credential,
-                &forged.late,
+                &equivocated.late,
                 &mut hashed,
             );
         }
         // A slot holds at most two bodies: a third is refused before
         // transfer.
-        for submission in [&forged.a, &forged.b] {
+        for submission in [&equivocated.first_on_time, &equivocated.second_on_time] {
             deliver(
                 &mut works[position],
                 &mut enrollments[position].credential,
@@ -536,9 +162,9 @@ pub fn run(
                 &mut enrollments[position].credential,
                 CloseOperation::BeginHeldBody,
                 0,
-                &control(&forged.late)
+                &control(&equivocated.late)
             ),
-            Err(Error::Consumed)
+            Err(Refusal::Consumed)
         ));
     }
     // Only the organizer closes, and only once.
@@ -553,10 +179,10 @@ pub fn run(
         .unwrap();
     assert!(matches!(
         sign(&mut other, &mut enrollments[1].credential, &body),
-        Err(Error::Context)
+        Err(Refusal::Context)
     ));
     let (intent_body, intent_signature) = open(&mut works, enrollments, close_time);
-    let intent_packet = packet(&intent_body, &intent_signature);
+    let intent_packet = signed_packet::encode(&intent_body, &intent_signature);
     let mut repeated = close_work(&enrollments[0], &poll, &setup, 0);
     let later = repeated
         .command(
@@ -568,7 +194,7 @@ pub fn run(
         .unwrap();
     assert!(matches!(
         sign(&mut repeated, &mut enrollments[0].credential, &later),
-        Err(Error::Consumed)
+        Err(Refusal::Consumed)
     ));
     let intent = context
         .authenticate_intent(&intent_body, &intent_signature)
@@ -577,14 +203,14 @@ pub fn run(
     changed[0] ^= 1;
     assert_eq!(
         context.authenticate_intent(&intent_body, &changed).err(),
-        Some(CloseError::Signature)
+        Some(CloseRefusal::Signature)
     );
     let unsigned = context.intent(close_time + 5).unwrap();
     assert_eq!(
         context
             .authenticate_intent(unsigned.body(), &intent_signature)
             .err(),
-        Some(CloseError::Signature)
+        Some(CloseRefusal::Signature)
     );
     let mut refused = close_work(&enrollments[first_honest], &poll, &setup, first_honest);
     assert!(
@@ -593,18 +219,18 @@ pub fn run(
                 &mut enrollments[first_honest].credential,
                 CloseOperation::LockIntent,
                 0,
-                &packet(unsigned.body(), &intent_signature)
+                &signed_packet::encode(unsigned.body(), &intent_signature)
             )
             .is_err()
     );
-    // No attempt starts after the close intent, by either signing path.
+    // No attempt starts after the close intent, and no ballot is signed.
     if let Some(&nonvoter) = scenario.nonvoters.first() {
         let owner = owner_of(&enrollments[nonvoter].credential, &poll, &setup, nonvoter);
         assert!(matches!(
             enrollments[nonvoter]
                 .credential
                 .reserve_ballot_attempt(&owner),
-            Err(Error::Consumed)
+            Err(Refusal::Consumed)
         ));
         let envelope = BallotEnvelope::new(
             profile,
@@ -619,20 +245,20 @@ pub fn run(
         assert!(matches!(
             enrollments[nonvoter]
                 .credential
-                .sign_ballot_envelope(roster, &envelope),
-            Err(Error::Consumed)
+                .sign_retained_ballot_envelope(&owner, &envelope),
+            Err(Refusal::Consumed)
         ));
     }
-    if let Some(forged) = &forged {
+    if let Some(equivocated) = &equivocated {
         for position in [0, first_honest] {
             assert!(matches!(
                 works[position].command(
                     &mut enrollments[position].credential,
                     CloseOperation::BeginHeldBody,
                     0,
-                    &control(&forged.late)
+                    &control(&equivocated.late)
                 ),
-                Err(Error::Context)
+                Err(Refusal::Context)
             ));
         }
     }
@@ -649,8 +275,11 @@ pub fn run(
         .omitted
         .map(|author| submissions[author].as_ref().unwrap());
     let mut held: Vec<Vec<&Submission>> = vec![common.clone(); count];
-    if let Some(forged) = &forged {
-        for (second, submission) in [(false, &forged.a), (true, &forged.b)] {
+    if let Some(equivocated) = &equivocated {
+        for (second, submission) in [
+            (false, &equivocated.first_on_time),
+            (true, &equivocated.second_on_time),
+        ] {
             for position in scenario.equivocation_holders(second) {
                 held[position].push(submission);
             }
@@ -677,7 +306,7 @@ pub fn run(
             0,
             &[]
         ),
-        Err(Error::Context)
+        Err(Refusal::Context)
     ));
     // A voter's response must list its own on-time ballot.
     let voter = scenario.omitted.unwrap_or(*scenario.voters.last().unwrap());
@@ -711,7 +340,7 @@ pub fn run(
         .unwrap();
     assert!(matches!(
         sign(&mut incomplete, &mut enrollments[voter].credential, &body),
-        Err(Error::Context)
+        Err(Refusal::Context)
     ));
     // Every other participant responds without waiting.
     let mut responses: Vec<Vec<u8>> = vec![Vec::new(); count];
@@ -724,8 +353,12 @@ pub fn run(
         );
     }
     let mut everything: Vec<&Submission> = common.clone();
-    if let Some(forged) = &forged {
-        everything.extend([&forged.a, &forged.b, &forged.late]);
+    if let Some(equivocated) = &equivocated {
+        everything.extend([
+            &equivocated.first_on_time,
+            &equivocated.second_on_time,
+            &equivocated.late,
+        ]);
     }
     everything.extend(omitted);
     let available: Vec<AuthenticatedBallotEnvelope> = everything
@@ -733,7 +366,7 @@ pub fn run(
         .map(|submission| envelope(&setup, submission))
         .collect();
     let mut late_response = None;
-    if let (Some(equivocation), Some(forged)) = (equivocation.as_mut(), &forged) {
+    if let (Some(equivocation), Some(equivocated)) = (equivocation.as_mut(), &equivocated) {
         // A corrupt fork may sign a response that lists its late envelope; no
         // verifier authenticates it.
         let position = equivocation.position;
@@ -755,7 +388,7 @@ pub fn run(
             *intent.message().identity(),
             position,
             count,
-            &[(position, forged.late.envelope.identity())],
+            &[(position, equivocated.late.envelope.identity())],
         )
         .unwrap();
         let late_signature = late_fork
@@ -765,7 +398,7 @@ pub fn run(
             context
                 .authenticate_response(&intent, late_listing.body(), &late_signature, &available)
                 .err(),
-            Some(CloseError::Context)
+            Some(CloseRefusal::Context)
         );
         assert!(
             works[0]
@@ -773,22 +406,25 @@ pub fn run(
                     &mut enrollments[0].credential,
                     CloseOperation::AdmitResponse,
                     0,
-                    &packet(late_listing.body(), &late_signature)
+                    &signed_packet::encode(late_listing.body(), &late_signature)
                 )
                 .is_err()
         );
         // Three envelopes for one slot are refused before any signature
         // check.
-        let mut entries: Vec<_> = [&forged.a, &forged.b, &forged.late]
-            .iter()
-            .map(|submission| (position as u16, submission.envelope.identity()))
-            .collect();
+        let mut entries: Vec<_> = [
+            &equivocated.first_on_time,
+            &equivocated.second_on_time,
+            &equivocated.late,
+        ]
+        .iter()
+        .map(|submission| (position as u16, submission.envelope.identity()))
+        .collect();
         entries.sort();
         let three = CanonicalTuple::new(
             1,
-            1,
             vec![
-                CanonicalItem::nonempty_ascii("sealed-lattice/close-response/v1").unwrap(),
+                CanonicalItem::nonempty_ascii(ClosePurpose::Response.context()).unwrap(),
                 CanonicalItem::hash512(poll.identity()),
                 CanonicalItem::hash512(setup.identity()),
                 CanonicalItem::hash512(*intent.message().identity()),
@@ -814,9 +450,9 @@ pub fn run(
             context
                 .authenticate_response(&intent, &three, &late_signature, &available)
                 .err(),
-            Some(CloseError::Shape)
+            Some(CloseRefusal::Shape)
         );
-        late_response = Some(packet(late_listing.body(), &late_signature));
+        late_response = Some(signed_packet::encode(late_listing.body(), &late_signature));
     }
     // A response naming another intent is refused before its signature.
     let other_intent = CloseIntentMessage::new(poll.identity(), setup.identity(), 7).unwrap();
@@ -836,7 +472,7 @@ pub fn run(
         context
             .authenticate_response(&intent, misdirected.body(), first_signature, &available)
             .err(),
-        Some(CloseError::Context)
+        Some(CloseRefusal::Context)
     );
     // A response stays pending until every listed envelope is available: the
     // first holder of the omitted ballot without it, or else the first
@@ -855,7 +491,7 @@ pub fn run(
         context
             .authenticate_response(&intent, body, signature, &without_pending)
             .err(),
-        Some(CloseError::Incomplete)
+        Some(CloseRefusal::Incomplete)
     );
     let mut changed = signature.to_vec();
     changed[1] ^= 1;
@@ -863,272 +499,33 @@ pub fn run(
         context
             .authenticate_response(&intent, body, &changed, &available)
             .err(),
-        Some(CloseError::Signature)
+        Some(CloseRefusal::Signature)
     );
     // An organizer that holds no body cannot answer: it wants a body for each
     // listed usable slot and none for a conflicting slot, whose two known
     // envelopes need no body.
-    let wanted_bytes = |submissions: &[&Submission]| -> Vec<u8> {
-        submissions
-            .iter()
-            .flat_map(|submission| {
-                (submission.envelope.position() as u16)
-                    .to_le_bytes()
-                    .into_iter()
-                    .chain(submission.envelope.identity())
-            })
-            .collect()
-    };
     let arrivals: Vec<&Vec<u8>> = responses[1..].iter().collect();
-    // Only the organizer takes responses. Delivery adds at most two envelopes
-    // to a slot, and the intent lock discards and then refuses late ones.
-    assert!(matches!(
-        works[1].command(
-            &mut enrollments[1].credential,
-            CloseOperation::AdmitResponse,
-            0,
-            arrivals[0]
-        ),
-        Err(Error::Context)
-    ));
-    let mut probe = close_work(&enrollments[0], &poll, &setup, 0);
-    let mut hashed = 0;
-    if let Some(forged) = &forged {
-        for submission in [&forged.a, &forged.late] {
-            deliver(
-                &mut probe,
-                &mut enrollments[0].credential,
-                submission,
-                &mut hashed,
-            );
-        }
-        assert!(matches!(
-            probe.command(
-                &mut enrollments[0].credential,
-                CloseOperation::BeginHeldBody,
-                0,
-                &control(&forged.b)
-            ),
-            Err(Error::Consumed)
-        ));
-    }
-    probe
-        .command(
-            &mut enrollments[0].credential,
-            CloseOperation::LockIntent,
-            0,
-            &intent_packet,
-        )
-        .unwrap();
-    if let Some(forged) = &forged {
-        assert!(matches!(
-            probe.command(
-                &mut enrollments[0].credential,
-                CloseOperation::BeginHeldBody,
-                0,
-                &control(&forged.late)
-            ),
-            Err(Error::Context)
-        ));
-        deliver(
-            &mut probe,
-            &mut enrollments[0].credential,
-            &forged.b,
-            &mut hashed,
-        );
-    }
-    // A response carries exactly the unknown envelopes it lists: adding one
-    // it does not list, or one already known, refuses the whole response.
-    let first = CloseResponseMessage::parse(split(arrivals[0]).0, count).unwrap();
-    let lists = |submission: &Submission| {
-        first
-            .listed()
-            .iter()
-            .any(|(_, identity)| *identity == submission.envelope.identity())
-    };
-    let known = common[0];
-    assert!(lists(known));
-    // The complete valid body may arrive before transport reports failure.
-    // Cancellation must not install it or block its later genuine delivery.
-    probe
-        .command(
-            &mut enrollments[0].credential,
-            CloseOperation::BeginHeldBody,
-            0,
-            &control(known),
-        )
-        .unwrap();
-    hashed += read_chunks(&known.body, |bytes| {
-        probe
-            .command(
-                &mut enrollments[0].credential,
-                CloseOperation::PushHeldBody,
-                0,
-                bytes,
-            )
-            .unwrap();
-    });
-    assert!(matches!(
-        probe.command(
-            &mut enrollments[0].credential,
-            CloseOperation::DiscardHeldBody,
-            0,
-            &[0]
-        ),
-        Err(Error::Shape)
-    ));
-    probe
-        .command(
-            &mut enrollments[0].credential,
-            CloseOperation::DiscardHeldBody,
-            0,
-            &[],
-        )
-        .unwrap();
-    assert!(matches!(
-        probe.command(
-            &mut enrollments[0].credential,
-            CloseOperation::FinishHeldBody,
-            0,
-            &[]
-        ),
-        Err(Error::Context)
-    ));
-    deliver(
-        &mut probe,
-        &mut enrollments[0].credential,
-        known,
-        &mut hashed,
+    let mut hashed = delivery::exercise_body_delivery(
+        &poll,
+        &setup,
+        enrollments,
+        &mut works[1],
+        delivery::CloseDeliveryInputs {
+            intent_packet: &intent_packet,
+            arrivals: &arrivals,
+            common: &common,
+            everything: &everything,
+            omitted,
+            equivocated: equivocated.as_ref(),
+        },
     );
-    probe
-        .command(
-            &mut enrollments[0].credential,
-            CloseOperation::DiscardHeldBody,
-            0,
-            &[],
-        )
-        .unwrap();
-    // An input that changes nothing is refused, so no log of accepted inputs
-    // records it.
-    assert!(matches!(
-        probe.command(
-            &mut enrollments[0].credential,
-            CloseOperation::BeginHeldBody,
-            0,
-            &control(known)
-        ),
-        Err(Error::Consumed)
-    ));
-    let missing: Vec<u8> = common[1..]
-        .iter()
-        .flat_map(|submission| control(submission))
-        .collect();
-    let unlisted = forged
-        .as_ref()
-        .map(|forged| &forged.late)
-        .into_iter()
-        .chain(omitted)
-        .find(|submission| !lists(submission));
-    for extra in unlisted.into_iter().chain([known]) {
-        assert!(matches!(
-            probe.command(
-                &mut enrollments[0].credential,
-                CloseOperation::AdmitResponse,
-                0,
-                &[arrivals[0].as_slice(), &missing, &control(extra)].concat()
-            ),
-            Err(Error::Context)
-        ));
-    }
-    probe
-        .command(
-            &mut enrollments[0].credential,
-            CloseOperation::AdmitResponse,
-            0,
-            &[arrivals[0].as_slice(), &missing].concat(),
-        )
-        .unwrap();
-    assert!(matches!(
-        probe.command(
-            &mut enrollments[0].credential,
-            CloseOperation::AdmitResponse,
-            0,
-            arrivals[0]
-        ),
-        Err(Error::Consumed)
-    ));
-    let mut lacking = close_work(&enrollments[0], &poll, &setup, 0);
-    lacking
-        .command(
-            &mut enrollments[0].credential,
-            CloseOperation::LockIntent,
-            0,
-            &intent_packet,
-        )
-        .unwrap();
-    gather(
-        &mut lacking,
-        &mut enrollments[0].credential,
-        count,
-        &everything,
-        &arrivals,
-    );
-    let mut all_wanted = common.clone();
-    all_wanted.extend(omitted);
-    assert_eq!(
-        lacking
-            .command(
-                &mut enrollments[0].credential,
-                CloseOperation::WantedBodies,
-                0,
-                &[]
-            )
-            .unwrap(),
-        wanted_bytes(&all_wanted)
-    );
-    // Each wanted body is named by the identity the close work reports for
-    // its envelope, and bytes that are not an envelope have none.
-    for submission in &all_wanted {
-        assert_eq!(
-            lacking
-                .command(
-                    &mut enrollments[0].credential,
-                    CloseOperation::EnvelopeIdentity,
-                    0,
-                    submission.envelope.bytes()
-                )
-                .unwrap(),
-            submission.envelope.identity()
-        );
-    }
-    let mut malformed = all_wanted[0].envelope.bytes().to_vec();
-    malformed[0] ^= 1;
-    assert!(
-        lacking
-            .command(
-                &mut enrollments[0].credential,
-                CloseOperation::EnvelopeIdentity,
-                0,
-                &malformed
-            )
-            .is_err()
-    );
-    for operation in [
-        CloseOperation::PrepareResponse,
-        CloseOperation::PrepareProposal,
-    ] {
-        assert!(matches!(
-            lacking.command(&mut enrollments[0].credential, operation, 0, &[]),
-            Err(Error::Context)
-        ));
-    }
     // The organizer lacks the equivocator's on-time envelopes and the omitted
     // ballot. Only the omitted body is wanted, and the first `n - f - 1`
     // other responses are ready without it, so the organizer answers and
     // proposes its own response and those.
     let mut unheld: Vec<&Submission> = Vec::new();
-    if let Some(forged) = &forged {
-        unheld.extend([&forged.a, &forged.b]);
+    if let Some(equivocated) = &equivocated {
+        unheld.extend([&equivocated.first_on_time, &equivocated.second_on_time]);
     }
     unheld.extend(omitted);
     gather(
@@ -1175,7 +572,7 @@ pub fn run(
         .unwrap();
     assert!(matches!(
         sign(&mut works[0], &mut enrollments[0].credential, &again),
-        Err(Error::Consumed)
+        Err(Refusal::Consumed)
     ));
     let listings: Vec<CloseResponseMessage> = responses
         .iter()
@@ -1184,26 +581,26 @@ pub fn run(
     // Honest listings exclude the late envelope and cap each slot at two. The
     // organizer lists both on-time envelopes of the equivocator without
     // their bodies.
-    let equivocated = usize::from(forged.is_some()) * 2;
+    let equivocated_envelopes = usize::from(equivocated.is_some()) * 2;
     for (position, listing) in listings.iter().enumerate() {
         let expected = match position {
             0 => common.len(),
             position => held[position].len(),
         } + if position == 0 || Some(position) == scenario.equivocator {
-            equivocated
+            equivocated_envelopes
         } else {
             0
         };
         assert_eq!(listing.listed().len(), expected, "listing {position}");
     }
-    if let Some(forged) = &forged {
+    if let Some(equivocated) = &equivocated {
         let position = scenario.equivocator.unwrap();
         assert!(listings.iter().all(|listing| {
             !listing
                 .listed()
-                .contains(&(position, forged.late.envelope.identity()))
+                .contains(&(position, equivocated.late.envelope.identity()))
         }));
-        for submission in [&forged.a, &forged.b] {
+        for submission in [&equivocated.first_on_time, &equivocated.second_on_time] {
             assert!(
                 listings[0]
                     .listed()
@@ -1247,7 +644,7 @@ pub fn run(
                 &bodies
             )
             .err(),
-        Some(CloseError::Signature)
+        Some(CloseRefusal::Signature)
     );
     let without_last: Vec<_> = authenticated
         .iter()
@@ -1264,7 +661,7 @@ pub fn run(
                 &bodies
             )
             .err(),
-        Some(CloseError::Incomplete)
+        Some(CloseRefusal::Incomplete)
     );
     assert_eq!(
         context
@@ -1276,7 +673,7 @@ pub fn run(
                 &bodies[..bodies.len() - 1]
             )
             .err(),
-        Some(CloseError::Incomplete)
+        Some(CloseRefusal::Incomplete)
     );
     let barrier = context
         .verify_proposal(
@@ -1288,9 +685,10 @@ pub fn run(
         )
         .unwrap();
     let responders: Vec<_> = barrier
+        .proposal()
         .responses()
         .iter()
-        .map(|response| response.message().responder())
+        .map(|(responder, _)| *responder)
         .collect();
     assert_eq!(responders, (0..quorum).collect::<Vec<_>>());
     let usable = scenario.usable();
@@ -1301,8 +699,11 @@ pub fn run(
                 submissions[author].as_ref().unwrap().envelope.bytes()
             ),
             ClosedSlot::Conflicting(identities) if Some(author) == scenario.equivocator => {
-                let forged = forged.as_ref().unwrap();
-                let mut expected = vec![forged.a.envelope.identity(), forged.b.envelope.identity()];
+                let equivocated = equivocated.as_ref().unwrap();
+                let mut expected = vec![
+                    equivocated.first_on_time.envelope.identity(),
+                    equivocated.second_on_time.envelope.identity(),
+                ];
                 expected.sort();
                 assert_eq!(identities, &expected);
             }
@@ -1332,7 +733,7 @@ pub fn run(
                 CloseMessage::Response(&response),
                 response_signature
             ),
-            Err(Error::Context)
+            Err(Refusal::Context)
         ));
         restored
             .lock_close_intent(&restored_owner, roster, intent.message(), &intent_signature)
@@ -1364,11 +765,11 @@ pub fn run(
                 CloseMessage::Response(&response),
                 response_signature
             ),
-            Err(Error::Consumed)
+            Err(Refusal::Consumed)
         ));
         assert!(matches!(
             restored.sign_close_response(&restored_owner, roster, &response),
-            Err(Error::Consumed)
+            Err(Refusal::Consumed)
         ));
         late_fork = Some(fork);
     }
@@ -1394,12 +795,12 @@ pub fn run(
     }
     assert!(matches!(
         organizer_restored.sign_close_proposal(&organizer_owner, roster, &proposal_message),
-        Err(Error::Consumed)
+        Err(Refusal::Consumed)
     ));
     let directory = output.join("close");
-    let late_identity = forged
+    let late_identity = equivocated
         .as_ref()
-        .map(|forged| forged.late.envelope.identity());
+        .map(|equivocated| equivocated.late.envelope.identity());
     let listed: Vec<&Submission> = everything
         .iter()
         .copied()
@@ -1437,13 +838,13 @@ pub fn run(
 /// The equivocator's credentials during the close.
 struct Equivocation {
     position: usize,
-    owner: RetainedBallotOwner,
+    owner: RetainedSetupOwner,
     late_fork: Credential,
     restored: Credential,
 }
 /// The equivocator's two on-time envelopes and its late one.
-struct Forged {
-    a: Submission,
-    b: Submission,
+struct EquivocatedSubmissions {
+    first_on_time: Submission,
+    second_on_time: Submission,
     late: Submission,
 }

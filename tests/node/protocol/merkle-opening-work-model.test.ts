@@ -1,5 +1,3 @@
-import { readFile } from 'node:fs/promises';
-
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -7,6 +5,10 @@ import {
     merkleOpeningWork,
 } from '#tests/merkle-opening-work-model.js';
 import { merklePathSharingSchedule } from '#tests/merkle-path-sharing-model.js';
+import {
+    readRustSource,
+    rustIntegerConstant,
+} from '#tests/node/rust-source.js';
 
 // Traverse the transmitted sibling schedule and the complete local cache
 // trees, rather than multiplying the model's per-block formulas.
@@ -142,20 +144,18 @@ describe('prover Merkle opening work', () => {
         expect(opened.saltExpansions).toBe(opened.restoredLeaves + 1);
     });
 
-    it('binds the omission and retention policy to the current producer', async () => {
+    it('binds the omission and retention policy to its producer', async () => {
         const [tree, oracles, linear, fri] = await Promise.all([
-            readFile('crates/protocol-research/word-proof/src/tree.rs', 'utf8'),
-            readFile(
+            readRustSource('crates/protocol-research/word-proof/src/tree.rs'),
+            readRustSource(
                 'crates/protocol-research/word-proof/src/oracles.rs',
-                'utf8',
             ),
-            readFile(
+            readRustSource(
                 'crates/protocol-research/word-proof/src/linear-oracle.rs',
-                'utf8',
             ),
-            readFile('crates/protocol-research/word-proof/src/fri.rs', 'utf8'),
+            readRustSource('crates/protocol-research/word-proof/src/fri.rs'),
         ]);
-        expect(tree).toContain('const RECOMPUTED_LEVELS: usize = 4;');
+        expect(rustIntegerConstant(tree, 'RECOMPUTED_LEVELS')).toBe(4n);
         expect(tree).toContain('for local in (2..span).rev()');
         expect(oracles).toContain(
             'let tree = Tree::new(role, 0, EVALUATION_DOMAIN_SIZE, relation.first_width());',

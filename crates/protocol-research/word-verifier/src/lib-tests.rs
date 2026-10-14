@@ -3,10 +3,10 @@ use supported_profile::{
     relation::{ballot_relation, release_relation, setup_relation},
 };
 
-// The verifier's own context parameters equal the prover's for every
+// The verifier's own statement context equals the prover's for every
 // relation of every profile.
 #[test]
-fn verifier_and_prover_bind_the_same_relation_parameters() {
+fn verifier_and_prover_bind_the_same_statement_context() {
     let mut relations = Vec::new();
     for profile in Profile::all() {
         relations.extend([
@@ -17,8 +17,8 @@ fn verifier_and_prover_bind_the_same_relation_parameters() {
     }
     for relation in relations {
         assert_eq!(
-            super::engine::context_parameters(&relation),
-            word_proof::transcript::parameters(&relation)
+            super::engine::context(&relation, b"context-test", &[7; 64]),
+            word_proof::transcript::context(&relation, b"context-test", &[7; 64])
         );
     }
 }

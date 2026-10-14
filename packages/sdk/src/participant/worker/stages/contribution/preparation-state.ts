@@ -1,12 +1,8 @@
 import type { ParticipantProfile } from '../../module/runtime-bounds.js';
 import { purposeBit, signingPurpose } from '../../module/signing-purpose.js';
-import {
-    concatenate,
-    encodeText,
-    equalBytes,
-    readUnsigned32,
-    unsigned32,
-} from '../../shared/bytes.js';
+import { concatenate, readUnsigned32, unsigned32 } from '../../shared/bytes.js';
+
+import { contributionPhase } from './contribution-state.js';
 
 export type PreparationSignature = Readonly<
     | { stage: 'intent'; body: Uint8Array }
@@ -54,15 +50,12 @@ export const encodePreparationState = (state: PreparationState) => {
               ),
     ];
     return concatenate(
-        encodeText('PRE2'),
         ...fields.flatMap((bytes) => [unsigned32(bytes.length), bytes]),
     );
 };
 
 const splitPreparation = (bytes: Uint8Array) => {
-    if (!equalBytes(bytes.subarray(0, 4), encodeText('PRE2')))
-        throw new Error('Invalid preparation journal.');
-    let offset = 4;
+    let offset = 0;
     const fields: Uint8Array[] = [];
     for (let index = 0; index < 3; index++) {
         if (bytes.length - offset < 4)
@@ -156,15 +149,15 @@ export const unusedPreparationPurposes = (bytes: Uint8Array) => {
     let mask = 0;
     if (contribution.length === 0) mask |= purposeBit(signingPurpose.offer);
     else {
-        const phase = contribution[4];
+        const phase = contribution[0];
         if (
-            !equalBytes(contribution.subarray(0, 4), encodeText('PCS5')) ||
             phase === undefined ||
-            phase < 4 ||
-            phase > 9
+            phase < contributionPhase.generationIntent ||
+            phase > contributionPhase.signed
         )
             throw new Error('Invalid retained offer phase.');
-        if (phase < 9) mask |= purposeBit(signingPurpose.offer);
+        if (phase < contributionPhase.signed)
+            mask |= purposeBit(signingPurpose.offer);
     }
     for (const [purpose, field] of [
         [signingPurpose.selectionProposal, selection],

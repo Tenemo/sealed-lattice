@@ -1,9 +1,8 @@
 //! The contribution: its offer signing, its proof and checkpoints, and the
 //! retained proposal it names.
 use super::{SESSION, Session, original_context};
-use crate::signed_packet;
-use contribution_prover::contribution_session::{CONTRIBUTION_INPUT_BYTES, ContributionSession};
-use protocol_foundations::roster::RetainedContributionContext;
+use crate::contribution_session::{CONTRIBUTION_INPUT_BYTES, ContributionSession};
+use protocol_foundations::{roster::RetainedContributionContext, signed_packet};
 use std::cell::RefCell;
 use zeroize::{Zeroize, Zeroizing};
 protocol_foundations::operation_codes! {
@@ -22,8 +21,8 @@ fn offer_operation(
     operation: u32,
     argument: usize,
     length: usize,
-) -> Result<(), protocol_foundations::Error> {
-    use protocol_foundations::Error;
+) -> Result<(), protocol_foundations::Refusal> {
+    use protocol_foundations::Refusal;
     let operation = OfferSigningOperation::from_code(operation);
     if length > state.input.len()
         || (!matches!(
@@ -31,7 +30,7 @@ fn offer_operation(
             Some(OfferSigningOperation::Polynomial | OfferSigningOperation::Proof)
         ) && argument != 0)
     {
-        return Err(Error::Shape);
+        return Err(Refusal::Shape);
     }
     let input = Zeroizing::new(state.input[..length].to_vec());
     state.input[..length].zeroize();
@@ -42,25 +41,25 @@ fn offer_operation(
                 || usize::from(u16::from_le_bytes(input[..2].try_into().unwrap()))
                     != context.position()
             {
-                return Err(Error::Shape);
+                return Err(Refusal::Shape);
             }
             let proof_length = usize::try_from(u64::from_le_bytes(input[2..].try_into().unwrap()))
-                .map_err(|_| Error::Shape)?;
-            let enrollment = state.enrollment.as_ref().ok_or(Error::Context)?;
+                .map_err(|_| Refusal::Shape)?;
+            let enrollment = state.enrollment.as_ref().ok_or(Refusal::Context)?;
             enrollment.credential.validate_offer_owner(&context)?;
             let header = enrollment
                 .contribution_header(context.profile(), proof_length)
-                .map_err(|_| Error::Context)?;
+                .map_err(|_| Refusal::Context)?;
             if operation == Some(OfferSigningOperation::BeginBody) {
                 state
                     .offer
                     .begin_body(&enrollment.credential, context, &header)?;
             }
-            state.contribution_output = header.to_vec();
+            state.participant_output = header.to_vec();
         }
         Some(OfferSigningOperation::Polynomial) => {
             if !(5..=4 + (1 << 20)).contains(&input.len()) {
-                return Err(Error::Shape);
+                return Err(Refusal::Shape);
             }
             let offset = u32::from_le_bytes(input[..4].try_into().unwrap()) as usize;
             state.offer.polynomial(argument, offset, &input[4..])?;
@@ -68,26 +67,30 @@ fn offer_operation(
         Some(OfferSigningOperation::Proof) => state.offer.proof(argument, &input)?,
         Some(OfferSigningOperation::FinishBody) => {
             if !input.is_empty() {
-                return Err(Error::Shape);
+                return Err(Refusal::Shape);
             }
             state.offer.finish_body()?;
-            state.contribution_output = state
+            state.participant_output = state
                 .offer
                 .envelope()
-                .ok_or(Error::Consumed)?
+                .ok_or(Refusal::Consumed)?
                 .bytes()
                 .to_vec();
         }
         Some(OfferSigningOperation::SignOffer) => {
             if !input.is_empty() {
-                return Err(Error::Shape);
+                return Err(Refusal::Shape);
             }
-            let credential = &mut state.enrollment.as_mut().ok_or(Error::Context)?.credential;
+            let credential = &mut state
+                .enrollment
+                .as_mut()
+                .ok_or(Refusal::Context)?
+                .credential;
             state.offer.sign(credential)?;
-            let (envelope, signature) = state.offer.offer().ok_or(Error::Consumed)?;
-            state.contribution_output = signed_packet::encode(envelope.bytes(), signature);
+            let (envelope, signature) = state.offer.offer().ok_or(Refusal::Consumed)?;
+            state.participant_output = signed_packet::encode(envelope.bytes(), signature);
         }
-        None => return Err(Error::Shape),
+        None => return Err(Refusal::Shape),
     }
     Ok(())
 }
@@ -111,7 +114,7 @@ fn send_public_chunk(object: usize, offset: usize, bytes: &[u8]) {
     );
 }
 
-thread_local! {static CONTRIBUTION: RefCell<ContributionSession> = RefCell::new(ContributionSession::new(send_public_chunk));}
+thread_local! {static CONTRIBUTION: RefCell<ContributionSession> = RefCell::new(ContributionSession::new(Box::new(send_public_chunk)));}
 
 /// Drops the completed contribution's private prover state and its
 /// remaining random stream state.
@@ -260,7 +263,7 @@ pub extern "C" fn retain_proposal(length: usize) -> u32 {
         let mut state = state.borrow_mut();
         // The proposal names the poll of this instance's verified
         // registration, which fixes the option count.
-        let Some(verified) = super::own_verification::verified() else {
+        let Some(verified) = super::own_registration::verified() else {
             return 1;
         };
         let Some(enrollment) = state.enrollment.as_ref() else {
@@ -281,7 +284,7 @@ pub extern "C" fn retain_proposal(length: usize) -> u32 {
         {
             return 1;
         }
-        let Some(Ok(context)) = super::own_verification::with_poll(|poll| {
+        let Some(Ok(context)) = super::own_registration::with_poll(|poll| {
             RetainedContributionContext::parse(
                 &enrollment.credential,
                 &verified,

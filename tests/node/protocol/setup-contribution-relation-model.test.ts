@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
+import { createSetupContributionRelationModel } from '#tests/setup-contribution-relation-model.js';
 import {
     compileSetupContributionRelationCensus,
     compileSetupContributionColumnLayout,
-    createSetupContributionRelationModel,
     deriveSetupContributionShape,
-} from '#tests/setup-contribution-relation-model.js';
+} from '#tests/setup-relation/shape.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
 import {
     completionProfile,
@@ -14,7 +14,7 @@ import {
 } from '#tests/supported-profile-model.js';
 
 describe('complete setup contribution relation in a reduced ring', () => {
-    it('rejects public limbs outside the canonical modulus even when the lifted equations are unchanged', () => {
+    it('refuses public limbs outside the canonical modulus even when the lifted equations are unchanged', () => {
         const model = createSetupContributionRelationModel(completionProfile());
         for (const equation of model.equations) {
             for (const coefficients of [
@@ -37,7 +37,7 @@ describe('complete setup contribution relation in a reduced ring', () => {
         expect(model.verify()).toBe(true);
     });
 
-    it('rejects incomplete public polynomials before evaluating the relation', () => {
+    it('refuses incomplete public polynomials before evaluating the relation', () => {
         const model = createSetupContributionRelationModel(completionProfile());
         model.equations[0].publicValue.pop();
         expect(model.verify()).toBe(false);
@@ -119,9 +119,9 @@ describe('complete setup contribution relation in a reduced ring', () => {
                 2n * 65536n * (3n * 16n) + 32768n * 16n + 1408n * 48n,
             fullRingQueryCosets: 4n,
             expandedStatementPolynomialCount: 42n + 31n,
-            expandedStatementHeaderByteLength: 4n + 4n + 108n + 20n,
+            expandedStatementHeaderByteLength: 4n + 108n,
             expandedStatementByteLength:
-                4n + 4n + 108n + 20n + 42n * 65536n * 109n + 31n * 65536n * 21n,
+                4n + 108n + 42n * 65536n * 109n + 31n * 65536n * 21n,
             maximumEncodedOperatorByteLength:
                 64n + 2n * 48n + 355n * 1408n * 48n,
             maximumIntegerLimbConvolutionMagnitude: 1024n * ((1n << 96n) - 1n),
@@ -162,7 +162,7 @@ describe('complete setup contribution relation in a reduced ring', () => {
         );
     });
 
-    it('rejects full resident affine coefficients at the absolute WASM bound', () => {
+    it('refuses full resident affine coefficients at the absolute WASM bound', () => {
         const census =
             compileSetupContributionRelationCensus(completionProfile());
         expect(census.fullAffineCoefficientByteLength).toBeGreaterThan(
@@ -227,7 +227,7 @@ describe('complete setup contribution relation in a reduced ring', () => {
         }
     });
 
-    it('rejects an altered shared constant and an altered wide coefficient', () => {
+    it('refuses an altered shared constant and an altered wide coefficient', () => {
         const model = createSetupContributionRelationModel(completionProfile());
         for (const name of [
             'FHE secret/positive',
@@ -245,7 +245,7 @@ describe('complete setup contribution relation in a reduced ring', () => {
         expect(model.verify()).toBe(true);
     });
 
-    it('rejects range violations and overlapping signs in the retained FHE auxiliary secret', () => {
+    it('refuses range violations and overlapping signs in the retained FHE auxiliary secret', () => {
         const model = createSetupContributionRelationModel(completionProfile());
         const error = model.columns.find((column) => column.bits === 7)!;
         const originalError = error.values[0];

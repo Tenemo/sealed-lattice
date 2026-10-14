@@ -12,13 +12,14 @@ import {
     hexadecimal,
 } from '#packages/sdk/src/participant/worker/shared/bytes.js';
 import { proofLength } from '#packages/sdk/src/participant/worker/stages/contribution/contribution-proof.js';
-import {
-    contributionRecords,
-    encodeContributionState,
-    resumeContribution,
-} from '#packages/sdk/src/participant/worker/stages/contribution/contribution.js';
+import { encodeContributionState } from '#packages/sdk/src/participant/worker/stages/contribution/contribution-state.js';
 import { encodePreparationState } from '#packages/sdk/src/participant/worker/stages/contribution/preparation-state.js';
 import { restoreEnrollment } from '#packages/sdk/src/participant/worker/stages/enrollment/enrollment.js';
+import {
+    contributionRecords,
+    isContributionSession,
+    resumeParticipant,
+} from '#packages/sdk/src/participant/worker/stages/participant-session.js';
 import { retainedProfile } from '#packages/sdk/src/participant/worker/stages/roster/roster.js';
 import {
     openParticipantDatabase,
@@ -31,7 +32,6 @@ import {
     openRecord,
     sealRecord,
 } from '#packages/sdk/src/participant/worker/storage/private-records.js';
-import { rootAssociatedData } from '#packages/sdk/src/participant/worker/storage/root-sealing.js';
 import {
     authenticateRoot,
     commitRoot,
@@ -107,7 +107,9 @@ export const mutateParticipantPadding = async (
             context.position >= context.profile.eligibleContributorCount
         )
             throw new Error('The padding control names another participant.');
-        const session = await resumeContribution(context, root);
+        const session = await resumeParticipant(context, root);
+        if (!isContributionSession(session))
+            throw new Error('No own contribution is retained.');
         const state = session.state;
         if (state.phase !== 7)
             throw new Error(
@@ -167,7 +169,7 @@ export const mutateParticipantPadding = async (
                     validateParticipantPredecessor(reader, {
                         head: root.head,
                         manifest: root.plaintext,
-                        rootContext: rootAssociatedData(context.runtime),
+                        rootContext: context.runtime,
                         maximumRootBytes: context.profile.root.maximumRootBytes,
                         recordStores: participantRecordStores,
                         records: predecessorRecords,

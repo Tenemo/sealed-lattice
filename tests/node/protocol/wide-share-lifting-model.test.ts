@@ -34,7 +34,7 @@ describe('wide sharing and release integer lifting', () => {
         expect(census.aliasCarry).toBeGreaterThanOrEqual(census.carryBound);
     });
 
-    it('uses the dense-convolution carry bound and rejects its modular alias', () => {
+    it('uses the dense-convolution carry bound and refuses its modular alias', () => {
         const census = compileReleaseShareLiftingCensus(
             completionProfile().releaseLifting,
         );

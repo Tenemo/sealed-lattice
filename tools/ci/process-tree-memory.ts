@@ -16,7 +16,7 @@ type ProcessMemory = Readonly<{
 // Windows keeps an exited parent's identifier, which a later process may
 // take, so a process that started before the process of its parent's
 // identifier is not that process's child.
-export const describeProtocolProcessTree = (
+export const describeProcessTree = (
     identifier: number,
     processes: readonly ProcessMemory[],
 ): Readonly<{ processes: number; bytes: number }> | undefined => {
@@ -52,11 +52,10 @@ export const describeProtocolProcessTree = (
 };
 
 // Sums the private bytes of the process and its descendants.
-export const sumProtocolProcessTree = (
+export const sumProcessTree = (
     identifier: number,
     processes: readonly ProcessMemory[],
-): number | undefined =>
-    describeProtocolProcessTree(identifier, processes)?.bytes;
+): number | undefined => describeProcessTree(identifier, processes)?.bytes;
 
 // One snapshot of every process takes about a second on an idle Windows host,
 // most of it the WMI enumeration, and several seconds beside the heavy work a
@@ -67,9 +66,7 @@ const snapshotTimeoutMilliseconds = 60_000;
 // started, in one snapshot, from which several process trees can be summed.
 // Elsewhere an exited parent's children pass to another process, so their
 // recorded parent is alive.
-export const readProtocolProcesses = async (): Promise<
-    readonly ProcessMemory[]
-> => {
+export const readProcesses = async (): Promise<readonly ProcessMemory[]> => {
     const execute = promisify(execFile);
     if (process.platform === 'win32') {
         const result = await execute(
@@ -117,14 +114,15 @@ export const readProtocolProcesses = async (): Promise<
         });
 };
 
-export const readProtocolProcessTree = async (
+export const readProcessTree = async (
     identifier: number,
 ): Promise<number | undefined> => {
     assert.ok(Number.isSafeInteger(identifier) && identifier > 0);
-    return sumProtocolProcessTree(identifier, await readProtocolProcesses());
+    return sumProcessTree(identifier, await readProcesses());
 };
 
-// Samples a process tree's memory once a second until stopped. Every sample
+// Samples a process tree's memory once per interval, a second unless given,
+// until stopped; stopping ends the wait for the next sample. Every sample
 // reaches `onSample`, and a sample above the limit aborts the guarded run with
 // the guard's message.
 export const guardProcessTreeMemory = (input: {
@@ -133,19 +131,28 @@ export const guardProcessTreeMemory = (input: {
     readonly exceededMessage: string;
     readonly onSample: (bytes: number) => void | Promise<void>;
     readonly abort: (reason: unknown) => void;
+    readonly sampleIntervalMilliseconds?: number;
 }): { readonly stop: () => Promise<void> } => {
     let active = true;
+    const stopped = new AbortController();
     const sampling = (async () => {
         while (active) {
-            const bytes = await readProtocolProcessTree(
-                input.processIdentifier,
-            );
+            const bytes = await readProcessTree(input.processIdentifier);
             if (bytes !== undefined) {
                 await input.onSample(bytes);
                 if (bytes > input.memoryLimit)
                     throw new Error(input.exceededMessage);
             }
-            if (active) await setTimeout(1000);
+            if (!active) break;
+            try {
+                await setTimeout(
+                    input.sampleIntervalMilliseconds ?? 1000,
+                    undefined,
+                    { signal: stopped.signal },
+                );
+            } catch (error) {
+                if (!stopped.signal.aborted) throw error;
+            }
         }
     })().catch((error: unknown) => {
         input.abort(error);
@@ -153,6 +160,7 @@ export const guardProcessTreeMemory = (input: {
     return {
         stop: async () => {
             active = false;
+            stopped.abort();
             await sampling;
         },
     };

@@ -35,7 +35,7 @@ import type { SignedPacket } from '../../shared/signed-packet.js';
 import {
     contributionCandidateKey,
     polynomialFile,
-} from '../contribution/contribution.js';
+} from '../contribution/contribution-offer.js';
 import {
     proposalRegistrationBodyDigests,
     rosterBegin,
@@ -551,7 +551,7 @@ export const aggregateSelection = async (
 
 // Each operation owns one Rust module; this records only whether that module
 // has already restored the roster, never whether an offer or setup is valid.
-export const preparedRosters = new WeakSet<object>();
+export const modulesWithReplayedRoster = new WeakSet<object>();
 
 export const authenticateCertificate = (
     context: PublicProfileContext,
@@ -641,7 +641,7 @@ export const readSetupCertificate = async (
                     }
                 },
                 () =>
-                    endorsements >= context.profile.close.quorum
+                    endorsements >= context.profile.quorum
                         ? endorsements
                         : undefined,
             );
@@ -778,7 +778,7 @@ export const verifyPublicSetup = async (
                     'The poll names no supported profile.',
                 );
             const profiled = { ...context, profile };
-            preparedRosters.add(module);
+            modulesWithReplayedRoster.add(module);
             const certificate = await readSetupCertificate(profiled, relay);
             await verifyCertificateInputs(profiled, relay, certificate.bytes);
             return profiled;

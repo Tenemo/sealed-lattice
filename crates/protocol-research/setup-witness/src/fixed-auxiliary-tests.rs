@@ -18,7 +18,7 @@ fn both_complete_streams_match_independent_sampling_and_canonical_records() {
         ("common-auxiliary-key", key, public_key_records()),
     ] {
         let mut hash = Shake256::default();
-        hash.update(b"synthetic-full-setup-witness/1");
+        hash.update(b"synthetic-full-setup-witness");
         hash.update(&(label.len() as u32).to_le_bytes());
         hash.update(label.as_bytes());
         let mut stream = hash.finalize_xof();

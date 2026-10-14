@@ -1,5 +1,3 @@
-import { readFile } from 'node:fs/promises';
-
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -9,13 +7,15 @@ import {
     compileCompleteAuthenticationFrameWork,
     compileCompleteCredentialIntentBounds,
     compileCompletedAuthenticationCensus,
-    compileCurrentCredentialIntentBounds,
-    compileCurrentSignatureHashInputs,
-    compileCurrentSignatureSamplingBounds,
+    compileCredentialIntentBoundsThroughBallot,
+    compileSignatureHashInputs,
+    compileSignatureSamplingBounds,
     compileSignatureCounterBoundary,
     compileBallotSignatureHashWork,
     pureSignatureFrame,
 } from '#tests/authentication-work-model.js';
+import { supportedParticipantCounts } from '#tests/node/protocol/reference/product-goals.js';
+import { readRustSource, rustStringConstant } from '#tests/node/rust-source.js';
 import {
     framedProofHashBytes,
     proofHashProfiles,
@@ -67,7 +67,7 @@ describe('authentication frame accounting', () => {
         expect(() => compileBallotSignatureHashWork(-1n)).toThrow();
     });
     it('bounds all seed inputs before adaptive selection without a lifetime invocation cap', () => {
-        const rows = compileCurrentSignatureSamplingBounds();
+        const rows = compileSignatureSamplingBounds();
         expect(rows.map((row) => row.outputBytes)).toEqual([
             1536n,
             1024n,
@@ -101,7 +101,7 @@ describe('authentication frame accounting', () => {
         }
     });
     it('keeps exact standard hash-input shapes and leaves unbounded sampler output explicit', () => {
-        const signature = compileCurrentSignatureHashInputs();
+        const signature = compileSignatureHashInputs();
         expect(signature.highBitEncodingBytes).toBe(768n);
         expect(
             signature.rows.slice(0, 8).map((value) => value.inputBytes),
@@ -131,7 +131,7 @@ describe('authentication frame accounting', () => {
             );
     });
     it('retains literal matrix-input overlap with the standard challenge sampler', () => {
-        const signature = compileCurrentSignatureHashInputs(),
+        const signature = compileSignatureHashInputs(),
             challenge = signature.rows.find(
                 (value) => value.purpose === 'Challenge polynomial sampling',
             )!;
@@ -140,17 +140,14 @@ describe('authentication frame accounting', () => {
         ).seeds.filter(
             (seed) => BigInt(seed.message.length) === challenge.inputBytes,
         );
-        expect(aliases.map((seed) => seed.label)).toEqual(
-            Array.from({ length: 6 }, (_, gadget) =>
-                ['a', 'u', 'k'].map((role) => `common-fhe-${role}-${gadget}`),
-            ).flat(),
-        );
+        expect(aliases.map((seed) => seed.label)).toEqual(['common-auxiliary']);
         expect(challenge.family).toBe('SHAKE256');
-        // These are permitted sampler inputs. This does not produce a valid
+        // This is a permitted sampler input. It does not produce a valid
         // signature or make the common matrices independent oracle functions.
     });
     it('bounds first-evaluated intents separately from delivered ballot counts', () => {
-        const [organizer, participant] = compileCurrentCredentialIntentBounds();
+        const [organizer, participant] =
+            compileCredentialIntentBoundsThroughBallot();
         expect(organizer.firstEvaluatedIntentBound).toBe(7n);
         expect(participant.firstEvaluatedIntentBound).toBe(4n);
         expect(participant.purposes).toEqual([
@@ -159,12 +156,14 @@ describe('authentication frame accounting', () => {
             'setup-selection-endorsement',
             'ballot-envelope',
         ]);
-        for (let count = 3; count <= 20; count++) {
+        for (const count of supportedParticipantCounts) {
             const intentBound =
                 organizer.firstEvaluatedIntentBound +
                 BigInt(count - 1) * participant.firstEvaluatedIntentBound -
                 BigInt(
-                    count - compileSetupSelectionCensus(count).eligibleCount,
+                    count -
+                        compileSetupSelectionCensus(count)
+                            .eligibleContributorCount,
                 );
             expect(
                 compileCompletedAuthenticationCensus(
@@ -208,7 +207,7 @@ describe('authentication frame accounting', () => {
             64n,
             64n,
             64n,
-            214n,
+            210n,
         ]);
         for (const role of roles) {
             const frame = pureSignatureFrame(
@@ -233,7 +232,7 @@ describe('authentication frame accounting', () => {
     });
 
     it('enumerates signatures without equating the enrollment set with the roster', () => {
-        for (let participants = 3; participants <= 20; participants++) {
+        for (const participants of supportedParticipantCounts) {
             for (const extraRegistrations of [0, 1, 21]) {
                 for (const ballots of [0, 1, participants]) {
                     const records = [
@@ -252,7 +251,8 @@ describe('authentication frame accounting', () => {
                     for (
                         let position = 0;
                         position <
-                        compileSetupSelectionCensus(participants).eligibleCount;
+                        compileSetupSelectionCensus(participants)
+                            .eligibleContributorCount;
                         position++
                     )
                         records.push('contribution-offer');
@@ -300,9 +300,9 @@ describe('authentication frame accounting', () => {
 });
 
 describe('complete participant authentication accounting', () => {
-    it('keeps all actual signature purposes in the current hash-input inventory', () => {
+    it('lists every signature purpose in the hash-input inventory', () => {
         expect(
-            compileCurrentSignatureHashInputs()
+            compileSignatureHashInputs()
                 .rows.slice(8)
                 .map((row) => row.purpose),
         ).toEqual([
@@ -330,17 +330,17 @@ describe('complete participant authentication accounting', () => {
             64n,
             64n,
             64n,
-            214n,
+            210n,
             64n,
             64n,
             64n,
             64n,
-            270n,
+            266n,
         ]);
         for (const role of roles.slice(7)) {
             const context = Buffer.from(role.context);
             const message = Buffer.alloc(
-                role.purpose === 'release-envelope' ? 270 : 64,
+                role.purpose === 'release-envelope' ? 266 : 64,
                 7,
             );
             const expected = Buffer.concat([
@@ -421,7 +421,7 @@ describe('complete participant authentication accounting', () => {
     it('preserves the separate through-ballot census used by retained prefix evidence', () => {
         expect(compileAuthenticationFrameWork()).toHaveLength(7);
         expect(
-            compileCurrentCredentialIntentBounds().map(
+            compileCredentialIntentBoundsThroughBallot().map(
                 (row) => row.firstEvaluatedIntentBound,
             ),
         ).toEqual([7n, 4n]);
@@ -446,23 +446,14 @@ describe('complete participant authentication accounting', () => {
                 'ENDORSEMENT_PURPOSE',
             ],
         ] as const) {
-            const source = await readFile(
-                new URL(
-                    '../../../crates/protocol-research/protocol-foundations/src/' +
-                        file,
-                    import.meta.url,
-                ),
-                'utf8',
+            const source = await readRustSource(
+                'crates/protocol-research/protocol-foundations/src/' + file,
             );
-            const actual = source.match(
-                new RegExp('const ' + name + ': [^=]+ = b?"([^"]+)";', 'u'),
-            );
-            expect(actual).not.toBeNull();
             expect(
                 roles.find((role) => role.purpose === purpose)!.context,
-            ).toBe(actual![1]);
+            ).toBe(rustStringConstant(source, name));
         }
-        expect(roles[0].context).toBe('sealed-lattice/poll-definition/v2');
-        expect(roles[1].context).toBe('sealed-lattice/registration/v1');
+        expect(roles[0].context).toBe('sealed-lattice/poll-definition');
+        expect(roles[1].context).toBe('sealed-lattice/registration');
     });
 });

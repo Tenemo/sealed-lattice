@@ -89,7 +89,7 @@ fn canonical_headers_bind_context_and_refuse_trailing_bytes() {
     assert_eq!(decoded.bytes(), body(&credential, [1; 64]).bytes());
     assert!(BodyDigest::from_header(&header, [9; 64]).is_err());
     let mut altered = header.clone();
-    altered[2] = 2;
+    altered[0] = 2;
     assert!(BodyDigest::from_header(&altered, [1; 64]).is_err());
     assert!(BodyDigest::from_header(&header[..header.len() - 1], [1; 64]).is_err());
 }

@@ -85,7 +85,7 @@ describe('bounded browser transport', () => {
             );
             expect(new URL(server.origin).port).not.toBe('80');
             for (const asset of [
-                '/bounded-output-browser-worker.mjs',
+                '/fhe-key-source-browser-worker.mjs',
                 '/bounded-output-browser-transport.mjs',
                 '/fhe-key-source-scalar.mjs',
                 '/scalar-module.mjs',
@@ -95,7 +95,7 @@ describe('bounded browser transport', () => {
             const page = await fetch(server.origin + '/');
             expect(page.status).toBe(200);
             expect(await page.text()).toContain(
-                "new Worker('/bounded-output-browser-worker.mjs'",
+                "new Worker('/fhe-key-source-browser-worker.mjs'",
             );
             const module = await fetch(server.origin + '/module.wasm');
             expect(module.headers.get('Content-Type')).toBe('application/wasm');

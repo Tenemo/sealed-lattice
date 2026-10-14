@@ -1,7 +1,9 @@
-import { readFile } from 'node:fs/promises';
-
 import { describe, expect, it } from 'vitest';
 
+import {
+    readRustSource,
+    rustIntegerConstant,
+} from '#tests/node/rust-source.js';
 import {
     bufferedFieldPrefixLaw,
     bufferedFieldSamplingFailure,
@@ -319,17 +321,11 @@ describe('bounded randomness for complete proof simulation', () => {
     });
 
     it('keeps the native degree-mask read variation instead of treating the minimum as fixed', async () => {
-        const source = await readFile(
-            new URL(
-                '../../../crates/protocol-research/supported-profile/src/relation.rs',
-                import.meta.url,
-            ),
-            'utf8',
+        const source = await readRustSource(
+            'crates/protocol-research/supported-profile/src/relation.rs',
         );
-        expect(source).toContain('pub const RANDOM_WORD_BYTES: usize = 16;');
-        expect(source).toContain(
-            'pub const RANDOM_READ_BYTES: usize = 65_536;',
-        );
+        expect(rustIntegerConstant(source, 'RANDOM_WORD_BYTES')).toBe(16n);
+        expect(rustIntegerConstant(source, 'RANDOM_READ_BYTES')).toBe(65_536n);
         const result = compileFirstOracleReadVariation();
         expect(result.requiredValues).toBe(3n * 2n * 65_536n);
         expect(result.bufferWords).toBe(65_536n / 16n);

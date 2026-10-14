@@ -9,9 +9,7 @@
 //! streams serve the operation's draws within the module.
 
 use parallel_work::random;
-use protocol_foundations::foundation::{
-    CANONICAL_TUPLE_SCHEMA_IDENTIFIER, CANONICAL_TUPLE_VERSION, CanonicalItem, CanonicalItemType,
-};
+use protocol_foundations::identity::{Trailing, framing};
 use sha3::{
     Shake256, Shake256Reader,
     digest::{ExtendableOutput, Update, XofReader},
@@ -44,14 +42,14 @@ impl Purpose {
     fn domains(self) -> [Option<&'static str>; 2] {
         match self {
             Self::Contribution => [
-                Some("sealed-lattice/contribution-witness-randomness/v1"),
-                Some("sealed-lattice/contribution-proof-randomness/v1"),
+                Some("sealed-lattice/contribution-witness-randomness"),
+                Some("sealed-lattice/contribution-proof-randomness"),
             ],
             Self::Ballot => [
-                Some("sealed-lattice/ballot-encryption-randomness/v1"),
-                Some("sealed-lattice/ballot-proof-randomness/v1"),
+                Some("sealed-lattice/ballot-encryption-randomness"),
+                Some("sealed-lattice/ballot-proof-randomness"),
             ],
-            Self::Release => [None, Some("sealed-lattice/release-proof-randomness/v1")],
+            Self::Release => [None, Some("sealed-lattice/release-proof-randomness")],
         }
     }
     /// The draws the first stream serves.
@@ -64,21 +62,14 @@ impl Purpose {
     }
 }
 
-// Absorbs the canonical tuple of the domain and the seed as one raw byte
-// item, as the foundation hash frames it, without copying the seed.
+// Absorbs the canonical tuple of the domain and the seed as one variable raw
+// byte item, as the foundation hash frames it, without copying the seed.
 fn stream(domain: &str, seed: &[u8; SEED_BYTES]) -> Shake256Reader {
-    let domain =
-        CanonicalItem::nonempty_ascii(domain).expect("A stream domain is canonical ASCII.");
     let mut hasher = Shake256::default();
-    hasher.update(&CANONICAL_TUPLE_SCHEMA_IDENTIFIER.to_le_bytes());
-    hasher.update(&CANONICAL_TUPLE_VERSION.to_le_bytes());
-    hasher.update(&2_u32.to_le_bytes());
-    hasher.update(&domain.item_type().canonical_code().to_le_bytes());
-    hasher.update(&(domain.canonical_bytes().len() as u32).to_le_bytes());
-    hasher.update(domain.canonical_bytes());
-    hasher.update(&CanonicalItemType::RawBytes.canonical_code().to_le_bytes());
-    hasher.update(&(SEED_BYTES as u32 + 4).to_le_bytes());
-    hasher.update(&(SEED_BYTES as u32).to_le_bytes());
+    hasher.update(
+        &framing(domain, &[], Trailing::Variable(SEED_BYTES))
+            .expect("A stream domain is canonical ASCII."),
+    );
     hasher.update(seed);
     hasher.finalize_xof()
 }

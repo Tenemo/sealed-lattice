@@ -1,4 +1,7 @@
+use super::kernels::KEPT;
+use super::keyed_products::keyed_job;
 use super::*;
+use parallel_work::share;
 
 const TEST_DEGREE: usize = 16;
 
@@ -185,17 +188,6 @@ fn shared_records_give_the_delivered_records_sums() {
     ));
     drop(product);
     assert_eq!(kept_everywhere(), 0);
-}
-
-// A product whose every job has requested its records has no request
-// left, so it refuses another record.
-#[test]
-fn a_product_past_its_last_request_refuses_a_record() {
-    let profile = Profile::new(3, 2).unwrap();
-    let arithmetic = Arithmetic::new(profile, TEST_DEGREE);
-    let mut product = arithmetic.keyed_product(&arithmetic.uniform(1), context(0));
-    product.requested = KEYED_GROUPS * arithmetic.external_primes;
-    assert!(!arithmetic.deliver_record(&mut product, 0, 0, &[0; 8 * TEST_DEGREE]));
 }
 
 // A keyed product's jobs name every prime's two groups once, each

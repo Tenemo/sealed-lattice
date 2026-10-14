@@ -6,7 +6,7 @@ use sha3::{
 
 pub(crate) fn public_reader(label: &str) -> impl XofReader + use<> {
     let mut state = Shake256::default();
-    Update::update(&mut state, b"synthetic-full-setup-witness/1");
+    Update::update(&mut state, b"synthetic-full-setup-witness");
     Update::update(&mut state, &(label.len() as u32).to_le_bytes());
     Update::update(&mut state, label.as_bytes());
     state.finalize_xof()

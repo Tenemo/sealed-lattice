@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 
 import {
     findFirstCensusMismatch,
@@ -7,10 +7,12 @@ import {
 } from '#tools/ci/generate-documentation-census.js';
 
 describe('documentation census generator', () => {
-    const rendered = renderDocumentationCensus();
+    let rendered: string;
+    beforeAll(() => {
+        rendered = renderDocumentationCensus();
+    });
 
-    it('renders deterministically with the current model owners', () => {
-        expect(renderDocumentationCensus()).toBe(rendered);
+    it('renders the section of each model owner', () => {
         for (const heading of [
             '## Threshold completion census',
             '## Threshold key-aggregation structural census',

@@ -1,4 +1,5 @@
 import { compileCommonAgreementDegreeCensus } from '#tests/common-agreement-degree-model.js';
+import { binomial } from '#tests/exact-integer.js';
 import {
     compileBallotWordProofLayout,
     compileFullWordProofLayout,
@@ -8,14 +9,6 @@ import { proofHashProfiles } from '#tests/proof-hash-work-model.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
 import type { SupportedProfile } from '#tests/supported-profile-model.js';
 import { compileWideChallengeCompilerCensus } from '#tests/wide-challenge-compiler-model.js';
-
-const binomial = (population: bigint, count: bigint) => {
-    if (count > population) return 0n;
-    let result = 1n;
-    for (let index = 1n; index <= count; index++)
-        result = (result * (population - index + 1n)) / index;
-    return result;
-};
 
 // One specified accepted output vector and the number of candidate words
 // examined through each next acceptance. Rounding to complete reads discards

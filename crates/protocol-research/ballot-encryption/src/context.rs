@@ -1,11 +1,11 @@
 use protocol_foundations::foundation::participant_identity::ParticipantIdentity;
-use protocol_foundations::{ballot_authentication::RetainedBallotOwner, poll::VerifiedPoll};
+use protocol_foundations::{ballot_authentication::RetainedSetupOwner, poll::VerifiedPoll};
 use setup_aggregate::RetainedSetupInputs;
 use std::sync::Arc;
 use supported_profile::Profile;
 
 #[derive(Debug)]
-pub struct Error;
+pub struct Refusal;
 /// Fixed private-computation inputs. It is not a public setup capability.
 pub struct BallotComputationContext {
     poll: Arc<VerifiedPoll>,
@@ -17,16 +17,16 @@ pub struct BallotComputationContext {
 impl BallotComputationContext {
     pub fn from_retained(
         poll: Arc<VerifiedPoll>,
-        owner: &RetainedBallotOwner,
+        owner: &RetainedSetupOwner,
         inputs: &RetainedSetupInputs,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, Refusal> {
         let profile = inputs.profile();
         if owner.poll() != &poll.identity()
             || owner.setup_identity() != inputs.setup_identity()
             || owner.position() >= profile.participants()
             || profile.options() != poll.manifest().option_count()
         {
-            return Err(Error);
+            return Err(Refusal);
         }
         Ok(Self {
             poll,

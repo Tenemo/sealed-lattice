@@ -13,7 +13,7 @@ import { participantReleaseProofRoleBytes } from '#tests/participant-release-cus
 import { compileProofVerifierQueryCensus } from '#tests/proof-verifier-query-model.js';
 import { compileRecipientKeyCensus } from '#tests/recipient-key-model.js';
 import { compileRosterProposalCensus } from '#tests/roster-proposal-model.js';
-import { compileSetupContributionRelationCensus } from '#tests/setup-contribution-relation-model.js';
+import { compileSetupContributionRelationCensus } from '#tests/setup-relation/shape.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
 import type { SupportedProfile } from '#tests/supported-profile-model.js';
 import {
@@ -221,7 +221,7 @@ export const proofHashProfiles = (profile: SupportedProfile) => {
             products: setup.disjointPairs,
             prefixWords: 18n,
             statementBytes: setup.expandedStatementByteLength,
-            relationTag: 'complete-setup-words/2',
+            relationTag: 'complete-setup-words',
             roleBytes: compileRosterProposalCensus(profile.participantCount)
                 .roleBytes,
         },
@@ -235,7 +235,7 @@ export const proofHashProfiles = (profile: SupportedProfile) => {
             prefixWords: 20n,
             statementBytes:
                 ballotBody.contextBytes + 2n * ballotBody.ciphertextBytes,
-            relationTag: 'linked-scored-ballot/1',
+            relationTag: 'linked-scored-ballot',
             roleBytes: ballotBody.proofRoleBytes,
         },
         {
@@ -257,7 +257,7 @@ export const proofHashProfiles = (profile: SupportedProfile) => {
                 2n +
                 fixedModulusBfvInputs.polynomialDegree *
                     (4n * (shareBytes + 1n) + 2n * (releaseBytes + 1n)),
-            relationTag: 'linked-threshold-release/1',
+            relationTag: 'linked-threshold-release',
             roleBytes: participantReleaseProofRoleBytes,
         },
     ] as const;
@@ -286,6 +286,22 @@ export const proofHashProfiles = (profile: SupportedProfile) => {
             roleBytes: row.roleBytes,
         };
     });
+};
+
+// The first-oracle leaf hash of a profile's setup proof resumed at its latest
+// checkpoint cut, which retains every base column and so maximizes the
+// complete-input factor for the profile.
+export const setupFirstOracleResumeWork = (profile: SupportedProfile) => {
+    const setup = proofHashProfiles(profile).find(
+        (value) => value.role === 'setup',
+    );
+    if (setup === undefined)
+        throw new Error('The proof hash profiles have no setup role.');
+    return firstOracleResumeHashWork(
+        setup.firstWidth,
+        setup.roleBytes,
+        (setup.firstWidth - 48n) / 16n,
+    );
 };
 
 export const compileProofHashWork = (
@@ -434,7 +450,7 @@ export const compileProofHashWork = (
         16n,
         profile.parameterBytes,
         16n,
-        profile.statementBytes,
+        64n,
     ]);
     const transcript = total([
         work(
