@@ -6,10 +6,7 @@ import path from 'node:path';
 import { runCommandsInSeries } from '#tools/ci/command-runner.js';
 import type { ActiveLocalRunLog } from '#tools/ci/local-run-log.js';
 import { createNativeOperationGuard } from '#tools/ci/native-operation-guard.js';
-import {
-    guardProcessTreeMemory,
-    readProtocolProcessTree,
-} from '#tools/ci/process-tree-memory.js';
+import { readProtocolProcessTree } from '#tools/ci/process-tree-memory.js';
 
 export const runGuardedFixture = async ({
     root,
@@ -19,7 +16,6 @@ export const runGuardedFixture = async ({
     command,
     args,
     name,
-    handshake,
     parseResult,
     nativeProgressLines,
 }: Readonly<{
@@ -30,27 +26,22 @@ export const runGuardedFixture = async ({
     command: string;
     args: string[];
     name: string;
-    handshake?: boolean;
     parseResult?: (output: string) => Record<string, unknown>;
     nativeProgressLines?: readonly string[];
 }>) => {
     assert.ok(freemem() >= 2 * processMemoryLimit);
-    const gateDirectory = handshake
-        ? await mkdtemp(path.join(root, 'temp/native-fixture-guard-'))
-        : undefined;
-    const gateFiles =
-        gateDirectory === undefined
-            ? undefined
-            : {
-                  startFile: path.join(gateDirectory, 'start'),
-                  finishFile: path.join(gateDirectory, 'finish'),
-              };
+    const gateDirectory = await mkdtemp(
+        path.join(root, 'temp/native-fixture-guard-'),
+    );
+    const gateFiles = {
+        startFile: path.join(gateDirectory, 'start'),
+        finishFile: path.join(gateDirectory, 'finish'),
+    };
     const controller = new AbortController();
     let peakMemory = 0,
         samples = 0,
         output = '';
     let monitor: Promise<void> | undefined;
-    let memoryGuard: { stop: () => Promise<void> } | undefined;
     let nativeGuard: ReturnType<typeof createNativeOperationGuard> | undefined;
     let guardResult:
         | Awaited<
@@ -80,16 +71,13 @@ export const runGuardedFixture = async ({
         [
             {
                 command,
-                args:
-                    gateFiles === undefined
-                        ? args
-                        : [
-                              ...args,
-                              '--guard-start',
-                              gateFiles.startFile,
-                              '--guard-finish',
-                              gateFiles.finishFile,
-                          ],
+                args: [
+                    ...args,
+                    '--guard-start',
+                    gateFiles.startFile,
+                    '--guard-finish',
+                    gateFiles.finishFile,
+                ],
                 env: environment,
                 workingDirectoryPath: root,
                 description: name,
@@ -122,52 +110,31 @@ export const runGuardedFixture = async ({
                 },
                 onCommandStart({ processIdentifier }) {
                     assert.ok(processIdentifier);
-                    if (gateFiles !== undefined) {
-                        nativeGuard = createNativeOperationGuard({
-                            allowedProgressLines: nativeProgressLines,
-                            ...gateFiles,
-                            memoryLimit: processMemoryLimit,
-                            readMemory: () =>
-                                readProtocolProcessTree(processIdentifier),
-                            recordSample,
-                        });
-                        monitor = nativeGuard
-                            .monitor()
-                            .then((result) => {
-                                guardResult = result;
-                            })
-                            .catch((error: unknown) => controller.abort(error));
-                        return;
-                    }
-                    memoryGuard = guardProcessTreeMemory({
-                        processIdentifier,
+                    nativeGuard = createNativeOperationGuard({
+                        allowedProgressLines: nativeProgressLines,
+                        ...gateFiles,
                         memoryLimit: processMemoryLimit,
-                        exceededMessage:
-                            'Fixture process-tree memory guard exceeded.',
-                        onSample: (bytes) => {
-                            recordSample('periodic', bytes);
-                        },
-                        abort: (reason) => {
-                            controller.abort(reason);
-                        },
+                        readMemory: () =>
+                            readProtocolProcessTree(processIdentifier),
+                        recordSample,
                     });
+                    monitor = nativeGuard
+                        .monitor()
+                        .then((result) => {
+                            guardResult = result;
+                        })
+                        .catch((error: unknown) => controller.abort(error));
                 },
                 onCommandExit() {
-                    void memoryGuard?.stop();
                     nativeGuard?.stop();
                 },
             },
         },
     ).finally(async () => {
-        await memoryGuard?.stop();
         await monitor;
-        if (gateDirectory !== undefined) {
-            const resolved = path.resolve(gateDirectory);
-            assert.ok(
-                resolved.startsWith(path.resolve(root, 'temp') + path.sep),
-            );
-            await rm(resolved, { recursive: true });
-        }
+        const resolved = path.resolve(gateDirectory);
+        assert.ok(resolved.startsWith(path.resolve(root, 'temp') + path.sep));
+        await rm(resolved, { recursive: true });
     });
     assert.equal(
         controller.signal.aborted,
@@ -176,11 +143,9 @@ export const runGuardedFixture = async ({
     );
     assert.equal(exitCode, 0);
     assert.ok(samples > 0);
-    if (handshake) {
-        assert.ok(guardResult !== undefined);
-        assert.equal(guardResult.samples.initial, 1);
-        assert.equal(guardResult.samples.final, 1);
-    }
+    assert.ok(guardResult !== undefined);
+    assert.equal(guardResult.samples.initial, 1);
+    assert.equal(guardResult.samples.final, 1);
     const reports = parseResult
         ? [parseResult(output)]
         : output
@@ -198,13 +163,9 @@ export const runGuardedFixture = async ({
         peakMemory,
         samples,
         milliseconds: performance.now() - started,
-        ...(guardResult === undefined
-            ? {}
-            : {
-                  operationMilliseconds: guardResult.operationMilliseconds,
-                  samplesByPhase: guardResult.samples,
-                  samplingScope:
-                      'Initial sample before work is released, periodic samples while it runs, and a fresh final sample after completion before process exit. Wall time includes coordination; the native operation duration excludes it. Sampled peaks do not bound transient peaks between observations.',
-              }),
+        operationMilliseconds: guardResult.operationMilliseconds,
+        samplesByPhase: guardResult.samples,
+        samplingScope:
+            'Initial sample before work is released, periodic samples while it runs, and a fresh final sample after completion before process exit. Wall time includes coordination; the native operation duration excludes it. Sampled peaks do not bound transient peaks between observations.',
     };
 };

@@ -319,7 +319,6 @@ export const runFheKeySourceScreen = async (
                         command: executable,
                         args: [file],
                         name: 'native-screen-' + model.kind,
-                        handshake: true,
                         nativeProgressLines: fheKeySourceProgressLines,
                         parseResult: parseFheKeySourceOutput,
                     });
@@ -376,7 +375,6 @@ export const runFheKeySourceScreen = async (
                                 configuration,
                             ],
                             name: 'scalar-screen-' + model.kind,
-                            handshake: true,
                         });
                     }
                     assert.equal(
