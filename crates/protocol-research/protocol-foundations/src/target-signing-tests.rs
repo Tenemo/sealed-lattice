@@ -24,12 +24,6 @@ fn body(participants: usize, accepted: usize, evaluated: bool) -> Vec<u8> {
     CanonicalTuple::new(1, 1, items).encode().unwrap()
 }
 #[test]
-fn minimum_turnout_is_two_more_than_the_compromise_bound() {
-    for (participants, turnout) in [(3, 2), (4, 3), (6, 3), (7, 4), (10, 5), (13, 6), (20, 8)] {
-        assert_eq!(minimum_turnout(participants), turnout);
-    }
-}
-#[test]
 fn only_the_minimum_turnout_selects_the_evaluated_branch() {
     for participants in 3..=20 {
         let minimum = minimum_turnout(participants);

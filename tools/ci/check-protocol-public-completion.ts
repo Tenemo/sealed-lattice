@@ -11,6 +11,7 @@ import {
 import { freemem } from 'node:os';
 import path from 'node:path';
 
+import { thresholdProfileFor } from '#tests/threshold-completion-model.js';
 import {
     runCheckedCommand,
     runCommandsInSeries,
@@ -386,7 +387,8 @@ await runWithLocalRunLog(
             assert.equal(emptyCase, noResult);
             assert.ok(
                 verified.certificateAuthors.length >=
-                    participantCount - Math.floor((participantCount - 1) / 3),
+                    thresholdProfileFor(participantCount)
+                        .inventoryCertificateThreshold,
             );
             if (selected.stage === 'certificate') {
                 assert.ok(verified.kind === 'certified-target');

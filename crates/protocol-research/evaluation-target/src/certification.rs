@@ -57,8 +57,7 @@ impl CertificateCollector {
         }
     }
     pub fn threshold(&self) -> usize {
-        let count = self.keys.len();
-        count - (count - 1) / 3
+        supported_profile::inventory_threshold(self.keys.len())
     }
     pub fn accepted(&self) -> usize {
         self.votes.iter().filter(|value| value.is_some()).count()

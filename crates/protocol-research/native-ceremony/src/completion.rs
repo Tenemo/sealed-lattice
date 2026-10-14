@@ -269,7 +269,6 @@ pub fn run(
     }
     assert!(restore(&enrollments[0].credential, &retained[..retained.len() - 1]).is_err());
     let mut collector = CertificateCollector::new(target.clone());
-    assert_eq!(collector.threshold(), profile.inventory_threshold());
     assert!(collector.certificate().is_err());
     assert_eq!(statuses.len(), enrollments.len());
     // Target signing reads the barrier, which only the evaluated target has.

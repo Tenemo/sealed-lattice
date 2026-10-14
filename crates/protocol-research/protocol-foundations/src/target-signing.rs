@@ -11,7 +11,7 @@ use fips204::{
     ml_dsa_65,
     traits::{SerDes, Verifier},
 };
-use supported_profile::Profile;
+use supported_profile::{Profile, minimum_turnout};
 
 pub const TARGET_PURPOSE: &str = "sealed-lattice/evaluation-target/v2";
 pub const TARGET_IDENTITY_DOMAIN: &str = "sealed-lattice/evaluation-target-identity/v1";
@@ -19,13 +19,6 @@ pub const CERTIFICATION_CONTEXT: &[u8] = b"sealed-lattice/target-certification/v
 pub const TARGET_VOTE_BYTES: usize = 2 + 64 + crate::SIGNATURE_BYTES;
 /// Every evaluation target body is at most this long.
 pub const MAXIMUM_TARGET_BODY_BYTES: usize = 2048;
-
-/// A result needs at least `f+2` accepted ballots, where `f = floor((n-1)/3)`
-/// bounds the compromised participants, so every result combines at least two
-/// honest ballots. A smaller accepted set takes the no-result branch.
-pub fn minimum_turnout(participants: usize) -> usize {
-    participants.saturating_sub(1) / 3 + 2
-}
 
 /// Canonical signing data only. Parsing this value never verifies evaluation,
 /// the source inventory, certification or authority to release a share.

@@ -6,6 +6,7 @@ import { readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 
+import { thresholdProfileFor } from '#tests/threshold-completion-model.js';
 import { participantRuntimeIdentity } from '#tools/ci/build-participant-module.js';
 import { repositoryRoot, toolArguments } from '#tools/ci/command-line.js';
 import {
@@ -387,7 +388,8 @@ const auditCase = async (
             // tolerates, leave for good at distinct stages; the remaining
             // members complete and a fresh outcome verifier checks the outcome.
             const participantCount = name === 'departures' ? 7 : 20;
-            const tolerated = Math.floor((participantCount - 1) / 3);
+            const { maximumCorruptParticipantCount: tolerated } =
+                thresholdProfileFor(participantCount);
             const schedule = result.departureSchedule ?? [];
             assert.equal(result.departures, true);
             assert.equal(result.participantCount, participantCount);

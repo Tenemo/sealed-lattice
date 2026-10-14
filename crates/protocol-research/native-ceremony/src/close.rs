@@ -22,7 +22,7 @@ use protocol_foundations::{
     Credential, Error,
     ballot_authentication::{BallotEnvelope, RetainedBallotOwner},
     close_signing::{
-        CloseIntentMessage, CloseMessage, ClosePurpose, CloseResponseMessage, close_quorum,
+        CloseIntentMessage, CloseMessage, ClosePurpose, CloseResponseMessage,
         maximum_close_message_bytes,
     },
     foundation::{CanonicalItem, CanonicalTuple},
@@ -66,8 +66,7 @@ pub fn run(
     let profile = scenario.profile();
     let count = enrollments.len();
     assert_eq!(count, profile.participants());
-    let quorum = close_quorum(count);
-    assert_eq!(quorum, profile.inventory_threshold());
+    let quorum = profile.inventory_threshold();
     let context = CloseContext::new(poll.clone(), setup.clone()).unwrap();
     let roster = setup.roster();
     let mut hashed = 0;

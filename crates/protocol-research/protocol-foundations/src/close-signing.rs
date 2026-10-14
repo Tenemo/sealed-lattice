@@ -11,7 +11,7 @@ use fips204::{
     ml_dsa_65,
     traits::{SerDes, Verifier},
 };
-use supported_profile::Profile;
+use supported_profile::{Profile, inventory_threshold};
 
 /// Two different envelopes already make a slot conflicting, so a response
 /// lists no more; a corrupt author cannot inflate honest responses.
@@ -42,11 +42,6 @@ impl ClosePurpose {
     }
 }
 
-/// The close quorum `q = n - f`, where `f = floor((n-1)/3)`.
-pub fn close_quorum(participants: usize) -> usize {
-    participants - (participants - 1) / 3
-}
-
 /// The exact encoded length of the largest message of a purpose, from the
 /// canonical tuple layout: an eight-byte header and, per item, a two-byte type
 /// and four-byte length, with a four-byte length inside variable values.
@@ -59,7 +54,7 @@ pub fn maximum_close_message_bytes(purpose: ClosePurpose, participants: usize) -
         ClosePurpose::Proposal => {
             close_prefix_bytes(purpose)
                 + (6 + 64)
-                + (6 + 4 + close_quorum(participants) * LISTED_ENTRY_BYTES)
+                + (6 + 4 + inventory_threshold(participants) * LISTED_ENTRY_BYTES)
         }
     }
 }
@@ -386,7 +381,7 @@ impl CloseProposalMessage {
         check_participants(participants)?;
         let items = decode(body, ClosePurpose::Proposal, participants)?;
         let responses = entries(&items[4], participants, 1)?;
-        if responses.len() != close_quorum(participants) {
+        if responses.len() != inventory_threshold(participants) {
             return Err(Error::Shape);
         }
         if !responses

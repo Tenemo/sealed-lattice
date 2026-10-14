@@ -12,10 +12,11 @@ use protocol_foundations::{
     },
     identity::{PUBLIC_POLYNOMIAL_DOMAIN, identity},
     poll::VerifiedPoll,
-    target_signing::{MAXIMUM_TARGET_BODY_BYTES, TARGET_PURPOSE, TargetMessage, minimum_turnout},
+    target_signing::{MAXIMUM_TARGET_BODY_BYTES, TARGET_PURPOSE, TargetMessage},
 };
 use setup_aggregate::verified::VerifiedSetupAggregate;
 use std::{io::Read, sync::Arc};
+use supported_profile::minimum_turnout;
 
 #[derive(Debug)]
 pub enum Error {

@@ -10,12 +10,13 @@ use protocol_foundations::{
     ballot_authentication::{BallotEnvelope, ENVELOPE_BYTES, RetainedBallotOwner},
     close_signing::{
         CloseIntentMessage, CloseMessage, CloseProposalMessage, ClosePurpose, CloseResponseMessage,
-        MAXIMUM_LISTED_ENVELOPES_PER_SLOT, close_quorum, maximum_close_message_bytes,
+        MAXIMUM_LISTED_ENVELOPES_PER_SLOT, maximum_close_message_bytes,
     },
     poll::VerifiedPoll,
 };
 use setup_aggregate::verified::VerifiedSetupAggregate;
 use std::sync::Arc;
+use supported_profile::inventory_threshold;
 
 protocol_foundations::operation_codes! {
     /// The close commands; the participant session begins the close work,
@@ -359,7 +360,7 @@ impl CloseWork {
                         )
                 })
                 .count()
-                < close_quorum(self.count()) - 1
+                < inventory_threshold(self.count()) - 1
         {
             return Err(Error::Context);
         }
@@ -484,7 +485,7 @@ impl CloseWork {
             return Err(Error::Context);
         }
         for response in &self.responses {
-            if selected.len() == close_quorum(self.count()) {
+            if selected.len() == inventory_threshold(self.count()) {
                 break;
             }
             if response.message().responder() == organizer {

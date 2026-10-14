@@ -194,6 +194,20 @@ pub fn fixed_common_sample_bits() -> usize {
     table().fixed_sample_bits
 }
 
+/// At most f = floor((n - 1) / 3) of n participants are corrupt.
+pub fn maximum_corrupt_participants(participants: usize) -> usize {
+    participants.saturating_sub(1) / 3
+}
+/// Inventory certificates and closing need n - f participants.
+pub fn inventory_threshold(participants: usize) -> usize {
+    participants - maximum_corrupt_participants(participants)
+}
+/// A result needs f + 2 accepted ballots, so it combines at least two honest
+/// ballots; a smaller accepted set takes the no-result branch.
+pub fn minimum_turnout(participants: usize) -> usize {
+    maximum_corrupt_participants(participants) + 2
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Profile {
     participants: usize,
@@ -252,13 +266,11 @@ impl Profile {
     pub fn options(self) -> usize {
         self.options
     }
-    /// At most f = floor((n - 1) / 3) participants are corrupt.
     pub fn maximum_corrupt_participants(self) -> usize {
-        (self.participants - 1) / 3
+        maximum_corrupt_participants(self.participants)
     }
-    /// Inventory certificates and closing need n - f participants.
     pub fn inventory_threshold(self) -> usize {
-        self.participants - self.maximum_corrupt_participants()
+        inventory_threshold(self.participants)
     }
     /// Result release needs d = max(f + 1, 2) shares.
     pub fn release_threshold(self) -> usize {
@@ -273,9 +285,8 @@ impl Profile {
     pub fn setup_eligible_contributors(self) -> usize {
         self.setup_contributors() + self.maximum_corrupt_participants()
     }
-    /// A result needs f + 2 accepted ballots.
     pub fn minimum_turnout(self) -> usize {
-        self.maximum_corrupt_participants() + 2
+        minimum_turnout(self.participants)
     }
     /// Sharing polynomials have degree d - 1, so they have d - 1 random
     /// coefficients.
