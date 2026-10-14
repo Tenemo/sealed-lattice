@@ -131,7 +131,7 @@ impl FheKeyCommitmentHasher {
             CanonicalItem::variable_bytes(&modulus).map_err(|_| Refusal::Shape)?,
             CanonicalItem::unsigned64(profile.fhe_common_sample_bits() as u64),
         ];
-        let hash = IdentityHasher::local("sealed-lattice/registered-fhe-key/v2", &prefix, length)?;
+        let hash = IdentityHasher::local("sealed-lattice/registered-fhe-key", &prefix, length)?;
         let codec = CenteredCodec::new(&modulus);
         Ok(Self {
             hash: Some(hash),

@@ -11,13 +11,13 @@ fn hash_uses_exact_typed_tuple_framing() {
         CanonicalItem::unsigned16(0x0201),
         CanonicalItem::variable_bytes([7, 8, 9]).expect("raw bytes fit u32"),
     ];
-    let actual = hash_foundation_tuple_512("sealed-lattice/test/hash/v1", &items)
-        .expect("hash input is valid");
+    let actual =
+        hash_foundation_tuple_512("sealed-lattice/test/hash", &items).expect("hash input is valid");
 
     let mut expected_frame = Vec::new();
     expected_frame.extend_from_slice(&0x0001_u16.to_le_bytes());
     expected_frame.extend_from_slice(&3_u32.to_le_bytes());
-    let domain = b"sealed-lattice/test/hash/v1";
+    let domain = b"sealed-lattice/test/hash";
     expected_frame.extend_from_slice(&0x02_u16.to_le_bytes());
     expected_frame.extend_from_slice(&((domain.len() + 4) as u32).to_le_bytes());
     expected_frame.extend_from_slice(&(domain.len() as u32).to_le_bytes());

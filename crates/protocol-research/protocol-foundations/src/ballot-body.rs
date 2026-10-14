@@ -11,7 +11,7 @@ pub(crate) const CONTEXT_BYTES: usize = BALLOT_HEADER_BYTES;
 /// that follow it stream into the statement as they arrive, and the rest of
 /// the proof ends the body.
 pub const HEADER_BYTES: usize = 8 + CONTEXT_BYTES + PROOF_HEADER_BYTES;
-pub(crate) const BODY_DOMAIN: &str = "sealed-lattice/ballot-body/v1";
+pub(crate) const BODY_DOMAIN: &str = "sealed-lattice/ballot-body";
 
 /// The body's ciphertext polynomials, by ballot statement index, with their
 /// byte lengths: both FHE ciphertext components, then both auxiliary

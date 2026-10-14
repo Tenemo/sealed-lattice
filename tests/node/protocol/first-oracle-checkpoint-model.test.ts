@@ -154,8 +154,8 @@ describe('complete first-oracle proof checkpoint', () => {
         const actualHeader = Buffer.concat([
             Buffer.from([10, 10]),
             Buffer.alloc(4),
-            Buffer.from([82, 1]),
-            Buffer.alloc(338),
+            Buffer.from([79, 1]),
+            Buffer.alloc(335),
             Buffer.alloc(64),
             Buffer.concat([
                 Buffer.from('SCO2'),
@@ -170,7 +170,7 @@ describe('complete first-oracle proof checkpoint', () => {
         expect(model.importBytes).toBe(
             BigInt(Buffer.concat([Buffer.alloc(2 * 64), actualHeader]).length),
         );
-        expect(model.maximumHeaderBytes - model.headerBytes).toBe(1024n - 338n);
+        expect(model.maximumHeaderBytes - model.headerBytes).toBe(1024n - 335n);
         const input = Buffer.concat([Buffer.alloc(64), actualHeader]);
         expect(model.headerDigestInputBytes).toBe(BigInt(input.length));
         const digestPermutations = spongePermutations(

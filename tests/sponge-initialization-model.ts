@@ -153,7 +153,7 @@ export const compileFixedSpongeInitializationCensus = (
                 bits: matrices.fixedFamilyBitsPerCoefficient,
             },
         ]);
-    const prefix = Buffer.from('synthetic-full-setup-witness/1');
+    const prefix = Buffer.from('synthetic-full-setup-witness');
     const extraSamplingBits =
         compileCommonMatrixInitializationCensus(profile).extraSamplingBits;
     const seeds = roles.map(({ label, degree: seedDegree, modulus, bits }) => {

@@ -24,24 +24,24 @@ describe('participant close custody layout', () => {
         expect(value.maximumBodyRecords).toBe(25n);
         const delivery = 13n * (11n + 32n * 26n);
         const events = delivery + 11n + 9n * (11n + 32n);
-        const intent = 4n + 200n + signatureBytes;
-        const response = 4n + (278n + 20n * 66n - 2n) + signatureBytes;
-        const proposal = 4n + 730n + signatureBytes;
+        const intent = 4n + 197n + signatureBytes;
+        const response = 4n + (275n + 20n * 66n - 2n) + signatureBytes;
+        const proposal = 4n + 727n + signatureBytes;
         expect(value.collectingBytes).toBe(4n + delivery);
         expect(value.phaseBytes).toEqual([
-            { phase: 18, bytes: 4n + 200n + delivery },
+            { phase: 18, bytes: 4n + 197n + delivery },
             { phase: 19, bytes: 4n + intent + events },
             {
                 phase: 20,
-                bytes: 4n + intent + events + 4n + 1596n,
+                bytes: 4n + intent + events + 4n + 1593n,
             },
             {
                 phase: 21,
-                bytes: 4n + intent + events + response + 730n,
+                bytes: 4n + intent + events + response + 727n,
             },
             { phase: 22, bytes: 4n + intent + events + response + proposal },
         ]);
-        expect(value.maximumStateBytes).toBe(23_826n);
+        expect(value.maximumStateBytes).toBe(23_817n);
         expect(value.maximumEvents).toBe(13n + 1n + 9n);
         expect(value.maximumRecords).toBe(13n * 26n + 9n);
     });
@@ -72,7 +72,7 @@ describe('participant close custody layout', () => {
                 held * envelopeRecord + held * bodyBytes,
             );
             const responsePacket =
-                4n + 278n + 2n * count * 66n - 2n + signatureBytes;
+                4n + 275n + 2n * count * 66n - 2n + signatureBytes;
             expect(value.maximumOrganizerEncryptedRecordBytes).toBe(
                 (organizerKnown + held) * envelopeRecord +
                     held * bodyBytes +

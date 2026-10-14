@@ -367,9 +367,7 @@ export const compileParticipantVaultKeyClasses = (
     // object, offset and length.
     const contributionAssociatedBytes =
         BigInt(
-            Buffer.byteLength(
-                'sealed-lattice/participant-contribution-record/v2',
-            ),
+            Buffer.byteLength('sealed-lattice/participant-contribution-record'),
         ) +
         64n +
         64n +
@@ -380,17 +378,13 @@ export const compileParticipantVaultKeyClasses = (
     // The poll and setup inventory, the position, a release's certified
     // target digest, and the record's index and length.
     const ballotAssociatedBytes =
-        BigInt(
-            Buffer.byteLength('sealed-lattice/participant-ballot-record/v3'),
-        ) +
+        BigInt(Buffer.byteLength('sealed-lattice/participant-ballot-record')) +
         2n * 64n +
         2n +
         2n +
         4n;
     const releaseAssociatedBytes =
-        BigInt(
-            Buffer.byteLength('sealed-lattice/participant-release-record/v3'),
-        ) +
+        BigInt(Buffer.byteLength('sealed-lattice/participant-release-record')) +
         2n * 64n +
         2n +
         64n +
@@ -467,7 +461,7 @@ export const compileParticipantVaultKeyClasses = (
             encryptions: [
                 invocation(
                     checkpoint.maximumPlaintextRecordBytes,
-                    BigInt(Buffer.byteLength('first-oracle-checkpoint/1')) +
+                    BigInt(Buffer.byteLength('first-oracle-checkpoint')) +
                         64n +
                         4n,
                 ),

@@ -27,9 +27,9 @@ import { protocolHashPrefix } from '#tests/word-proof-reference/transcript.js';
 // statements have canonical encodings; no arithmetic truth or protocol
 // authentication is supplied, and no verifier is called or overridden.
 const domains = {
-    setup: 'sealed-lattice/setup-contribution/v3',
-    ballot: 'sealed-lattice/ballot-proof/v3',
-    release: 'sealed-lattice/certified-release/v3',
+    setup: 'sealed-lattice/setup-contribution',
+    ballot: 'sealed-lattice/ballot-proof',
+    release: 'sealed-lattice/certified-release',
 };
 const originalRole = (purpose: keyof typeof domains, owner = 'ab'.repeat(64)) =>
     tuple([

@@ -57,7 +57,7 @@ fn digests_match_independent_vectors() {
         protocol.update(b"abc");
         assert_eq!(
             hexadecimal(protocol.finish()),
-            "a8df42eb0a2bad96d4d5fde4a7896c5f31287bf651801f3335038cd92aaf3b7f35c81fc12490ef51cd4efb534428f6abc938956e876ea85dd5c669bf484d86fc"
+            "57e23be26c7f5327983c44e9d60efac3d2b526474de65a541097c38ef870b6ab189972f952282d7b3115be2b1bd7a9ff30e3237e7f8337d87d972c4a76595efd"
         );
         let mut shake = HashStream::held(Sponge::Shake256, remote);
         shake.update(b"abc");

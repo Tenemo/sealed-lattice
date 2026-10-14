@@ -35,7 +35,7 @@ export const compileRegistrationSourceRandomness = (
         sparse.maximumExaminedBytes + gaussianBytes;
     const bytes = (value: string) => BigInt(Buffer.byteLength(value, 'ascii'));
     const commonInputBytes =
-        bytes('synthetic-full-setup-witness/1') + 4n + bytes('common-fhe-a-0');
+        bytes('synthetic-full-setup-witness') + 4n + bytes('common-fhe-a-0');
     const families = inventory.fhe.map((family, index) => {
         const modulusBytes = BigInt(
             Math.ceil(family.modulus.toString(2).length / 8),
@@ -46,7 +46,7 @@ export const compileRegistrationSourceRandomness = (
             6n +
             6n * 6n +
             4n +
-            bytes('sealed-lattice/fhe-source-randomness/v2') +
+            bytes('sealed-lattice/fhe-source-randomness') +
             mlDsa65Sizes.publicKeyBytes +
             64n +
             4n +
@@ -60,7 +60,7 @@ export const compileRegistrationSourceRandomness = (
             6n +
             7n * 6n +
             4n +
-            bytes('sealed-lattice/registered-fhe-key/v2') +
+            bytes('sealed-lattice/registered-fhe-key') +
             mlDsa65Sizes.publicKeyBytes +
             64n +
             64n +

@@ -43,7 +43,7 @@ export const compileBallotBodyCensus = (profile: SupportedProfile) => {
         6n +
         5n * 6n +
         4n +
-        BigInt(Buffer.byteLength('sealed-lattice/ballot-proof/v3')) +
+        BigInt(Buffer.byteLength('sealed-lattice/ballot-proof')) +
         4n +
         participantIdentityAsciiBytes +
         2n * 64n +
@@ -63,7 +63,7 @@ export const compileBallotBodyCensus = (profile: SupportedProfile) => {
         6n +
         2n * 6n +
         4n +
-        BigInt(Buffer.byteLength('sealed-lattice/ballot-body/v1')) +
+        BigInt(Buffer.byteLength('sealed-lattice/ballot-body')) +
         4n;
     return {
         polynomials,

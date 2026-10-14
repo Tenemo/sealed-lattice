@@ -190,7 +190,7 @@ export const recordBegin = concatenate(
     createHash('shake256', { outputLength: 64 })
         .update(
             tuple([
-                ascii('sealed-lattice/registration-body/v2'),
+                ascii('sealed-lattice/registration-body'),
                 item(itemType.rawBytes, variable(organizer.header)),
             ]),
         )

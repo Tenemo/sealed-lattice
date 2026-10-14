@@ -199,7 +199,7 @@ pub fn setup_relation(profile: Profile) -> Relation {
     let shape = profile.setup_shape();
     let words = shape.word_columns;
     let mut relation = Relation {
-        tag: b"complete-setup-words/2",
+        tag: b"complete-setup-words",
         words,
         booleans: shape.boolean_columns,
         narrow: shape
@@ -301,7 +301,7 @@ pub fn ballot_relation(profile: Profile) -> Relation {
     let words = columns.words();
     let error = narrow_factor(SETUP_ERROR_BITS);
     let mut relation = Relation {
-        tag: b"linked-scored-ballot/1",
+        tag: b"linked-scored-ballot",
         words,
         booleans: 5,
         narrow: vec![
@@ -388,7 +388,7 @@ pub fn release_relation(profile: Profile) -> Relation {
     let bits = profile.release_variable_bits();
     let (starts, words) = release_variable_starts(profile);
     let mut relation = Relation {
-        tag: b"linked-threshold-release/1",
+        tag: b"linked-threshold-release",
         words,
         booleans: 2,
         narrow: bits

@@ -274,7 +274,7 @@ pub fn run(
     let rekeyed = |bytes: &[u8]| {
         let mut copy = bytes.to_vec();
         copy.extend(enrollments[0].credential.retained_tag(
-            b"sealed-lattice/retained-evaluation-target/v2",
+            b"sealed-lattice/retained-evaluation-target",
             &poll,
             bytes,
         ));

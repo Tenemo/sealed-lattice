@@ -54,7 +54,7 @@ fn associated(body: [u8; 64]) -> Vec<u8> {
     CanonicalTuple::new(
         1,
         vec![
-            CanonicalItem::nonempty_ascii("sealed-lattice/fhe-source-custody/v1").unwrap(),
+            CanonicalItem::nonempty_ascii("sealed-lattice/fhe-source-custody").unwrap(),
             CanonicalItem::hash512(body),
         ],
     )
@@ -71,7 +71,7 @@ fn stream(
     seed: &[u8; SEED_BYTES],
 ) -> Shake256Reader {
     let framing = identity::framing(
-        "sealed-lattice/fhe-source-randomness/v2",
+        "sealed-lattice/fhe-source-randomness",
         &[
             CanonicalItem::fixed_bytes(owner).unwrap(),
             CanonicalItem::hash512(poll),

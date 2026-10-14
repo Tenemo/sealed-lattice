@@ -177,7 +177,7 @@ export const framed = (parts: readonly Uint8Array[]) =>
 // The fixed-length protocol digest: 64 bytes of SHAKE256 after a 64-byte
 // domain prefix.
 export const protocolHashPrefix = Buffer.alloc(64);
-protocolHashPrefix.write('sealed-lattice/fixed-hash/v1', 'ascii');
+protocolHashPrefix.write('sealed-lattice/fixed-hash', 'ascii');
 
 export const protocolHash = (domain: string, parts: readonly Uint8Array[]) =>
     createHash('shake256', { outputLength: 64 })

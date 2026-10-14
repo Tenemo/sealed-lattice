@@ -13,9 +13,9 @@ use fips204::{
 };
 use supported_profile::{Profile, minimum_turnout};
 
-pub const TARGET_PURPOSE: &str = "sealed-lattice/evaluation-target/v2";
-pub const TARGET_IDENTITY_DOMAIN: &str = "sealed-lattice/evaluation-target-identity/v1";
-pub const CERTIFICATION_CONTEXT: &[u8] = b"sealed-lattice/target-certification/v1";
+pub const TARGET_PURPOSE: &str = "sealed-lattice/evaluation-target";
+pub const TARGET_IDENTITY_DOMAIN: &str = "sealed-lattice/evaluation-target-identity";
+pub const CERTIFICATION_CONTEXT: &[u8] = b"sealed-lattice/target-certification";
 pub const TARGET_VOTE_BYTES: usize = 2 + 64 + crate::SIGNATURE_BYTES;
 /// Every evaluation target body is at most this long.
 pub const MAXIMUM_TARGET_BODY_BYTES: usize = 2048;

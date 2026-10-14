@@ -367,7 +367,7 @@ impl RunningEvaluation {
     }
 }
 
-const CIPHERTEXT_IDENTITY_DOMAIN: &str = "sealed-lattice/evaluation-ciphertext/v1";
+const CIPHERTEXT_IDENTITY_DOMAIN: &str = "sealed-lattice/evaluation-ciphertext";
 
 fn ciphertext_identity(ciphertext: &[u8]) -> Result<[u8; 64], Refusal> {
     Ok(hash_foundation_tuple_512(
@@ -483,7 +483,7 @@ fn read_exactly(
     Ok(())
 }
 
-const RETAINED_TARGET_LABEL: &[u8] = b"sealed-lattice/retained-evaluation-target/v2";
+const RETAINED_TARGET_LABEL: &[u8] = b"sealed-lattice/retained-evaluation-target";
 
 /// Only completed deterministic evaluation (or an accepted set below the
 /// minimum turnout) creates this value, or its restoration from the copy the

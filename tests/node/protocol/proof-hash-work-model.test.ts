@@ -187,9 +187,9 @@ describe('proof hash work', () => {
             ['release', 1040n, 3360n, 1540n, 8782022n],
         ]);
         expect(profiles.map((value) => value.roleBytes)).toEqual([
-            338n,
-            332n,
-            407n,
+            335n,
+            329n,
+            404n,
         ]);
         for (const profile of profiles) {
             const costs = compileProofHashWork(completionProfile(), profile);
@@ -500,7 +500,7 @@ describe('proof hash work', () => {
         const role = proofHashProfiles(profile).find(
             (value) => value.role === 'setup',
         )!;
-        const previousRoleBytes = 6n + 4n * 6n + 4n + 36n + 2n * 64n + 2n;
+        const previousRoleBytes = 6n + 4n * 6n + 4n + 33n + 2n * 64n + 2n;
         const ownerItemBytes = 6n + 4n + 2n * 64n;
         expect(role.roleBytes).toBe(previousRoleBytes + ownerItemBytes);
         const current = compileProofHashWork(profile, role);

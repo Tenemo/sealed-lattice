@@ -35,7 +35,7 @@ type CompleteAuthenticationPurpose =
     (typeof completeAuthenticationPurposes)[number];
 
 export const authenticationContext = (purpose: CompleteAuthenticationPurpose) =>
-    `sealed-lattice/${purpose}/${purpose === 'poll-definition' || purpose === 'roster-proposal' ? 'v2' : 'v1'}`;
+    `sealed-lattice/${purpose}`;
 
 // One original credential through ballot completion, under the original-state
 // invariant. Each purpose has one fixed first-evaluated intent; repeated

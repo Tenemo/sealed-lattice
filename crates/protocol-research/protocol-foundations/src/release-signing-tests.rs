@@ -83,7 +83,7 @@ fn release_digest_matches_canonical_hash_across_chunk_boundaries() {
     let mut body = body_header(profile, &context(0), PROOF_HEADER_BYTES).unwrap();
     body.extend((0..partial + PROOF_HEADER_BYTES).map(|index| (index % 251) as u8));
     let expected = hash_foundation_tuple_512(
-        "sealed-lattice/release-body/v1",
+        "sealed-lattice/release-body",
         &[CanonicalItem::variable_bytes(&body).unwrap()],
     )
     .unwrap()

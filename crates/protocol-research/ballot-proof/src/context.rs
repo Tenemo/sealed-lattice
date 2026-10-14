@@ -49,7 +49,7 @@ fn encode_role(
     CanonicalTuple::new(
         1,
         vec![
-            CanonicalItem::nonempty_ascii("sealed-lattice/ballot-proof/v3").map_err(|_| Refusal)?,
+            CanonicalItem::nonempty_ascii("sealed-lattice/ballot-proof").map_err(|_| Refusal)?,
             CanonicalItem::nonempty_ascii(&participant_identity.to_lowercase_hex())
                 .map_err(|_| Refusal)?,
             CanonicalItem::hash512(poll),

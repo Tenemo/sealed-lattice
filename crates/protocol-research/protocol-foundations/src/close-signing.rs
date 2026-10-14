@@ -28,9 +28,9 @@ pub enum ClosePurpose {
 impl ClosePurpose {
     pub const fn context(self) -> &'static str {
         match self {
-            Self::Intent => "sealed-lattice/close-intent/v1",
-            Self::Response => "sealed-lattice/close-response/v1",
-            Self::Proposal => "sealed-lattice/close-proposal/v1",
+            Self::Intent => "sealed-lattice/close-intent",
+            Self::Response => "sealed-lattice/close-response",
+            Self::Proposal => "sealed-lattice/close-proposal",
         }
     }
     const fn item_count(self) -> usize {

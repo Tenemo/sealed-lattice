@@ -37,7 +37,7 @@ const independentIdentity = (domain: string, payload: Uint8Array) => {
     );
 };
 
-const rootDomain = 'sealed-lattice/participant-root/v1';
+const rootDomain = 'sealed-lattice/participant-root';
 
 // Lengths below, at and above the module's input buffer, and several whole
 // buffers.
@@ -58,12 +58,12 @@ describe('participant custody identities', () => {
         expect(
             Buffer.from(
                 independentIdentity(
-                    'sealed-lattice/public-polynomial/v1',
+                    'sealed-lattice/public-polynomial',
                     new Uint8Array(),
                 ),
             ).toString('hex'),
         ).toBe(
-            'ae4e93421e5300b846a0f24f8a8f637b190afbdd215153a94708eedf948717a047815cfac7aa5e4a01c4d9a6c9daabacdf892ec65fe2e95befb100ca4497c2e2',
+            'cb0458477ff5bfa6fa24eba4e613831e23bf4b23b03544bd90daa5b9c4d66d5e6651910b519c41f7def6e0377a79116797efce82c6664fc82044b7d66517c2ae',
         );
     });
 
@@ -97,13 +97,13 @@ describe('participant custody identities', () => {
         const domains = [
             [
                 custodyPurpose.target,
-                'sealed-lattice/evaluation-target-identity/v1',
+                'sealed-lattice/evaluation-target-identity',
             ],
             [
                 custodyPurpose.envelope,
-                'sealed-lattice/ballot-envelope-identity/v1',
+                'sealed-lattice/ballot-envelope-identity',
             ],
-            [custodyPurpose.closeResponse, 'sealed-lattice/close-response/v1'],
+            [custodyPurpose.closeResponse, 'sealed-lattice/close-response'],
         ] as const;
         for (const [purpose, domain] of domains)
             for (const length of [0, 1, 65_537])

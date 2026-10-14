@@ -5,7 +5,7 @@ use protocol_foundations::identity::identity;
 use supported_profile::{FHE_SECRET_SUPPORT, PLAINTEXT_MODULUS, Profile};
 
 /// The diagnostic identity of every loaded input and its position.
-const PROBE_INPUT_DOMAIN: &str = "sealed-lattice/requested-output-probe-input/v2";
+const PROBE_INPUT_DOMAIN: &str = "sealed-lattice/requested-output-probe-input";
 
 const PRIME: u64 = PLAINTEXT_MODULUS as u64;
 

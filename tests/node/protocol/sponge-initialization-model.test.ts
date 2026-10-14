@@ -47,12 +47,12 @@ describe('fixed-input sponge initialization', () => {
         );
         expect(value.seeds.slice(-2).map((seed) => seed.message)).toEqual([
             Buffer.concat([
-                Buffer.from('synthetic-full-setup-witness/1'),
+                Buffer.from('synthetic-full-setup-witness'),
                 Buffer.from([16, 0, 0, 0]),
                 Buffer.from('common-auxiliary'),
             ]),
             Buffer.concat([
-                Buffer.from('synthetic-full-setup-witness/1'),
+                Buffer.from('synthetic-full-setup-witness'),
                 Buffer.from([20, 0, 0, 0]),
                 Buffer.from('common-auxiliary-key'),
             ]),

@@ -25,26 +25,26 @@ const rosterProfile = (participantCount: number) =>
 
 describe('close wire census', () => {
     it('matches hand-derived lengths at the smallest, completion and largest rosters', () => {
-        // Header 6, purpose 6 + 4 + 30 or 32 ASCII bytes, and two identities
+        // Header 6, purpose 6 + 4 + 27 or 29 ASCII bytes, and two identities
         // of 6 + 64 bytes open each message.
-        expect(closeContexts.intent).toHaveLength(30);
-        expect(closeContexts.response).toHaveLength(32);
-        expect(closeContexts.proposal).toHaveLength(32);
+        expect(closeContexts.intent).toHaveLength(27);
+        expect(closeContexts.response).toHaveLength(29);
+        expect(closeContexts.proposal).toHaveLength(29);
         for (const [participants, quorum, response, proposal] of [
-            [3, 3, 188 + 70 + 8 + 10 + 6 * 66, 188 + 70 + 10 + 3 * 66],
-            [10, 7, 188 + 70 + 8 + 10 + 20 * 66, 188 + 70 + 10 + 7 * 66],
-            [20, 14, 2916, 1192],
+            [3, 3, 185 + 70 + 8 + 10 + 6 * 66, 185 + 70 + 10 + 3 * 66],
+            [10, 7, 185 + 70 + 8 + 10 + 20 * 66, 185 + 70 + 10 + 7 * 66],
+            [20, 14, 2913, 1189],
         ]) {
             const value = compileCloseWireCensus(rosterProfile(participants));
             expect(value.closeQuorum).toBe(BigInt(quorum));
-            expect(value.intentBodyBytes).toBe(186n + 14n);
+            expect(value.intentBodyBytes).toBe(183n + 14n);
             expect(value.maximumResponseBodyBytes).toBe(BigInt(response));
             expect(value.proposalBodyBytes).toBe(BigInt(proposal));
-            expect(value.intentPacketBytes).toBe(4n + 200n + signatureBytes);
+            expect(value.intentPacketBytes).toBe(4n + 197n + signatureBytes);
         }
         expect(
             compileCloseWireCensus(rosterProfile(3)).minimumResponseBodyBytes,
-        ).toBe(188n + 70n + 8n + 10n);
+        ).toBe(185n + 70n + 8n + 10n);
     });
 
     it('bounds the barrier closure by envelopes and usable bodies only', () => {

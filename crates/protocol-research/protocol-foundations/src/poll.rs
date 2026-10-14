@@ -12,7 +12,7 @@ use fips204::{
 use supported_profile::Profile;
 
 /// The poll definition's purpose, which is also its signature context.
-const POLL_PURPOSE: &str = "sealed-lattice/poll-definition/v2";
+const POLL_PURPOSE: &str = "sealed-lattice/poll-definition";
 pub(crate) const POLL_SIGNATURE_CONTEXT: &[u8] = POLL_PURPOSE.as_bytes();
 pub const MAXIMUM_POLL_BYTES: usize = 1_048_576;
 pub(crate) const POLL_BODY_OVERHEAD: usize =
@@ -129,7 +129,7 @@ impl VerifiedPoll {
 }
 fn identity(body: &[u8]) -> Result<[u8; 64], Refusal> {
     hash_foundation_tuple_512(
-        "sealed-lattice/poll-identity/v1",
+        "sealed-lattice/poll-identity",
         &[CanonicalItem::variable_bytes(body).map_err(|_| Refusal::Shape)?],
     )
     .map(|value| value.into_bytes())

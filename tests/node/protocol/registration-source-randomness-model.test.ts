@@ -105,7 +105,7 @@ describe('original registration source randomness and hash work', () => {
             const value = compileRegistrationSourceRandomness(maximum, options);
             for (const family of value.families) {
                 const source = tuple([
-                    ascii('sealed-lattice/fhe-source-randomness/v2'),
+                    ascii('sealed-lattice/fhe-source-randomness'),
                     item(itemType.rawBytes, Buffer.alloc(1952)),
                     item(itemType.hash512, Buffer.alloc(64)),
                     item(
@@ -132,7 +132,7 @@ describe('original registration source randomness and hash work', () => {
                     ),
                 );
                 const commitmentPrefix = tuple([
-                    ascii('sealed-lattice/registered-fhe-key/v2'),
+                    ascii('sealed-lattice/registered-fhe-key'),
                     item(itemType.rawBytes, Buffer.alloc(1952)),
                     item(itemType.rawBytes, Buffer.alloc(64)),
                     item(itemType.hash512, Buffer.alloc(64)),
@@ -155,7 +155,7 @@ describe('original registration source randomness and hash work', () => {
                     ),
                 );
                 const commonInput = Buffer.concat([
-                    Buffer.from('synthetic-full-setup-witness/1'),
+                    Buffer.from('synthetic-full-setup-witness'),
                     unsigned(14, 4),
                     Buffer.from('common-fhe-a-0'),
                 ]);

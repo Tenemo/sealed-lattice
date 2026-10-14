@@ -104,7 +104,7 @@ export const compileRankingProgramModel = (
     const identityInput = Buffer.concat([
         unsigned(1, 2),
         unsigned(2),
-        item(2, variable(Buffer.from('sealed-lattice/ranking-program/v1'))),
+        item(2, variable(Buffer.from('sealed-lattice/ranking-program'))),
         item(1, variable(bytes)),
     ]);
     return {

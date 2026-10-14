@@ -440,7 +440,7 @@ describe('shared participant custody', () => {
         // The poll and setup inventory, the position, the certified target
         // digest, and the record's index and length.
         const associatedBytes = Buffer.concat([
-            Buffer.from('sealed-lattice/participant-release-record/v3'),
+            Buffer.from('sealed-lattice/participant-release-record'),
             Buffer.alloc(64),
             Buffer.alloc(64),
             Buffer.alloc(2),

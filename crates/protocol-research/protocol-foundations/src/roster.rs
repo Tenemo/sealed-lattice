@@ -15,8 +15,8 @@ use supported_profile::Profile;
 /// proposal fits.
 pub const MAXIMUM_PROPOSAL_BYTES: usize = 2048;
 /// The proposal's purpose, which is also the organizer's signature context.
-pub(crate) const PROPOSAL_PURPOSE: &str = "sealed-lattice/roster-proposal/v2";
-const PROPOSAL_IDENTITY_DOMAIN: &str = "sealed-lattice/roster-proposal-identity/v1";
+pub(crate) const PROPOSAL_PURPOSE: &str = "sealed-lattice/roster-proposal";
+const PROPOSAL_IDENTITY_DOMAIN: &str = "sealed-lattice/roster-proposal-identity";
 
 /// Parsed context for private continuation after the current local root is authenticated.
 /// This is not a verified public proposal and cannot initialize contribution generation.
@@ -310,7 +310,7 @@ pub(crate) fn encode_contribution_role(
     let role = CanonicalTuple::new(
         1,
         vec![
-            CanonicalItem::nonempty_ascii("sealed-lattice/setup-contribution/v3")
+            CanonicalItem::nonempty_ascii("sealed-lattice/setup-contribution")
                 .map_err(|_| Refusal::Shape)?,
             CanonicalItem::nonempty_ascii(&participant_identity.to_lowercase_hex())
                 .map_err(|_| Refusal::Shape)?,

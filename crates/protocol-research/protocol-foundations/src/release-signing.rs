@@ -10,7 +10,7 @@ use supported_profile::{
     relation::{PROOF_HEADER_BYTES, RELEASE_HEADER_BYTES, SYSTEMATIC, release_relation},
 };
 
-pub const RELEASE_SIGNATURE_CONTEXT: &[u8] = b"sealed-lattice/release-envelope/v1";
+pub const RELEASE_SIGNATURE_CONTEXT: &[u8] = b"sealed-lattice/release-envelope";
 /// The poll, setup and target identities, the author's position, the body
 /// length and the body identity.
 pub const RELEASE_ENVELOPE_BYTES: usize = 3 * 64 + 2 + 8 + 64;
@@ -140,7 +140,7 @@ pub fn body_hasher(profile: Profile, length: usize) -> Result<BodyHasher, Refusa
     if !body_lengths(profile).contains(&length) {
         return Err(Refusal::Shape);
     }
-    BodyHasher::new("sealed-lattice/release-body/v1", length)
+    BodyHasher::new("sealed-lattice/release-body", length)
 }
 
 impl Credential {

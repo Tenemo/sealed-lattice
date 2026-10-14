@@ -85,7 +85,7 @@ impl Header {
         })
     }
     fn associated(&self, record: usize) -> Vec<u8> {
-        let mut bytes = Vec::from(b"first-oracle-checkpoint/1".as_slice());
+        let mut bytes = Vec::from(b"first-oracle-checkpoint".as_slice());
         bytes.extend(ProtocolHash::digest(self.encode()));
         bytes.extend((record as u32).to_le_bytes());
         bytes

@@ -85,7 +85,7 @@ const KEYED_BLOCK: usize = 4;
 const _: () = assert!(KEYED_BLOCK <= KEYED_POSITIONS);
 /// The identity of one key record: a key polynomial's transformed residues
 /// modulo one prime, which the evaluation's working storage holds.
-const EVALUATION_KEY_DOMAIN: &str = "sealed-lattice/evaluation-key-work/v1";
+const EVALUATION_KEY_DOMAIN: &str = "sealed-lattice/evaluation-key-work";
 const IDENTITY_BYTES: usize = 64;
 /// The key groups one keyed product multiplies.
 pub(super) const KEYED_GROUPS: usize = 2;

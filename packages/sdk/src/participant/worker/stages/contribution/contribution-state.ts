@@ -282,7 +282,7 @@ export const recordAssociatedData = (
     record: RecordLocation,
 ) =>
     concatenate(
-        encodeText('sealed-lattice/participant-contribution-record/v2'),
+        encodeText('sealed-lattice/participant-contribution-record'),
         context.poll,
         context.proposal,
         unsigned16(context.position),

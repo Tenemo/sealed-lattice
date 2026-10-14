@@ -11,7 +11,7 @@ use parallel_work::{CHUNK_LIMIT, HashStream, PendingDigest, Sponge};
 /// The identity of a public polynomial in its canonical coefficient
 /// encoding: a setup aggregate, a common polynomial, or a key polynomial read
 /// back before use.
-pub const PUBLIC_POLYNOMIAL_DOMAIN: &str = "sealed-lattice/public-polynomial/v1";
+pub const PUBLIC_POLYNOMIAL_DOMAIN: &str = "sealed-lattice/public-polynomial";
 
 /// Computes `H_512(domain, prefix..., bytes(payload))` over a payload whose
 /// length is committed before absorption.

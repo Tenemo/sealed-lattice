@@ -25,7 +25,7 @@ fn encode_release_proof_role(
     CanonicalTuple::new(
         1,
         vec![
-            CanonicalItem::nonempty_ascii("sealed-lattice/certified-release/v3")
+            CanonicalItem::nonempty_ascii("sealed-lattice/certified-release")
                 .map_err(|_| Refusal::Encoding)?,
             CanonicalItem::nonempty_ascii(&participant_identity.to_lowercase_hex())
                 .map_err(|_| Refusal::Encoding)?,

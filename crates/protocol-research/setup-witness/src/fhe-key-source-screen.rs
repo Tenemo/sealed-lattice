@@ -34,7 +34,7 @@ const POSITIONS: [usize; 8] = [
 
 fn source_reader() -> impl XofReader {
     let mut hash = Shake256::default();
-    hash.update(b"fhe-key-source-screen/1");
+    hash.update(b"fhe-key-source-screen");
     hash.update(&[0x67; 64]);
     hash.finalize_xof()
 }

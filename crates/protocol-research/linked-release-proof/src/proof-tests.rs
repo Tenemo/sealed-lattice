@@ -84,8 +84,8 @@ fn release_proofs_verify_only_for_their_role_and_true_partial() {
 }
 
 // The digest of the seed-one release's statement digest and proof below.
-const REPLAYED_RELEASE: &str = "cb1e434db2b7ff120b0b90cf5ed2cc7b779a599e5c9db9cbcd52242a7e501638\
-                                1ec0bfdafbc575baea7eb0d6cb581e5a0e80f283c678242124178e8554ba79a1";
+const REPLAYED_RELEASE: &str = "dc79d587ea0caa30ab072385b36e24343fd6510f9293b760a8592a9fffb63b05\
+                                e36459bc59a6baee455f15d350b9602f8025136675982f2f478abe5768a2e4b2";
 
 thread_local! {
     // The fixture's witness and proof streams, which serve the key's and

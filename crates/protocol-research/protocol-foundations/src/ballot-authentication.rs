@@ -13,7 +13,7 @@ use fips204::{
 };
 use supported_profile::Profile;
 
-pub(crate) const BALLOT_SIGNATURE_CONTEXT: &[u8] = b"sealed-lattice/ballot-envelope/v1";
+pub(crate) const BALLOT_SIGNATURE_CONTEXT: &[u8] = b"sealed-lattice/ballot-envelope";
 /// The envelope's fields start at these offsets: the poll, the setup
 /// identity, the author's position, the ballot time, the body length and the
 /// body identity.
@@ -24,8 +24,8 @@ pub const ENVELOPE_BALLOT_TIME_OFFSET: usize = 130;
 pub const ENVELOPE_BODY_LENGTH_OFFSET: usize = 138;
 pub(crate) const ENVELOPE_BODY_IDENTITY_OFFSET: usize = 146;
 pub const ENVELOPE_BYTES: usize = ENVELOPE_BODY_IDENTITY_OFFSET + 64;
-pub const ENVELOPE_IDENTITY_DOMAIN: &str = "sealed-lattice/ballot-envelope-identity/v1";
-const RETAINED_SETUP_TAG_LABEL: &[u8] = b"sealed-lattice/retained-setup-reference/v2";
+pub const ENVELOPE_IDENTITY_DOMAIN: &str = "sealed-lattice/ballot-envelope-identity";
+const RETAINED_SETUP_TAG_LABEL: &[u8] = b"sealed-lattice/retained-setup-reference";
 
 /// Original credential correspondence beneath the authenticated participant root.
 /// This creates no public roster, setup, ballot, or unspent-attempt capability.

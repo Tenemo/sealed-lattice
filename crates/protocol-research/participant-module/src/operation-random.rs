@@ -42,14 +42,14 @@ impl Purpose {
     fn domains(self) -> [Option<&'static str>; 2] {
         match self {
             Self::Contribution => [
-                Some("sealed-lattice/contribution-witness-randomness/v1"),
-                Some("sealed-lattice/contribution-proof-randomness/v1"),
+                Some("sealed-lattice/contribution-witness-randomness"),
+                Some("sealed-lattice/contribution-proof-randomness"),
             ],
             Self::Ballot => [
-                Some("sealed-lattice/ballot-encryption-randomness/v1"),
-                Some("sealed-lattice/ballot-proof-randomness/v1"),
+                Some("sealed-lattice/ballot-encryption-randomness"),
+                Some("sealed-lattice/ballot-proof-randomness"),
             ],
-            Self::Release => [None, Some("sealed-lattice/release-proof-randomness/v1")],
+            Self::Release => [None, Some("sealed-lattice/release-proof-randomness")],
         }
     }
     /// The draws the first stream serves.

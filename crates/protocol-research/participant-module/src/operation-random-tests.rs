@@ -79,24 +79,24 @@ fn keeps_every_stream_prefix_byte_identical() {
     let seed = seed(3);
     for (domain, prefix) in [
         (
-            "sealed-lattice/contribution-witness-randomness/v1",
-            "631baef846a6d182def6e7f35dbfef8213303c9ea933ad5ac9a6dbfb14d30473",
+            "sealed-lattice/contribution-witness-randomness",
+            "cfb9a04f9b1573034681a81fe6748b6e19c54b0fe8bf65b678625167d292836b",
         ),
         (
-            "sealed-lattice/contribution-proof-randomness/v1",
-            "5e0a5ce2c71d653031e529256d45df8c452657f00107287a207d289de6ba3e11",
+            "sealed-lattice/contribution-proof-randomness",
+            "1ea48958e62e12901c8e8af39e2a738e01c88fb4df5ccb99f5df3cf38a2ebf6c",
         ),
         (
-            "sealed-lattice/ballot-encryption-randomness/v1",
-            "01adb5cdcf8602aa76a814e2aaf4eba8db56109bec689aece19cb1cfffe7e928",
+            "sealed-lattice/ballot-encryption-randomness",
+            "9876a6090dce31588bdfae48d0b39729044406cf516e09f269ed4774c2832d27",
         ),
         (
-            "sealed-lattice/ballot-proof-randomness/v1",
-            "a7ee66697e5cb77cc1c0a0bf1a8e6105f64b830bd7c5dae070c5acdfe9bb0c52",
+            "sealed-lattice/ballot-proof-randomness",
+            "8caec31ad90b7cfb4cbb85a1bb0734f3588e452c79f500a927faa37b57419066",
         ),
         (
-            "sealed-lattice/release-proof-randomness/v1",
-            "1be195f12e1b4ee0957dd26e11045556db3d98652d7960ae8d2f701cb457201a",
+            "sealed-lattice/release-proof-randomness",
+            "9a28119f5a661d134a7d2849c8f9dd4af76913f9fde4a94e80971359d330e22f",
         ),
     ] {
         let mut bytes = [0; 32];

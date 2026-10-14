@@ -39,7 +39,7 @@ const frame = (
     coordinate: Buffer,
 ) =>
     tuple([
-        ascii('sealed-lattice/registered-fhe-key/v2'),
+        ascii('sealed-lattice/registered-fhe-key'),
         item(itemType.rawBytes, owner),
         item(itemType.rawBytes, Buffer.alloc(64, 3)),
         item(itemType.hash512, Buffer.alloc(64, 5)),
@@ -171,7 +171,7 @@ const decode = (bytes: Buffer, degree: number) => {
         modulus = unwrap(fields[4].bytes),
         coordinate = unwrap(fields[6].bytes);
     if (
-        domain?.toString() !== 'sealed-lattice/registered-fhe-key/v2' ||
+        domain?.toString() !== 'sealed-lattice/registered-fhe-key' ||
         fields[1].bytes.length !== 1952 ||
         fields[2].bytes.length !== 64 ||
         fields[3].bytes.length !== 64 ||

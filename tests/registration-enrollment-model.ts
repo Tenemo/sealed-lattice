@@ -82,7 +82,7 @@ export const compileRegistrationEnrollmentCensus = () => {
         6n +
         6n * 6n +
         4n +
-        bytes('sealed-lattice/registration-header/v6') +
+        bytes('sealed-lattice/registration-header') +
         2n * 64n +
         inputs.signingPublicKeyBytes +
         4n +
@@ -110,7 +110,7 @@ export const compileRegistrationEnrollmentCensus = () => {
         6n +
         7n * 6n +
         4n +
-        bytes('sealed-lattice/poll-definition/v2') +
+        bytes('sealed-lattice/poll-definition') +
         64n +
         32n +
         inputs.signingPublicKeyBytes +
@@ -181,13 +181,13 @@ export const compileRegistrationEnrollmentCensus = () => {
             inputs.maximumUsernameIngressBytes +
             96n,
         recipientAssociatedBytes:
-            bytes('sealed-lattice/recipient-key-custody/v1') + 64n,
-        signingAssociatedBytes: bytes('registration-signing-seed/1') + 64n,
+            bytes('sealed-lattice/recipient-key-custody') + 64n,
+        signingAssociatedBytes: bytes('registration-signing-seed') + 64n,
         sourceAssociatedBytes:
             6n +
             2n * 6n +
             4n +
-            bytes('sealed-lattice/fhe-source-custody/v1') +
+            bytes('sealed-lattice/fhe-source-custody') +
             64n,
         rootAssociatedBytes: 64n,
         // The restore control ends with the two-byte mask of signing

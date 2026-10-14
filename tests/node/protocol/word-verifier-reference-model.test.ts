@@ -46,7 +46,7 @@ const statementMagic = Buffer.from('TOY1');
 const statementBytes = 4 + 16 * systematic + 16;
 const relation: WordRelation = (() => {
     const shape = {
-        tag: Buffer.from('reference-toy/1'),
+        tag: Buffer.from('reference-toy'),
         words: 3,
         booleans: 2,
         lookups: [

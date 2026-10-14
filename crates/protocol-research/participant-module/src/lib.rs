@@ -127,7 +127,7 @@ impl<F: FnMut(u32, usize, &[u8])> Write for RecordWriter<'_, F> {
 }
 pub(crate) fn key_associated(body_digest: [u8; 64]) -> Vec<u8> {
     [
-        b"sealed-lattice/recipient-key-custody/v1".as_slice(),
+        b"sealed-lattice/recipient-key-custody".as_slice(),
         &body_digest,
     ]
     .concat()

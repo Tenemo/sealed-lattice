@@ -255,7 +255,7 @@ describe('complete ordinary workflow resource graph', () => {
                         0n,
                     ),
                 );
-            expect(result.cleanResponseBytes).toBe(276n + 66n * n + 4n + 3309n);
+            expect(result.cleanResponseBytes).toBe(273n + 66n * n + 4n + 3309n);
             expect(result.responderListedCopyBytes).toBe(
                 n * n * (210n + 3309n),
             );

@@ -3,7 +3,7 @@ use protocol_foundations::identity::identity;
 use std::collections::BTreeSet;
 use supported_profile::Profile;
 
-const RANKING_PROGRAM_DOMAIN: &str = "sealed-lattice/ranking-program/v1";
+const RANKING_PROGRAM_DOMAIN: &str = "sealed-lattice/ranking-program";
 pub fn program_identity(program: &[u8]) -> Result<[u8; 64], Refusal> {
     identity(RANKING_PROGRAM_DOMAIN, program).map_err(|_| Refusal::Program)
 }

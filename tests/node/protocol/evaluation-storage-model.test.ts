@@ -18,7 +18,7 @@ describe('scalar evaluation storage schedule', () => {
         const profile = deriveSupportedProfile(10, 10);
         const complete = compileRankingProgramModel(profile);
         expect(complete.identity).toBe(
-            '5d8e3744d3d1e00e902ccf6f7fafeec4d586f310ae4abdab30293b918837bf778180780dc4f71eac86e8a2e988ae05f61df0211e497427c7baf7c4627d27b3a4',
+            '017f859de532edf89af14dc72c7aea96b7917da7ffdebb01b4a853cf087d7d48d747640bc29f8a201fd5f699612f13de57dec36a18ded4d883deec289d3ac421',
         );
         expect(complete.instructions).toHaveLength(284);
         for (let top = 1; top < 10; top++) {

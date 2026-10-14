@@ -16,12 +16,12 @@ fn proof_role_separates_every_verified_context_input() {
         assert_ne!(changed.unwrap(), original);
     }
     assert!(original.len() <= 1024);
-    assert_eq!(original.len(), 407);
+    assert_eq!(original.len(), 404);
     let tuple = CanonicalTuple::decode(&original, &Default::default()).unwrap();
     assert_eq!(tuple.items.len(), 6);
     assert_eq!(
         tuple.items[0].variable_value_bytes().unwrap(),
-        b"sealed-lattice/certified-release/v3"
+        b"sealed-lattice/certified-release"
     );
     assert_eq!(
         tuple.items[1].item_type(),

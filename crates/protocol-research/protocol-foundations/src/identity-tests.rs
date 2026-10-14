@@ -34,11 +34,11 @@ fn matches_independent_shake256_vectors() {
     // SHAKE256 over the canonical tuple, computed outside Rust.
     assert_eq!(
         hexadecimal(&identity(PUBLIC_POLYNOMIAL_DOMAIN, b"").unwrap()),
-        "ae4e93421e5300b846a0f24f8a8f637b190afbdd215153a94708eedf948717a047815cfac7aa5e4a01c4d9a6c9daabacdf892ec65fe2e95befb100ca4497c2e2"
+        "cb0458477ff5bfa6fa24eba4e613831e23bf4b23b03544bd90daa5b9c4d66d5e6651910b519c41f7def6e0377a79116797efce82c6664fc82044b7d66517c2ae"
     );
     assert_eq!(
         hexadecimal(&identity(PUBLIC_POLYNOMIAL_DOMAIN, &[0, 1, 2, 255]).unwrap()),
-        "584f8823279d9ab61e689aa7513a466e917e4204e931b061ea7352d11e6b21d95533cffd89c7bec1cb76a06faf744d37548f2640775aac8781364b2e5d284dae"
+        "482ccf1fcd9583d7e3b08bed1e1c6067ef736f4cb34301673e4ee989a6f85e144c8ffe1f5cb9a977af20f43cce17d4d7cac80bd70e12780144d82e68e4633353"
     );
 }
 

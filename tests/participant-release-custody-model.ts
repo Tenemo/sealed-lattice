@@ -12,7 +12,7 @@ export const participantReleaseProofRoleBytes =
     6n +
     6n * 6n +
     4n +
-    BigInt(Buffer.byteLength('sealed-lattice/certified-release/v3')) +
+    BigInt(Buffer.byteLength('sealed-lattice/certified-release')) +
     4n +
     participantIdentityAsciiBytes +
     3n * 64n +

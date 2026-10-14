@@ -4,7 +4,7 @@ use protocol_foundations::{foundation::CanonicalItem, identity::IdentityHasher};
 use std::collections::BTreeSet;
 use supported_profile::Profile;
 
-const EVALUATION_VALUE_DOMAIN: &str = "sealed-lattice/public-evaluation-work/v2";
+const EVALUATION_VALUE_DOMAIN: &str = "sealed-lattice/public-evaluation-work";
 /// Bytes of one stored working value of the profile: every coefficient word
 /// of both components.
 pub fn stored_value_bytes(profile: Profile) -> usize {

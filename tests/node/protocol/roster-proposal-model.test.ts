@@ -15,7 +15,7 @@ describe('verified registration roster proposal', () => {
         for (const owner of ['00'.repeat(64), 'a5'.repeat(64)]) {
             for (const position of [0, 1, 19]) {
                 const encoded = tuple([
-                    ascii('sealed-lattice/setup-contribution/v3'),
+                    ascii('sealed-lattice/setup-contribution'),
                     ascii(owner),
                     item(itemType.hash512, Buffer.alloc(64, 1)),
                     item(itemType.hash512, Buffer.alloc(64, 2)),
@@ -25,7 +25,7 @@ describe('verified registration roster proposal', () => {
                     BigInt(encoded.length),
                 );
                 expect(encoded.length).toBe(
-                    6 + 5 * 6 + (4 + 36) + (4 + 128) + 2 * 64 + 2,
+                    6 + 5 * 6 + (4 + 33) + (4 + 128) + 2 * 64 + 2,
                 );
             }
         }

@@ -26,7 +26,7 @@ import { protocolHashPrefix } from '#tests/word-proof-reference/transcript.js';
 // original-PID role and native hash framing.
 // This builder shares no framing code with the recognizer under test.
 const role = tuple([
-    ascii('sealed-lattice/ballot-proof/v3'),
+    ascii('sealed-lattice/ballot-proof'),
     ascii('ab'.repeat(64)),
     item(itemType.hash512, Buffer.alloc(64, 1)),
     item(itemType.hash512, Buffer.alloc(64, 2)),
@@ -46,7 +46,7 @@ const state = Buffer.concat([
     Buffer.alloc(262144 - 128, 14),
 ]);
 const contextFields = () => [
-    Buffer.from('linked-scored-ballot/1'),
+    Buffer.from('linked-scored-ballot'),
     Buffer.alloc(16),
     Buffer.alloc(16),
     Buffer.alloc(16),

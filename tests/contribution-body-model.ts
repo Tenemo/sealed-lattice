@@ -7,7 +7,7 @@ import type { SupportedProfile } from '#tests/supported-profile-model.js';
 
 // The complete proof length and the source opening salt.
 const contributionBodyHeaderBytes = 8n + sourceOpeningSaltBytes;
-const bodyDomain = Buffer.from('sealed-lattice/contribution-body/v1', 'ascii');
+const bodyDomain = Buffer.from('sealed-lattice/contribution-body', 'ascii');
 
 // Ordinary body-hash framing; the source-opening salt is already inside
 // the body header. This calculation creates no contribution verifier

@@ -78,18 +78,18 @@ const mlDsa65 = {
 // proposal and endorsement, optional ballot, close intent, response and
 // proposal, target certification and release envelope.
 const organizerPurposes = [
-    ['poll-definition', 'v2'],
-    ['registration', 'v1'],
-    ['roster-proposal', 'v1'],
-    ['contribution-offer', 'v1'],
-    ['setup-selection-proposal', 'v1'],
-    ['setup-selection-endorsement', 'v1'],
-    ['ballot-envelope', 'v1'],
-    ['close-intent', 'v1'],
-    ['close-response', 'v1'],
-    ['close-proposal', 'v1'],
-    ['target-certification', 'v1'],
-    ['release-envelope', 'v1'],
+    'poll-definition',
+    'registration',
+    'roster-proposal',
+    'contribution-offer',
+    'setup-selection-proposal',
+    'setup-selection-endorsement',
+    'ballot-envelope',
+    'close-intent',
+    'close-response',
+    'close-proposal',
+    'target-certification',
+    'release-envelope',
 ] as const;
 
 // Whether value/experiment <= bound, compared exactly.
@@ -155,11 +155,8 @@ describe('security ledger', () => {
         );
         // tr || M' with M' = 0 || |ctx| || ctx || a 64-byte digest.
         const shortestContext = organizerPurposes
-            .filter(([purpose]) => !purpose.endsWith('-envelope'))
-            .map(
-                ([purpose, version]) =>
-                    `sealed-lattice/${purpose}/${version}`.length,
-            )
+            .filter((purpose) => !purpose.endsWith('-envelope'))
+            .map((purpose) => `sealed-lattice/${purpose}`.length)
             .reduce((minimum, value) => Math.min(minimum, value));
         const frameInputBytes =
             mlDsa65.publicKeyDigestBytes + 2n + BigInt(shortestContext) + 64n;

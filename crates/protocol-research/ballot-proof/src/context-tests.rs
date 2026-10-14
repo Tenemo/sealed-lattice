@@ -14,12 +14,12 @@ fn proof_roles_separate_every_variable_context_input() {
         assert_ne!(changed.unwrap(), original);
     }
     assert!(original.len() <= 1024);
-    assert_eq!(original.len(), 332);
+    assert_eq!(original.len(), 329);
     let tuple = CanonicalTuple::decode(&original, &Default::default()).unwrap();
     assert_eq!(tuple.items.len(), 5);
     assert_eq!(
         tuple.items[0].variable_value_bytes().unwrap(),
-        b"sealed-lattice/ballot-proof/v3"
+        b"sealed-lattice/ballot-proof"
     );
     assert_eq!(
         tuple.items[1].item_type(),

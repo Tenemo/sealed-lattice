@@ -154,7 +154,7 @@ export const releaseRecordAssociatedData = (
     length: number,
 ) =>
     concatenate(
-        encodeText('sealed-lattice/participant-release-record/v3'),
+        encodeText('sealed-lattice/participant-release-record'),
         context.poll,
         context.setupIdentity,
         unsigned16(context.position),

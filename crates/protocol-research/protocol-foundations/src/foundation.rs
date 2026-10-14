@@ -18,7 +18,7 @@ pub(crate) use schemas::FoundationSchemaRefusal;
 pub use text::StabilizedDisplayText;
 
 pub(crate) const MAXIMUM_USERNAME_BYTES: usize = 128;
-const REGISTRATION_HEADER_PURPOSE: &str = "sealed-lattice/registration-header/v6";
+const REGISTRATION_HEADER_PURPOSE: &str = "sealed-lattice/registration-header";
 /// A username arrives as at most this many bytes before normalization.
 pub const MAXIMUM_USERNAME_INGRESS_BYTES: usize = 512;
 pub fn normalize_username(bytes: &[u8]) -> Result<StabilizedDisplayText, crate::Refusal> {

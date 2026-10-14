@@ -44,7 +44,7 @@ use poll::VerifiedPoll;
 
 use zeroize::Zeroizing;
 
-pub const REGISTRATION_SIGNATURE_CONTEXT: &[u8] = b"sealed-lattice/registration/v1";
+pub const REGISTRATION_SIGNATURE_CONTEXT: &[u8] = b"sealed-lattice/registration";
 /// Every participant signature is one ML-DSA-65 signature.
 pub const SIGNATURE_BYTES: usize = ml_dsa_65::SIG_LEN;
 /// Every participant signing key is one ML-DSA-65 public key.
@@ -244,7 +244,7 @@ impl BodyDigest {
         check_header(&header)?;
         let encoded = header.encode()?;
         let digest = hash_foundation_tuple_512(
-            "sealed-lattice/registration-body/v2",
+            "sealed-lattice/registration-body",
             &[CanonicalItem::variable_bytes(encoded).map_err(|_| Refusal::Shape)?],
         )
         .map_err(|_| Refusal::Shape)?

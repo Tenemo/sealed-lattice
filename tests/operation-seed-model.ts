@@ -57,32 +57,32 @@ export const compilePrivateRandomnessScopes = (
         2n * contributionIntents + ballotIntents + releaseIntents;
     const domains = [
         {
-            domain: 'sealed-lattice/fhe-source-randomness/v2',
+            domain: 'sealed-lattice/fhe-source-randomness',
             initialized: registrationSourceEntries,
             read: registrationSourceEntries,
         },
         {
-            domain: 'sealed-lattice/contribution-witness-randomness/v1',
+            domain: 'sealed-lattice/contribution-witness-randomness',
             initialized: 2n * contributionIntents,
             read: contributionIntents,
         },
         {
-            domain: 'sealed-lattice/contribution-proof-randomness/v1',
+            domain: 'sealed-lattice/contribution-proof-randomness',
             initialized: 2n * contributionIntents,
             read: 2n * contributionIntents,
         },
         {
-            domain: 'sealed-lattice/ballot-encryption-randomness/v1',
+            domain: 'sealed-lattice/ballot-encryption-randomness',
             initialized: ballotIntents,
             read: ballotIntents,
         },
         {
-            domain: 'sealed-lattice/ballot-proof-randomness/v1',
+            domain: 'sealed-lattice/ballot-proof-randomness',
             initialized: ballotIntents,
             read: ballotIntents,
         },
         {
-            domain: 'sealed-lattice/release-proof-randomness/v1',
+            domain: 'sealed-lattice/release-proof-randomness',
             initialized: releaseIntents,
             read: releaseIntents,
         },

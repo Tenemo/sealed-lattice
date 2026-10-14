@@ -29,9 +29,9 @@ protocol_foundations::operation_codes! {
 impl CustodyPurpose {
     fn domain(self) -> &'static str {
         match self {
-            Self::Root => "sealed-lattice/participant-root/v1",
-            Self::Record => "sealed-lattice/participant-record/v1",
-            Self::EnrollmentInput => "sealed-lattice/enrollment-input/v1",
+            Self::Root => "sealed-lattice/participant-root",
+            Self::Record => "sealed-lattice/participant-record",
+            Self::EnrollmentInput => "sealed-lattice/enrollment-input",
             Self::Target => TARGET_IDENTITY_DOMAIN,
             Self::Envelope => ENVELOPE_IDENTITY_DOMAIN,
             Self::CloseResponse => ClosePurpose::Response.context(),

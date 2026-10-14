@@ -40,7 +40,7 @@ fn exact_target_owner_and_signature_context_are_required() {
         Err(Refusal::Signature)
     ));
     let signature = key
-        .try_sign_with_seed(&[31; 32], &target, b"sealed-lattice/close-response/v1")
+        .try_sign_with_seed(&[31; 32], &target, b"sealed-lattice/close-response")
         .unwrap();
     let mut changed = packet;
     changed[66..].copy_from_slice(&signature);

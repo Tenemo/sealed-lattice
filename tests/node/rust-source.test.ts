@@ -73,7 +73,7 @@ describe('Rust source reader', () => {
                 'const SHIFTED: usize = 1 << 14;',
                 'const MASK: u64 = 0xFF_FFu64;',
                 'const TABLE: [u8; 2] = [1, 2];',
-                'const PURPOSE: &[u8] = b"sealed-lattice/offer/v1";',
+                'const PURPOSE: &[u8] = b"sealed-lattice/offer";',
                 'pub enum Step {',
                 '    /// The first step.',
                 '    Begin = 1,',
@@ -85,7 +85,7 @@ describe('Rust source reader', () => {
         expect(rustIntegerConstant(source, 'SHIFTED')).toBe(16_384n);
         expect(rustIntegerConstant(source, 'MASK')).toBe(0xffffn);
         expect(rustStringConstant(source, 'PURPOSE')).toBe(
-            'sealed-lattice/offer/v1',
+            'sealed-lattice/offer',
         );
         expect(rustEnumCodes(source, 'Step')).toEqual({ Begin: 1, End: 16 });
     });

@@ -140,13 +140,9 @@ describe('authentication frame accounting', () => {
         ).seeds.filter(
             (seed) => BigInt(seed.message.length) === challenge.inputBytes,
         );
-        expect(aliases.map((seed) => seed.label)).toEqual(
-            Array.from({ length: 6 }, (_, gadget) =>
-                ['a', 'u', 'k'].map((role) => `common-fhe-${role}-${gadget}`),
-            ).flat(),
-        );
+        expect(aliases.map((seed) => seed.label)).toEqual(['common-auxiliary']);
         expect(challenge.family).toBe('SHAKE256');
-        // These are permitted sampler inputs. This does not produce a valid
+        // This is a permitted sampler input. It does not produce a valid
         // signature or make the common matrices independent oracle functions.
     });
     it('bounds first-evaluated intents separately from delivered ballot counts', () => {
@@ -457,7 +453,7 @@ describe('complete participant authentication accounting', () => {
                 roles.find((role) => role.purpose === purpose)!.context,
             ).toBe(rustStringConstant(source, name));
         }
-        expect(roles[0].context).toBe('sealed-lattice/poll-definition/v2');
-        expect(roles[1].context).toBe('sealed-lattice/registration/v1');
+        expect(roles[0].context).toBe('sealed-lattice/poll-definition');
+        expect(roles[1].context).toBe('sealed-lattice/registration');
     });
 });

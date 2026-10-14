@@ -19,7 +19,7 @@ export const compileRosterProposalCensus = (participantCount: number) => {
         6n +
         5n * 6n +
         4n +
-        bytes('sealed-lattice/setup-contribution/v3') +
+        bytes('sealed-lattice/setup-contribution') +
         4n +
         participantIdentityAsciiBytes +
         2n * 64n +
@@ -28,7 +28,7 @@ export const compileRosterProposalCensus = (participantCount: number) => {
         6n +
         3n * 6n +
         4n +
-        bytes('sealed-lattice/roster-proposal/v2') +
+        bytes('sealed-lattice/roster-proposal') +
         64n +
         4n +
         4n +

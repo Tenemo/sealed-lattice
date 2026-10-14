@@ -18,9 +18,9 @@ const byteStringItemBytes = (length: bigint) =>
     itemHeaderBytes + innerLengthBytes + length;
 
 export const closeContexts = {
-    intent: 'sealed-lattice/close-intent/v1',
-    response: 'sealed-lattice/close-response/v1',
-    proposal: 'sealed-lattice/close-proposal/v1',
+    intent: 'sealed-lattice/close-intent',
+    response: 'sealed-lattice/close-response',
+    proposal: 'sealed-lattice/close-proposal',
 } as const;
 
 // A listed entry is a two-byte author position and an envelope identity; a

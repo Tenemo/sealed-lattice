@@ -221,7 +221,7 @@ export const proofHashProfiles = (profile: SupportedProfile) => {
             products: setup.disjointPairs,
             prefixWords: 18n,
             statementBytes: setup.expandedStatementByteLength,
-            relationTag: 'complete-setup-words/2',
+            relationTag: 'complete-setup-words',
             roleBytes: compileRosterProposalCensus(profile.participantCount)
                 .roleBytes,
         },
@@ -235,7 +235,7 @@ export const proofHashProfiles = (profile: SupportedProfile) => {
             prefixWords: 20n,
             statementBytes:
                 ballotBody.contextBytes + 2n * ballotBody.ciphertextBytes,
-            relationTag: 'linked-scored-ballot/1',
+            relationTag: 'linked-scored-ballot',
             roleBytes: ballotBody.proofRoleBytes,
         },
         {
@@ -257,7 +257,7 @@ export const proofHashProfiles = (profile: SupportedProfile) => {
                 2n +
                 fixedModulusBfvInputs.polynomialDegree *
                     (4n * (shareBytes + 1n) + 2n * (releaseBytes + 1n)),
-            relationTag: 'linked-threshold-release/1',
+            relationTag: 'linked-threshold-release',
             roleBytes: participantReleaseProofRoleBytes,
         },
     ] as const;

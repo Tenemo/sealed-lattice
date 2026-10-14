@@ -80,7 +80,7 @@ fn source_stream_matches_canonical_tuple_and_binds_each_original_context() {
     let canonical = CanonicalTuple::new(
         1,
         vec![
-            CanonicalItem::nonempty_ascii("sealed-lattice/fhe-source-randomness/v2").unwrap(),
+            CanonicalItem::nonempty_ascii("sealed-lattice/fhe-source-randomness").unwrap(),
             CanonicalItem::fixed_bytes(owner).unwrap(),
             CanonicalItem::hash512([3; 64]),
             CanonicalItem::variable_bytes(profile.ciphertext_modulus().to_bytes()).unwrap(),
@@ -123,7 +123,7 @@ fn keeps_the_source_stream_prefix_byte_identical() {
     let actual: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
     assert_eq!(
         actual,
-        "99579d5d7eb35eec81ee6ee224862f1f379905a2553a0eb1791e6e4e212faedb"
+        "fa9cbfcb4d66d97a1320f1688b7c58e943d85aa9cc267ba869339ec64f1be3c2"
     );
 }
 

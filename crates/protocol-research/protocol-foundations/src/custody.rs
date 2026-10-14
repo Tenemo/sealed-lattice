@@ -30,7 +30,7 @@ impl SigningPurpose {
 const ALL_SIGNING_PURPOSES: u16 = (SigningPurpose::Release.mask() << 1) - 1;
 
 fn associated(body: [u8; 64]) -> Vec<u8> {
-    let mut bytes = Vec::from(b"registration-signing-seed/1".as_slice());
+    let mut bytes = Vec::from(b"registration-signing-seed".as_slice());
     bytes.extend(body);
     bytes
 }

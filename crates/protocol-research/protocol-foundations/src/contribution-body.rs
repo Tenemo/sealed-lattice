@@ -7,7 +7,7 @@ use supported_profile::{
 
 /// The complete proof length and the source opening salt.
 pub const BODY_HEADER_BYTES: usize = 8 + SOURCE_SALT_BYTES;
-pub(crate) const BODY_DOMAIN: &str = "sealed-lattice/contribution-body/v1";
+pub(crate) const BODY_DOMAIN: &str = "sealed-lattice/contribution-body";
 pub struct ContributionBodyHeader {
     pub proof_length: usize,
     pub source_salt: [u8; SOURCE_SALT_BYTES],

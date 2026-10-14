@@ -14,7 +14,7 @@ describe('signed registration and original-key custody', () => {
             6n +
                 6n * 6n +
                 4n +
-                37n +
+                34n +
                 2n * 64n +
                 1952n +
                 4n +
@@ -23,12 +23,12 @@ describe('signed registration and original-key custody', () => {
                 4n +
                 64n * value.maximumSourceFamilyCount,
         );
-        expect(value.pollDefinitionOverheadBytes).toBe(2141n);
+        expect(value.pollDefinitionOverheadBytes).toBe(2138n);
         // A two-option poll: 694 bytes of runtime, lengths, counts, username
         // and data keys beside the texts, which fill the poll definition but
-        // its 2,141 bytes of framing and the manifest's 28 + 2 * 34 + 16.
+        // its 2,138 bytes of framing and the manifest's 28 + 2 * 34 + 16.
         expect(value.maximumOrganizerInputBytes).toBe(
-            694n + 1_048_576n - 2141n - 112n,
+            694n + 1_048_576n - 2138n - 112n,
         );
         expect(value.maximumJoinInputBytes).toBeLessThan(1_572_864n);
         expect(value.recipientCapsuleBytes).toBe(528n);
@@ -55,9 +55,8 @@ describe('signed registration and original-key custody', () => {
         expect(value.preparedManifestPrefixBytes).toBe(132n);
         expect(value.rootAssociatedBytes).toBe(64n);
         expect(value.recipientAssociatedBytes).toBe(
-            BigInt(
-                Buffer.byteLength('sealed-lattice/recipient-key-custody/v1'),
-            ) + 64n,
+            BigInt(Buffer.byteLength('sealed-lattice/recipient-key-custody')) +
+                64n,
         );
         expect(value.initialRootDistinctBlockInputs).toBe(59n);
         expect(value.rootDistinctBlockInputs).toBe(63n);
@@ -69,7 +68,7 @@ describe('signed registration and original-key custody', () => {
             Buffer.alloc(6),
             Buffer.alloc(6),
             Buffer.alloc(4),
-            Buffer.from('sealed-lattice/fhe-source-custody/v1'),
+            Buffer.from('sealed-lattice/fhe-source-custody'),
             Buffer.alloc(6),
             Buffer.alloc(64),
         ]);

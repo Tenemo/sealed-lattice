@@ -38,9 +38,9 @@ const role = (purpose: string, release = false) =>
         item(itemType.unsigned16, unsigned(1, 2)),
     ]);
 const roles = {
-    setup: role('sealed-lattice/setup-contribution/v3'),
-    ballot: role('sealed-lattice/ballot-proof/v3'),
-    release: role('sealed-lattice/certified-release/v3', true),
+    setup: role('sealed-lattice/setup-contribution'),
+    ballot: role('sealed-lattice/ballot-proof'),
+    release: role('sealed-lattice/certified-release', true),
 };
 const frame = (
     purpose: keyof typeof roles,
@@ -61,7 +61,7 @@ const frame = (
 describe('fixed three-purpose raw-domain catalogue', () => {
     it('uses the independently pinned original-PID role widths and complete state widths', () => {
         expect(Object.values(roles).map((value) => value.length)).toEqual([
-            338, 332, 407,
+            335, 329, 404,
         ]);
         const shapes = [
             [3, 2, 131072],
@@ -158,9 +158,9 @@ describe('fixed three-purpose raw-domain catalogue', () => {
             'utf8',
         );
         for (const tag of [
-            'complete-setup-words/2',
-            'linked-scored-ballot/1',
-            'linked-threshold-release/1',
+            'complete-setup-words',
+            'linked-scored-ballot',
+            'linked-threshold-release',
         ])
             expect(source).toContain(`tag: b"${tag}"`);
         // Independent completion operands pinned by the Rust descriptor's

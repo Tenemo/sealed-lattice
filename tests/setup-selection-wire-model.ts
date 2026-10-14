@@ -53,7 +53,7 @@ export const encodeSetupSelectionModel = (
         ]);
     });
     return tuple([
-        ascii('sealed-lattice/setup-selection/v1'),
+        ascii('sealed-lattice/setup-selection'),
         hash(rosterIdentity),
         item(
             1,
@@ -70,7 +70,7 @@ export const setupSelectionIdentityModel = (
     createHash('shake256', { outputLength: 64 })
         .update(
             tuple([
-                ascii('sealed-lattice/setup-selection-identity/v1'),
+                ascii('sealed-lattice/setup-selection-identity'),
                 item(
                     1,
                     variable(
@@ -130,7 +130,7 @@ export const compileSetupSelectionWireCensus = (participants: number) => {
         6n +
         5n * 6n +
         4n +
-        text('sealed-lattice/contribution-offer/v1') +
+        text('sealed-lattice/contribution-offer') +
         64n +
         2n +
         8n +
@@ -139,7 +139,7 @@ export const compileSetupSelectionWireCensus = (participants: number) => {
         6n +
         3n * 6n +
         4n +
-        text('sealed-lattice/setup-selection/v1') +
+        text('sealed-lattice/setup-selection') +
         64n +
         4n +
         4n +
@@ -148,7 +148,7 @@ export const compileSetupSelectionWireCensus = (participants: number) => {
         6n +
         3n * 6n +
         4n +
-        text('sealed-lattice/setup-selection-endorsement/v1') +
+        text('sealed-lattice/setup-selection-endorsement') +
         64n +
         2n;
     return {
@@ -175,10 +175,6 @@ export const compileSetupSelectionWireCensus = (participants: number) => {
         // Ordinary body identity: domain and variable-byte body, no sender,
         // whole-body salt, role or predecessor copied into this hash input.
         bodyHashPrefixBytes:
-            6n +
-            2n * 6n +
-            4n +
-            text('sealed-lattice/contribution-body/v1') +
-            4n,
+            6n + 2n * 6n + 4n + text('sealed-lattice/contribution-body') + 4n,
     };
 };
