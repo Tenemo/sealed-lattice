@@ -3,15 +3,15 @@ import {
     mlDsa65ChallengeSeedBytes,
     mlDsa65MaskNonceBytes,
     mlDsa65Parameters,
+    mlDsa65Sizes,
 } from '#tests/ml-dsa-65-parameters.js';
 import { participantReleaseEnvelopeBytes } from '#tests/participant-release-custody-model.js';
 import { byteAlignedSpongePermutations } from '#tests/proof-hash-work-model.js';
 import { rejectionSubsetBound } from '#tests/proof-randomness-budget-model.js';
-import { compileRegistrationEnrollmentCensus } from '#tests/registration-enrollment-model.js';
 import { compileSetupSelectionCensus } from '#tests/setup-selection-model.js';
 
 const envelopeBytes = ballotEnvelopeBytes;
-const signatureBytes = compileRegistrationEnrollmentCensus().signatureBytes;
+const signatureBytes = mlDsa65Sizes.signatureBytes;
 
 export const authenticationPurposes = [
     'poll-definition',
@@ -178,8 +178,7 @@ export const compileCurrentSignatureHashInputs = () => {
         {
             purpose: 'Public key digest',
             family: 'SHAKE256',
-            inputBytes:
-                compileRegistrationEnrollmentCensus().signingPublicKeyBytes,
+            inputBytes: mlDsa65Sizes.publicKeyBytes,
             outputBytes: 64n,
         },
         {

@@ -1,3 +1,4 @@
+import { mlDsa65Sizes } from '#tests/ml-dsa-65-parameters.js';
 import { compileRecipientKeyCensus } from '#tests/recipient-key-model.js';
 import { compileRegistrationSetupBindingScreen } from '#tests/registration-setup-binding-model.js';
 import {
@@ -5,7 +6,6 @@ import {
     supportedProfileRanges,
 } from '#tests/supported-profile-model.js';
 
-export const registrationSigningPublicKeyBytes = 1952n;
 // ParticipantIdentity renders its foundation Hash512 as lowercase hex.
 export const participantIdentityAsciiBytes = 2n * 64n;
 
@@ -61,8 +61,8 @@ const maximumSourceInventory = () => {
 };
 
 const registrationEnrollmentInputs = {
-    signingPublicKeyBytes: registrationSigningPublicKeyBytes,
-    signatureBytes: 3309n,
+    signingPublicKeyBytes: mlDsa65Sizes.publicKeyBytes,
+    signatureBytes: mlDsa65Sizes.signatureBytes,
     maximumUsernameBytes: 128n,
     maximumUsernameIngressBytes: 512n,
     maximumHeaderInputBytes: 4096n,

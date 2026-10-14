@@ -5,9 +5,9 @@ import {
     sourceCoordinateDecodingWork,
 } from '#tests/compressed-oracle/source-extraction.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
+import { mlDsa65Sizes } from '#tests/ml-dsa-65-parameters.js';
 import { operationSeedBytes } from '#tests/operation-seed-model.js';
 import { byteAlignedSpongePermutations } from '#tests/proof-hash-work-model.js';
-import { registrationSigningPublicKeyBytes } from '#tests/registration-enrollment-model.js';
 import { compileRegistrationSetupBindingScreen } from '#tests/registration-setup-binding-model.js';
 import { registrationSourceMask } from '#tests/registration-source-domain-model.js';
 import { setupGaussianParameters } from '#tests/setup-randomness-model.js';
@@ -47,7 +47,7 @@ export const compileRegistrationSourceRandomness = (
             6n * 6n +
             4n +
             bytes('sealed-lattice/fhe-source-randomness/v2') +
-            registrationSigningPublicKeyBytes +
+            mlDsa65Sizes.publicKeyBytes +
             64n +
             4n +
             modulusBytes +
@@ -61,7 +61,7 @@ export const compileRegistrationSourceRandomness = (
             7n * 6n +
             4n +
             bytes('sealed-lattice/registered-fhe-key/v2') +
-            registrationSigningPublicKeyBytes +
+            mlDsa65Sizes.publicKeyBytes +
             64n +
             64n +
             4n +
@@ -71,7 +71,7 @@ export const compileRegistrationSourceRandomness = (
             family.publicCoordinateBytes;
         const commonOutputBytes = (degree * BigInt(family.sampleBits)) / 8n;
         const sourceMask = registrationSourceMask(
-            new Uint8Array(Number(registrationSigningPublicKeyBytes)),
+            new Uint8Array(Number(mlDsa65Sizes.publicKeyBytes)),
             Uint8Array.from({ length: Number(modulusBytes) }, (_, offset) =>
                 Number((family.modulus >> BigInt(8 * offset)) & 255n),
             ),
