@@ -6,10 +6,7 @@ use protocol_foundations::{
     Credential, RETAINED_TAG_BYTES,
     ballot_authentication::BallotEnvelope,
     ballot_body::{self, HEADER_BYTES},
-    foundation::{
-        CanonicalDecodeLimits, CanonicalItem, CanonicalItemType, CanonicalTuple,
-        hash_foundation_tuple_512,
-    },
+    foundation::{CanonicalItem, CanonicalTuple, hash_foundation_tuple_512},
     identity::{PUBLIC_POLYNOMIAL_DOMAIN, identity},
     poll::VerifiedPoll,
     target_signing::{MAXIMUM_TARGET_BODY_BYTES, TARGET_PURPOSE, TargetMessage},
@@ -494,50 +491,27 @@ impl VerifiedEvaluationTarget {
             return Err(Error::Encoding);
         }
         let (body, ciphertext) = bytes[8..].split_at(length);
-        // The finality message's parser accepts only a canonical target body
-        // of this profile, so its fields are read at their positions.
-        let identity = target_identity(body, setup.profile().participants())?;
-        let limits = CanonicalDecodeLimits {
-            maximum_tuple_byte_length: MAXIMUM_TARGET_BODY_BYTES,
-            maximum_item_count: 7,
-            maximum_item_byte_length: MAXIMUM_TARGET_BODY_BYTES,
-            maximum_nesting_depth: 0,
-            ..CanonicalDecodeLimits::default()
-        };
-        let tuple = CanonicalTuple::decode(body, &limits).map_err(|_| Error::Encoding)?;
-        let items = &tuple.items;
-        let hash = |index: usize| {
-            items
-                .get(index)
-                .filter(|item| item.item_type() == CanonicalItemType::Hash512)
-                .map(|item| item.canonical_bytes())
-        };
-        if hash(1) != Some(poll.identity().as_slice())
-            || hash(2) != Some(setup.identity().as_slice())
-        {
+        let message = TargetMessage::parse(body, setup.profile().participants())
+            .map_err(|_| Error::Encoding)?;
+        if message.poll() != &poll.identity() || message.setup_identity() != &setup.identity() {
             return Err(Error::Context);
         }
-        let evaluated = match items.len() {
-            6 => false,
-            7 => true,
-            _ => return Err(Error::Encoding),
-        };
-        let ciphertext = if evaluated {
-            if hash(6) != Some(ciphertext_identity(ciphertext)?.as_slice()) {
-                return Err(Error::Context);
+        let ciphertext = match message.ciphertext_identity() {
+            Some(identity) => {
+                if identity != &ciphertext_identity(ciphertext)? {
+                    return Err(Error::Context);
+                }
+                Some(ciphertext.to_vec())
             }
-            Some(ciphertext.to_vec())
-        } else if ciphertext.is_empty() {
-            None
-        } else {
-            return Err(Error::Encoding);
+            None if ciphertext.is_empty() => None,
+            None => return Err(Error::Encoding),
         };
         Ok(Self {
             poll,
             setup,
             classified: None,
             body: body.to_vec(),
-            identity,
+            identity: *message.identity(),
             ciphertext,
         })
     }

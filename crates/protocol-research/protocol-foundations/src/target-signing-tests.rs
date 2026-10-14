@@ -33,6 +33,7 @@ fn only_the_minimum_turnout_selects_the_evaluated_branch() {
                 TargetMessage::parse(&body(participants, accepted, evaluated), participants)
                     .unwrap();
             assert_eq!(message.encrypted(), evaluated);
+            assert_eq!(message.ciphertext_identity(), evaluated.then_some(&[4; 64]));
             for position in 0..participants {
                 assert_eq!(
                     message.classification(position),

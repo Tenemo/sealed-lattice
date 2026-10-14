@@ -29,7 +29,7 @@ pub struct TargetMessage {
     proposal: [u8; 64],
     identity: [u8; 64],
     participants: usize,
-    encrypted: bool,
+    ciphertext: Option<[u8; 64]>,
     classifications: Vec<u8>,
 }
 impl TargetMessage {
@@ -79,15 +79,21 @@ impl TargetMessage {
         );
         let accepted = classifications.iter().filter(|value| **value == 2).count();
         let evaluated = accepted >= minimum_turnout(participants);
-        match branch {
-            0 if items.len() == 6 && !evaluated => {}
+        let ciphertext = match branch {
+            0 if items.len() == 6 && !evaluated => None,
             1 if items.len() == 7 && evaluated => {
                 if items[6].item_type() != CanonicalItemType::Hash512 {
                     return Err(Error::Shape);
                 }
+                Some(
+                    items[6]
+                        .canonical_bytes()
+                        .try_into()
+                        .map_err(|_| Error::Shape)?,
+                )
             }
             _ => return Err(Error::Shape),
-        }
+        };
         let identity = hash_foundation_tuple_512(
             TARGET_IDENTITY_DOMAIN,
             &[CanonicalItem::variable_bytes(body).map_err(|_| Error::Shape)?],
@@ -110,7 +116,7 @@ impl TargetMessage {
                 .map_err(|_| Error::Shape)?,
             identity,
             participants,
-            encrypted: branch == 1,
+            ciphertext,
             classifications: classifications.to_vec(),
         })
     }
@@ -135,7 +141,12 @@ impl TargetMessage {
         self.participants
     }
     pub fn encrypted(&self) -> bool {
-        self.encrypted
+        self.ciphertext.is_some()
+    }
+    /// The identity of the evaluated ciphertext, which only an evaluated
+    /// target names.
+    pub fn ciphertext_identity(&self) -> Option<&[u8; 64]> {
+        self.ciphertext.as_ref()
     }
     /// A participant's classification code, or `None` outside the roster.
     pub fn classification(&self, position: usize) -> Option<u8> {
