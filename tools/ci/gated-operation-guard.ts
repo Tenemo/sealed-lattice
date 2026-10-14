@@ -1,24 +1,21 @@
 import assert from 'node:assert/strict';
 import { writeFile } from 'node:fs/promises';
 
-export type NativeOperationSamplePhase = 'initial' | 'periodic' | 'final';
+export type GatedOperationSamplePhase = 'initial' | 'periodic' | 'final';
 
-// The native operation waits at both boundaries, so a fast operation cannot
+// The gated operation waits at both boundaries, so a fast operation cannot
 // disappear before its process is observed. These are sampled values, not
 // an operating-system lifetime peak; short internal peaks can remain unseen.
-export const createNativeOperationGuard = (
+export const createGatedOperationGuard = (
     input: Readonly<{
         startFile: string;
         finishFile: string;
         memoryLimit: number;
         allowedProgressLines?: readonly string[];
         readMemory: (
-            phase: NativeOperationSamplePhase,
+            phase: GatedOperationSamplePhase,
         ) => Promise<number | undefined>;
-        recordSample: (
-            phase: NativeOperationSamplePhase,
-            bytes: number,
-        ) => void;
+        recordSample: (phase: GatedOperationSamplePhase, bytes: number) => void;
     }>,
 ) => {
     let readySeen = false;
@@ -86,7 +83,7 @@ export const createNativeOperationGuard = (
         monitor: async () => {
             let peakMemory = 0;
             const samples = { initial: 0, periodic: 0, final: 0 };
-            const sample = async (phase: NativeOperationSamplePhase) => {
+            const sample = async (phase: GatedOperationSamplePhase) => {
                 const bytes = await input.readMemory(phase);
                 assert.ok(
                     bytes !== undefined &&

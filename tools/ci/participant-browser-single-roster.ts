@@ -22,7 +22,7 @@ export const runSingleRoster = async (cohort: ParticipantCohort) => {
         participantCount,
         optionCount,
         mode,
-        profiling,
+        cpuProfiling,
         scalar,
         setupDeparture,
         unselectedCheckpoint,
@@ -417,7 +417,7 @@ export const runSingleRoster = async (cohort: ParticipantCohort) => {
                 peakProcessTreeBytes: peaks,
                 identifiers,
                 topCount,
-                profiled: profiling,
+                profiled: cpuProfiling,
                 memoryPressures,
                 transfers,
                 sampledResources,
@@ -454,7 +454,7 @@ export const runSingleRoster = async (cohort: ParticipantCohort) => {
                               'Members other than the organizer, as many as the profile tolerates, leave for good at the scheduled boundaries between the roster’s publication and the target vote, each losing its browser and private state. Members leaving before their offer never offer, and selected authors leave after offering. The remaining quorum completes setup certification, close, target certification, release and the combined result without them, counting the ballots of departed voters, and a fresh outcome verifier checks the same outcome. This is one named schedule, not every departure combination.',
                           ]
                         : []),
-                    ...(profiling
+                    ...(cpuProfiling
                         ? [
                               'Chrome recorded the CPU samples of every operation, which slows it.',
                           ]

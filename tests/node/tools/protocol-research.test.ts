@@ -96,7 +96,7 @@ describe('guarded protocol research entry', () => {
         });
         expect(() => deriveResearchScenario(3, 2, true)).toThrow();
     });
-    it('fixes the FHE key source screen and requires one native source for each scalar host', () => {
+    it('fixes the FHE key source screen and requires one native run for each scalar host', () => {
         expect(
             selectProtocolResearchCase(['native-fhe-key-source']),
         ).toMatchObject({
@@ -111,7 +111,7 @@ describe('guarded protocol research entry', () => {
         ]) {
             expect(selectProtocolResearchCase([name, 'source'])).toMatchObject({
                 name,
-                source: 'source',
+                nativeRun: 'source',
             });
             for (const values of [
                 [name],

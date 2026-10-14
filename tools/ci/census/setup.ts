@@ -2,9 +2,9 @@ import {
     compileCompleteAuthenticationFrameWork,
     compileCompleteCredentialIntentBounds,
     compileCompletedAuthenticationCensus,
-    compileCurrentCredentialIntentBounds,
-    compileCurrentSignatureHashInputs,
-    compileCurrentSignatureSamplingBounds,
+    compileCredentialIntentBoundsThroughBallot,
+    compileSignatureHashInputs,
+    compileSignatureSamplingBounds,
     compileSignatureCounterBoundary,
     compileBallotSignatureHashWork,
 } from '#tests/authentication-work-model.js';
@@ -67,7 +67,7 @@ export const renderAuthenticationFramesAndCompletedPrefix = (): string[] => {
         '',
         table(
             ['Purpose', 'Primitive', 'Input bytes', 'Literal output bytes'],
-            compileCurrentSignatureHashInputs().rows.map((row) => [
+            compileSignatureHashInputs().rows.map((row) => [
                 row.purpose,
                 row.family,
                 formatCount(row.inputBytes),
@@ -88,7 +88,7 @@ export const renderAuthenticationFramesAndCompletedPrefix = (): string[] => {
                 'Analytical output cap bytes',
                 'All-seed failure exponent',
             ],
-            compileCurrentSignatureSamplingBounds().map((row) => [
+            compileSignatureSamplingBounds().map((row) => [
                 row.purpose,
                 ...[
                     row.inputBytes,
@@ -108,7 +108,7 @@ export const renderAuthenticationFramesAndCompletedPrefix = (): string[] => {
                 'Current purposes',
                 'First-evaluated intent bound',
             ],
-            compileCurrentCredentialIntentBounds().map((value) => [
+            compileCredentialIntentBoundsThroughBallot().map((value) => [
                 value.role,
                 value.purposes.join(', '),
                 formatCount(value.firstEvaluatedIntentBound),

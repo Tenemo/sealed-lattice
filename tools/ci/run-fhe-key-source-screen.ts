@@ -16,30 +16,30 @@ import {
     fheKeySourceProgressLines,
     parseFheKeySourceOutput,
     parseFheKeySourceReport,
-    readFheKeySourceNativeSource,
+    readFheKeySourceNativeRun,
 } from '#tools/ci/fhe-key-source-report.js';
 import { fheKeySourcePhases } from '#tools/ci/fhe-key-source-scalar.mjs';
-import {
-    checkFixtureSources,
-    compiledFixtureFiles,
-    fileDigest,
-    snapshotResearchSources,
-} from '#tools/ci/fixture-sources.js';
 import { importClosure } from '#tools/ci/import-closure.js';
 import { runWithLocalRunLog } from '#tools/ci/local-run-log.js';
 import { acquireProtocolResearchLock } from '#tools/ci/protocol-research-lock.js';
-import { runGuardedFixture } from '#tools/ci/run-guarded-fixture.js';
+import { runGuardedScreen } from '#tools/ci/run-guarded-screen.js';
+import {
+    checkRunSources,
+    compiledRunFiles,
+    fileDigest,
+    snapshotResearchSources,
+} from '#tools/ci/run-sources.js';
 import {
     rustToolchain,
     workspaceCargoEnvironment,
 } from '#tools/ci/rust-toolchain.js';
 import {
-    buildScalarFixtureModule,
-    executeFixtureCommand,
-    fixtureProcessMemoryLimit,
-    readFixtureCompiler,
-    scalarFixtureBuildFlags,
-} from '#tools/ci/scalar-fixture-build.js';
+    buildScalarScreenModule,
+    executeScreenCommand,
+    readScreenCompiler,
+    scalarScreenBuildFlags,
+    screenProcessMemoryLimit,
+} from '#tools/ci/scalar-screen-build.js';
 
 const screenKind = 'fhe-key-source';
 const packageName = 'setup-witness';
@@ -49,15 +49,15 @@ const features = ['--features', 'key-source-screen'];
 // starts and the browser worker it serves, which only their paths reach.
 const hostEntries = [
     'tools/ci/run-protocol-research.ts',
-    'tools/ci/bounded-output-worker.mjs',
+    'tools/ci/fhe-key-source-scalar-worker.mjs',
     boundedBrowserWorker,
 ];
 
 export const runFheKeySourceScreen = async (
     host: 'native' | 'scalar' | 'browser',
-    sourceDirectory?: string,
+    nativeRunDirectory?: string,
 ) => {
-    assert.equal(sourceDirectory === undefined, host === 'native');
+    assert.equal(nativeRunDirectory === undefined, host === 'native');
     const name = `${host}-${screenKind}`;
     const root = path.resolve('.');
     const workspace = path.join(root, 'crates/protocol-research');
@@ -66,7 +66,9 @@ export const runFheKeySourceScreen = async (
             scriptName: 'research:protocol',
             commandLineArguments: [
                 name,
-                ...(sourceDirectory === undefined ? [] : [sourceDirectory]),
+                ...(nativeRunDirectory === undefined
+                    ? []
+                    : [nativeRunDirectory]),
             ],
             lanes: [
                 'Pin FHE key-source screen inputs',
@@ -82,7 +84,7 @@ export const runFheKeySourceScreen = async (
                 root,
             );
             try {
-                assert.ok(freemem() >= 2 * fixtureProcessMemoryLimit);
+                assert.ok(freemem() >= 2 * screenProcessMemoryLimit);
                 const resources = compileFheKeySourceScreenResources();
                 const model = {
                     ...resources,
@@ -93,7 +95,7 @@ export const runFheKeySourceScreen = async (
                             : resources.scalarPlanningBytes,
                 };
                 assert.ok(
-                    model.planningBytes < BigInt(fixtureProcessMemoryLimit),
+                    model.planningBytes < BigInt(screenProcessMemoryLimit),
                 );
                 assert.ok(
                     model.planningBytes < BigInt(participantLinearMemoryBytes),
@@ -108,7 +110,7 @@ export const runFheKeySourceScreen = async (
                         {
                             model,
                             phaseLabels: fheKeySourcePhases,
-                            processMemoryLimit: fixtureProcessMemoryLimit,
+                            processMemoryLimit: screenProcessMemoryLimit,
                             linearMemoryLimit: participantLinearMemoryBytes,
                             scope: 'Original FHE source creation, public-coordinate emission, restoration into a contribution, first-gadget generation and independent coordinate checks. Planning and sampled process/linear limits remain distinct; no proof or participant capability is created.',
                         },
@@ -123,22 +125,22 @@ export const runFheKeySourceScreen = async (
                 };
                 delete environment.SEALED_LATTICE_SIMULATED_HELPERS;
                 const context = { root, log, environment };
-                const compiler = await readFixtureCompiler(context);
-                const source =
-                    sourceDirectory === undefined
+                const compiler = await readScreenCompiler(context);
+                const nativeRun =
+                    nativeRunDirectory === undefined
                         ? undefined
-                        : await readFheKeySourceNativeSource(
-                              sourceDirectory,
+                        : await readFheKeySourceNativeRun(
+                              nativeRunDirectory,
                               root,
                           );
-                if (source)
+                if (nativeRun)
                     await writeFile(
                         path.join(log.runDirectoryPath, 'native-inputs.json'),
                         JSON.stringify(
                             {
-                                directory: source.directory,
-                                diagnosticDigests: source.diagnosticDigests,
-                                artifacts: source.artifacts,
+                                directory: nativeRun.directory,
+                                diagnosticDigests: nativeRun.diagnosticDigests,
+                                artifacts: nativeRun.artifacts,
                             },
                             null,
                             2,
@@ -156,14 +158,14 @@ export const runFheKeySourceScreen = async (
                 await mkdir(output);
                 let executable: string | undefined;
                 let module:
-                    | Awaited<ReturnType<typeof buildScalarFixtureModule>>
+                    | Awaited<ReturnType<typeof buildScalarScreenModule>>
                     | undefined;
                 let files: string[];
                 let admission:
                     | Awaited<ReturnType<typeof assertScalarNativeInputs>>
                     | undefined;
                 if (host === 'native') {
-                    await executeFixtureCommand(
+                    await executeScreenCommand(
                         context,
                         'cargo',
                         [
@@ -176,7 +178,7 @@ export const runFheKeySourceScreen = async (
                         ],
                         'format',
                     );
-                    await executeFixtureCommand(
+                    await executeScreenCommand(
                         context,
                         'cargo',
                         [
@@ -195,7 +197,7 @@ export const runFheKeySourceScreen = async (
                         ],
                         'clippy',
                     );
-                    await executeFixtureCommand(
+                    await executeScreenCommand(
                         context,
                         'cargo',
                         [
@@ -212,7 +214,7 @@ export const runFheKeySourceScreen = async (
                         ],
                         'bounded-unit-tests',
                     );
-                    await executeFixtureCommand(
+                    await executeScreenCommand(
                         context,
                         'cargo',
                         [
@@ -236,7 +238,7 @@ export const runFheKeySourceScreen = async (
                             binaryName +
                             (process.platform === 'win32' ? '.exe' : ''),
                     );
-                    files = await compiledFixtureFiles(
+                    files = await compiledRunFiles(
                         path.join(
                             workspace,
                             'target/release/' + binaryName + '.d',
@@ -244,26 +246,23 @@ export const runFheKeySourceScreen = async (
                         snapshot,
                     );
                 } else {
-                    assert.ok(source);
-                    module = await buildScalarFixtureModule(context);
+                    assert.ok(nativeRun);
+                    module = await buildScalarScreenModule(context);
                     const dependencyFile = path.join(
                         root,
                         'target/' +
                             screenKind +
                             '-scalar/wasm32-unknown-unknown/release/setup_witness.d',
                     );
-                    files = await compiledFixtureFiles(
-                        dependencyFile,
-                        snapshot,
-                    );
+                    files = await compiledRunFiles(dependencyFile, snapshot);
                     admission = await assertScalarNativeInputs(
-                        source,
+                        nativeRun,
                         files,
                         compiler,
                         root,
                     );
                 }
-                const compiledInputs = await checkFixtureSources(
+                const compiledInputs = await checkRunSources(
                     root,
                     snapshot,
                     files,
@@ -284,7 +283,7 @@ export const runFheKeySourceScreen = async (
                             ...(module === undefined
                                 ? {}
                                 : {
-                                      flags: scalarFixtureBuildFlags(
+                                      flags: scalarScreenBuildFlags(
                                           '<repository>',
                                           '<cargo-home>',
                                       ),
@@ -311,11 +310,11 @@ export const runFheKeySourceScreen = async (
                 const artifactName = 'key-source.bin';
                 const file = path.join(output, artifactName);
                 if (executable !== undefined) {
-                    const result = await runGuardedFixture({
+                    const result = await runGuardedScreen({
                         root,
                         log,
                         environment,
-                        processMemoryLimit: fixtureProcessMemoryLimit,
+                        processMemoryLimit: screenProcessMemoryLimit,
                         command: executable,
                         args: [file],
                         name: 'native-screen-' + model.kind,
@@ -329,8 +328,8 @@ export const runFheKeySourceScreen = async (
                     );
                     native.push(result);
                 } else {
-                    assert.ok(source && module);
-                    const [expected] = source.artifacts;
+                    assert.ok(nativeRun && module);
+                    const [expected] = nativeRun.artifacts;
                     let result;
                     if (host === 'browser')
                         result = await runFheKeySourceInChrome({
@@ -341,7 +340,7 @@ export const runFheKeySourceScreen = async (
                             outputFile: file,
                             expectedBytes: expected.bytes,
                             expectedSha512: expected.sha512,
-                            processMemoryLimit: fixtureProcessMemoryLimit,
+                            processMemoryLimit: screenProcessMemoryLimit,
                             linearMemoryLimit: participantLinearMemoryBytes,
                         });
                     else {
@@ -361,16 +360,16 @@ export const runFheKeySourceScreen = async (
                             }) + '\n',
                             { flag: 'wx' },
                         );
-                        result = await runGuardedFixture({
+                        result = await runGuardedScreen({
                             root,
                             log,
                             environment,
-                            processMemoryLimit: fixtureProcessMemoryLimit,
+                            processMemoryLimit: screenProcessMemoryLimit,
                             command: process.execPath,
                             args: [
                                 path.join(
                                     root,
-                                    'tools/ci/bounded-output-worker.mjs',
+                                    'tools/ci/fhe-key-source-scalar-worker.mjs',
                                 ),
                                 configuration,
                             ],
@@ -407,9 +406,9 @@ export const runFheKeySourceScreen = async (
                     bytes: Number(model.reportBytes),
                     sha512: await fileDigest(file),
                 });
-                if (source !== undefined)
-                    await assertFheKeySourceStable(source, root);
-                await checkFixtureSources(
+                if (nativeRun !== undefined)
+                    await assertFheKeySourceStable(nativeRun, root);
+                await checkRunSources(
                     root,
                     pinnedSources,
                     host === 'native'
@@ -437,9 +436,9 @@ export const runFheKeySourceScreen = async (
                             ...(host === 'native'
                                 ? { native }
                                 : {
-                                      source: source?.directory,
+                                      source: nativeRun?.directory,
                                       sourceDiagnostics:
-                                          source?.diagnosticDigests,
+                                          nativeRun?.diagnosticDigests,
                                       admission,
                                       module: module?.inspected,
                                       scalar,

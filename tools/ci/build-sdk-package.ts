@@ -10,7 +10,7 @@ import {
 } from './build-participant-module.js';
 import { repositoryRoot } from './command-line.js';
 import { recordBundleSources } from './compiled-inputs.js';
-import { sdkPackageOptions } from './sdk-package-tsdown.config.js';
+import { sdkPackageOptions } from './sdk-package-options.js';
 
 const workerStagingPath = path.join(
     repositoryRoot,

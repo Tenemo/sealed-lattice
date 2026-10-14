@@ -5,7 +5,7 @@ import { pathToFileURL } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
-import { createNativeOperationGuard } from '#tools/ci/native-operation-guard.js';
+import { createGatedOperationGuard } from '#tools/ci/gated-operation-guard.js';
 
 const deferred = <Value>() => {
     let resolve!: (value: Value) => void;
@@ -16,7 +16,9 @@ const deferred = <Value>() => {
 };
 const scratch = async () => {
     await mkdir('temp', { recursive: true });
-    const directory = await mkdtemp(path.resolve('temp/native-guard-test-'));
+    const directory = await mkdtemp(
+        path.resolve('temp/gated-operation-guard-test-'),
+    );
     return {
         directory,
         startFile: path.join(directory, 'start'),
@@ -24,10 +26,10 @@ const scratch = async () => {
     };
 };
 
-describe('native operation sampling handshake', () => {
+describe('gated operation sampling handshake', () => {
     it('allows only explicitly listed arithmetic progress while preserving strict JSON events', () => {
         const make = (allowedProgressLines?: readonly string[]) =>
-            createNativeOperationGuard({
+            createGatedOperationGuard({
                 startFile: 'unused-start',
                 finishFile: 'unused-finish',
                 memoryLimit: 1024,
@@ -59,7 +61,7 @@ describe('native operation sampling handshake', () => {
             const finalSample = deferred<number>();
             const workStarted = deferred<void>();
             const events: string[] = [];
-            const guard = createNativeOperationGuard({
+            const guard = createGatedOperationGuard({
                 ...files,
                 memoryLimit: 1024,
                 readMemory: (phase) => {
@@ -181,7 +183,7 @@ describe('native operation sampling handshake', () => {
         for (const bytes of [undefined, 0, 1025]) {
             const files = await scratch();
             const observed: number[] = [];
-            const guard = createNativeOperationGuard({
+            const guard = createGatedOperationGuard({
                 ...files,
                 memoryLimit: 1024,
                 readMemory: () => Promise.resolve(bytes),

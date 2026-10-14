@@ -3,7 +3,7 @@ import {
     emitBrowserOutputChunk,
     readBoundedBrowserResponse,
 } from './bounded-output-browser-transport.mjs';
-import { runFheKeySourceScreen } from './fhe-key-source-scalar.mjs';
+import { runScalarKeySourceScreen } from './fhe-key-source-scalar.mjs';
 
 /** @typedef {{moduleUrl:string,moduleBytes:number,moduleSha512:string,expectedBytes:number,sinkUrl:string}} ScreenConfiguration */
 
@@ -20,7 +20,7 @@ self.onmessage = ({ data }) => {
         );
         if ((await browserSha512(bytes)) !== moduleSha512)
             throw new Error('The browser module identity differs.');
-        const result = await runFheKeySourceScreen({
+        const result = await runScalarKeySourceScreen({
             moduleBytes: bytes,
             expectedBytes: configuration.expectedBytes,
             emitChunk: (index, offset, chunk) =>

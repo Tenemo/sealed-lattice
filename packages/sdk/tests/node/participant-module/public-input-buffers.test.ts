@@ -4,7 +4,7 @@ import { writeBufferInput } from '#packages/sdk/src/participant/worker/module/pa
 import { inputBuffers } from '#packages/sdk/tests/node/participant-module/public-input-commands.js';
 import { instantiate } from '#packages/sdk/tests/node/participant-module/public-input-fixture.js';
 
-describe('participant module public input', () => {
+describe('participant module public input buffers', () => {
     it('writes each input buffer up to the capacity the module reports, in memory no other buffer holds', async () => {
         const { module } = await instantiate();
         const extents = Object.entries(inputBuffers).map(([name, buffer]) => ({

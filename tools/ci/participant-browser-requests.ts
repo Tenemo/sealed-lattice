@@ -22,7 +22,7 @@ import {
 import type { ParticipantOperationMeasurement } from '#tools/ci/participant-workflow-measurements.js';
 
 export const createParticipantRequests = async ({
-    profiling,
+    cpuProfiling,
     log,
     inBrowser,
     measureWorkflow,
@@ -36,7 +36,7 @@ export const createParticipantRequests = async ({
     scalar,
     proofDraws,
 }: Readonly<{
-    profiling: boolean;
+    cpuProfiling: boolean;
     log: ActiveLocalRunLog;
     inBrowser: InParticipantBrowser;
     measureWorkflow: CohortState['measureWorkflow'];
@@ -51,9 +51,9 @@ export const createParticipantRequests = async ({
     proofDraws: ReturnType<typeof compileOperationProofDraws>;
 }>) => {
     let nextMeasuredOperation = 0;
-    // With profiling, each operation's summary of CPU samples, in
+    // With a CPU profile, each operation's summary of CPU samples, in
     // the order the operations ended.
-    const cpuProfileDirectory = profiling
+    const cpuProfileDirectory = cpuProfiling
         ? path.join(log.runDirectoryPath, 'cpu-profiles')
         : undefined;
     if (cpuProfileDirectory !== undefined) await mkdir(cpuProfileDirectory);

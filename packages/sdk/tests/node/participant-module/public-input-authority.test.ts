@@ -22,7 +22,7 @@ import {
     rosterBegin,
 } from '#packages/sdk/tests/node/participant-module/public-input-fixture.js';
 
-describe('participant module public input', () => {
+describe('participant module public input authority', () => {
     it('withholds offer and setup authority for partial carriers and proof bytes without a verified roster', async () => {
         const { module } = await instantiate();
         const signatureBytes = organizer.limits.registration.signatureBytes;

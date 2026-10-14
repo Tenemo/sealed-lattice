@@ -29,7 +29,7 @@ import {
     recordBegin,
 } from '#packages/sdk/tests/node/participant-module/public-input-fixture.js';
 
-describe('participant module public input', () => {
+describe('participant module registration input', () => {
     it('refuses every join and roster input with a changed byte, length or roster count', async () => {
         const { module } = await instantiate();
         const join = joinInput('First voter');

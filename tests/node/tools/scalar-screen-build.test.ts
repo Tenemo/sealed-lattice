@@ -1,7 +1,7 @@
 import binaryen from 'binaryen';
 import { describe, expect, it } from 'vitest';
 
-import { inspectScalarFixtureModule } from '#tools/ci/scalar-fixture-build.js';
+import { inspectScalarScreenModule } from '#tools/ci/scalar-screen-build.js';
 
 const screenExports = [
     'begin',
@@ -36,10 +36,10 @@ const moduleBytes = ({
 describe('scalar key source module admission', () => {
     it('admits a scalar, bounded, unshared screen module with only its known host imports', async () => {
         await expect(
-            inspectScalarFixtureModule(moduleBytes()),
+            inspectScalarScreenModule(moduleBytes()),
         ).resolves.toMatchObject({ imports: [] });
         await expect(
-            inspectScalarFixtureModule(
+            inspectScalarScreenModule(
                 moduleBytes({
                     extra: '(import "parallel" "helpers" (func (result i32))) (import "setup_witness" "fill_random" (func (param i32 i32) (result i32)))',
                 }),
@@ -64,11 +64,11 @@ describe('scalar key source module admission', () => {
             '(import "parallel" "helpers" (global i32))',
         ])
             await expect(
-                inspectScalarFixtureModule(moduleBytes({ extra })),
+                inspectScalarScreenModule(moduleBytes({ extra })),
             ).rejects.toThrow('unknown host import');
         for (const missing of screenExports)
             await expect(
-                inspectScalarFixtureModule(
+                inspectScalarScreenModule(
                     moduleBytes({
                         exports: screenExports.filter(
                             (name) => name !== missing,
@@ -77,7 +77,7 @@ describe('scalar key source module admission', () => {
                 ),
             ).rejects.toThrow('missing its bounded ABI');
         await expect(
-            inspectScalarFixtureModule(
+            inspectScalarScreenModule(
                 moduleBytes({ memory: '(memory (export "heap") 1 10240)' }),
             ),
         ).rejects.toThrow();
@@ -87,10 +87,10 @@ describe('scalar key source module admission', () => {
             '(memory (export "memory") 1 10240 shared)',
         ])
             await expect(
-                inspectScalarFixtureModule(moduleBytes({ memory })),
+                inspectScalarScreenModule(moduleBytes({ memory })),
             ).rejects.toThrow('bounded unshared');
         await expect(
-            inspectScalarFixtureModule(
+            inspectScalarScreenModule(
                 moduleBytes({
                     extra: '(func (drop (v128.const i32x4 0 0 0 0)))',
                 }),

@@ -185,7 +185,7 @@ describe('participant browser cohort selection', () => {
             'plain',
             '--scalar',
             '--sequential',
-            '--profile',
+            '--cpu-profile',
             '--top-count=3',
             '--base-port=44000',
         ];
@@ -198,7 +198,7 @@ describe('participant browser cohort selection', () => {
             topCount: 3,
             scalar: true,
             sequential: true,
-            profiling: true,
+            cpuProfiling: true,
             basePort: 44000,
             commandLineArguments: commandLineArguments.slice(1),
         });
@@ -250,7 +250,7 @@ describe('participant browser cohort selection', () => {
             ['--scalar', '--scalar'],
             ['--scalar=true'],
             ['--helpers=0'],
-            ['--profile', '--profile'],
+            ['--cpu-profile', '--cpu-profile'],
             ['--foreign-poll= '],
             ['--base-port=65530'],
             ['--base-port=1023'],

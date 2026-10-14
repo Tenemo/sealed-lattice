@@ -111,7 +111,7 @@ export const scheduleParticipantDepartures = (
 // The runner's options: each switch, and each option with its value, and
 // what it selects.
 const browserOptions = {
-    profile: {
+    'cpu-profile': {
         usage: "Record every operation's CPU samples and summarize them beside the run.",
     },
     'memory-pressure': {
@@ -322,7 +322,7 @@ export const selectParticipantBrowserOptions = (
         optionCount,
         mode,
         foreignPoll,
-        profiling: switches.has('--profile'),
+        cpuProfiling: switches.has('--cpu-profile'),
         scalar: switches.has('--scalar'),
         setupDeparture,
         unselectedCheckpoint,

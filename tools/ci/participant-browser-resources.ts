@@ -9,8 +9,8 @@ import {
     participantMemoryLimit,
 } from '#tools/ci/participant-cohort-state.js';
 import {
-    readProtocolProcesses,
-    sumProtocolProcessTree,
+    readProcesses,
+    sumProcessTree,
 } from '#tools/ci/process-tree-memory.js';
 export const startParticipantResourceSampling = ({
     profileDirectory,
@@ -177,10 +177,10 @@ export const startParticipantResourceSampling = ({
     // from one snapshot of the host's processes.
     cleanup.monitor = (async () => {
         while (cleanup.sampling) {
-            const processes = await readProtocolProcesses();
+            const processes = await readProcesses();
             for (const { key, browser, sampled } of browsers.launched()) {
                 const details = browserDetails.get(key);
-                const bytes = sumProtocolProcessTree(
+                const bytes = sumProcessTree(
                     browser.processIdentifier,
                     processes,
                 );

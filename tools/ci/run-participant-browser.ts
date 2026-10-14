@@ -36,7 +36,7 @@ import { acquireProtocolResearchLock } from '#tools/ci/protocol-research-lock.js
 // each roster with the organizer as its only corrupt member, and serves each
 // roster's records to a member of the other. A plain run carries one roster
 // of honest participants through each stage once, with no crash, forgery or
-// other roster. With --profile, Chrome records every operation's CPU samples,
+// other roster. With --cpu-profile, Chrome records every operation's CPU samples,
 // and their summary lies beside the run. With --base-port, the origins start
 // at another port, so runs of other checkouts may run beside this one. With
 // --memory-pressure, a plain run's second contributor first contributes in a

@@ -1,4 +1,4 @@
-import { compileCurrentSignatureHashInputs } from '#tests/authentication-work-model.js';
+import { compileSignatureHashInputs } from '#tests/authentication-work-model.js';
 import {
     prefixOracleWork,
     oracleMaskRoutingWork,
@@ -378,9 +378,7 @@ export const renderCompressedOracleCircuitWork = (): string[] => {
             [
                 [
                     'Maximum current credential hash input',
-                    formatCount(
-                        compileCurrentSignatureHashInputs().maximumInputBytes,
-                    ),
+                    formatCount(compileSignatureHashInputs().maximumInputBytes),
                 ],
                 [
                     'Syntactic minimum source input',

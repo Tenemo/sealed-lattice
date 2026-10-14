@@ -6,9 +6,9 @@
                 "tests/**/*.test.ts",
                 // Browser entry bundled by the guarded preparation runner.
                 "tools/ci/participant-preparation-storage.ts",
-                // Workers the bounded output screens start by path.
-                "tools/ci/bounded-output-browser-worker.mjs",
-                "tools/ci/bounded-output-worker.mjs",
+                // Workers the FHE key source screen starts by path.
+                "tools/ci/fhe-key-source-browser-worker.mjs",
+                "tools/ci/fhe-key-source-scalar-worker.mjs",
             ],
             "project": ["tests/**/*.{ts,mjs}", "tools/**/*.{ts,mjs}"],
         },

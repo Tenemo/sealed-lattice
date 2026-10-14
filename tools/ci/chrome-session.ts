@@ -5,8 +5,8 @@ import { StringDecoder } from 'node:string_decoder';
 
 import { killProcessTree } from '#tools/ci/command-runner.js';
 import {
-    describeProtocolProcessTree,
-    readProtocolProcesses,
+    describeProcessTree,
+    readProcesses,
 } from '#tools/ci/process-tree-memory.js';
 
 // Drives an installed release Chrome over its DevTools socket with Runtime
@@ -301,9 +301,9 @@ export const launchChromeParticipant = async (
             const slow = setTimeout(() => {
                 const identifier = child.pid;
                 if (identifier !== undefined)
-                    remaining = readProtocolProcesses().then(
+                    remaining = readProcesses().then(
                         (processes) =>
-                            describeProtocolProcessTree(identifier, processes),
+                            describeProcessTree(identifier, processes),
                         () => undefined,
                     );
             }, slowCloseMilliseconds);

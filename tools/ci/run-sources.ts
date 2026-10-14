@@ -19,7 +19,7 @@ export const fileDigest = async (file: string): Promise<string> => {
     return digest.digest('hex');
 };
 
-const snapshotFixtureFiles = async (
+const snapshotRunFiles = async (
     log: ActiveLocalRunLog,
     root: string,
     files: readonly string[],
@@ -95,10 +95,10 @@ export const snapshotResearchSources = async (
         }
     };
     await visit(path.join(root, 'crates/protocol-research'));
-    return snapshotFixtureFiles(log, root, files);
+    return snapshotRunFiles(log, root, files);
 };
 
-export const compiledFixtureFiles = async (
+export const compiledRunFiles = async (
     dependencyFile: string,
     available: readonly SourceEntry[],
 ) => {
@@ -119,7 +119,7 @@ export const compiledFixtureFiles = async (
     return [...files].sort();
 };
 
-export const checkFixtureSources = async (
+export const checkRunSources = async (
     root: string,
     sources: readonly SourceEntry[],
     files: readonly string[] = sources.map((source) => source.file),
@@ -138,7 +138,7 @@ export const checkFixtureSources = async (
         assert.equal(
             await fileDigest(path.join(root, file)),
             source.sha512,
-            'A fixture source changed: ' + file,
+            'A run source changed: ' + file,
         );
         checked.push(source);
     }

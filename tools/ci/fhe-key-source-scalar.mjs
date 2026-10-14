@@ -13,7 +13,7 @@ export const fheKeySourcePhases = {
 };
 
 /** @param {{moduleBytes:Uint8Array,expectedBytes:number,emitChunk:(index:number,offset:number,bytes:Uint8Array)=>Promise<import('./bounded-output.mjs').OutputAcknowledgment>,onProgress?:(progress:import('./bounded-output.mjs').OutputProgress)=>void}} input */
-export const runFheKeySourceScreen = async ({
+export const runScalarKeySourceScreen = async ({
     moduleBytes,
     expectedBytes,
     emitChunk,

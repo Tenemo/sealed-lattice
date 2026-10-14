@@ -7,7 +7,10 @@ import { build } from 'tsdown';
 import { compileOperationProofDraws } from '#tests/operation-seed-model.js';
 import { compileParticipantRuntimeProfile } from '#tests/participant-runtime-bounds-model.js';
 import { deriveSupportedProfile } from '#tests/supported-profile-model.js';
-import { snapshotRunSources } from '#tools/ci/fixture-sources.js';
+import {
+    type ChromeParticipant,
+    launchChromeParticipant,
+} from '#tools/ci/chrome-session.js';
 import { importClosure } from '#tools/ci/import-closure.js';
 import type { ActiveLocalRunLog } from '#tools/ci/local-run-log.js';
 import { createParticipantInterruptions } from '#tools/ci/participant-browser-interruptions.js';
@@ -33,11 +36,8 @@ import {
 import { paddingHaltingClient } from '#tools/ci/participant-padding-halt.js';
 import type { CheckpointCustodyObservation } from '#tools/ci/participant-preparation-storage.js';
 import { assembleParticipantRuntime } from '#tools/ci/participant-runtime-assembly.js';
-import {
-    type ChromeParticipant,
-    launchChromeParticipant,
-} from '#tools/ci/participant-runtime-chrome.js';
 import { redactDiagnosticText } from '#tools/ci/run-log-diagnostics.js';
+import { snapshotRunSources } from '#tools/ci/run-sources.js';
 
 // Sets up the run, opens its relay and monitors, creates the poll and
 // returns what every case uses.
@@ -51,7 +51,7 @@ export const openParticipantCohort = async (
         optionCount,
         mode,
         foreignPoll,
-        profiling,
+        cpuProfiling,
         scalar,
         setupDeparture,
         unselectedCheckpoint,
@@ -428,7 +428,7 @@ export const openParticipantCohort = async (
     };
     const { request, recoveryOperations, run, expectStatus } =
         await createParticipantRequests({
-            profiling,
+            cpuProfiling,
             log,
             inBrowser,
             measureWorkflow,

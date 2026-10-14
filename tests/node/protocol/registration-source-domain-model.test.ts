@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 
-import { compileCurrentSignatureHashInputs } from '#tests/authentication-work-model.js';
+import { compileSignatureHashInputs } from '#tests/authentication-work-model.js';
 import {
     compileOracleMaskRouting,
     runOracleSliceRouting,
@@ -48,7 +48,7 @@ const frame = (
     ]);
 
 it('separates the credential hash inputs from the source language by exact lengths', () => {
-    const signature = compileCurrentSignatureHashInputs();
+    const signature = compileSignatureHashInputs();
     // FIPS 204 ML-DSA-65: rho, followed by k encodings of 256 ten-bit t1
     // coefficients. This is larger than the other current signature inputs.
     const publicKeyBytes = 32n + (6n * 256n * 10n) / 8n;

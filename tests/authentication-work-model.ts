@@ -41,7 +41,7 @@ export const authenticationContext = (purpose: CompleteAuthenticationPurpose) =>
 // invariant. Each purpose has one fixed first-evaluated intent; repeated
 // deterministic reevaluation is still work, but not another oracle query.
 // Closing/release purposes and the population of credential creations are absent.
-export const compileCurrentCredentialIntentBounds = () => {
+export const compileCredentialIntentBoundsThroughBallot = () => {
     const owners: Record<AuthenticationPurpose, 'organizer' | 'everyone'> = {
         'poll-definition': 'organizer',
         registration: 'everyone',
@@ -130,7 +130,7 @@ export const compileCompleteCredentialIntentBounds = (
         },
     ] as const;
     return branches.flatMap((branch) =>
-        compileCurrentCredentialIntentBounds().map((participant) => {
+        compileCredentialIntentBoundsThroughBallot().map((participant) => {
             const fixedPurposes: CompleteAuthenticationPurpose[] = [
                 ...participant.purposes.filter(
                     (purpose) => purpose !== 'ballot-envelope',
@@ -159,7 +159,7 @@ export const compileCompleteCredentialIntentBounds = (
 
 // Participant-credential hash input shapes for pure ML-DSA-65. A null
 // output length denotes a source-level rejection sampler, not zero work.
-export const compileCurrentSignatureHashInputs = () => {
+export const compileSignatureHashInputs = () => {
     const parameters = mlDsa65Parameters;
     const highBitAlphabet =
         (parameters.modulus - 1n) / (2n * parameters.roundingBound);
@@ -237,7 +237,7 @@ export const compileCurrentSignatureHashInputs = () => {
 
 // An ideal-XOF property of every possible sampler seed, established before
 // adaptive input selection. These analytical caps do not alter the library.
-export const compileCurrentSignatureSamplingBounds = () => {
+export const compileSignatureSamplingBounds = () => {
     const parameters = mlDsa65Parameters;
     return [
         {
@@ -324,13 +324,10 @@ export const compileBallotSignatureHashWork = (
     )
         throw new RangeError('Invalid checked signing-loop prefix.');
     const inputs = new Map(
-            compileCurrentSignatureHashInputs().rows.map((row) => [
-                row.purpose,
-                row,
-            ]),
+            compileSignatureHashInputs().rows.map((row) => [row.purpose, row]),
         ),
         caps = new Map(
-            compileCurrentSignatureSamplingBounds().map((row) => [
+            compileSignatureSamplingBounds().map((row) => [
                 row.purpose,
                 row.outputBytes,
             ]),

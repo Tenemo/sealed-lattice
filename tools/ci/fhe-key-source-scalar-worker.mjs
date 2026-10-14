@@ -9,11 +9,11 @@ import {
 } from 'node:worker_threads';
 
 import { createBoundedOutputSink } from './bounded-output-sink.mjs';
-import { runFheKeySourceScreen } from './fhe-key-source-scalar.mjs';
+import { runScalarKeySourceScreen } from './fhe-key-source-scalar.mjs';
 import { withProcessGates } from './process-gates.mjs';
 
 /** @typedef {{module:string,moduleSha512:string,outputFile:string,expectedBytes:number,expectedSha512:string,operation:'fhe-key-source'}} Configuration */
-/** @typedef {Awaited<ReturnType<typeof runFheKeySourceScreen>>} GenerationResult */
+/** @typedef {Awaited<ReturnType<typeof runScalarKeySourceScreen>>} GenerationResult */
 /** @typedef {import('./bounded-output.mjs').OutputAcknowledgment} OutputAcknowledgment */
 
 if (isMainThread) {
@@ -179,7 +179,7 @@ if (isMainThread) {
     };
     port.on('message', acknowledgment);
     try {
-        const result = await runFheKeySourceScreen({
+        const result = await runScalarKeySourceScreen({
             moduleBytes,
             expectedBytes: configuration.expectedBytes,
             onProgress: (progress) =>

@@ -21,7 +21,7 @@ import {
     rosterBegin,
 } from '#packages/sdk/tests/node/participant-module/public-input-fixture.js';
 
-describe('participant module public input', () => {
+describe('participant module public input fuzzing', () => {
     it('refuses arbitrary arguments and bytes at every command that reads public input, and the instance stays usable', async () => {
         const { module } = await instantiate();
         // Open roster verifications give the record commands a verifier to

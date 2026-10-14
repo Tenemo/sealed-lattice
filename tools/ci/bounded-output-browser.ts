@@ -6,16 +6,16 @@ import path from 'node:path';
 
 import { createBrowserOutputSink } from '#tools/ci/bounded-output-browser-sink.js';
 import { browserChunkBytes } from '#tools/ci/bounded-output-browser-transport.mjs';
-import { fileDigest } from '#tools/ci/fixture-sources.js';
+import { launchChromeParticipant } from '#tools/ci/chrome-session.js';
+import type { ChromeParticipant } from '#tools/ci/chrome-session.js';
 import { harnessPage, harnessPageType } from '#tools/ci/harness-page.js';
 import type { ActiveLocalRunLog } from '#tools/ci/local-run-log.js';
-import { launchChromeParticipant } from '#tools/ci/participant-runtime-chrome.js';
-import type { ChromeParticipant } from '#tools/ci/participant-runtime-chrome.js';
 import { guardProcessTreeMemory } from '#tools/ci/process-tree-memory.js';
+import { fileDigest } from '#tools/ci/run-sources.js';
 
 // The worker the screen page starts, whose imports the page serves.
 export const boundedBrowserWorker =
-    'tools/ci/bounded-output-browser-worker.mjs';
+    'tools/ci/fhe-key-source-browser-worker.mjs';
 
 type OutputTarget = {
     file: string;
@@ -27,7 +27,7 @@ const page = harnessPage(
     'Bounded output screen',
     `
 window.runBoundedScreen = (configuration) => new Promise((resolve, reject) => {
-    const worker = new Worker('/bounded-output-browser-worker.mjs', {type: 'module'});
+    const worker = new Worker('/fhe-key-source-browser-worker.mjs', {type: 'module'});
     let finished = false;
     const finish = (error, result) => {
         if (finished) return;
@@ -63,7 +63,7 @@ export const serveBoundedBrowserInputs = async (
         ],
     ]);
     for (const name of [
-        'bounded-output-browser-worker.mjs',
+        'fhe-key-source-browser-worker.mjs',
         'bounded-output-browser-transport.mjs',
         'scalar-module.mjs',
         'fhe-key-source-scalar.mjs',

@@ -4,11 +4,11 @@ import { freemem } from 'node:os';
 import path from 'node:path';
 
 import { runCommandsInSeries } from '#tools/ci/command-runner.js';
+import { createGatedOperationGuard } from '#tools/ci/gated-operation-guard.js';
 import type { ActiveLocalRunLog } from '#tools/ci/local-run-log.js';
-import { createNativeOperationGuard } from '#tools/ci/native-operation-guard.js';
-import { readProtocolProcessTree } from '#tools/ci/process-tree-memory.js';
+import { readProcessTree } from '#tools/ci/process-tree-memory.js';
 
-export const runGuardedFixture = async ({
+export const runGuardedScreen = async ({
     root,
     log,
     environment,
@@ -31,7 +31,7 @@ export const runGuardedFixture = async ({
 }>) => {
     assert.ok(freemem() >= 2 * processMemoryLimit);
     const gateDirectory = await mkdtemp(
-        path.join(root, 'temp/native-fixture-guard-'),
+        path.join(root, 'temp/guarded-screen-gate-'),
     );
     const gateFiles = {
         startFile: path.join(gateDirectory, 'start'),
@@ -42,11 +42,12 @@ export const runGuardedFixture = async ({
         samples = 0,
         output = '';
     let monitor: Promise<void> | undefined;
-    let nativeGuard: ReturnType<typeof createNativeOperationGuard> | undefined;
+    let operationGuard:
+        ReturnType<typeof createGatedOperationGuard> | undefined;
     let guardResult:
         | Awaited<
               ReturnType<
-                  ReturnType<typeof createNativeOperationGuard>['monitor']
+                  ReturnType<typeof createGatedOperationGuard>['monitor']
               >
           >
         | undefined;
@@ -94,29 +95,28 @@ export const runGuardedFixture = async ({
                     if (streamName === 'stdout') {
                         output += chunk;
                         try {
-                            nativeGuard?.observeStdout(chunk);
+                            operationGuard?.observeStdout(chunk);
                         } catch (error) {
                             controller.abort(error);
                         }
                         if (output.length > 1_048_576)
                             controller.abort(
                                 new Error(
-                                    'Fixture diagnostics exceed their bound.',
+                                    'Screen diagnostics exceed their bound.',
                                 ),
                             );
                     }
                 },
                 onCommandStart({ processIdentifier }) {
                     assert.ok(processIdentifier);
-                    nativeGuard = createNativeOperationGuard({
+                    operationGuard = createGatedOperationGuard({
                         allowedProgressLines: nativeProgressLines,
                         ...gateFiles,
                         memoryLimit: processMemoryLimit,
-                        readMemory: () =>
-                            readProtocolProcessTree(processIdentifier),
+                        readMemory: () => readProcessTree(processIdentifier),
                         recordSample,
                     });
-                    monitor = nativeGuard
+                    monitor = operationGuard
                         .monitor()
                         .then((result) => {
                             guardResult = result;
@@ -124,7 +124,7 @@ export const runGuardedFixture = async ({
                         .catch((error: unknown) => controller.abort(error));
                 },
                 onCommandExit() {
-                    nativeGuard?.stop();
+                    operationGuard?.stop();
                 },
             },
         },
@@ -154,7 +154,7 @@ export const runGuardedFixture = async ({
     assert.equal(
         reports.length,
         1,
-        'The fixture emitted an ambiguous final report.',
+        'The screen emitted an ambiguous final report.',
     );
     return {
         result: reports[0],

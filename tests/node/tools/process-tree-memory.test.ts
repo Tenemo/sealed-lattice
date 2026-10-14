@@ -3,9 +3,9 @@ import { spawn } from 'node:child_process';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
-    describeProtocolProcessTree,
+    describeProcessTree,
     guardProcessTreeMemory,
-    sumProtocolProcessTree,
+    sumProcessTree,
 } from '#tools/ci/process-tree-memory.js';
 
 const children: ReturnType<typeof spawn>[] = [];
@@ -34,18 +34,18 @@ describe('process-tree memory', () => {
             { identifier: 3, parent: 2, bytes: 30 },
             { identifier: 2, parent: 1, bytes: 20 },
         ];
-        expect(sumProtocolProcessTree(2, rows)).toBe(90);
-        expect(sumProtocolProcessTree(2, [...rows].reverse())).toBe(90);
-        expect(sumProtocolProcessTree(5, rows)).toBeUndefined();
-        expect(describeProtocolProcessTree(2, rows)).toEqual({
+        expect(sumProcessTree(2, rows)).toBe(90);
+        expect(sumProcessTree(2, [...rows].reverse())).toBe(90);
+        expect(sumProcessTree(5, rows)).toBeUndefined();
+        expect(describeProcessTree(2, rows)).toEqual({
             processes: 3,
             bytes: 90,
         });
-        expect(describeProtocolProcessTree(4, rows)).toEqual({
+        expect(describeProcessTree(4, rows)).toEqual({
             processes: 1,
             bytes: 40,
         });
-        expect(describeProtocolProcessTree(5, rows)).toBeUndefined();
+        expect(describeProcessTree(5, rows)).toBeUndefined();
     });
 
     it('charges no process that started before the process of its recorded parent identifier, nor its descendants', () => {
@@ -57,14 +57,14 @@ describe('process-tree memory', () => {
             { identifier: 7, parent: 2, bytes: 7000, started: 100 },
             { identifier: 9, parent: 7, bytes: 900, started: 499 },
         ];
-        expect(sumProtocolProcessTree(2, rows)).toBe(90);
-        expect(sumProtocolProcessTree(2, [...rows].reverse())).toBe(90);
-        expect(sumProtocolProcessTree(7, rows)).toBe(7900);
-        expect(describeProtocolProcessTree(2, rows)).toEqual({
+        expect(sumProcessTree(2, rows)).toBe(90);
+        expect(sumProcessTree(2, [...rows].reverse())).toBe(90);
+        expect(sumProcessTree(7, rows)).toBe(7900);
+        expect(describeProcessTree(2, rows)).toEqual({
             processes: 3,
             bytes: 90,
         });
-        expect(describeProtocolProcessTree(7, rows)).toEqual({
+        expect(describeProcessTree(7, rows)).toEqual({
             processes: 2,
             bytes: 7900,
         });

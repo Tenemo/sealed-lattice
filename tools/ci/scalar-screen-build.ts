@@ -11,13 +11,13 @@ import { runCheckedCommand } from '#tools/ci/command-runner.js';
 import type { ActiveLocalRunLog } from '#tools/ci/local-run-log.js';
 import { rustCompilerCommit, rustToolchain } from '#tools/ci/rust-toolchain.js';
 
-type FixtureBuildContext = Readonly<{
+type ScreenBuildContext = Readonly<{
     root: string;
     log: ActiveLocalRunLog;
     environment: NodeJS.ProcessEnv;
 }>;
-export const executeFixtureCommand = (
-    context: FixtureBuildContext,
+export const executeScreenCommand = (
+    context: ScreenBuildContext,
     command: string,
     args: string[],
     name: string,
@@ -40,8 +40,8 @@ export const executeFixtureCommand = (
             signal: AbortSignal.timeout(600_000),
         },
     );
-export const readFixtureCompiler = async (context: FixtureBuildContext) => {
-    const compiler = await executeFixtureCommand(
+export const readScreenCompiler = async (context: ScreenBuildContext) => {
+    const compiler = await executeScreenCommand(
         context,
         'rustc',
         [rustToolchain, '-Vv'],
@@ -50,7 +50,7 @@ export const readFixtureCompiler = async (context: FixtureBuildContext) => {
     assert.ok(compiler.includes('commit-hash: ' + rustCompilerCommit));
     return compiler;
 };
-export const scalarFixtureBuildFlags = (repository: string, cargo: string) => [
+export const scalarScreenBuildFlags = (repository: string, cargo: string) => [
     '--remap-path-prefix',
     repository + '=/workspace',
     '--remap-path-prefix',
@@ -60,7 +60,7 @@ export const scalarFixtureBuildFlags = (repository: string, cargo: string) => [
     '-C',
     'link-arg=--max-memory=' + String(participantLinearMemoryBytes),
 ];
-export const fixtureProcessMemoryLimit = 1_073_741_824;
+export const screenProcessMemoryLimit = 1_073_741_824;
 const allowedImports = new Set([
     'helpers',
     'share',
@@ -75,7 +75,7 @@ const allowedImports = new Set([
 
 // The key source screen module may import only the scalar helper queries and
 // its setup entropy, and must export its bounded screen ABI.
-export const inspectScalarFixtureModule = async (bytes: Uint8Array) => {
+export const inspectScalarScreenModule = async (bytes: Uint8Array) => {
     const inspected = binaryen.readBinary(bytes);
     try {
         assert.doesNotMatch(
@@ -133,9 +133,7 @@ export const inspectScalarFixtureModule = async (bytes: Uint8Array) => {
     return { imports, exports };
 };
 
-export const buildScalarFixtureModule = async (
-    context: FixtureBuildContext,
-) => {
+export const buildScalarScreenModule = async (context: ScreenBuildContext) => {
     const targetDirectory = path.join(
         context.root,
         'target/fhe-key-source-scalar',
@@ -143,13 +141,13 @@ export const buildScalarFixtureModule = async (
     const cargoHome = path.resolve(
         process.env.CARGO_HOME ?? path.join(homedir(), '.cargo'),
     );
-    await executeFixtureCommand(
+    await executeScreenCommand(
         {
             ...context,
             environment: {
                 ...context.environment,
                 CARGO_TARGET_DIR: targetDirectory,
-                CARGO_ENCODED_RUSTFLAGS: scalarFixtureBuildFlags(
+                CARGO_ENCODED_RUSTFLAGS: scalarScreenBuildFlags(
                     context.root,
                     cargoHome,
                 ).join('\x1f'),
@@ -181,7 +179,7 @@ export const buildScalarFixtureModule = async (
             'wasm32-unknown-unknown/release/setup_witness.wasm',
         ),
     );
-    const inspected = await inspectScalarFixtureModule(moduleBytes);
+    const inspected = await inspectScalarScreenModule(moduleBytes);
     const moduleFile = path.join(
         context.log.artifactDirectoryPath,
         'fhe-key-source.wasm',

@@ -3,11 +3,11 @@ import { availableParallelism, freemem } from 'node:os';
 import path from 'node:path';
 
 import type { ParticipantRequest } from '#packages/sdk/src/participant/participant-contract.js';
+import { type ChromeParticipant } from '#tools/ci/chrome-session.js';
 import type { ActiveLocalRunLog } from '#tools/ci/local-run-log.js';
 import { selectParticipantBrowserOptions } from '#tools/ci/participant-browser-options.js';
 import { createBrowserPool } from '#tools/ci/participant-browser-pool.js';
 import { type Relay } from '#tools/ci/participant-browser-relay.js';
-import { type ChromeParticipant } from '#tools/ci/participant-runtime-chrome.js';
 import { emptyParticipantTransfer } from '#tools/ci/participant-transfer.js';
 import type {
     ParticipantBootstrapMeasurement,

@@ -50,7 +50,7 @@ describe('participant source identity', () => {
             'crates/protocol-research/protocol-foundations/Cargo.toml',
             'crates/protocol-research/Cargo.toml',
             'crates/protocol-research/Cargo.lock',
-            'tools/ci/sdk-package-tsdown.config.ts',
+            'tools/ci/sdk-package-options.ts',
         ]) {
             const source = await readFile(file);
             expect(

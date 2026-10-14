@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import {
     compileCompleteAuthenticationFrameWork,
     compileCompleteCredentialIntentBounds,
-    compileCurrentSignatureHashInputs,
-    compileCurrentSignatureSamplingBounds,
+    compileSignatureHashInputs,
+    compileSignatureSamplingBounds,
 } from '#tests/authentication-work-model.js';
 import { auxiliaryInputEncryptionParameters } from '#tests/auxiliary-input-encryption-parameters.js';
 import { compileCommonAgreementDegreeCensus } from '#tests/common-agreement-degree-model.js';
@@ -139,7 +139,7 @@ export const compileAuthenticationGroup = () => {
             0n,
         );
     const comparisonGates = signedFramesPerKey * (2n * frameDigestBits + 1n);
-    const challengeDigest = compileCurrentSignatureHashInputs().rows.find(
+    const challengeDigest = compileSignatureHashInputs().rows.find(
         (row) => row.purpose === 'Challenge digest',
     );
     assert.ok(
@@ -475,15 +475,13 @@ export const compileStatisticalTerms = (
                 ),
             ),
         },
-        ...compileCurrentSignatureSamplingBounds().map(
-            (row): StatisticalTerm => ({
-                name: `ML-DSA ${row.purpose.toLowerCase()} over every seed`,
-                scope: 'outside the proofs',
-                ratioAt: perCharge(
-                    rational(row.numerator, 1n << row.denominatorBits),
-                ),
-            }),
-        ),
+        ...compileSignatureSamplingBounds().map((row): StatisticalTerm => ({
+            name: `ML-DSA ${row.purpose.toLowerCase()} over every seed`,
+            scope: 'outside the proofs',
+            ratioAt: perCharge(
+                rational(row.numerator, 1n << row.denominatorBits),
+            ),
+        })),
         {
             // The FHE and circular comparisons are linear in the
             // registrations, each of which costs at least c.
