@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 
 import { describe, expect, it } from 'vitest';
 
+import { negacyclicProduct } from '#tests/node/protocol/reference/negacyclic-ring.js';
 import {
     readRustSource,
     rustIntegerConstant,
@@ -28,39 +29,26 @@ const logicalWords = (value: bigint, digitBits: number) => {
     return words;
 };
 
-// Direct toy negacyclic multiplication, independent of the production limb
-// transforms. This checks a marginal distribution, not an encryption scheme.
+// A toy key coordinate, error - common * secret, reduced to [0, modulus).
+// This checks a marginal distribution, not an encryption scheme.
 const coordinate = (
-    common: number[],
-    secret: number[],
-    error: number[],
+    common: readonly number[],
+    secret: readonly number[],
+    error: readonly number[],
     modulus: number,
-) => {
-    const output = [...error];
-    for (let left = 0; left < common.length; left++)
-        for (let right = 0; right < secret.length; right++) {
-            const index = left + right;
-            output[index % output.length] -=
-                common[left] * secret[right] * (index < output.length ? 1 : -1);
-        }
-    return output.map((value) => ((value % modulus) + modulus) % modulus);
-};
+) =>
+    negacyclicProduct(
+        common.map((value) => BigInt(value)),
+        secret.map((value) => BigInt(value)),
+    ).map((value, index) => {
+        const residue = (BigInt(error[index]) - value) % BigInt(modulus);
+        return Number(residue < 0n ? residue + BigInt(modulus) : residue);
+    });
 
 const absolute = (value: bigint) => (value < 0n ? -value : value);
 const digit = (value: bigint, limb: number, radix: bigint) =>
     (value < 0n ? -1n : 1n) *
     ((absolute(value) / radix ** BigInt(limb)) % radix);
-const negacyclicProduct = (
-    left: readonly bigint[],
-    right: readonly bigint[],
-) => {
-    const output = Array<bigint>(left.length).fill(0n);
-    for (let i = 0; i < left.length; i++)
-        for (let j = 0; j < right.length; j++)
-            output[(i + j) % left.length] +=
-                left[i] * right[j] * (i + j < left.length ? 1n : -1n);
-    return output;
-};
 
 describe('source coefficient allocation comparison', () => {
     it('bounds direct integer source equations and every signed carry in finite rings', () => {
@@ -104,7 +92,7 @@ describe('source coefficient allocation comparison', () => {
                     (_, limb) =>
                         negacyclicProduct(
                             common.map((value) => digit(value, limb, radix)),
-                            [...secret],
+                            secret,
                         ),
                 );
                 for (let position = 0; position < secret.length; position++) {
@@ -398,7 +386,7 @@ describe('source coefficient allocation comparison', () => {
                     digits = Math.floor(digits / modulus);
                     return value;
                 });
-                const result = coordinate(common, [...secret], error, modulus);
+                const result = coordinate(common, secret, error, modulus);
                 if (result.some((value) => value === 0)) anyShrinks++;
                 result.forEach((value, index) => marginals[index][value]++);
             }
