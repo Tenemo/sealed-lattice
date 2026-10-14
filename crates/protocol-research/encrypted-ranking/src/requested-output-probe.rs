@@ -76,8 +76,7 @@ fn program(profile: Profile, top_count: usize) -> Vec<u8> {
         sum = instructions.len() as u32 - 1;
     }
     instructions.push([5, sum, u32::MAX, 2 + family as u32]);
-    let mut bytes = b"BRK1".to_vec();
-    bytes.extend((DEGREE as u32).to_le_bytes());
+    let mut bytes = (DEGREE as u32).to_le_bytes().to_vec();
     bytes.extend((instructions.len() as u32).to_le_bytes());
     bytes.extend(((instructions.len() - 1) as u32).to_le_bytes());
     for instruction in instructions {

@@ -11,7 +11,6 @@ pub mod plaintext;
 pub mod relation;
 
 const TABLE: &[u8] = include_bytes!("../profiles.bin");
-const MAGIC: &[u8; 4] = b"SPT1";
 const RECORD_BYTES: usize = 30;
 const STATEMENT_MAGIC: &[u8; 4] = b"SCO2";
 
@@ -84,8 +83,7 @@ struct Table {
 // The correspondence test owns the table bytes, so a malformed table is a
 // build defect rather than an input to refuse.
 fn table() -> Table {
-    assert_eq!(&TABLE[..4], MAGIC);
-    let share_end = 5 + usize::from(TABLE[4]);
+    let share_end = 1 + usize::from(TABLE[0]);
     let auxiliary_end = share_end + 1 + usize::from(TABLE[share_end]);
     let fixed_sample_bits = usize::from(u16::from_le_bytes([
         TABLE[auxiliary_end],
@@ -100,7 +98,7 @@ fn table() -> Table {
         participants.clone().count() * options.clone().count() * RECORD_BYTES
     );
     Table {
-        share: &TABLE[5..share_end],
+        share: &TABLE[1..share_end],
         auxiliary: &TABLE[share_end + 1..auxiliary_end],
         fixed_sample_bits,
         participants,

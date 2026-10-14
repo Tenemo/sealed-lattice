@@ -18,7 +18,9 @@ const variable = (bytes: Buffer) =>
     Buffer.concat([unsigned(bytes.length), bytes]);
 
 // Reuses the independent algebraic ranking emitter, then applies the public
-// BRK1 postorder encoding. There are no ciphertexts, keys or proof operations.
+// postorder encoding: the ring degree, the instruction count, the result's
+// index and each instruction. There are no ciphertexts, keys or proof
+// operations.
 export const compileRankingProgramModel = (
     profile: SupportedProfile,
     topCount = profile.optionCount,
@@ -87,7 +89,6 @@ export const compileRankingProgramModel = (
         inputs: original[index].inputs.map((input) => renamed.get(input)!),
     }));
     const bytes = Buffer.concat([
-        Buffer.from('BRK1'),
         unsigned(Number(fixedModulusBfvInputs.polynomialDegree)),
         unsigned(instructions.length),
         unsigned(instructions.length - 1),

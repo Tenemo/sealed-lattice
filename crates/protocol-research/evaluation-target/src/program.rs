@@ -112,8 +112,7 @@ impl Builder {
         for (index, original) in ordered.iter().enumerate() {
             renamed[*original] = index;
         }
-        let mut bytes = Vec::from(b"BRK1".as_slice());
-        bytes.extend((DEGREE as u32).to_le_bytes());
+        let mut bytes = (DEGREE as u32).to_le_bytes().to_vec();
         bytes.extend((ordered.len() as u32).to_le_bytes());
         bytes.extend((renamed[result] as u32).to_le_bytes());
         for original in ordered {

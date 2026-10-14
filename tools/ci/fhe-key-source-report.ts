@@ -346,7 +346,6 @@ export const parseFheKeySourceReport = (bytes: Uint8Array) => {
         return value;
     };
     const integer = () => take(4).readUInt32LE();
-    assert.ok(take(4).equals(Buffer.from('FKS1', 'ascii')));
     const dimensions = Array.from({ length: 6 }, integer);
     assert.deepEqual(dimensions, [
         model.participantCount,

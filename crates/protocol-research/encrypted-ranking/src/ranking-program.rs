@@ -23,13 +23,13 @@ fn word(bytes: &[u8]) -> u32 {
     u32::from_le_bytes(bytes.try_into().unwrap())
 }
 pub(super) fn decode_program(profile: Profile, program: &[u8]) -> Result<Program, Refusal> {
-    if program.len() < 16 || &program[..4] != b"BRK1" || word(&program[4..8]) != DEGREE as u32 {
+    if program.len() < 12 || word(&program[..4]) != DEGREE as u32 {
         return Err(Refusal::Program);
     }
-    let count = word(&program[8..12]) as usize;
+    let count = word(&program[4..8]) as usize;
     if !(1..=MAXIMUM_INSTRUCTIONS).contains(&count)
-        || program.len() != 16 + 16 * count
-        || word(&program[12..16]) as usize != count - 1
+        || program.len() != 12 + 16 * count
+        || word(&program[8..12]) as usize != count - 1
     {
         return Err(Refusal::Program);
     }
@@ -40,7 +40,7 @@ pub(super) fn decode_program(profile: Profile, program: &[u8]) -> Result<Program
     let mut input_positions = BTreeSet::new();
     let mut remaining_uses = vec![0; count];
     let mut top_count = None;
-    for (index, bytes) in program[16..].chunks_exact(16).enumerate() {
+    for (index, bytes) in program[12..].chunks_exact(16).enumerate() {
         let operation = word(&bytes[..4]);
         let arity = match operation {
             0 => 0,

@@ -768,7 +768,7 @@ export const renderSetupSelectionAndRegistrationBindingScreen =
                         'Independent coordinate samples',
                         screen.samplePositions.length,
                     ],
-                    ['Canonical FKS1 report bytes', screen.reportBytes],
+                    ['Canonical report bytes', screen.reportBytes],
                     ['Output capacity bytes', screen.outputCapacity],
                     [
                         'Original private source payload bytes',

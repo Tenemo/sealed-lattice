@@ -38,7 +38,6 @@ const putMagnitude = (
 const reportFixture = () => {
     const model = compileFheKeySourceScreenResources();
     const bytes = Buffer.alloc(Number(model.reportBytes));
-    bytes.write('FKS1');
     const dimensions = [
         model.participantCount,
         model.optionCount,
@@ -47,12 +46,10 @@ const reportFixture = () => {
         model.commonSampleBits,
         model.samplePositions.length,
     ];
-    dimensions.forEach((value, index) =>
-        bytes.writeUInt32LE(value, 4 + 4 * index),
-    );
-    bytes.fill(17, 28, 156);
+    dimensions.forEach((value, index) => bytes.writeUInt32LE(value, 4 * index));
+    bytes.fill(17, 24, 152);
     const width = Number(model.coefficientBytes - 1n);
-    let offset = 156;
+    let offset = 152;
     const offsets: number[] = [];
     const samples = model.samplePositions.map((position, index) => {
         offsets.push(offset);
@@ -204,13 +201,10 @@ describe('FHE key source report and source intake', () => {
         const { bytes, offsets, width, model } = reportFixture();
         const changes: ((copy: Buffer) => void)[] = [
             (copy) => {
-                copy[0] ^= 1;
-            },
-            (copy) => {
-                copy[92] ^= 1;
+                copy[88] ^= 1;
             },
             ...Array.from({ length: 6 }, (_, index) => (copy: Buffer) => {
-                copy[4 + 4 * index] ^= 1;
+                copy[4 * index] ^= 1;
             }),
             (copy) => {
                 copy[offsets[0]] ^= 1;

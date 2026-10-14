@@ -271,7 +271,6 @@ impl Screen {
             .as_ref()
             .ok_or_else(|| io::Error::other("Missing restored coordinate"))?;
         let width = self.profile.family_magnitude_bytes(Family::Fhe);
-        self.report.extend_from_slice(b"FKS1");
         for value in [
             self.profile.participants(),
             self.profile.options(),

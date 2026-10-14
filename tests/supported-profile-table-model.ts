@@ -13,7 +13,6 @@ import { shareEncryptionParameters } from '#tests/wide-share-lifting-model.js';
 
 // The research crates read the searched parameters of every supported
 // profile from this table and derive every other size by closed-form rules.
-const supportedProfileTableMagic = 'SPT1';
 export const supportedProfileRecordBytes = 30;
 
 const unsigned = (value: bigint | number, bytes: number): Buffer => {
@@ -87,7 +86,6 @@ export const encodeSupportedProfileTable = (): Buffer => {
     if (profiles.length !== participantCounts.length * optionCounts.length)
         throw new Error('The supported profiles are not contiguous.');
     return Buffer.concat([
-        Buffer.from(supportedProfileTableMagic),
         magnitudeBytes(shareEncryptionParameters.modulus),
         magnitudeBytes(auxiliaryInputEncryptionParameters.modulus),
         unsigned(fixedFamilyBitsPerCoefficient, 2),
