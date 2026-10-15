@@ -29,12 +29,12 @@ use setup_aggregate::{CHUNK_BYTES, contribution_family, verified::SetupAggregato
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs::{self, File, OpenOptions},
-    io::{self, BufWriter, Read, Write},
+    io::{self, BufWriter, Read, Seek, SeekFrom, Write},
     path::{Component, Path, PathBuf},
     sync::Arc,
     time::Instant,
 };
-use supported_profile::{Profile, relation::PROOF_HEADER_BYTES};
+use supported_profile::{Profile, source_linked::relation as setup_relation};
 
 mod completion;
 
@@ -337,6 +337,19 @@ fn main() -> io::Result<()> {
                 .map_err(refusal)?;
         }
         roster.finish_key(position).map_err(refusal)?;
+        // The registration's source ciphertexts, which the registration
+        // verifier requires after the key.
+        let mut sources = File::open(directory.join("source-ciphertexts.bin"))?;
+        loop {
+            let count = sources.read(&mut buffer)?;
+            work.read_bytes += count as u64;
+            if count == 0 {
+                break;
+            }
+            roster
+                .push_sources(position, &buffer[..count])
+                .map_err(refusal)?;
+        }
         roster.finish_record(position).map_err(refusal)?;
     }
     let proposal = roster.finish().map_err(refusal)?;
@@ -389,10 +402,29 @@ fn main() -> io::Result<()> {
             &mut work,
         )?;
         let mut proof = File::open(directory.join("proof.bin"))?;
-        let mut proof_header = [0; PROOF_HEADER_BYTES];
+        let mut proof_header = vec![0; setup_relation(profile).proof_header_bytes()];
         work.read(&mut proof, &mut proof_header)?;
         let mut verifier = ContributionOfferVerifier::new(authenticated, &header, &proof_header)
             .map_err(refusal)?;
+        // The author's registered source ciphertexts of the roster's FHE
+        // key family precede the body's polynomials, as the offer verifier
+        // requires.
+        let range = roster.proposal().source_ciphertext_range();
+        let mut source = File::open(
+            ceremony
+                .join(format!("participant-{position}"))
+                .join("source-ciphertexts.bin"),
+        )?;
+        source.seek(SeekFrom::Start(range.start as u64))?;
+        let mut source = source.take(range.len() as u64);
+        loop {
+            let count = source.read(&mut buffer)?;
+            work.read_bytes += count as u64;
+            if count == 0 {
+                break;
+            }
+            verifier.source(&buffer[..count]).map_err(refusal)?;
+        }
         for index in &indices {
             let (length, capacity) = polynomial_bytes(profile, *index)?;
             let mut incoming = File::open(directory.join(polynomial_name(*index)))?;

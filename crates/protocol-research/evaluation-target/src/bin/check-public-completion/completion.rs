@@ -9,7 +9,7 @@ use evaluation_target::{
 use protocol_foundations::{
     SIGNATURE_BYTES,
     release_signing::{RELEASE_BODY_HEADER_BYTES, RELEASE_ENVELOPE_BYTES},
-    target_signing::MAXIMUM_TARGET_BODY_BYTES,
+    target_signing::{MAXIMUM_TARGET_BODY_BYTES, TARGET_VOTE_BYTES},
 };
 use setup_aggregate::{CHUNK_BYTES, VerifiedAggregatePolynomial};
 use std::{fs::File, io, path::Path, sync::Arc};
@@ -72,7 +72,7 @@ pub fn verify(
         }
         let packet = match bounded(
             directory.join(format!("target-vote-{position}.bin")),
-            3375,
+            TARGET_VOTE_BYTES,
             work,
         ) {
             Ok(packet) => packet,
