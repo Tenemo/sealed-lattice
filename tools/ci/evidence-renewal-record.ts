@@ -211,9 +211,9 @@ const utcDates = (from: Date, to: Date): string[] => {
     return dates;
 };
 
-// The runs, oldest first, that started at or after `since` under the
-// repository's logs and whose metadata names the parent run directory. A run
-// whose metadata another process has not yet written names no parent.
+// The runs, oldest first, that started in the inclusive interval from `since`
+// through `until` (now by default) and whose metadata names the parent run.
+// A run whose metadata has not yet been written names no parent.
 export const listChildRuns = async (input: {
     readonly repositoryRoot: string;
     readonly parentRunDirectoryPath: string;
@@ -222,8 +222,10 @@ export const listChildRuns = async (input: {
 }): Promise<readonly Readonly<{ run: string; scriptName: string }>[]> => {
     const parent = runKey(input.parentRunDirectoryPath);
     const earliest = runNamePrefix(input.since);
+    const until = input.until ?? new Date();
+    const latest = runNamePrefix(until);
     const children: { run: string; scriptName: string }[] = [];
-    for (const date of utcDates(input.since, input.until ?? new Date())) {
+    for (const date of utcDates(input.since, until)) {
         const dateDirectoryPath = path.join(input.repositoryRoot, 'logs', date);
         let names: string[];
         try {
@@ -233,7 +235,8 @@ export const listChildRuns = async (input: {
             throw error;
         }
         for (const name of names.sort()) {
-            if (name < earliest) continue;
+            const timestamp = name.slice(0, earliest.length);
+            if (timestamp < earliest || timestamp > latest) continue;
             let metadata: {
                 parentRunDirectoryPath?: unknown;
                 scriptName?: unknown;

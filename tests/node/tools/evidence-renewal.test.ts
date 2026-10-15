@@ -663,6 +663,16 @@ describe('evidence renewal records', () => {
         );
         await run('2026-10-13', '2026-10-13T00-00-12.000Z-starting', undefined);
         await run('2026-10-13', '2026-10-13T00-00-13.000Z-torn', '{"parent');
+        for (const name of [
+            '2026-10-13T12-00-00.000Z-cutoff-a',
+            '2026-10-13T12-00-00.000Z-cutoff-b',
+            '2026-10-13T18-00-00.000Z-late',
+        ])
+            await run('2026-10-13', name, child(renewal, 'check'));
+        const atCutoff = ['a', 'b'].map((suffix) => ({
+            run: `logs/2026-10-13/2026-10-13T12-00-00.000Z-cutoff-${suffix}`,
+            scriptName: 'check',
+        }));
         expect(
             await listChildRuns({
                 parentRunDirectoryPath: renewal,
@@ -679,7 +689,24 @@ describe('evidence renewal records', () => {
                 run: 'logs/2026-10-13/2026-10-13T00-00-10.000Z-research-protocol',
                 scriptName: 'research:protocol',
             },
+            ...atCutoff,
         ]);
+        expect(
+            await listChildRuns({
+                parentRunDirectoryPath: renewal,
+                repositoryRoot: root,
+                since: new Date('2026-10-13T12:00:00.000Z'),
+                until: new Date('2026-10-13T12:00:00.000Z'),
+            }),
+        ).toEqual(atCutoff);
+        expect(
+            await listChildRuns({
+                parentRunDirectoryPath: renewal,
+                repositoryRoot: root,
+                since: new Date('2026-10-13T12:00:00.001Z'),
+                until: new Date('2026-10-13T12:00:00.000Z'),
+            }),
+        ).toEqual([]);
     });
 
     it('removes links without following them and keeps a directory that replaced one', async () => {
