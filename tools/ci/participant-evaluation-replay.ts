@@ -7,13 +7,14 @@ import path from 'node:path';
 
 import { chromium } from 'playwright';
 
-import { foregroundVisitMilliseconds } from '#packages/sdk/src/participant/worker/module/runtime-bounds.js';
 import {
     encodeCandidatePage,
     isCandidateKey,
     isCandidateLocator,
 } from '#packages/sdk/src/participant/worker/relay/candidate-codec.js';
 import type { WorkerResult } from '#packages/sdk/src/participant/worker/runtime/worker-messages.js';
+import { compileEvaluationStorage } from '#tests/evaluation-storage-model.js';
+import { deriveSupportedProfile } from '#tests/supported-profile-model.js';
 import { thresholdProfileFor } from '#tests/threshold-completion-model.js';
 import { participantRuntimeIdentity } from '#tools/ci/build-participant-module.js';
 import { runArtifactDirectoryPath } from '#tools/ci/local-run-log.js';
@@ -23,6 +24,7 @@ import {
     type EvaluationProfile,
 } from '#tools/ci/participant-evaluation-profile.js';
 import { participantRelayStore } from '#tools/ci/participant-relay-record.js';
+import { participantWorkflowLimits } from '#tools/ci/participant-workflow-measurements.js';
 
 const [source, run, artifacts] = process.argv.slice(2);
 assert.ok(source && run && artifacts && process.argv.length === 5);
@@ -41,6 +43,11 @@ const fixture = JSON.parse(resultText) as {
     runtimeIdentity: string;
     participantCount: number;
     optionCount: number;
+    topCount?: number;
+    sampledResources?: {
+        originStorageBytes: number;
+        missingStorageSamples: number;
+    }[];
     identifiers?: string[];
     result?: { kind: string; identifiers?: string[] };
     workflow?: {
@@ -189,7 +196,7 @@ try {
                 digest,
             }) => {
                 const bytes = new Uint8Array(
-                    await (await fetch('/browserWorker.js')).arrayBuffer(),
+                    await (await fetch('/worker.js')).arrayBuffer(),
                 );
                 const actual = Array.from(
                     new Uint8Array(
@@ -323,6 +330,29 @@ try {
                 ] ?? 0,
         );
     const evaluationMilliseconds = Math.min(...evaluationTimes);
+    const storage = compileEvaluationStorage(
+        deriveSupportedProfile(fixture.participantCount, fixture.optionCount),
+        fixture.topCount,
+    );
+    const workerMemoryBytes = Math.max(
+        ...reports.map((report) => {
+            const memory = report.result.details.memory;
+            assert.ok(
+                memory !== undefined &&
+                    Number.isSafeInteger(memory.workerBytes) &&
+                    memory.helpers === 0,
+            );
+            return memory.workerBytes;
+        }),
+    );
+    const sampledOriginStorageBytes =
+        fixture.sampledResources === undefined
+            ? undefined
+            : Math.max(
+                  ...fixture.sampledResources.map(
+                      (resource) => resource.originStorageBytes,
+                  ),
+              );
     const thresholds = thresholdProfileFor(fixture.participantCount);
     const consumerCounts = {
         allParticipants: fixture.participantCount - 1,
@@ -338,6 +368,38 @@ try {
                 source,
                 evaluationMilliseconds,
                 consumerCounts,
+                limits: participantWorkflowLimits,
+                workerMemoryBytes,
+                additivePlanningMemoryHeadroomBytes:
+                    Number(storage.capacity.evaluatorPlanningBytes) -
+                    workerMemoryBytes,
+                additiveAbsoluteMemoryHeadroomBytes:
+                    Number(storage.capacity.scalarInstanceBoundBytes) -
+                    workerMemoryBytes,
+                evaluationScratchBytes: Number(
+                    expectedHasResult ? storage.peakBytes : 0n,
+                ),
+                scratchPlanningHeadroomBytes: Number(
+                    storage.scratchPlanningBytes -
+                        (expectedHasResult ? storage.peakBytes : 0n),
+                ),
+                sampledOriginStorageBytes,
+                sampledOriginStorageHeadroomBytes:
+                    sampledOriginStorageBytes === undefined
+                        ? undefined
+                        : participantWorkflowLimits.originStorageBytes -
+                          sampledOriginStorageBytes,
+                missingStorageSamples: fixture.sampledResources?.reduce(
+                    (sum, resource) => sum + resource.missingStorageSamples,
+                    0,
+                ),
+                measuredParticipantTimeHeadroom:
+                    fixture.workflow?.participants.map((participant) => ({
+                        position: participant.position,
+                        milliseconds:
+                            participantWorkflowLimits.participantMilliseconds -
+                            participant.activeMillisecondsUpperBound,
+                    })),
                 maximumAdditionalCohortWorkMilliseconds: Object.fromEntries(
                     Object.entries(consumerCounts).map(([name, count]) => [
                         name,
@@ -346,14 +408,15 @@ try {
                 ),
                 optimisticProverVisitHeadroomMilliseconds: Math.max(
                     0,
-                    foregroundVisitMilliseconds - evaluationMilliseconds,
+                    participantWorkflowLimits.visitMilliseconds -
+                        evaluationMilliseconds,
                 ),
                 measuredTargetVisitHeadroom: fixture.workflow?.participants.map(
                     (participant) => ({
                         position: participant.position,
                         milliseconds: Math.max(
                             0,
-                            foregroundVisitMilliseconds -
+                            participantWorkflowLimits.visitMilliseconds -
                                 Math.max(
                                     ...participant.visits
                                         .filter((visit) =>
