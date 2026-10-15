@@ -42,7 +42,7 @@ const fixture = JSON.parse(resultText) as {
     participantCount: number;
     optionCount: number;
     identifiers?: string[];
-    mode?: string;
+    result?: { kind: string; identifiers?: string[] };
     workflow?: {
         participants: {
             position: number;
@@ -52,6 +52,14 @@ const fixture = JSON.parse(resultText) as {
     };
 };
 assert.match(fixture.poll, /^[0-9a-f]{128}$/u);
+const expectedIdentifiers =
+    fixture.identifiers ??
+    (fixture.result?.kind === 'no-result' ? [] : fixture.result?.identifiers);
+assert.ok(
+    Array.isArray(expectedIdentifiers),
+    'Select a fixture with a verified terminal outcome.',
+);
+const expectedHasResult = expectedIdentifiers.length > 0;
 const identity = participantRuntimeIdentity(manifest, module, worker);
 assert.equal(
     identity.runtime,
@@ -264,13 +272,11 @@ try {
         const milliseconds = performance.now() - started;
         assert.equal(observed.result.status, 'completed');
         assert.ok(observed.result.status === 'completed');
-        if (fixture.mode === 'no-result' || fixture.mode === 'empty')
-            assert.equal(observed.result.details.hasResult, false);
-        if (fixture.identifiers !== undefined)
-            assert.deepEqual(
-                observed.result.details.identifiers,
-                fixture.identifiers,
-            );
+        assert.equal(observed.result.details.hasResult, expectedHasResult);
+        assert.deepEqual(
+            observed.result.details.identifiers,
+            expectedIdentifiers,
+        );
         const profiles = observed.profiles.map(summarizeEvaluationProfile);
         assert.equal(profiles.length, 1);
         assert.equal(profiles[0].targetDigests.length, 1);
@@ -395,6 +401,10 @@ try {
                     ]),
                 ),
                 browser: browser.browser()?.version(),
+                pairedPhaseOverheadMilliseconds: [
+                    reports[1].milliseconds - reports[0].milliseconds,
+                    reports[2].milliseconds - reports[3].milliseconds,
+                ],
                 reports,
                 wrongPoll: wrongPoll.result,
             },
