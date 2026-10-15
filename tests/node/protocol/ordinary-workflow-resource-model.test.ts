@@ -345,11 +345,16 @@ describe('complete ordinary workflow resource graph', () => {
         expect(ten.rows[1].publicCorpusBytes).toBeGreaterThan(
             ten.planningBytes,
         );
+        // The largest profile's overruns are open resource obligations that
+        // the census reports; the test fixes only the rows' ordering.
+        expect(twenty.rows[1].publicCorpusBytes).toBeGreaterThan(
+            twenty.rows[0].publicCorpusBytes,
+        );
         expect(twenty.rows[0].publicCorpusBytes).toBeGreaterThan(
-            twenty.planningVarianceCeilingBytes,
+            ten.rows[0].publicCorpusBytes,
         );
         expect(twenty.publicReaderProtocolBytes).toBeGreaterThan(
-            twenty.planningVarianceCeilingBytes,
+            ten.publicReaderProtocolBytes,
         );
         expect(() =>
             compileOrdinaryWorkflowResources(deriveSupportedProfile(3, 2), {

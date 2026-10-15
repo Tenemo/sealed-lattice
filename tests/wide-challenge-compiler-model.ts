@@ -434,9 +434,14 @@ export const compileWideChallengeCompilerCensus = (
     const batchingAndFirstFoldNumerator =
         correlatedRowCount * BigInt(agreement.domainSize) +
         sampledRounds.weightedFri.ceiling;
+    // The setup affine challenge is non-base, one of p^2*(p-1) values, so
+    // its root term over p^3 is m*p/(p-1). The ballot and release terms,
+    // over all of K with fewer rows, are no larger.
+    const affineNumerator =
+        (affineRootDegree * prime + prime - 2n) / (prime - 1n) + 1n;
     const ordinaryAlgebraicNumerator = [
         2n * lookupRootDegree,
-        affineRootDegree + 1n,
+        affineNumerator,
         batchingAndFirstFoldNumerator,
     ].reduce((maximum, value) => (value > maximum ? value : maximum), 0n);
     return {

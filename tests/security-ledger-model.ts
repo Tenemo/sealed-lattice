@@ -24,6 +24,10 @@ import {
     type LatticeAssumptionGroup,
 } from '#tests/security-margin/attack-screens.js';
 import {
+    reductionConstructorDimensions,
+    reductionConstructorModuli,
+} from '#tests/security-margin/constructor-operands.js';
+import {
     compileLatticePopulationLimits,
     largestPopulationWithin,
 } from '#tests/security-margin/population-limits.js';
@@ -94,14 +98,18 @@ export const ledgerGroupBudget = (group: LedgerGroup) =>
 // Bounds of the constructed descriptor, independently checked against every
 // active role. The native proof still uses its exact role dimensions.
 export const securityProofEnvelope = {
-    columns: 8192n,
-    lookups: 4096n,
-    oracles: 8192n,
+    columns: reductionConstructorDimensions.maximumColumns,
+    lookups: reductionConstructorDimensions.maximumLookups,
+    oracles: reductionConstructorDimensions.maximumOracles,
     inputBits: 1n << 40n,
     expansionQueries: 1n << 24n,
     programmedPrefixBits: 1n << 24n,
-    pricedQueries: 768n,
+    pricedQueries: reductionConstructorDimensions.pricedQueries,
 } as const;
+
+// Complete-function queries allowed per credential for the known
+// authentication bank, which needs two adapter calls per bank call.
+const authenticationBankQueries = 1n << 20n;
 
 export const semanticMacroEdges = [
     'Original authentication and retained-record normalization',
@@ -162,10 +170,13 @@ let operands: ReturnType<typeof deriveOperands> | undefined;
 const deriveOperands = () => {
     const profiles = listSupportedProfiles();
     const degree = fixedModulusBfvInputs.polynomialDegree;
-    assert.equal(degree, 65536n);
+    assert.equal(degree, reductionConstructorDimensions.degree);
     const agreement = compileCommonAgreementDegreeCensus();
     const queries = BigInt(agreement.queries);
     assert.equal(queries, 704n);
+    // Every query-dependent statistical and constructor charge uses the
+    // priced count, which must cover the proof's actual queries.
+    assert.ok(queries <= securityProofEnvelope.pricedQueries);
     const domain = 4n * degree;
     const prime = compileSmallLimbProofFieldCensus().modulus;
     const roundError = rational(193n ** queries, 256n ** queries);
@@ -198,7 +209,10 @@ const deriveOperands = () => {
     const maximumParticipants = Math.max(
         ...profiles.map((profile) => profile.participantCount),
     );
-    assert.ok(maximumParticipants <= 20);
+    assert.ok(
+        BigInt(maximumParticipants) <=
+            reductionConstructorDimensions.participants,
+    );
     const maximumSourceFamilies = profiles.reduce((maximum, profile) => {
         const count = compileRegistrationSetupBindingScreen(
             profile.participantCount,
@@ -206,7 +220,9 @@ const deriveOperands = () => {
         ).coordinateCount;
         return count > maximum ? count : maximum;
     }, 0n);
-    assert.ok(maximumSourceFamilies <= 18n);
+    assert.ok(
+        maximumSourceFamilies <= reductionConstructorDimensions.sourceFamilies,
+    );
     assert.ok(
         BigInt(semanticMacroEdges.length) <=
             semanticEndpointBudget.fixedMacroCapacity,
@@ -219,11 +235,42 @@ const deriveOperands = () => {
     assert.equal(auxiliaryInputEncryptionParameters.degree, 4096n);
     assert.ok(auxiliaryInputEncryptionParameters.modulus < 1n << 63n);
     assert.ok(auxiliaryInputEncryptionParameters.support <= 256n);
-    const credentialPredecessor =
-        compilePurposeSignatureWork().credentialPredecessorGates;
+    const signatureWork = compilePurposeSignatureWork();
+    const credentialPredecessor = signatureWork.credentialPredecessorGates;
+    // The late interval begins no later than one complete honest credential
+    // construction, which precedes every reduction factory.
+    assert.ok(minimumReductionWork <= credentialPredecessor);
+    assert.ok(
+        2n * signatureWork.maximumKnownBankCallsPerCredential <=
+            authenticationBankQueries,
+    );
+    assert.equal(
+        reductionConstructorModuli.shareModulus,
+        shareEncryptionParameters.modulus,
+    );
+    assert.equal(
+        reductionConstructorModuli.auxiliaryModulus,
+        auxiliaryInputEncryptionParameters.modulus,
+    );
+    assert.equal(
+        reductionConstructorModuli.sourceSampleBits,
+        sourceCommonSampleBits,
+    );
+    // A result needs the minimum turnout, of which at most the fault bound
+    // can be corrupt; the rest are original honest ballots.
+    const honestBallotFloor = profiles.reduce((least, profile) => {
+        const honest = BigInt(
+            profile.minimumTurnout - profile.maximumCorruptParticipantCount,
+        );
+        return honest < least ? honest : least;
+    }, BigInt(Number.MAX_SAFE_INTEGER));
+    assert.ok(honestBallotFloor >= 2n);
     const ballotRowBytes = 336n;
     const releasePredecessor =
-        2n * domain * (ballotRowBytes / 168n) * originalQueryDivisor;
+        honestBallotFloor *
+        domain *
+        (ballotRowBytes / 168n) *
+        originalQueryDivisor;
     const auxiliary = auxiliaryInputEncryptionParameters;
     const rawBias = (modulus: bigint, width: bigint) => {
         const space = 1n << width,
@@ -236,10 +283,14 @@ const deriveOperands = () => {
     let maximumPrimitiveSlope = 0n;
     for (const profile of profiles) {
         assert.ok(
-            profile.gadgetLength <= 32n && profile.ciphertext.bits <= 1024,
+            profile.gadgetLength <= reductionConstructorDimensions.gadgets &&
+                profile.ciphertext.bits <= 1024,
         );
         assert.ok(profile.optionCount <= 20);
-        assert.ok(profile.setupContributorCount <= 7);
+        assert.ok(
+            BigInt(profile.setupContributorCount) <=
+                reductionConstructorDimensions.selectedContributors,
+        );
         assert.ok(profile.releaseThreshold <= 7);
         assert.ok(profile.shareLifting.sharingCoefficientBits <= 127);
         assert.ok(profile.releaseNoiseBits <= 1024);
@@ -376,12 +427,20 @@ const semanticEndpointMultiplier = (honestRegistrations: bigint) => {
 };
 
 const authenticationParts = (work: bigint, population: bigint) => {
+    // Late games also carry the reduction's fixed external queries.
+    const lateQueries =
+        work >= minimumReductionWork
+            ? compileReductionWork(population).fixedExternalQueries
+            : 0n;
     const queries = add(
         rational(2n * work, originalQueryDivisor),
         rational(
-            (1n << 20n) * (population + 1n) + 128n * (work + population + 1n),
+            authenticationBankQueries * (population + 1n) +
+                128n * (work + population + 1n) +
+                lateQueries,
         ),
     );
+    const labelQueries = add(queries, rational(1n));
     const chainQueries = scale(queries, 2n);
     const { chains, radix } = purposeSignatureParameters;
     const squared = multiply(chainQueries, chainQueries);
@@ -402,8 +461,8 @@ const authenticationParts = (work: bigint, population: bigint) => {
     const labels = add(
         rational(population * (population - 1n), 1n << 512n),
         rational(
-            4n * queries.numerator * ceilingSquareRoot(population),
-            queries.denominator * (1n << 256n),
+            4n * labelQueries.numerator * ceilingSquareRoot(population),
+            labelQueries.denominator * (1n << 256n),
         ),
         rational(
             4n * queries.numerator * population,
@@ -460,6 +519,7 @@ const compileStatisticalTerms = (honestRegistrations: bigint, work: bigint) => {
     const parents = (value.maximumSourceFamilies + 4n) * honestRegistrations;
     const trees = 3n * honestRegistrations * value.treeCount;
     const sources = value.maximumSourceFamilies * honestRegistrations;
+    const labelQueries = add(queries, rational(1n));
     const privateLabels = add(
         rational(
             parents * (parents - 1n) +
@@ -469,11 +529,11 @@ const compileStatisticalTerms = (honestRegistrations: bigint, work: bigint) => {
         ),
         rational(
             4n *
-                queries.numerator *
+                labelQueries.numerator *
                 (ceilingSquareRoot(parents) +
                     ceilingSquareRoot(trees) +
                     ceilingSquareRoot(sources)),
-            queries.denominator * (1n << 256n),
+            labelQueries.denominator * (1n << 256n),
         ),
         rational(
             4n * queries.numerator * sources,

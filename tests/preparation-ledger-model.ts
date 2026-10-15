@@ -6,6 +6,7 @@ import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import { compileSetupSelectionCensus } from '#tests/setup-selection-model.js';
 import {
     listSupportedProfiles,
+    supportedProfileRanges,
     type SupportedProfile,
 } from '#tests/supported-profile-model.js';
 import { thresholdProfileFor } from '#tests/threshold-completion-model.js';
@@ -89,7 +90,12 @@ export const compilePreparationLedger = (
     pollMaximumParticipants = profile.participantCount,
 ) => {
     assert.ok(originalHonestRegistrations >= 0n);
-    assert.ok(pollMaximumParticipants >= profile.participantCount);
+    assert.ok(
+        Number.isInteger(pollMaximumParticipants) &&
+            pollMaximumParticipants >= profile.participantCount &&
+            pollMaximumParticipants <=
+                supportedProfileRanges().participants.maximum,
+    );
     const participants = BigInt(pollMaximumParticipants);
     const threshold = thresholdProfileFor(profile.participantCount);
     const corrupt = BigInt(threshold.maximumCorruptParticipantCount);

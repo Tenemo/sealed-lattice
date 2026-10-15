@@ -5,7 +5,11 @@ import {
     compilePreparationLedger,
     compilePreparationPollPopulations,
 } from '#tests/preparation-ledger-model.js';
-import { deriveSupportedProfile } from '#tests/supported-profile-model.js';
+import { reductionConstructorOrigins } from '#tests/security-margin/constructor-price.js';
+import {
+    deriveSupportedProfile,
+    supportedProfileRanges,
+} from '#tests/supported-profile-model.js';
 
 describe('complete preparation populations', () => {
     it('counts original births and both ciphertext hops across losing rosters', () => {
@@ -30,6 +34,17 @@ describe('complete preparation populations', () => {
                 expect(row.auxiliaryKeyComparisons).toBe(3n);
                 expect(row.auxiliaryBallotComparisons).toBe(2n * population);
             }
+    });
+    it('refuses a poll maximum outside the supported rosters', () => {
+        const profile = deriveSupportedProfile(10, 20);
+        expect(() => compilePreparationLedger(profile, 1n, 9)).toThrow();
+        expect(() => compilePreparationLedger(profile, 1n, 21)).toThrow();
+        expect(() => compilePreparationLedger(profile, 1n, 10.5)).toThrow();
+        expect(() => compilePreparationLedger(profile, -1n)).toThrow();
+        expect(
+            compilePreparationLedger(profile, 1n, 20)
+                .recipientCiphertextComparisons,
+        ).toBe(40n);
     });
     it('distinguishes actual source families from the pre-preprocessing catalogue guess', () => {
         const families = compilePreparationFamilyInventory();
@@ -58,5 +73,52 @@ describe('complete preparation populations', () => {
         expect(
             compilePreparationPollPopulations(20, 20, 37n).maximumSourceDecodes,
         ).toBe(740n);
+    });
+    it('stays within the constructor origin coefficients at every supported profile', () => {
+        const origins = reductionConstructorOrigins;
+        const { participants, options } = supportedProfileRanges();
+        for (
+            let rosterSize = participants.minimum;
+            rosterSize <= participants.maximum;
+            rosterSize++
+        ) {
+            for (
+                let optionCount = options.minimum;
+                optionCount <= options.maximum;
+                optionCount++
+            ) {
+                const poll = compilePreparationPollPopulations(
+                    rosterSize,
+                    optionCount,
+                    1n,
+                );
+                expect(poll.generatedSourceEntries).toBeLessThanOrEqual(
+                    origins.sourceStatements,
+                );
+                expect(poll.maximumSourceDecodes).toBeLessThanOrEqual(
+                    origins.earlySourceRecoveries,
+                );
+            }
+            const row = compilePreparationLedger(
+                deriveSupportedProfile(rosterSize, options.maximum),
+                1n,
+                participants.maximum,
+            );
+            expect(row.generatedSourceEntries).toBeLessThanOrEqual(
+                origins.sourceStatements,
+            );
+            expect(row.maximumSourceDecodes).toBeLessThanOrEqual(
+                origins.earlySourceRecoveries,
+            );
+            expect(row.recipientKeyComparisons).toBeLessThanOrEqual(
+                2n * origins.recipientKeyStatements,
+            );
+            expect(row.maximumHonestProofScopes).toBeLessThanOrEqual(
+                origins.proofScopes,
+            );
+            expect(row.maximumHonestReleases).toBeLessThanOrEqual(
+                origins.firstPrescribedReleases,
+            );
+        }
     });
 });

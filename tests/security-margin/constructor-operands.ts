@@ -1,3 +1,26 @@
+// The extents the constructor prices. The security ledger checks that each
+// bounds the matching quantity of every supported profile and proof role.
+export const reductionConstructorDimensions = {
+    metadataBits: 384n,
+    degree: 65536n,
+    maximumColumns: 8192n,
+    maximumLookups: 4096n,
+    maximumOracles: 8192n,
+    pricedQueries: 768n,
+    sourceFamilies: 18n,
+    participants: 20n,
+    gadgets: 32n,
+    selectedContributors: 7n,
+} as const;
+
+// The moduli and source sample width the sampling envelope uses. The security
+// ledger checks that each equals its owner.
+export const reductionConstructorModuli = {
+    shareModulus: 339684951204300816163700896517723286734934900737n,
+    auxiliaryModulus: 27217887233n,
+    sourceSampleBits: 576n,
+} as const;
+
 // Independently audited literal instruction banks and complete path/data counts.
 // These are construction operands, not measured runtime work or derived prices.
 export const reductionConstructorOperands = {

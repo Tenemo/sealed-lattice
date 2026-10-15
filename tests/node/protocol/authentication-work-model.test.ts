@@ -11,6 +11,11 @@ import {
     spongePermutations,
     shake256RateBytes,
 } from '#tests/node/protocol/reference/sponge-permutations.js';
+import {
+    readRustSource,
+    rustFunctionBody,
+    rustIntegerConstant,
+} from '#tests/node/rust-source.js';
 
 describe('purpose signature work and framing', () => {
     it('binds complete roots, purpose indices, lengths and varied messages', () => {
@@ -55,6 +60,60 @@ describe('purpose signature work and framing', () => {
             purposeSignatureFrame(new Uint8Array(63), 0, new Uint8Array()),
         ).toThrow();
     });
+    it('derives the credential predecessor from native key generation', async () => {
+        const [signature, digest] = await Promise.all([
+            readRustSource(
+                'crates/protocol-research/purpose-signature/src/lib.rs',
+            ),
+            readRustSource(
+                'crates/protocol-research/parallel-work/src/protocol-hash.rs',
+            ),
+        ]);
+        // Each signing context is one active purpose, and the declared array
+        // length must agree with its distinct entries.
+        const contexts =
+            /\bconst\s+SIGNING_CONTEXTS\s*:\s*\[&\[u8\];\s*(\d+)\]\s*=\s*\[([^\]]*)\]/u.exec(
+                signature,
+            );
+        expect(contexts).not.toBeNull();
+        const contextNames = [...contexts![2].matchAll(/b"([^"]*)"/gu)].map(
+            (match) => match[1],
+        );
+        expect(BigInt(contextNames.length)).toBe(BigInt(contexts![1]));
+        expect(new Set(contextNames).size).toBe(contextNames.length);
+        // Key generation walks every chain of every active purpose once.
+        const walks = [
+            ...rustFunctionBody(signature, 'new').matchAll(
+                /for\s+_\s+in\s+0\.\.(\d+)\s*\{\s*\*value\s*=\s*step\(&value\);\s*\}/gu,
+            ),
+        ];
+        expect(walks).toHaveLength(1);
+        // One chain step hashes its domain and one digest after the prefix.
+        const domain = /^\{\s*hash\(b"([^"]*)",\s*&\[value\]\)\s*\}$/u.exec(
+            rustFunctionBody(signature, 'step'),
+        );
+        expect(domain).not.toBeNull();
+        expect(signature).toMatch(/\btype\s+Digest\s*=\s*\[u8;\s*64\];/u);
+        const chainInputBytes =
+            rustIntegerConstant(digest, 'PREFIX_BYTES') +
+            BigInt(Buffer.byteLength(domain![1])) +
+            64n;
+        expect(chainInputBytes).toBe(149n);
+        const chainPermutations = spongePermutations(
+            chainInputBytes,
+            64n,
+            rustIntegerConstant(digest, 'RATE'),
+        );
+        // The cost convention charges each Keccak-f[1600] permutation 38400
+        // gates.
+        expect(compilePurposeSignatureWork().credentialPredecessorGates).toBe(
+            BigInt(contextNames.length) *
+                rustIntegerConstant(signature, 'CHAINS') *
+                BigInt(walks[0][1]) *
+                chainPermutations *
+                38400n,
+        );
+    });
     it('uses the independent sponge counter and complete key-tree predecessor', () => {
         expect(completeAuthenticationPurposes).toHaveLength(12);
         for (const row of compileCompleteAuthenticationFrameWork()) {
@@ -78,7 +137,36 @@ describe('purpose signature work and framing', () => {
             12n * 131n * 15n * 2n * 38400n,
         );
         expect(work.maximumKnownBankCallsPerCredential).toBeLessThan(1n << 16n);
-        for (const row of compileCompleteCredentialIntentBounds(20))
-            expect(row.firstEvaluatedIntentBound).toBeLessThanOrEqual(12n);
+        // The organizer's own poll, roster and selection purposes and its
+        // close intent and proposal, the target vote and the release share
+        // each add one purpose; the optional ballot adds the last.
+        const rows = compileCompleteCredentialIntentBounds(20);
+        expect(
+            rows.map((row) => [
+                row.branch,
+                row.role,
+                row.firstEvaluatedIntentBound,
+            ]),
+        ).toEqual([
+            ['Encrypted result with own target vote', 'organizer', 12n],
+            ['Encrypted result with own target vote', 'other participant', 7n],
+            ['No result', 'organizer', 11n],
+            ['No result', 'other participant', 6n],
+            ['Encrypted release without own target vote', 'organizer', 11n],
+            [
+                'Encrypted release without own target vote',
+                'other participant',
+                6n,
+            ],
+        ]);
+        for (const row of rows) {
+            expect(new Set(row.fixedPurposes).size).toBe(
+                row.fixedPurposes.length,
+            );
+            expect(row.fixedPurposes).not.toContain('ballot-envelope');
+            expect(row.firstEvaluatedIntentBound).toBeLessThanOrEqual(
+                BigInt(completeAuthenticationPurposes.length),
+            );
+        }
     });
 });

@@ -24,8 +24,8 @@ const provingPositions = (
         : participantCount;
 
 // Local producer counts for one roster, including unselected eligible offers.
-// The preparation ledger separately counts original registrations,
-// stalled exposure scopes and certified continuations. Local counts cannot
+// The per-credential proof-scope cap of the security argument and the
+// preparation ledger count the complete population. Local counts cannot
 // determine the complete experiment's query count or security population.
 export const compileProofCompilerChronology = (profile: SupportedProfile) => {
     const participants = BigInt(profile.participantCount);
@@ -37,7 +37,8 @@ export const compileProofCompilerChronology = (profile: SupportedProfile) => {
     // The direct simulator programs only the affine-challenge message.
     const programmedMessages = honestProofs;
     // Every leaf and internal node of every tree and every salted message
-    // root is a commitment that the privacy argument replaces.
+    // root is counted, a conservative cap: the privacy argument replaces the
+    // salted leaf labels and message roots and computes internal nodes.
     const query = compileProofVerifierQueryCensus();
     const committedNodesPerProof =
         query.groups.reduce(

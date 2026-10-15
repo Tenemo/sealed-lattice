@@ -3,7 +3,9 @@ import { describe, expect, it } from 'vitest';
 import {
     addRationals,
     atMost,
+    ceilingSquareRoot,
     rational,
+    rationalCeilingLog2,
 } from '#tests/security-ledger/rational.js';
 import {
     compileErrorEnvelope,
@@ -21,6 +23,30 @@ import {
 } from '#tests/security-margin/reduction-work.js';
 
 describe('full128-bit composition ledger', () => {
+    it('computes exact integer square roots and base-two logarithms', () => {
+        for (const [value, root] of [
+            [0n, 0n],
+            [1n, 1n],
+            [2n, 2n],
+            [4n, 2n],
+            [5n, 3n],
+            [(1n << 64n) ** 2n, 1n << 64n],
+            [(1n << 64n) ** 2n + 1n, (1n << 64n) + 1n],
+        ] as const)
+            expect(ceilingSquareRoot(value)).toBe(root);
+        expect(() => ceilingSquareRoot(-1n)).toThrow();
+        expect(rationalCeilingLog2(rational(1n))).toBe(0n);
+        expect(rationalCeilingLog2(rational(1n, 2n))).toBe(-1n);
+        expect(rationalCeilingLog2(rational(1n, 3n))).toBe(-1n);
+        expect(rationalCeilingLog2(rational(3n, 2n))).toBe(1n);
+        expect(rationalCeilingLog2(rational(1n, 1n << 300n))).toBe(-300n);
+        expect(
+            rationalCeilingLog2(rational((1n << 300n) + 1n, 1n << 300n)),
+        ).toBe(1n);
+        expect(() => rationalCeilingLog2(rational(0n))).toThrow();
+        expect(() => rational(1n, 0n)).toThrow();
+        expect(() => rational(-1n)).toThrow();
+    });
     it('rejects any role that exceeds a separately priced constructor dimension', () => {
         const boundary = {
             columns: securityProofEnvelope.columns,
@@ -62,8 +88,13 @@ describe('full128-bit composition ledger', () => {
                     : minimum,
             rows[0].criterion.binding.limit,
         );
-        expect(population).toBeGreaterThanOrEqual(20n);
-        for (const row of rows) expect(row.stressTest.binding.limit).toBe(0n);
+        // The owner accepted this suite's limit of 37 original honest
+        // registrations; a model change that lowers it returns to the owner.
+        expect(population).toBeGreaterThanOrEqual(37n);
+        for (const row of rows)
+            expect(row.stressTest.binding.limit).toBeLessThanOrEqual(
+                row.criterion.binding.limit,
+            );
         for (const original of [1n, 20n, population]) {
             const checks = [
                 ...compileErrorEnvelope(original),

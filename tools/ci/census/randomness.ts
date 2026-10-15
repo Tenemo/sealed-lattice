@@ -333,7 +333,7 @@ export const renderCommonMatrixSamplingCensus = (): string[] => {
             ],
         ),
         '',
-        'Common-matrix XOF initialization reuses the fixed-work residue-fibre sampler. Each common polynomial is one fixed input with a complete output prefix; consecutive wide words encode its coefficients. The sampler makes one bounded draw per coefficient and adds its explicit modulo bias. It does not use a rejection-loop or exhaustion term.',
+        'Common-matrix XOF initialization reuses the fixed-work residue-fibre sampler. Each common polynomial is one fixed input with a complete output prefix; consecutive wide words encode its coefficients. The sampler makes one bounded draw per coefficient and adds its explicit modulo bias. It does not use a rejection-loop or exhaustion term. The encrypted-source common blocks have their own sample width and are not in these tables; the security ledger adds them to the same initialization term.',
         '',
         table(
             ['Property', 'Value'],

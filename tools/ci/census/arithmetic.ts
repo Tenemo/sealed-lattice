@@ -194,7 +194,7 @@ export const renderFixedModulusBFVNoiseCensus = (): string[] => {
     return [
         '## Fixed-modulus BFV noise census',
         '',
-        'Exact worst-case noise screen for the uniform comparison and duplicated ranking-window candidate. The full integer tensor-rounding and KLSW relinearization equations are checked independently. This screen does not establish the circular-key assumption, complete proof compiler, browser cost, or protocol admission.',
+        'Exact worst-case noise screen for the compact ranking program and its flooded release. The full integer tensor-rounding and KLSW relinearization equations are checked independently. This screen does not establish the circular-key assumption, complete proof compiler, browser cost, or protocol admission.',
         '',
         table(
             ['Property', 'Value'],

@@ -1,4 +1,8 @@
-import { reductionConstructorOperands } from './constructor-operands.js';
+import {
+    reductionConstructorDimensions,
+    reductionConstructorModuli,
+    reductionConstructorOperands,
+} from './constructor-operands.js';
 
 // Pure arithmetic for the audited reduction algorithms. Operands describe
 // literal instruction banks, worst-path counts and named data extents.
@@ -16,25 +20,41 @@ type InstructionBank = {
     maximumEventGap: bigint;
 };
 
+// The constructor's populations per original honest credential: one source
+// statement per family, one recipient-key statement, three proof scopes with
+// their role statements and descriptors, one early source recovery per roster
+// position and one first prescribed release. The preparation-ledger test
+// checks each against its count at every supported profile.
+export const reductionConstructorOrigins = {
+    sourceStatements: reductionConstructorDimensions.sourceFamilies,
+    recipientKeyStatements: 1n,
+    proofScopes: 3n,
+    earlySourceRecoveries: reductionConstructorDimensions.participants,
+    firstPrescribedReleases: 1n,
+} as const;
+
 export const compileReductionConstructorPrice = (honestRegistrations = 20n) => {
-    const operands = reductionConstructorOperands;
+    const operands = reductionConstructorOperands,
+        origins = reductionConstructorOrigins;
     if (honestRegistrations < 1n)
         throw new RangeError(
             'The original credential population must be positive.',
         );
-    const metadataBits = 384n,
-        degree = 65536n,
-        domain = 4n * degree,
-        maximumColumns = 8192n,
-        maximumLookups = 4096n,
-        maximumOracles = 8192n,
-        pricedQueries = 768n,
-        sourceFamilies = 18n,
-        participants = 20n,
-        gadgets = 32n,
-        selectedContributors = 7n;
+    const {
+        metadataBits,
+        degree,
+        maximumColumns,
+        maximumLookups,
+        maximumOracles,
+        pricedQueries,
+        sourceFamilies,
+        participants,
+        gadgets,
+        selectedContributors,
+    } = reductionConstructorDimensions;
+    const domain = 4n * degree;
     const banks = operands.banks;
-    const access = (width = metadataBits) =>
+    const access = (width: bigint = metadataBits) =>
         4096n * (metadataBits + 1n) ** 2n +
         256n * (metadataBits + 1n) * (width + 1n);
     const step = (bank: InstructionBank, rows = 0n) =>
@@ -168,8 +188,8 @@ export const compileReductionConstructorPrice = (honestRegistrations = 20n) => {
 
     // Common initialization has no honestRegistrations-dependent origin population. Work uses
     // the wider accepted sampling envelope, including conditional fibres.
-    const shareModulus = 339684951204300816163700896517723286734934900737n,
-        auxiliaryModulus = 27217887233n;
+    const { shareModulus, auxiliaryModulus, sourceSampleBits } =
+        reductionConstructorModuli;
     const fibreBits = (modulus: bigint, bits: bigint) =>
         length(ceiling(1n << bits, modulus)) + 512n;
     const fixedSample = 64n * ceiling(length(shareModulus) + 256n, 64n);
@@ -201,17 +221,17 @@ export const compileReductionConstructorPrice = (honestRegistrations = 20n) => {
         {
             count: (4n * degree) / 4096n,
             degree: 4096n,
-            sample: 576n,
+            sample: sourceSampleBits,
             limbs: 1n,
-            random: fibreBits(auxiliaryModulus, 576n),
-            draw: 576n,
+            random: fibreBits(auxiliaryModulus, sourceSampleBits),
+            draw: sourceSampleBits,
         },
     ];
     const records = sum(groups.map((group) => group.count)),
         initialized = sum(
             groups.map((group) => group.count * group.degree * group.sample),
         );
-    // Each current label has at most512bits. This is a small independent
+    // Each current label has at most 512 bits. This is a small independent
     // overcharge over the literal older label inventory, not a hash shortcut.
     const commonRecords =
         span(
@@ -241,14 +261,15 @@ export const compileReductionConstructorPrice = (honestRegistrations = 20n) => {
             1024n
         );
     };
-    const sourceFibreRandom = fibreBits(auxiliaryModulus, 576n);
+    const sourceFibreRandom = fibreBits(auxiliaryModulus, sourceSampleBits);
     const sourceFibre =
         4n *
             events(
                 banks.sourceFibre,
-                64n * (576n + 9n + 1n) +
+                64n * (sourceSampleBits + 9n + 1n) +
                     degree * 32n * (sourceFibreRandom + 1n) * 10n,
-                degree * (64n + sourceFibreRandom + 576n) + 4n * 576n,
+                degree * (64n + sourceFibreRandom + sourceSampleBits) +
+                    4n * sourceSampleBits,
             ) +
         8n * degree * sourceFibreRandom;
     const fibres =
@@ -309,7 +330,7 @@ export const compileReductionConstructorPrice = (honestRegistrations = 20n) => {
         commonRecords + fibres + commonUniform + auxiliaryKey;
 
     // Original caller: four adapters per retained instruction; three per
-    // fixed factory object. Each adapter has512fields and one8-pass effect.
+    // fixed factory object. Each adapter has 512 fields and one 8-pass effect.
     const factoryObjects =
             (sourceFamilies + 20n + 3n * participants) * honestRegistrations +
             1n,
@@ -465,7 +486,12 @@ export const compileReductionConstructorPrice = (honestRegistrations = 20n) => {
         (64n * metadataBits + 16n) *
             (sourceScan + footprint + dispatch * metadataBits) +
         dispatch * (outerStep + access());
-    const statementOrigins = (sourceFamilies + 4n) * honestRegistrations + 1n,
+    const statementOrigins =
+            (origins.sourceStatements +
+                origins.recipientKeyStatements +
+                origins.proofScopes) *
+                honestRegistrations +
+            1n,
         statements = statementOrigins * (componentWork + outer),
         statementCalls = 3n * gadgets + (4n * degree) / 4096n + 8n;
     const statementTraffic =
@@ -678,7 +704,7 @@ export const compileReductionConstructorPrice = (honestRegistrations = 20n) => {
         (64n * metadataBits + 1n) * constantGates +
         64n * metadataBits;
     const descriptors =
-        3n *
+        origins.proofScopes *
         honestRegistrations *
         (polynomialCore +
             affineWork +
@@ -688,7 +714,7 @@ export const compileReductionConstructorPrice = (honestRegistrations = 20n) => {
             2n * (1024n * leaves + 1024n * rounds + prefix));
 
     const earlySourceRecovery =
-        20n *
+        origins.earlySourceRecoveries *
         honestRegistrations *
         (events(
             banks.sourceRecovery,
@@ -767,6 +793,7 @@ export const compileReductionConstructorPrice = (honestRegistrations = 20n) => {
             recoveryRows.ballot.work + recoveryRows.auxiliary.work,
         ]);
     const firstPrescribedReleases =
+            origins.firstPrescribedReleases *
             honestRegistrations *
             (recoveryPreparation + recoveryRows.release.work),
         alternativeRecovery = ceiling(
@@ -890,7 +917,7 @@ export const compileReductionConstructorPrice = (honestRegistrations = 20n) => {
     };
     const fixedExternalQueries =
         2n *
-            (3n * honestRegistrations * descriptorQueries +
+            (origins.proofScopes * honestRegistrations * descriptorQueries +
                 statementOrigins * statementCalls +
                 honestRegistrations * (authTree.calls + 12n * authSign.calls)) +
         6n * honestRegistrations * (2n * domain - 1n + openingRehashes);

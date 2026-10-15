@@ -31,6 +31,16 @@ import {
 } from '#tests/security-margin-screen-model.js';
 import { formatCount, table } from '#tools/ci/census/format.js';
 
+// A population that reaches the representation ceiling is limited by the
+// reduction's metadata domain rather than by the group's attack floor.
+const populationCell = (column: {
+    honestRegistrations: bigint;
+    metadataLimited: boolean;
+}) =>
+    column.metadataLimited
+        ? `${formatCount(column.honestRegistrations)} (representation ceiling)`
+        : formatCount(column.honestRegistrations);
+
 export const renderComposedSecurityLedger = (): string[] => {
     const ledger = compileSecurityLedger(),
         operands = compileSecurityOperands();
@@ -271,9 +281,9 @@ export const renderComposedSecurityLedger = (): string[] => {
                                 constructionPopulation,
                             ).requiredBits,
                         ),
-                        formatCount(row.criterion.honestRegistrations),
+                        populationCell(row.criterion),
                         formatCount(row.stressTest.levelBits),
-                        formatCount(row.stressTest.honestRegistrations),
+                        populationCell(row.stressTest),
                     ];
                 }),
             ),
