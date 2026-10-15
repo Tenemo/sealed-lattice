@@ -22,7 +22,10 @@ import {
     secondRosterPath,
     startRelay,
 } from '#tools/ci/participant-browser-relay.js';
-import { createParticipantRequests } from '#tools/ci/participant-browser-requests.js';
+import {
+    completeSavedWork,
+    createParticipantRequests,
+} from '#tools/ci/participant-browser-requests.js';
 import { startParticipantResourceSampling } from '#tools/ci/participant-browser-resources.js';
 import { createParticipantStateFaults } from '#tools/ci/participant-browser-state-faults.js';
 import {
@@ -559,11 +562,8 @@ export const openParticipantCohort = async (
         operation: ParticipantOperation,
         parameters: Record<string, unknown> = {},
     ) => {
-        const result = await request(
-            member.origin,
-            operation,
-            parameters,
-            member.copy,
+        const result = await completeSavedWork(() =>
+            request(member.origin, operation, parameters, member.copy),
         );
         assert.ok(
             result.status === 'completed',

@@ -20,7 +20,7 @@ export const merkleVerificationQueries = (
     return { leafQueries: indices.length, nodeQueries };
 };
 
-export const compileProofVerifierQueryCensus = () => {
+export const compileProofVerifierQueryCensus = (publicOracle = false) => {
     const profile = compileCommonAgreementDegreeCensus();
     const folds = Math.log2(profile.domainSize / 2);
     const lengths = [
@@ -28,6 +28,7 @@ export const compileProofVerifierQueryCensus = () => {
         profile.domainSize,
         profile.domainSize,
     ];
+    if (publicOracle) lengths.push(profile.domainSize);
     for (let length = profile.domainSize / 2; length > 2; length /= 2)
         lengths.push(length);
     const groups = lengths.map((length) => {

@@ -26,6 +26,24 @@ import type { ParticipantOperationMeasurement } from '#tools/ci/participant-work
 // client's page answers with its worker's own result.
 type HarnessResult = ParticipantResponse | ParticipantWorkerResult;
 
+// A deliberate work boundary resumes the same stage. Failures and waiting
+// for external input are returned unchanged, and the whole stage keeps its
+// original foreground deadline.
+export const completeSavedWork = async (
+    request: () => Promise<HarnessResult>,
+) => {
+    const started = performance.now();
+    for (;;) {
+        const result = await request();
+        if (result.status !== 'pending' || result.cause !== 'work')
+            return result;
+        assert.ok(
+            performance.now() - started < operationMilliseconds,
+            'Saved setup work exceeded the stage deadline.',
+        );
+    }
+};
+
 export const createParticipantRequests = async ({
     cpuProfiling,
     log,
@@ -248,7 +266,9 @@ export const createParticipantRequests = async ({
         operation: ParticipantOperation,
         parameters: Record<string, unknown> = {},
     ) => {
-        const result = await request(position, operation, parameters);
+        const result = await completeSavedWork(() =>
+            request(position, operation, parameters),
+        );
         assert.ok(
             result.status === 'completed',
             `${operation} at position ${String(position)}: ${JSON.stringify(result)}`,

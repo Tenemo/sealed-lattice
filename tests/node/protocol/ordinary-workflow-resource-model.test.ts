@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { encodeCandidateManifest } from '#packages/sdk/src/participant/worker/relay/candidate-codec.js';
 import { compileBallotBodyCensus } from '#tests/ballot-body-model.js';
 import { compileCloseWireCensus } from '#tests/close-wire-model.js';
+import { compileCommittedOfferCensus } from '#tests/committed-offer-model.js';
 import { compileContributionBodyCensus } from '#tests/contribution-body-model.js';
 import { goalThresholds } from '#tests/node/protocol/reference/product-goals.js';
 import { compileOrdinaryWorkflowResources } from '#tests/ordinary-workflow-resource-model.js';
@@ -30,6 +31,7 @@ describe('complete ordinary workflow resource graph', () => {
             const key = compileRecipientKeyCensus();
             const roster = compileRosterProposalCensus(n);
             const body = compileContributionBodyCensus(profile);
+            const aggregate = compileCommittedOfferCensus(profile);
             const wire = compileSetupSelectionWireCensus(n);
             const ballot = compileBallotBodyCensus(profile);
             const close = compileCloseWireCensus(profile);
@@ -153,6 +155,26 @@ describe('complete ordinary workflow resource graph', () => {
                         ['proof.bin', body.maximumProofBytes],
                     ],
                 );
+            publish('aggregate/' + identity(0), [
+                ['manifest.bin', aggregate.aggregateManifestBytes],
+                ...aggregate.committedPolynomials.map((index): Entry => [
+                    'polynomial-' + String(index).padStart(2, '0') + '.bin',
+                    aggregate.generatedAggregateBytes /
+                        BigInt(aggregate.committedPolynomials.length),
+                ]),
+            ]);
+            for (
+                let ordinal = 0;
+                ordinal < wire.setupContributorCount;
+                ordinal++
+            )
+                publish(
+                    'aggregate-evaluation/' +
+                        identity(0) +
+                        '/' +
+                        String(ordinal),
+                    [['proof.bin', aggregate.maximumEvaluationProofBytes]],
+                );
             publish('selection', [
                 ['selection.bin', wire.selectionBodyBytes],
                 ['signature.bin', registration.signatureBytes],
@@ -228,7 +250,8 @@ describe('complete ordinary workflow resource graph', () => {
             expect(row.totalUploadBytes).toBe(uploaded);
             expect(row.transport.receivedPayloadBytes).toBe(received);
             expect(row.transport.requests).toBe(requests);
-            expect(row.workerInvocations).toBe(BigInt(12 * n + offers + 1));
+            // The bounded 10/10 organizer schedule needs two calls.
+            expect(row.workerInvocations).toBe(BigInt(12 * n + offers + 2));
         },
     );
     it.each([10, 20])(
@@ -315,11 +338,13 @@ describe('complete ordinary workflow resource graph', () => {
         expect(ten.rows[1].publicCorpusBytes).toBeGreaterThan(
             ten.rows[0].publicCorpusBytes,
         );
-        expect(ten.rows[1].publicCorpusBytes).toBeLessThan(ten.planningBytes);
+        expect(ten.rows[1].publicCorpusBytes).toBeGreaterThan(
+            ten.planningBytes,
+        );
         expect(twenty.rows[0].publicCorpusBytes).toBeGreaterThan(
             twenty.planningVarianceCeilingBytes,
         );
-        expect(twenty.publicReaderProtocolBytes).toBeGreaterThan(
+        expect(twenty.publicReaderProtocolBytes).toBeLessThan(
             twenty.planningVarianceCeilingBytes,
         );
         expect(() =>

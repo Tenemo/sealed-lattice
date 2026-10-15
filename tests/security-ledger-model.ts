@@ -281,7 +281,7 @@ export const compileSoundnessCharge = (): SoundnessCharge => {
     const inputBits = domain.maximumInputBits;
     const sentinels = domain.sentinelCount;
     const expansionQueries = domain.maximumAcceptedExpansionQueries;
-    const messageBits = domain.maximumMessageBits;
+    const messageBits = domain.minimumMessageBits;
     const tagSpace = rational(1n, 1n << tagBits);
     // J = J0 + J1*Q with J0 = epsilon + (W+b)/2^kappa + (W+2)*M/2^kappa and
     // J1 = 2*(W+2)/2^kappa, and t^2 = M^2 + 4MQ + 4Q^2.

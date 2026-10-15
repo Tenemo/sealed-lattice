@@ -58,9 +58,12 @@ describe('proof hash work', () => {
             for (const [index, group] of value.groups.entries()) {
                 const count = group.openingCounts;
                 expect(count.restoredLeaves === 0).toBe(index < 2);
-                saltCalls += BigInt(
-                    group.length + count.restoredLeaves + count.openedLeaves,
-                );
+                if (!group.publicOracle)
+                    saltCalls += BigInt(
+                        group.length +
+                            count.restoredLeaves +
+                            count.openedLeaves,
+                    );
                 leafHashes += BigInt(count.restoredLeaves);
                 nodeHashes += BigInt(
                     count.restoredNodes + count.reconstructedNodes,
@@ -105,7 +108,7 @@ describe('proof hash work', () => {
         );
         for (const [participants, options, setupBytes] of [
             [3, 2, 131072n],
-            [10, 10, 262144n],
+            [10, 10, 524288n],
             [20, 20, 524288n],
         ] as const) {
             const profile = deriveSupportedProfile(participants, options);
@@ -180,8 +183,8 @@ describe('proof hash work', () => {
                 'setup',
                 356n * 16n + 48n,
                 377n * 48n,
-                4n * (18n + 1147n) + 8n * 375n,
-                4n + 108n + 42n * 65536n * 109n + 31n * 65536n * 21n,
+                4n * (18n + 1147n + 2n * 207n) + 8n * 375n,
+                4n + 108n + 19n * 65536n * 109n + 31n * 65536n * 21n + 64n,
             ],
             ['ballot', 576n, 1632n, 776n, 28672136n],
             ['release', 1040n, 3360n, 1540n, 8782022n],
@@ -193,8 +196,16 @@ describe('proof hash work', () => {
         ]);
         for (const profile of profiles) {
             const costs = compileProofHashWork(completionProfile(), profile);
-            expect(costs.verifierCore.queries).toBe(97827n);
-            expect(costs.proverCore.queries).toBe(2097187n);
+            const publicNodes = Array.from({ length: 18 }, (_, level) =>
+                BigInt(Math.min(1408, 262144 / 2 ** (level + 1))),
+            ).reduce((sum, count) => sum + count, 0n);
+            expect(costs.verifierCore.queries).toBe(
+                97827n + (profile.role === 'setup' ? 1408n + publicNodes : 0n),
+            );
+            expect(costs.proverCore.queries).toBe(
+                2097187n +
+                    (profile.role === 'setup' ? 2n * (2n * 262144n - 1n) : 0n),
+            );
             expect(costs.proverCore.permutations).toBeGreaterThan(
                 costs.proverCore.queries,
             );
@@ -356,7 +367,10 @@ describe('proof hash work', () => {
                     (sum, group) => sum + group.prefixReuse.initializations,
                     0n,
                 ),
-            ).toBe(initializations);
+            ).toBe(
+                initializations +
+                    (value.role === 'setup' ? 2n * (2n * 262144n - 1n) : 0n),
+            );
             expect(
                 value.groups.reduce(
                     (sum, group) => sum + group.prefixReuse.stateClones,
@@ -397,10 +411,12 @@ describe('proof hash work', () => {
                     helpers,
                 );
                 expect(group.prefixReuse.leafInitializations).toBe(
-                    BigInt(counts.leaf),
+                    group.publicOracle ? 2n * 262144n : BigInt(counts.leaf),
                 );
                 expect(group.prefixReuse.nodeInitializations).toBe(
-                    BigInt(counts.node),
+                    group.publicOracle
+                        ? 2n * (262144n - 1n)
+                        : BigInt(counts.node),
                 );
             }
         }
@@ -469,13 +485,14 @@ describe('proof hash work', () => {
         // Every leaf and node hash of a group but the first of each reuses
         // the prefix blocks, including the fixed 64-byte digest domain: three
         // complete blocks for every role.
-        const reusedPrefixes = compileProofVerifierQueryCensus().groups.reduce(
-            (sum, group) =>
-                sum +
-                BigInt(group.maximumLeafQueries - 1) +
-                BigInt(group.maximumNodeQueries - 1),
-            0n,
-        );
+        const reusedPrefixes = (publicOracle: boolean) =>
+            compileProofVerifierQueryCensus(publicOracle).groups.reduce(
+                (sum, group) =>
+                    sum +
+                    BigInt(group.maximumLeafQueries - 1) +
+                    BigInt(group.maximumNodeQueries - 1),
+                0n,
+            );
         expect(
             values.map(
                 (value) =>
@@ -483,7 +500,9 @@ describe('proof hash work', () => {
                     value.verifierCore.permutations,
             ),
         ).toEqual(
-            [3n, 3n, 3n].map((prefixBlocks) => reusedPrefixes * prefixBlocks),
+            [true, false, false].map(
+                (publicOracle) => reusedPrefixes(publicOracle) * 3n,
+            ),
         );
         for (const value of values) {
             expect(value.verifierCore.queries).toBe(

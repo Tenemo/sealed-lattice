@@ -20,6 +20,8 @@ pub(super) struct Shape {
     pub(super) zero_products: Vec<(usize, usize)>,
     pub(super) original: usize,
     pub(super) oracles: usize,
+    pub(super) word_oracles: usize,
+    pub(super) public_columns: usize,
     pub(super) first_width: usize,
     pub(super) second_width: usize,
     pub(super) message_bytes: usize,
@@ -32,15 +34,15 @@ impl Shape {
             .chain(relation.narrow.iter().copied())
             .collect();
         let original = columns + lookups.len() + 4;
+        let word_oracles =
+            original + relation.booleans + relation.zero_product_pairs.len() + lookups.len() + 2;
         Self {
             words: relation.words,
             booleans: relation.booleans,
             columns,
-            oracles: original
-                + relation.booleans
-                + relation.zero_product_pairs.len()
-                + lookups.len()
-                + 2,
+            oracles: word_oracles + 2 * relation.public_columns,
+            word_oracles,
+            public_columns: relation.public_columns,
             original,
             first_width: (columns + 1) * 16 + 48,
             second_width: (lookups.len() + 2) * 48,
@@ -52,11 +54,13 @@ impl Shape {
 }
 
 fn degree(shape: &Shape, index: usize) -> usize {
-    if index < shape.original - 1 {
+    if index >= shape.word_oracles {
+        SYSTEMATIC - 1 - ((index - shape.word_oracles) % 2)
+    } else if index < shape.original - 1 {
         WITNESS_DEGREE
-    } else if index == shape.original - 1 || index == shape.oracles - 2 {
+    } else if index == shape.original - 1 || index == shape.word_oracles - 2 {
         WITNESS_DEGREE - 1
-    } else if index == shape.oracles - 1 {
+    } else if index == shape.word_oracles - 1 {
         SYSTEMATIC - 2
     } else {
         2 * WITNESS_DEGREE - SYSTEMATIC
@@ -133,7 +137,7 @@ pub(super) fn hash_after(prefix: &ProtocolHash, parts: &[&[u8]]) -> [u8; 64] {
     }
     hash.finalize()
 }
-fn wide(domain: &[u8], parts: &[&[u8]], length: usize) -> Vec<u8> {
+pub(super) fn wide(domain: &[u8], parts: &[&[u8]], length: usize) -> Vec<u8> {
     let mut hash = Shake256::default();
     Update::update(&mut hash, &(domain.len() as u32).to_le_bytes());
     Update::update(&mut hash, domain);
@@ -166,7 +170,7 @@ fn residue(bytes: &[u8], modulus: u128) -> u128 {
     }
     remainder
 }
-fn sample(message: &[u8], index: usize, nonbase: bool) -> Element {
+pub(super) fn sample(message: &[u8], index: usize, nonbase: bool) -> Element {
     std::array::from_fn(|coordinate| {
         let nonzero = nonbase && coordinate == 2;
         let value = residue(
@@ -213,10 +217,12 @@ pub(super) struct Header {
     pub(super) salts: Vec<[u8; 128]>,
     pub(super) fold_roots: Vec<[u8; 64]>,
     pub(super) terminal: Element,
+    pub(super) public_root: Option<[u8; 64]>,
+    pub(super) evaluations: Vec<Element>,
 }
 impl Header {
-    pub(super) fn parse(bytes: &[u8]) -> Result<Self, Refusal> {
-        if bytes.len() != HEADER_LENGTH {
+    pub(super) fn parse(bytes: &[u8], columns: usize) -> Result<Self, Refusal> {
+        if bytes.len() != HEADER_LENGTH + if columns == 0 { 0 } else { 64 + 48 * columns } {
             return Err(Refusal::Length);
         }
         let mut reader = Reader::new(bytes);
@@ -235,6 +241,14 @@ impl Header {
             fold_roots.push(reader.take(64)?.try_into().unwrap());
         }
         let terminal = reader.element()?;
+        let public_root = if columns == 0 {
+            None
+        } else {
+            Some(reader.take(64)?.try_into().unwrap())
+        };
+        let evaluations = (0..columns)
+            .map(|_| reader.element())
+            .collect::<Result<Vec<_>, _>>()?;
         Ok(Self {
             statement,
             roots,
@@ -242,6 +256,8 @@ impl Header {
             salts,
             fold_roots,
             terminal,
+            public_root,
+            evaluations,
         })
     }
 }
@@ -277,7 +293,7 @@ pub(super) fn challenges(
             beta = sample(&message, 0, true);
         }
         if round == 3 {
-            alpha = sample(&message, 0, false);
+            alpha = sample(&message, 0, shape.public_columns > 0);
             mask = sample(&message, 1, false);
         }
         if round == 4 {
@@ -294,9 +310,15 @@ pub(super) fn challenges(
         }
         let sum = encode(header.mask_sum);
         let terminal = encode(header.terminal);
+        let evaluations: Vec<u8> = header
+            .evaluations
+            .iter()
+            .flat_map(|value| encode(*value))
+            .collect();
         let parts: Vec<&[u8]> = match round {
             1 => vec![&header.roots[0]],
             2 => vec![&header.roots[1], &sum],
+            3 if shape.public_columns > 0 => vec![&header.roots[2], &evaluations],
             3 => vec![&header.roots[2]],
             _ => {
                 if round == FOLDS + 3 {

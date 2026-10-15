@@ -41,26 +41,30 @@ export const merkleTree = (
     stage: number,
     leaves: readonly Uint8Array[],
     salts: readonly Uint8Array[],
+    publicOracle = false,
 ) => {
     const length = leaves.length;
     const nodes = new Array<Buffer>(2 * length);
     leaves.forEach((data, index) => {
-        nodes[length + index] = merkleLeaf(
-            role,
-            stage,
-            index,
-            salts[index],
-            data,
-        );
+        nodes[length + index] = publicOracle
+            ? protocolHash('committed-key/leaf', [role, word32(index), data])
+            : merkleLeaf(role, stage, index, salts[index], data);
     });
     for (let node = length - 1, level = 1, start = length / 2; node >= 1;) {
-        nodes[node] = merkleNode(
-            role,
-            stage,
-            level,
-            nodes[2 * node],
-            nodes[2 * node + 1],
-        );
+        nodes[node] = publicOracle
+            ? protocolHash('committed-key/node', [
+                  role,
+                  word32(level),
+                  nodes[2 * node],
+                  nodes[2 * node + 1],
+              ])
+            : merkleNode(
+                  role,
+                  stage,
+                  level,
+                  nodes[2 * node],
+                  nodes[2 * node + 1],
+              );
         node--;
         if (node < start) {
             level++;
@@ -73,7 +77,8 @@ export const merkleTree = (
         const authenticated = new Set<number>();
         const parts: Uint8Array[] = [word32(positions.length)];
         for (const position of positions) {
-            parts.push(word32(position), leaves[position], salts[position]);
+            parts.push(word32(position), leaves[position]);
+            if (!publicOracle) parts.push(salts[position]);
             for (
                 let node = length + position;
                 node > 1 && !authenticated.has(node);

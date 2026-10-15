@@ -13,7 +13,10 @@ fn records_have_their_declared_lengths() {
         let bounds = profile_bounds(profile);
         let checkpoints = bounds[26] as usize;
         let polynomials = bounds[27 + checkpoints] as usize;
-        assert_eq!(bounds.len(), 28 + checkpoints + 3 * polynomials);
+        assert_eq!(
+            bounds.len(),
+            37 + checkpoints + 3 * polynomials + profile.committed_polynomials().len()
+        );
         assert_eq!(
             bounds[14],
             (profile.setup_contributors() + profile.maximum_corrupt_participants()) as u64

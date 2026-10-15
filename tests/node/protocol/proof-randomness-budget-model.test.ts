@@ -355,7 +355,7 @@ describe('bounded randomness for complete proof simulation', () => {
     it('programs the complete role-specific word without borrowing the setup width', () => {
         for (const [participants, options, setupBytes] of [
             [3, 2, 131072n],
-            [10, 10, 262144n],
+            [10, 10, 524288n],
             [20, 20, 524288n],
         ] as const) {
             const budgets = compileProofRandomnessBudgets(
@@ -449,7 +449,7 @@ describe('bounded randomness for complete proof simulation', () => {
         ]);
         for (const value of budgets) {
             expect(value.simulatorBaselineBytes).toBe(
-                value.ordinaryBaselineBytes + 262_144n,
+                value.ordinaryBaselineBytes + value.programmedMessageBytes,
             );
             expect(value.failure.numerator << 128n).toBeLessThanOrEqual(
                 1n << value.failure.denominatorBits,

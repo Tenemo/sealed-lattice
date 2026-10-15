@@ -1,5 +1,9 @@
 import { compileBallotBodyCensus } from '#tests/ballot-body-model.js';
 import { compileBallotEncryptionRelationCensus } from '#tests/ballot-encryption-relation-model.js';
+import {
+    committedOfferColumns,
+    committedOfferPolynomials,
+} from '#tests/committed-offer-model.js';
 import { compileCommonAgreementDegreeCensus } from '#tests/common-agreement-degree-model.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import {
@@ -119,7 +123,11 @@ const maximumRowsPerJob = 16_384;
 // Every salted proof-hash input shape of one role: a leaf of each opened
 // group, in verifier order, and the three message-root shapes.
 export const saltedProofHashInputs = (
-    role: Readonly<{ firstWidth: bigint; secondWidth: bigint }>,
+    role: Readonly<{
+        firstWidth: bigint;
+        secondWidth: bigint;
+        publicColumns?: number;
+    }>,
     roleBytes: bigint,
 ) => {
     const query = compileProofVerifierQueryCensus();
@@ -169,6 +177,18 @@ export const saltedProofHashInputs = (
                 salt,
                 extension,
             ]),
+            ...((role.publicColumns ?? 0) === 0
+                ? []
+                : [
+                      fixedHashInputBytes('bounded-proof/message-root', [
+                          roleBytes,
+                          tag,
+                          4n,
+                          salt,
+                          tag,
+                          48n * BigInt(role.publicColumns!),
+                      ]),
+                  ]),
         ],
     };
 };
@@ -220,7 +240,18 @@ export const proofHashProfiles = (profile: SupportedProfile) => {
             lookups: setup.lookupEntries,
             products: setup.disjointPairs,
             prefixWords: 18n,
-            statementBytes: setup.expandedStatementByteLength,
+            statementBytes:
+                setup.expandedStatementByteLength -
+                BigInt(committedOfferPolynomials(profile).length) *
+                    fixedModulusBfvInputs.polynomialDegree *
+                    (1n +
+                        BigInt(
+                            Math.ceil(
+                                profile.ciphertext.modulus.toString(2).length /
+                                    8,
+                            ),
+                        )) +
+                64n,
             relationTag: 'complete-setup-words',
             roleBytes: compileRosterProposalCensus(profile.participantCount)
                 .roleBytes,
@@ -262,10 +293,18 @@ export const proofHashProfiles = (profile: SupportedProfile) => {
         },
     ] as const;
     return rows.map((row) => {
+        const publicColumns =
+            row.role === 'setup' ? committedOfferColumns(profile) : 0;
         const oracles =
-            row.columns + 2 * row.lookups + row.booleans + row.products + 6;
+            row.columns +
+            2 * row.lookups +
+            row.booleans +
+            row.products +
+            6 +
+            2 * publicColumns;
         return {
             role: row.role,
+            publicColumns,
             // supported-profile::relation fixes the other three descriptors
             // at MESSAGE_BYTES; only setup chooses its minimum word width.
             messageBytes: BigInt(
@@ -311,7 +350,7 @@ export const compileProofHashWork = (
 ) => {
     if (roleBytes < 1n || roleBytes > 1024n)
         throw new RangeError('Unsupported verifier role length.');
-    const query = compileProofVerifierQueryCensus();
+    const query = compileProofVerifierQueryCensus(profile.publicColumns > 0);
     const compiler = compileWideChallengeCompilerCensus(supportedProfile);
     const tag = compiler.tagBits / 8n;
     const message = profile.messageBytes;
@@ -325,27 +364,50 @@ export const compileProofHashWork = (
     const salted = saltedProofHashInputs(profile, roleBytes);
     const leafSaltInput = framedProofHashBytes('bounded-proof/salt', [64n, 4n]);
     const groups = query.groups.map((group, index) => {
-        const width = salted.widths[index];
-        const leafInput = salted.leaves[index];
-        const leafPrefixPermutations =
-            fixedHashInputBytes('bounded-proof/leaf', [roleBytes, 4n]) / 136n;
-        const nodePrefixPermutations =
-            fixedHashInputBytes('bounded-proof/node', [roleBytes, 4n, 4n]) /
-            136n;
+        const publicOracle = profile.publicColumns > 0 && index === 3;
+        const privateIndex =
+            index - (profile.publicColumns > 0 && index > 3 ? 1 : 0);
+        const width = publicOracle
+            ? 16n * BigInt(profile.publicColumns)
+            : salted.widths[privateIndex];
+        const leafInput = publicOracle
+            ? fixedHashInputBytes('committed-key/leaf', [roleBytes, 4n, width])
+            : salted.leaves[privateIndex];
+        const nodeBytes = publicOracle
+            ? fixedHashInputBytes('committed-key/node', [
+                  roleBytes,
+                  4n,
+                  tag,
+                  tag,
+              ])
+            : nodeInput;
+        const leafPrefixPermutations = publicOracle
+            ? 0n
+            : fixedHashInputBytes('bounded-proof/leaf', [roleBytes, 4n]) / 136n;
+        const verifierLeafPrefixPermutations = publicOracle
+            ? fixedHashInputBytes('committed-key/leaf', [roleBytes]) / 136n
+            : leafPrefixPermutations;
+        const nodePrefixPermutations = publicOracle
+            ? 0n
+            : fixedHashInputBytes('bounded-proof/node', [roleBytes, 4n, 4n]) /
+              136n;
         // The verifier keeps one leaf and one node prefix per group, whose
         // node prefix ends before the level.
-        const verifierNodePrefixPermutations =
-            fixedHashInputBytes('bounded-proof/node', [roleBytes, 4n]) / 136n;
+        const verifierNodePrefixPermutations = publicOracle
+            ? fixedHashInputBytes('committed-key/node', [roleBytes]) / 136n
+            : fixedHashInputBytes('bounded-proof/node', [roleBytes, 4n]) / 136n;
         const levels = BigInt(Math.log2(group.length));
         const subtreeLeaves = Math.min(group.length, maximumSubtreeLeaves);
         const subtrees = BigInt(group.length / subtreeLeaves);
         const subtreeLevels = BigInt(Math.log2(subtreeLeaves));
-        const leafInitializations =
-            index < 3
-                ? 4n * BigInt(Math.ceil(group.length / 4 / maximumRowsPerJob))
-                : subtrees;
-        const nodeInitializations =
-            subtrees * subtreeLevels + levels - subtreeLevels;
+        const leafInitializations = publicOracle
+            ? 2n * BigInt(group.length)
+            : privateIndex < 3
+              ? 4n * BigInt(Math.ceil(group.length / 4 / maximumRowsPerJob))
+              : subtrees;
+        const nodeInitializations = publicOracle
+            ? 2n * BigInt(group.length - 1)
+            : subtrees * subtreeLevels + levels - subtreeLevels;
         const savedPermutations =
             (BigInt(group.length) - leafInitializations) *
                 leafPrefixPermutations +
@@ -357,7 +419,7 @@ export const compileProofHashWork = (
             136n,
         );
         const nodePermutations = byteAlignedSpongePermutations(
-            nodeInput,
+            nodeBytes,
             tag,
             136n,
         );
@@ -367,27 +429,48 @@ export const compileProofHashWork = (
         };
         const completeInputFactor = [
             factor(leafPermutations, leafPrefixPermutations),
+            factor(leafPermutations, verifierLeafPrefixPermutations),
             factor(nodePermutations, nodePrefixPermutations),
             factor(nodePermutations, verifierNodePrefixPermutations),
         ].reduce((maximum, value) => (value > maximum ? value : maximum));
         const proverWithoutPrefixReuse = total([
-            work(BigInt(group.length), leafInput, tag, 136n),
-            work(BigInt(group.length - 1), nodeInput, tag, 136n),
+            work(
+                BigInt(group.length) * (publicOracle ? 2n : 1n),
+                leafInput,
+                tag,
+                136n,
+            ),
+            work(
+                BigInt(group.length - 1) * (publicOracle ? 2n : 1n),
+                nodeBytes,
+                tag,
+                136n,
+            ),
         ]);
         const verifierWithoutPrefixReuse = total([
             work(BigInt(group.maximumLeafQueries), leafInput, tag, 136n),
-            work(BigInt(group.maximumNodeQueries), nodeInput, tag, 136n),
+            work(BigInt(group.maximumNodeQueries), nodeBytes, tag, 136n),
         ]);
         // First and second oracles retain leaf digests. The linear oracle
         // and folding layers regenerate complete queried blocks from rows.
         const openingCounts = maximumMerkleOpeningWork(
             group.length,
             group.maximumLeafQueries,
-            index >= 2,
+            !publicOracle && privateIndex >= 2,
         );
+        if (publicOracle)
+            Object.assign(openingCounts, {
+                restoredLeaves: group.maximumLeafQueries,
+                restoredNodes: 0,
+                reconstructedNodes: 0,
+                nodeHashes: 0,
+                leafPrefixInitializations: group.maximumLeafQueries,
+                nodePrefixInitializations: 0,
+                saltExpansions: 0,
+            });
         const openingWithoutPrefixReuse = total([
             work(BigInt(openingCounts.restoredLeaves), leafInput, tag, 136n),
-            work(BigInt(openingCounts.nodeHashes), nodeInput, tag, 136n),
+            work(BigInt(openingCounts.nodeHashes), nodeBytes, tag, 136n),
         ]);
         const opening = {
             ...openingWithoutPrefixReuse,
@@ -405,13 +488,16 @@ export const compileProofHashWork = (
                     nodePrefixPermutations,
         };
         const leafSaltExpansion = work(
-            BigInt(group.length + openingCounts.saltExpansions),
+            publicOracle
+                ? 0n
+                : BigInt(group.length + openingCounts.saltExpansions),
             leafSaltInput,
             salted.saltBytes,
             136n,
         );
         return {
             length: group.length,
+            publicOracle,
             width,
             prover: {
                 ...proverWithoutPrefixReuse,
@@ -421,7 +507,7 @@ export const compileProofHashWork = (
             proverWithoutPrefixReuse,
             prefixReuse: {
                 savedPermutations,
-                stateClones: 2n * BigInt(group.length) - 1n,
+                stateClones: publicOracle ? 0n : 2n * BigInt(group.length) - 1n,
                 leafInitializations,
                 nodeInitializations,
                 initializations: leafInitializations + nodeInitializations,
@@ -432,7 +518,7 @@ export const compileProofHashWork = (
                 permutations:
                     verifierWithoutPrefixReuse.permutations -
                     BigInt(group.maximumLeafQueries - 1) *
-                        leafPrefixPermutations -
+                        verifierLeafPrefixPermutations -
                     BigInt(group.maximumNodeQueries - 1) *
                         verifierNodePrefixPermutations,
             },
@@ -476,13 +562,20 @@ export const compileProofHashWork = (
             136n,
         ),
         work(
-            BigInt(query.messageRootQueries - 2),
+            BigInt(
+                query.messageRootQueries -
+                    2 -
+                    Number(profile.publicColumns > 0),
+            ),
             salted.messageRoots[0],
             tag,
             136n,
         ),
         work(1n, salted.messageRoots[1], tag, 136n),
         work(1n, salted.messageRoots[2], tag, 136n),
+        ...(profile.publicColumns > 0
+            ? [work(1n, salted.messageRoots[3], tag, 136n)]
+            : []),
         work(1n, contextInput, tag, 136n),
     ]);
     return {

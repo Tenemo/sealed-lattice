@@ -137,9 +137,18 @@ pub fn run(
     }
     let inputs = Arc::new(aggregate::verify(
         proposal.clone(),
-        selected,
+        selected.clone(),
         &selected_directories,
         &output.join("aggregates"),
+    ));
+    let inputs = Arc::new(crate::committed_offer::verify_selection(
+        proposal.clone(),
+        &selected,
+        &selected_directories,
+        output,
+        &inputs,
+        [&enrollments[0].credential, &enrollments[1].credential],
+        poll,
     ));
     let selected_indices: Vec<_> = selected_authors
         .iter()

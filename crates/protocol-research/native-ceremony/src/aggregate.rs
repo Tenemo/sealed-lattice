@@ -14,7 +14,10 @@ use std::{
     path::{Path, PathBuf},
     sync::Arc,
 };
-use supported_profile::{Profile, relation::PROOF_HEADER_BYTES};
+use supported_profile::{
+    Profile,
+    relation::{PROOF_HEADER_BYTES, setup_relation},
+};
 
 /// Bytes of a contribution polynomial and of the largest whole-coefficient
 /// chunk.
@@ -46,7 +49,7 @@ pub fn verify_source_refusals(
 ) {
     let profile = offers[0].roster().proposal().profile();
     let index = profile.fhe_polynomial(0, 1);
-    let mut proof_header = [0; PROOF_HEADER_BYTES];
+    let mut proof_header = vec![0; setup_relation(profile).proof_header_bytes()];
     File::open(directories[0].join("proof.bin"))
         .unwrap()
         .read_exact(&mut proof_header)
@@ -90,7 +93,7 @@ pub fn verify_offer(
     header: &[u8],
 ) -> VerifiedContributionOffer {
     let profile = offer.roster().proposal().profile();
-    let mut proof_header = [0; PROOF_HEADER_BYTES];
+    let mut proof_header = vec![0; setup_relation(profile).proof_header_bytes()];
     File::open(directory.join("proof.bin"))
         .unwrap()
         .read_exact(&mut proof_header)
@@ -218,7 +221,8 @@ fn begin_streamed_offer(
     directory: &Path,
     header: &[u8],
 ) {
-    let mut proof_header = [0; PROOF_HEADER_BYTES];
+    let mut proof_header =
+        vec![0; setup_relation(offer.roster().proposal().profile()).proof_header_bytes()];
     File::open(directory.join("proof.bin"))
         .unwrap()
         .read_exact(&mut proof_header)

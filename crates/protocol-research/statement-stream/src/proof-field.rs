@@ -211,6 +211,26 @@ pub fn power(mut value: u128, mut exponent: u128) -> u128 {
     result
 }
 
+/// The inverse in the cubic extension, absent only for zero.
+pub fn inverse_extension(value: [u128; 3]) -> Option<[u128; 3]> {
+    let [a, b, c] = value;
+    let numerator = [
+        subtract(multiply(a, a), multiply(2, multiply(b, c))),
+        subtract(multiply(2, multiply(c, c)), multiply(a, b)),
+        subtract(multiply(b, b), multiply(a, c)),
+    ];
+    let denominator = multiply_extension(value, numerator);
+    assert!(
+        denominator[1] == 0 && denominator[2] == 0,
+        "The extension norm lies in the base field"
+    );
+    if denominator[0] == 0 {
+        return None;
+    }
+    let inverse = power(denominator[0], MODULUS - 2);
+    Some(numerator.map(|value| multiply(value, inverse)))
+}
+
 #[cfg(test)]
 #[path = "proof-field-tests.rs"]
 mod tests;

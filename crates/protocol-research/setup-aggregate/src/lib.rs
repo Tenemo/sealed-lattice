@@ -2,8 +2,14 @@ use num_bigint::BigInt;
 use statement_stream::coefficient::CenteredCodec;
 use supported_profile::{Family, Profile};
 
+#[path = "aggregate-publisher.rs"]
+pub mod aggregate_publisher;
+#[path = "limb-sum.rs"]
+pub mod limb_sum;
 #[path = "offer-verifier.rs"]
 pub mod offer_verifier;
+#[path = "published-aggregate.rs"]
+pub mod published_aggregate;
 mod retained;
 #[path = "setup-session.rs"]
 pub mod setup_session;

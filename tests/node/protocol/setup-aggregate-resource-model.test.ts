@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { compileCommittedOfferCensus } from '#tests/committed-offer-model.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import { goalThresholds } from '#tests/node/protocol/reference/product-goals.js';
 import { compileRecipientKeyCensus } from '#tests/recipient-key-model.js';
@@ -14,6 +15,7 @@ describe('setup aggregate cache resources', () => {
     it('matches an independent count of key and encrypted-share components', () => {
         const profile = completionProfile();
         const value = compileSetupAggregateResources(profile);
+        const committed = compileCommittedOfferCensus(profile);
         const parameters = fixedModulusBfvInputs;
         const participantCount = BigInt(profile.participantCount);
         const recipient = compileRecipientKeyCensus();
@@ -48,14 +50,23 @@ describe('setup aggregate cache resources', () => {
         const setupContributorCount = BigInt(
             goalThresholds(profile.participantCount).resultReleaseThreshold,
         );
+        const streamed =
+            parameters.polynomialDegree * fheWidth +
+            2n * participantCount * recipient.publicKeyBytes;
         expect(value.contributionReadBytes).toBe(
-            setupContributorCount * expected,
+            setupContributorCount * streamed + committed.maximumAggregateBytes,
         );
         expect(value.previousCacheReadBytes + value.completeReadbackBytes).toBe(
-            value.contributionReadBytes,
+            (setupContributorCount - 1n) * streamed + expected,
         );
         expect(value.provisionalCacheWriteBytes).toBe(
-            value.contributionReadBytes,
+            setupContributorCount * streamed + expected - streamed,
+        );
+        expect(value.collectionPhases.collection).toBe(
+            2n * (committed.generatedAggregateBytes + streamed) + expected,
+        );
+        expect(value.maximumCollectionPayloadBytes).toBeGreaterThan(
+            value.collectionPhases.collection,
         );
     });
 

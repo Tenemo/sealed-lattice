@@ -65,7 +65,7 @@ describe('fixed three-purpose raw-domain catalogue', () => {
         ]);
         const shapes = [
             [3, 2, 131072],
-            [10, 10, 262144],
+            [10, 10, 524288],
             [20, 20, 524288],
         ];
         for (const [participants, options, setupWidth] of shapes) {
@@ -135,10 +135,23 @@ describe('fixed three-purpose raw-domain catalogue', () => {
 
     it('bounds every static framed family in bits and reuses the source-linked verifier expansion', () => {
         const census = compileProofHashDomainCensus();
-        expect(census.rows).toHaveLength(342 * 3);
+        expect(census.rows).toHaveLength(342 * 4);
         expect(census.sentinelCount).toBe(1n);
-        expect(census.maximumAcceptedExpansionQueries).toBe(97828n);
-        expect(census.minimumMessageBits).toBe(8n * 131072n);
+        const treeQueries = (length: number, openings: number) =>
+            Math.min(length, openings) +
+            Array.from({ length: Math.log2(length) }, (_, level) =>
+                Math.min(openings, length / 2 ** (level + 1)),
+            ).reduce((sum, value) => sum + value, 0);
+        const wordQueries = 97828 + treeQueries(262144, 1408);
+        const evaluationQueries =
+            56 +
+            Array.from({ length: 16 }, (_, stage) =>
+                treeQueries(262144 / 2 ** stage, 858),
+            ).reduce((sum, value) => sum + value, 0);
+        expect(census.maximumAcceptedExpansionQueries).toBe(
+            BigInt(7 * (wordQueries + evaluationQueries) + 5),
+        );
+        expect(census.minimumMessageBits).toBe(8n * 16384n);
         expect(census.maximumMessageBits).toBe(8n * 524288n);
         // The maximum is a full setup statement, which its digest hashes.
         const maximum = census.rows.find(
@@ -171,7 +184,7 @@ describe('fixed three-purpose raw-domain catalogue', () => {
         expect(completion[0].encodedParameters.subarray(0, 72)).toEqual(
             Buffer.concat(
                 [
-                    65536, 704, 1409, 262144, 131071, 2, 262144, 65536, 331, 24,
+                    65536, 704, 1409, 262144, 131071, 2, 524288, 65536, 331, 24,
                     375, 1024, 256, 112, 96, 16, 7, 32,
                 ].map((value) => unsigned(value, 4)),
             ),

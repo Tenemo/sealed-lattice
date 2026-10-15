@@ -119,7 +119,7 @@ export const proofRelationCatalogueEntry = (profile: SupportedProfile) =>
                 ]);
                 families = [
                     {
-                        count: 7 * Number(profile.gadgetLength),
+                        count: 3 * Number(profile.gadgetLength) + 1,
                         degree,
                         modulus: profile.ciphertext.modulus,
                     },
@@ -219,6 +219,10 @@ export const proofRelationCatalogueEntry = (profile: SupportedProfile) =>
             ),
             witnessDegree - 1,
             degree - 2,
+            ...Array.from({ length: hash.publicColumns }, () => [
+                degree - 1,
+                degree - 2,
+            ]).flat(),
         ];
         const encodedParameters = words([
             degree,
@@ -336,7 +340,8 @@ export const resolveProofContext = (
                 offset += bytes;
             }
         }
-        const canonical = offset === statement.length;
+        const canonical =
+            offset + (entry.role === 'setup' ? 64 : 0) === statement.length;
         canonicalPayloads.set(payloadKey, canonical);
         return canonical;
     });

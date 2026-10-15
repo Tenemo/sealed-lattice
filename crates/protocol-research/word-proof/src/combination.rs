@@ -579,7 +579,7 @@ fn encode_counts(
         coset,
         columns,
         columns + 1 + lookups,
-        relation.oracles() - 2,
+        relation.word_oracles() - 2,
     ] {
         push_number(&mut bytes, oracle);
     }
@@ -708,7 +708,11 @@ pub fn polynomial(
     message: &[u8],
 ) -> Vec<Element> {
     let relation = &witness.relation;
-    let (columns, lookups, oracles) = (relation.columns(), relation.lookups(), relation.oracles());
+    let (columns, lookups, oracles) = (
+        relation.columns(),
+        relation.lookups(),
+        relation.word_oracles(),
+    );
     let common = share(Zeroizing::new(encode_common(relation, message, beta)));
     let mut table = Zeroizing::new(Vec::with_capacity(ELEMENT_BYTES * inverses.len()));
     for inverse in inverses {

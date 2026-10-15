@@ -1,9 +1,13 @@
 //! The public setup verification: the roster, the contribution offers, the
 //! selection and its aggregate, and the certificate that verifies the setup.
-use crate::offer_verifier::{ContributionOfferVerifier, VerifiedContributionOffer};
+use crate::offer_verifier::{
+    ContributionOfferVerifier, VerifiedCommittedOffer, VerifiedContributionOffer, VerifiedOffer,
+};
 use crate::{
     CHUNK_BYTES,
-    verified::{SetupAggregator, VerifiedSelectionInputs, VerifiedSetupAggregate, build_selection},
+    verified::{
+        StreamedOfferAggregator, VerifiedSelectionInputs, VerifiedSetupAggregate, build_selection,
+    },
 };
 use protocol_foundations::{
     Credential,
@@ -22,7 +26,11 @@ use protocol_foundations::{
     signed_packet,
 };
 use std::sync::Arc;
-use supported_profile::relation::PROOF_HEADER_BYTES;
+use supported_profile::relation::setup_relation;
+#[path = "public-work.rs"]
+mod public_work;
+pub use public_work::PublicOperation;
+use public_work::PublicWork;
 
 pub const SETUP_INPUT_BYTES: usize = 1_572_864;
 /// The refusal of a setup verification step.
@@ -43,7 +51,9 @@ fn offer_input(
 ) -> Result<OfferInput<'_>, ()> {
     let (envelope, signature, headers) =
         signed_packet::leading(bytes, MAXIMUM_OFFER_BYTES).ok_or(())?;
-    if headers.len() != BODY_HEADER_BYTES + PROOF_HEADER_BYTES {
+    if headers.len()
+        != BODY_HEADER_BYTES + setup_relation(roster.proposal().profile()).proof_header_bytes()
+    {
         return Err(());
     }
     let offer = authenticate_offer(roster, envelope, signature).map_err(|_| ())?;
@@ -54,9 +64,9 @@ fn offer_input(
         proof_header,
     })
 }
-fn keep_offer(
-    offers: &mut Vec<Arc<VerifiedContributionOffer>>,
-    offer: Arc<VerifiedContributionOffer>,
+fn keep_offer<const EXACT: bool>(
+    offers: &mut Vec<Arc<VerifiedOffer<EXACT>>>,
+    offer: Arc<VerifiedOffer<EXACT>>,
 ) {
     if let Some(slot) = offers
         .iter_mut()
@@ -77,12 +87,14 @@ pub struct SetupSession {
     poll: Option<Arc<VerifiedPoll>>,
     offer: Option<ContributionOfferVerifier>,
     offers: Vec<Arc<VerifiedContributionOffer>>,
+    committed_offers: Vec<Arc<VerifiedCommittedOffer>>,
     unsigned: Option<SelectionProposal>,
     selected: Option<Arc<AuthenticatedSelectionProposal>>,
     inputs: Option<Arc<VerifiedSelectionInputs>>,
     endorsements: Vec<AuthenticatedSelectionEndorsement>,
     certificate: Option<AuthenticatedSelectionCertificate>,
-    aggregator: Option<SetupAggregator>,
+    aggregator: Option<StreamedOfferAggregator>,
+    public_work: PublicWork,
     verified: Option<Arc<VerifiedSetupAggregate>>,
 }
 impl SetupSession {
@@ -95,12 +107,14 @@ impl SetupSession {
             poll: None,
             offer: None,
             offers: Vec::new(),
+            committed_offers: Vec::new(),
             unsigned: None,
             selected: None,
             inputs: None,
             endorsements: Vec::new(),
             certificate: None,
             aggregator: None,
+            public_work: PublicWork::default(),
             verified: None,
         }
     }
@@ -122,6 +136,8 @@ impl SetupSession {
         self.output.clear();
         self.offer = None;
         self.offers.clear();
+        self.committed_offers.clear();
+        self.public_work = PublicWork::default();
         self.unsigned = None;
         self.selected = None;
         self.inputs = None;
@@ -345,6 +361,7 @@ impl SetupSession {
         {
             self.aggregator = None;
             self.inputs = None;
+            self.public_work.reset_selection();
             self.endorsements.clear();
         }
         self.selected = Some(selected);
@@ -400,7 +417,19 @@ impl SetupSession {
                         .cloned()
                 })
                 .collect();
-            SetupAggregator::new(selected, offers).map_err(|_| ())
+            let mut committed: Vec<_> = offers
+                .iter()
+                .map(|offer| Arc::new(offer.committed()))
+                .collect();
+            for offer in &self.committed_offers {
+                if selected.selection().selected().contains(&(
+                    offer.envelope().position(),
+                    *offer.envelope().body_identity(),
+                )) {
+                    keep_offer(&mut committed, offer.clone());
+                }
+            }
+            StreamedOfferAggregator::new(selected, committed).map_err(|_| ())
         })();
         match result {
             Ok(aggregate) => {
@@ -474,17 +503,17 @@ impl SetupSession {
         let Some(Ok(offer)) = self
             .aggregator
             .as_mut()
-            .map(SetupAggregator::finish_contribution)
+            .map(StreamedOfferAggregator::finish_contribution)
         else {
             return Err(Refusal);
         };
-        keep_offer(&mut self.offers, offer);
+        keep_offer(&mut self.committed_offers, offer);
         Ok(())
     }
     pub fn accepted(&self) -> usize {
         self.aggregator
             .as_ref()
-            .map_or(0, SetupAggregator::accepted)
+            .map_or(0, StreamedOfferAggregator::accepted)
     }
     pub fn finish_selection(&mut self) -> Result<(), Refusal> {
         if self
@@ -497,14 +526,7 @@ impl SetupSession {
         let Ok(inputs) = self.aggregator.take().unwrap().finish() else {
             return Err(Refusal);
         };
-        if self.inputs.as_ref().is_some_and(|known| {
-            known.identity() != inputs.identity() || known.polynomials() != inputs.polynomials()
-        }) || self.verified.as_ref().is_some_and(|known| {
-            known.identity() != inputs.identity() || known.polynomials() != inputs.polynomials()
-        }) {
-            return Err(Refusal);
-        }
-        self.inputs = Some(Arc::new(inputs));
+        self.public_work.streamed = Some(inputs);
         Ok(())
     }
     pub fn add_endorsement(&mut self, length: usize) -> Result<(), Refusal> {

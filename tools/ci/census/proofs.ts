@@ -133,7 +133,7 @@ export const renderBoundedPolynomialProofCensus = (): string[] => {
 };
 
 export const renderProofVerifierQueryBounds = (): string[] => {
-    const proofVerifierQueries = compileProofVerifierQueryCensus();
+    const proofVerifierQueries = compileProofVerifierQueryCensus(true);
     return [
         '## Proof verifier query bounds',
         '',

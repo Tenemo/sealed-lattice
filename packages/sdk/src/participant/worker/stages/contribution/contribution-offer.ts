@@ -77,7 +77,12 @@ const bodyOffer = async (session: ContributionSession) => {
     } finally {
         control.fill(0);
     }
-    for (const polynomial of profile.contribution.polynomials)
+    for (const polynomial of profile.contribution.polynomials.filter(
+        (candidate) =>
+            !profile.contribution.committedPolynomials.includes(
+                candidate.expandedIndex,
+            ),
+    ))
         for (const record of state.publicRecords.filter(
             (value) => value.object === polynomial.expandedIndex + 1,
         )) {

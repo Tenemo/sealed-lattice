@@ -16,23 +16,7 @@ pub fn multiply(left: Element, right: Element) -> Element {
     base::multiply_extension(left, right)
 }
 pub fn inverse(value: Element) -> Element {
-    assert_ne!(value, ZERO);
-    let [a, b, c] = value;
-    let numerator = [
-        base::subtract(
-            base::multiply(a, a),
-            base::multiply(2, base::multiply(b, c)),
-        ),
-        base::subtract(
-            base::multiply(2, base::multiply(c, c)),
-            base::multiply(a, b),
-        ),
-        base::subtract(base::multiply(b, b), base::multiply(a, c)),
-    ];
-    let denominator = multiply(value, numerator);
-    assert_eq!(denominator[1..], [0, 0]);
-    assert_ne!(denominator[0], 0);
-    scale(numerator, base::power(denominator[0], MODULUS - 2))
+    base::inverse_extension(value).expect("The prover inverts only nonzero elements")
 }
 pub(crate) fn batch_inverse(values: &[Element]) -> Vec<Element> {
     let mut prefixes = Vec::with_capacity(values.len());

@@ -8,13 +8,16 @@ import {
     compileSignatureCounterBoundary,
     compileBallotSignatureHashWork,
 } from '#tests/authentication-work-model.js';
+import { compileCommittedOfferCensus } from '#tests/committed-offer-model.js';
 import { compileFheKeySourceScreenResources } from '#tests/fhe-key-source-resource-model.js';
 import { compilePreparationResources } from '#tests/preparation-resource-model.js';
+import { compilePublicEvaluationHashCensus } from '#tests/public-evaluation-hash-model.js';
 import { compileRecipientKeyCensus } from '#tests/recipient-key-model.js';
 import { compileRegistrationEnrollmentCensus } from '#tests/registration-enrollment-model.js';
 import { compileRegistrationSetupBindingScreen } from '#tests/registration-setup-binding-model.js';
 import { compileRosterProposalCensus } from '#tests/roster-proposal-model.js';
 import { compileSelectedOpeningTransformCensus } from '#tests/selected-opening-transform-model.js';
+import { compileSetupAggregateResources } from '#tests/setup-aggregate-resource-model.js';
 import {
     compileSetupSelectionCensus,
     countStagePath,
@@ -34,6 +37,7 @@ import {
     completionProfile,
     deriveSupportedProfile,
     largestSupportedProfile,
+    listSupportedProfiles,
 } from '#tests/supported-profile-model.js';
 import { compileSupportedThresholdCompletionProfiles } from '#tests/threshold-completion-model.js';
 import { formatCount, table } from '#tools/ci/census/format.js';
@@ -807,6 +811,161 @@ export const renderSetupSelectionAndRegistrationBindingScreen =
         '',
     ];
 
+const renderCommittedOfferResources = (): string[] => {
+    const profiles = [
+        deriveSupportedProfile(3, 2),
+        completionProfile(),
+        largestSupportedProfile(),
+    ];
+    const all = listSupportedProfiles().map((profile) => ({
+        profile,
+        preparation: compilePreparationResources(profile),
+    }));
+    return [
+        '## Committed offers and published aggregates',
+        '',
+        'The public coefficient oracle and aggregate evaluation proofs use the unchanged profile family. The selector re-encodes complete offers and publishes every aggregate dependency before endorsement. Logical transfer bounds include publication receipts, cached-prefix replay and additional organizer calls; they exclude unbounded hostile candidates and arbitrary restarts. Expanded oracle bytes are total materialized evaluation data, not simultaneous memory. Collection storage counts disposable logical payload, excluding other custody, database journals and garbage collection.',
+        '',
+        table(
+            [
+                'Profile',
+                'Public columns',
+                'Expanded public oracle bytes',
+                'Generated sum bytes',
+                'Maximum accepted sum bytes',
+                'Evaluation proof maximum bytes',
+                'Collection cache peak bytes',
+                'Organizer calls',
+                'Largest organizer call protocol allowance',
+            ],
+            profiles.map((profile) => {
+                const value = compileCommittedOfferCensus(profile),
+                    resources = compilePreparationResources(profile),
+                    cache = compileSetupAggregateResources(profile);
+                return [
+                    `${profile.participantCount}/${profile.optionCount}`,
+                    ...[
+                        value.committedColumns,
+                        value.publicOracleBytes,
+                        value.generatedAggregateBytes,
+                        value.maximumAggregateBytes,
+                        value.maximumEvaluationProofBytes,
+                        cache.maximumCollectionPayloadBytes,
+                        resources.organizerSchedule.calls.length,
+                        resources.organizerSchedule.calls.reduce(
+                            (maximum, bytes) =>
+                                bytes > maximum ? bytes : maximum,
+                            0n,
+                        ),
+                    ].map(formatCount),
+                ];
+            }),
+        ),
+        '',
+        table(
+            ['Completion-profile proof operand', 'Value'],
+            (() => {
+                const value = compileCommittedOfferCensus(completionProfile()),
+                    hash =
+                        compilePublicEvaluationHashCensus(completionProfile());
+                return [
+                    ['Column degree', value.columnDegree],
+                    [
+                        'Evaluation quotient degree',
+                        value.evaluationQuotientDegree,
+                    ],
+                    [
+                        'Degree-shift identity degree',
+                        value.degreeShiftIdentityDegree,
+                    ],
+                    ['Common agreement points', value.agreementPoints],
+                    [
+                        'Accepted digit magnitude bound',
+                        value.committedDigitMagnitudeBound,
+                    ],
+                    [
+                        'Accepted sum magnitude bound',
+                        value.aggregateLimbMagnitudeBound,
+                    ],
+                    [
+                        'Generated signed limb bytes',
+                        value.generatedAggregateLimbBytes,
+                    ],
+                    [
+                        'Maximum signed limb bytes',
+                        value.maximumAggregateLimbBytes,
+                    ],
+                    ['Evaluation query pairs', value.evaluationQueries],
+                    ['Evaluation folds', value.evaluationFolds],
+                    ['Evaluation header bytes', value.evaluationHeaderBytes],
+                    [
+                        'Evaluation verifier message bytes',
+                        value.evaluationMessageBytes,
+                    ],
+                    [
+                        'Evaluation weighted-fold numerator',
+                        value.weightedFri.upper.numerator,
+                    ],
+                    [
+                        'Evaluation weighted-fold denominator',
+                        value.weightedFri.upper.denominator,
+                    ],
+                    ['Evaluation prover tree queries', hash.proverTreeQueries],
+                    [
+                        'Evaluation verifier queries',
+                        hash.maximumVerifierQueries,
+                    ],
+                ].map(([name, count]) => [
+                    String(name),
+                    formatCount(count as bigint | number),
+                ]);
+            })(),
+        ),
+        '',
+        table(
+            ['Across all supported profiles', 'Count'],
+            [
+                [
+                    'Participant preparation above planning',
+                    all.filter(
+                        ({ preparation }) =>
+                            !preparation.preparationDownloadWithinPlanning,
+                    ).length,
+                ],
+                [
+                    'Organizer stage above planning',
+                    all.filter(
+                        ({ preparation }) =>
+                            !preparation.organizerDownloadWithinPlanning,
+                    ).length,
+                ],
+                [
+                    'Maximum organizer calls',
+                    Math.max(
+                        ...all.map(
+                            ({ preparation }) =>
+                                preparation.organizerSchedule.calls.length,
+                        ),
+                    ),
+                ],
+                [
+                    'Organizer calls above reserved protocol budget',
+                    all.filter(({ preparation }) =>
+                        preparation.organizerSchedule.calls.some(
+                            (bytes) =>
+                                bytes > preparation.organizerSchedule.budget,
+                        ),
+                    ).length,
+                ],
+            ].map(([name, count]) => [
+                String(name),
+                formatCount(count as number),
+            ]),
+        ),
+        '',
+    ];
+};
+
 export const renderSetupSelectionWireAndResources = (): string[] => {
     const completion = completionProfile();
     const selectionWires = compileSupportedThresholdCompletionProfiles().map(
@@ -814,6 +973,7 @@ export const renderSetupSelectionWireAndResources = (): string[] => {
     );
     const preparationResources = compilePreparationResources(completion);
     return [
+        ...renderCommittedOfferResources(),
         '## Setup selection wire and resources',
         '',
         'Offers authenticate complete ordinary body identities under the original roster and author. Exactly the roster-derived selected count enters the canonical proposal, and exactly the inventory quorum signs its certificate. Different valid signer subsets carry the same semantic setup identity. Whole-body commitments, later opening messages and unanimous confirmation carriers are absent. The independent lifecycle model covers own-work coexistence, one-shot endorsements, original-state restoration and authenticated retirement; it assumes the complete owning proof/signature verifiers and the named published-store retention contract.',

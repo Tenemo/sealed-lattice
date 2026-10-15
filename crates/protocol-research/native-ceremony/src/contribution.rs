@@ -114,6 +114,28 @@ pub fn generate(
     // The linear oracle, then the folded combination.
     session.advance(ProverOperation::Step, 0, 0).unwrap();
     session.advance(ProverOperation::Step, 0, 0).unwrap();
+    for phase in [112, 113] {
+        assert_eq!(session.phase(), phase);
+        for index in profile.committed_polynomials() {
+            session
+                .advance(ProverOperation::BeginPolynomial, index, 0)
+                .unwrap();
+            let mut file =
+                File::open(directory.join(format!("polynomial-{index:02}.bin"))).unwrap();
+            loop {
+                let length = file.read(&mut session.input()[..1 << 20]).unwrap();
+                if length == 0 {
+                    break;
+                }
+                session
+                    .advance(ProverOperation::PushPolynomial, 0, length)
+                    .unwrap();
+            }
+            session
+                .advance(ProverOperation::FinishPolynomial, 0, 0)
+                .unwrap();
+        }
+    }
     let proof_path = directory.join("proof.bin");
     let mut file = PublicOutput::create(&proof_path).unwrap();
     while session.phase() == OUTPUT_PHASE {
@@ -142,7 +164,7 @@ pub fn generate(
         .begin_body(&enrollment.credential, context, &body_header)
         .unwrap();
     let mut buffer = vec![0; 1 << 20];
-    for index in profile.contribution_body_polynomials() {
+    for index in profile.streamed_contribution_polynomials() {
         let mut file = File::open(directory.join(format!("polynomial-{index:02}.bin"))).unwrap();
         let mut offset = 0;
         loop {

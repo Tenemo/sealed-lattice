@@ -28,7 +28,7 @@ describe('wide verifier messages and short authentication tags', () => {
                 role.virtualOracles,
             ]),
         ).toEqual([
-            ['setup', 734, 413],
+            ['setup', 734 + 23 * 9, 413 + 23 * 9],
             ['ballot', 68, 42],
             ['release', 133, 73],
         ]);
@@ -74,7 +74,7 @@ describe('wide verifier messages and short authentication tags', () => {
                     BigInt(role.messageBytes),
                     role.baseFieldSamples,
                 ]).toEqual([
-                    shape.original,
+                    shape.original + shape.publicColumns,
                     shape.oracles,
                     shape.lookups,
                     entry!.messageBytes,
@@ -112,6 +112,15 @@ describe('wide verifier messages and short authentication tags', () => {
                     .map((role) => role.messageBytes),
             ).toEqual([262144, 262144]);
             expect(value.maximumRoundError).toEqual(value.queryError);
+            expect(value.evaluation.queryDominates).toBe(true);
+            expect(value.evaluation.weightedFri.rateDenominator).toBe(4n);
+            expect(
+                value.evaluation.roundError.numerator *
+                    value.queryError.denominator,
+            ).toBeLessThanOrEqual(
+                value.queryError.numerator *
+                    value.evaluation.roundError.denominator,
+            );
         }
     });
     it('bounds every effective relation of each purpose by the query term', () => {

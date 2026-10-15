@@ -59,7 +59,8 @@ type WordProofStatement = Readonly<{
     }>;
 }>;
 
-export type WordProverMode = 'honest' | 'false-statement' | 'excess-degree';
+export type WordProverMode =
+    'honest' | 'false-statement' | 'excess-degree' | 'false-public-evaluation';
 
 // A deterministic stream of field elements and salts from a seed.
 const seededStream = (seed: Uint8Array) => {
@@ -124,12 +125,38 @@ export const proveWordRelation = (
         statementDigest: Uint8Array;
         // Every column's values on the systematic subgroup.
         columns: readonly (readonly bigint[])[];
+        publicPolynomials?: readonly (readonly bigint[])[];
         seed: Uint8Array;
         mode: WordProverMode;
     }>,
 ) => {
     const { relation, domain, role, statement, columns, mode } = input;
     const shape = wordRelationShape(relation, domain);
+    const publicPolynomials = input.publicPolynomials ?? [];
+    if (
+        publicPolynomials.length !== shape.publicColumns ||
+        publicPolynomials.some((column) => column.length > domain.systematic)
+    )
+        throw new RangeError('The public columns do not match their relation.');
+    const publicValues = publicPolynomials.map((coefficients) =>
+        evaluateOnCoset(coefficients, domain),
+    );
+    const publicTree =
+        publicPolynomials.length === 0
+            ? undefined
+            : merkleTree(
+                  role,
+                  3,
+                  Array.from({ length: domain.domain }, (_, position) =>
+                      Buffer.concat(
+                          publicValues.map((values) =>
+                              encodeBase(values[position]),
+                          ),
+                      ),
+                  ),
+                  [],
+                  true,
+              );
     const random = seededStream(input.seed);
     const systematic = domain.systematic;
     if (
@@ -257,7 +284,16 @@ export const proveWordRelation = (
     // vanishing polynomial; the remainder's constant must be the claimed sum
     // over H.
     const third = chain.message(3);
-    const affine = sample(third, 0, false);
+    const affine = sample(third, 0, shape.publicColumns > 0);
+    const publicEvaluations = publicPolynomials.map((coefficients) =>
+        coefficients.reduceRight(
+            (value, coefficient) =>
+                add(multiply(value, affine), base(coefficient)),
+            zero,
+        ),
+    );
+    if (mode === 'false-public-evaluation')
+        publicEvaluations[0] = add(publicEvaluations[0], base(1n));
     const maskChallenge = sample(third, 1, false);
     const operator = statement.operator(affine);
     const combinedAffine: Extension[] = Array.from(
@@ -325,7 +361,12 @@ export const proveWordRelation = (
         quotientValues.map(encodeExtension),
         leafSalts(domain.domain),
     );
-    chain.respond(3, salts[2], [linear.root]);
+    chain.respond(3, salts[2], [
+        linear.root,
+        ...(publicTree
+            ? [Buffer.concat(publicEvaluations.map(encodeExtension))]
+            : []),
+    ]);
 
     // The combined word at every point, with the remainder constant the
     // prover's own quotient leaves, then the folds and the terminal.
@@ -372,6 +413,39 @@ export const proveWordRelation = (
             },
         ),
     );
+    if (publicTree)
+        layer = layer.map((value, position) => {
+            const x = points[position];
+            const denominator = invertExtension(subtract(base(x), affine));
+            publicValues.forEach((values, column) => {
+                const oracle = shape.wordOracles + 2 * column;
+                const weight = (index: number) =>
+                    add(
+                        combination[2 * index],
+                        scale(
+                            combination[2 * index + 1],
+                            power(
+                                x,
+                                BigInt(
+                                    domain.maximumDegree - shape.degrees[index],
+                                ),
+                            ),
+                        ),
+                    );
+                const publicQuotient = multiply(
+                    subtract(base(values[position]), publicEvaluations[column]),
+                    denominator,
+                );
+                value = add(
+                    value,
+                    add(
+                        scale(weight(oracle), values[position]),
+                        multiply(weight(oracle + 1), publicQuotient),
+                    ),
+                );
+            });
+            return value;
+        });
     const foldTrees: ReturnType<typeof merkleTree>[] = [];
     let terminal = zero;
     for (let round = 0; round < domain.folds; round++) {
@@ -402,7 +476,7 @@ export const proveWordRelation = (
         } else {
             const tree = merkleTree(
                 role,
-                3 + round,
+                3 + Number(!!publicTree) + round,
                 layer.map(encodeExtension),
                 leafSalts(layer.length),
             );
@@ -424,10 +498,17 @@ export const proveWordRelation = (
         ...salts,
         ...foldTrees.map((tree) => tree.root),
         encodeExtension(terminal),
+        ...(publicTree
+            ? [publicTree.root, ...publicEvaluations.map(encodeExtension)]
+            : []),
     ]);
     const openings = [first, second, linear].map((tree) =>
         tree.open(requestedPositions(queries, domain.domain)),
     );
+    if (publicTree)
+        openings.push(
+            publicTree.open(requestedPositions(queries, domain.domain)),
+        );
     foldTrees.forEach((tree, index) =>
         openings.push(
             tree.open(

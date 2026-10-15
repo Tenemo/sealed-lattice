@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { encodeCandidateManifest } from '#packages/sdk/src/participant/worker/relay/candidate-codec.js';
+import { compileCommittedOfferCensus } from '#tests/committed-offer-model.js';
 import { compileContributionBodyCensus } from '#tests/contribution-body-model.js';
 import { goalThresholds } from '#tests/node/protocol/reference/product-goals.js';
 import { compilePreparationResources } from '#tests/preparation-resource-model.js';
@@ -18,6 +19,10 @@ describe('preparation public resource bounds', () => {
         (participants, options) => {
             const profile = deriveSupportedProfile(participants, options);
             const body = compileContributionBodyCensus(profile);
+            const aggregate = compileCommittedOfferCensus(profile);
+            const committedBytes =
+                body.polynomialPayloadBytes -
+                body.streamedPolynomialPayloadBytes;
             const wire = compileSetupSelectionWireCensus(participants);
             const result = compilePreparationResources(profile);
             const {
@@ -104,6 +109,58 @@ describe('preparation public resource bounds', () => {
             const certificateManifest = manifest([
                 ['certificate.bin', wire.certificateBytes],
             ]);
+            const aggregatePublications = [
+                {
+                    key: 'aggregate/' + '0'.repeat(128),
+                    bytes:
+                        aggregate.generatedAggregateBytes +
+                        aggregate.aggregateManifestBytes,
+                    manifest: manifest([
+                        ['manifest.bin', aggregate.aggregateManifestBytes],
+                        ...aggregate.committedPolynomials.map(
+                            (index) =>
+                                [
+                                    'polynomial-' +
+                                        String(index).padStart(2, '0') +
+                                        '.bin',
+                                    aggregate.generatedAggregateBytes /
+                                        BigInt(
+                                            aggregate.committedPolynomials
+                                                .length,
+                                        ),
+                                ] as const,
+                        ),
+                    ]),
+                },
+                ...Array.from({ length: selected }, (_, ordinal) => ({
+                    key:
+                        'aggregate-evaluation/' +
+                        '0'.repeat(128) +
+                        '/' +
+                        String(ordinal),
+                    bytes: aggregate.maximumEvaluationProofBytes,
+                    manifest: manifest([
+                        ['proof.bin', aggregate.maximumEvaluationProofBytes],
+                    ]),
+                })),
+            ];
+            const aggregateUploads = aggregatePublications.reduce(
+                (sum, value) => sum + value.bytes + value.manifest,
+                0n,
+            );
+            const aggregateStored = aggregatePublications.reduce(
+                (sum, value) =>
+                    sum +
+                    value.bytes +
+                    value.manifest +
+                    BigInt(value.key.length) +
+                    16n,
+                0n,
+            );
+            const aggregateRouting = aggregatePublications.reduce(
+                (sum, value) => sum + value.manifest + 28n,
+                0n,
+            );
             const sourceKeyBytes = BigInt(
                 Buffer.byteLength(
                     'contribution-' +
@@ -114,14 +171,21 @@ describe('preparation public resource bounds', () => {
             );
             expect(result.maximumCertifiedSetupBytes).toBe(
                 BigInt(selected) *
-                    (signedOffer + offerManifest + sourceKeyBytes + 16n) +
+                    (signedOffer +
+                        committedBytes +
+                        offerManifest +
+                        sourceKeyBytes +
+                        16n) +
+                    aggregateStored +
                     wire.certificateBytes +
                     certificateManifest +
                     BigInt('setup-certificate'.length) +
                     16n,
             );
             expect(result.maximumCleanTotalUploadBytes).toBe(
-                BigInt(eligible) * (signedOffer + offerManifest + 64n) +
+                BigInt(eligible) *
+                    (signedOffer + committedBytes + offerManifest + 64n) +
+                    aggregateUploads +
                     wire.selectionBodyBytes +
                     3309n +
                     selectionManifest +
@@ -143,7 +207,9 @@ describe('preparation public resource bounds', () => {
                     result.maximumPreparationRoutingBytes,
             );
             expect(result.extraAggregateReadPassBytes).toBe(
-                BigInt(selected) * body.polynomialPayloadBytes,
+                aggregate.maximumAggregateBytes +
+                    aggregate.aggregateManifestBytes +
+                    BigInt(selected) * aggregate.maximumEvaluationProofBytes,
             );
             expect(result.volatileOfferPolynomialIdentityBytes).toBe(
                 BigInt(eligible * body.polynomials.length) * 64n,
@@ -158,10 +224,12 @@ describe('preparation public resource bounds', () => {
                     wire.certificateBytes +
                     BigInt(participants) * wire.endorsementPacketBytes +
                     result.maximumPreparationRoutingBytes +
-                    result.maximumPublicationReceivedBytes,
+                    result.maximumAggregateReadBytes +
+                    result.readerPublicationReceivedBytes,
             );
             expect(result.maximumPreparationRoutingBytes).toBe(
-                BigInt(selected) * (28n + offerManifest) +
+                aggregateRouting +
+                    BigInt(selected) * (28n + offerManifest) +
                     2n * (28n + selectionManifest) +
                     BigInt(participants) * (28n + endorsementManifest) +
                     12n +
@@ -170,8 +238,13 @@ describe('preparation public resource bounds', () => {
             );
             expect(result.maximumCleanOrganizerPreparationDownloadBytes).toBe(
                 result.maximumCleanPreparationDownloadBytes +
-                    BigInt(selected) * body.polynomialPayloadBytes +
-                    BigInt(eligible) * (8n + 4n + 64n),
+                    2n * BigInt(selected) * committedBytes +
+                    aggregate.generatedAggregateBytes -
+                    aggregate.maximumAggregateBytes +
+                    result.organizerPublicationReceivedBytes -
+                    result.readerPublicationReceivedBytes +
+                    BigInt(eligible) * (8n + 4n + 64n) +
+                    result.organizerSchedule.continuationReadBytes,
             );
             expect(result.organizerDiscoveryReadBytes).toBe(
                 BigInt(eligible) * (8n + 4n + 64n),
@@ -189,10 +262,13 @@ describe('preparation public resource bounds', () => {
                 BigInt(eligible) * 64n,
             );
             expect(result.cleanParticipantPolynomialReadFloorBytes).toBe(
-                BigInt(selected) * body.polynomialPayloadBytes,
+                BigInt(selected) * body.streamedPolynomialPayloadBytes +
+                    aggregate.generatedAggregateBytes,
             );
             expect(result.cleanOrganizerPolynomialReadFloorBytes).toBe(
-                2n * BigInt(selected) * body.polynomialPayloadBytes,
+                BigInt(selected) * body.streamedPolynomialPayloadBytes +
+                    2n * BigInt(selected) * committedBytes +
+                    2n * aggregate.generatedAggregateBytes,
             );
             expect(result.completeEligiblePolynomialUploadFloorBytes).toBe(
                 BigInt(eligible) * body.polynomialPayloadBytes,

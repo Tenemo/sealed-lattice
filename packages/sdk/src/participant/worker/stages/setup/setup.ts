@@ -130,6 +130,11 @@ export const verifySelectionInputs = async (
 ) => {
     await verifySetupRoster(session, relay);
     const selection = authenticateSelection(session.context, packet, retained);
+    if (
+        session.context.module.setup_inputs_available() === 1 &&
+        (await holdsFinalAggregate(session.context))
+    )
+        return selection;
     await aggregateSelection(session.context, relay, selection);
     return selection;
 };

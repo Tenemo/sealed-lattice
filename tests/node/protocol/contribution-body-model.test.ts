@@ -67,21 +67,22 @@ describe('complete contribution body encoding', () => {
         const payloadBytes = 24n * 65536n * 109n + 20n * 65536n * 21n;
         const prefixBytes = 6n + 2n * 6n + 4n + 32n + 4n;
         // The full word proof's header is its shortest encoding.
-        const minimumProofBytes = 3936n;
+        const minimumProofBytes = 3936n + 64n + 48n * 23n * 9n;
+        const streamedBytes = 65536n * 109n + 20n * 65536n * 21n;
         expect(value.headerBytes).toBe(headerBytes);
         expect(value.sourceOpeningSaltBytes).toBe(64n);
         expect(value.polynomialPayloadBytes).toBe(payloadBytes);
         expect(value.minimumProofBytes).toBe(minimumProofBytes);
         expect(value.maximumBodyBytes).toBe(
-            headerBytes + payloadBytes + value.maximumProofBytes,
+            headerBytes + streamedBytes + value.maximumProofBytes,
         );
         expect(value.maximumBodyBytes).toBeLessThan(256n * 1024n ** 2n);
         expect(value.hashPrefixBytes).toBe(prefixBytes);
         expect(value.minimumHashInputBytes).toBe(
-            prefixBytes + headerBytes + payloadBytes + minimumProofBytes,
+            prefixBytes + headerBytes + streamedBytes + minimumProofBytes,
         );
         expect(value.maximumHashInputBytes).toBe(
-            prefixBytes + headerBytes + payloadBytes + value.maximumProofBytes,
+            prefixBytes + headerBytes + streamedBytes + value.maximumProofBytes,
         );
         expect(value.maximumHashInputBytes).toBeLessThan(1n << 32n);
         expect(value.setupContributorCount).toBe(4);

@@ -47,8 +47,9 @@ describe('instrumented participant padding boundaries', () => {
     });
     it('halts after authenticated selection readback and before any endorsement work', async () => {
         const worker = Buffer.from(`globalThis.select = async () => {
-            const publication = { finish: globalThis.readback };
+            const publication = { addBytes: async () => undefined, finish: globalThis.readback };
             const session = {}, relay = {}, retained = {};
+            await publication.addBytes('signature.bin', retained.signature);
             await publication.finish();
             await endorseSetup(session, relay, retained);
         };`);

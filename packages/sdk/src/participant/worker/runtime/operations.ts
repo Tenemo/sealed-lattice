@@ -301,8 +301,14 @@ export const executeOperation = async (
         }
         case 'select-setup': {
             const session = await resumeParticipant(profileContext(), root);
-            await selectSetup(session, relay);
+            const completed = await selectSetup(session, relay);
             root = session.root;
+            if (!completed)
+                return {
+                    status: 'pending',
+                    cause: 'work',
+                    detail: 'Setup work is saved. Repeat setup preparation to continue.',
+                };
             break;
         }
         case 'endorse-setup': {

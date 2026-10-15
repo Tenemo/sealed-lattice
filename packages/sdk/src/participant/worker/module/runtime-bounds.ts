@@ -107,6 +107,7 @@ export type ParticipantProfile = Readonly<{
         statementBytes: number;
         bodyHeaderBytes: number;
         proofHeaderBytes: number;
+        committedPolynomials: readonly number[];
         minimumProofBytes: number;
         maximumProofBytes: number;
         maximumStateBytes: number;
@@ -129,6 +130,16 @@ export type ParticipantProfile = Readonly<{
         checkpointLengths: readonly number[];
     }>;
     preparation: Readonly<{
+        publishedAggregate: Readonly<{
+            limbs: number;
+            generatedLimbBytes: number;
+            maximumLimbBytes: number;
+            manifestBytes: number;
+            proofHeaderBytes: number;
+            maximumProofBytes: number;
+            maximumCollectedReferenceBytes: number;
+            retainedDataBytes: number;
+        }>;
         selectionBodyBytes: number;
         endorsementBodyBytes: number;
         selectionReferenceBytes: number;
@@ -328,6 +339,17 @@ const readModuleProfile = (
             bytes: take(),
             coefficients: take(),
         })),
+        committedPolynomials: list(take),
+        publishedAggregate: {
+            limbs: take(),
+            generatedLimbBytes: take(),
+            maximumLimbBytes: take(),
+            manifestBytes: take(),
+            proofHeaderBytes: take(),
+            maximumProofBytes: take(),
+            maximumCollectedReferenceBytes: take(),
+            retainedDataBytes: take(),
+        },
     };
     finish();
     if (
@@ -423,6 +445,8 @@ const contributionBounds = (
         firstOracleColumns: profile.firstOracleColumns,
         statementBytes: profile.statementBytes,
         ...contribution,
+        proofHeaderBytes: profile.minimumProofBytes,
+        committedPolynomials: profile.committedPolynomials,
         minimumProofBytes: profile.minimumProofBytes,
         maximumProofBytes: profile.maximumProofBytes,
         maximumCheckpointHeaderBytes: profile.maximumCheckpointHeaderBytes,
@@ -622,6 +646,7 @@ const profileBounds = (
     const setupCertificate = profile.certificateBytes;
     const preparation = {
         ...moduleLimits.preparation,
+        publishedAggregate: profile.publishedAggregate,
         selectionBodyBytes: profile.selectionBodyBytes,
         selectionReferenceBytes: profile.retainedReferenceBytes,
         certificateBytes: profile.certificateBytes,

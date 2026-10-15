@@ -45,7 +45,7 @@ describe('full word-proof layout and theorem operands', () => {
         const layout = compileFullWordProofLayout(completionProfile());
         expect(layout.foldCount).toBe(17);
         expect(layout.headerBytes).toBe(
-            64n + 192n + 48n + 20n * 128n + 16n * 64n + 48n,
+            64n + 192n + 48n + 20n * 128n + 16n * 64n + 48n + 64n + 48n * 207n,
         );
         expect(layout.firstWidth).toBe(356n * 16n + 48n);
         expect(layout.secondWidth).toBe(377n * 48n);
@@ -63,9 +63,9 @@ describe('full word-proof layout and theorem operands', () => {
         const census = compileWideChallengeCompilerCensus(completionProfile());
         expect(census.lookupEntryCount).toBe(375n * 65536n);
         expect(census.lookupRootDegree).toBe(376n * 65536n - 1n);
-        expect(census.correlatedRowCount).toBe(2n * (734n + 413n));
+        expect(census.correlatedRowCount).toBe(2n * (734n + 413n + 2n * 207n));
         expect(census.batchingAndFirstFoldNumerator).toBe(
-            2294n * 262144n + (17n ** 7n * 262144n ** 2n) / 512n,
+            (2294n + 4n * 207n) * 262144n + (17n ** 7n * 262144n ** 2n) / 512n,
         );
         expect(census.ordinaryAlgebraicNumerator).toBe(
             census.batchingAndFirstFoldNumerator,

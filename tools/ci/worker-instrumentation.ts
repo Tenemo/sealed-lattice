@@ -19,7 +19,9 @@ const checkpoints = {
     },
     'selection-readback': {
         statement: statement('await publication.finish();'),
-        next: statement('await endorseSetup(session, relay, retained);'),
+        previous: statement(
+            "await publication.addBytes('signature.bin', retained.signature);",
+        ),
         description: 'one authenticated selection-readback continuation',
     },
     'proof-slot-store': {
@@ -61,14 +63,17 @@ const sameSyntax = (left: ts.Node, right: ts.Node): boolean => {
     );
 };
 
-const nextStatement = (node: ts.Node): ts.Statement | undefined => {
+const adjacentStatement = (
+    node: ts.Node,
+    offset: number,
+): ts.Statement | undefined => {
     let current = node;
     while (current.parent !== undefined && !ts.isBlock(current.parent))
         current = current.parent;
     if (current.parent === undefined) return undefined;
     const block = current.parent;
     const index = block.statements.findIndex((child) => child === current);
-    return block.statements[index + 1];
+    return block.statements[index + offset];
 };
 
 // Only development tooling imports this module. It edits exactly one
@@ -94,10 +99,14 @@ export const rewriteWorkerCheckpoint = (
                 ? (selected.statement as ts.ExpressionStatement).expression
                 : selected.statement;
         if (sameSyntax(node, template)) {
-            const next = nextStatement(node);
+            const next = adjacentStatement(node, 1);
+            const previous = adjacentStatement(node, -1);
             if (
-                !('next' in selected) ||
-                (next !== undefined && sameSyntax(next, selected.next))
+                (!('next' in selected) ||
+                    (next !== undefined && sameSyntax(next, selected.next))) &&
+                (!('previous' in selected) ||
+                    (previous !== undefined &&
+                        sameSyntax(previous, selected.previous)))
             )
                 matches.push(node);
         }

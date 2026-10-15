@@ -343,7 +343,10 @@ dependencies = [
  "participant-module",
  "protocol-foundations",
  "setup-aggregate",
+ "statement-stream",
  "supported-profile",
+ "word-proof",
+ "word-verifier",
  "zeroize",
 ]
 
@@ -517,6 +520,7 @@ dependencies = [
  "setup-witness",
  "statement-stream",
  "supported-profile",
+ "word-proof",
  "word-verifier",
 ]
 

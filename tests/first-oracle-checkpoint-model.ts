@@ -61,12 +61,13 @@ export const compileFirstOracleCheckpointCensus = (
             0n,
         );
     // Fixed fields: participant and option counts, column, role length,
-    // statement digest, statement header and complete original recipient-key
+    // statement digest, public oracle root, statement header and complete original recipient-key
     // hash list. Only the role payload varies.
     const fixedHeaderBytes =
         2n +
         4n +
         2n +
+        64n +
         64n +
         relation.expandedStatementHeaderByteLength +
         2n +

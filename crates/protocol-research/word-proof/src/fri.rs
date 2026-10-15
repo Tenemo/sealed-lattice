@@ -50,6 +50,15 @@ impl Fri {
         coefficients: Vec<Element>,
         transcript: &mut Transcript,
     ) -> Self {
+        Self::with_first_stage(role, oracles, coefficients, transcript, 3)
+    }
+    pub fn with_first_stage(
+        role: &[u8],
+        oracles: usize,
+        coefficients: Vec<Element>,
+        transcript: &mut Transcript,
+        first_stage: usize,
+    ) -> Self {
         let mut coefficients = Zeroizing::new(coefficients);
         assert_eq!(coefficients.len(), MAXIMUM_DEGREE + 1);
         let mut length = EVALUATION_DOMAIN_SIZE;
@@ -86,7 +95,7 @@ impl Fri {
                     power = base::multiply(power, coset);
                 }
                 Transform::cached(SYSTEMATIC).extension(&mut values, false);
-                let mut tree = Tree::new(role, 3 + round, length, 48);
+                let mut tree = Tree::new(role, first_stage + round, length, 48);
                 // Openings read the layer's values again.
                 tree.forget_leaves();
                 tree.hash_rows(|index, rows| rows.extend(field::encode(values[index])));

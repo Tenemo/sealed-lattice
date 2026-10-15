@@ -13,3 +13,4 @@ setup-witness = { path = "../setup-witness" }
 statement-stream = { path = "../statement-stream" }
 supported-profile = { path = "../supported-profile" }
 word-verifier = { path = "../word-verifier" }
+word-proof = { path = "../word-proof" }

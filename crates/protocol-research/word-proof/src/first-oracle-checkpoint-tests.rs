@@ -42,6 +42,7 @@ fn restored_checkpoints_commit_the_same_first_oracle() {
         profile,
         b"checkpoint-test",
         [7; 64],
+        [11; 64],
         profile.setup_statement_header(),
         columns(&relation),
     )

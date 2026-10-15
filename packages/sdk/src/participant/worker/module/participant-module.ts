@@ -138,6 +138,10 @@ export const moduleArity = {
     setup_output_pointer: 0,
     setup_output_length: 0,
     setup_offer_begin: 1,
+    setup_public_work: 4,
+    setup_public_output_pointer: 0,
+    setup_public_output_length: 0,
+    setup_inputs_available: 0,
     setup_offer_polynomial: 3,
     setup_offer_proof: 2,
     setup_offer_finish: 0,
@@ -327,6 +331,15 @@ export type ParticipantModule = Readonly<{
     setup_output_pointer: () => number;
     setup_output_length: () => number;
     setup_offer_begin: (length: number) => number;
+    setup_public_work: (
+        operation: number,
+        index: number,
+        offset: number,
+        length: number,
+    ) => number;
+    setup_public_output_pointer: () => number;
+    setup_public_output_length: () => number;
+    setup_inputs_available: () => number;
     setup_offer_polynomial: (
         index: number,
         offset: number,

@@ -145,6 +145,19 @@ pub fn profile_bounds(profile: Profile) -> Vec<u64> {
             profile.family_degree(family),
         ]);
     }
+    let committed = profile.committed_polynomials();
+    bounds.push(committed.len());
+    bounds.extend(committed);
+    bounds.extend([
+        profile.fhe_limbs(),
+        setup_aggregate::limb_sum::generated_limb_bytes(profile),
+        setup_aggregate::limb_sum::maximum_limb_bytes(profile),
+        setup_aggregate::published_aggregate::manifest_bytes(profile),
+        supported_profile::relation::EVALUATION_HEADER_BYTES,
+        supported_profile::relation::maximum_evaluation_proof_bytes(profile),
+        setup_aggregate::aggregate_publisher::maximum_collected_reference_bytes(profile),
+        setup_aggregate::published_aggregate::retained_data_bytes(profile),
+    ]);
     bounds.into_iter().map(|value| value as u64).collect()
 }
 

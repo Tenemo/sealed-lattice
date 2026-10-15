@@ -81,13 +81,24 @@ export const compileContributionBodyCensus = (profile: SupportedProfile) => {
         (total, polynomial) => total + polynomial.bytes,
         0n,
     );
+    const streamedPolynomials = polynomials.filter(
+        (polynomial) =>
+            polynomial.expandedIndex === 1 ||
+            polynomial.expandedIndex >= sharingStart,
+    );
+    const streamedPolynomialPayloadBytes = streamedPolynomials.reduce(
+        (sum, polynomial) => sum + polynomial.bytes,
+        0n,
+    );
     const maximumBodyBytes =
-        headerBytes + polynomialPayloadBytes + proof.maximumMultiproofBytes;
+        headerBytes +
+        streamedPolynomialPayloadBytes +
+        proof.maximumMultiproofBytes;
     const hashPrefixBytes = 6n + 2n * 6n + 4n + BigInt(bodyDomain.length) + 4n;
     const minimumHashInputBytes =
         hashPrefixBytes +
         headerBytes +
-        polynomialPayloadBytes +
+        streamedPolynomialPayloadBytes +
         proof.headerBytes;
     const maximumHashInputBytes = hashPrefixBytes + maximumBodyBytes;
     const enclosingExponent = (value: bigint) => {
@@ -100,6 +111,8 @@ export const compileContributionBodyCensus = (profile: SupportedProfile) => {
         setupContributorCount: profile.setupContributorCount,
         eligibleContributorCount: selection.eligibleContributorCount,
         polynomials,
+        streamedPolynomials,
+        streamedPolynomialPayloadBytes,
         headerBytes,
         polynomialPayloadBytes,
         minimumProofBytes: proof.headerBytes,

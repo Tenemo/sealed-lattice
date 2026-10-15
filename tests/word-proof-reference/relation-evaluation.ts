@@ -176,7 +176,7 @@ export const combinedValue = (at: PointContext, values: PointValues) => {
     );
     combined = add(
         combined,
-        multiply(weight(shape.oracles - 2), tableResidual),
+        multiply(weight(shape.wordOracles - 2), tableResidual),
     );
     // The affine remainder (c*(F + lookup sum) + G - claimed/H - Z_H*h)/X,
     // with the quotient h opened in the third tree.
@@ -203,7 +203,7 @@ export const combinedValue = (at: PointContext, values: PointValues) => {
     );
     combined = add(
         combined,
-        multiply(weight(shape.oracles - 1), scale(numerator, at.inverseX)),
+        multiply(weight(shape.wordOracles - 1), scale(numerator, at.inverseX)),
     );
     return add(combined, multiply(weight(shape.original - 1), values.quotient));
 };

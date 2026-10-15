@@ -17,6 +17,10 @@ protocol_foundations::operation_codes! {
         RestoreProposal = 3,
         RestoreEndorsement = 4,
         EndorsementBody = 5,
+        RetainCollection = 6,
+        RestoreCollection = 7,
+        RetainAggregateData = 8,
+        RestoreAggregateData = 9,
     }
 }
 fn selection_operation(
@@ -37,6 +41,44 @@ fn selection_operation(
         return Err(Refusal::Context);
     }
     match operation {
+        Some(
+            SelectionOperation::RetainAggregateData | SelectionOperation::RestoreAggregateData,
+        ) => {
+            let credential = &state
+                .enrollment
+                .as_ref()
+                .ok_or(Refusal::Context)?
+                .credential;
+            state.participant_output = if operation == Some(SelectionOperation::RetainAggregateData)
+            {
+                if !input.is_empty() {
+                    return Err(Refusal::Shape);
+                }
+                super::setup_verification::retain_aggregate_data(credential)
+                    .map_err(|_| Refusal::Context)?
+            } else {
+                super::setup_verification::restore_aggregate_data(credential, &input)
+                    .map_err(|_| Refusal::Context)?;
+                Vec::new()
+            };
+        }
+        Some(SelectionOperation::RetainCollection | SelectionOperation::RestoreCollection) => {
+            let credential = &state
+                .enrollment
+                .as_ref()
+                .ok_or(Refusal::Context)?
+                .credential;
+            state.participant_output = if operation == Some(SelectionOperation::RetainCollection) {
+                if !input.is_empty() {
+                    return Err(Refusal::Shape);
+                }
+                super::setup_verification::retain_collection(credential)
+                    .map_err(|_| Refusal::Context)?
+            } else {
+                super::setup_verification::restore_collection(credential, &input)
+                    .map_err(|_| Refusal::Context)?
+            };
+        }
         Some(SelectionOperation::UnsignedBody) => {
             if !input.is_empty() {
                 return Err(Refusal::Shape);

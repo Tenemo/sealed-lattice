@@ -2,6 +2,8 @@
 
 pub mod affine;
 pub mod coefficient;
+#[path = "committed-polynomial.rs"]
+pub mod committed_polynomial;
 mod jobs;
 pub mod negacyclic;
 #[path = "proof-field.rs"]

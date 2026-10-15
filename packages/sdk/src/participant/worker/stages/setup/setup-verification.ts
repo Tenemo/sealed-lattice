@@ -43,12 +43,14 @@ import {
     validRegistrationBodyDigests,
 } from '../roster/roster.js';
 
+import { verifyPublishedAggregate } from './published-aggregate.js';
 import {
     aggregateCapacity,
     openSetupCache,
     readCachedAggregateChunk,
     writeCache,
 } from './setup-cache.js';
+import { publicOperation, publicWork } from './setup-public-work.js';
 
 // The setup verification. The owning Rust verifiers authenticate the
 // roster, the complete selected offers, the organizer's proposal and the
@@ -60,7 +62,7 @@ export type SelectedOffer = Readonly<{
     identity: Uint8Array;
 }>;
 
-type SetupSelection = Readonly<{
+export type SetupSelection = Readonly<{
     identity: Uint8Array;
     offers: readonly SelectedOffer[];
 }>;
@@ -191,6 +193,18 @@ const offerAvailable = (
     );
 };
 
+const selectedOfferAvailable = (
+    context: PublicProfileContext,
+    offer: SelectedOffer,
+) =>
+    offerAvailable(context, offer) ||
+    publicWork(
+        context,
+        publicOperation.compactAvailable,
+        offer.identity,
+        offer.position,
+    )[0] === 1;
+
 // Both discovery and selected aggregation authenticate the same complete
 // envelope and lookahead before reading any polynomial under its named route.
 const beginOffer = async (
@@ -281,17 +295,24 @@ export const verifyOffer = async (
     context: PublicProfileContext,
     relay: PublicRelay,
     offer: SelectedOffer,
+    capture?: (
+        index: number,
+        offset: number,
+        bytes: Uint8Array,
+    ) => Promise<void>,
 ) => {
     const { module, profile } = context;
-    if (offerAvailable(context, offer)) return;
+    const known = offerAvailable(context, offer);
+    if (known && capture === undefined) return;
     await findCandidate(relay, offerKey(offer), async (candidate) => {
-        await beginOffer(
-            context,
-            relay,
-            offer,
-            candidate,
-            module.setup_offer_begin,
-        );
+        if (!known)
+            await beginOffer(
+                context,
+                relay,
+                offer,
+                candidate,
+                module.setup_offer_begin,
+            );
         const bounds = profile.contribution;
         for (const polynomial of bounds.polynomials) {
             let offset = 0;
@@ -300,9 +321,10 @@ export const verifyOffer = async (
                 candidate,
                 polynomialFile(polynomial.expandedIndex),
                 polynomial.bytes,
-                (bytes) => {
-                    writeSetupInput(module, bytes);
+                async (bytes) => {
+                    if (!known) writeSetupInput(module, bytes);
                     if (
+                        !known &&
                         module.setup_offer_polynomial(
                             polynomial.expandedIndex,
                             offset,
@@ -312,6 +334,7 @@ export const verifyOffer = async (
                         throw new PublicInputFailure(
                             'A contribution offer polynomial was refused.',
                         );
+                    await capture?.(polynomial.expandedIndex, offset, bytes);
                     offset += bytes.length;
                 },
             );
@@ -320,13 +343,14 @@ export const verifyOffer = async (
                     'A contribution offer polynomial is incomplete.',
                 );
         }
-        await streamOfferProof(
-            context,
-            relay,
-            candidate,
-            module.setup_offer_proof,
-        );
-        if (module.setup_offer_finish() !== 0)
+        if (!known)
+            await streamOfferProof(
+                context,
+                relay,
+                candidate,
+                module.setup_offer_proof,
+            );
+        if (!known && module.setup_offer_finish() !== 0)
             throw new PublicInputFailure('A contribution offer was refused.');
         if (!offerAvailable(context, offer))
             throw new PublicInputFailure(
@@ -345,7 +369,7 @@ const aggregateOffer = async (
     const { module, profile } = context;
     const bounds = profile.contribution;
     const accepted = module.setup_accepted();
-    const verified = offerAvailable(context, offer);
+    const verified = selectedOfferAvailable(context, offer);
     if (verified) {
         if (module.setup_begin_selected_offer(offer.position) !== 0)
             throw new PublicInputFailure(
@@ -363,7 +387,9 @@ const aggregateOffer = async (
     // One incoming chunk and one previous/output chunk suffice. Replacing
     // each ordinal in one transaction leaves only disposable mixed scratch
     // until the complete offer and every aggregate digest have verified.
-    for (const polynomial of bounds.polynomials) {
+    for (const polynomial of bounds.polynomials.filter(
+        (entry) => !bounds.committedPolynomials.includes(entry.expandedIndex),
+    )) {
         const capacity = aggregateCapacity(context, polynomial);
         const pending = new Uint8Array(capacity);
         let used = 0;
@@ -452,7 +478,7 @@ const aggregateOffer = async (
         throw new PublicInputFailure(
             'A selected contribution aggregate was refused.',
         );
-    if (!offerAvailable(context, offer))
+    if (!selectedOfferAvailable(context, offer))
         throw new PublicInputFailure(
             'The selected offer differs from its advertised identity.',
         );
@@ -510,6 +536,12 @@ export const aggregateSelection = async (
                     throw new PublicInputFailure(
                         'The selected aggregate was refused.',
                     );
+                await verifyPublishedAggregate(
+                    context,
+                    relay,
+                    selection,
+                    cache,
+                );
                 return;
             } catch (error) {
                 // The cache may now contain chunks from two different prefixes.

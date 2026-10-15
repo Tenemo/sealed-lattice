@@ -36,11 +36,14 @@ const openRelayBudget = () => {
     };
 };
 let relayBudget = openRelayBudget();
+let downloadedBytes = 0;
+export const relayDownloadedBytes = () => downloadedBytes;
 
 // Begins an operation's relay budget; the worker calls it as each operation
 // starts.
 export const beginRelayBudget = () => {
     relayBudget = openRelayBudget();
+    downloadedBytes = 0;
 };
 
 // Runs one request's waits on the relay: none outlasts a minute, and
@@ -109,6 +112,7 @@ export const streamBounded = async (
                 );
             }
             if (next.done) break;
+            downloadedBytes += next.value.length;
             if (next.value.length > maximum - total)
                 throw new PublicInputFailure(
                     'A public record exceeds its bound.',

@@ -1,4 +1,8 @@
 import { compileBallotEncryptionRelationCensus } from '#tests/ballot-encryption-relation-model.js';
+import {
+    committedOfferColumns,
+    compileCommittedOfferCensus,
+} from '#tests/committed-offer-model.js';
 import { compileCommonAgreementDegreeCensus } from '#tests/common-agreement-degree-model.js';
 import { compileLinkedReleaseRelationCensus } from '#tests/linked-release-relation-model.js';
 import { deriveSetupContributionShape } from '#tests/setup-relation/shape.js';
@@ -160,18 +164,21 @@ const proofEvents = (
         zeroProducts: number;
         affineRows: bigint;
     }>,
+    publicColumns = 0,
 ) => ({
     name,
     originalOracles:
         relation.wordColumns +
         relation.booleanColumns +
         relation.lookupEntries +
-        4,
+        4 +
+        publicColumns,
     virtualOracles:
         relation.booleanColumns +
         relation.zeroProducts +
         relation.lookupEntries +
-        2,
+        2 +
+        publicColumns,
     lookupEntries: relation.lookupEntries,
     affineRows: relation.affineRows,
 });
@@ -181,7 +188,11 @@ const activeProofEvents = (profile: SupportedProfile) => {
     const ballot = compileBallotEncryptionRelationCensus(profile);
     const release = compileLinkedReleaseRelationCensus(profile);
     return [
-        proofEvents('setup', { ...setup, zeroProducts: setup.disjointPairs }),
+        proofEvents(
+            'setup',
+            { ...setup, zeroProducts: setup.disjointPairs },
+            committedOfferColumns(profile),
+        ),
         proofEvents('ballot', {
             ...ballot,
             zeroProducts: ballot.additionalQuadraticConstraints,
@@ -249,7 +260,13 @@ export const compileProofRoundErrorCensus = (profile: SupportedProfile) => {
         const batchingNumerator = 2n * BigInt(oracles) * domain;
         const uniformAlgebraic = largestFraction([
             { numerator: lookupRootDegree, denominator: lookupChallengeSpace },
-            { numerator: role.affineRows + 1n, denominator: fieldSize },
+            role.name === 'setup'
+                ? {
+                      numerator:
+                          role.affineRows * fieldSize + lookupChallengeSpace,
+                      denominator: lookupChallengeSpace * fieldSize,
+                  }
+                : { numerator: role.affineRows + 1n, denominator: fieldSize },
             {
                 numerator:
                     batchingNumerator * weightedFri.upper.denominator +
@@ -283,15 +300,18 @@ export const compileProofRoundErrorCensus = (profile: SupportedProfile) => {
             roundError: largestFraction([queryError, sampledAlgebraic]),
         };
     });
+    const evaluation = compileCommittedOfferCensus(profile);
     return {
         prime,
         fieldSize,
         weightedFri,
         queryError,
         roles,
-        maximumRoundError: largestFraction(
-            roles.map((role) => role.roundError),
-        ),
+        evaluation,
+        maximumRoundError: largestFraction([
+            ...roles.map((role) => role.roundError),
+            evaluation.roundError,
+        ]),
     };
 };
 
@@ -364,10 +384,14 @@ export const compileWideChallengeCompilerCensus = (
     const agreement = compileCommonAgreementDegreeCensus();
     const queryCount = agreement.queries;
     const relation = deriveSetupContributionShape(profile);
-    const { originalOracles, virtualOracles } = proofEvents('setup', {
-        ...relation,
-        zeroProducts: relation.disjointPairs,
-    });
+    const { originalOracles, virtualOracles } = proofEvents(
+        'setup',
+        {
+            ...relation,
+            zeroProducts: relation.disjointPairs,
+        },
+        committedOfferColumns(profile),
+    );
     const ballot = compileBallotEncryptionRelationCensus(profile);
     const release = compileLinkedReleaseRelationCensus(profile);
     for (const role of [

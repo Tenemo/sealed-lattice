@@ -97,7 +97,10 @@ export const compileOrdinaryWorkflowResources = (
         // confirmation, selection/endorsement, activation, ballot, two close
         // calls, target, release and result. Each offered contribution adds
         // its call; the organizer additionally republishes the signed roster.
-        const workerInvocations = 12n * n + offers + 1n;
+        const workerInvocations =
+            12n * n +
+            offers +
+            BigInt(preparation.organizerSchedule.calls.length);
         return {
             name,
             offers,
@@ -139,6 +142,7 @@ export const compileOrdinaryWorkflowResources = (
         transport.publications
             .filter((value) => value.key.startsWith('contribution-'))
             .reduce((total, value) => total + routing(value.key), 0n) +
+        preparation.aggregateRoutingBytes +
         routing('close-proposal') +
         voteRoutingBytes +
         releaseRoutingBytes;
@@ -149,6 +153,7 @@ export const compileOrdinaryWorkflowResources = (
         registrationCorpus +
         selection.certificateBytes +
         preparation.maximumOfferVerificationReadBytes +
+        preparation.maximumAggregateReadBytes +
         close.intentPacketBytes +
         close.proposalPacketBytes +
         q * response +

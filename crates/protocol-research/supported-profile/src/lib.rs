@@ -552,6 +552,29 @@ impl Profile {
         }
         polynomials
     }
+    /// The FHE key polynomials carried by the public oracle. The first
+    /// encryption-key coordinate stays in the streamed registration opening.
+    pub fn committed_polynomials(self) -> Vec<usize> {
+        self.contribution_body_polynomials()
+            .into_iter()
+            .filter(|index| {
+                *index < self.share_common_polynomial() && *index != self.fhe_polynomial(0, 1)
+            })
+            .collect()
+    }
+
+    pub fn committed_columns(self) -> usize {
+        self.committed_polynomials().len() * self.fhe_limbs()
+    }
+    /// The registration-bound coordinate and encrypted shares remain in
+    /// the offer body; the other key polynomials are published separately.
+    pub fn streamed_contribution_polynomials(self) -> Vec<usize> {
+        let committed = self.committed_polynomials();
+        self.contribution_body_polynomials()
+            .into_iter()
+            .filter(|index| !committed.contains(index))
+            .collect()
+    }
     pub fn setup_family(self, index: usize) -> Option<Family> {
         if index < self.share_common_polynomial() {
             Some(Family::Fhe)

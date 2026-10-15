@@ -60,7 +60,9 @@ const indexRecords = (
         if (
             parsed === undefined
                 ? !isRawStatementInput(record.input)
-                : honestOwners.has(parsed.owner)
+                : honestOwners.has(parsed.owner) &&
+                  parsed.family !== 'public-leaf' &&
+                  parsed.family !== 'public-node'
         )
             continue;
         if (record.output.length < tagBytes)
@@ -197,7 +199,11 @@ export const extractRawProofPrefix = (
             return undefined;
         const parts = response.parsed.fields.slice(3);
         const scalar =
-            round === 2 ? parts[1] : round === folds + 3 ? parts[0] : undefined;
+            round === 2 || (round === 3 && relation.publicColumns > 0)
+                ? parts[1]
+                : round === folds + 3
+                  ? parts[0]
+                  : undefined;
         if (scalar !== undefined && !canonicalFieldWords(scalar))
             return undefined;
         messages.unshift(previousMessage);
@@ -210,11 +216,13 @@ export const extractRawProofPrefix = (
     // Reusing identical raw tree inputs across contexts is intentional.
     const oracles = responseParts
         .filter((_, stage) => stage < folds + 2)
-        .map((parts, stage) => {
+        .map((parts, round) => {
+            const stage =
+                round + Number(round >= 3 && relation.publicColumns > 0);
             const length =
-                stage < 3
+                round < 3
                     ? agreement.domainSize
-                    : agreement.domainSize / 2 ** (stage - 2);
+                    : agreement.domainSize / 2 ** (round - 2);
             const width = Number(
                 stage === 0
                     ? relation.firstWidth
@@ -261,6 +269,50 @@ export const extractRawProofPrefix = (
                 },
             };
         });
+    if (relation.publicColumns > 0) {
+        const root = statement.subarray(-64);
+        const width = 16 * relation.publicColumns;
+        oracles.splice(3, 0, {
+            stage: 3,
+            length: agreement.domainSize,
+            width,
+            root,
+            leaf: (position: number) => {
+                if (
+                    !Number.isSafeInteger(position) ||
+                    position < 0 ||
+                    position >= agreement.domainSize
+                )
+                    return undefined;
+                let tag = root;
+                for (
+                    let level = Math.log2(agreement.domainSize);
+                    level >= 1;
+                    level--
+                ) {
+                    const node = find(query.role, tag)?.parsed;
+                    if (
+                        node?.family !== 'public-node' ||
+                        node.fields[0].readUInt32LE() !== level
+                    )
+                        return undefined;
+                    tag =
+                        node.fields[
+                            1 + (Math.floor(position / 2 ** (level - 1)) % 2)
+                        ];
+                }
+                const leaf = find(query.role, tag)?.parsed;
+                if (
+                    leaf?.family !== 'public-leaf' ||
+                    leaf.fields[0].readUInt32LE() !== position ||
+                    leaf.fields[1].length !== width ||
+                    !canonicalFieldWords(leaf.fields[1])
+                )
+                    return undefined;
+                return leaf.fields[1];
+            },
+        });
+    }
     return {
         role: query.role,
         context: context.input,

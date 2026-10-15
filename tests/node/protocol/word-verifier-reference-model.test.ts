@@ -8,7 +8,12 @@ import { compileSetupContributionColumnLayout } from '#tests/setup-relation/shap
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
 import { deriveSupportedProfile } from '#tests/supported-profile-model.js';
 import {
+    merkleTree,
+    encodeBase,
+} from '#tests/word-proof-reference/commitments.js';
+import {
     evaluateSystematicColumns,
+    evaluateOnCoset,
     type Extension,
     lookupTableCoefficients,
     wordFieldArithmetic as arithmetic,
@@ -258,6 +263,115 @@ const littleEndianPrime = () => {
 };
 
 describe('reference word verifier', () => {
+    it('checks degree-bounded public columns and refuses a freshly proved false evaluation', () => {
+        const publicPolynomials = [
+            Array.from({ length: systematic }, (_, index) => BigInt(index % 7)),
+            [prime - 3n, 5n, 9n],
+        ];
+        const values = publicPolynomials.map((column) =>
+            evaluateOnCoset(column, domain),
+        );
+        const tree = merkleTree(
+            role,
+            3,
+            Array.from({ length: domain.domain }, (_, position) =>
+                Buffer.concat(
+                    values.map((column) => encodeBase(column[position])),
+                ),
+            ),
+            [],
+            true,
+        );
+        const publicRelation = {
+            ...relation,
+            publicColumns: publicPolynomials.length,
+            messageBytes:
+                relation.messageBytes + 384 * publicPolynomials.length,
+        };
+        const toy = toyWitness(19);
+        const plain = encodeStatement(toy);
+        const statement = Buffer.concat([plain, tree.root]);
+        const digest = createHash('sha3-512').update(statement).digest();
+        const openStatement: WordProofInput['openStatement'] = (
+            expectedDigest,
+            affine,
+            positions,
+            publicRoot,
+        ) => {
+            const received: Buffer[] = [];
+            return {
+                push: (bytes) => {
+                    received.push(Buffer.from(bytes));
+                    return true;
+                },
+                finish: () => {
+                    const bytes = Buffer.concat(received);
+                    if (
+                        !publicRoot ||
+                        bytes.length !== statementBytes + 64 ||
+                        !bytes.subarray(statementBytes).equals(publicRoot) ||
+                        !createHash('sha3-512')
+                            .update(bytes)
+                            .digest()
+                            .equals(expectedDigest)
+                    )
+                        return undefined;
+                    const parser = toyParser(
+                        createHash('sha3-512')
+                            .update(bytes.subarray(0, statementBytes))
+                            .digest(),
+                        affine,
+                        positions,
+                    );
+                    if (!parser.push(bytes.subarray(0, statementBytes)))
+                        return undefined;
+                    return parser.finish();
+                },
+            };
+        };
+        for (const mode of ['honest', 'false-public-evaluation'] as const) {
+            const proof = proveWordRelation({
+                relation: publicRelation,
+                domain,
+                role,
+                statement: {
+                    bytes: [statement],
+                    operator: (affine) =>
+                        toyOperator(affine, toy.targets, toy.support),
+                },
+                statementDigest: digest,
+                columns: toy.columns,
+                publicPolynomials,
+                seed: Buffer.from('public-column-reference'),
+                mode,
+            });
+            const input = {
+                relation: publicRelation,
+                domain,
+                role,
+                header: proof.header,
+                proof: proof.proof,
+                statement: chunks(statement, 53),
+                openStatement,
+            };
+            expect(verifyWordProof(input).accepted).toBe(mode === 'honest');
+            expect(
+                verifyWordProof({
+                    ...input,
+                    header: changed(proof.header, (bytes) => {
+                        bytes[domain.headerBytes] ^= 1;
+                    }),
+                }).accepted,
+            ).toBe(false);
+            expect(
+                verifyWordProof({
+                    ...input,
+                    proof: proof.proof.subarray(0, proof.proof.length - 1),
+                }).accepted,
+            ).toBe(false);
+        }
+    });
+
     it('derives the production domain from the census and refuses unsupported domains', () => {
         expect(productionWordProofDomain()).toEqual({
             systematic: 65536,

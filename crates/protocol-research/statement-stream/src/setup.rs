@@ -767,7 +767,14 @@ pub struct SetupStatementStream {
     polynomial: usize,
     records: Option<PolynomialRecords>,
     accumulator: Option<Accumulator>,
+    committed: Option<CommittedStatement>,
     failed: bool,
+}
+struct CommittedStatement {
+    root: [u8; 64],
+    evaluations: Vec<Element>,
+    polynomials: Vec<usize>,
+    next: usize,
 }
 impl SetupStatementStream {
     pub fn new(
@@ -777,6 +784,35 @@ impl SetupStatementStream {
         indices: &[u32],
     ) -> Result<Self, Refusal> {
         Self::with_layout(Layout::full(profile), expected_digest, alpha, indices)
+    }
+    /// The public key columns enter the statement through their root and
+    /// the evaluations that the same proof's degree test verifies.
+    pub fn committed(
+        profile: Profile,
+        expected_digest: [u8; 64],
+        alpha: Element,
+        indices: &[u32],
+        root: [u8; 64],
+        evaluations: &[Element],
+    ) -> Result<Self, Refusal> {
+        if evaluations.len() != profile.committed_columns()
+            || evaluations.iter().flatten().any(|value| *value >= MODULUS)
+        {
+            return Err(Refusal::Parameters);
+        }
+        let mut stream = Self::new(profile, expected_digest, alpha, indices)?;
+        let polynomials = profile.committed_polynomials();
+        stream.encoded_length -= polynomials
+            .iter()
+            .map(|index| profile.setup_polynomial_bytes(*index).unwrap())
+            .sum::<usize>();
+        stream.committed = Some(CommittedStatement {
+            root,
+            evaluations: evaluations.to_vec(),
+            polynomials,
+            next: 0,
+        });
+        Ok(stream)
     }
     fn with_layout(
         layout: Layout,
@@ -801,6 +837,7 @@ impl SetupStatementStream {
             polynomial: 0,
             records: None,
             accumulator: None,
+            committed: None,
             failed: false,
         })
     }
@@ -837,6 +874,7 @@ impl SetupStatementStream {
                 return Err(Refusal::Parameters);
             }
             self.accumulator = Some(Accumulator::new(self.layout, self.alpha, &self.indices)?);
+            self.committed_values()?;
         }
         while !bytes.is_empty() {
             let (family, degree) = self
@@ -863,11 +901,36 @@ impl SetupStatementStream {
             if records.remaining() == 0 {
                 self.records = None;
                 self.polynomial += 1;
+                self.committed_values()?;
             }
         }
         Ok(())
     }
-    pub fn finish(self) -> Result<StatementOutput, Refusal> {
+    fn committed_values(&mut self) -> Result<(), Refusal> {
+        let Some(committed) = &mut self.committed else {
+            return Ok(());
+        };
+        while committed.polynomials.get(committed.next) == Some(&self.polynomial) {
+            let accumulator = self.accumulator.as_mut().ok_or(Refusal::Incomplete)?;
+            accumulator.settle()?;
+            let limbs = self.layout.profile.fhe_limbs();
+            let limb_weight = power(self.alpha, self.layout.degree);
+            let value = committed.evaluations[committed.next * limbs..(committed.next + 1) * limbs]
+                .iter()
+                .rev()
+                .fold(ZERO, |sum, value| plus(times(sum, limb_weight), *value));
+            for usage in &accumulator.uses[self.polynomial] {
+                let PublicUse::Value(weight) = usage else {
+                    return Err(Refusal::Parameters);
+                };
+                accumulator.target = minus(accumulator.target, times(*weight, value));
+            }
+            committed.next += 1;
+            self.polynomial += 1;
+        }
+        Ok(())
+    }
+    pub fn finish(mut self) -> Result<StatementOutput, Refusal> {
         if self.failed {
             return Err(Refusal::Encoding);
         }
@@ -876,6 +939,12 @@ impl SetupStatementStream {
             || self.records.is_some()
         {
             return Err(Refusal::Incomplete);
+        }
+        if let Some(committed) = &self.committed {
+            if committed.next != committed.polynomials.len() {
+                return Err(Refusal::Incomplete);
+            }
+            self.hasher.update(&committed.root);
         }
         let digest = self.hasher.finish();
         if digest != self.expected_digest {

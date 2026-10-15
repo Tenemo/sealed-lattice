@@ -1,3 +1,5 @@
+#[path = "public-evaluation.rs"]
+pub mod public_evaluation;
 #[path = "query-domain.rs"]
 mod query_domain;
 #[path = "proof-transcript.rs"]
@@ -107,17 +109,46 @@ impl<S: Statement> Verifier<S> {
         proof_header: &[u8],
         open_statement: impl FnOnce([u8; 64], Element, &[u32]) -> Option<S>,
     ) -> Result<Self, Refusal> {
+        if relation.public_columns != 0 {
+            return Err(Refusal::Context);
+        }
+        Self::open_with_public(
+            relation,
+            role,
+            proof_header,
+            |statement, alpha, queries, _, _| open_statement(statement, alpha, queries),
+        )
+    }
+
+    pub fn open_with_public(
+        relation: Relation,
+        role: &[u8],
+        proof_header: &[u8],
+        open_statement: impl FnOnce(
+            [u8; 64],
+            Element,
+            &[u32],
+            Option<[u8; 64]>,
+            &[Element],
+        ) -> Option<S>,
+    ) -> Result<Self, Refusal> {
         if role.is_empty() || role.len() > 1024 {
             return Err(Refusal::Context);
         }
-        let header = Header::parse(proof_header)?;
+        let header = Header::parse(proof_header, relation.public_columns)?;
         let shape = Shape::new(&relation);
         let context = context(&relation, role, &header.statement);
         let challenges = challenges(&shape, role, &context, &header);
         let indices = requested(&challenges.queries, EVALUATION_DOMAIN_SIZE);
         let selected: Vec<u32> = indices.iter().map(|index| *index as u32).collect();
-        let statement = open_statement(header.statement, challenges.alpha, &selected)
-            .ok_or(Refusal::Context)?;
+        let statement = open_statement(
+            header.statement,
+            challenges.alpha,
+            &selected,
+            header.public_root,
+            &header.evaluations,
+        )
+        .ok_or(Refusal::Context)?;
         Ok(Self {
             shape,
             role: role.to_vec(),
@@ -183,14 +214,26 @@ impl<S: Statement> Verifier<S> {
                 [self.shape.first_width, self.shape.second_width, 48][self.stage],
                 self.header.roots[self.stage],
             )
+        } else if self.public_stage() {
+            (
+                EVALUATION_DOMAIN_SIZE,
+                16 * self.shape.public_columns,
+                self.header.public_root.unwrap(),
+            )
         } else {
-            let round = self.stage - 3;
+            let round = self.stage - 3 - self.public_stages();
             (
                 EVALUATION_DOMAIN_SIZE >> (round + 1),
                 48,
                 self.header.fold_roots[round],
             )
         }
+    }
+    fn public_stages(&self) -> usize {
+        usize::from(self.shape.public_columns > 0)
+    }
+    fn public_stage(&self) -> bool {
+        self.stage == 3 && self.shape.public_columns > 0
     }
     fn missing_siblings(&self, index: usize, length: usize) -> usize {
         let mut node = length + index;
@@ -213,11 +256,15 @@ impl<S: Statement> Verifier<S> {
         for _ in 0..width / 16 {
             fields.base()?;
         }
-        let salt = reader.take(128)?;
-        let mut digest = hash_after(
-            &self.leaf_prefix,
-            &[&(index as u32).to_le_bytes(), salt, data],
-        );
+        let mut digest = if self.public_stage() {
+            hash_after(&self.leaf_prefix, &[&(index as u32).to_le_bytes(), data])
+        } else {
+            let salt = reader.take(128)?;
+            hash_after(
+                &self.leaf_prefix,
+                &[&(index as u32).to_le_bytes(), salt, data],
+            )
+        };
         let mut node = length + index;
         let mut pending = Vec::new();
         let mut level = 1u32;
@@ -258,6 +305,7 @@ impl<S: Statement> Verifier<S> {
                 self.values
                     .push(add(row.combined, multiply(row.quotient_coefficient, value)));
             }
+            3 if self.public_stage() => self.public(data)?,
             _ => {
                 let value = Reader::new(data).element()?;
                 if let Ok(expected) = self
@@ -269,6 +317,32 @@ impl<S: Statement> Verifier<S> {
                 }
                 self.values.push(value);
             }
+        }
+        Ok(())
+    }
+    fn public(&mut self, data: &[u8]) -> Result<(), Refusal> {
+        let mut reader = Reader::new(data);
+        let point = &self.points[self.position];
+        let inverse = statement_stream::proof_field::inverse_extension(subtract(
+            [point.value, 0, 0],
+            self.challenges.alpha,
+        ))
+        .ok_or(Refusal::Relation)?;
+        for column in 0..self.shape.public_columns {
+            let value = reader.base()?;
+            let quotient = multiply(
+                subtract([value, 0, 0], self.header.evaluations[column]),
+                inverse,
+            );
+            let oracle = self.shape.word_oracles + 2 * column;
+            let combined = add(
+                scale(point.weight(&self.shape, &self.challenges, oracle), value),
+                multiply(
+                    point.weight(&self.shape, &self.challenges, oracle + 1),
+                    quotient,
+                ),
+            );
+            self.values[self.position] = add(self.values[self.position], combined);
         }
         Ok(())
     }
@@ -410,7 +484,7 @@ impl<S: Statement> Verifier<S> {
         row.combined = add(
             row.combined,
             multiply(
-                point.weight(shape, &self.challenges, shape.oracles - 2),
+                point.weight(shape, &self.challenges, shape.word_oracles - 2),
                 table_residue,
             ),
         );
@@ -427,7 +501,7 @@ impl<S: Statement> Verifier<S> {
             add(multiply(self.challenges.mask, linear), mask),
             scale(claimed, Coset::get().inverse_systematic),
         );
-        let remainder_weight = point.weight(shape, &self.challenges, shape.oracles - 1);
+        let remainder_weight = point.weight(shape, &self.challenges, shape.word_oracles - 1);
         row.combined = add(
             row.combined,
             multiply(remainder_weight, scale(numerator, point.inverse)),
@@ -449,13 +523,14 @@ impl<S: Statement> Verifier<S> {
         {
             operator.coefficients = Vec::new();
         }
-        if self.stage >= 2 {
-            let length = if self.stage == 2 {
+        let first_fold = 2 + self.public_stages();
+        if self.stage >= first_fold {
+            let length = if self.stage == first_fold {
                 EVALUATION_DOMAIN_SIZE
             } else {
-                EVALUATION_DOMAIN_SIZE >> (self.stage - 2)
+                EVALUATION_DOMAIN_SIZE >> (self.stage - first_fold)
             };
-            let round = if self.stage == 2 { 0 } else { self.stage - 2 };
+            let round = self.stage - first_fold;
             let coset = Coset::get();
             let mut expected = Vec::new();
             for index in requested(&self.challenges.queries, length)
@@ -496,7 +571,7 @@ impl<S: Statement> Verifier<S> {
             }
             self.expected_fold = expected;
             self.values = Vec::new();
-            if self.stage == 2 {
+            if self.stage == first_fold {
                 self.rows = Vec::new();
                 self.points = Vec::new();
                 self.operator = None;
@@ -504,13 +579,14 @@ impl<S: Statement> Verifier<S> {
         }
         self.stage += 1;
         let stage = (self.stage as u32).to_le_bytes();
-        self.leaf_prefix = prefix(b"bounded-proof/leaf", &[&self.role, &stage]);
-        self.node_prefix = prefix(b"bounded-proof/node", &[&self.role, &stage]);
-        let length = if self.stage < 3 {
-            EVALUATION_DOMAIN_SIZE
+        if self.public_stage() {
+            self.leaf_prefix = prefix(b"committed-key/leaf", &[&self.role]);
+            self.node_prefix = prefix(b"committed-key/node", &[&self.role]);
         } else {
-            EVALUATION_DOMAIN_SIZE >> (self.stage - 2)
-        };
+            self.leaf_prefix = prefix(b"bounded-proof/leaf", &[&self.role, &stage]);
+            self.node_prefix = prefix(b"bounded-proof/node", &[&self.role, &stage]);
+        }
+        let length = self.stage_shape().0;
         self.indices = requested(&self.challenges.queries, length);
         self.position = 0;
         self.reading_count = true;
@@ -534,7 +610,7 @@ impl<S: Statement> Verifier<S> {
                     4
                 } else {
                     4 + width
-                        + 128
+                        + if self.public_stage() { 0 } else { 128 }
                         + 64 * self.missing_siblings(self.indices[self.position], length)
                 };
                 let count = bytes.len().min(required - self.buffer.len());

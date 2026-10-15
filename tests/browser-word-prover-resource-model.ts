@@ -1,3 +1,4 @@
+import { committedOfferColumns } from '#tests/committed-offer-model.js';
 import { compileCommonAgreementDegreeCensus } from '#tests/common-agreement-degree-model.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import {
@@ -16,6 +17,8 @@ const compileWordProverResources = (
         columns: number;
         lookups: number;
         preparedAdjointBytes: bigint;
+        publicColumns: number;
+        publicLimbs: number;
     }>,
 ) => {
     const agreement = compileCommonAgreementDegreeCensus();
@@ -52,8 +55,13 @@ const compileWordProverResources = (
         domain * maximumHasherBytes + systematic * (5n * extension + 4n * base);
     const polynomialWorkspace = 12n * systematic * extension;
     const metadataAndAllocatorAllowance = 64n * 1024n * 1024n;
+    const publicPolynomial = BigInt(input.publicLimbs) * systematic * base;
+    const publicTree = 2n * domain * 64n;
+    const publicBuilder = domain * maximumHasherBytes + publicPolynomial;
+    const publicOpenings =
+        3n * BigInt(2 * agreement.queries) * BigInt(input.publicColumns) * base;
     const stages = [
-        ['first oracle', witness + first + commitmentWorkspace],
+        ['first oracle', witness + first + commitmentWorkspace + publicBuilder],
         [
             'second oracle',
             witness + first + second + reciprocals + commitmentWorkspace,
@@ -65,7 +73,8 @@ const compileWordProverResources = (
                 second +
                 reciprocals +
                 preparedAdjointBytes +
-                polynomialWorkspace,
+                polynomialWorkspace +
+                publicPolynomial,
         ],
         [
             'linear oracle',
@@ -77,6 +86,16 @@ const compileWordProverResources = (
                 polynomialWorkspace,
         ],
         [
+            'public oracle',
+            witness +
+                first +
+                second +
+                linear +
+                reciprocals +
+                polynomialWorkspace +
+                publicBuilder,
+        ],
+        [
             'degree combination and folding',
             witness +
                 first +
@@ -84,7 +103,8 @@ const compileWordProverResources = (
                 linear +
                 folding +
                 reciprocals +
-                polynomialWorkspace,
+                polynomialWorkspace +
+                publicTree,
         ],
         [
             'first openings',
@@ -95,7 +115,9 @@ const compileWordProverResources = (
                 folding +
                 reciprocals +
                 polynomialWorkspace +
-                3n * BigInt(2 * agreement.queries) * layout.firstWidth,
+                3n * BigInt(2 * agreement.queries) * layout.firstWidth +
+                publicTree +
+                publicOpenings,
         ],
         [
             'second openings',
@@ -105,7 +127,9 @@ const compileWordProverResources = (
                 folding +
                 reciprocals +
                 polynomialWorkspace +
-                3n * BigInt(2 * agreement.queries) * layout.secondWidth,
+                3n * BigInt(2 * agreement.queries) * layout.secondWidth +
+                publicTree +
+                publicOpenings,
         ],
     ].map(([stage, bytes]) => ({
         stage: stage as string,
@@ -114,6 +138,10 @@ const compileWordProverResources = (
     return {
         preparedAdjointBytes,
         maximumHasherBytes,
+        publicPolynomial,
+        publicTree,
+        publicBuilder,
+        publicOpenings,
         metadataAndAllocatorAllowance,
         stages,
         maximumLiveBytes: stages.reduce(
@@ -136,6 +164,8 @@ export const compileBrowserWordProverResources = (
         ...compileWordProverResources({
             columns: relation.wordColumns + relation.booleanColumns,
             lookups: relation.lookupEntries,
+            publicColumns: committedOfferColumns(profile),
+            publicLimbs: Math.ceil(profile.ciphertext.bits / 96),
             preparedAdjointBytes:
                 fullDegreeCommonPolynomials *
                 BigInt(agreement.systematicSize) *

@@ -1,5 +1,6 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 pub mod engine;
+pub use engine::public_evaluation;
 pub use engine::{CHUNK_LIMIT, HEADER_LENGTH, Refusal};
 use statement_stream::{
     SetupStatementStream, StatementOutput,
@@ -31,12 +32,13 @@ pub fn setup_contribution_verifier(
     role: &[u8],
     proof_header: &[u8],
 ) -> Result<SetupContributionVerifier, Refusal> {
-    SetupContributionVerifier::open(
+    SetupContributionVerifier::open_with_public(
         setup_relation(profile),
         role,
         proof_header,
-        |statement, alpha, queries| {
-            SetupStatementStream::new(profile, statement, alpha, queries).ok()
+        |statement, alpha, queries, root, evaluations| {
+            SetupStatementStream::committed(profile, statement, alpha, queries, root?, evaluations)
+                .ok()
         },
     )
 }

@@ -269,10 +269,16 @@ pub(crate) fn run(output: &Path, runtime: [u8; 64], scenario: &Scenario) -> Enro
         let mut restored = restore(&capsules[2]).unwrap();
         assert_eq!(
             restored
-                .contribution_header(profile, supported_profile::relation::PROOF_HEADER_BYTES)
+                .contribution_header(
+                    profile,
+                    supported_profile::relation::setup_relation(profile).proof_header_bytes()
+                )
                 .unwrap(),
             enrollments[position]
-                .contribution_header(profile, supported_profile::relation::PROOF_HEADER_BYTES)
+                .contribution_header(
+                    profile,
+                    supported_profile::relation::setup_relation(profile).proof_header_bytes()
+                )
                 .unwrap(),
         );
         // The original completed enrollment has not acted on any roster yet.

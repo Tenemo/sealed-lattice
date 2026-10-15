@@ -1,4 +1,6 @@
-use crate::offer_verifier::{ContributionOfferVerifier, VerifiedContributionOffer};
+use crate::offer_verifier::{
+    OfferVerifier, VerifiedCommittedOffer, VerifiedContributionOffer, VerifiedOffer,
+};
 use crate::{CHUNK_BYTES, PolynomialAdder, RetainedSetupInputs};
 use parallel_work::PendingDigest;
 use protocol_foundations::{
@@ -33,8 +35,8 @@ impl AggregatePolynomial {
 }
 
 pub struct VerifiedSelectionInputs {
-    selection: Arc<AuthenticatedSelectionProposal>,
-    polynomials: Vec<AggregatePolynomial>,
+    pub(crate) selection: Arc<AuthenticatedSelectionProposal>,
+    pub(crate) polynomials: Vec<AggregatePolynomial>,
 }
 pub struct VerifiedSetupAggregate {
     inputs: Arc<VerifiedSelectionInputs>,
@@ -196,8 +198,8 @@ pub enum Refusal {
     Incomplete,
 }
 
-struct Pending {
-    incoming: IncomingOffer,
+struct Pending<const EXACT: bool> {
+    incoming: IncomingOffer<EXACT>,
     incoming_hash: Option<IdentityHasher>,
     ordinal: usize,
     offset: usize,
@@ -211,9 +213,9 @@ struct Pending {
     outputs: Vec<AggregatePolynomial>,
 }
 
-enum IncomingOffer {
-    Verified(Arc<VerifiedContributionOffer>),
-    Verifying(Box<ContributionOfferVerifier>),
+enum IncomingOffer<const EXACT: bool> {
+    Verified(Arc<VerifiedOffer<EXACT>>),
+    Verifying(Box<OfferVerifier<EXACT>>),
 }
 
 struct FinishingPolynomial {
@@ -251,20 +253,30 @@ fn settle(
 /// Output chunks are provisional until `finish_contribution` succeeds. A
 /// polynomial's identities are checked while later polynomials stream, and
 /// `finish_contribution` checks the last ones.
-pub struct SetupAggregator {
+pub struct OfferAggregator<const EXACT: bool> {
     selection: Arc<AuthenticatedSelectionProposal>,
-    offers: Vec<Arc<VerifiedContributionOffer>>,
+    offers: Vec<Arc<VerifiedOffer<EXACT>>>,
     profile: Profile,
     accepted: usize,
     indices: Vec<usize>,
     previous: Vec<AggregatePolynomial>,
-    pending: Option<Pending>,
+    pending: Option<Pending<EXACT>>,
     failed: bool,
 }
-impl SetupAggregator {
+pub type SetupAggregator = OfferAggregator<true>;
+pub type StreamedOfferAggregator = OfferAggregator<false>;
+
+#[derive(Clone)]
+pub struct StreamedAggregate {
+    pub(crate) selection: Arc<AuthenticatedSelectionProposal>,
+    pub(crate) polynomials: Vec<AggregatePolynomial>,
+    pub(crate) offers: Vec<Arc<VerifiedCommittedOffer>>,
+}
+
+impl<const EXACT: bool> OfferAggregator<EXACT> {
     pub fn new(
         selection: Arc<AuthenticatedSelectionProposal>,
-        offers: Vec<Arc<VerifiedContributionOffer>>,
+        offers: Vec<Arc<VerifiedOffer<EXACT>>>,
     ) -> Result<Self, Refusal> {
         let profile = selection.roster().proposal().profile();
         for (index, offer) in offers.iter().enumerate() {
@@ -285,7 +297,11 @@ impl SetupAggregator {
             offers,
             profile,
             accepted: 0,
-            indices: profile.contribution_body_polynomials(),
+            indices: if EXACT {
+                profile.contribution_body_polynomials()
+            } else {
+                profile.streamed_contribution_polynomials()
+            },
             previous: Vec::new(),
             pending: None,
             failed: false,
@@ -353,12 +369,12 @@ impl SetupAggregator {
         {
             return Err(Refusal::Context);
         }
-        let verifier = ContributionOfferVerifier::new(offer, body_header, proof_header)
+        let verifier = OfferVerifier::<EXACT>::new(offer, body_header, proof_header)
             .map_err(|_| Refusal::Body)?;
         self.begin_incoming(IncomingOffer::Verifying(Box::new(verifier)));
         Ok(())
     }
-    fn begin_incoming(&mut self, incoming: IncomingOffer) {
+    fn begin_incoming(&mut self, incoming: IncomingOffer<EXACT>) {
         self.pending = Some(Pending {
             incoming,
             incoming_hash: None,
@@ -513,7 +529,7 @@ impl SetupAggregator {
         }
         result
     }
-    pub fn finish_contribution(&mut self) -> Result<Arc<VerifiedContributionOffer>, Refusal> {
+    pub fn finish_contribution(&mut self) -> Result<Arc<VerifiedOffer<EXACT>>, Refusal> {
         if self.failed {
             return Err(Refusal::Incomplete);
         }
@@ -544,6 +560,8 @@ impl SetupAggregator {
         }
         result
     }
+}
+impl SetupAggregator {
     pub fn finish(self) -> Result<VerifiedSelectionInputs, Refusal> {
         if !self.complete() {
             return Err(Refusal::Incomplete);
@@ -551,6 +569,19 @@ impl SetupAggregator {
         Ok(VerifiedSelectionInputs {
             selection: self.selection,
             polynomials: self.previous,
+        })
+    }
+}
+
+impl StreamedOfferAggregator {
+    pub fn finish(self) -> Result<StreamedAggregate, Refusal> {
+        if !self.complete() {
+            return Err(Refusal::Incomplete);
+        }
+        Ok(StreamedAggregate {
+            selection: self.selection,
+            polynomials: self.previous,
+            offers: self.offers,
         })
     }
 }

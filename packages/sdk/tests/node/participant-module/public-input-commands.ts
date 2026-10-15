@@ -99,6 +99,11 @@ export const publicInputCommands: readonly PublicInputCommand[] = [
     },
     { name: 'setup_offer_begin', buffer: 'setup', parameters: ['length'] },
     {
+        name: 'setup_public_work',
+        buffer: 'setup',
+        parameters: ['operation', 'index', 'index', 'length'],
+    },
+    {
         name: 'setup_offer_polynomial',
         buffer: 'setup',
         parameters: ['index', 'index', 'length'],

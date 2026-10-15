@@ -32,6 +32,7 @@ import { runWithLocalRunLog } from '#tools/ci/local-run-log.js';
 import { acquireProtocolResearchLock } from '#tools/ci/protocol-research-lock.js';
 import { selectProtocolResearchCase } from '#tools/ci/protocol-research-registry.js';
 import { deriveResearchScenario } from '#tools/ci/protocol-research-scenario.js';
+import { runCommittedOfferScreen } from '#tools/ci/run-committed-offer-screen.js';
 import { runFheKeySourceScreen } from '#tools/ci/run-fhe-key-source-screen.js';
 import { snapshotResearchSources } from '#tools/ci/run-sources.js';
 import {
@@ -60,6 +61,10 @@ type NativeResult = {
     }[];
 };
 const selected = selectProtocolResearchCase(process.argv.slice(2));
+if (selected.name === 'native-committed-offer') {
+    await runCommittedOfferScreen();
+    process.exit(process.exitCode ?? 0);
+}
 if (
     selected.name === 'native-fhe-key-source' ||
     selected.name === 'scalar-fhe-key-source' ||

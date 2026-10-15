@@ -1,5 +1,6 @@
 import { compileBallotBodyCensus } from '#tests/ballot-body-model.js';
 import { compileCloseWireCensus } from '#tests/close-wire-model.js';
+import { compileCommittedOfferCensus } from '#tests/committed-offer-model.js';
 import { compileContributionBodyCensus } from '#tests/contribution-body-model.js';
 import { maximum } from '#tests/exact-integer.js';
 import { compileParticipantReleaseCustody } from '#tests/participant-release-custody-model.js';
@@ -124,6 +125,7 @@ export const compileCandidatePublicationCensus = (
     const key = compileRecipientKeyCensus();
     const roster = compileRosterProposalCensus(n);
     const offer = compileContributionBodyCensus(profile);
+    const aggregate = compileCommittedOfferCensus(profile);
     const selection = compileSetupSelectionWireCensus(n);
     const ballot = compileBallotBodyCensus(profile);
     const close = compileCloseWireCensus(profile);
@@ -210,6 +212,22 @@ export const compileCandidatePublicationCensus = (
                 file('proof.bin', offer.maximumProofBytes),
             ],
         );
+    publish(0, 'aggregate/' + identity(0), [
+        file('manifest.bin', aggregate.aggregateManifestBytes),
+        ...aggregate.committedPolynomials.map((index) =>
+            file(
+                'polynomial-' + String(index).padStart(2, '0') + '.bin',
+                aggregate.generatedAggregateBytes /
+                    BigInt(aggregate.committedPolynomials.length),
+            ),
+        ),
+    ]);
+    for (let ordinal = 0; ordinal < profile.setupContributorCount; ordinal++)
+        publish(
+            0,
+            'aggregate-evaluation/' + identity(0) + '/' + String(ordinal),
+            [file('proof.bin', aggregate.maximumEvaluationProofBytes)],
+        );
     publish(0, 'selection', [
         file('selection.bin', selection.selectionBodyBytes),
         file('signature.bin', registration.signatureBytes),
@@ -276,6 +294,8 @@ export const compileCandidatePublicationCensus = (
     const preparation = publications.filter(
         (publication) =>
             publication.key.startsWith('contribution-') ||
+            publication.key.startsWith('aggregate/') ||
+            publication.key.startsWith('aggregate-evaluation/') ||
             publication.key === 'selection' ||
             publication.key.startsWith('selection-endorsement-') ||
             publication.key === 'setup-certificate',
