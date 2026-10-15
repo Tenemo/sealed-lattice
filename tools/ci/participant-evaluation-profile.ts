@@ -3,6 +3,49 @@ import { createHash } from 'node:crypto';
 
 import * as ts from 'typescript';
 
+// Archived public fixtures must use the label in their pinned worker, not
+// the current package's label. This does not open or migrate private state.
+export const evaluationFixtureIdentity = (
+    manifest: Buffer,
+    module: Buffer,
+    worker: Buffer,
+) => {
+    const parsed = ts.createSourceFile(
+        'worker.js',
+        worker.toString('utf8'),
+        ts.ScriptTarget.Latest,
+        true,
+    );
+    const labels: string[] = [];
+    const visit = (node: ts.Node) => {
+        if (
+            ts.isVariableDeclaration(node) &&
+            ts.isIdentifier(node.name) &&
+            node.name.text === 'participantRuntimeLabel' &&
+            node.initializer !== undefined &&
+            ts.isStringLiteral(node.initializer)
+        )
+            labels.push(node.initializer.text);
+        ts.forEachChild(node, visit);
+    };
+    visit(parsed);
+    assert.equal(labels.length, 1, 'Expected one pinned runtime label.');
+    const [source, moduleDigest, workerDigest] = [manifest, module, worker].map(
+        (bytes) => createHash('sha512').update(bytes).digest(),
+    );
+    return {
+        runtime: createHash('sha512')
+            .update(labels[0])
+            .update(source)
+            .update(moduleDigest)
+            .update(workerDigest)
+            .digest('hex'),
+        source: source.toString('hex'),
+        module: moduleDigest.toString('hex'),
+        worker: workerDigest.toString('hex'),
+    };
+};
+
 const measuredFunctions = {
     verifyCloseBarrier: 'close-verification',
     classifyBallot: 'ballot-classification',

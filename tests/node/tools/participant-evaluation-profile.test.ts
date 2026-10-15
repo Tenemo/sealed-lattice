@@ -1,10 +1,11 @@
-import { webcrypto } from 'node:crypto';
+import { createHash, webcrypto } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { runInNewContext } from 'node:vm';
 
 import { describe, expect, it } from 'vitest';
 
 import {
+    evaluationFixtureIdentity,
     instrumentEvaluation,
     instrumentEvaluationSdk,
     summarizeEvaluationProfile,
@@ -12,6 +13,36 @@ import {
 import type { EvaluationProfile } from '#tools/ci/participant-evaluation-profile.js';
 
 describe('evaluation phase diagnostics', () => {
+    it('binds an archived label to the exact retained artifacts', () => {
+        const manifest = Buffer.from('fixture manifest');
+        const module = Buffer.from('fixture module');
+        const label = 'participant-runtime/8';
+        const worker = Buffer.from(
+            `const participantRuntimeLabel = '${label}';`,
+        );
+        const expected = createHash('sha512')
+            .update(
+                Buffer.concat([
+                    Buffer.from(label),
+                    ...[manifest, module, worker].map((bytes) =>
+                        createHash('sha512').update(bytes).digest(),
+                    ),
+                ]),
+            )
+            .digest('hex');
+        expect(
+            evaluationFixtureIdentity(manifest, module, worker).runtime,
+        ).toBe(expected);
+        expect(
+            evaluationFixtureIdentity(manifest, Buffer.from('changed'), worker)
+                .runtime,
+        ).not.toBe(expected);
+        for (const bytes of [Buffer.from(''), Buffer.concat([worker, worker])])
+            expect(() =>
+                evaluationFixtureIdentity(manifest, module, bytes),
+            ).toThrow('one pinned');
+    });
+
     it('finds every boundary in the packaged worker and preserves the SDK lifecycle', async () => {
         const [worker, sdk] = await Promise.all([
             readFile('packages/sdk/dist/participant-worker.js'),

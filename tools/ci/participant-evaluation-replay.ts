@@ -16,9 +16,9 @@ import type { WorkerResult } from '#packages/sdk/src/participant/worker/runtime/
 import { compileEvaluationStorage } from '#tests/evaluation-storage-model.js';
 import { deriveSupportedProfile } from '#tests/supported-profile-model.js';
 import { thresholdProfileFor } from '#tests/threshold-completion-model.js';
-import { participantRuntimeIdentity } from '#tools/ci/build-participant-module.js';
 import { runArtifactDirectoryPath } from '#tools/ci/local-run-log.js';
 import {
+    evaluationFixtureIdentity,
     instrumentEvaluation,
     summarizeEvaluationProfile,
     type EvaluationProfile,
@@ -67,7 +67,7 @@ assert.ok(
     'Select a fixture with a verified terminal outcome.',
 );
 const expectedHasResult = expectedIdentifiers.length > 0;
-const identity = participantRuntimeIdentity(manifest, module, worker);
+const identity = evaluationFixtureIdentity(manifest, module, worker);
 assert.equal(
     identity.runtime,
     fixture.runtimeIdentity,
@@ -262,6 +262,7 @@ try {
         );
     const reports: {
         variant: string;
+        hasResult: boolean;
         milliseconds: number;
         result: Extract<WorkerResult, { status: 'completed' }>;
         profiles: ReturnType<typeof summarizeEvaluationProfile>[];
@@ -279,7 +280,13 @@ try {
         const milliseconds = performance.now() - started;
         assert.equal(observed.result.status, 'completed');
         assert.ok(observed.result.status === 'completed');
-        assert.equal(observed.result.details.hasResult, expectedHasResult);
+        const details = observed.result
+            .details as typeof observed.result.details & {
+            encrypted?: boolean;
+        };
+        const hasResult = details.hasResult ?? details.encrypted;
+        assert.equal(hasResult, expectedHasResult);
+        assert.ok(typeof hasResult === 'boolean');
         assert.deepEqual(
             observed.result.details.identifiers,
             expectedIdentifiers,
@@ -292,6 +299,7 @@ try {
         );
         const report = {
             variant,
+            hasResult,
             milliseconds,
             result: observed.result,
             profiles,
@@ -309,10 +317,7 @@ try {
                 observed.result.details.identifiers,
                 reports[0].result.details.identifiers,
             );
-            assert.equal(
-                observed.result.details.hasResult,
-                reports[0].result.details.hasResult,
-            );
+            assert.equal(hasResult, reports[0].hasResult);
         }
         reports.push(report);
         await writeFile(
@@ -346,7 +351,8 @@ try {
         }),
     );
     const sampledOriginStorageBytes =
-        fixture.sampledResources === undefined
+        fixture.sampledResources === undefined ||
+        fixture.sampledResources.length === 0
             ? undefined
             : Math.max(
                   ...fixture.sampledResources.map(
@@ -411,8 +417,13 @@ try {
                     participantWorkflowLimits.visitMilliseconds -
                         evaluationMilliseconds,
                 ),
-                measuredTargetVisitHeadroom: fixture.workflow?.participants.map(
-                    (participant) => ({
+                measuredTargetVisitHeadroom: fixture.workflow?.participants
+                    .filter((participant) =>
+                        participant.visits.some((visit) =>
+                            visit.stage.includes('target'),
+                        ),
+                    )
+                    .map((participant) => ({
                         position: participant.position,
                         milliseconds: Math.max(
                             0,
@@ -428,8 +439,7 @@ try {
                                         ),
                                 ),
                         ),
-                    }),
-                ),
+                    })),
             },
             null,
             2,
