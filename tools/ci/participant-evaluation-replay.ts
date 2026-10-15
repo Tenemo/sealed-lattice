@@ -367,10 +367,6 @@ try {
                         ),
                     }),
                 ),
-                comparison:
-                    'Additional proving plus consumer verification plus extra transfer and custody must be less than the avoided evaluations. Headroom assumes no other added work; memory, storage, cumulative work and actual prover costs remain separate required bounds.',
-                proofDecision:
-                    'Defer a transferable tally proof until an exact arithmetic-fragment implementation and full-trace projection fit these budgets and the individual participant bounds. Retain local evaluation and authenticated target reuse.',
             },
             null,
             2,

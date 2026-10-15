@@ -254,9 +254,16 @@ export const summarizeEvaluationProfile = (profile: EvaluationProfile) => {
                     phase,
                 ),
             );
-            const key = (detailed.length > 0 ? detailed : running)
-                .sort()
-                .join(' + ');
+            const primary =
+                running
+                    .filter((phase) => !detailed.includes(phase))
+                    .sort()
+                    .join(' + ') || 'unscoped';
+            const key =
+                primary +
+                (detailed.length > 0
+                    ? ' / ' + detailed.sort().join(' + ')
+                    : '');
             partition[key] = (partition[key] ?? 0) + elapsed;
         }
         active.set(

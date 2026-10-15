@@ -47,10 +47,10 @@ describe('evaluation phase diagnostics', () => {
         });
         expect(summary.partitionMilliseconds).toEqual({
             'encrypted-evaluation': 7,
-            retrieval: 5,
-            'retrieval + working-storage': 4,
-            'evaluation-module + retrieval + working-storage': 1,
-            'working-storage': 3,
+            'encrypted-evaluation / retrieval': 5,
+            'encrypted-evaluation / retrieval + working-storage': 4,
+            'encrypted-evaluation / evaluation-module + retrieval + working-storage': 1,
+            'encrypted-evaluation / working-storage': 3,
             'target-signing': 2,
         });
     });
