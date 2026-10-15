@@ -3,6 +3,7 @@ import { readdir } from 'node:fs/promises';
 
 import { describe, expect, it } from 'vitest';
 
+import { ballotEnvelopeBytes } from '#tests/ballot-body-model.js';
 import {
     readRustSource,
     rustEnumCodes,
@@ -10,7 +11,11 @@ import {
     rustIntegerConstant,
     rustStringConstant,
 } from '#tests/node/rust-source.js';
-import { reductionConstructorDimensions } from '#tests/security-margin/constructor-operands.js';
+import { participantReleaseEnvelopeBytes } from '#tests/participant-release-custody-model.js';
+import {
+    reductionConstructorDimensions,
+    reductionConstructorOperands,
+} from '#tests/security-margin/constructor-operands.js';
 
 // The designated raw SHAKE input languages of the security argument, rebuilt
 // from the literals and layouts in their Rust sources. Every raw SHAKE input
@@ -487,6 +492,155 @@ describe('raw-input language separation', () => {
         ];
         for (const bytes of rawInputs)
             expect(8 * bytes).toBeLessThanOrEqual(512);
+    });
+
+    it('fits every purpose-signature raw input within its priced frame', async () => {
+        const [protocolHash, signature, authentication, foundations] =
+            await Promise.all(
+                [
+                    'parallel-work/src/protocol-hash.rs',
+                    'purpose-signature/src/lib.rs',
+                    'protocol-foundations/src/authentication.rs',
+                    'protocol-foundations/src/lib.rs',
+                ].map((path) => readRustSource(`${research}/${path}`)),
+            );
+        const sources = new Map<string, string>();
+        for (const path of await productionRustFiles())
+            sources.set(
+                path.slice(research.length + 1),
+                await readRustSource(path),
+            );
+        const callers = (pattern: RegExp) =>
+            [...sources].flatMap(([path, source]) =>
+                [...normalized(source).matchAll(pattern)].map((match) =>
+                    match[1] === undefined ? path : `${path} ${match[1]}`,
+                ),
+            );
+        // Honest signing has one path: a credential derives its key pair and
+        // signs only inside its deterministic signer, and its other
+        // derivations drop the signing key.
+        expect(callers(/(?<!fn )\bkeypair_from_seed\(/gu)).toEqual([
+            'protocol-foundations/src/lib.rs',
+            'protocol-foundations/src/lib.rs',
+            'protocol-foundations/src/lib.rs',
+        ]);
+        for (const name of ['from_seed', 'check_retained'])
+            containsStatements(
+                rustFunctionBody(foundations, name),
+                'drop(private);',
+            );
+        containsStatements(
+            rustFunctionBody(foundations, 'sign_deterministically'),
+            'let (_, mut private) = crate::authentication::keypair_from_seed(&self.signing_seed); private.sign(message, context).map_err(|_| Refusal::Crypto)',
+        );
+        containsStatements(
+            rustFunctionBody(authentication, 'sign'),
+            'self.0 .sign_context(context, message)?',
+        );
+        expect(
+            callers(/\.sign_context\(/gu).filter(
+                (caller) => !caller.startsWith('purpose-signature/'),
+            ),
+        ).toEqual(['protocol-foundations/src/authentication.rs']);
+        // Each signed message is a fixed-length ballot or release envelope or
+        // a 64-byte identity or digest. A new call site fails this list.
+        const envelopes = new Map([
+            [
+                'protocol-foundations/src/ballot-authentication.rs envelope.bytes()',
+                ballotEnvelopeBytes,
+            ],
+            [
+                'protocol-foundations/src/release-signing.rs envelope.bytes()',
+                participantReleaseEnvelopeBytes,
+            ],
+        ]);
+        const signed = callers(
+            /(?<!fn )\bsign_deterministically\( ?([^,]+),/gu,
+        );
+        expect([...signed].sort()).toEqual([
+            'protocol-foundations/src/ballot-authentication.rs envelope.bytes()',
+            'protocol-foundations/src/close-signing.rs identity',
+            'protocol-foundations/src/contribution-offer.rs &envelope.identity()',
+            'protocol-foundations/src/lib.rs &body.digest',
+            'protocol-foundations/src/poll.rs &identity',
+            'protocol-foundations/src/release-signing.rs envelope.bytes()',
+            'protocol-foundations/src/roster-authentication.rs &proposal.identity()',
+            'protocol-foundations/src/setup-selection.rs &digest',
+            'protocol-foundations/src/setup-selection.rs &selection.identity()',
+            'protocol-foundations/src/target-signing.rs message.identity()',
+        ]);
+        const longestMessage = signed
+            .map((call) => envelopes.get(call) ?? 64n)
+            .reduce((left, right) => (left > right ? left : right));
+
+        // Every frame hashes the protocol prefix, its domain and its parts.
+        containsStatements(
+            rustFunctionBody(signature, 'hash'),
+            'let mut value = ProtocolHash::new(); value.update(domain); for part in parts { value.update(part); } value.finalize()',
+        );
+        expect(signature).toMatch(/\btype\s+Digest\s*=\s*\[u8;\s*64\];/u);
+        const prefixBytes = rustIntegerConstant(protocolHash, 'PREFIX_BYTES');
+        const chains = rustIntegerConstant(signature, 'CHAINS');
+        for (const statement of [
+            'fn step(value: &Digest) -> Digest',
+            'fn start(seed: &Digest, purpose: u8, chain: usize) -> Digest',
+            'fn digits(message: &Digest) -> [u8; CHAINS]',
+            'fn message_digest(root: &Digest, purpose: u8, message: &[u8]) -> Digest',
+            'fn leaf(purpose: u8, public_key: &[u8]) -> Digest',
+            'fn parent(level: u8, left: &Digest, right: &Digest) -> Digest',
+        ])
+            expect(normalized(signature)).toContain(statement);
+        // Both leaf inputs hold one 64-byte chain end per chain.
+        containsStatements(
+            rustFunctionBody(signature, 'new'),
+            'let mut public_key = Vec::with_capacity(CHAINS * 64); for chain in 0..CHAINS { let mut value = Zeroizing::new(start(&seed, purpose as u8, chain)); for _ in 0..15 { *value = step(&value); } public_key.extend_from_slice(&*value); } tree[PURPOSES + purpose] = leaf(purpose as u8, &public_key);',
+        );
+        containsStatements(
+            rustFunctionBody(signature, 'verify'),
+            'let encoded = digits(&message_digest(root, expected_purpose, message)); let mut public_key = Vec::with_capacity(CHAINS * 64); for (chain, count) in encoded.into_iter().enumerate() { let mut value: Digest = signature[2 + chain * 64..2 + (chain + 1) * 64] .try_into() .unwrap(); for _ in count..15 { value = step(&value); } public_key.extend_from_slice(&value); } let mut node = leaf(expected_purpose, &public_key);',
+        );
+        const frames = [
+            [
+                'secret',
+                'hash( b"purpose-wots/secret/v1", &[seed, &[purpose], &(chain as u16).to_le_bytes()], )',
+                64n + 1n + 2n,
+            ],
+            ['chain', 'hash(b"purpose-wots/chain/v1", &[value])', 64n],
+            [
+                'leaf',
+                'hash(b"purpose-wots/leaf/v1", &[&[purpose], public_key])',
+                1n + 64n * chains,
+            ],
+            [
+                'unused',
+                'hash(b"purpose-wots/unused/v1", &[&[purpose as u8]])',
+                1n,
+            ],
+            [
+                'node',
+                'hash(b"purpose-wots/node/v1", &[&[level], left, right])',
+                1n + 64n + 64n,
+            ],
+            [
+                'message',
+                'hash( b"purpose-wots/message/v1", &[ root, &[purpose], &(message.len() as u64).to_le_bytes(), message, ], )',
+                64n + 1n + 8n + longestMessage,
+            ],
+        ] as const;
+        // These are all the hash calls of the primitive.
+        const production = normalized(signature).split('#[cfg(test)]')[0];
+        expect(production.match(/(?<!fn )\bhash\(/gu)).toHaveLength(
+            frames.length,
+        );
+        const priced = reductionConstructorOperands.authentication.frames;
+        for (const [name, call, payloadBytes] of frames) {
+            expect(production, name).toContain(call);
+            const domain = /b"([^"]+)"/u.exec(call)![1];
+            expect(
+                8n * (prefixBytes + BigInt(domain.length) + payloadBytes),
+                name,
+            ).toBeLessThanOrEqual(priced[name].inputBits);
+        }
     });
 
     it('keeps every retained-tag label shorter than 2^8 bytes', async () => {

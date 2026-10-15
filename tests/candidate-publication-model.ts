@@ -13,7 +13,7 @@ import { compileTargetSigningStateCensus } from '#tests/target-signing-state-mod
 
 // Independently maintained wire operands: u16 file count, u16 name length,
 // ASCII name, u64 payload length and one 16-byte locator per fixed chunk.
-const candidateTransportParameters = {
+export const candidateTransportParameters = {
     chunkBytes: 1_048_576n,
     manifestBytes: 1_048_576n,
     maximumFileBytes: 4_294_967_291n,

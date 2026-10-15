@@ -10,6 +10,7 @@ import {
 } from '#tests/node/protocol/reference/sponge-permutations.js';
 import { compilePreparationFamilyInventory } from '#tests/preparation-ledger-model.js';
 import { compileRegistrationSourceRandomness } from '#tests/registration-source-randomness-model.js';
+import { reductionConstructorOperands } from '#tests/security-margin/constructor-operands.js';
 import {
     deriveSupportedProfile,
     supportedProfileRanges,
@@ -143,6 +144,40 @@ describe('encrypted registration source randomness', () => {
             );
         }
         expect(admitted).toEqual(catalogue);
+    });
+    it('fits the stream coins of every family within the priced stream rows', () => {
+        // The reduction never absorbs the private frame: its source and
+        // source-encryption stream rows read only expanded coins, up to their
+        // input widths.
+        const row = (name: string) => {
+            const statement = reductionConstructorOperands.statements.find(
+                (entry) => entry.name === name,
+            );
+            expect(statement, name).toBeDefined();
+            return statement!;
+        };
+        const source = row('source stream');
+        const encryption = row('source encryption stream');
+        const { participants, options } = supportedProfileRanges();
+        let families = 0;
+        for (
+            let optionCount = options.minimum;
+            optionCount <= options.maximum;
+            optionCount++
+        )
+            for (const family of compileRegistrationSourceRandomness(
+                participants.maximum,
+                optionCount,
+            ).families) {
+                families++;
+                expect(
+                    8n * family.comparisonMaximumSourceOutputBytes,
+                ).toBeLessThanOrEqual(source.inputBits);
+                expect(
+                    8n * family.comparisonMaximumEncryptionOutputBytes,
+                ).toBeLessThanOrEqual(encryption.inputBits);
+            }
+        expect(families).toBeGreaterThan(0);
     });
     it('retains families admitted before a smaller eventual roster', () => {
         expect(

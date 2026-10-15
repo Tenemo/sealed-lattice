@@ -33,6 +33,58 @@ export const reductionConstructorOrigins = {
     firstPrescribedReleases: 1n,
 } as const;
 
+// The most bits one payload pass of the caller moves. The security-ledger
+// test checks every payload class against it.
+export const callerPassPayloadBits = 1n << 41n;
+
+// Descriptor geometry: three full trees, then every halving tree down to
+// four leaves. Framing, salt and query work retain the old overbounds. The
+// serialized proof of a descriptor is a payload class of the caller.
+export const reductionDescriptorGeometry = (() => {
+    const {
+        degree,
+        maximumColumns,
+        maximumLookups,
+        maximumOracles,
+        pricedQueries,
+    } = reductionConstructorDimensions;
+    const domain = 4n * degree;
+    const depth = length(domain) - 1n,
+        rounds = depth + 2n,
+        units = maximumColumns + maximumLookups + maximumOracles + 32n,
+        prefix = 1n << 24n,
+        roleBytes = 1024n,
+        framing = 1n << 16n;
+    const trees = [domain, domain, domain];
+    for (let size = domain / 2n; size >= 4n; size /= 2n) trees.push(size);
+    const leaves = sum(trees),
+        treeCount = BigInt(trees.length),
+        inner = leaves - treeCount,
+        rowBits = 384n * (units + 8n),
+        inputBits = 1n << 40n;
+    const proofBits =
+        inputBits +
+        (1n << 16n) +
+        1024n * rounds +
+        512n * treeCount +
+        2n * pricedQueries * treeCount * (32n + rowBits + 1024n + 512n * depth);
+    return {
+        depth,
+        rounds,
+        units,
+        prefix,
+        roleBytes,
+        framing,
+        trees,
+        leaves,
+        treeCount,
+        inner,
+        rowBits,
+        inputBits,
+        proofBits,
+    } as const;
+})();
+
 export const compileReductionConstructorPrice = (honestRegistrations = 20n) => {
     const operands = reductionConstructorOperands,
         origins = reductionConstructorOrigins;
@@ -45,7 +97,6 @@ export const compileReductionConstructorPrice = (honestRegistrations = 20n) => {
         degree,
         maximumColumns,
         maximumLookups,
-        maximumOracles,
         pricedQueries,
         sourceFamilies,
         participants,
@@ -347,7 +398,7 @@ export const compileReductionConstructorPrice = (honestRegistrations = 20n) => {
         preparation +
         caller.field.steps * callerStep +
         caller.field.spanAccesses * access();
-    const payload = 1n << 41n,
+    const payload = callerPassPayloadBits,
         chunks = ceiling(payload, metadataBits);
     const passWork =
         (caller.prefix.base.steps + chunks * caller.prefix.perChunk.steps) *
@@ -500,27 +551,19 @@ export const compileReductionConstructorPrice = (honestRegistrations = 20n) => {
         statementRouting =
             statementOrigins * queryCoefficient * statementTraffic;
 
-    // Descriptor geometry: three full trees, then every halving tree down
-    // to four leaves. Framing, salt and query work retain the old overbounds.
-    const depth = length(domain) - 1n,
-        rounds = depth + 2n,
-        units = maximumColumns + maximumLookups + maximumOracles + 32n,
-        prefix = 1n << 24n,
-        roleBytes = 1024n,
-        framing = 1n << 16n;
-    const trees = [domain, domain, domain];
-    for (let size = domain / 2n; size >= 4n; size /= 2n) trees.push(size);
-    const leaves = sum(trees),
-        treeCount = BigInt(trees.length),
-        inner = leaves - treeCount,
-        rowBits = 384n * (units + 8n),
-        inputBits = 1n << 40n;
-    const proofBits =
-        inputBits +
-        (1n << 16n) +
-        1024n * rounds +
-        512n * treeCount +
-        2n * pricedQueries * treeCount * (32n + rowBits + 1024n + 512n * depth);
+    const {
+        rounds,
+        units,
+        prefix,
+        roleBytes,
+        framing,
+        trees,
+        leaves,
+        inner,
+        rowBits,
+        inputBits,
+        proofBits,
+    } = reductionDescriptorGeometry;
     const retained =
         leaves * (rowBits + 1024n) +
         512n * (leaves + inner) +
