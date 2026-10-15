@@ -23,6 +23,7 @@ use supported_profile::{
     relation::{EVALUATION_HEADER_BYTES, setup_relation},
 };
 use word_proof::public_evaluation::EvaluationProver;
+use word_proof::public_oracle::PublicOracleBuilder;
 use word_verifier::public_evaluation::EvaluationVerifier;
 
 fn polynomial_file(directory: &Path, index: usize) -> PathBuf {
@@ -77,7 +78,7 @@ fn evaluation(
         prover.column(column).unwrap()
     });
     prover.finish_columns().unwrap();
-    let reencoding_milliseconds = started.elapsed().as_millis();
+    let commitment_and_folds_milliseconds = started.elapsed().as_millis();
     columns(profile, &directories[ordinal], |column| {
         prover.opening_column(column).unwrap()
     });
@@ -91,7 +92,7 @@ fn evaluation(
     drop(prover);
     let proof = fs::read(output).unwrap();
     println!(
-        "Public evaluation {ordinal}: bytes={}, reencoding_ms={reencoding_milliseconds}, generation_ms={}",
+        "Public evaluation {ordinal}: bytes={}, commitment_and_folds_ms={commitment_and_folds_milliseconds}, generation_ms={}",
         proof.len(),
         started.elapsed().as_millis()
     );
@@ -149,6 +150,22 @@ pub fn verify_selection(
     let profile = selection.roster().proposal().profile();
     let published = output.join("published-aggregate");
     fs::create_dir(&published).unwrap();
+    // Measure exact public-root reconstruction separately from proof folding.
+    let role = selection
+        .roster()
+        .proposal()
+        .contribution_role(offers[0].envelope().position())
+        .unwrap();
+    let started = Instant::now();
+    let mut builder = PublicOracleBuilder::new(&role, profile.committed_columns()).unwrap();
+    columns(profile, &directories[0], |column| {
+        builder.column(column).unwrap()
+    });
+    assert_eq!(builder.finish().unwrap().root(), *offers[0].public_root());
+    println!(
+        "Public root reencoding: milliseconds={}",
+        started.elapsed().as_millis()
+    );
     let mut publisher = AggregatePublisher::new(selection.roster().clone());
     let mut previous_directory: Option<PathBuf> = None;
     // Reverse discovery order while the signed selection remains sorted.

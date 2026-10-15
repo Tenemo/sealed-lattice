@@ -16,7 +16,8 @@ import {
     workspaceCargoEnvironment,
 } from '#tools/ci/rust-toolchain.js';
 
-// One genuine offer, before any selected-set or full-ceremony corpus exists.
+// A representative selected set, its published aggregate and complete setup
+// certificate, including hostile inputs and authenticated public continuation.
 export const runCommittedOfferScreen = async () => {
     const root = path.resolve('.');
     const workspace = path.join(root, 'crates/protocol-research');
