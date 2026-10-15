@@ -27,6 +27,34 @@ const verification = {
 };
 
 describe('worker message boundary', () => {
+    it.each([
+        'https://user@relay.invalid/',
+        'https://user:pass@relay.invalid/',
+        'https://:pass@relay.invalid/',
+        'https://%75ser:p%40ss@relay.invalid/',
+        'http://%40@127.0.0.1:43123/records/',
+    ])('refuses relay credentials in both message types: %s', (relay) => {
+        expect(isWellFormed({ ...participant, relay })).toBe(false);
+        expect(isWellFormedVerification({ ...verification, relay })).toBe(
+            false,
+        );
+    });
+
+    it.each([
+        'https://relay.invalid/',
+        'https://relay.invalid/user@room/',
+        'http://127.0.0.1:43123/records/',
+        'http://[::1]:43123/records/',
+    ])(
+        'accepts credential-free relay bases in both message types: %s',
+        (relay) => {
+            expect(isWellFormed({ ...participant, relay })).toBe(true);
+            expect(isWellFormedVerification({ ...verification, relay })).toBe(
+                true,
+            );
+        },
+    );
+
     it('recognizes participant and independent-verification envelopes separately', () => {
         expect(isWellFormed(participant)).toBe(true);
         expect(

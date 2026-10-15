@@ -81,12 +81,14 @@ const httpUrl = (value: unknown) => {
         : undefined;
 };
 
-// A base URL ends with a slash and has no query or fragment, so every
-// record name extends its path.
+// A base URL has no credentials, ends with a slash and has no query or
+// fragment, so every record name extends its path.
 const isBaseUrl = (value: unknown) => {
     const url = httpUrl(value);
     return (
         url !== undefined &&
+        url.username === '' &&
+        url.password === '' &&
         url.pathname.endsWith('/') &&
         url.search === '' &&
         url.hash === ''
