@@ -36,9 +36,7 @@ import {
     type EvidenceRenewalStep,
 } from '#tools/ci/evidence-renewal-steps.js';
 import {
-    busyProcessors,
     estimateProbeSlowdown,
-    parseProcessTimes,
     selectMonitorOptions,
 } from '#tools/ci/monitor-host-contention.js';
 import {
@@ -853,55 +851,23 @@ describe('evidence renewal measurements', () => {
         );
     });
 
-    it('splits processor time between own and other processes present in both readings', () => {
-        const previous = parseProcessTimes(
-            [
-                '0|System Idle Process|50|0',
-                '4|chrome.exe|1|1',
-                '8|game.exe|10|0',
-                '12|old.exe|5|0',
-                '16|clock.exe|9|0',
-                'malformed line',
-            ].join('\r\n'),
-            0,
-        );
-        const current = parseProcessTimes(
-            [
-                '0|System Idle Process|90|0',
-                '4|chrome.exe|3|1',
-                '8|game.exe|11|0',
-                '12|new.exe|7|0',
-                '16|clock.exe|8|0',
-            ].join('\n'),
-            2000,
-        );
-        expect(busyProcessors(previous, current)).toEqual({
-            ownProcessors: 1,
-            otherProcessors: 0.5,
-        });
-        expect(() => busyProcessors(current, current)).toThrow(
-            'must advance in time',
-        );
-    });
-
-    it('requires a label, a stop file and the checkouts whose processes are own', () => {
+    it('requires a label, a stop file and the accounting job', () => {
         expect(
             selectMonitorOptions([
                 '--',
                 '--label=ordinary',
                 '--stop-file=temp/ordinary.stop',
-                '--own-path=.',
-                '--own-path=temp/worktree',
+                '--job=shared-job',
             ]),
         ).toEqual({
             label: 'ordinary',
-            ownPaths: [path.resolve('.'), path.resolve('temp/worktree')],
+            job: 'shared-job',
             stopFile: path.resolve('temp/ordinary.stop'),
         });
         for (const values of [
-            ['--stop-file=a', '--own-path=.'],
-            ['--label=Ordinary', '--stop-file=a', '--own-path=.'],
-            ['--label=ordinary', '--own-path=.'],
+            ['--stop-file=a', '--job=shared-job'],
+            ['--label=Ordinary', '--stop-file=a', '--job=shared-job'],
+            ['--label=ordinary', '--job=shared-job'],
             ['--label=ordinary', '--stop-file=a'],
         ])
             expect(() => selectMonitorOptions(values)).toThrow('Usage:');

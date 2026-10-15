@@ -319,7 +319,8 @@ const runStep = async (
         },
         eventType: 'renewal-step-started',
     });
-    let monitor: { readonly stop: () => Promise<void> } | undefined;
+    let monitor:
+        Awaited<ReturnType<typeof startHostContentionMonitor>> | undefined;
     if (
         invocation !== undefined &&
         step.monitored === true &&
@@ -329,7 +330,6 @@ const runStep = async (
             monitor = await startHostContentionMonitor({
                 directory: context.monitorDirectory,
                 label: step.name,
-                ownPaths: [...new Set([repositoryRoot, context.checkoutRoot])],
                 placement,
                 runLog: context.runLog,
             });
@@ -343,7 +343,13 @@ const runStep = async (
                 [
                     placement === undefined
                         ? invocation
-                        : placeCommand(invocation, placement),
+                        : placeCommand(
+                              invocation,
+                              placement,
+                              monitor === undefined
+                                  ? undefined
+                                  : { name: monitor.job },
+                          ),
                 ],
                 {
                     guard: {

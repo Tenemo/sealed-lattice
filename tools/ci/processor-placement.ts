@@ -16,6 +16,10 @@ export type ProcessorPlacement = Readonly<{
     priority: ProcessorPriority;
 }>;
 
+// One outer job accounts for the monitor and workload, while each command
+// retains its own nested job for process-tree cleanup.
+export type ProcessorAccountingJob = Readonly<{ name: string; create?: true }>;
+
 // One affinity mask addresses one Windows processor group of at most 64
 // logical processors.
 const processorGroupSize = 64;
@@ -94,9 +98,11 @@ export const quoteWindowsCommandLineArgument = (argument: string): string => {
 // at the priority class, with no breakaway, and moves the calling process
 // into it, so every process it starts inherits the job. The job ends every
 // process it holds when its last handle closes with the calling process.
-const processorJobSource = String.raw`
+export const processorJobSource = String.raw`
 using System;
 using System.ComponentModel;
+using System.Diagnostics;
+using System.Globalization;
 using System.Runtime.InteropServices;
 
 public static class ProcessorPlacementJob {
@@ -133,6 +139,18 @@ public static class ProcessorPlacementJob {
         public UIntPtr PeakJobMemoryUsed;
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    struct Accounting {
+        public long TotalUserTime;
+        public long TotalKernelTime;
+        public long PeriodUserTime;
+        public long PeriodKernelTime;
+        public uint TotalPageFaultCount;
+        public uint TotalProcesses;
+        public uint ActiveProcesses;
+        public uint TotalTerminatedProcesses;
+    }
+
     const int ExtendedLimitInformation = 9;
     const uint LimitAffinity = 0x10;
     const uint LimitPriorityClass = 0x20;
@@ -141,24 +159,62 @@ public static class ProcessorPlacementJob {
     [DllImport("kernel32.dll", SetLastError = true)]
     static extern IntPtr CreateJobObject(IntPtr attributes, string name);
     [DllImport("kernel32.dll", SetLastError = true)]
+    static extern IntPtr OpenJobObject(uint access, bool inherit, string name);
+    [DllImport("kernel32.dll", SetLastError = true)]
     static extern bool SetInformationJobObject(IntPtr job, int informationClass, ref ExtendedLimits information, int length);
     [DllImport("kernel32.dll", SetLastError = true)]
     static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
     [DllImport("kernel32.dll")]
     static extern IntPtr GetCurrentProcess();
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern bool QueryInformationJobObject(IntPtr job, int informationClass, out Accounting information, int length, IntPtr returnedLength);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern bool GetSystemTimes(out long idle, out long kernel, out long user);
+    [DllImport("kernel32.dll")]
+    static extern bool CloseHandle(IntPtr handle);
 
     static IntPtr job;
+    static IntPtr accountingJob;
 
-    public static void Enter(ulong affinity, uint priorityClass) {
-        job = CreateJobObject(IntPtr.Zero, null);
-        if (job == IntPtr.Zero) throw new Win32Exception();
+    static IntPtr Create(ulong affinity, uint priorityClass, string name) {
+        IntPtr created = CreateJobObject(IntPtr.Zero, name);
+        if (created == IntPtr.Zero) throw new Win32Exception();
+        if (Marshal.GetLastWin32Error() == 183) {
+            CloseHandle(created);
+            throw new InvalidOperationException("The accounting job already exists.");
+        }
         ExtendedLimits limits = new ExtendedLimits();
         limits.Basic.LimitFlags = LimitAffinity | LimitPriorityClass | LimitKillOnJobClose;
         limits.Basic.Affinity = new UIntPtr(affinity);
         limits.Basic.PriorityClass = priorityClass;
-        if (!SetInformationJobObject(job, ExtendedLimitInformation, ref limits, Marshal.SizeOf(typeof(ExtendedLimits))))
+        if (!SetInformationJobObject(created, ExtendedLimitInformation, ref limits, Marshal.SizeOf(typeof(ExtendedLimits))))
             throw new Win32Exception();
+        return created;
+    }
+
+    public static void Enter(ulong affinity, uint priorityClass, string accountingName, bool createAccounting) {
+        if (!String.IsNullOrEmpty(accountingName)) {
+            accountingJob = createAccounting ? Create(affinity, priorityClass, accountingName) : OpenJobObject(1, false, accountingName);
+            if (accountingJob == IntPtr.Zero) throw new Win32Exception();
+            if (!AssignProcessToJobObject(accountingJob, GetCurrentProcess())) throw new Win32Exception();
+        }
+        job = Create(affinity, priorityClass, null);
         if (!AssignProcessToJobObject(job, GetCurrentProcess())) throw new Win32Exception();
+    }
+
+    public static string CpuTimes(string name) {
+        IntPtr handle = OpenJobObject(4, false, name);
+        if (handle == IntPtr.Zero) throw new Win32Exception();
+        try {
+            Accounting information;
+            if (!QueryInformationJobObject(handle, 1, out information, Marshal.SizeOf(typeof(Accounting)), IntPtr.Zero)) throw new Win32Exception();
+            long idle, kernel, user;
+            if (!GetSystemTimes(out idle, out kernel, out user)) throw new Win32Exception();
+            double at = 1000.0 * Stopwatch.GetTimestamp() / Stopwatch.Frequency;
+            double busy = (kernel + user - idle) / 1e7;
+            double own = (information.TotalUserTime + information.TotalKernelTime) / 1e7;
+            return String.Format(CultureInfo.InvariantCulture, "{0:R}|{1:R}|{2:R}", at, busy, own);
+        } finally { CloseHandle(handle); }
     }
 }
 `;
@@ -170,6 +226,7 @@ public static class ProcessorPlacementJob {
 export const placedCommandScript = (
     invocation: CommandInvocation,
     placement: ProcessorPlacement,
+    accountingJob?: ProcessorAccountingJob,
 ): string => {
     const payload = Buffer.from(
         JSON.stringify({
@@ -178,6 +235,7 @@ export const placedCommandScript = (
                 .join(' '),
             command: invocation.command,
             workingDirectory: invocation.workingDirectoryPath ?? process.cwd(),
+            ...(accountingJob === undefined ? {} : { accountingJob }),
         }),
         'utf8',
     ).toString('base64');
@@ -188,14 +246,14 @@ export const placedCommandScript = (
         processorJobSource,
         "'@",
         'try {',
+        `    $payload = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${payload}')) | ConvertFrom-Json`,
         '    Add-Type -TypeDefinition $source',
-        `    [ProcessorPlacementJob]::Enter([UInt64]::Parse('${placement.affinityMask.toString()}'), [UInt32]::Parse('${String(priorityClasses[placement.priority])}'))`,
+        `    [ProcessorPlacementJob]::Enter([UInt64]::Parse('${placement.affinityMask.toString()}'), [UInt32]::Parse('${String(priorityClasses[placement.priority])}'), [string]$payload.accountingJob.name, [bool]$payload.accountingJob.create)`,
         '} catch {',
         "    [Console]::Error.WriteLine('The processor placement failed: ' + $_.Exception.Message)",
         '    exit 1',
         '}',
         'try {',
-        `    $payload = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${payload}')) | ConvertFrom-Json`,
         '    $start = New-Object System.Diagnostics.ProcessStartInfo',
         '    $start.FileName = $payload.command',
         '    $start.Arguments = $payload.arguments',
@@ -216,6 +274,7 @@ export const placedCommandScript = (
 export const placeCommand = (
     invocation: CommandInvocation,
     placement: ProcessorPlacement,
+    accountingJob?: ProcessorAccountingJob,
 ): CommandInvocation => ({
     ...invocation,
     args: [
@@ -225,7 +284,7 @@ export const placeCommand = (
         'Bypass',
         '-EncodedCommand',
         Buffer.from(
-            placedCommandScript(invocation, placement),
+            placedCommandScript(invocation, placement, accountingJob),
             'utf16le',
         ).toString('base64'),
     ],
