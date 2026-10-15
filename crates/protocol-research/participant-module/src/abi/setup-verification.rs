@@ -130,6 +130,18 @@ pub extern "C" fn setup_offer_begin(length: usize) -> u32 {
     step(|setup| setup.begin_offer(length))
 }
 #[unsafe(no_mangle)]
+pub extern "C" fn setup_offer_source(length: usize) -> u32 {
+    step(|setup| setup.offer_source(length))
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn setup_source_range() -> u32 {
+    step(SetupSession::source_range)
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn setup_selected_offer_source(length: usize) -> u32 {
+    step(|setup| setup.selected_offer_source(length))
+}
+#[unsafe(no_mangle)]
 pub extern "C" fn setup_offer_polynomial(index: usize, offset: usize, length: usize) -> u32 {
     step(|setup| setup.offer_polynomial(index, offset, length))
 }

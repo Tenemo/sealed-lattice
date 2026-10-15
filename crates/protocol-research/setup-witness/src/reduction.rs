@@ -3,6 +3,7 @@ use zeroize::Zeroizing;
 
 // Enough limbs for every supported modulus at the narrowest limb.
 pub const MAXIMUM_LIMBS: usize = 16;
+const QUOTIENT_BITS: usize = 16;
 
 pub struct Modulus {
     pub digits: Vec<u128>,
@@ -37,7 +38,9 @@ impl Modulus {
         };
         let value = BigUint::from_bytes_le(bytes);
         let digits = split(value.clone());
-        if digits.len() > MAXIMUM_LIMBS || digits.last().copied().unwrap() <= 65536 {
+        if digits.len() > MAXIMUM_LIMBS
+            || digits.last().copied().unwrap() < 1u128 << (QUOTIENT_BITS - 1)
+        {
             return None;
         }
         let mut ceiling_half = split((value >> 1usize) + 1u8);
@@ -82,19 +85,21 @@ impl Modulus {
             .checked_mul(1u128 << bits)
             .and_then(|value| value.checked_add(magnitude[count - 1]))?;
         let modulus_top = self.digits[count - 1];
-        if top >= modulus_top << 16 {
+        if top >= modulus_top << QUOTIENT_BITS {
             return None;
         }
         let mut quotient = 0u128;
-        for bit in (0..16).rev() {
+        for bit in (0..QUOTIENT_BITS).rev() {
             let candidate = quotient | (1u128 << bit);
             let difference = top as i128 - (candidate * modulus_top) as i128;
             let take = 1 - ((difference >> 127) & 1);
             quotient |= (take as u128) << bit;
         }
         // Ignoring lower modulus limbs gives an upper quotient estimate.
-        // Since that estimate is smaller than the leading modulus limb, it
-        // exceeds the exact quotient by at most one.
+        // The estimate is below 2^16 and the leading digit is at least 2^15.
+        // If B is the radix and k the final limb index, the excess product
+        // is below estimate * B^k, hence below twice the modulus. At most
+        // two masked additions therefore recover the exact remainder.
         let mut product_carry = 0u128;
         let mut borrow = 0i128;
         for index in 0..count {
@@ -108,19 +113,22 @@ impl Modulus {
         if !matches!(high_difference, 0 | -1) {
             return None;
         }
-        let correction = ((high_difference >> 127) & 1) as u128;
-        let correction_mask = 0u128.wrapping_sub(correction);
-        let mut addition_carry = 0u128;
-        for index in 0..count {
-            let value = remainder[index] + (self.digits[index] & correction_mask) + addition_carry;
-            remainder[index] = value & mask;
-            addition_carry = value >> bits;
+        for _ in 0..2 {
+            let correction = ((high_difference >> 127) & 1) as u128;
+            let correction_mask = 0u128.wrapping_sub(correction);
+            let mut addition_carry = 0u128;
+            for index in 0..count {
+                let value =
+                    remainder[index] + (self.digits[index] & correction_mask) + addition_carry;
+                remainder[index] = value & mask;
+                addition_carry = value >> bits;
+            }
+            high_difference += addition_carry as i128;
+            quotient -= correction;
         }
-        high_difference += addition_carry as i128;
         if high_difference != 0 {
             return None;
         }
-        quotient -= correction;
         borrow = 0;
         for index in 0..count {
             let difference = remainder[index] as i128 - self.ceiling_half[index] as i128 - borrow;

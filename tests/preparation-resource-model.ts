@@ -1,6 +1,7 @@
 import { compileCandidatePublicationCensus } from '#tests/candidate-publication-model.js';
 import { compileCommittedOfferCensus } from '#tests/committed-offer-model.js';
 import { compileContributionBodyCensus } from '#tests/contribution-body-model.js';
+import { sourceReadBytes } from '#tests/encrypted-registration-source-model.js';
 import { compileRecipientKeyCensus } from '#tests/recipient-key-model.js';
 import { compileRegistrationEnrollmentCensus } from '#tests/registration-enrollment-model.js';
 import { compileRosterProposalCensus } from '#tests/roster-proposal-model.js';
@@ -21,8 +22,11 @@ const compileOrganizerCollectionSchedule = (profile: SupportedProfile) => {
         BigInt(profile.participantCount) *
             (registration.maximumHeaderBytes +
                 compileRecipientKeyCensus().publicKeyBytes +
+                registration.maximumSourceCiphertextBytes +
+                registration.signatureBytes +
                 2n * chunk);
     const fullOffer =
+        sourceReadBytes +
         body.polynomialPayloadBytes +
         body.maximumProofBytes +
         body.headerBytes +
@@ -161,7 +165,9 @@ export const compilePreparationResources = (profile: SupportedProfile) => {
             ? body.maximumProofBytes
             : 1_048_576n);
     const maximumOfferVerificationReadBytes =
-        maximumSelectedOfferBytes + selectedProofLookaheadBytes;
+        maximumSelectedOfferBytes +
+        selectedProofLookaheadBytes +
+        selected * sourceReadBytes;
     const maximumCertificateAssemblyReadBytes =
         participants * wire.endorsementPacketBytes;
     const maximumPreparationRoutingBytes =

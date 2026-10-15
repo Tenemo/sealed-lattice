@@ -1,4 +1,9 @@
 import { compileContributionBodyCensus } from '#tests/contribution-body-model.js';
+import {
+    sourceOperandPolynomials,
+    sourceStatementPolynomialBytes,
+    sourceStatementPolynomialCount,
+} from '#tests/encrypted-registration-source-model.js';
 import { compileFirstOracleCheckpointCensus } from '#tests/first-oracle-checkpoint-model.js';
 import { operationSeedBytes } from '#tests/operation-seed-model.js';
 import { compileParticipantBallotCustody } from '#tests/participant-ballot-custody-model.js';
@@ -94,8 +99,7 @@ export const projectContributionProofStorageSavings = (
         savedProofWriteBytes: savedProofCiphertextBytes,
         savedProofReadBytes: completeReadPasses * savedProofCiphertextBytes,
         savedProofVerificationCalls: completeReadPasses * addedRecords,
-        // The source-opening salt stays in the body header; storage changes
-        // no proof bytes.
+        // Changing retained capacity changes no published proof bytes.
         publishedProofBytes: observedProofBytes,
     };
 };
@@ -108,7 +112,16 @@ export const compileParticipantCustodyCensus = (profile: SupportedProfile) => {
     const relation = compileSetupContributionRelationCensus(profile);
     const chunkBytes = 1n << 20n;
     const chunks = (bytes: bigint) => (bytes + chunkBytes - 1n) / chunkBytes;
-    const publicRecords = body.polynomials.flatMap((polynomial) => {
+    const retainedPolynomials = [
+        ...body.polynomials,
+        ...sourceOperandPolynomials(
+            Number(
+                relation.expandedStatementPolynomialCount -
+                    sourceStatementPolynomialCount,
+            ),
+        ),
+    ];
+    const publicRecords = retainedPolynomials.flatMap((polynomial) => {
         const records = [];
         for (let offset = 0n; offset < polynomial.bytes; offset += chunkBytes) {
             const remaining = polynomial.bytes - offset;
@@ -226,6 +239,7 @@ export const compileParticipantCustodyCensus = (profile: SupportedProfile) => {
             ? maximumPreparationRootBytes
             : maximumPreparedRootBytes;
     const maximumPublicBodyCiphertextBytes =
+        sourceStatementPolynomialBytes +
         body.polynomialPayloadBytes +
         body.maximumProofBytes +
         16n * (BigInt(publicRecords.length) + maximumProofRecords);
@@ -247,6 +261,7 @@ export const compileParticipantCustodyCensus = (profile: SupportedProfile) => {
         maximumReleaseStateBytes: release.maximumStateBytes,
         participants: body.participantCount,
         publicRecords,
+        retainedSourceOperandBytes: sourceStatementPolynomialBytes,
         checkpointLengths,
         metadataPrefixBytes,
         maximumCheckpointMetadataBytes,

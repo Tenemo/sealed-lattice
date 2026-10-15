@@ -112,6 +112,10 @@ pub fn common_records_job(profile: Profile, index: usize) -> Result<Ticket, Refu
     ))
 }
 impl Contribution {
+    pub(crate) fn profile(&self) -> Profile {
+        self.profile
+    }
+
     /// Continues the original source's FHE key in its exact parameter family.
     /// The caller owns registration authentication and retained-source custody.
     pub fn from_source(

@@ -163,13 +163,10 @@ fn main() {
         enrollment.retire_sources();
         enrollment.credential.retire_preparation();
         assert!(enrollment.sources_retired());
-        assert!(enrollment.contribution_source(profile).is_err());
+        assert!(enrollment.contribution_source(&poll, profile).is_err());
         assert!(
             enrollment
-                .contribution_header(
-                    profile,
-                    supported_profile::relation::setup_relation(profile).proof_header_bytes()
-                )
+                .contribution_coordinate_hash(&poll, profile)
                 .is_err()
         );
     }

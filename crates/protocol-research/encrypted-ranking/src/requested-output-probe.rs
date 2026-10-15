@@ -2,6 +2,7 @@ use super::{Ciphertext, DEGREE, Engine, Refusal, plaintext, stored_bytes};
 use num_bigint::BigInt;
 use num_traits::Zero;
 use protocol_foundations::identity::identity;
+use supported_profile::plaintext::{ACTIVE_SLOTS, ENCODING_DEGREE};
 use supported_profile::{FHE_SECRET_SUPPORT, PLAINTEXT_MODULUS, Profile};
 
 /// The diagnostic identity of every loaded input and its position.
@@ -37,12 +38,16 @@ fn order(options: usize) -> Vec<usize> {
 fn expected_coefficients(profile: Profile, order: &[usize], top_count: usize) -> Vec<u64> {
     let mut expected = vec![0; DEGREE];
     for (rank, option) in order.iter().take(top_count).enumerate() {
-        let slot = (option * profile.options() + rank) * profile.rank_window();
-        let exponent = power(5, slot, DEGREE as u64);
-        let root = power(3, exponent as usize, PRIME);
+        let slot = (option * profile.rank_window() + ACTIVE_SLOTS - rank) % ACTIVE_SLOTS;
+        let exponent = power(5, slot, ENCODING_DEGREE as u64);
+        let root = power(
+            11,
+            (PRIME as usize - 1) / ENCODING_DEGREE * exponent as usize,
+            PRIME,
+        );
         let inverse = power(root, (PRIME - 2) as usize, PRIME);
-        let mut term = power((DEGREE / 2) as u64, (PRIME - 2) as usize, PRIME);
-        for coefficient in expected.iter_mut().step_by(2) {
+        let mut term = power((ENCODING_DEGREE / 2) as u64, (PRIME - 2) as usize, PRIME);
+        for coefficient in expected.iter_mut().step_by(2 * DEGREE / ENCODING_DEGREE) {
             *coefficient = (*coefficient + term) % PRIME;
             term = term * inverse % PRIME;
         }
@@ -76,6 +81,12 @@ fn program(profile: Profile, top_count: usize) -> Vec<u8> {
         sum = instructions.len() as u32 - 1;
     }
     instructions.push([5, sum, u32::MAX, 2 + family as u32]);
+    instructions.push([
+        5,
+        instructions.len() as u32 - 1,
+        u32::MAX,
+        3 + options as u32,
+    ]);
     let mut bytes = (DEGREE as u32).to_le_bytes().to_vec();
     bytes.extend((instructions.len() as u32).to_le_bytes());
     bytes.extend(((instructions.len() - 1) as u32).to_le_bytes());
@@ -118,12 +129,11 @@ pub fn probe(profile: Profile, top_count: usize) -> Result<String, Refusal> {
     for (rank, option) in order.iter().enumerate() {
         ranks[*option] = rank as u32;
     }
-    let mut slots: Vec<_> = (0..DEGREE / 4)
-        .map(|index| ((index * 73 + 19) % PRIME as usize) as u32)
-        .collect();
+    let mut slots = vec![0; ACTIVE_SLOTS];
     for (option, rank) in ranks.iter().enumerate() {
         for requested in 0..options {
-            slots[(option * options + requested) * profile.rank_window()] = *rank;
+            slots[(option * profile.rank_window() + ACTIVE_SLOTS - requested) % ACTIVE_SLOTS] =
+                *rank;
         }
     }
     let mut inputs = Vec::new();
@@ -200,4 +210,89 @@ pub fn probe(profile: Profile, top_count: usize) -> Result<String, Refusal> {
                 .map_err(|_| Refusal::Identity)?
         ),
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn compact_scalar_output_preserves_full_and_short_requested_orders() {
+        let profile = Profile::new(3, 2).unwrap();
+        assert!(probe(profile, 2).is_ok());
+        assert!(probe(profile, 1).is_ok());
+        assert_eq!(probe(profile, 0), Err(Refusal::Program));
+        assert_eq!(probe(profile, 3), Err(Refusal::Program));
+    }
+
+    #[test]
+    fn compact_scalar_mask_removes_the_literal_orbit_and_nonbase_positions() {
+        let profile = Profile::new(3, 2).unwrap();
+        let mut instructions = vec![
+            [0, u32::MAX, u32::MAX, 0],
+            [0, u32::MAX, u32::MAX, 1],
+            [1, 0, 1, 0],
+            [0, u32::MAX, u32::MAX, 2],
+            [1, 2, 3, 0],
+            [4, 4, u32::MAX, 0],
+        ];
+        let bytes: Vec<_> = [
+            DEGREE as u32,
+            instructions.len() as u32,
+            instructions.len() as u32 - 1,
+        ]
+        .into_iter()
+        .chain(instructions.drain(..).flatten())
+        .flat_map(u32::to_le_bytes)
+        .collect();
+        let mut engine = Engine::new(profile, &bytes).unwrap();
+        let secret = engine.arithmetic.small(&super::super::super::secret(
+            DEGREE,
+            2,
+            FHE_SECRET_SUPPORT,
+            0x4123_5678_9abc_def1,
+        ));
+        let primary: Vec<_> = (0..ACTIVE_SLOTS)
+            .map(|position| (position % 10 + 1) as u32)
+            .collect();
+        let complementary: Vec<_> = (0..ACTIVE_SLOTS)
+            .map(|position| (position % 10 + 1) as u32)
+            .collect();
+        let message = supported_profile::plaintext::encode_orbits(&primary, &complementary, DEGREE);
+        let input = engine.add_plaintext(&engine.zero_value(), &message);
+        while !engine.finished() {
+            if let Some(position) = engine.requirements().unwrap().input_position {
+                engine
+                    .load_input(
+                        position,
+                        if position == 0 {
+                            input.clone()
+                        } else {
+                            engine.zero_value()
+                        },
+                    )
+                    .unwrap();
+            }
+            engine.execute().unwrap();
+        }
+        let actual = engine
+            .arithmetic
+            .decode(engine.value(engine.step() - 1).unwrap(), &secret);
+        let kept: Vec<_> = primary
+            .iter()
+            .enumerate()
+            .map(|(position, value)| {
+                if position % profile.rank_window() == 0 {
+                    *value
+                } else {
+                    0
+                }
+            })
+            .collect();
+        let expected: Vec<_> = supported_profile::plaintext::encode_slots(&kept, DEGREE)
+            .iter()
+            .map(|value| value.rem_euclid(PLAINTEXT_MODULUS as i32) as u64)
+            .collect();
+        assert_eq!(actual, expected);
+    }
 }

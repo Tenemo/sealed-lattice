@@ -17,7 +17,6 @@ import {
 import {
     renderThresholdCompletionCensus,
     renderThresholdKeyAggregationStructuralCensus,
-    renderRecipientKeyUniquenessCensus,
     renderCertificateCustodyCensus,
     renderCloseResponseCensus,
     renderThresholdReleaseFloodingBound,
@@ -31,7 +30,6 @@ import {
     renderSharedParticipantCustodyCensus,
     renderParticipantVaultKeyWork,
 } from '#tools/ci/census/custody.js';
-import { renderCompressedOracleCircuitWork } from '#tools/ci/census/oracle-circuit-work.js';
 import { renderProofHashByteAndPermutationWork } from '#tools/ci/census/proof-hash-work.js';
 import {
     renderBoundedPolynomialProofCensus,
@@ -76,10 +74,7 @@ import {
     renderSetupSelectionWireAndResources,
     renderRosterProposalCensus,
 } from '#tools/ci/census/setup.js';
-import {
-    renderSimulatorRecipientKeyAvailability,
-    renderCommitmentEquivocationFiniteModel,
-} from '#tools/ci/census/simulation.js';
+import { renderSimulatorRecipientKeyAvailability } from '#tools/ci/census/simulation.js';
 import { toolArguments } from '#tools/ci/command-line.js';
 
 const renderCensusText = (): string => {
@@ -91,7 +86,6 @@ const renderCensusText = (): string => {
             '',
             ...renderThresholdCompletionCensus(),
             ...renderThresholdKeyAggregationStructuralCensus(),
-            ...renderRecipientKeyUniquenessCensus(),
             ...renderBoundedPolynomialProofCensus(),
             ...renderWideSharingAndReleaseLiftingCensus(),
             ...renderLinkedBallotEncryptionCensus(),
@@ -145,8 +139,6 @@ const renderCensusText = (): string => {
             ...renderProofFieldCoefficientFoldBounds(),
             ...renderSmallLimbProofFieldCensus(),
             ...renderSimulatorRecipientKeyAvailability(),
-            ...renderCompressedOracleCircuitWork(),
-            ...renderCommitmentEquivocationFiniteModel(),
             ...renderCloseResponseCensus(),
             ...renderThresholdReleaseFloodingBound(),
             ...renderCloseWireCensus(),

@@ -50,10 +50,10 @@ describe('preparation public resource bounds', () => {
                         wire.signatureBytes),
             );
             expect(result.maximumEndorsementPacketBytes).toBe(
-                BigInt(participants) * (2n + 64n + 3309n),
+                BigInt(participants) * (2n + 64n + 8642n),
             );
             expect(result.quorumEndorsementPacketBytes).toBe(
-                BigInt(quorum) * (2n + 64n + 3309n),
+                BigInt(quorum) * (2n + 64n + 8642n),
             );
             expect(result.maximumGenerationAndContinuationSeeds).toBe(
                 2n * BigInt(eligible),
@@ -63,7 +63,7 @@ describe('preparation public resource bounds', () => {
                 BigInt(selected),
             );
             const signedOffer =
-                body.maximumBodyBytes + wire.offerEnvelopeBytes + 3309n;
+                body.maximumBodyBytes + wire.offerEnvelopeBytes + 8642n;
             const manifest = (files: readonly (readonly [string, bigint])[]) =>
                 BigInt(
                     encodeCandidateManifest({
@@ -83,7 +83,7 @@ describe('preparation public resource bounds', () => {
                 );
             const offerManifest = manifest([
                 ['offer.bin', wire.offerEnvelopeBytes],
-                ['offer-signature.bin', 3309n],
+                ['offer-signature.bin', 8642n],
                 ['body-header.bin', body.headerBytes],
                 ...body.polynomials.map(
                     (polynomial) =>
@@ -101,7 +101,7 @@ describe('preparation public resource bounds', () => {
             ]);
             const selectionManifest = manifest([
                 ['selection.bin', wire.selectionBodyBytes],
-                ['signature.bin', 3309n],
+                ['signature.bin', 8642n],
             ]);
             const endorsementManifest = manifest([
                 ['endorsement.bin', wire.endorsementPacketBytes],
@@ -187,7 +187,7 @@ describe('preparation public resource bounds', () => {
                     (signedOffer + committedBytes + offerManifest + 64n) +
                     aggregateUploads +
                     wire.selectionBodyBytes +
-                    3309n +
+                    8642n +
                     selectionManifest +
                     BigInt(participants) *
                         (wire.endorsementPacketBytes +
@@ -203,7 +203,7 @@ describe('preparation public resource bounds', () => {
                     16n * BigInt(participants) +
                     BigInt(participants) * wire.endorsementPacketBytes +
                     wire.selectionBodyBytes +
-                    3309n +
+                    8642n +
                     result.maximumPreparationRoutingBytes,
             );
             expect(result.extraAggregateReadPassBytes).toBe(
@@ -215,9 +215,10 @@ describe('preparation public resource bounds', () => {
                 BigInt(eligible * body.polynomials.length) * 64n,
             );
             expect(result.maximumCleanPreparationDownloadBytes).toBe(
-                2n * (wire.selectionBodyBytes + 3309n) +
+                2n * (wire.selectionBodyBytes + 8642n) +
                     BigInt(selected) *
                         (signedOffer +
+                            2_097_152n +
                             (body.maximumProofBytes < 1_048_576n
                                 ? body.maximumProofBytes
                                 : 1_048_576n)) +

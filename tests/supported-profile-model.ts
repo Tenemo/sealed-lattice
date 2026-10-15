@@ -23,7 +23,7 @@ export const ballotScoreRange = { minimum: 1, maximum: 10 } as const;
 export const supportedProfileRules = {
     // Moduli are the largest primes t*k*2^(b-32)+1 below 2^b with odd k.
     modulusOddFactorBits: 32,
-    ciphertextModulusBitStep: 32,
+    ciphertextModulusBitStep: 16,
     releaseModulusBitStep: 48,
     prothWitnessLimit: 256n,
 } as const;
@@ -356,6 +356,8 @@ export const deriveRankingNoise = (
     try {
         const model = createFixedModulusBfvNoiseModel({
             ...fixedModulusBfvInputs,
+            publicPlaintextSubringDegree:
+                2n * BigInt(2 ** Math.ceil(Math.log2(optionCount))),
             setupContributorCount: BigInt(
                 thresholdProfileFor(participantCount).setupContributorCount,
             ),
@@ -445,7 +447,14 @@ const computeSupportedProfile = (
         'optionCount is outside the supported range.',
     );
     const step = supportedProfileRules.ciphertextModulusBitStep;
-    for (let bits = 3 * step; ; bits += step) {
+    for (
+        let bits =
+            Math.ceil(
+                (2 * supportedProfileRules.modulusOddFactorBits + 1) / step,
+            ) * step;
+        ;
+        bits += step
+    ) {
         const ciphertext = largestTransformPrimeBelow(bits);
         const ranking = deriveRankingNoise(
             participantCount,

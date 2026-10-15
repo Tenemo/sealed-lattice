@@ -5,7 +5,6 @@ edition.workspace = true
 publish.workspace = true
 
 [dependencies]
-fips204 = { workspace = true, features = ["ml-dsa-65"] }
 num-bigint.workspace = true
 ballot-proof = { path = "../ballot-proof" }
 protocol-foundations = { path = "../protocol-foundations" }
@@ -18,4 +17,5 @@ linked-release-proof = { path = "../linked-release-proof" }
 supported-profile = { path = "../supported-profile" }
 
 [dev-dependencies]
+purpose-signature = { path = "../purpose-signature" }
 ballot-encryption = { path = "../ballot-encryption" }

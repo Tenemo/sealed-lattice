@@ -43,7 +43,7 @@ const productionBallotLayout = {
 const ballotHeaderBytes = 4 + 64 + 64 + 2 + 1 + 1;
 
 // Rows: each FHE ciphertext component's limbs, one ring degree per limb;
-// the packing equation; each auxiliary component; then one row per support
+// the packing and plaintext-interval equations; each auxiliary component; then one row per support
 // column. FHE component c is P_c*u + e_c + [c=0]*scale*m - Q*q_c = C_c in
 // signed limbs with carries, where P_0 is the key and P_1 the common
 // polynomial. The packing row is m - sum_option M_option*score_option -
@@ -91,7 +91,7 @@ export const ballotRelationOperator = (
     const fheRow = (component: number) => component * limbs * degree;
     const packingRow = 2 * limbs * degree;
     const auxiliaryRow = (component: number) =>
-        packingRow + degree + component * auxiliaryDegree;
+        packingRow + 2 * degree + component * auxiliaryDegree;
     const builder = createOperatorBuilder(alpha, columnLayout.columns.length);
     // Each encryption's common polynomial and key enter its ephemeral's
     // adjoint through the second and first component; each ciphertext
@@ -124,14 +124,9 @@ export const ballotRelationOperator = (
     const limbWeight = power(alpha, degree);
     const plaintextScale =
         (ciphertextModulus + plaintextModulus / 2n) / plaintextModulus;
-    // The plaintext is its offset lower word plus 65,536 times its high
-    // bit.
     const plaintext: Variable = {
-        terms: [
-            [index('plaintext-lower-word'), 1n],
-            [index('plaintext-high-bit'), 65536n],
-        ],
-        offset: -32768n,
+        terms: [[index('plaintext-lower-word'), 1n]],
+        offset: -(plaintextModulus / 2n),
     };
     for (const component of [0, 1]) {
         const weight = power(alpha, fheRow(component));
@@ -191,6 +186,17 @@ export const ballotRelationOperator = (
                 multiply(packingWeight, value),
             );
         },
+    );
+    builder.putGeometric(
+        {
+            terms: [
+                [index('plaintext-lower-word'), 1n],
+                [index('plaintext-complement-word'), 1n],
+            ],
+            offset: -(plaintextModulus - 1n),
+        },
+        degree,
+        power(alpha, packingRow + degree),
     );
     for (const component of [0, 1]) {
         const weight = power(alpha, auxiliaryRow(component));

@@ -76,8 +76,9 @@ export type WordRelation = Readonly<{
 
 // A supported relation from its catalogue entry. Setup's positive and
 // negative sparse-support columns lead its Boolean columns, one pair for
-// the FHE secret, one for its auxiliary secret and one per recipient; the
-// ballot and release layouts own their pairs.
+// the FHE secret, its auxiliary secret and each recipient. The registered
+// source-encryption ephemeral is appended after the original Boolean bank,
+// including signed-variable remainder bits. Ballot and release own their pairs.
 export const catalogueWordRelation = (
     entry: ProofRelationCatalogueEntry,
 ): WordRelation => {
@@ -86,16 +87,22 @@ export const catalogueWordRelation = (
         entry.optionCount,
     );
     let zeroProducts: (readonly [number, number])[];
-    if (entry.role === 'setup')
-        zeroProducts = Array.from(
-            { length: entry.participantCount + 2 },
-            (_, pair) =>
-                [
-                    entry.wordColumns + 2 * pair,
-                    entry.wordColumns + 2 * pair + 1,
-                ] as const,
-        );
-    else if (entry.role === 'ballot')
+    if (entry.role === 'setup') {
+        zeroProducts = [
+            ...Array.from(
+                { length: entry.participantCount + 2 },
+                (_, pair) =>
+                    [
+                        entry.wordColumns + 2 * pair,
+                        entry.wordColumns + 2 * pair + 1,
+                    ] as const,
+            ),
+            [
+                entry.wordColumns + entry.booleanColumns - 2,
+                entry.wordColumns + entry.booleanColumns - 1,
+            ],
+        ];
+    } else if (entry.role === 'ballot')
         zeroProducts = compileBallotEncryptionColumnLayout(
             profile,
         ).zeroProducts.map(([left, right]) => [left, right] as const);

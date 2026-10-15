@@ -1,50 +1,26 @@
 import assert from 'node:assert/strict';
 
 import {
-    compileCompleteAuthenticationFrameWork,
-    compileCompleteCredentialIntentBounds,
-    compileSignatureHashInputs,
-    compileSignatureSamplingBounds,
+    compilePurposeSignatureWork,
+    purposeSignatureParameters,
 } from '#tests/authentication-work-model.js';
 import { auxiliaryInputEncryptionParameters } from '#tests/auxiliary-input-encryption-parameters.js';
+import { compileCommittedOfferCensus } from '#tests/committed-offer-model.js';
 import { compileCommonAgreementDegreeCensus } from '#tests/common-agreement-degree-model.js';
-import {
-    compileCommonMatrixInitializationCensus,
-    compileCommonMatrixSamplingCensus,
-} from '#tests/common-matrix-sampling-model.js';
+import { compileCommonMatrixSamplingCensus } from '#tests/common-matrix-sampling-model.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
-import { merkleSaltSeedBytes } from '#tests/full-word-proof-layout-model.js';
-import {
-    mlDsa65KeySeedBytes,
-    mlDsa65PublicMatrixSeedBytes,
-} from '#tests/ml-dsa-65-parameters.js';
-import {
-    compilePrivateRandomnessScopes,
-    operationSeedBytes,
-} from '#tests/operation-seed-model.js';
-import { shakePermutationGateCharge } from '#tests/oracle-budget-model.js';
+import { compileBallotWordProofLayout } from '#tests/full-word-proof-layout-model.js';
 import { compilePreparationLedger } from '#tests/preparation-ledger-model.js';
 import { compileProofHashDomainCensus } from '#tests/proof-hash-domain-model.js';
+import { proofRelationCatalogue } from '#tests/proof-relation-catalogue-model.js';
+import { compileRegistrationSetupBindingScreen } from '#tests/registration-setup-binding-model.js';
+import { sourceCommonSampleBits } from '#tests/registration-source-randomness-model.js';
 import {
-    byteAlignedSpongePermutations,
-    compileProofHashWork,
-    proofHashProfiles,
-} from '#tests/proof-hash-work-model.js';
-import { compileProofRandomnessBudgets } from '#tests/proof-randomness-budget-model.js';
-import { compileRecipientKeyUniquenessBound } from '#tests/recipient-key-uniqueness-model.js';
-import {
-    type Rational,
-    rational,
-    addRationals,
-    scale,
-    divide,
-    atMost,
-    largest,
     ceilingSquareRoot,
+    type Rational,
 } from '#tests/security-ledger/rational.js';
 import {
     latticeAssumptionGroups,
-    latticeGroupFloors,
     type LatticeAssumptionGroup,
 } from '#tests/security-margin/attack-screens.js';
 import {
@@ -52,902 +28,636 @@ import {
     largestPopulationWithin,
 } from '#tests/security-margin/population-limits.js';
 import {
-    budgetSplitBits,
-    decisiveExperimentGates,
+    compileReductionWork,
+    maximumExperimentGates,
+    minimumReductionWork,
+    originalQueryDivisor,
     securityTargetBits,
-    supportedLevelBits,
-    unpricedWorkAllowance,
 } from '#tests/security-margin/reduction-work.js';
-import {
-    latticeGroupComparisons,
-    latticeRequirementAt,
-} from '#tests/security-margin-screen-model.js';
-import { compileSetupRandomnessCensus } from '#tests/setup-randomness-model.js';
-import {
-    boundSparseSupportSampling,
-    compileSparseSupportSamplingCensus,
-} from '#tests/sparse-sampling-bound-model.js';
-import {
-    listSupportedProfiles,
-    type SupportedProfile,
-} from '#tests/supported-profile-model.js';
-import {
-    compileProofCompilerCapCensus,
-    compileProofRoundErrorCensus,
-} from '#tests/wide-challenge-compiler-model.js';
+import { latticeGroupComparisons } from '#tests/security-margin-screen-model.js';
+import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
+import { listSupportedProfiles } from '#tests/supported-profile-model.js';
+import { compileProofRoundErrorCensus } from '#tests/wide-challenge-compiler-model.js';
+import { shareEncryptionParameters } from '#tests/wide-share-lifting-model.js';
 
-// Each of the seven assumption groups may contribute at most T/2^(80+3) to
-// an adversary's advantage at every experiment cost T up to 2^80 gates, so
-// each group's requirement bounds the ratio of its contribution to T.
-export const groupBudget = rational(
-    1n,
-    1n << (securityTargetBits + budgetSplitBits),
-);
-
-const largestExperimentGates = 1n << securityTargetBits;
-
-// The convention charges every SHAKE call at least one permutation, so an
-// experiment of cost T makes at most T/c logical calls and at most T/c honest
-// operations of any kind that calls SHAKE, and every experiment costs at
-// least c. Each wrapper of the proof compiler's hybrids makes at most four
-// calls for every original call, so a hybrid game makes at most 4T/c.
-const permutationCharge = shakePermutationGateCharge;
-
-const callsPerChargedQuery = () => {
-    const caps = compileProofCompilerCapCensus();
-    assert.equal(caps.chargedQueries % caps.adversaryQueries, 0n);
-    return caps.chargedQueries / caps.adversaryQueries;
-};
-
-export const maximumChargedQueries = () =>
-    callsPerChargedQuery() * (largestExperimentGates / permutationCharge);
-
-// The accepted reading of ML-DSA-65's category 3 claim: one key, against an
-// adversary of cost T, is forged with probability at most T^2/2^192. A union
-// over the original honest credentials charges each key's reduction. That
-// reduction receives one challenge key and its deterministic signing oracle,
-// generates every other key itself and runs the real experiment with genuine
-// witnesses; it never programs the oracle. Each first-evaluated signing intent
-// calls the signing oracle once and is cached, so a repeated evaluation reuses
-// the same signature, and the honest signing work the oracle replaces exceeds
-// the caching. Its only added work is the forgery test: each honest
-// verification under the challenge key compares the frame digest it computes
-// with the digests of the at most s frames that key's intents fixed, at most
-// s*(2*512+1) gates, while every verification computes at least its frame
-// digest, its challenge digest and one challenge-sampling permutation. The
-// reduction therefore costs at most (1+rho)T, with rho the comparison work
-// over that verification work.
-const mlDsaSecurityExponent = 192n;
-
-const frameDigestBits = 512n;
-
-export const compileAuthenticationGroup = () => {
-    const participantCounts = [
-        ...new Set(
-            listSupportedProfiles().map((profile) => profile.participantCount),
-        ),
-    ];
-    const signedFramesPerKey = participantCounts
-        .flatMap((participantCount) =>
-            compileCompleteCredentialIntentBounds(participantCount),
-        )
-        .reduce(
-            (maximum, row) =>
-                row.firstEvaluatedIntentBound > maximum
-                    ? row.firstEvaluatedIntentBound
-                    : maximum,
-            0n,
-        );
-    const comparisonGates = signedFramesPerKey * (2n * frameDigestBits + 1n);
-    const challengeDigest = compileSignatureHashInputs().rows.find(
-        (row) => row.purpose === 'Challenge digest',
-    );
-    assert.ok(
-        challengeDigest !== undefined && challengeDigest.outputBytes !== null,
-    );
-    const shortestFrameInputBytes = compileCompleteAuthenticationFrameWork()
-        .map((frame) => frame.representativeInputBytes)
-        .reduce((minimum, value) => (value < minimum ? value : minimum));
-    const shakeRate = 136n;
-    const verificationPermutations =
-        byteAlignedSpongePermutations(
-            shortestFrameInputBytes,
-            frameDigestBits / 8n,
-            shakeRate,
-        ) +
-        byteAlignedSpongePermutations(
-            challengeDigest.inputBytes,
-            challengeDigest.outputBytes,
-            shakeRate,
-        ) +
-        1n;
-    const verificationGates = verificationPermutations * permutationCharge;
-    // H*((1+rho)T)^2/2^192 <= T/2^(80+split) for every T up to 2^80, which
-    // the largest experiment decides.
-    const reducedGates = verificationGates + comparisonGates;
-    const honestRegistrations =
-        ((1n << mlDsaSecurityExponent) * verificationGates ** 2n) /
-        ((1n << (securityTargetBits + budgetSplitBits)) *
-            largestExperimentGates *
-            reducedGates ** 2n);
+const gcd = (left: bigint, right: bigint): bigint =>
+    right === 0n ? left : gcd(right, left % right);
+const rational = (numerator: bigint, denominator = 1n): Rational => {
+    assert.ok(numerator >= 0n && denominator > 0n);
+    const divisor = gcd(numerator, denominator);
     return {
-        signedFramesPerKey,
-        comparisonGates,
-        shortestFrameInputBytes,
-        verificationPermutations,
-        verificationGates,
-        reductionRatio: rational(reducedGates, verificationGates),
-        honestRegistrations,
+        numerator: numerator / divisor,
+        denominator: denominator / divisor,
     };
 };
-
-// Every foundation and custody identity, retained tag and signed-frame digest
-// is a 512-bit SHAKE256 output prefix, and their binding fails only if the
-// experiment's calls contain two inputs with equal prefixes: one event for the
-// whole ideal function, whatever the population. Zha19 Theorem 2's compressed
-// oracle grows a colliding database's amplitude by at most 2*sqrt(q/2^n) per
-// query, and Lemma 5 charges the two output pairs, giving at most
-// (sqrt(4(q+2)^3/2^n)+sqrt(2/2^n))^2 <= (8(q+2)^3+4)/2^n. With
-// (a+b)^3 <= 4(a^3+b^3), q <= 4T/c and T >= c, its ratio to T is at most
-// (128*Q^2+260)/(c*2^n) at the largest charged query count Q.
-const identityDigestBits = 512n;
-
-export const compileIdentityCollisionGroup = () => {
-    const queries = maximumChargedQueries();
-    const ratio = rational(
-        32n * callsPerChargedQuery() * queries ** 2n + 260n,
-        permutationCharge << identityDigestBits,
+const add = (...values: Rational[]) =>
+    values.reduce(
+        (left, right) =>
+            rational(
+                left.numerator * right.denominator +
+                    right.numerator * left.denominator,
+                left.denominator * right.denominator,
+            ),
+        rational(0n),
     );
-    return {
-        digestBits: identityDigestBits,
-        maximumChargedQueries: queries,
-        ratio,
-        withinBudget: atMost(ratio, groupBudget),
-    };
-};
-
-// Each lattice group's single-message comparisons at h original honest
-// registrations are at most constant + slope*h for every h: the FHE, circular
-// and share-encryption counts are linear in h, and the auxiliary group adds at
-// most h ballot messages to its one key comparison.
-export const compileComparisonGrowth = (profile: SupportedProfile) => {
-    const none = compilePreparationLedger(profile, 0n);
-    const one = compilePreparationLedger(profile, 1n);
-    return latticeAssumptionGroups.map((group) => {
-        if (group === 'Auxiliary Ring-LWE')
-            return {
-                group,
-                constant: none.auxiliaryKeyComparisons,
-                slope: 1n,
-            };
-        const constant = latticeGroupComparisons(group, none);
-        assert.equal(constant, 0n);
-        return { group, constant, slope: latticeGroupComparisons(group, one) };
-    });
-};
-
-// Every comparison whose endpoint games use true accepted corrupt statements
-// pays corrupt-proof soundness once at each endpoint: every lattice
-// comparison, whose endpoints recover corrupt offers through genuine
-// recipient keys and corrupt ballots through the auxiliary or FHE key, and
-// four steps outside them.
-export const semanticUseStepsOutsideComparisons = [
-    'Original-history recovery and prescribed release',
-    'Corrupt-ballot recovery switch to the auxiliary key',
-    'Corrupt-ballot recovery switch to the FHE aggregate',
-    'Terminal identity',
-] as const;
-
-export const compileSemanticUseCharges = (profile: SupportedProfile) => {
-    const growth = compileComparisonGrowth(profile);
-    const sum = (field: 'constant' | 'slope') =>
-        growth.reduce((total, row) => total + row[field], 0n);
-    return {
-        constant:
-            2n *
-            (BigInt(semanticUseStepsOutsideComparisons.length) +
-                sum('constant')),
-        slope: 2n * sum('slope'),
-    };
-};
-
-// One semantic-use charge of the finite-family tagged soundness bound,
-// 12*t^2*J + 2*M/2^Lambda with t = 2Q + M and
-// J = epsilon + (W*(t+1) + b + 2t)/2^kappa, as a polynomial in the charged
-// queries Q of its game. The family is the whole suite's, so epsilon is the
-// largest round error of every supported profile.
-type SoundnessCharge = Readonly<{
-    roundError: Rational;
-    tagBits: bigint;
-    inputBits: bigint;
-    sentinels: bigint;
-    expansionQueries: bigint;
-    messageBits: bigint;
-    coefficients: readonly Rational[];
-}>;
-
-let soundnessCharge: SoundnessCharge | undefined;
-
-export const compileSoundnessCharge = (): SoundnessCharge => {
-    if (soundnessCharge !== undefined) return soundnessCharge;
-    const domain = compileProofHashDomainCensus();
-    const roundError = largest(
-        listSupportedProfiles().map(
-            (profile) =>
-                compileProofRoundErrorCensus(profile).maximumRoundError,
-        ),
-    );
-    const tagBits = compileProofCompilerCapCensus().tagBits;
-    const inputBits = domain.maximumInputBits;
-    const sentinels = domain.sentinelCount;
-    const expansionQueries = domain.maximumAcceptedExpansionQueries;
-    const messageBits = domain.minimumMessageBits;
-    const tagSpace = rational(1n, 1n << tagBits);
-    // J = J0 + J1*Q with J0 = epsilon + (W+b)/2^kappa + (W+2)*M/2^kappa and
-    // J1 = 2*(W+2)/2^kappa, and t^2 = M^2 + 4MQ + 4Q^2.
-    const perTagWidth = scale(tagSpace, inputBits + 2n);
-    const constantJ = addRationals(
-        roundError,
-        scale(tagSpace, inputBits + sentinels),
-        scale(perTagWidth, expansionQueries),
-    );
-    const linearJ = scale(perTagWidth, 2n);
-    const m = expansionQueries;
-    soundnessCharge = {
-        roundError,
-        tagBits,
-        inputBits,
-        sentinels,
-        expansionQueries,
-        messageBits,
-        coefficients: [
-            addRationals(
-                scale(constantJ, 12n * m * m),
-                rational(2n * m, 1n << messageBits),
-            ),
-            addRationals(
-                scale(linearJ, 12n * m * m),
-                scale(constantJ, 48n * m),
-            ),
-            addRationals(scale(linearJ, 48n * m), scale(constantJ, 48n)),
-            scale(linearJ, 48n),
-        ],
-    };
-    return soundnessCharge;
-};
-
-export const soundnessChargeAt = (chargedQueries: bigint) =>
-    addRationals(
-        ...compileSoundnessCharge().coefficients.map((coefficient, power) =>
-            scale(coefficient, chargedQueries ** BigInt(power)),
-        ),
-    );
-
-// One statistical term's bound on its contribution divided by the experiment's
-// cost, over every experiment of at most 2^80 gates with at most the given
-// original honest registrations. Terms outside the proofs do not depend on the
-// proof-compiler gate.
-export type StatisticalTerm = Readonly<{
-    name: string;
-    scope: 'outside the proofs' | 'proofs';
-    ratioAt: (honestRegistrations: bigint) => Rational;
-}>;
-
-// A once-global term v has ratio at most v/c, and so does a term of v per
-// operation of one kind, since every such operation costs at least c.
-const perCharge = (value: Rational) => () => divide(value, permutationCharge);
-
-type SuiteTerms = Readonly<{
-    matrixSampling: Rational;
-    matrixInitialization: Rational;
-    largestStreamProgramming: Rational;
-}>;
-
-let suiteTerms: SuiteTerms | undefined;
-
-// The suite's fixed common matrices are global, so every profile's sampling
-// distance and fibre bias is charged once. A comparison that programs its
-// guessed modulus's common streams moves its guessed world by that family's
-// distance and bias, twice per comparison.
-const compileSuiteTerms = (): SuiteTerms => {
-    if (suiteTerms !== undefined) return suiteTerms;
-    const rows = listSupportedProfiles().map((profile) => {
-        const sampling = compileCommonMatrixSamplingCensus(profile);
-        const initialization = compileCommonMatrixInitializationCensus(profile);
-        return {
-            sampling: rational(
-                sampling.distanceUpperNumerator,
-                sampling.distanceUpperDenominator,
-            ),
-            initialization: rational(
-                initialization.biasNumerator,
-                initialization.biasDenominator,
-            ),
-        };
-    });
-    suiteTerms = {
-        matrixSampling: addRationals(...rows.map((row) => row.sampling)),
-        matrixInitialization: addRationals(
-            ...rows.map((row) => row.initialization),
-        ),
-        largestStreamProgramming: scale(
-            largest(
-                rows.map((row) =>
-                    addRationals(row.sampling, row.initialization),
-                ),
-            ),
-            2n,
-        ),
-    };
-    return suiteTerms;
-};
-
-const sparseBound = (degree: bigint, support: bigint) => {
-    const bound = boundSparseSupportSampling(degree, support);
-    return rational(bound.numerator, bound.denominator);
-};
-
-const statisticalTermsCache = new Map<
-    SupportedProfile,
-    readonly StatisticalTerm[]
->();
-
-export const compileStatisticalTerms = (
-    profile: SupportedProfile,
-): readonly StatisticalTerm[] => {
-    const cached = statisticalTermsCache.get(profile);
-    if (cached !== undefined) return cached;
-    const suite = compileSuiteTerms();
-    const caps = compileProofCompilerCapCensus();
-    const wrap = callsPerChargedQuery();
-    const queries = maximumChargedQueries();
-    const soundness = compileSoundnessCharge();
-    const growth = compileComparisonGrowth(profile);
-    const charges = compileSemanticUseCharges(profile);
-    const one = compilePreparationLedger(profile, 1n);
-    // Per original honest registration: its source coordinates, potential
-    // commitment sender scopes and corrupt registration-source extractions.
-    const coordinatesPerRegistration = one.generatedSourceEntries;
-    const maskScopesPerRegistration = one.sourceMaskScopes;
-    const extractionsPerRegistration = one.maximumCorruptSourceExtractions;
-    // Each original honest credential has at most one contribution, ballot and
-    // release intent, unfinished work included.
-    const scopesAt = (honestRegistrations: bigint) =>
-        compilePrivateRandomnessScopes(
-            coordinatesPerRegistration * honestRegistrations,
-            honestRegistrations,
-            honestRegistrations,
-            honestRegistrations,
-        );
-    const sampling = compileSparseSupportSamplingCensus(profile);
-    const samplingRows = (scope: string) =>
-        addRationals(
-            ...sampling
-                .filter((row) => row.scope === scope)
-                .map((row) =>
-                    scale(
-                        rational(row.numerator, row.denominator),
-                        row.callsPerOperation,
-                    ),
-                ),
-        );
-    const fheSecret = sparseBound(
-        fixedModulusBfvInputs.polynomialDegree,
-        fixedModulusBfvInputs.secretSupportWeight,
-    );
-    const preparation = compileSetupRandomnessCensus(profile);
-    const slopeOf = (group: LatticeAssumptionGroup) => {
-        const row = growth.find((value) => value.group === group);
-        assert.ok(row !== undefined);
-        return row.slope;
-    };
-    // The seed-expansion lemma's 4(q+1)*sqrt(k)/2^(s/2), with q+1 at most
-    // (wrap+1)T/c.
-    const seedExpansion = (seeds: bigint, seedBytes: bigint) =>
-        rational(
-            4n * (wrap + 1n) * ceilingSquareRoot(seeds),
-            permutationCharge << (4n * seedBytes),
-        );
-    const credentialSeedPair = addRationals(
-        rational(1n, 1n << (8n * mlDsa65KeySeedBytes)),
-        rational(1n, 1n << (8n * mlDsa65PublicMatrixSeedBytes)),
-    );
-    const terms: StatisticalTerm[] = [
-        {
-            name: 'Fixed common matrix sampling of every profile',
-            scope: 'outside the proofs',
-            ratioAt: perCharge(suite.matrixSampling),
-        },
-        {
-            name: 'Fixed common matrix fibre initialization of every profile',
-            scope: 'outside the proofs',
-            ratioAt: perCharge(suite.matrixInitialization),
-        },
-        {
-            name: 'Bounded recipient-key collision',
-            scope: 'outside the proofs',
-            ratioAt: perCharge(
-                rational(
-                    1n,
-                    1n <<
-                        compileRecipientKeyUniquenessBound()
-                            .uniformMatrixFailureExponent,
-                ),
-            ),
-        },
-        ...compileSignatureSamplingBounds().map((row): StatisticalTerm => ({
-            name: `ML-DSA ${row.purpose.toLowerCase()} over every seed`,
-            scope: 'outside the proofs',
-            ratioAt: perCharge(
-                rational(row.numerator, 1n << row.denominatorBits),
-            ),
-        })),
-        {
-            // The FHE and circular comparisons are linear in the
-            // registrations, each of which costs at least c.
-            name: 'Common-stream programming of every FHE and circular comparison',
-            scope: 'outside the proofs',
-            ratioAt: perCharge(
-                scale(
-                    suite.largestStreamProgramming,
-                    slopeOf('FHE Ring-LWE') +
-                        slopeOf('Evaluation-key circular security'),
-                ),
-            ),
-        },
-        {
-            name: 'Integer sharing translation per honest offer',
-            scope: 'outside the proofs',
-            ratioAt: perCharge(
-                rational(
-                    profile.shareLifting.privacyNumerator,
-                    2n * profile.shareLifting.sharingRadius,
-                ),
-            ),
-        },
-        {
-            name: 'Prescribed-release coupling per certified roster',
-            scope: 'outside the proofs',
-            ratioAt: perCharge(
-                rational(
-                    1n,
-                    1n << BigInt(fixedModulusBfvInputs.statisticalBits),
-                ),
-            ),
-        },
-        {
-            name: 'Preparation Gaussian sampling per contribution',
-            scope: 'outside the proofs',
-            ratioAt: perCharge(
-                rational(
-                    preparation.preparationVariationNumerator,
-                    preparation.preparationVariationDenominator,
-                ),
-            ),
-        },
-        {
-            // The recipient secret and one FHE source secret per coordinate.
-            name: 'Sparse-support caps per registration',
-            scope: 'outside the proofs',
-            ratioAt: perCharge(
-                addRationals(
-                    samplingRows('registration'),
-                    scale(fheSecret, coordinatesPerRegistration),
-                ),
-            ),
-        },
-        {
-            name: 'Sparse-support caps per contribution',
-            scope: 'outside the proofs',
-            ratioAt: perCharge(samplingRows('contribution')),
-        },
-        {
-            name: 'Sparse-support caps per ballot',
-            scope: 'outside the proofs',
-            ratioAt: perCharge(
-                addRationals(
-                    fheSecret,
-                    sparseBound(
-                        auxiliaryInputEncryptionParameters.degree,
-                        auxiliaryInputEncryptionParameters.support,
-                    ),
-                ),
-            ),
-        },
-        {
-            // AHU19 one-way to hiding for every potential sender scope,
-            // 2*M*Q/2^(s/2) with 512-bit salts and Q <= 4T/c.
-            name: 'Registration-source commitment simulation',
-            scope: 'outside the proofs',
-            ratioAt: (honestRegistrations) =>
-                rational(
-                    2n * wrap * maskScopesPerRegistration * honestRegistrations,
-                    permutationCharge << 256n,
-                ),
-        },
-        {
-            // DFMS21 Corollary 4.8 with both normalized ratios at most
-            // 2^-512 and l <= f*h extractions: 24*l*Q + 24*l^2 over 2^256
-            // and 296*(Q+l+1)^3 + 2 over 2^512, since 8*sqrt(2) < 12 and
-            // 40*e^2 < 296, with (a+b)^3 <= 4(a^3+b^3), Q <= 4T/c and
-            // T >= c*max(1,h). The opening mismatch is charged at Q+l, as
-            // the view distance is, instead of the corollary's Q+1: its
-            // proof moves each extraction past the other extractions too.
-            name: 'Registration-source extraction',
-            scope: 'outside the proofs',
-            ratioAt: (honestRegistrations) => {
-                const perRegistration = extractionsPerRegistration;
-                const extractions = perRegistration * honestRegistrations;
-                return addRationals(
-                    rational(
-                        24n * wrap * extractions +
-                            24n * perRegistration * extractions,
-                        permutationCharge << 256n,
-                    ),
-                    rational(
-                        1184n *
-                            (wrap * queries ** 2n +
-                                (perRegistration + 1n) ** 3n *
-                                    honestRegistrations ** 2n) +
-                            2n,
-                        permutationCharge << 512n,
-                    ),
-                );
-            },
-        },
-        {
-            // Registration-source and operation seeds, all of 64 bytes;
-            // Merkle seeds belong to the proofs.
-            name: 'Private seed expansion',
-            scope: 'outside the proofs',
-            ratioAt: (honestRegistrations) =>
-                seedExpansion(
-                    coordinatesPerRegistration * honestRegistrations +
-                        scopesAt(honestRegistrations).operationSeeds,
-                    operationSeedBytes,
-                ),
-        },
-        {
-            // Every pair of seed draws, at most D*h of them for D draws per
-            // registration, against T >= c*max(1,h).
-            name: 'Private seed collisions',
-            scope: 'outside the proofs',
-            ratioAt: (honestRegistrations) => {
-                const scopes = scopesAt(1n);
-                return rational(
-                    scopes.maximumSeedDraws ** 2n * honestRegistrations,
-                    2n * permutationCharge * scopes.seedCollisionDenominator,
-                );
-            },
-        },
-        {
-            // h(h-1)/2 pairs of original credentials, against T >= c*h.
-            name: 'Honest signing-credential seed collisions',
-            scope: 'outside the proofs',
-            ratioAt: (honestRegistrations) =>
-                honestRegistrations < 2n
-                    ? rational(0n)
-                    : divide(
-                          scale(credentialSeedPair, honestRegistrations - 1n),
-                          2n * permutationCharge,
-                      ),
-        },
-        {
-            name: 'Merkle salt seed expansion',
-            scope: 'proofs',
-            ratioAt: (honestRegistrations) =>
-                seedExpansion(
-                    scopesAt(honestRegistrations).treeSeedScopes,
-                    merkleSaltSeedBytes,
-                ),
-        },
-        {
-            // Two salted-leaf replacements per committed node.
-            name: 'Merkle privacy per honest proof',
-            scope: 'proofs',
-            ratioAt: perCharge(
-                rational(
-                    2n * caps.committedNodeBudget,
-                    1n << caps.relativeBalanceBits,
-                ),
-            ),
-        },
-        {
-            name: 'Salted message-root balance per honest proof',
-            scope: 'proofs',
-            ratioAt: perCharge(
-                rational(1n, 1n << (caps.relativeBalanceBits + 1n)),
-            ),
-        },
-        {
-            // Its exponent exceeds any representable width, so the term is
-            // bounded at 2^-1024.
-            name: 'All-input hash-balance exception',
-            scope: 'proofs',
-            ratioAt: perCharge(
-                rational(
-                    1n,
-                    1n <<
-                        (caps.balanceFailureExponent < 1024n
-                            ? caps.balanceFailureExponent
-                            : 1024n),
-                ),
-            ),
-        },
-        {
-            // GHHM21 Theorem 1 per programmed message, sqrt(Qp) + Qp/2 with
-            // p = 2/2^kappa and one message per honest proof. With
-            // Q <= 4T/c and T >= c*P for P honest proofs, the ratio is at
-            // most sqrt(4pP)/c + 2pP/c.
-            name: 'Adaptive reprogramming of every honest proof',
-            scope: 'proofs',
-            ratioAt: (honestRegistrations) => {
-                const proofs = compilePreparationLedger(
-                    profile,
-                    honestRegistrations,
-                ).maximumHonestProofScopes;
-                return addRationals(
-                    rational(
-                        ceilingSquareRoot(2n * wrap * proofs),
-                        permutationCharge << (caps.tagBits / 2n),
-                    ),
-                    rational(wrap * proofs, permutationCharge << caps.tagBits),
-                );
-            },
-        },
-        ...compileProofRandomnessBudgets(profile).map(
-            (budget): StatisticalTerm => ({
-                // The budget's failure is a union over its invocation cap.
-                name: `Simulator field sampling per ${budget.role} proof`,
-                scope: 'proofs',
-                ratioAt: perCharge(
-                    rational(
-                        budget.failure.numerator,
-                        budget.invocationCap << budget.failure.denominatorBits,
-                    ),
-                ),
-            }),
-        ),
-        {
-            // charges(h) <= C0 + C1*h. The constant coefficient is charged
-            // against T >= c*max(1,h), the others against T >= c*Q/4 at the
-            // largest charged query count.
-            name: 'Proof soundness at every semantic-use charge',
-            scope: 'proofs',
-            ratioAt: (honestRegistrations) => {
-                const [constant, ...growing] = soundness.coefficients;
-                const perQuery = addRationals(
-                    ...growing.map((coefficient, power) =>
-                        scale(coefficient, queries ** BigInt(power)),
-                    ),
-                );
-                return divide(
-                    addRationals(
-                        scale(constant, charges.constant + charges.slope),
-                        scale(
-                            perQuery,
-                            wrap *
-                                (charges.constant +
-                                    charges.slope * honestRegistrations),
-                        ),
-                    ),
-                    permutationCharge,
-                );
-            },
-        },
-    ];
-    statisticalTermsCache.set(profile, terms);
-    return terms;
-};
-
-// The terms' sum, each term rounded up to a multiple of 2^-1024 so that
-// million-bit denominators do not enter the sum. The result still bounds the
-// exact sum from above.
-export const ratioResolutionBits = 1024n;
-
-export const statisticalRatioAt = (
-    profile: SupportedProfile,
-    honestRegistrations: bigint,
-    scope?: StatisticalTerm['scope'],
-) =>
+const scale = (value: Rational, count: bigint) =>
+    rational(value.numerator * count, value.denominator);
+const multiply = (left: Rational, right: Rational) =>
     rational(
-        compileStatisticalTerms(profile)
-            .filter((term) => scope === undefined || term.scope === scope)
-            .reduce((sum, term) => {
-                const { numerator, denominator } =
-                    term.ratioAt(honestRegistrations);
-                return (
-                    sum +
-                    ((numerator << ratioResolutionBits) + denominator - 1n) /
-                        denominator
-                );
-            }, 0n),
-        1n << ratioResolutionBits,
+        left.numerator * right.numerator,
+        left.denominator * right.denominator,
     );
+const atMost = (left: Rational, right: Rational) =>
+    left.numerator * right.denominator <= right.numerator * left.denominator;
+const largest = (values: Rational[]) =>
+    values.reduce((left, right) => (atMost(left, right) ? right : left));
+const targetAt = (work: bigint) => rational(work, 1n << securityTargetBits);
 
-const profilesByParticipantCount = () => {
-    const groups = new Map<number, SupportedProfile[]>();
-    for (const profile of listSupportedProfiles()) {
-        const group = groups.get(profile.participantCount) ?? [];
-        group.push(profile);
-        groups.set(profile.participantCount, group);
-    }
-    return [...groups.entries()]
-        .sort(([left], [right]) => left - right)
-        .map(([participantCount, profiles]) => ({
-            participantCount,
-            profiles,
-        }));
-};
-
-// The statistical group's own limit for each participant count: the largest
-// population whose summed ratio stays within the group's budget at every
-// option count, or undefined when every option count stays within it at the
-// search cap.
-const compileStatisticalPopulationLimits = () =>
-    profilesByParticipantCount().map(({ participantCount, profiles }) => {
-        let honestRegistrations: bigint | undefined;
-        for (const profile of profiles) {
-            const within = (population: bigint) =>
-                atMost(statisticalRatioAt(profile, population), groupBudget);
-            if (
-                honestRegistrations !== undefined &&
-                within(honestRegistrations)
-            )
-                continue;
-            const limit = largestPopulationWithin(within, honestRegistrations);
-            if (limit !== undefined) honestRegistrations = limit;
-        }
-        return { participantCount, honestRegistrations };
-    });
-
-type LedgerGroup =
+export type LedgerGroup =
     | LatticeAssumptionGroup
-    | 'ML-DSA authentication'
+    | 'Purpose authentication'
     | 'Identity collisions'
     | 'Statistical terms';
-
 export const ledgerGroups: readonly LedgerGroup[] = [
     ...latticeAssumptionGroups,
-    'ML-DSA authentication',
+    'Purpose authentication',
     'Identity collisions',
     'Statistical terms',
 ];
+export const ledgerGroupBudget = (group: LedgerGroup) =>
+    group === 'Statistical terms'
+        ? rational(447n, 512n)
+        : group === 'Purpose authentication' || group === 'Identity collisions'
+          ? rational(1n, 1024n)
+          : rational(1n, 32n);
 
-// The poll's original-credential limit for each participant count is the
-// smallest group limit. The lattice groups use their criterion floors, and
-// the stress test replaces those by their quantum floors. A group with no
-// limit below the search cap imposes none.
-let securityLedger: ReturnType<typeof solveSecurityLedger> | undefined;
+// Bounds of the constructed descriptor, independently checked against every
+// active role. The native proof still uses its exact role dimensions.
+export const securityProofEnvelope = {
+    columns: 8192n,
+    lookups: 4096n,
+    oracles: 8192n,
+    inputBits: 1n << 40n,
+    expansionQueries: 1n << 24n,
+    programmedPrefixBits: 1n << 24n,
+    pricedQueries: 768n,
+} as const;
 
-export const compileSecurityLedger = () => {
-    securityLedger ??= solveSecurityLedger();
-    return securityLedger;
-};
+export const semanticMacroEdges = [
+    'Original authentication and retained-record normalization',
+    'Original credential label comparison',
+    'Operation-parent label comparison',
+    'Proof-tree label comparison',
+    'Registration-source label comparison',
+    'Finite mask sampler comparison',
+    'Finite sparse sampler comparison',
+    'Common-matrix and conditional-fibre initialization',
+    'Genuine source-package reconstruction',
+    'Genuine retained recipient-key reconstruction',
+    'Setup proof-view replacement',
+    'Ballot proof-view replacement',
+    'Release proof-view replacement',
+    'Corrupt-share recovery interface',
+    'Corrupt FHE-ballot recovery interface',
+    'Prescribed-release interface and joint flooding',
+    'Recipient-excluded recovery interface',
+    'Joint sharing projection',
+    'Immutable source decoding and early first-coordinate interface',
+    'Fixed-family affine aggregate embedding',
+    'FHE-to-auxiliary corrupt-ballot recovery switch',
+    'Good-endpoint recovery restoration',
+    'Certified-close and terminal output identity',
+    'Public-column setup and retained public-header refinement',
+    'Added bounded sampler conversions',
+] as const;
 
-const solveSecurityLedger = () => {
-    const authentication = compileAuthenticationGroup();
-    const identity = compileIdentityCollisionGroup();
+export const semanticEndpointBudget = {
+    fixedMacroCapacity: 32n,
+    authenticationEmbeddingsPerCredential:
+        purposeSignatureParameters.treeLeaves,
+    credentialSeedEndpointsPerCredential: 2n,
+    earlyRepresentationEndpoints: 4n,
+    normalizationMultiplier: 2n * 4n,
+} as const;
+
+export const validatePricedRoleShape = (shape: {
+    columns: bigint;
+    lookups: bigint;
+    oracles: bigint;
+    affineRows: bigint;
+}) => {
     assert.ok(
-        identity.withinBudget,
-        'Identity collisions exceed their budget.',
+        shape.columns > 0n && shape.columns <= securityProofEnvelope.columns,
     );
-    const lattice = latticeAssumptionGroups.map((group) => ({
-        group,
-        limits: compileLatticePopulationLimits(group),
-    }));
-    return compileStatisticalPopulationLimits().map(
-        ({ participantCount, honestRegistrations }) => {
-            const column = (floor: 'criterion' | 'stressTest') => {
-                const limits = new Map<LedgerGroup, bigint | undefined>();
-                for (const { group, limits: rows } of lattice) {
-                    const row = rows.find(
-                        (value) => value.participantCount === participantCount,
-                    );
-                    assert.ok(row !== undefined);
-                    limits.set(group, row[floor]?.honestRegistrations);
-                }
-                limits.set(
-                    'ML-DSA authentication',
-                    authentication.honestRegistrations,
-                );
-                limits.set('Identity collisions', undefined);
-                limits.set('Statistical terms', honestRegistrations);
-                let binding: { group: LedgerGroup; limit: bigint } | undefined;
-                for (const [group, limit] of limits)
-                    if (
-                        limit !== undefined &&
-                        (binding === undefined || limit < binding.limit)
-                    )
-                        binding = { group, limit };
-                assert.ok(binding !== undefined);
-                return { limits, binding };
-            };
-            return {
-                participantCount,
-                criterion: column('criterion'),
-                stressTest: column('stressTest'),
-            };
-        },
+    assert.ok(
+        shape.lookups >= 0n && shape.lookups <= securityProofEnvelope.lookups,
+    );
+    assert.ok(
+        shape.oracles > 0n && shape.oracles <= securityProofEnvelope.oracles,
+    );
+    assert.ok(shape.affineRows >= 0n && shape.affineRows <= 1n << 32n);
+};
+
+let operands: ReturnType<typeof deriveOperands> | undefined;
+const deriveOperands = () => {
+    const profiles = listSupportedProfiles();
+    const degree = fixedModulusBfvInputs.polynomialDegree;
+    assert.equal(degree, 65536n);
+    const agreement = compileCommonAgreementDegreeCensus();
+    const queries = BigInt(agreement.queries);
+    assert.equal(queries, 704n);
+    const domain = 4n * degree;
+    const prime = compileSmallLimbProofFieldCensus().modulus;
+    const roundError = rational(193n ** queries, 256n ** queries);
+    const hashDomain = compileProofHashDomainCensus();
+    assert.ok(hashDomain.maximumInputBits <= securityProofEnvelope.inputBits);
+    assert.ok(
+        hashDomain.maximumMessageBits <=
+            securityProofEnvelope.programmedPrefixBits,
+    );
+    assert.ok(
+        hashDomain.maximumAcceptedExpansionQueries <=
+            securityProofEnvelope.expansionQueries,
+    );
+    assert.ok(hashDomain.minimumMessageBits >= 512n);
+    assert.ok(hashDomain.sentinelCount <= 1n);
+    for (const role of proofRelationCatalogue()) {
+        const encodedWords = BigInt(role.encodedParameters.length / 4);
+        const oracleCount =
+            encodedWords -
+            7n -
+            BigInt(role.relationParameters.length) -
+            2n * BigInt(role.lookups.length);
+        validatePricedRoleShape({
+            columns: BigInt(role.wordColumns + role.booleanColumns),
+            lookups: BigInt(role.lookups.length),
+            oracles: oracleCount,
+            affineRows: 0n,
+        });
+    }
+    const maximumParticipants = Math.max(
+        ...profiles.map((profile) => profile.participantCount),
+    );
+    assert.ok(maximumParticipants <= 20);
+    const maximumSourceFamilies = profiles.reduce((maximum, profile) => {
+        const count = compileRegistrationSetupBindingScreen(
+            profile.participantCount,
+            profile.optionCount,
+        ).coordinateCount;
+        return count > maximum ? count : maximum;
+    }, 0n);
+    assert.ok(maximumSourceFamilies <= 18n);
+    assert.ok(
+        BigInt(semanticMacroEdges.length) <=
+            semanticEndpointBudget.fixedMacroCapacity,
+    );
+    assert.ok(fixedModulusBfvInputs.secretSupportWeight <= 1024n);
+    // Accepted seven-bit error words include rank zero, which encodes -64.
+    // Their norm bound is independent of the honest sampler's probabilities.
+    assert.equal(fixedModulusBfvInputs.errorBound, 64n);
+    assert.ok(shareEncryptionParameters.encryptionSupportWeight <= 256n);
+    assert.equal(auxiliaryInputEncryptionParameters.degree, 4096n);
+    assert.ok(auxiliaryInputEncryptionParameters.modulus < 1n << 63n);
+    assert.ok(auxiliaryInputEncryptionParameters.support <= 256n);
+    const credentialPredecessor =
+        compilePurposeSignatureWork().credentialPredecessorGates;
+    const ballotRowBytes = 336n;
+    const releasePredecessor =
+        2n * domain * (ballotRowBytes / 168n) * originalQueryDivisor;
+    const auxiliary = auxiliaryInputEncryptionParameters;
+    const rawBias = (modulus: bigint, width: bigint) => {
+        const space = 1n << width,
+            remainder = space % modulus;
+        return rational(remainder * (modulus - remainder), modulus * space);
+    };
+    const sharingRatios: Rational[] = [],
+        releaseRatios: Rational[] = [],
+        initializations: Rational[] = [];
+    let maximumPrimitiveSlope = 0n;
+    for (const profile of profiles) {
+        assert.ok(
+            profile.gadgetLength <= 32n && profile.ciphertext.bits <= 1024,
+        );
+        assert.ok(profile.optionCount <= 20);
+        assert.ok(profile.setupContributorCount <= 7);
+        assert.ok(profile.releaseThreshold <= 7);
+        assert.ok(profile.shareLifting.sharingCoefficientBits <= 127);
+        assert.ok(profile.releaseNoiseBits <= 1024);
+        assert.ok(profile.release.bits <= 1024);
+        assert.ok(
+            atMost(
+                compileProofRoundErrorCensus(profile).maximumRoundError,
+                roundError,
+            ),
+        );
+        for (const role of compileProofRoundErrorCensus(profile).roles)
+            assert.ok(role.affineRows >= 0n && role.affineRows <= 1n << 32n);
+        assert.ok(
+            atMost(
+                compileCommittedOfferCensus(profile).sampledAlgebraic,
+                roundError,
+            ),
+        );
+        assert.ok(
+            compileBallotWordProofLayout(profile).firstWidth >= ballotRowBytes,
+        );
+        const sharingNumerator =
+            fixedModulusBfvInputs.secretSupportWeight *
+            ((1n << BigInt(profile.releaseThreshold - 1)) - 1n);
+        sharingRatios.push(
+            rational(
+                sharingNumerator * (1n << securityTargetBits),
+                (1n << BigInt(profile.shareLifting.sharingCoefficientBits)) *
+                    credentialPredecessor,
+            ),
+        );
+        const releaseShift =
+            degree *
+            profile.interpolation.maximumJointSimulationOneNormSum *
+            profile.releaseError;
+        releaseRatios.push(
+            rational(
+                releaseShift * (1n << securityTargetBits),
+                (1n << BigInt(profile.releaseNoiseBits)) * releasePredecessor,
+            ),
+        );
+        const sampling = compileCommonMatrixSamplingCensus(profile);
+        assert.ok(sampling.fheBitsPerCoefficient <= 1280);
+        assert.ok(sampling.fixedFamilyBitsPerCoefficient <= 448);
+        const groups = [
+            {
+                count: 3n * profile.gadgetLength * degree,
+                modulus: profile.ciphertext.modulus,
+                bits: BigInt(sampling.fheBitsPerCoefficient),
+            },
+            {
+                count: degree,
+                modulus: shareEncryptionParameters.modulus,
+                bits: BigInt(sampling.fixedFamilyBitsPerCoefficient),
+            },
+            {
+                count: 2n * auxiliary.degree,
+                modulus: auxiliary.modulus,
+                bits: BigInt(sampling.fixedFamilyBitsPerCoefficient),
+            },
+            {
+                count: 4n * degree,
+                modulus: auxiliary.modulus,
+                bits: sourceCommonSampleBits,
+            },
+        ];
+        const coefficients = groups.reduce(
+            (sum, group) => sum + group.count,
+            0n,
+        );
+        initializations.push(
+            add(
+                ...groups.map((group) =>
+                    scale(rawBias(group.modulus, group.bits), group.count),
+                ),
+                rational(2n * coefficients, 1n << 514n),
+                rational(1n, 1n << 512n),
+            ),
+        );
+        const ledger = compilePreparationLedger(profile, 1n);
+        const slope =
+            latticeAssumptionGroups.reduce(
+                (sum, group) => sum + latticeGroupComparisons(group, ledger),
+                0n,
+            ) - 3n;
+        if (slope > maximumPrimitiveSlope) maximumPrimitiveSlope = slope;
+    }
+    const sharingRatio = largest(sharingRatios),
+        releaseRatio = largest(releaseRatios);
+    assert.ok(atMost(sharingRatio, rational(5n, 8n)));
+    assert.ok(atMost(releaseRatio, rational(1n, 8n)));
+    const treeCount = BigInt(domain.toString(2).length);
+    const masks = 2n * securityProofEnvelope.pricedQueries + 1n;
+    const maskCells =
+        masks *
+            (securityProofEnvelope.columns +
+                3n * securityProofEnvelope.lookups +
+                7n) +
+        18n * degree;
+    return {
+        degree,
+        domain,
+        prime,
+        queries,
+        roundError,
+        maximumParticipants: BigInt(maximumParticipants),
+        maximumSourceFamilies,
+        maximumPrimitiveSlope,
+        credentialPredecessor,
+        releasePredecessor,
+        sharingRatio,
+        releaseRatio,
+        initialization: largest(initializations),
+        treeCount,
+        maskCells,
+    };
+};
+export const compileSecurityOperands = () => (operands ??= deriveOperands());
+
+const semanticEndpointMultiplier = (honestRegistrations: bigint) => {
+    const value = compileSecurityOperands();
+    const comparisons = 3n + value.maximumPrimitiveSlope * honestRegistrations;
+    const budget = semanticEndpointBudget;
+    return (
+        budget.normalizationMultiplier *
+        (2n *
+            (budget.fixedMacroCapacity +
+                comparisons +
+                budget.authenticationEmbeddingsPerCredential *
+                    honestRegistrations) +
+            budget.credentialSeedEndpointsPerCredential * honestRegistrations +
+            budget.earlyRepresentationEndpoints)
     );
 };
 
-// Each simulated proof replaces one honest proof, and the direct simulator
-// runs the unchanged proof writer on public dummy columns. Beyond the writer
-// it samples those dummy entries, adds their public affine pairing, adjusts
-// one constant coefficient and samples the message that the replacement
-// wrapper programs. Every honest proof costs at least its prover's hash
-// permutations, so an experiment of cost T holds at most T/(c*p) simulated
-// proofs, for the least prover permutations p of any proof role. The decisive
-// experiment has the largest reduction ratio, so the added work fits within a
-// lattice group's level at every experiment when it is at most c*p*A/T* per
-// simulated proof, where A is the further work that the group's levels still
-// absorb at the poll's limit and T* is the decisive experiment. Dividing by
-// the proof's dummy entries, every systematic coordinate of its original
-// oracles, gives the largest work per entry that keeps record creation within
-// every level.
-export const compileRecordCreationPricing = () => {
-    const systematic = BigInt(
-        compileCommonAgreementDegreeCensus().systematicSize,
+const authenticationParts = (work: bigint, population: bigint) => {
+    const queries = add(
+        rational(2n * work, originalQueryDivisor),
+        rational(
+            (1n << 20n) * (population + 1n) + 128n * (work + population + 1n),
+        ),
     );
-    return compileSecurityLedger().map((row) => {
-        const honestRegistrations = row.criterion.binding.limit;
-        let allowance: bigint | undefined;
-        let leastProverPermutations: bigint | undefined;
-        let largestDummyEntries = 0n;
-        for (const profile of listSupportedProfiles().filter(
-            (value) => value.participantCount === row.participantCount,
-        )) {
-            for (const group of latticeAssumptionGroups) {
-                const screen = latticeGroupFloors(
-                    group,
-                    BigInt(profile.ciphertext.bits),
-                ).criterion;
-                if (screen === undefined) continue;
-                const at = latticeRequirementAt(
-                    group,
-                    profile,
-                    honestRegistrations,
-                );
-                const value = unpricedWorkAllowance(
-                    at.comparisons,
-                    at.reductionGates,
-                    supportedLevelBits(screen),
-                );
-                if (allowance === undefined || value < allowance)
-                    allowance = value;
-            }
-            for (const hashProfile of proofHashProfiles(profile)) {
-                const permutations = compileProofHashWork(profile, hashProfile)
-                    .proverHashSubtotal.permutations;
-                if (
-                    leastProverPermutations === undefined ||
-                    permutations < leastProverPermutations
-                )
-                    leastProverPermutations = permutations;
-            }
-            for (const role of compileProofRoundErrorCensus(profile).roles) {
-                const entries = BigInt(role.originalOracles) * systematic;
-                if (entries > largestDummyEntries)
-                    largestDummyEntries = entries;
-            }
-        }
-        assert.ok(
-            allowance !== undefined &&
-                allowance > 0n &&
-                leastProverPermutations !== undefined,
-        );
-        const workPerProof =
-            (permutationCharge * leastProverPermutations * allowance) /
-            decisiveExperimentGates;
+    const chainQueries = scale(queries, 2n);
+    const { chains, radix } = purposeSignatureParameters;
+    const squared = multiply(chainQueries, chainQueries);
+    const expression = add(
+        scale(
+            squared,
+            chains ** 2n *
+                (radix - 1n) ** 2n *
+                (20n * radix - 4n) ** 2n *
+                (chains + 1n),
+        ),
+        rational(chains + 1n + 3n * radix ** 2n * chains ** 2n),
+    );
+    const oneTime = rational(
+        4n * 16n * population * expression.numerator,
+        expression.denominator * (1n << 512n),
+    );
+    const labels = add(
+        rational(population * (population - 1n), 1n << 512n),
+        rational(
+            4n * queries.numerator * ceilingSquareRoot(population),
+            queries.denominator * (1n << 256n),
+        ),
+        rational(
+            4n * queries.numerator * population,
+            queries.denominator * (1n << 512n),
+        ),
+    );
+    const base = add(scale(queries, 2n), rational(2n)),
+        cube = multiply(base, multiply(base, base));
+    const binding = rational(
+        12n * cube.numerator + 4n * cube.denominator,
+        cube.denominator * (1n << 512n),
+    );
+    const attempts = 128n * (work + population + 1n);
+    const tags = add(
+        rational(attempts, 1n << 512n),
+        rational(attempts * (attempts - 1n), 1n << 513n),
+    );
+    const endpoints = 2n * semanticEndpointMultiplier(population);
+    return {
+        authentication: scale(add(oneTime, labels, tags), endpoints),
+        identity: scale(binding, endpoints),
+    };
+};
+
+const compileStatisticalTerms = (honestRegistrations: bigint, work: bigint) => {
+    assert.ok(
+        honestRegistrations > 0n &&
+            work >= minimumReductionWork &&
+            work <= maximumExperimentGates,
+    );
+    const value = compileSecurityOperands(),
+        envelope = compileReductionWork(honestRegistrations);
+    const queries = add(
+        rational(2n * work, originalQueryDivisor),
+        rational(envelope.fixedExternalQueries),
+    );
+    const endpoints = semanticEndpointMultiplier(honestRegistrations);
+    const expanded = add(
+        scale(queries, 2n),
+        rational(securityProofEnvelope.expansionQueries),
+    );
+    const lift = add(
+        scale(expanded, securityProofEnvelope.inputBits + 2n),
+        rational(securityProofEnvelope.inputBits + 1n),
+    );
+    const liftedRound = add(
+        value.roundError,
+        rational(lift.numerator, lift.denominator * (1n << 512n)),
+    );
+    const soundness = add(
+        scale(multiply(liftedRound, multiply(expanded, expanded)), 12n),
+        rational(2n * securityProofEnvelope.expansionQueries, 1n << 512n),
+    );
+    const parents = (value.maximumSourceFamilies + 4n) * honestRegistrations;
+    const trees = 3n * honestRegistrations * value.treeCount;
+    const sources = value.maximumSourceFamilies * honestRegistrations;
+    const privateLabels = add(
+        rational(
+            parents * (parents - 1n) +
+                trees * (trees - 1n) +
+                sources * (sources - 1n),
+            1n << 512n,
+        ),
+        rational(
+            4n *
+                queries.numerator *
+                (ceilingSquareRoot(parents) +
+                    ceilingSquareRoot(trees) +
+                    ceilingSquareRoot(sources)),
+            queries.denominator * (1n << 256n),
+        ),
+        rational(
+            4n * queries.numerator * sources,
+            queries.denominator * (1n << 512n),
+        ),
+    );
+    const proofView = add(
+        rational(1n, 1n << 1024n),
+        rational(
+            3n * work * (4n * value.domain - 4n),
+            minimumReductionWork * (1n << 192n),
+        ),
+        scale(
+            add(
+                rational(
+                    2n * queries.numerator + queries.denominator,
+                    queries.denominator * (1n << 256n),
+                ),
+                rational(
+                    2n * queries.numerator,
+                    queries.denominator * (1n << 512n),
+                ),
+            ),
+            3n * honestRegistrations,
+        ),
+    );
+    const rejectedFieldWords = (1n << 128n) - value.prime;
+    const factories =
+        (value.maximumSourceFamilies + 4n) * honestRegistrations + 1n;
+    const sparse =
+        (2n * value.maximumSourceFamilies + value.maximumParticipants + 4n) *
+        honestRegistrations;
+    const uniform =
+        (4n * 32n + 2n * value.maximumParticipants + 16n) *
+        value.degree *
+        factories;
+    return [
+        {
+            name: 'Sharing translation',
+            value: multiply(targetAt(work), value.sharingRatio),
+        },
+        {
+            name: 'Prescribed release',
+            value: multiply(targetAt(work), value.releaseRatio),
+        },
+        { name: 'Semantic soundness', value: scale(soundness, endpoints) },
+        { name: 'Private labels', value: scale(privateLabels, endpoints) },
+        { name: 'Complete proof view', value: scale(proofView, endpoints) },
+        {
+            name: 'Original proof-mask sampling',
+            value: rational(
+                endpoints *
+                    3n *
+                    value.maskCells *
+                    rejectedFieldWords ** 3n *
+                    work,
+                minimumReductionWork * (1n << 384n),
+            ),
+        },
+        {
+            name: 'Public initialization',
+            value: scale(value.initialization, 2n * endpoints),
+        },
+        {
+            name: 'Original sparse sampling',
+            value: rational(endpoints * sparse, 1n << 512n),
+        },
+        {
+            name: 'Added sampler conversions',
+            value: scale(
+                add(
+                    rational(32n * factories, 1n << 512n),
+                    rational(uniform, 1n << 514n),
+                ),
+                2n * endpoints,
+            ),
+        },
+    ];
+};
+
+export const compileErrorGroups = (
+    honestRegistrations: bigint,
+    work: bigint,
+) => {
+    assert.ok(
+        honestRegistrations > 0n && work > 0n && work <= maximumExperimentGates,
+    );
+    const early = authenticationParts(work, honestRegistrations);
+    if (work < minimumReductionWork)
         return {
-            participantCount: row.participantCount,
-            honestRegistrations,
-            allowance,
-            leastProverPermutations,
-            largestDummyEntries,
-            workPerProof,
-            workPerEntry: workPerProof / largestDummyEntries,
+            authentication: early.authentication,
+            identity: early.identity,
+            statistical: rational(0n),
+        };
+    const envelope = compileReductionWork(honestRegistrations);
+    const queries = add(
+        rational(2n * work, originalQueryDivisor),
+        rational(envelope.fixedExternalQueries),
+    );
+    const base = add(scale(queries, 2n), rational(2n)),
+        cube = multiply(base, multiply(base, base));
+    const binding = rational(
+        12n * cube.numerator + 4n * cube.denominator,
+        cube.denominator * (1n << 512n),
+    );
+    return {
+        authentication: early.authentication,
+        identity: add(
+            early.identity,
+            scale(binding, semanticEndpointMultiplier(honestRegistrations)),
+        ),
+        statistical: add(
+            ...compileStatisticalTerms(honestRegistrations, work).map(
+                (term) => term.value,
+            ),
+        ),
+    };
+};
+
+// At fixed H, each ratio is a nonnegative sum of T^-1,1,T,T^2.
+// Convexity proves the entire nontrivial interval from these endpoints.
+export const compileErrorEnvelope = (honestRegistrations: bigint) =>
+    [
+        1n,
+        minimumReductionWork - 1n,
+        minimumReductionWork,
+        maximumExperimentGates,
+    ].map((work) => ({
+        work,
+        ...compileErrorGroups(honestRegistrations, work),
+    }));
+
+const nonLatticeLimit = (
+    group:
+        'Purpose authentication' | 'Identity collisions' | 'Statistical terms',
+) => {
+    const key =
+        group === 'Purpose authentication'
+            ? 'authentication'
+            : group === 'Identity collisions'
+              ? 'identity'
+              : 'statistical';
+    return largestPopulationWithin((population) =>
+        compileErrorEnvelope(population).every((row) =>
+            atMost(
+                row[key],
+                multiply(targetAt(row.work), ledgerGroupBudget(group)),
+            ),
+        ),
+    );
+};
+let extraLimits: Map<LedgerGroup, bigint> | undefined;
+const statisticalLimits = () =>
+    (extraLimits ??= new Map([
+        ['Purpose authentication', nonLatticeLimit('Purpose authentication')],
+        ['Identity collisions', nonLatticeLimit('Identity collisions')],
+        ['Statistical terms', nonLatticeLimit('Statistical terms')],
+    ]));
+let ledger: ReturnType<typeof deriveSecurityLedger> | undefined;
+const deriveSecurityLedger = () => {
+    const lattices = latticeAssumptionGroups.map((group) => ({
+        group,
+        rows: compileLatticePopulationLimits(group),
+    }));
+    return lattices[0].rows.map(({ participantCount }) => {
+        const column = (kind: 'criterion' | 'stressTest') => {
+            const limits = new Map(statisticalLimits());
+            for (const { group, rows } of lattices)
+                limits.set(
+                    group,
+                    rows.find(
+                        (row) => row.participantCount === participantCount,
+                    )![kind].honestRegistrations,
+                );
+            const [group, limit] = [...limits].reduce((left, right) =>
+                left[1] <= right[1] ? left : right,
+            );
+            return { limits, binding: { group, limit } };
+        };
+        return {
+            participantCount,
+            criterion: column('criterion'),
+            stressTest: column('stressTest'),
         };
     });
 };
+export const compileSecurityLedger = () => (ledger ??= deriveSecurityLedger());

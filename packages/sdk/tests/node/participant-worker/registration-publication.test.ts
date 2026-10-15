@@ -79,9 +79,16 @@ const fixture = async (
     const records = new Map<string, Blob>();
     const references: RecordReference[] = [];
     for (const kind of Object.values(dataKind).filter(
-        (value) => value <= dataKind.rosterProposalSignature,
+        (value) =>
+            value <= dataKind.rosterProposalSignature ||
+            value === dataKind.sourceCiphertexts,
     )) {
-        const length = kind === dataKind.publicKey ? keyBytes : 32 + kind;
+        const length =
+            kind === dataKind.publicKey
+                ? keyBytes
+                : kind === dataKind.sourceCiphertexts
+                  ? chunkBytes + 37
+                  : 32 + kind;
         for (let offset = 0; offset < length; offset += chunkBytes) {
             const bytes = new Uint8Array(Math.min(chunkBytes, length - offset));
             for (let index = 0; index < bytes.length; index++)
@@ -125,6 +132,7 @@ const fixture = async (
     const prefix = `registration/${hexadecimal(enrollment.registrationBodyDigest)}/`;
     const names = new Map([
         [prefix + 'polynomial-01.bin', dataKind.publicKey],
+        [prefix + 'source-ciphertexts.bin', dataKind.sourceCiphertexts],
         [prefix + 'registration-header.bin', dataKind.header],
         [prefix + 'signature.bin', dataKind.signature],
         ['poll-definition.bin', dataKind.pollDefinition],
@@ -228,7 +236,11 @@ describe('bounded registration publication', () => {
             Array.from({ length: 2 }, (_unused, index) => index * chunkBytes),
         );
         for (const reference of state.references) {
-            const expectedReads = reference.kind <= dataKind.signature ? 2 : 0;
+            const expectedReads =
+                reference.kind <= dataKind.signature ||
+                reference.kind === dataKind.sourceCiphertexts
+                    ? 2
+                    : 0;
             expect(
                 state.reads.filter(
                     (key) =>
@@ -242,7 +254,7 @@ describe('bounded registration publication', () => {
         // Two snapshots open the guard, then one after each complete preflight
         // and after each upload. No registration file is concatenated.
         expect(local.snapshot).toHaveBeenCalledTimes(
-            2 + 3 + state.posts.length + 1,
+            2 + 4 + state.posts.length + 1,
         );
     });
 
@@ -253,6 +265,8 @@ describe('bounded registration publication', () => {
             await state.publish();
             expect(state.posts.map(({ name }) => name)).toEqual([
                 state.prefix + 'polynomial-01.bin',
+                state.prefix + 'source-ciphertexts.bin',
+                state.prefix + 'source-ciphertexts.bin',
                 state.prefix + 'registration-header.bin',
                 state.prefix + 'signature.bin',
                 'poll-definition.bin',
@@ -270,6 +284,7 @@ describe('bounded registration publication', () => {
                     'polynomial-01.bin',
                     'registration-header.bin',
                     'signature.bin',
+                    'source-ciphertexts.bin',
                 ],
             ]);
             expect(await state.transport.published('poll')).toEqual([
@@ -288,6 +303,60 @@ describe('bounded registration publication', () => {
             'A participant data record changed.',
         );
         expect(state.posts).toEqual([]);
+    });
+
+    it.each(['changed', 'missing'] as const)(
+        'refuses a %s retained source chunk before publishing any source bytes',
+        async (fault) => {
+            const state = await fixture();
+            if (fault === 'changed')
+                await state.corrupt(dataKind.sourceCiphertexts, chunkBytes);
+            else
+                state.records.delete(
+                    recordKey(dataKind.sourceCiphertexts, chunkBytes),
+                );
+            await expect(state.publish()).rejects.toThrow();
+            expect(
+                state.posts.filter(({ name }) =>
+                    name.endsWith('/source-ciphertexts.bin'),
+                ),
+            ).toEqual([]);
+            expect(
+                await state.transport.published(
+                    'registration/' + '03'.repeat(64),
+                ),
+            ).toEqual([]);
+        },
+    );
+
+    it('replays the identical source bytes and withholds changed source bytes after preflight', async () => {
+        const state = await fixture();
+        await state.publish();
+        const first = state.posts.map((item) => ({ ...item }));
+        await state.publish();
+        expect(state.posts.slice(first.length)).toEqual(first);
+        const send = state.send.getMockImplementation()!;
+        state.send.mockImplementation(async (url, options) => {
+            const response = await send(url, options);
+            const last = state.posts[state.posts.length - 1];
+            if (
+                options?.method === 'POST' &&
+                new URL(url).pathname === '/chunks' &&
+                last?.name.endsWith('/source-ciphertexts.bin') &&
+                last.offset === 0
+            )
+                await state.corrupt(dataKind.sourceCiphertexts, chunkBytes);
+            return response;
+        });
+        await expect(state.publish()).rejects.toThrow(
+            'A participant data record changed.',
+        );
+        expect(
+            state.posts
+                .slice(first.length * 2)
+                .filter(({ name }) => name.endsWith('/source-ciphertexts.bin'))
+                .map((item) => item.offset),
+        ).toEqual([0]);
     });
 
     it('rechecks later records after preflight and never uploads a changed chunk', async () => {

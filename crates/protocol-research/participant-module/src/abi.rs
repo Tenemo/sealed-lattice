@@ -45,7 +45,8 @@ fn input_bytes() -> usize {
         + setup_witness::registration::SEALED_KEY_BYTES
         + protocol_foundations::SEALED_SIGNING_SEED_BYTES
         + 2
-        + (96 + crate::fhe_sources::maximum_capsule_bytes()).max(64 + 4 + retained_setup);
+        + (96 + protocol_foundations::source_seeds::maximum_capsule_bytes())
+            .max(64 + 4 + retained_setup);
     let enrollment = 128
         + 4
         + protocol_foundations::poll::MAXIMUM_POLL_BYTES

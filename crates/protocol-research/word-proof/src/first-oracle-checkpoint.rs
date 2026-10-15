@@ -10,7 +10,7 @@ use parallel_work::{
     ProtocolHash,
     sealing::{self, Sealed, TAG_BYTES},
 };
-use supported_profile::{Profile, relation::*};
+use supported_profile::{Profile, relation::*, source_linked::relation as setup_relation};
 use zeroize::Zeroizing;
 
 /// The most plaintext bytes one record seals, the chunk bound of the

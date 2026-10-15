@@ -19,6 +19,7 @@ crate::operation_codes! {
         Begin = 0,
         Key = 1,
         KeyFinish = 2,
+        Sources = 3,
         Finish = 4,
         Discard = 5,
     }
@@ -86,6 +87,7 @@ impl RosterInputVerifier {
         match step {
             RecordStep::Begin => self.begin_record(bytes),
             RecordStep::Key => self.push_key(position, bytes),
+            RecordStep::Sources => self.push_sources(position, bytes),
             RecordStep::KeyFinish if bytes.is_empty() => self.finish_key(position),
             RecordStep::Finish if bytes.is_empty() => self.finish_record(position),
             RecordStep::Discard if bytes.is_empty() => self.discard_record(position),
@@ -153,6 +155,13 @@ impl RosterInputVerifier {
     pub fn finish_key(&mut self, position: usize) -> Result<(), Refusal> {
         match self.records.get_mut(position) {
             Some(Record::Open(session)) => session.finish_key(),
+            _ => Err(Refusal::Shape),
+        }
+    }
+
+    pub fn push_sources(&mut self, position: usize, bytes: &[u8]) -> Result<(), Refusal> {
+        match self.records.get_mut(position) {
+            Some(Record::Open(session)) => session.push_sources(bytes),
             _ => Err(Refusal::Shape),
         }
     }

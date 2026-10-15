@@ -10,6 +10,8 @@ pub mod negacyclic;
 pub mod proof_field;
 mod query;
 mod setup;
+#[path = "source-linked.rs"]
+pub mod source_linked;
 use coefficient::CenteredCodec;
 use proof_field::{Columns, MODULUS, add, multiply, subtract};
 pub use setup::{

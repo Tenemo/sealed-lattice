@@ -12,6 +12,7 @@ protocol_foundations::operation_codes! {
         Begin = 0,
         Key = 1,
         KeyFinish = 2,
+        Sources = 3,
         Finish = 4,
     }
 }
@@ -97,6 +98,11 @@ impl State {
             Some(OwnRegistrationStep::KeyFinish) if length == 0 => {
                 self.pending.as_mut().ok_or(Refusal::Consumed)?.finish_key()
             }
+            Some(OwnRegistrationStep::Sources) => self
+                .pending
+                .as_mut()
+                .ok_or(Refusal::Consumed)?
+                .push_sources(&self.input[..length]),
             Some(OwnRegistrationStep::Finish) if length == 0 => {
                 let verified = self.pending.take().ok_or(Refusal::Consumed)?.finish()?;
                 self.verified = Some(Arc::new(verified));

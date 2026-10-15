@@ -26,7 +26,7 @@ use protocol_foundations::{
     signed_packet,
 };
 use std::sync::Arc;
-use supported_profile::relation::setup_relation;
+use supported_profile::source_linked::relation as setup_relation;
 #[path = "public-work.rs"]
 mod public_work;
 pub use public_work::PublicOperation;
@@ -228,6 +228,24 @@ impl SetupSession {
     pub fn roster_context(&self) -> Option<(Arc<VerifiedPoll>, Arc<AuthenticatedRosterProposal>)> {
         Some((self.poll.clone()?, self.proposal.clone()?))
     }
+    /// Locates the selected family inside the original registration file.
+    /// The offer's source verifier still authenticates every supplied byte.
+    pub fn source_range(&mut self) -> Result<(), Refusal> {
+        self.output.clear();
+        let proposal = self.proposal.as_ref().ok_or(Refusal)?.proposal();
+        let range = proposal.source_ciphertext_range();
+        self.output.extend(
+            u32::try_from(range.start)
+                .map_err(|_| Refusal)?
+                .to_le_bytes(),
+        );
+        self.output.extend(
+            u32::try_from(range.len())
+                .map_err(|_| Refusal)?
+                .to_le_bytes(),
+        );
+        Ok(())
+    }
     pub fn unsigned_selection(&self) -> Option<SelectionProposal> {
         self.unsigned.clone()
     }
@@ -272,6 +290,22 @@ impl SetupSession {
                 Err(Refusal)
             }
         }
+    }
+    pub fn offer_source(&mut self, length: usize) -> Result<(), Refusal> {
+        let bytes = self.input.get(..length).ok_or(Refusal)?;
+        self.offer
+            .as_mut()
+            .ok_or(Refusal)?
+            .source(bytes)
+            .map_err(|_| Refusal)
+    }
+    pub fn selected_offer_source(&mut self, length: usize) -> Result<(), Refusal> {
+        let bytes = self.input.get(..length).ok_or(Refusal)?;
+        self.aggregator
+            .as_mut()
+            .ok_or(Refusal)?
+            .source(bytes)
+            .map_err(|_| Refusal)
     }
     pub fn offer_polynomial(
         &mut self,

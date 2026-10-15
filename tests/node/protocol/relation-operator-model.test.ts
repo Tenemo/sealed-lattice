@@ -134,7 +134,7 @@ const reducedBallot = (profile: SupportedProfile) => {
         );
     }
     place('plaintext-lower-word', model.plaintextWords);
-    place('plaintext-high-bit', model.plaintextHighBits);
+    place('plaintext-complement-word', model.plaintextComplements);
     place('packing-quotient', words(model.packingQuotient, 16, 1)[0]);
     place('score-minus-one', model.scoreWords);
     const [fhePositive, fheNegative] = signs(model.fhe.ephemeral);
@@ -209,7 +209,12 @@ const reducedRelease = (profile: SupportedProfile, seed: bigint) => {
     return { model, layout, witness, statement };
 };
 
-const setupLayout = { degree: 16, fheHalfSupport: 2, shareHalfSupport: 2 };
+const setupLayout = {
+    degree: 16,
+    fheHalfSupport: 2,
+    shareHalfSupport: 2,
+    sourceHalfSupport: 2,
+};
 const reducedSetup = (profile: SupportedProfile) => {
     const model = createSetupContributionRelationModel(profile);
     expect(model.verify()).toBe(true);
@@ -267,6 +272,14 @@ const reducedSetup = (profile: SupportedProfile) => {
         header,
         ...fhePolynomials.map((values) => encode(values, modulus)),
         ...sharePolynomials.map((values) => encode(values, shareModulus)),
+        ...model.sourceEquations
+            .flatMap((sourceEquation) => [
+                sourceEquation.convolution[0].publicCoefficients,
+                sourceEquation.publicValue,
+            ])
+            .map((values) =>
+                encode(values, auxiliaryInputEncryptionParameters.modulus),
+            ),
     ]);
     return {
         model,
@@ -300,12 +313,13 @@ describe('relation operator model', () => {
                 profile.ciphertext.modulus.toString(2).length / 96,
             );
             expect(operator.lookupWeight).toEqual(
-                power(alpha, (2 * limbs + 1) * 64 + 2 * 8 + 4),
+                power(alpha, (2 * limbs + 2) * 64 + 2 * 8 + 4),
             );
             // A changed score, carry, auxiliary quotient or support bit, or
             // a changed ciphertext coefficient, no longer meets it.
             for (const [column, row] of [
                 [index('score-minus-one'), 1],
+                [index('plaintext-complement-word'), 7],
                 [index(`fhe-carry-1-${limbs - 2}`), 9],
                 [index('auxiliary-quotient-0'), 16],
                 [index('fhe-negative-support'), 40],
@@ -448,6 +462,8 @@ describe('relation operator model', () => {
                 ];
             for (const [column, row] of [
                 [named('encryption/0/error/word-0'), 4],
+                [named('encrypted-source-0/quotient/word-0'), 5],
+                [named('source encryption/positive'), 1],
                 [named('sharing coefficient 1/high/word-0'), 13],
                 [
                     named(

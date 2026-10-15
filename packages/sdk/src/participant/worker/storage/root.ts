@@ -85,6 +85,8 @@ export const dataKind = {
     setupCertificate: 10,
     // Original private FHE family sources, retired with verified setup.
     sourceCapsule: 11,
+    // Complete public ciphertexts remain after private source retirement.
+    sourceCiphertexts: 13,
 } as const;
 
 export type RecordReference = Readonly<{
@@ -195,6 +197,7 @@ const checkReferences = (
     if (
         !exact(dataKind.publicKey, registration.publicKeyBytes) ||
         lengths[dataKind.header] === 0 ||
+        lengths[dataKind.sourceCiphertexts] === 0 ||
         !exact(dataKind.signature, registration.signatureBytes) ||
         !exact(dataKind.recipientCapsule, registration.recipientCapsuleBytes) ||
         !exact(dataKind.signingCapsule, registration.signingCapsuleBytes) ||

@@ -16,7 +16,7 @@ const profile = compileParticipantRuntimeProfile(4, 2);
 const bounds = profile.contribution;
 const recordBytes = 1_048_576;
 const fixtureHeader = (length: number) => {
-    const header = new Uint8Array(72).fill(43);
+    const header = new Uint8Array(bounds.bodyHeaderBytes);
     new DataView(header.buffer).setBigUint64(0, BigInt(length), true);
     return header;
 };

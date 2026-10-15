@@ -163,6 +163,12 @@ impl RankingProgram {
             shifted = builder.append(6, &[shifted], 0);
             rank = builder.append(1, &[rank, shifted], 0);
         }
+        rank = builder.append(4, &[rank], 0);
+        shifted = rank;
+        for _ in 1..top_count {
+            shifted = builder.append(6, &[shifted], 0);
+            rank = builder.append(1, &[rank, shifted], 0);
+        }
         let mut powers = vec![None; options];
         powers[1] = Some(rank);
         // Family zero retains the complete-ordering encoding. Other families
@@ -184,7 +190,8 @@ impl RankingProgram {
         } else {
             2 + top_count as u32
         };
-        let result = builder.append(5, &[sum], constant);
+        let ranked = builder.append(5, &[sum], constant);
+        let result = builder.append(5, &[ranked], options as u32 + 3);
         Some(Self {
             bytes: builder.encode(result),
         })
@@ -197,3 +204,7 @@ impl RankingProgram {
 #[cfg(test)]
 #[path = "program-tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "program-output-tests.rs"]
+mod output_tests;

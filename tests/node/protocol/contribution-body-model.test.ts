@@ -45,32 +45,31 @@ describe('complete contribution body encoding', () => {
             expect(() => contributionBodyHashPrefix(length)).toThrow('length');
     });
 
-    it('carries only the FHE and encrypted-share polynomials and preserves the header source opening', () => {
+    it('carries the original FHE and encrypted-share records under the proof-length header', () => {
         const value = compileContributionBodyCensus(completionProfile());
         const excluded = new Set([
-            42,
-            ...Array.from({ length: 6 }, (_, gadget) => [
+            63,
+            ...Array.from({ length: 9 }, (_, gadget) => [
                 7 * gadget,
                 7 * gadget + 3,
                 7 * gadget + 5,
             ]).flat(),
-            ...Array.from({ length: 10 }, (_, recipient) => 43 + 3 * recipient),
+            ...Array.from({ length: 10 }, (_, recipient) => 64 + 3 * recipient),
         ]);
         expect(
             value.polynomials.map((polynomial) => polynomial.expandedIndex),
         ).toEqual(
-            Array.from({ length: 73 }, (_, index) => index).filter(
+            Array.from({ length: 94 }, (_, index) => index).filter(
                 (index) => !excluded.has(index),
             ),
         );
-        const headerBytes = 8n + 64n;
-        const payloadBytes = 24n * 65536n * 109n + 20n * 65536n * 21n;
+        const headerBytes = 8n;
+        const payloadBytes = 36n * 65536n * 97n + 20n * 65536n * 21n;
         const prefixBytes = 6n + 2n * 6n + 4n + 32n + 4n;
         // The full word proof's header is its shortest encoding.
-        const minimumProofBytes = 3936n + 64n + 48n * 23n * 9n;
-        const streamedBytes = 65536n * 109n + 20n * 65536n * 21n;
+        const minimumProofBytes = 3936n + 64n + 48n * 35n * 8n;
+        const streamedBytes = 65536n * 97n + 20n * 65536n * 21n;
         expect(value.headerBytes).toBe(headerBytes);
-        expect(value.sourceOpeningSaltBytes).toBe(64n);
         expect(value.polynomialPayloadBytes).toBe(payloadBytes);
         expect(value.minimumProofBytes).toBe(minimumProofBytes);
         expect(value.maximumBodyBytes).toBe(

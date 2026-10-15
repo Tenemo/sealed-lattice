@@ -1,3 +1,4 @@
+use encrypted_source_operator::LinkedStatementStream;
 use parallel_work::Ticket;
 use protocol_foundations::{
     Credential, RETAINED_TAG_BYTES, SIGNATURE_BYTES,
@@ -5,19 +6,18 @@ use protocol_foundations::{
     contribution_offer::{
         AuthenticatedContributionOffer, OfferEnvelope, authenticate_offer, offer_envelope_bytes,
     },
+    foundation::participant_identity::derive_participant_identity,
     identity::{IdentityHasher, PUBLIC_POLYNOMIAL_DOMAIN},
     poll::VerifiedPoll,
     roster_authentication::AuthenticatedRosterProposal,
-    source_binding::FheKeyCommitmentHasher,
 };
+use setup_witness::encrypted_source::{SourceCiphertextVerifier, ciphertext_bytes};
 use setup_witness::{Profile, contribution::common_records_job};
 use statement_stream::committed_polynomial::CommittedPolynomial;
 use std::{collections::VecDeque, sync::Arc};
-use supported_profile::relation::setup_relation;
+use supported_profile::source_linked::relation as setup_relation;
 use word_proof::public_oracle::PublicOracleBuilder;
-use word_verifier::{
-    CHUNK_LIMIT, HEADER_LENGTH, SetupContributionVerifier, setup_contribution_verifier,
-};
+use word_verifier::{CHUNK_LIMIT, HEADER_LENGTH, engine::Verifier};
 
 #[cfg(test)]
 #[path = "published-aggregate-tests.rs"]
@@ -190,10 +190,12 @@ pub struct OfferVerifier<const EXACT: bool> {
     profile: Profile,
     position: usize,
     body: ContributionBodyHasher,
-    source_binding: Option<FheKeyCommitmentHasher>,
+    source: Option<SourceCiphertextVerifier>,
+    source_remaining: usize,
+    source_records: Vec<Vec<u8>>,
     polynomial_hash: Option<IdentityHasher>,
     polynomials: Vec<OfferPolynomial>,
-    verifier: SetupContributionVerifier,
+    verifier: Option<Verifier<LinkedStatementStream>>,
     proof_header: Vec<u8>,
     statement_index: usize,
     // The common polynomials the statement supplies, in its order: those
@@ -232,24 +234,24 @@ impl<const EXACT: bool> OfferVerifier<EXACT> {
         {
             return Err(Refusal::Shape);
         }
-        let source_binding = FheKeyCommitmentHasher::for_contribution(
-            proposal,
-            offer.envelope().position(),
-            &decoded.source_salt,
-        )
-        .map_err(|_| Refusal::Context)?;
+        let registration = proposal
+            .records()
+            .get(offer.envelope().position())
+            .ok_or(Refusal::Context)?;
+        let owner = derive_participant_identity(&registration.header().signing_public)
+            .map_err(|_| Refusal::Context)?;
+        let source = SourceCiphertextVerifier::new(
+            profile,
+            &registration.header().poll,
+            owner.as_bytes(),
+            *proposal
+                .source_binding(offer.envelope().position())
+                .map_err(|_| Refusal::Context)?,
+        );
         let role = proposal
             .contribution_role(offer.envelope().position())
             .map_err(|_| Refusal::Context)?;
         let body = ContributionBodyHasher::new(profile, body_header).map_err(|_| Refusal::Shape)?;
-        // The statement digest the proof declares is not trusted: the
-        // statement stream recomputes it from fixed predecessors and every
-        // supplied polynomial.
-        let mut verifier = setup_contribution_verifier(profile, &role, proof_header)
-            .map_err(|_| Refusal::Proof)?;
-        verifier
-            .push_statement(&profile.setup_statement_header())
-            .map_err(|_| Refusal::Statement)?;
         // Every polynomial that is neither the body's nor a recipient's
         // registered key is common.
         let body_polynomials = profile.contribution_body_polynomials();
@@ -260,15 +262,17 @@ impl<const EXACT: bool> OfferVerifier<EXACT> {
                         .all(|recipient| profile.recipient_key_polynomial(recipient) != *index)
             })
             .collect();
-        let mut result = Self {
+        let result = Self {
             position: offer.envelope().position(),
             offer,
             profile,
             body,
-            source_binding: Some(source_binding),
+            source: Some(source),
+            source_remaining: ciphertext_bytes(),
+            source_records: Vec::new(),
             polynomial_hash: None,
             polynomials: Vec::new(),
-            verifier,
+            verifier: None,
             proof_header: proof_header.to_vec(),
             statement_index: 0,
             computing: VecDeque::new(),
@@ -293,9 +297,73 @@ impl<const EXACT: bool> OfferVerifier<EXACT> {
             ordinal: 0,
             polynomial_offset: 0,
         };
-        result.compute_common()?;
-        result.fixed_inputs()?;
         Ok(result)
+    }
+
+    /// Reopens the exact source family authenticated by the registration.
+    pub fn source(&mut self, bytes: &[u8]) -> Result<(), Refusal> {
+        if self.failed {
+            return Err(Refusal::Consumed);
+        }
+        let result = (|| {
+            if bytes.len() > self.source_remaining {
+                return Err(Refusal::Shape);
+            }
+            self.source
+                .as_mut()
+                .ok_or(Refusal::Consumed)?
+                .push(bytes)
+                .map_err(|_| Refusal::Commitment)?;
+            self.source_remaining -= bytes.len();
+            if self.source_remaining == 0 {
+                let registered = self
+                    .source
+                    .take()
+                    .ok_or(Refusal::Consumed)?
+                    .finish()
+                    .map_err(|_| Refusal::Commitment)?;
+                self.source_records = registered
+                    .public()
+                    .records()
+                    .map_err(|_| Refusal::Statement)?;
+                let role = self
+                    .offer
+                    .roster()
+                    .proposal()
+                    .contribution_role(self.position)
+                    .map_err(|_| Refusal::Context)?;
+                let mut verifier = Verifier::open_with_public(
+                    setup_relation(self.profile),
+                    &role,
+                    &self.proof_header,
+                    |digest, alpha, queries, root, evaluations| {
+                        LinkedStatementStream::committed(
+                            self.profile,
+                            digest,
+                            registered,
+                            alpha,
+                            queries,
+                            root?,
+                            evaluations,
+                        )
+                        .ok()
+                    },
+                )
+                .map_err(|_| Refusal::Proof)?;
+                verifier
+                    .push_statement(&self.profile.setup_statement_header())
+                    .map_err(|_| Refusal::Statement)?;
+                self.verifier = Some(verifier);
+                self.compute_common()?;
+                self.fixed_inputs()?;
+            }
+            Ok(())
+        })();
+        if result.is_err() {
+            self.failed = true;
+            self.verifier = None;
+        }
+        result
     }
 
     // Starts the records of the next common polynomials, as many as the
@@ -334,6 +402,8 @@ impl<const EXACT: bool> OfferVerifier<EXACT> {
                 let bytes = self.offer.roster().proposal().records()[recipient].public_key();
                 for chunk in bytes.chunks(CHUNK_LIMIT) {
                     self.verifier
+                        .as_mut()
+                        .ok_or(Refusal::Consumed)?
                         .push_statement(chunk)
                         .map_err(|_| Refusal::Statement)?;
                 }
@@ -344,6 +414,8 @@ impl<const EXACT: bool> OfferVerifier<EXACT> {
                 }
                 for chunk in ticket.wait().chunks(CHUNK_LIMIT) {
                     self.verifier
+                        .as_mut()
+                        .ok_or(Refusal::Consumed)?
                         .push_statement(chunk)
                         .map_err(|_| Refusal::Statement)?;
                 }
@@ -352,7 +424,18 @@ impl<const EXACT: bool> OfferVerifier<EXACT> {
             self.statement_index += 1;
         }
         if next_owned == profile.setup_polynomials() {
+            for record in &self.source_records {
+                for chunk in record.chunks(CHUNK_LIMIT) {
+                    self.verifier
+                        .as_mut()
+                        .ok_or(Refusal::Consumed)?
+                        .push_statement(chunk)
+                        .map_err(|_| Refusal::Statement)?;
+                }
+            }
             self.verifier
+                .as_mut()
+                .ok_or(Refusal::Consumed)?
                 .finish_statement()
                 .map_err(|_| Refusal::Statement)?;
             self.statement_done = true;
@@ -361,7 +444,7 @@ impl<const EXACT: bool> OfferVerifier<EXACT> {
     }
 
     pub fn polynomial(&mut self, index: usize, offset: usize, bytes: &[u8]) -> Result<(), Refusal> {
-        if self.failed || self.statement_done {
+        if self.failed || self.statement_done || self.verifier.is_none() {
             return Err(Refusal::Consumed);
         }
         let result = (|| {
@@ -400,34 +483,12 @@ impl<const EXACT: bool> OfferVerifier<EXACT> {
                 .ok_or(Refusal::Consumed)?
                 .absorb(bytes)
                 .map_err(|_| Refusal::Shape)?;
-            if index == self.profile.fhe_polynomial(0, 1) {
-                self.source_binding
-                    .as_mut()
-                    .ok_or(Refusal::Consumed)?
-                    .push(offset, bytes)
-                    .map_err(|_| Refusal::Statement)?;
-                if self.polynomial_offset == polynomial_bytes {
-                    let digest = self
-                        .source_binding
-                        .take()
-                        .ok_or(Refusal::Consumed)?
-                        .finish()
-                        .map_err(|_| Refusal::Statement)?;
-                    let expected = self
-                        .offer
-                        .roster()
-                        .proposal()
-                        .fhe_key_commitment(self.position)
-                        .map_err(|_| Refusal::Context)?;
-                    if &digest != expected {
-                        return Err(Refusal::Commitment);
-                    }
-                }
-            }
             if let Some(public) = &mut self.public_polynomial {
                 public.push(bytes).map_err(|_| Refusal::Statement)?;
             } else {
                 self.verifier
+                    .as_mut()
+                    .ok_or(Refusal::Consumed)?
                     .push_statement(bytes)
                     .map_err(|_| Refusal::Statement)?;
             }
@@ -465,7 +526,7 @@ impl<const EXACT: bool> OfferVerifier<EXACT> {
     }
 
     pub fn proof(&mut self, offset: usize, bytes: &[u8]) -> Result<(), Refusal> {
-        if self.failed || !self.statement_done || self.source_binding.is_some() {
+        if self.failed || !self.statement_done || self.source.is_some() {
             return Err(Refusal::Consumed);
         }
         let result = (|| {
@@ -482,6 +543,8 @@ impl<const EXACT: bool> OfferVerifier<EXACT> {
             }
             if prefix < bytes.len() {
                 self.verifier
+                    .as_mut()
+                    .ok_or(Refusal::Consumed)?
                     .push_proof(&bytes[prefix..])
                     .map_err(|_| Refusal::Proof)?;
             }
@@ -496,7 +559,7 @@ impl<const EXACT: bool> OfferVerifier<EXACT> {
     pub fn finish(mut self) -> Result<VerifiedOffer<EXACT>, Refusal> {
         if self.failed
             || !self.statement_done
-            || self.source_binding.is_some()
+            || self.source.is_some()
             || self.polynomial_hash.is_some()
         {
             return Err(Refusal::Consumed);
@@ -519,7 +582,7 @@ impl<const EXACT: bool> OfferVerifier<EXACT> {
         {
             return Err(Refusal::Body);
         }
-        if !self.verifier.finish() {
+        if !self.verifier.take().ok_or(Refusal::Consumed)?.finish() {
             return Err(Refusal::Proof);
         }
         Ok(VerifiedOffer {

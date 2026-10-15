@@ -12,6 +12,7 @@ import {
     compileProofRandomnessBudgets,
     rejectionSubsetBound,
 } from '#tests/proof-randomness-budget-model.js';
+import { securityTargetBits } from '#tests/security-margin/reduction-work.js';
 import {
     completionProfile,
     deriveSupportedProfile,
@@ -344,19 +345,19 @@ describe('bounded randomness for complete proof simulation', () => {
         expect(
             result.upperNumerator << result.upperProbabilityExponent,
         ).toBeLessThanOrEqual(result.denominator);
-        // This work variation is not itself 2^-80-small. That comparison
+        // This work variation alone exceeds the security target. That comparison
         // gives no cost-normalized security verdict; the coupling retains
         // the actual request history without assigning it a privacy error.
-        expect(result.lowerNumerator << 80n).toBeGreaterThan(
+        expect(result.lowerNumerator << securityTargetBits).toBeGreaterThan(
             result.denominator,
         );
     });
 
     it('programs the complete role-specific word without borrowing the setup width', () => {
         for (const [participants, options, setupBytes] of [
-            [3, 2, 131072n],
+            [3, 2, 262144n],
             [10, 10, 524288n],
-            [20, 20, 524288n],
+            [20, 20, 1048576n],
         ] as const) {
             const budgets = compileProofRandomnessBudgets(
                 deriveSupportedProfile(participants, options),
@@ -454,7 +455,9 @@ describe('bounded randomness for complete proof simulation', () => {
             expect(value.failure.numerator << 128n).toBeLessThanOrEqual(
                 1n << value.failure.denominatorBits,
             );
-            expect(value.invocationCap).toBe(1n << 28n);
+            expect(value.invocationCap).toBe(
+                (3n * ((1n << 128n) - 1n)) / (1n << 29n),
+            );
             expect(value.extraReads).toBeGreaterThan(0n);
             const previousPositions =
                 (value.simulatorBaselineBytes +

@@ -15,8 +15,7 @@ use std::{
     sync::Arc,
 };
 use supported_profile::{
-    Profile,
-    relation::{PROOF_HEADER_BYTES, setup_relation},
+    Profile, relation::PROOF_HEADER_BYTES, source_linked::relation as setup_relation,
 };
 
 /// Bytes of a contribution polynomial and of the largest whole-coefficient
@@ -41,7 +40,24 @@ pub fn ballot_key(profile: Profile) -> usize {
     setup_input(profile).2
 }
 
-/// Both controls reach the registered-coordinate check before proof bytes.
+/// Streams the selected ciphertext family from the published registration.
+pub fn read_source<E>(
+    directory: &Path,
+    mut consume: impl FnMut(&[u8]) -> Result<(), E>,
+) -> Result<(), E> {
+    let mut source = File::open(directory.join("source-ciphertexts.bin")).unwrap();
+    let mut buffer = vec![0; CHUNK_BYTES];
+    loop {
+        let count = source.read(&mut buffer).unwrap();
+        if count == 0 {
+            return Ok(());
+        }
+        consume(&buffer[..count])?;
+    }
+}
+
+/// A foreign or changed source family and a substituted first FHE
+/// coordinate cannot authorize an offer, even before proof bytes arrive.
 pub fn verify_source_refusals(
     offers: &[Arc<AuthenticatedContributionOffer>],
     directories: &[PathBuf],
@@ -54,36 +70,55 @@ pub fn verify_source_refusals(
         .unwrap()
         .read_exact(&mut proof_header)
         .unwrap();
-    let (length, capacity) = polynomial_bytes(profile, index);
     for wrong_source in [false, true] {
-        let mut header = headers[0].clone();
-        if !wrong_source {
-            header[12] ^= 1;
-        }
         let mut verifier =
-            ContributionOfferVerifier::new(offers[0].clone(), &header, &proof_header).unwrap();
+            ContributionOfferVerifier::new(offers[0].clone(), &headers[0], &proof_header).unwrap();
+        let mut first = true;
+        let result = read_source(&directories[usize::from(wrong_source)], |bytes| {
+            let mut changed = bytes.to_vec();
+            if first && !wrong_source {
+                changed[1] ^= 1;
+            }
+            first = false;
+            verifier.source(&changed)
+        });
+        assert!(matches!(
+            result,
+            Err(setup_aggregate::offer_verifier::Refusal::Commitment)
+        ));
+        assert!(verifier.proof(0, &proof_header).is_err());
+        assert!(verifier.finish().is_err());
+    }
+    let mut verifier =
+        ContributionOfferVerifier::new(offers[0].clone(), &headers[0], &proof_header).unwrap();
+    read_source(&directories[0], |bytes| verifier.source(bytes)).unwrap();
+    let mut refused = false;
+    'polynomials: for polynomial in profile.contribution_body_polynomials() {
+        let (length, capacity) = polynomial_bytes(profile, polynomial);
         let mut incoming = File::open(
-            directories[usize::from(wrong_source)].join(format!("polynomial-{index:02}.bin")),
+            directories[usize::from(polynomial == index)]
+                .join(format!("polynomial-{polynomial:02}.bin")),
         )
         .unwrap();
         let mut bytes = vec![0; capacity];
         for offset in (0..length).step_by(capacity) {
             let count = capacity.min(length - offset);
             incoming.read_exact(&mut bytes[..count]).unwrap();
-            let result = verifier.polynomial(index, offset, &bytes[..count]);
-            if offset + count == length {
-                assert!(matches!(
-                    result,
-                    Err(setup_aggregate::offer_verifier::Refusal::Commitment)
-                ));
-            } else {
-                result.unwrap();
+            match verifier.polynomial(polynomial, offset, &bytes[..count]) {
+                Ok(()) => (),
+                Err(setup_aggregate::offer_verifier::Refusal::Statement) => {
+                    refused = true;
+                    break 'polynomials;
+                }
+                Err(error) => panic!("Unexpected substituted-coordinate refusal: {error:?}"),
             }
         }
-        assert!(verifier.finish().is_err());
     }
+    assert!(refused);
+    assert!(verifier.proof(0, &proof_header).is_err());
+    assert!(verifier.finish().is_err());
     println!(
-        "Refused a foreign registered coordinate and changed source opening before proof consumption"
+        "Refused foreign and changed registration sources and a substituted FHE coordinate before proof consumption"
     );
 }
 
@@ -99,6 +134,7 @@ pub fn verify_offer(
         .read_exact(&mut proof_header)
         .unwrap();
     let mut verifier = ContributionOfferVerifier::new(offer, header, &proof_header).unwrap();
+    read_source(directory, |bytes| verifier.source(bytes)).unwrap();
     for index in profile.contribution_body_polynomials() {
         let (length, capacity) = polynomial_bytes(profile, index);
         let mut file = File::open(directory.join(format!("polynomial-{index:02}.bin"))).unwrap();
@@ -230,6 +266,7 @@ fn begin_streamed_offer(
     verifier
         .begin_verification(offer, header, &proof_header)
         .unwrap();
+    read_source(directory, |bytes| verifier.source(bytes)).unwrap();
 }
 
 // Genuine public files supply both the incoming coefficients and the

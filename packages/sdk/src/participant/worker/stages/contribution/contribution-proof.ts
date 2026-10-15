@@ -25,7 +25,7 @@ export const proofRecordLayout = (
 
 const checkProofLength = (bounds: ProofBounds, length: number) => {
     if (
-        bounds.bodyHeaderBytes !== 8 + 64 ||
+        bounds.bodyHeaderBytes !== 8 ||
         !Number.isSafeInteger(length) ||
         length < bounds.minimumProofBytes ||
         length > bounds.maximumProofBytes
@@ -36,7 +36,7 @@ const checkProofLength = (bounds: ProofBounds, length: number) => {
 // The existing authenticated body header remains the sole length carrier.
 export const proofLength = (bounds: ProofBounds, header: Uint8Array) => {
     if (
-        bounds.bodyHeaderBytes !== 8 + 64 ||
+        bounds.bodyHeaderBytes !== 8 ||
         header.length !== bounds.bodyHeaderBytes
     )
         throw new Error('The contribution body header is malformed.');

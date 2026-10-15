@@ -37,6 +37,7 @@ import {
     polynomialFile,
 } from '../contribution/contribution-offer.js';
 import {
+    registrationFile,
     proposalRegistrationBodyDigests,
     rosterBegin,
     streamRegistrations,
@@ -264,6 +265,47 @@ const beginOffer = async (
         );
 };
 
+// Read only this roster's selected family from the previously admitted
+// registration candidate. A changed relay response still fails natively.
+const streamOfferSource = async (
+    context: PublicProfileContext,
+    relay: PublicRelay,
+    offer: SelectedOffer,
+    absorb: (length: number) => number,
+) => {
+    const { module, profile } = context;
+    const candidate =
+        rosterRegistrationCandidates.get(module)?.[offer.position];
+    if (candidate === undefined || module.setup_source_range() !== 0)
+        throw new PublicInputFailure(
+            'The original registered source is unavailable.',
+        );
+    const description = setupOutput(context);
+    if (description.length !== 8)
+        throw new Error('The module returned an invalid source range.');
+    const start = readUnsigned32(description, 0),
+        length = readUnsigned32(description, 4);
+    if (
+        length === 0 ||
+        start + length > profile.registration.maximumSourceCiphertextBytes
+    )
+        throw new Error('The module returned an invalid source range.');
+    await streamCandidateFile(
+        relay,
+        candidate,
+        registrationFile.sourceCiphertexts,
+        profile.registration.maximumSourceCiphertextBytes,
+        (bytes) => {
+            writeSetupInput(module, bytes);
+            if (absorb(bytes.length) !== 0)
+                throw new PublicInputFailure(
+                    'The original registered source was refused.',
+                );
+        },
+        { start, length },
+    );
+};
+
 const streamOfferProof = async (
     context: PublicProfileContext,
     relay: PublicRelay,
@@ -305,7 +347,7 @@ export const verifyOffer = async (
     const known = offerAvailable(context, offer);
     if (known && capture === undefined) return;
     await findCandidate(relay, offerKey(offer), async (candidate) => {
-        if (!known)
+        if (!known) {
             await beginOffer(
                 context,
                 relay,
@@ -313,6 +355,13 @@ export const verifyOffer = async (
                 candidate,
                 module.setup_offer_begin,
             );
+            await streamOfferSource(
+                context,
+                relay,
+                offer,
+                module.setup_offer_source,
+            );
+        }
         const bounds = profile.contribution;
         for (const polynomial of bounds.polynomials) {
             let offset = 0;
@@ -375,7 +424,7 @@ const aggregateOffer = async (
             throw new PublicInputFailure(
                 'A selected verified offer was refused.',
             );
-    } else
+    } else {
         await beginOffer(
             context,
             relay,
@@ -383,6 +432,13 @@ const aggregateOffer = async (
             candidate,
             module.setup_begin_selected_offer_verification,
         );
+        await streamOfferSource(
+            context,
+            relay,
+            offer,
+            module.setup_selected_offer_source,
+        );
+    }
     const chunk = module.setup_chunk_capacity();
     // One incoming chunk and one previous/output chunk suffice. Replacing
     // each ordinal in one transaction leaves only disposable mixed scratch
@@ -581,9 +637,12 @@ export const aggregateSelection = async (
     }
 };
 
-// Each operation owns one Rust module; this records only whether that module
-// has already restored the roster, never whether an offer or setup is valid.
-export const modulesWithReplayedRoster = new WeakSet<object>();
+// The transport views used while admitting this operation's roster. They
+// locate source bytes; the native offer verifier checks their binding again.
+export const rosterRegistrationCandidates = new WeakMap<
+    object,
+    readonly CandidateView[]
+>();
 
 export const authenticateCertificate = (
     context: PublicProfileContext,
@@ -767,10 +826,11 @@ export const verifyPublicSetup = async (
                 pollSignature,
                 registrationBodyDigests.length,
             );
+            rosterRegistrationCandidates.delete(module);
             writeSetupInput(module, begin);
             if (module.setup_roster_begin(begin.length) !== 0)
                 throw new PublicInputFailure('The poll was refused.');
-            await streamRegistrations(
+            const registrationCandidates = await streamRegistrations(
                 relay,
                 registrationBodyDigests,
                 registration,
@@ -810,7 +870,7 @@ export const verifyPublicSetup = async (
                     'The poll names no supported profile.',
                 );
             const profiled = { ...context, profile };
-            modulesWithReplayedRoster.add(module);
+            rosterRegistrationCandidates.set(module, registrationCandidates);
             const certificate = await readSetupCertificate(profiled, relay);
             await verifyCertificateInputs(profiled, relay, certificate.bytes);
             return profiled;

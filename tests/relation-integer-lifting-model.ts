@@ -106,6 +106,7 @@ const setupFamilies = (profile: SupportedProfile): IntegerLiftingFamily[] => {
     // The constant share equation carries a public offset of at most this
     // many half radices of the scale.
     const sharingOffset = (sharingDegree * scale * shareRadix) / 2n;
+    const auxiliary = auxiliaryInputEncryptionParameters;
     assert.ok(scale < shareRadix);
     return [
         {
@@ -217,28 +218,82 @@ const setupFamilies = (profile: SupportedProfile): IntegerLiftingFamily[] => {
                 },
             ],
         },
-        supportFamily('setup', fixedModulusBfvInputs.secretSupportWeight / 2n),
+        {
+            relation: 'setup',
+            family: 'source encryption equations',
+            limbs: 1,
+            terms: [
+                {
+                    term: 'public ciphertext coefficient',
+                    bound: auxiliary.modulus / 2n,
+                },
+                {
+                    term: 'common polynomial product',
+                    bound: auxiliary.support * (auxiliary.modulus / 2n),
+                },
+                {
+                    // The first source message is s + 1 in 0..2; the
+                    // original first-error word e + 64 spans 0..127.
+                    term: 'source message',
+                    bound: ((1n << BigInt(errorBits)) - 1n) * auxiliary.scale,
+                },
+                {
+                    term: 'quotient product',
+                    bound: auxiliary.modulus * signedRadius(quotientBits),
+                },
+                { term: 'error', bound: signedRadius(errorBits) },
+            ],
+            publicMagnitudes: [],
+        },
+        supportFamily(
+            'setup',
+            maximum([
+                fixedModulusBfvInputs.secretSupportWeight,
+                auxiliary.support,
+            ]) / 2n,
+        ),
     ];
 };
 
 const ballotFamilies = (profile: SupportedProfile): IntegerLiftingFamily[] => {
     const layout = compileBallotEncryptionColumnLayout(profile);
-    // A signed column of range m is offset by half of m + 1.
-    const radius = (name: string) => {
+    const maximumWord = (name: string) => {
         const column = layout.columns.find((value) => value.name === name);
         assert.ok(column !== undefined, name);
-        return BigInt(column.maximum + 1) / 2n;
+        return BigInt(column.maximum);
     };
+    // A signed column of range m is offset by half of m + 1.
+    const radius = (name: string) => (maximumWord(name) + 1n) / 2n;
     const modulus = profile.ciphertext.modulus;
     const fheLimbs = Math.ceil(bitLength(modulus) / fheLimbBits);
     const plaintextModulus = fixedModulusBfvInputs.plaintextModulus;
     const scale = (modulus - 1n) / plaintextModulus;
-    // The plaintext word and its high bit, whose product is zero, span the
-    // centered plaintext interval.
-    const plaintext = radius('plaintext-lower-word');
+    // Lift y + z = t - 1 over the full nonnegative word box first. Its
+    // integer equality confines y to 0..t-1, hence m = y - floor(t/2)
+    // to the centered plaintext interval used by the remaining rows.
+    const interval: IntegerLiftingFamily = {
+        relation: 'ballot',
+        family: 'plaintext interval equations',
+        limbs: 1,
+        terms: [
+            {
+                term: 'plaintext word',
+                bound: maximumWord('plaintext-lower-word'),
+            },
+            {
+                term: 'complement word',
+                bound: maximumWord('plaintext-complement-word'),
+            },
+            { term: 'interval endpoint', bound: plaintextModulus - 1n },
+        ],
+        publicMagnitudes: [],
+    };
+    integerLiftingResidualBound(interval);
+    const plaintext = plaintextModulus / 2n;
     const auxiliary = auxiliaryInputEncryptionParameters;
     const maximumScore = BigInt(ballotScoreRange.maximum);
     return [
+        interval,
         {
             relation: 'ballot',
             family: 'FHE encryption equations',

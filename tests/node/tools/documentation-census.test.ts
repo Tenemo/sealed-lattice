@@ -13,37 +13,85 @@ describe('documentation census generator', () => {
     });
 
     it('renders the section of each model owner', () => {
-        for (const heading of [
+        expect(rendered.match(/^#{2,3} .+$/gmu)).toEqual([
             '## Threshold completion census',
             '## Threshold key-aggregation structural census',
-            '## Recipient-key uniqueness census',
-            '## Commitment equivocation finite model',
-            '### Assumption group limits',
             '## Bounded polynomial proof census',
-            '## Small-limb proof-field census',
-            '## Fixed-modulus BFV noise census',
-            '## Certificate custody census',
-            '## Roster proposal census',
-            '## Contribution body census',
-            '## Common-matrix sampling census',
-            '## Wide-challenge compiler census',
-            '## Common-agreement degree census',
-            '## Exact RNS arithmetic census',
-            '## Setup contribution operator census',
-            '## Linked release relation census',
-            '## Linked ballot encryption census',
             '## Wide sharing and release lifting census',
+            '## Linked ballot encryption census',
+            '## Ballot body census',
+            '## Authentication frames and completed prefix',
+            '## Proof hash byte and permutation work',
+            '## Release verification attempts',
+            '## Proof verifier query bounds',
+            '## Sparse-support sampling comparison',
+            '## Recipient-key arithmetic bounds',
+            '## Original-source arithmetic bounds',
+            '## Generated setup arithmetic bounds',
+            '## Source coefficient normalization comparison',
+            '## Proof simulator randomness budgets',
+            '## Buffered field-sampling observations',
+            '## Operation randomness seeds',
+            '## Private randomness scope inventory',
+            '## Registration source randomness and hash work',
+            '## Participant ballot custody',
+            '## Participant close custody',
+            '## Participant release custody',
+            '## Linked release relation census',
+            '## Setup contribution operator census',
+            '## Relation integer-lifting census',
+            '## Exact RNS arithmetic census',
+            '## Common-agreement degree census',
+            '## Wide-challenge compiler census',
+            '## Proof compiler chronology',
+            '## Full word-proof encoding census',
+            '## Browser word-prover resource census',
+            '## Contribution generation and sampling census',
+            '## Recipient key census',
+            '## Registration enrollment census',
+            '## First-oracle checkpoint census',
+            '## Selected opening transform census',
+            '## Contribution body census',
+            '## Setup selection and registration binding screen',
+            '### FHE key source generation screen',
+            '## Setup aggregate cache census',
+            '## Shared participant custody census',
+            '## Participant vault key work',
+            '## Committed offers and published aggregates',
+            '## Setup selection wire and resources',
+            '## Complete ordinary workflow resource screen',
+            '## Scalar evaluation storage screen',
+            '## Roster proposal census',
+            '## Common-matrix sampling census',
+            '## Fixed sponge initialization census',
+            '## Certificate custody census',
+            '## Fixed-modulus BFV noise census',
+            '## Supported profile census',
+            '## Composed security ledger',
+            '### FHE Ring-LWE',
+            '### Evaluation-key circular security',
+            '### Share-encryption Ring-LWE',
+            '### Auxiliary Ring-LWE',
+            '### Joint population limits',
+            '### Full-interval error checks',
+            '## Proof-field coefficient-fold bounds',
+            '## Small-limb proof-field census',
+            '## Simulator recipient-key availability',
+            '## Close-response census',
             '## Threshold release flooding bound',
-        ]) {
-            expect(rendered).toContain(`\n${heading}\n`);
-        }
+            '## Close wire census',
+        ]);
         expect(rendered).toContain('| 10 | 3 | 7 | 4 | 5 | yes | 4 | 4 | 0 |');
         expect(rendered).toContain('| 3 | 0 | 3 | 2 | 2 | no | 3 | 3 | 0 |');
         expect(rendered).toContain(
             '| Authorized release subsets checked | `210` |',
         );
+        expect(rendered).toContain('| Security target bits | `128` |');
         expect(rendered).toContain(
-            '| Exact dominant noise-budget floor at 80 statistical bits | `106` |',
+            '| Exact dominant noise-budget bound at the selected 96 statistical bits | `123` |',
+        );
+        expect(rendered).toContain(
+            '| Hypothetical exact dominant noise-budget bound at 128 statistical bits | `155` |',
         );
         expect(rendered).not.toMatch(/\d{4}-\d{2}-\d{2}T/u);
         expect(rendered.endsWith('\n')).toBe(true);

@@ -1,3 +1,4 @@
+import { auxiliaryInputEncryptionParameters } from '#tests/auxiliary-input-encryption-parameters.js';
 import { compileBallotBodyCensus } from '#tests/ballot-body-model.js';
 import { compileBallotEncryptionRelationCensus } from '#tests/ballot-encryption-relation-model.js';
 import {
@@ -239,7 +240,10 @@ export const proofHashProfiles = (profile: SupportedProfile) => {
             booleans: setup.booleanColumns,
             lookups: setup.lookupEntries,
             products: setup.disjointPairs,
-            prefixWords: 18n,
+            prefixWords:
+                18n +
+                4n +
+                byteWidth(auxiliaryInputEncryptionParameters.modulus),
             statementBytes:
                 setup.expandedStatementByteLength -
                 BigInt(committedOfferPolynomials(profile).length) *
@@ -252,7 +256,7 @@ export const proofHashProfiles = (profile: SupportedProfile) => {
                             ),
                         )) +
                 64n,
-            relationTag: 'complete-setup-words',
+            relationTag: 'encrypted-source-linked-setup',
             roleBytes: compileRosterProposalCensus(profile.participantCount)
                 .roleBytes,
         },
@@ -263,7 +267,7 @@ export const proofHashProfiles = (profile: SupportedProfile) => {
             booleans: ballot.booleanColumns,
             lookups: ballot.lookupEntries,
             products: ballot.additionalQuadraticConstraints,
-            prefixWords: 20n,
+            prefixWords: 18n,
             statementBytes:
                 ballotBody.contextBytes + 2n * ballotBody.ciphertextBytes,
             relationTag: 'linked-scored-ballot',
@@ -280,8 +284,8 @@ export const proofHashProfiles = (profile: SupportedProfile) => {
                 15n +
                 BigInt(release.columns.length) +
                 3n +
-                shareBytes / 4n +
-                releaseBytes / 4n,
+                (shareBytes + 3n) / 4n +
+                (releaseBytes + 3n) / 4n,
             statementBytes:
                 4n +
                 3n * 64n +

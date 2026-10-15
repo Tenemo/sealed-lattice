@@ -7,6 +7,9 @@ use super::{Arithmetic, DEGREE, Profile, Refusal, prime_count_bounds, shared};
 pub(super) const MEMORY_BYTES: usize = 402_653_184;
 pub(super) const RUNTIME_RESERVE_BYTES: usize = 67_108_864;
 pub(super) const TRANSFER_RESERVE_BYTES: usize = 2_097_152;
+/// The main instance retains the rank mask and padding correction throughout
+/// evaluation, each with one signed plaintext coefficient per ambient slot.
+pub(super) const PLAINTEXT_CACHE_BYTES: usize = 2 * DEGREE * std::mem::size_of::<i32>();
 const HELPER_RESERVE_BYTES: usize = 2_097_152;
 /// Each transform owns two tables of a word per coefficient: the forward
 /// twiddles and their Shoup companions, from which the backward transform
@@ -159,6 +162,7 @@ pub(super) fn capacity(
         .checked_sub(
             RUNTIME_RESERVE_BYTES
                 + TRANSFER_RESERVE_BYTES
+                + PLAINTEXT_CACHE_BYTES
                 + instance_holds
                 + scratch_bytes(arithmetic, operation, helpers),
         )

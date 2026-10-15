@@ -63,14 +63,14 @@ fn framing_refuses_contexts_and_proof_lengths_outside_the_profile() {
         assert!(parse_header(other, &bytes).is_err());
         assert!(parse_header(profile, &bytes[..bytes.len() - 1]).is_err());
     }
-    // The completion profile's body model: two FHE components of 108
+    // The completion profile's body model: two FHE components of 96
     // magnitude bytes and two auxiliary components of 5.
     let completion = Profile::new(10, 10).unwrap();
     assert_eq!(
         ciphertext_bytes(completion),
-        2 * 65_536 * 109 + 2 * 4_096 * 6
+        2 * 65_536 * 97 + 2 * 4_096 * 6
     );
-    assert_eq!(*proof_lengths(completion).end(), 11_105_052);
+    assert_eq!(*proof_lengths(completion).end(), 10_992_412);
 }
 #[test]
 fn incomplete_oversized_and_excess_streams_cannot_return_a_digest() {

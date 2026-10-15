@@ -10,7 +10,7 @@ use setup_aggregate::contribution_family;
 use std::{
     cell::RefCell,
     fs::File,
-    io::{Read, Write},
+    io::{Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
     rc::Rc,
     sync::Arc,
@@ -34,10 +34,13 @@ impl BodyFiles {
     fn receive(&mut self, object: usize, offset: usize, bytes: &[u8]) {
         if offset == 0 {
             self.finish();
-            if let Some(index) = object
-                .checked_sub(1)
-                .filter(|index| contribution_family(self.profile, *index).is_some())
-            {
+            if let Some(index) = object.checked_sub(1).filter(|index| {
+                contribution_family(self.profile, *index).is_some()
+                    || (self.profile.setup_polynomials()
+                        ..self.profile.setup_polynomials()
+                            + supported_profile::source_linked::SOURCE_POLYNOMIALS)
+                        .contains(index)
+            }) {
                 let name = format!("polynomial-{index:02}.bin");
                 self.open = Some(PublicOutput::create(self.directory.join(name)).unwrap());
             }
@@ -61,10 +64,25 @@ pub fn generate(
     roster: &Arc<AuthenticatedRosterProposal>,
     enrollment: &mut Enrollment,
     position: usize,
+    registration_sources: &Path,
     directory: &Path,
 ) -> (OfferSigning, Vec<u8>) {
     std::fs::create_dir(directory).unwrap();
     let profile = roster.proposal().profile();
+    let source_range = roster.proposal().source_ciphertext_range();
+    let mut registered_sources = File::open(registration_sources).unwrap();
+    registered_sources
+        .seek(SeekFrom::Start(source_range.start as u64))
+        .unwrap();
+    let mut selected_source =
+        PublicOutput::create(directory.join("source-ciphertexts.bin")).unwrap();
+    let copied = std::io::copy(
+        &mut registered_sources.take(source_range.len() as u64),
+        &mut selected_source,
+    )
+    .unwrap();
+    assert_eq!(copied, source_range.len() as u64);
+    selected_source.finish().unwrap();
     let files = Rc::new(RefCell::new(BodyFiles {
         profile,
         directory: directory.to_owned(),
@@ -74,7 +92,11 @@ pub fn generate(
     let mut session = ContributionSession::new(Box::new(move |object, offset, bytes| {
         receiver.borrow_mut().receive(object, offset, bytes);
     }));
-    let source = enrollment.contribution_source(profile).unwrap();
+    let source = enrollment.contribution_source(poll, profile).unwrap();
+    let source = enrollment
+        .credential
+        .source_contribution(roster, position, source)
+        .unwrap();
     session
         .begin_verified(roster.proposal(), position, source)
         .unwrap();
@@ -87,8 +109,10 @@ pub fn generate(
     }
     // The prover takes the published body polynomials back from the host
     // and recomputes the roster keys and common polynomials itself.
-    for index in 0..profile.setup_polynomials() {
-        if contribution_family(profile, index).is_none() {
+    for index in
+        0..profile.setup_polynomials() + supported_profile::source_linked::SOURCE_POLYNOMIALS
+    {
+        if index < profile.setup_polynomials() && contribution_family(profile, index).is_none() {
             session
                 .advance(ProverOperation::ConsumePredecessor, index, 0)
                 .unwrap();
@@ -145,12 +169,11 @@ pub fn generate(
     assert_eq!(session.phase(), DONE_PHASE);
     file.finish().unwrap();
     drop(session);
-    let body_header = enrollment
-        .contribution_header(
-            profile,
-            std::fs::metadata(&proof_path).unwrap().len() as usize,
-        )
-        .unwrap();
+    let body_header = protocol_foundations::contribution_body::body_header(
+        profile,
+        std::fs::metadata(&proof_path).unwrap().len() as usize,
+    )
+    .unwrap();
     let context = RetainedContributionContext::parse(
         &enrollment.credential,
         &roster.proposal().records()[position],
@@ -161,7 +184,14 @@ pub fn generate(
     .unwrap();
     let mut signing = OfferSigning::default();
     signing
-        .begin_body(&enrollment.credential, context, &body_header)
+        .begin_body(
+            &enrollment.credential,
+            context,
+            &body_header,
+            enrollment
+                .contribution_coordinate_hash(poll, profile)
+                .unwrap(),
+        )
         .unwrap();
     let mut buffer = vec![0; 1 << 20];
     for index in profile.streamed_contribution_polynomials() {

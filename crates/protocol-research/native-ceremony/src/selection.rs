@@ -51,7 +51,14 @@ pub fn run(
         .filter(|(position, _)| *position < profile.setup_eligible_contributors())
     {
         let draft = output.join(format!("draft-contribution-{position}"));
-        let (signing, header) = contribution::generate(poll, &roster, enrollment, position, &draft);
+        let (signing, header) = contribution::generate(
+            poll,
+            &roster,
+            enrollment,
+            position,
+            &output.join(format!("participant-{position}/source-ciphertexts.bin")),
+            &draft,
+        );
         let (envelope, signature) = signing.offer().unwrap();
         let author = output.join(format!("contribution-{position}"));
         fs::create_dir(&author).unwrap();

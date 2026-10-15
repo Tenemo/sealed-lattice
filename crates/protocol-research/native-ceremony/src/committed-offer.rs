@@ -19,8 +19,7 @@ use std::{
     time::Instant,
 };
 use supported_profile::{
-    Profile,
-    relation::{EVALUATION_HEADER_BYTES, setup_relation},
+    Profile, relation::EVALUATION_HEADER_BYTES, source_linked::relation as setup_relation,
 };
 use word_proof::public_evaluation::EvaluationProver;
 use word_proof::public_oracle::PublicOracleBuilder;
@@ -258,6 +257,7 @@ pub fn verify_selection(
         reader
             .begin_verification(offer.authenticated().clone(), &header, &proof_header)
             .unwrap();
+        aggregate::read_source(&directories[ordinal], |bytes| reader.source(bytes)).unwrap();
         let destination = output.join(format!("compact-prefix-{ordinal}"));
         fs::create_dir(&destination).unwrap();
         for index in profile.streamed_contribution_polynomials() {

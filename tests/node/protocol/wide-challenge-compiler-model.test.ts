@@ -28,9 +28,9 @@ describe('wide verifier messages and short authentication tags', () => {
                 role.virtualOracles,
             ]),
         ).toEqual([
-            ['setup', 734 + 23 * 9, 413 + 23 * 9],
-            ['ballot', 68, 42],
-            ['release', 133, 73],
+            ['setup', 1216, 804],
+            ['ballot', 65, 39],
+            ['release', 138, 76],
         ]);
         for (const role of value.roles) {
             expect(role.lookupChallengeSpace).toBe(
@@ -212,15 +212,16 @@ describe('wide verifier messages and short authentication tags', () => {
 
     it('charges routing, verification and proof roles in the conditional compiler caps', () => {
         const census = compileWideChallengeCompilerCensus(completionProfile());
-        expect(census.chargedQueries).toBe(4n * (1n << 80n));
-        expect(census.roleBudget).toBe(65536n);
-        expect(census.honestProofBudget).toBe(1n << 28n);
+        expect(census.chargedQueries).toBe(4n * (1n << 128n));
+        expect(census.roleBudget).toBe(1n << 128n);
+        expect(census.honestProofBudget).toBe(
+            (3n * ((1n << 128n) - 1n)) / (1n << 29n),
+        );
         expect(census.saltBits).toBe(2n * census.tagBits);
-        // 2 * 2^28 honest proofs * 2^23 nodes over 2^160.
-        expect(census.merklePrivacyBits).toBe(108);
-        // One programmed message per honest proof: sqrt(9 * 2^56 * 2^82 /
-        // 2^513) lies between 2^-186 and 2^-185.
+        // The diagnostic covers every completed scope at the full horizon.
+        // The composed bound uses each actual work/population endpoint.
+        expect(census.merklePrivacyBits).toBe(67);
         expect(census.programmedMessageBudget).toBe(census.honestProofBudget);
-        expect(census.reprogrammingBits).toBe(185);
+        expect(census.reprogrammingBits).toBe(89);
     });
 });

@@ -1,19 +1,10 @@
 import { ballotEnvelopeBytes } from '#tests/ballot-body-model.js';
-import {
-    mlDsa65ChallengeSeedBytes,
-    mlDsa65MaskNonceBytes,
-    mlDsa65Parameters,
-    mlDsa65Sizes,
-} from '#tests/ml-dsa-65-parameters.js';
 import { participantReleaseEnvelopeBytes } from '#tests/participant-release-custody-model.js';
 import { byteAlignedSpongePermutations } from '#tests/proof-hash-work-model.js';
-import { rejectionSubsetBound } from '#tests/proof-randomness-budget-model.js';
+import { purposeSignatureSizes } from '#tests/purpose-signature-parameters.js';
 import { compileSetupSelectionCensus } from '#tests/setup-selection-model.js';
 
-const envelopeBytes = ballotEnvelopeBytes;
-const signatureBytes = mlDsa65Sizes.signatureBytes;
-
-export const authenticationPurposes = [
+const authenticationPurposes = [
     'poll-definition',
     'registration',
     'roster-proposal',
@@ -23,7 +14,7 @@ export const authenticationPurposes = [
     'ballot-envelope',
 ] as const;
 type AuthenticationPurpose = (typeof authenticationPurposes)[number];
-const completeAuthenticationPurposes = [
+export const completeAuthenticationPurposes = [
     ...authenticationPurposes,
     'close-intent',
     'close-response',
@@ -33,64 +24,61 @@ const completeAuthenticationPurposes = [
 ] as const;
 type CompleteAuthenticationPurpose =
     (typeof completeAuthenticationPurposes)[number];
-
-export const authenticationContext = (purpose: CompleteAuthenticationPurpose) =>
+const authenticationContext = (purpose: CompleteAuthenticationPurpose) =>
     `sealed-lattice/${purpose}`;
+export const purposeSignatureParameters = {
+    digestBits: 512n,
+    radix: 16n,
+    messageDigits: 128n,
+    checksumDigits: 3n,
+    chains: 131n,
+    activePurposes: BigInt(completeAuthenticationPurposes.length),
+    treeLeaves: 16n,
+    treeHeight: 4n,
+    seedBytes: 64n,
+} as const;
 
-// One original credential through ballot completion, under the original-state
-// invariant. Each purpose has one fixed first-evaluated intent; repeated
-// deterministic reevaluation is still work, but not another oracle query.
-// Closing/release purposes and the population of credential creations are absent.
-export const compileCredentialIntentBoundsThroughBallot = () => {
-    const owners: Record<AuthenticationPurpose, 'organizer' | 'everyone'> = {
-        'poll-definition': 'organizer',
-        registration: 'everyone',
-        'roster-proposal': 'organizer',
-        'contribution-offer': 'everyone',
-        'setup-selection-proposal': 'organizer',
-        'setup-selection-endorsement': 'everyone',
-        'ballot-envelope': 'everyone',
-    };
-    return (['organizer', 'other participant'] as const).map((role) => {
-        const purposes = authenticationPurposes.filter(
-            (purpose) => role === 'organizer' || owners[purpose] === 'everyone',
-        );
-        return {
-            role,
-            purposes,
-            firstEvaluatedIntentBound: BigInt(purposes.length),
-        };
-    });
-};
-
-// FIPS 204 Algorithms 2 and 3 use the pure interface, even when the
-// application's message is already a foundation digest. This is not HashML-DSA.
-export const pureSignatureFrame = (
-    context: Uint8Array,
+export const purposeSignatureFrame = (
+    root: Uint8Array,
+    purpose: number,
     message: Uint8Array,
 ) => {
-    if (context.length > 255)
-        throw new RangeError('Signature context too long.');
-    return Buffer.concat([Buffer.from([0, context.length]), context, message]);
+    if (
+        root.length !== 64 ||
+        !Number.isInteger(purpose) ||
+        purpose < 0 ||
+        purpose >= completeAuthenticationPurposes.length
+    )
+        throw new RangeError('Invalid purpose signature frame.');
+    const prefix = Buffer.alloc(64);
+    prefix.write('sealed-lattice/fixed-hash');
+    const length = Buffer.alloc(8);
+    length.writeBigUInt64LE(BigInt(message.length));
+    return Buffer.concat([
+        prefix,
+        Buffer.from('purpose-wots/message/v1'),
+        root,
+        Uint8Array.of(purpose),
+        length,
+        message,
+    ]);
 };
 
-const authenticationFrameWork = <Purpose extends CompleteAuthenticationPurpose>(
+const frameWork = <Purpose extends CompleteAuthenticationPurpose>(
     purpose: Purpose,
 ) => {
-    const context = authenticationContext(purpose);
     const messageBytes =
         purpose === 'ballot-envelope'
-            ? envelopeBytes
+            ? ballotEnvelopeBytes
             : purpose === 'release-envelope'
               ? participantReleaseEnvelopeBytes
               : 64n;
-    const frameBytes = 2n + BigInt(Buffer.byteLength(context)) + messageBytes;
-    // Sign_internal and Verify_internal hash tr || M'. Other ML-DSA
-    // hashes, key expansion and rejection-loop work are separate operands.
-    const representativeInputBytes = 64n + frameBytes;
+    const frameBytes = 64n + 1n + 8n + messageBytes;
+    const representativeInputBytes =
+        64n + BigInt(Buffer.byteLength('purpose-wots/message/v1')) + frameBytes;
     return {
         purpose,
-        context,
+        context: authenticationContext(purpose),
         messageBytes,
         frameBytes,
         representativeInputBytes,
@@ -101,22 +89,34 @@ const authenticationFrameWork = <Purpose extends CompleteAuthenticationPurpose>(
         ),
     };
 };
-
-export const compileAuthenticationFrameWork = () =>
-    authenticationPurposes.map(authenticationFrameWork);
+const compileAuthenticationFrameWork = () =>
+    authenticationPurposes.map(frameWork);
 export const compileCompleteAuthenticationFrameWork = () =>
-    completeAuthenticationPurposes.map(authenticationFrameWork);
+    completeAuthenticationPurposes.map(frameWork);
 
-// Per original honest credential/action in the selected arithmetic profile,
-// assuming current authenticated state and the one-shot locks. Reevaluating
-// a retained intent still incurs work. The ballot is optional; every
-// participant signs one close response, and the organizer also its close
-// intent and proposal.
-// These maxima do not bound verification, lifetime keys or signing failures.
+export const compileCredentialIntentBoundsThroughBallot = () => {
+    const organizerOnly: readonly AuthenticationPurpose[] = [
+        'poll-definition',
+        'roster-proposal',
+        'setup-selection-proposal',
+    ];
+    return (['organizer', 'other participant'] as const).map((role) => {
+        const purposes = authenticationPurposes.filter(
+            (purpose) =>
+                role === 'organizer' || !organizerOnly.includes(purpose),
+        );
+        return {
+            role,
+            purposes,
+            firstEvaluatedIntentBound: BigInt(purposes.length),
+        };
+    });
+};
+
 export const compileCompleteCredentialIntentBounds = (
     participantCount: number,
-) => {
-    const branches = [
+) =>
+    [
         {
             name: 'Encrypted result with own target vote',
             target: true,
@@ -128,8 +128,7 @@ export const compileCompleteCredentialIntentBounds = (
             target: false,
             release: true,
         },
-    ] as const;
-    return branches.flatMap((branch) =>
+    ].flatMap((branch) =>
         compileCredentialIntentBoundsThroughBallot().map((participant) => {
             const fixedPurposes: CompleteAuthenticationPurpose[] = [
                 ...participant.purposes.filter(
@@ -142,8 +141,8 @@ export const compileCompleteCredentialIntentBounds = (
                           'close-proposal',
                       ] as const)
                     : (['close-response'] as const)),
-                ...(branch.target ? ['target-certification' as const] : []),
-                ...(branch.release ? ['release-envelope' as const] : []),
+                ...(branch.target ? (['target-certification'] as const) : []),
+                ...(branch.release ? (['release-envelope'] as const) : []),
             ];
             return {
                 participantCount,
@@ -155,244 +154,66 @@ export const compileCompleteCredentialIntentBounds = (
             };
         }),
     );
-};
 
-// Participant-credential hash input shapes for pure ML-DSA-65. A null
-// output length denotes a source-level rejection sampler, not zero work.
 export const compileSignatureHashInputs = () => {
-    const parameters = mlDsa65Parameters;
-    const highBitAlphabet =
-        (parameters.modulus - 1n) / (2n * parameters.roundingBound);
-    const highBitWidth = BigInt((highBitAlphabet - 1n).toString(2).length);
-    const highBitEncodingBytes =
-        (parameters.rowCount * parameters.polynomialDegree * highBitWidth) / 8n;
-    const maskBits =
-        1n + BigInt((parameters.maskingBound - 1n).toString(2).length);
-    const rows = [
-        {
-            purpose: 'Key expansion',
-            family: 'SHAKE256',
-            inputBytes: 32n + 2n,
-            outputBytes: 128n,
-        },
-        {
-            purpose: 'Public key digest',
-            family: 'SHAKE256',
-            inputBytes: mlDsa65Sizes.publicKeyBytes,
-            outputBytes: 64n,
-        },
-        {
-            purpose: 'Private mask seed',
-            family: 'SHAKE256',
-            inputBytes: 32n + 32n + 64n,
-            outputBytes: 64n,
-        },
-        {
-            purpose: 'Challenge digest',
-            family: 'SHAKE256',
-            inputBytes: 64n + highBitEncodingBytes,
-            outputBytes: mlDsa65ChallengeSeedBytes,
-        },
-        {
-            purpose: 'Challenge polynomial sampling',
-            family: 'SHAKE256',
-            inputBytes: mlDsa65ChallengeSeedBytes,
-            outputBytes: null,
-        },
-        {
-            purpose: 'Secret polynomial sampling',
-            family: 'SHAKE256',
-            inputBytes: 64n + 2n,
-            outputBytes: null,
-        },
-        {
-            purpose: 'Mask expansion',
-            family: 'SHAKE256',
-            inputBytes: 64n + 2n,
-            outputBytes: 32n * maskBits,
-        },
-        {
-            purpose: 'Matrix polynomial sampling',
-            family: 'SHAKE128',
-            inputBytes: 32n + 2n,
-            outputBytes: null,
-        },
-        ...compileCompleteAuthenticationFrameWork().map((frame) => ({
-            purpose: frame.purpose,
-            family: 'SHAKE256',
-            inputBytes: frame.representativeInputBytes,
-            outputBytes: 64n,
-        })),
-    ];
-    return {
-        highBitEncodingBytes,
-        rows,
-        maximumInputBytes: rows.reduce(
-            (maximum, row) =>
-                row.inputBytes > maximum ? row.inputBytes : maximum,
-            0n,
-        ),
+    const payloads = {
+        secret: 67n,
+        chain: 64n,
+        leaf: 1n + 131n * 64n,
+        unused: 1n,
+        node: 129n,
     };
-};
-
-// An ideal-XOF property of every possible sampler seed, established before
-// adaptive input selection. These analytical caps do not alter the library.
-export const compileSignatureSamplingBounds = () => {
-    const parameters = mlDsa65Parameters;
-    return [
-        {
-            purpose: 'Matrix polynomial sampling',
-            family: 'SHAKE128',
-            inputBytes: 34n,
-            sampleBits: 23n,
-            rejectedValues: (1n << 23n) - parameters.modulus,
-            candidatePositions: 2n * parameters.polynomialDegree,
-            requiredSuccesses: parameters.polynomialDegree,
-            outputBytes: 6n * parameters.polynomialDegree,
-        },
-        {
-            purpose: 'Secret polynomial sampling',
-            family: 'SHAKE256',
-            inputBytes: 66n,
-            sampleBits: 4n,
-            rejectedValues: 16n - (2n * parameters.secretCoefficientBound + 1n),
-            candidatePositions: 8n * parameters.polynomialDegree,
-            requiredSuccesses: parameters.polynomialDegree,
-            outputBytes: 4n * parameters.polynomialDegree,
-        },
-        {
-            purpose: 'Challenge polynomial sampling',
-            family: 'SHAKE256',
-            inputBytes: mlDsa65ChallengeSeedBytes,
-            sampleBits: 8n,
-            rejectedValues: parameters.challengeWeight - 1n,
-            candidatePositions: 2n * parameters.polynomialDegree,
-            requiredSuccesses: parameters.challengeWeight,
-            outputBytes: 8n + 2n * parameters.polynomialDegree,
-        },
-    ].map((row) => {
-        const requiredRejections =
-                row.candidatePositions - row.requiredSuccesses + 1n,
-            inputCount = 1n << (8n * row.inputBytes),
-            failure = rejectionSubsetBound({
-                ...row,
-                requiredRejections,
-                inputCount,
-            });
-        let failureExponent = 0n;
-        while (
-            failure.numerator << (failureExponent + 1n) <=
-            1n << failure.denominatorBits
-        )
-            failureExponent++;
+    const rows = Object.entries(payloads).map(([purpose, bytes]) => {
+        const inputBytes =
+            64n +
+            BigInt(Buffer.byteLength(`purpose-wots/${purpose}/v1`)) +
+            bytes;
         return {
-            ...row,
-            requiredRejections,
-            inputCount,
-            ...failure,
-            failureExponent,
+            purpose,
+            family: 'SHAKE256',
+            inputBytes,
+            outputBytes: 64n,
+            permutations: byteAlignedSpongePermutations(inputBytes, 64n, 136n),
         };
     });
+    return { rows };
 };
 
-export const compileSignatureCounterBoundary = () => {
-    const nonceCapacity = 1n << (8n * mlDsa65MaskNonceBytes),
-        masksPerIteration = mlDsa65Parameters.columnCount;
+export const compilePurposeSignatureWork = () => {
+    const { chains, activePurposes, treeLeaves, treeHeight } =
+        purposeSignatureParameters;
+    const hashes = new Map(
+        compileSignatureHashInputs().rows.map((row) => [row.purpose, row]),
+    );
+    const keyCounts = {
+        secret: activePurposes * chains,
+        chain: activePurposes * chains * 15n,
+        leaf: activePurposes,
+        unused: treeLeaves - activePurposes,
+        node: treeLeaves - 1n,
+    };
+    const keyHashCalls = Object.values(keyCounts).reduce(
+        (sum, value) => sum + value,
+        0n,
+    );
+    const keyPermutations = Object.entries(keyCounts).reduce(
+        (sum, [name, count]) => sum + count * hashes.get(name)!.permutations,
+        0n,
+    );
+    const chainPermutations = hashes.get('chain')!.permutations;
     return {
-        nonceCapacity,
-        masksPerIteration,
-        fullIterations: nonceCapacity / masksPerIteration,
-        partialMaskCalls: nonceCapacity % masksPerIteration,
+        keyCounts,
+        keyHashCalls,
+        keyPermutations,
+        maximumSignatureHashCalls: 1n + chains * 16n,
+        maximumVerificationHashCalls: chains * 15n + 2n + treeHeight,
+        credentialPredecessorGates:
+            activePurposes * chains * 15n * chainPermutations * 38400n,
+        maximumKnownBankCallsPerCredential:
+            keyHashCalls + 12n * (1n + chains * 16n),
     };
 };
 
-// One original ballot signing evaluation regenerates its ML-DSA key and then
-// invokes Sign, which expands the public matrix again. Counts include a
-// possible partial final mask vector in the declared overflow-checked build.
-export const compileBallotSignatureHashWork = (
-    fullIterations: bigint,
-    partialMaskCalls = 0n,
-) => {
-    const boundary = compileSignatureCounterBoundary();
-    if (
-        fullIterations < 0n ||
-        fullIterations > boundary.fullIterations ||
-        partialMaskCalls < 0n ||
-        partialMaskCalls >= boundary.masksPerIteration ||
-        (fullIterations === boundary.fullIterations &&
-            partialMaskCalls > boundary.partialMaskCalls)
-    )
-        throw new RangeError('Invalid checked signing-loop prefix.');
-    const inputs = new Map(
-            compileSignatureHashInputs().rows.map((row) => [row.purpose, row]),
-        ),
-        caps = new Map(
-            compileSignatureSamplingBounds().map((row) => [
-                row.purpose,
-                row.outputBytes,
-            ]),
-        );
-    const counts: [string, bigint][] = [
-        ['Key expansion', 1n],
-        ['Public key digest', 1n],
-        [
-            'Secret polynomial sampling',
-            mlDsa65Parameters.rowCount + mlDsa65Parameters.columnCount,
-        ],
-        [
-            'Matrix polynomial sampling',
-            2n * mlDsa65Parameters.rowCount * mlDsa65Parameters.columnCount,
-        ],
-        ['ballot-envelope', 1n],
-        ['Private mask seed', 1n],
-        [
-            'Mask expansion',
-            boundary.masksPerIteration * fullIterations + partialMaskCalls,
-        ],
-        ['Challenge digest', fullIterations],
-        ['Challenge polynomial sampling', fullIterations],
-    ];
-    const rows = counts.map(([purpose, calls]) => {
-        const input = inputs.get(purpose);
-        if (!input) throw new Error('Missing signature hash shape.');
-        const outputBytes = input.outputBytes ?? caps.get(purpose);
-        if (outputBytes === undefined)
-            throw new Error('Missing signature sampler bound.');
-        return {
-            ...input,
-            outputBytes,
-            calls,
-            inputBytesTotal: calls * input.inputBytes,
-            outputBytesUpperBound: calls * outputBytes,
-            permutationsUpperBound:
-                calls *
-                byteAlignedSpongePermutations(
-                    input.inputBytes,
-                    outputBytes,
-                    input.family === 'SHAKE128' ? 168n : 136n,
-                ),
-        };
-    });
-    return {
-        fullIterations,
-        partialMaskCalls,
-        rows,
-        hashCalls: rows.reduce((sum, row) => sum + row.calls, 0n),
-        inputBytes: rows.reduce((sum, row) => sum + row.inputBytesTotal, 0n),
-        outputBytesUpperBound: rows.reduce(
-            (sum, row) => sum + row.outputBytesUpperBound,
-            0n,
-        ),
-        permutationsUpperBound: rows.reduce(
-            (sum, row) => sum + row.permutationsUpperBound,
-            0n,
-        ),
-    };
-};
-
-// One completed, all-cooperating prefix through ballot signing. Enrollment
-// records outside the eventual roster are explicit. This is neither a lifetime
-// signing-oracle bound nor a count of repeated verification or recovery work.
 export const compileCompletedAuthenticationCensus = (
     participantCount: number,
     registrationCount: bigint,
@@ -409,14 +230,14 @@ export const compileCompletedAuthenticationCensus = (
     )
         throw new RangeError('Invalid completed authentication population.');
     const participants = BigInt(participantCount);
-    const eligible = BigInt(
-        compileSetupSelectionCensus(participantCount).eligibleContributorCount,
-    );
     const counts: Record<AuthenticationPurpose, bigint> = {
         'poll-definition': 1n,
         registration: registrationCount,
         'roster-proposal': 1n,
-        'contribution-offer': eligible,
+        'contribution-offer': BigInt(
+            compileSetupSelectionCensus(participantCount)
+                .eligibleContributorCount,
+        ),
         'setup-selection-proposal': 1n,
         'setup-selection-endorsement': participants,
         'ballot-envelope': BigInt(ballotCount),
@@ -434,7 +255,7 @@ export const compileCompletedAuthenticationCensus = (
         ballotCount,
         roles,
         signatures,
-        signatureBytes: signatures * signatureBytes,
+        signatureBytes: signatures * purposeSignatureSizes.signatureBytes,
         signingMessageBytes: sum((role) => role.messageBytes),
         signingFrameBytes: sum((role) => role.frameBytes),
         representativeInputBytes: sum((role) => role.representativeInputBytes),

@@ -98,6 +98,13 @@ export const publicInputCommands: readonly PublicInputCommand[] = [
         parameters: ['length'],
     },
     { name: 'setup_offer_begin', buffer: 'setup', parameters: ['length'] },
+    { name: 'setup_offer_source', buffer: 'setup', parameters: ['length'] },
+    { name: 'setup_source_range', buffer: 'setup', parameters: [] },
+    {
+        name: 'setup_selected_offer_source',
+        buffer: 'setup',
+        parameters: ['length'],
+    },
     {
         name: 'setup_public_work',
         buffer: 'setup',
@@ -218,7 +225,7 @@ export const publicInputCommands: readonly PublicInputCommand[] = [
 
 // Values at and beyond the bounds the module checks, including those whose
 // 32-bit sums wrap.
-const boundaryValues = (capacity: number) => [
+const boundaryValues = (capacity: number, signatureBytes: number) => [
     0,
     1,
     2,
@@ -228,7 +235,9 @@ const boundaryValues = (capacity: number) => [
     8,
     64,
     132,
-    3309,
+    signatureBytes - 1,
+    signatureBytes,
+    signatureBytes + 1,
     4096,
     65_535,
     65_536,
@@ -245,8 +254,9 @@ export const drawArgument = (
     parameter: Parameter,
     draw: (bound: number) => number,
     capacity: number,
+    signatureBytes: number,
 ) => {
-    const boundary = boundaryValues(capacity);
+    const boundary = boundaryValues(capacity, signatureBytes);
     if (draw(2) === 0) return boundary[draw(boundary.length)];
     if (parameter === 'operation') return draw(32);
     return draw(parameter === 'length' ? capacity + 1 : 64);

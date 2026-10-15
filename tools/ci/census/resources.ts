@@ -230,10 +230,6 @@ export const renderContributionBodyCensus = (): string[] => {
                     formatCount(contributionBody.maximumBodyBytes),
                 ],
                 [
-                    'Registered-coordinate opening salt bytes inside the contribution body header',
-                    formatCount(contributionBody.sourceOpeningSaltBytes),
-                ],
-                [
                     'Ordinary body hash-prefix bytes',
                     formatCount(contributionBody.hashPrefixBytes),
                 ],
@@ -491,7 +487,7 @@ export const renderCompleteOrdinaryWorkflowResourceScreen = (): string[] => {
             ]),
         ),
         '',
-        'The outcome verifier has no participant custody and streams every usable submission for barrier authentication, classification and evaluation import before checking the target votes and release shares. Participants with intact close custody read those bodies locally. Roster restoration refetches complete registered headers and recipient keys, recomputing their canonical body identities against its retained verification. Metadata allowances are conservative: held close responses can avoid target reads, and an existing setup certificate avoids assembly reads. These are protocol-read upper bounds, not exact ordinary network traces. The action rows exclude bootstrap; add the actual module for each primary-worker invocation and the SDK for each page load. Cumulative download rows are distinct from the per-action planning target.',
+        'The outcome verifier has no participant custody and streams every usable submission for barrier authentication, classification and evaluation import before checking the target votes and release shares. Participants with intact close custody read those bodies locally. Roster restoration refetches complete registered headers, signatures, recipient keys and source ciphertext bodies, recomputing their canonical body identities and verifying their signed bindings against its retained verification. Metadata allowances are conservative: held close responses can avoid target reads, and an existing setup certificate avoids assembly reads. These are protocol-read upper bounds, not exact ordinary network traces. The action rows exclude bootstrap; add the actual module for each primary-worker invocation and the SDK for each page load. Cumulative download rows are distinct from the per-action planning target.',
         '',
         table(
             [

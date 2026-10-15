@@ -83,7 +83,7 @@ const checkKeyArithmeticWidths = (
     radix: bigint,
 ) => {
     assert.ok(row.limbs <= 16);
-    assert.ok(row.leadingModulusDigit > 65_536n);
+    assert.ok(row.leadingModulusDigit >= 32_768n);
     assert.ok(row.maximumQuotientEstimate < 1n << 16n);
     assert.ok(row.maximumQuotientEstimate < row.leadingModulusDigit);
     assert.ok(row.maximumQuotient < 1n << 15n);

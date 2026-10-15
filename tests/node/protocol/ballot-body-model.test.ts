@@ -5,10 +5,10 @@ import { compileBallotWordProofLayout } from '#tests/full-word-proof-layout-mode
 import { completionProfile } from '#tests/supported-profile-model.js';
 
 // Each canonical coefficient is a sign byte plus enough magnitude bytes for
-// its modulus: 109 bytes in the 65536-coefficient FHE family and 6 bytes in
+// its modulus: 97 bytes in the 65536-coefficient FHE family and 6 bytes in
 // the 4096-coefficient auxiliary family. The transmitted ciphertexts and the
 // reconstructed common and key inputs each hold two polynomials per family.
-const polynomialPairPerFamilyBytes = 2n * 65536n * 109n + 2n * 4096n * 6n;
+const polynomialPairPerFamilyBytes = 2n * 65536n * 97n + 2n * 4096n * 6n;
 
 describe('ballot body framing', () => {
     it('transmits both ciphertext pairs and reconstructs fixed common and certified key inputs', () => {
@@ -20,11 +20,11 @@ describe('ballot body framing', () => {
             layout.reconstructedPolynomials.map((value) => value.expandedIndex),
         ).toEqual([0, 1, 4, 5]);
         expect(layout.setupKeyPolynomials).toEqual([
-            { expandedIndex: 1, bytes: 65536n * 109n },
+            { expandedIndex: 1, bytes: 65536n * 97n },
         ]);
-        expect(layout.setupKeyInputBytes).toBe(65536n * 109n);
+        expect(layout.setupKeyInputBytes).toBe(65536n * 97n);
         expect(layout.locallyDerivedInputBytes).toBe(
-            65536n * 109n + 2n * 4096n * 6n,
+            65536n * 97n + 2n * 4096n * 6n,
         );
         expect(
             layout.setupKeyInputBytes + layout.locallyDerivedInputBytes,
@@ -42,8 +42,8 @@ describe('ballot body framing', () => {
         expect(layout.reconstructedInputBytes).toBe(
             polynomialPairPerFamilyBytes,
         );
-        // ML-DSA-65 signature size, FIPS 204 Table 2.
-        expect(layout.signatureBytes).toBe(3309n);
+        // The fixed-purpose credential carries 131 chain values and four siblings.
+        expect(layout.signatureBytes).toBe(8642n);
         // The rest of the proof follows the ciphertexts, so a body holds
         // the header and ciphertexts and then the proof after its header.
         const maximumProofBytes = proofLayout.maximumMultiproofBytes;
@@ -59,7 +59,7 @@ describe('ballot body framing', () => {
                 polynomialPairPerFamilyBytes +
                 maximumProofBytes +
                 210n +
-                3309n,
+                8642n,
         );
         expect(layout.maximumBodyBytes).toBeLessThan(1n << 32n);
         expect(layout.maximumBodyBytes).toBeGreaterThan(8_388_608n);

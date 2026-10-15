@@ -5,7 +5,7 @@ use crate::{
 };
 #[test]
 fn restored_signing_keys_cannot_recreate_authority_the_root_does_not_unlock() {
-    let mut original = Credential::from_seed([7; 32]);
+    let mut original = Credential::from_seed([7; 64]);
     assert!(original.seal_complete().is_err());
     let make = || {
         BodyDigest::new(RegistrationHeader {
@@ -14,7 +14,7 @@ fn restored_signing_keys_cannot_recreate_authority_the_root_does_not_unlock() {
             signing_public: *original.signing_public(),
             recipient_key_hash: [3; 64],
 
-            fhe_key_commitments: vec![[7; 64]],
+            source_bindings: vec![[7; 64]],
         })
         .unwrap()
     };
@@ -76,7 +76,9 @@ fn restored_signing_keys_cannot_recreate_authority_the_root_does_not_unlock() {
     changed[20] ^= 1;
     assert!(open(&sealed.key, &changed, body).is_err());
     // A capsule that authenticates but holds another signing seed.
-    let wrong_seed = parallel_work::sealing::seal(&[6u8; 32], &associated(body));
+    let mut wrong_seed = Vec::from(b"RCS2".as_slice());
+    wrong_seed.extend([6u8; 64]);
+    let wrong_seed = parallel_work::sealing::seal(&wrong_seed, &associated(body));
     assert!(open(&wrong_seed.key, &wrong_seed.bytes, body).is_err());
     let mut extra = sealed.bytes.clone();
     extra.push(0);

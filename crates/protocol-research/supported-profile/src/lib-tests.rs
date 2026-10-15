@@ -23,7 +23,7 @@ fn an_fhe_key_family_is_one_modulus_and_common_sampler_width() {
 
 #[test]
 fn every_modulus_is_a_certified_prime_of_its_form() {
-    let plaintext = 65_537u32;
+    let plaintext = 12_289u32;
     for profile in Profile::all() {
         for (prime, bits) in [
             (
@@ -46,7 +46,7 @@ fn every_modulus_is_a_certified_prime_of_its_form() {
                 minus_one
             );
         }
-        assert_eq!(profile.ciphertext_modulus().bits() % 32, 0);
+        assert_eq!(profile.ciphertext_modulus().bits() % 16, 0);
         assert!(profile.release_modulus().bits() < profile.ciphertext_modulus().bits());
     }
 }
@@ -54,13 +54,13 @@ fn every_modulus_is_a_certified_prime_of_its_form() {
 #[test]
 fn completion_parameters_rebuild_the_independent_moduli() {
     let profile = Profile::new(10, 10).unwrap();
-    let fhe: BigUint = ((BigUint::from(65_537u32) * 65_319u32) << 832usize) + 1u8;
+    let fhe: BigUint = ((BigUint::from(12_289u32) * 349_017u32) << 736usize) + 1u8;
     let proof_field: BigUint =
         (BigUint::from(1u8) << 128usize) - (BigUint::from(133u8) << 64usize) + 1u8;
     let share: BigUint = proof_field * (119u32 * (1 << 23) + 1);
     let auxiliary: BigUint = (BigUint::from(257u32 * 101) << 20usize) + 1u8;
     for (family, value, length) in [
-        (Family::Fhe, &fhe, 108),
+        (Family::Fhe, &fhe, 96),
         (Family::Sharing, &share, 20),
         (Family::Auxiliary, &auxiliary, 5),
     ] {
@@ -113,12 +113,24 @@ fn searched_sizes_match_the_census() {
     // Participants, options, ciphertext bits, gadget coordinates, FHE
     // limbs, sharing coefficient, share limb and carry bits, release
     // share and quotient bits, and common-matrix sample bits.
-    for (participants, options, bits, gadgets, limbs, sharing, limb, carry, share, quotient) in [
-        (3, 2, 576, 4, 6, 108, 96, 32, 112, 144),
-        (10, 10, 864, 6, 9, 112, 96, 32, 120, 144),
-        (13, 2, 704, 5, 8, 114, 96, 32, 120, 144),
-        (16, 2, 736, 6, 8, 115, 95, 33, 120, 144),
-        (20, 20, 960, 7, 10, 116, 95, 33, 127, 192),
+    for (
+        participants,
+        options,
+        bits,
+        gadgets,
+        limbs,
+        sharing,
+        limb,
+        carry,
+        share,
+        quotient,
+        release,
+    ) in [
+        (3, 2, 496, 6, 6, 108, 96, 32, 112, 144, 144),
+        (10, 10, 768, 9, 8, 112, 96, 32, 120, 144, 192),
+        (13, 2, 608, 7, 7, 114, 96, 32, 120, 144, 192),
+        (16, 2, 656, 8, 7, 115, 95, 33, 120, 144, 192),
+        (20, 20, 880, 10, 10, 116, 95, 33, 127, 192, 192),
     ] {
         let profile = Profile::new(participants, options).unwrap();
         assert_eq!(profile.ciphertext_modulus().bits(), bits);
@@ -129,9 +141,9 @@ fn searched_sizes_match_the_census() {
         assert_eq!(profile.share_carry_bits(), carry);
         assert_eq!(profile.release_share_bits(), share);
         assert_eq!(profile.release_quotient_bits(), quotient);
-        assert_eq!(profile.release_modulus().bits(), 192);
+        assert_eq!(profile.release_modulus().bits(), release);
     }
-    for (participants, options, sample) in [(3, 2, 768), (10, 10, 1024), (20, 20, 1152)] {
+    for (participants, options, sample) in [(3, 2, 704), (10, 10, 960), (20, 20, 1088)] {
         assert_eq!(
             Profile::new(participants, options)
                 .unwrap()
@@ -141,7 +153,7 @@ fn searched_sizes_match_the_census() {
     }
     assert_eq!(fixed_common_sample_bits(), 320);
     let completion = Profile::new(10, 10).unwrap();
-    assert_eq!(completion.release_noise_bits(), 144);
+    assert_eq!(completion.release_noise_bits(), 168);
     assert_eq!(completion.comparison_degree(), 181);
     assert_eq!(completion.rank_window(), 16);
     assert_eq!(Profile::new(3, 2).unwrap().rank_window(), 2);
@@ -185,16 +197,16 @@ fn setup_polynomials_are_numbered_once_by_family() {
         assert_eq!(profile.setup_family(profile.setup_polynomials()), None);
     }
     let completion = Profile::new(10, 10).unwrap();
-    // The magic and the 108-byte ciphertext modulus.
-    assert_eq!(completion.setup_statement_header().len(), 4 + 108);
+    // The magic and the 96-byte ciphertext modulus.
+    assert_eq!(completion.setup_statement_header().len(), 4 + 96);
     assert_eq!(
         completion.setup_statement_length(),
-        4 + 108 + 42 * DEGREE * 109 + 31 * DEGREE * 21
+        4 + 96 + 63 * DEGREE * 97 + 31 * DEGREE * 21
     );
-    assert_eq!(completion.setup_polynomials(), 73);
-    assert_eq!(completion.share_common_polynomial(), 42);
-    assert_eq!(completion.recipient_key_polynomial(0), 43);
-    assert_eq!(completion.share_linear_polynomial(9), 72);
+    assert_eq!(completion.setup_polynomials(), 94);
+    assert_eq!(completion.share_common_polynomial(), 63);
+    assert_eq!(completion.recipient_key_polynomial(0), 64);
+    assert_eq!(completion.share_linear_polynomial(9), 93);
 }
 
 #[test]
@@ -226,14 +238,14 @@ fn contribution_bodies_carry_every_key_once_and_no_common_polynomial() {
     let completion = Profile::new(10, 10).unwrap();
     let polynomials = completion.contribution_body_polynomials();
     assert_eq!(polynomials[..4], [1, 2, 4, 6]);
-    assert_eq!(polynomials[20..26], [36, 37, 39, 41, 44, 45]);
-    assert_eq!(polynomials[43], 72);
+    assert_eq!(polynomials[32..38], [57, 58, 60, 62, 65, 66]);
+    assert_eq!(polynomials[55], 93);
     assert_eq!(
         polynomials
             .iter()
             .map(|index| completion.setup_polynomial_bytes(*index).unwrap())
             .sum::<usize>(),
-        24 * DEGREE * 109 + 20 * DEGREE * 21
+        36 * DEGREE * 97 + 20 * DEGREE * 21
     );
     assert_eq!(
         completion.setup_polynomial_bytes(completion.setup_polynomials()),
@@ -246,20 +258,20 @@ fn setup_shapes_match_the_census() {
     let completion = Profile::new(10, 10).unwrap().setup_shape();
     assert_eq!(
         (completion.word_columns, completion.boolean_columns),
-        (331, 24)
+        (415, 24)
     );
-    // Twenty-four FHE errors, one per key, then two share errors per
+    // Thirty-six FHE errors, one per key, then two share errors per
     // recipient.
-    let mut narrow: Vec<_> = (0..24).map(|key| (30 + 10 * key, 7)).collect();
+    let mut narrow: Vec<_> = (0..36).map(|key| (29 + 9 * key, 7)).collect();
     for recipient in 0..10 {
-        narrow.extend([(264 + 7 * recipient, 7), (267 + 7 * recipient, 7)]);
+        narrow.extend([(348 + 7 * recipient, 7), (351 + 7 * recipient, 7)]);
     }
     assert_eq!(completion.narrow_words, narrow);
     assert_eq!(completion.sparse_supports.len(), 12);
     assert_eq!(completion.sparse_supports[0], (1, 512));
     assert_eq!(completion.sparse_supports[2], (1, 128));
     // Census ranges of word columns by participant count.
-    for (participants, low, high) in [(3, 140, 268), (16, 358, 450), (20, 392, 484)] {
+    for (participants, low, high) in [(3, 196, 352), (16, 398, 582), (20, 432, 616)] {
         let words: Vec<_> = Profile::option_range()
             .map(|options| {
                 Profile::new(participants, options)

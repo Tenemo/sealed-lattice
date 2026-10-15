@@ -8,14 +8,13 @@ use protocol_foundations::{
     roster::{RetainedContributionContext, RosterProposal},
 };
 use setup_witness::{
-    PolynomialOutput,
-    contribution::{Contribution, common_records},
+    PolynomialOutput, contribution::common_records, encrypted_source::LinkedContribution,
 };
 
 use statement_stream::coefficient::{self, CenteredCodec};
 use statement_stream::committed_polynomial::CommittedPolynomial;
 use std::sync::Arc;
-use supported_profile::{Profile, relation::setup_relation, share_modulus};
+use supported_profile::{Profile, share_modulus, source_linked::relation as setup_relation};
 use word_proof::public_oracle::PublicOracleBuilder;
 use word_proof::setup_prover::{ProverStep, SetupProver, first_oracle_checkpoint};
 use zeroize::Zeroize;
@@ -205,7 +204,7 @@ struct Work {
     registrations: Vec<Arc<VerifiedRegistration>>,
     retained_keys: Vec<Vec<u8>>,
     input_hashes: Vec<[u8; 64]>,
-    generator: Option<Contribution>,
+    generator: Option<LinkedContribution>,
     proof: Option<SetupProver>,
     public: Option<PublicOutput>,
     next_gadget: usize,
@@ -216,7 +215,7 @@ impl Work {
     fn new(
         proposal: &RosterProposal,
         position: usize,
-        source: setup_witness::fhe_key_source::FheKeySource,
+        source: LinkedContribution,
     ) -> Result<Self, ()> {
         let profile = proposal.profile();
         let role = proposal.contribution_role(position).map_err(|_| ())?;
@@ -229,7 +228,7 @@ impl Work {
                 .iter()
                 .map(|record| record.header().recipient_key_hash)
                 .collect(),
-            generator: Some(Contribution::from_source(profile, source).map_err(|_| ())?),
+            generator: Some(source),
             proof: None,
             public: None,
             role,
@@ -285,6 +284,12 @@ impl Work {
                 || public.next != profile.setup_polynomials() + 1
             {
                 return Err(());
+            }
+            for record in generator.public().records().map_err(|_| ())? {
+                public.append(&record);
+                public.flush();
+                public.next += 1;
+                public.offset = 0;
             }
             let columns = self
                 .generator
@@ -414,7 +419,7 @@ impl ContributionSession {
         &mut self,
         proposal: &RosterProposal,
         position: usize,
-        source: setup_witness::fhe_key_source::FheKeySource,
+        source: LinkedContribution,
     ) -> Result<(), protocol_foundations::Refusal> {
         use protocol_foundations::Refusal as FoundationRefusal;
         if self.stopped

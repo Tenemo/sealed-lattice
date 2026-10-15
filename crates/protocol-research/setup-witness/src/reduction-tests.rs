@@ -100,12 +100,47 @@ fn centered_values_and_exact_quotients_match_big_integer_division() {
 fn refuses_unsupported_estimate_and_shape_before_reduction() {
     let profile = Profile::new(10, 10).unwrap();
     let modulus = Modulus::new(&profile.family_modulus(Family::Fhe), 96).unwrap();
-    let mut raw = vec![0; 9];
-    raw[8] = (modulus.digits[8] << 16) as i128;
-    assert!(modulus.reduce(&raw, &mut [0; 9]).is_none());
-    assert!(modulus.reduce(&[0; 8], &mut [0; 9]).is_none());
+    let count = modulus.digits.len();
+    let mut raw = vec![0; count];
+    raw[count - 1] = (modulus.digits[count - 1] << 16) as i128;
+    assert!(modulus.reduce(&raw, &mut vec![0; count]).is_none());
+    assert!(
+        modulus
+            .reduce(&raw[..count - 1], &mut vec![0; count])
+            .is_none()
+    );
     assert!(Modulus::new(&[], 96).is_none());
     assert!(Modulus::new(&[2, 1, 0, 0, 1], 96).is_none());
     assert!(Modulus::new(supported_profile::share_modulus(), 16).is_none());
     assert!(Modulus::new(supported_profile::share_modulus(), 97).is_none());
+}
+
+#[test]
+fn a_sixteen_bit_leading_digit_corrects_both_excess_quotient_units() {
+    for radix in [17usize, 32, 64, 96] {
+        let base: BigInt = BigInt::from(1) << radix;
+        let value: BigInt = (BigInt::from(32768) << radix) + &base - 1;
+        let modulus = Modulus::new(&value.to_bytes_le().1, radix).unwrap();
+        // This exact multiple minus one has quotient 65533, but its leading
+        // digit alone selects 65535. One correction still leaves it negative.
+        let magnitude: BigInt = &value * 65534 - 1;
+        let low = (&magnitude % &base).to_i128().unwrap();
+        let high = (&magnitude / &base).to_i128().unwrap();
+        assert_eq!(high / 32768, 65535);
+        for sign in [-1, 1] {
+            let mut output = [0; 2];
+            let reduced = modulus
+                .reduce(&[sign * low, sign * high], &mut output)
+                .unwrap();
+            assert_eq!(output, [1, 0]);
+            assert_eq!(reduced.negative, sign > 0);
+            assert_eq!(reduced.quotient, sign * 65534);
+        }
+        let unsupported: BigInt = (BigInt::from(32767) << radix) + &base - 1;
+        assert!(Modulus::new(&unsupported.to_bytes_le().1, radix).is_none());
+        // A one-unit-over quotient estimate remains unsupported.
+        let mut raw = [0; 2];
+        raw[1] = 32768i128 << QUOTIENT_BITS;
+        assert!(modulus.reduce(&raw, &mut [0; 2]).is_none());
+    }
 }

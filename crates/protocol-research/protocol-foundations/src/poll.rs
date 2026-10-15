@@ -5,10 +5,6 @@ use crate::{
         hash_foundation_tuple_512, manifest::Manifest,
     },
 };
-use fips204::{
-    ml_dsa_65,
-    traits::{SerDes, Verifier},
-};
 use supported_profile::Profile;
 
 /// The poll definition's purpose, which is also its signature context.
@@ -203,10 +199,10 @@ pub fn verify_poll(
         .canonical_bytes()
         .try_into()
         .map_err(|_| Refusal::Shape)?;
-    let public = ml_dsa_65::PublicKey::try_from_bytes(organizer).map_err(|_| Refusal::Shape)?;
+    let public = crate::authentication::PublicKey::from_bytes(organizer);
     if !public.verify(
         &expected_identity,
-        &signature.try_into().map_err(|_| Refusal::Shape)?,
+        &<[u8; SIGNATURE_BYTES]>::try_from(signature).map_err(|_| Refusal::Shape)?,
         POLL_SIGNATURE_CONTEXT,
     ) {
         return Err(Refusal::Crypto);

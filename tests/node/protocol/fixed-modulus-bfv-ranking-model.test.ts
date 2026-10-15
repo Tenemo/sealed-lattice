@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { evaluateFixedModulusBfvRanking } from '#tests/fixed-modulus-bfv-ranking-model.js';
 
-const prime = 65_537;
+const prime = 12_289;
 const reduce = (value: number): number => ((value % prime) + prime) % prime;
 const inverse = (value: number): number => {
     let result = 1;
@@ -50,14 +50,16 @@ const interpolate = (
     return output;
 };
 
-describe('shared fixed-modulus BFV ranking schedule', () => {
+describe('compact fixed-modulus BFV ranking schedule', () => {
     it.each([
         { participants: 3, options: 2, top: 1 },
+        { participants: 4, options: 3, top: 2 },
         { participants: 10, options: 10, top: 10 },
         { participants: 20, options: 20, top: 3 },
     ])(
-        'matches independent sorting for $participants participants and $options options',
+        'matches independent sorting and clears every unused slot for $participants/$options/$top',
         ({ participants, options, top }) => {
+            const activeSlots = 1024;
             const maximum = 18 * participants + 1;
             const points = Array.from(
                 { length: maximum + 1 },
@@ -67,17 +69,16 @@ describe('shared fixed-modulus BFV ranking schedule', () => {
                 points,
                 points.map((value) => Number(value > 0)),
             );
-            const equality = Array.from({ length: top }, (_rank, requested) =>
+            const equality = Array.from({ length: top }, (_rankSlot, rank) =>
                 interpolate(
                     Array.from({ length: options }, (_, index) => index),
                     Array.from({ length: options }, (_, index) =>
-                        Number(index === requested),
+                        Number(index === rank),
                     ),
                 ),
             );
             const window = 2 ** Math.ceil(Math.log2(options));
-            const lanes = options * top * window;
-            const mapPair = (
+            const combine = (
                 left: readonly number[],
                 right: readonly number[],
                 multiply: boolean,
@@ -88,11 +89,11 @@ describe('shared fixed-modulus BFV ranking schedule', () => {
                     ),
                 );
             for (const pattern of [0, 1, 2]) {
-                const submitted = pattern === 2 ? 1 : participants;
+                const turnout = pattern === 2 ? 1 : participants;
                 const ballots = Array.from(
                     { length: participants },
-                    (_participant, participant) =>
-                        participant >= submitted
+                    (_participantSlot, participant) =>
+                        participant >= turnout
                             ? null
                             : Array.from({ length: options }, (_, option) =>
                                   pattern === 0
@@ -105,51 +106,82 @@ describe('shared fixed-modulus BFV ranking schedule', () => {
                               ),
                 );
                 const inputs = ballots.map((ballot) =>
-                    Array.from({ length: lanes }, (_, index) => {
-                        const option = Math.floor(index / (top * window)),
-                            opponent = index % window;
-                        return ballot && opponent < options
+                    Array.from({ length: 2 * activeSlots }, (_, position) => {
+                        if (!ballot) return 0;
+                        if (position >= activeSlots)
+                            return ballot[position - activeSlots] ?? 0;
+                        const option = Math.floor(position / window),
+                            opponent = position % window;
+                        return option < options && opponent < options
                             ? reduce(2 * (ballot[opponent] - ballot[option]))
                             : 0;
                     }),
                 );
-                const coefficient = (index: number, exponent: number) =>
-                    index % window === 0
-                        ? equality[Math.floor(index / window) % top][exponent]
+                const coefficient = (position: number, exponent: number) => {
+                    const rank = (window - (position % window)) % window;
+                    return position < activeSlots && rank < top
+                        ? equality[rank][exponent]
                         : 0;
-                const rankedSlots = evaluateFixedModulusBfvRanking(
+                };
+                const ranked = evaluateFixedModulusBfvRanking(
                     inputs,
                     options,
                     16,
                     {
-                        add: (left, right) => mapPair(left, right, false),
-                        multiply: (left, right) => mapPair(left, right, true),
-                        multiplyScalar: (input, exponent) =>
-                            input.map((value) =>
-                                reduce(value * comparison[exponent]),
+                        add: (left, right) => combine(left, right, false),
+                        multiply: (left, right) => combine(left, right, true),
+                        multiplyScalar: (value, exponent) =>
+                            value.map((item) =>
+                                reduce(item * comparison[exponent]),
                             ),
-                        multiplyPlaintext: (input, exponent) =>
-                            input.map((value, index) =>
-                                reduce(value * coefficient(index, exponent)),
-                            ),
-                        addPlaintext: (input, purpose) =>
-                            input.map((value, index) =>
+                        multiplyPlaintext: (value, exponent) =>
+                            value.map((item, position) =>
                                 reduce(
-                                    value +
-                                        (purpose === 'comparison-constant'
-                                            ? comparison[0]
-                                            : purpose === 'ranking-constant'
-                                              ? coefficient(index, 0)
-                                              : index % window <
-                                                  Math.floor(
-                                                      index / (top * window),
-                                                  )
-                                                ? 1
-                                                : -1),
+                                    item *
+                                        (exponent === -1
+                                            ? Number(
+                                                  position < activeSlots &&
+                                                      position % window === 0,
+                                              )
+                                            : coefficient(position, exponent)),
                                 ),
                             ),
-                        rotate: (input) => [...input.slice(1), input[0]],
+                        addPlaintext: (value, purpose) =>
+                            value.map((item, position) => {
+                                const constant =
+                                    purpose === 'comparison-constant'
+                                        ? comparison[0]
+                                        : purpose === 'ranking-constant'
+                                          ? coefficient(position, 0)
+                                          : purpose === 'padding-correction'
+                                            ? -Number(
+                                                  position < activeSlots &&
+                                                      position % window === 0 &&
+                                                      position / window >=
+                                                          options,
+                                              )
+                                            : position >= activeSlots
+                                              ? 0
+                                              : position < options * window &&
+                                                  position % window <
+                                                      Math.floor(
+                                                          position / window,
+                                                      )
+                                                ? 1
+                                                : -1;
+                                return reduce(item + constant);
+                            }),
+                        rotate: (value) =>
+                            value.map(
+                                (_, position) =>
+                                    value[
+                                        Math.floor(position / activeSlots) *
+                                            activeSlots +
+                                            ((position + 1) % activeSlots)
+                                    ],
+                            ),
                     },
+                    top,
                 ).result;
                 const totals = Array.from({ length: options }, (_, option) =>
                     ballots.reduce(
@@ -166,23 +198,14 @@ describe('shared fixed-modulus BFV ranking schedule', () => {
                             totals[right] - totals[left] || left - right,
                     )
                     .slice(0, top);
-                expect(
-                    rankedSlots.every((bit, index) =>
-                        index % window === 0
-                            ? bit === 0 || bit === 1
-                            : bit === 0,
-                    ),
-                ).toBe(true);
-                const selected = Array.from({ length: top }, (_rank, rank) =>
-                    Array.from(
-                        { length: options },
-                        (_, option) => option,
-                    ).filter(
-                        (option) =>
-                            rankedSlots[(option * top + rank) * window] === 1,
-                    ),
+                const expected = new Array<number>(2 * activeSlots).fill(0);
+                ordered.forEach(
+                    (option, rank) =>
+                        (expected[
+                            (option * window - rank + activeSlots) % activeSlots
+                        ] = 1),
                 );
-                expect(selected).toEqual(ordered.map((option) => [option]));
+                expect(ranked).toEqual(expected);
             }
         },
     );

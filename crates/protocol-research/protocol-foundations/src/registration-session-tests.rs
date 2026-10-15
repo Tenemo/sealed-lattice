@@ -43,7 +43,7 @@ pub(crate) fn keyless_record(runtime: [u8; 64]) -> (SignedPoll, Vec<u8>) {
         })
         .collect();
     let draft = PollDraft::new(Manifest::new(text("Question"), options).unwrap(), 2, 3).unwrap();
-    let mut organizer = Credential::from_seed([1; 32]);
+    let mut organizer = Credential::from_seed([1; 64]);
     let packet = organizer.create_poll(draft, runtime, [5; 32]).unwrap();
     let header = RegistrationHeader {
         username: normalize_username(b"Participant").unwrap(),
@@ -51,7 +51,7 @@ pub(crate) fn keyless_record(runtime: [u8; 64]) -> (SignedPoll, Vec<u8>) {
         signing_public: *organizer.signing_public(),
         recipient_key_hash: [0; 64],
 
-        fhe_key_commitments: vec![[7; 64]],
+        source_bindings: vec![[7; 64]],
     }
     .encode()
     .unwrap();
@@ -105,7 +105,7 @@ fn sessions_refuse_as_the_verifier_does_and_leave_no_state() {
         session.push_key(part).unwrap();
     }
     session.finish_key().unwrap();
-    let pending = session.finish().unwrap();
+    // A key alone no longer completes a registration: its source bodies are mandatory.
+    assert!(matches!(session.finish(), Err(Refusal::Consumed)));
     assert_eq!(open_sessions(), 0);
-    assert!(matches!(pending.wait(), Err(Refusal::Shape)));
 }

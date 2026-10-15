@@ -1,4 +1,5 @@
-import { mlDsa65Sizes } from '#tests/ml-dsa-65-parameters.js';
+import { sourceCiphertextBytes } from '#tests/encrypted-registration-source-model.js';
+import { purposeSignatureSizes } from '#tests/purpose-signature-parameters.js';
 import { compileRecipientKeyCensus } from '#tests/recipient-key-model.js';
 import { compileRegistrationSetupBindingScreen } from '#tests/registration-setup-binding-model.js';
 import {
@@ -21,9 +22,10 @@ export const compileRegistrationSourceCustody = (
     );
     return {
         familyCount: source.coordinateCount,
-        commitmentListBytes: 2n + 4n + source.commitmentDigestPayloadBytes,
-        capsulePlaintextBytes: source.privateSeedAndSaltPayloadBytes,
-        capsuleBytes: source.privateSeedAndSaltPayloadBytes + 16n,
+        sourceBindingListBytes:
+            2n + 4n + source.sourceBindingDigestPayloadBytes,
+        capsulePlaintextBytes: 4n + 64n * source.coordinateCount,
+        capsuleBytes: 4n + 64n * source.coordinateCount + 16n,
     };
 };
 
@@ -54,15 +56,15 @@ const maximumSourceInventory = () => {
     }
     sourceMaximums = {
         familyCount,
-        capsuleBytes: familyCount * 128n + 16n,
+        capsuleBytes: 4n + 64n * familyCount + 16n,
         retainedSetupBytes,
     };
     return sourceMaximums;
 };
 
 const registrationEnrollmentInputs = {
-    signingPublicKeyBytes: mlDsa65Sizes.publicKeyBytes,
-    signatureBytes: mlDsa65Sizes.signatureBytes,
+    signingPublicKeyBytes: purposeSignatureSizes.publicKeyBytes,
+    signatureBytes: purposeSignatureSizes.signatureBytes,
     maximumUsernameBytes: 128n,
     maximumUsernameIngressBytes: 512n,
     maximumHeaderInputBytes: 4096n,
@@ -75,6 +77,8 @@ export const compileRegistrationEnrollmentCensus = () => {
     const key = compileRecipientKeyCensus();
     const inputs = registrationEnrollmentInputs;
     const source = maximumSourceInventory();
+    const maximumSourceCiphertextBytes =
+        source.familyCount * sourceCiphertextBytes;
     const ceiling = (value: bigint, divisor: bigint) =>
         (value + divisor - 1n) / divisor;
     const bytes = (value: string) => BigInt(Buffer.byteLength(value, 'utf8'));
@@ -82,7 +86,7 @@ export const compileRegistrationEnrollmentCensus = () => {
         6n +
         6n * 6n +
         4n +
-        bytes('sealed-lattice/registration-header') +
+        bytes('sealed-lattice/registration-header/v7') +
         2n * 64n +
         inputs.signingPublicKeyBytes +
         4n +
@@ -91,9 +95,11 @@ export const compileRegistrationEnrollmentCensus = () => {
         4n +
         64n * source.familyCount;
     const recipientCapsuleBytes = key.support * 2n + 16n;
-    const signingCapsuleBytes = 32n + 16n;
+    const signingCapsuleBytes = 4n + 64n + 16n;
     const maximumEnrollmentRecords =
-        ceiling(key.publicKeyBytes, 1_048_576n) + 7n;
+        ceiling(key.publicKeyBytes, 1_048_576n) +
+        ceiling(maximumSourceCiphertextBytes, 1_048_576n) +
+        7n;
     // The proposal and its signature.
     const maximumRecords = maximumEnrollmentRecords + 2n;
     const manifestPrefixBytes = 3n * 32n + 64n + 4n;
@@ -155,8 +161,30 @@ export const compileRegistrationEnrollmentCensus = () => {
         if (value > maximumOrganizerInputBytes)
             maximumOrganizerInputBytes = value;
     }
+    const maximumEnrollmentStagedPayloadBytes =
+        key.publicKeyBytes +
+        maximumSourceCiphertextBytes +
+        maximumHeaderBytes +
+        inputs.signatureBytes +
+        recipientCapsuleBytes +
+        signingCapsuleBytes +
+        source.capsuleBytes +
+        inputs.maximumPollDefinitionBytes +
+        inputs.signatureBytes;
     return {
         ...inputs,
+        maximumEnrollmentStagedPayloadBytes,
+        maximumEnrollmentStagedSourceRecords: ceiling(
+            maximumSourceCiphertextBytes,
+            1_048_576n,
+        ),
+        // Enrollment retains every staged array through its atomic commit.
+        // Charge their record-copy arrays and Blob snapshots separately;
+        // this allocation allowance does not model GC or browser overhead.
+        maximumEnrollmentRecordCopyBytes: maximumEnrollmentStagedPayloadBytes,
+        maximumEnrollmentBlobSnapshotBytes: maximumEnrollmentStagedPayloadBytes,
+        maximumEnrollmentStagingAndBlobPayloadBytes:
+            3n * maximumEnrollmentStagedPayloadBytes,
         maximumHeaderBytes,
         recipientCapsuleBytes,
         signingCapsuleBytes,
@@ -164,6 +192,7 @@ export const compileRegistrationEnrollmentCensus = () => {
         maximumSourceCapsuleBytes: source.capsuleBytes,
         maximumRecords,
         maximumEnrollmentRecords,
+        maximumSourceCiphertextBytes,
         maximumEnrollmentManifestBytes,
         maximumProposalIntentManifestBytes,
         manifestPrefixBytes,
@@ -182,13 +211,9 @@ export const compileRegistrationEnrollmentCensus = () => {
             96n,
         recipientAssociatedBytes:
             bytes('sealed-lattice/recipient-key-custody') + 64n,
-        signingAssociatedBytes: bytes('registration-signing-seed') + 64n,
+        signingAssociatedBytes: bytes('registration-signing-seed/2') + 64n,
         sourceAssociatedBytes:
-            6n +
-            2n * 6n +
-            4n +
-            bytes('sealed-lattice/fhe-source-custody') +
-            64n,
+            bytes('sealed-lattice/encrypted-source-custody/v1') + 64n,
         rootAssociatedBytes: 64n,
         // The restore control ends with the two-byte mask of signing
         // purposes that the authenticated root shows unused.
@@ -205,6 +230,7 @@ export const compileRegistrationEnrollmentCensus = () => {
                 : 64n + 4n + source.retainedSetupBytes) +
             2n,
         maximumRetainedPayloadBytes:
+            maximumSourceCiphertextBytes +
             key.publicKeyBytes +
             maximumHeaderBytes +
             inputs.signatureBytes +

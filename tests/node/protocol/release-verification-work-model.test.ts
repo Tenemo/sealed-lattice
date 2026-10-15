@@ -39,7 +39,7 @@ describe('public release verification work', () => {
 
     it('crosses the query cap using mandatory calls without confusing an upper bound with a witness', () => {
         const single = compileReleaseVerificationWorkload(attempts(1n));
-        expect(single.queryCap).toBe(1n << 80n);
+        expect(single.queryCap).toBe(1n << 128n);
         const below = compileReleaseVerificationWorkload(
             attempts(single.firstAttemptCountExceedingCoreLowerBound - 1n),
         );
@@ -47,14 +47,16 @@ describe('public release verification work', () => {
             attempts(single.firstAttemptCountExceedingCoreLowerBound),
         );
         expect(below.totals.minimumProofCoreQueries).toBeLessThanOrEqual(
-            1n << 80n,
+            1n << 128n,
         );
-        expect(above.totals.minimumProofCoreQueries).toBeGreaterThan(1n << 80n);
+        expect(above.totals.minimumProofCoreQueries).toBeGreaterThan(
+            1n << 128n,
+        );
         const covered = compileReleaseVerificationWorkload(
             attempts(single.maximumAttemptsCoveredByCoreUpperBound),
         );
         expect(covered.totals.maximumProofCoreQueries).toBeLessThanOrEqual(
-            1n << 80n,
+            1n << 128n,
         );
         expect(single.maximumAttemptsCoveredByCoreUpperBound).toBeLessThan(
             single.firstAttemptCountExceedingCoreLowerBound,
@@ -66,7 +68,7 @@ describe('public release verification work', () => {
         expect(Object.values(empty.totals).every((value) => value === 0n)).toBe(
             true,
         );
-        const count = 1n << 80n;
+        const count = 1n << 128n;
         const large = compileReleaseVerificationWorkload(attempts(count));
         expect(large.totals.minimumKnownHashCalls).toBe(64n * count);
         expect(large.lifetimeAttemptLimit).toBeNull();

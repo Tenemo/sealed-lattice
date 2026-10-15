@@ -9,6 +9,8 @@ use std::ops::RangeInclusive;
 
 pub mod plaintext;
 pub mod relation;
+#[path = "source-linked.rs"]
+pub mod source_linked;
 
 const TABLE: &[u8] = include_bytes!("../profiles.bin");
 const RECORD_BYTES: usize = 30;
@@ -21,13 +23,13 @@ pub const AUXILIARY_DEGREE: usize = 4_096;
 /// FHE witness equations use limbs of this many bits.
 pub const FHE_LIMB_BITS: usize = 96;
 /// Gadget coordinates are digits of this many bits.
-const GADGET_BASE_BITS: usize = 144;
+const GADGET_BASE_BITS: usize = 88;
 /// Every score is between these values.
 pub const MINIMUM_SCORE: usize = 1;
 pub const MAXIMUM_SCORE: usize = 10;
 /// FHE plaintexts are integers modulo this prime, which divides every
 /// ciphertext modulus less one.
-pub const PLAINTEXT_MODULUS: u32 = 65_537;
+pub const PLAINTEXT_MODULUS: u32 = 12_289;
 /// Auxiliary-encryption plaintexts are integers modulo this prime, which
 /// divides the auxiliary modulus less one.
 pub const AUXILIARY_PLAINTEXT_MODULUS: u32 = 257;

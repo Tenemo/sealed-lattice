@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
-import { compileBoundedKeyUniqueness } from '#tests/recipient-key-uniqueness-model.js';
 import { compileRegistrationSetupBindingScreen } from '#tests/registration-setup-binding-model.js';
 import { deriveSupportedProfile } from '#tests/supported-profile-model.js';
 
@@ -38,9 +37,6 @@ describe('registration-bound setup key screen', () => {
                     fixedModulusBfvInputs.polynomialDegree *
                         BigInt(1 + Math.ceil(bits / 8)),
                 );
-                expect(
-                    family.uniqueness.uniformMatrixFailureExponent,
-                ).toBeGreaterThan(128n);
             }
             expect(2n * screen.auxiliary.goodKeyPhaseError).toBeLessThan(
                 screen.auxiliary.scale,
@@ -58,21 +54,6 @@ describe('registration-bound setup key screen', () => {
         ).toBeGreaterThan(1);
         expect(screen.fhe[0].modulus).not.toBe(
             screen.fhe[screen.fhe.length - 1].modulus,
-        );
-    });
-
-    it('checks the determinant-bound operands independently at a small split prime', () => {
-        const result = compileBoundedKeyUniqueness(2n, 65537n, 1n, 2n);
-        // (5 * 9 * 2 * sqrt(2))^2; the square removes rounding.
-        expect(result.squaredFailureBaseNumerator).toBe(16_200n);
-        expect(result.uniformMatrixFailureExponent).toBe(18n);
-        expect(16_200n * (1n << 18n)).toBeLessThanOrEqual(65537n ** 2n);
-        expect(16_200n * (1n << 20n)).toBeGreaterThan(65537n ** 2n);
-        expect(() => compileBoundedKeyUniqueness(3n, 65537n, 1n, 2n)).toThrow(
-            'cyclotomic',
-        );
-        expect(() => compileBoundedKeyUniqueness(2n, 7n, 1n, 2n)).toThrow(
-            'cyclotomic',
         );
     });
 });

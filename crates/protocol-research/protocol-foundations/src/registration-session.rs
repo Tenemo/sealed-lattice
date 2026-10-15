@@ -20,6 +20,7 @@ const OPEN: u8 = 0;
 const KEY: u8 = 1;
 const FINISH: u8 = 2;
 const DISCARD: u8 = 3;
+const SOURCES: u8 = 4;
 const OPERATION_BYTES: usize = 9;
 /// A verdict: zero, the body digest, or the code of the
 /// refusal that ended the session.
@@ -67,6 +68,15 @@ fn run(input: &[u8]) -> Vec<u8> {
                 }
                 Vec::new()
             }
+            SOURCES => {
+                let state = sessions.get_mut(&session).expect("An open session");
+                if let Ok(verifier) = state
+                    && let Err(error) = verifier.push_sources(bytes)
+                {
+                    *state = Err(error);
+                }
+                Vec::new()
+            }
             FINISH => {
                 let state = sessions.remove(&session).expect("An open session");
                 let result = state.and_then(|verifier| {
@@ -93,13 +103,16 @@ fn run(input: &[u8]) -> Vec<u8> {
     })
 }
 
-// The poll identity, the header's length, the header and the signature.
+// The verified poll identity/dimensions, header length, header and signature.
 fn open(bytes: &[u8]) -> Result<RegistrationVerifier, Refusal> {
-    let length = u32::from_le_bytes(bytes[64..68].try_into().unwrap()) as usize;
+    let maximum = u16::from_le_bytes(bytes[64..66].try_into().unwrap()) as usize;
+    let options = u16::from_le_bytes(bytes[66..68].try_into().unwrap()) as usize;
+    let length = u32::from_le_bytes(bytes[68..72].try_into().unwrap()) as usize;
     RegistrationVerifier::open(
         bytes[..64].try_into().unwrap(),
-        &bytes[68..68 + length],
-        &bytes[68 + length..],
+        &bytes[72..72 + length],
+        &bytes[72 + length..],
+        crate::source_binding::families_from_dimensions(maximum, options)?,
     )
 }
 
@@ -135,6 +148,8 @@ pub struct RegistrationSession {
     running: Vec<Ticket>,
     failed: bool,
     finished: bool,
+    source_bytes: usize,
+    expected_source_bytes: usize,
 }
 impl RegistrationSession {
     /// Opens the verification of a record of the poll from its header and
@@ -150,8 +165,12 @@ impl RegistrationSession {
         if signature.len() != SIGNATURE_BYTES {
             return Err(Refusal::Shape);
         }
-        let mut input = Vec::with_capacity(68 + header_bytes.len() + signature.len());
+        let expected_source_bytes = crate::source_binding::fhe_key_families(poll).len()
+            * setup_witness::encrypted_source::ciphertext_bytes();
+        let mut input = Vec::with_capacity(72 + header_bytes.len() + signature.len());
         input.extend(poll.identity());
+        input.extend(poll.maximum_participants().to_le_bytes());
+        input.extend((poll.manifest().option_count() as u16).to_le_bytes());
         input.extend((header_bytes.len() as u32).to_le_bytes());
         input.extend(header_bytes);
         input.extend(signature);
@@ -164,6 +183,8 @@ impl RegistrationSession {
             running: Vec::new(),
             failed: false,
             finished: false,
+            source_bytes: 0,
+            expected_source_bytes,
         };
         let ticket = send(record.session, shard, OPEN, &input, 0);
         record.keep(ticket);
@@ -197,9 +218,27 @@ impl RegistrationSession {
         Ok(())
     }
 
+    /// Waits for each bounded source chunk so helper inputs cannot accumulate
+    /// into a second resident copy of the complete source inventory.
+    pub fn push_sources(&mut self, bytes: &[u8]) -> Result<(), Refusal> {
+        if self.failed
+            || !self.key_sent
+            || bytes.is_empty()
+            || bytes.len() > CHUNK_LIMIT
+            || bytes.len() > self.expected_source_bytes - self.source_bytes
+        {
+            self.failed = true;
+            return Err(Refusal::Shape);
+        }
+        self.source_bytes += bytes.len();
+        let result = send(self.session, self.shard, SOURCES, bytes, 0).wait();
+        assert!(result.is_empty());
+        Ok(())
+    }
+
     /// Requests the owning verifier's verdict for the complete record.
     pub fn finish(mut self) -> Result<PendingRegistration, Refusal> {
-        if self.failed || !self.key_sent {
+        if self.failed || !self.key_sent || self.source_bytes != self.expected_source_bytes {
             return Err(Refusal::Consumed);
         }
         let ticket = send(self.session, self.shard, FINISH, &[], VERDICT_BYTES);

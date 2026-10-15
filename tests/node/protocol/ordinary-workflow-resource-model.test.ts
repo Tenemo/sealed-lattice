@@ -118,6 +118,10 @@ describe('complete ordinary workflow resource graph', () => {
             ];
             const registrationFiles: Entry[] = [
                 ['polynomial-01.bin', key.publicKeyBytes],
+                [
+                    'source-ciphertexts.bin',
+                    registration.maximumSourceCiphertextBytes,
+                ],
                 ['registration-header.bin', registration.maximumHeaderBytes],
                 ['signature.bin', registration.signatureBytes],
             ];
@@ -278,9 +282,9 @@ describe('complete ordinary workflow resource graph', () => {
                         0n,
                     ),
                 );
-            expect(result.cleanResponseBytes).toBe(273n + 66n * n + 4n + 3309n);
+            expect(result.cleanResponseBytes).toBe(273n + 66n * n + 4n + 8642n);
             expect(result.responderListedCopyBytes).toBe(
-                n * n * (210n + 3309n),
+                n * n * (210n + 8642n),
             );
             expect(result.ordinaryForwardedBodyUploadBytes).toBe(0n);
             expect(result.ordinaryReferencedBodyBytes).toBe(
@@ -344,7 +348,7 @@ describe('complete ordinary workflow resource graph', () => {
         expect(twenty.rows[0].publicCorpusBytes).toBeGreaterThan(
             twenty.planningVarianceCeilingBytes,
         );
-        expect(twenty.publicReaderProtocolBytes).toBeLessThan(
+        expect(twenty.publicReaderProtocolBytes).toBeGreaterThan(
             twenty.planningVarianceCeilingBytes,
         );
         expect(() =>

@@ -1,17 +1,15 @@
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import { compileFullWordProofLayout } from '#tests/full-word-proof-layout-model.js';
 import { compileRecipientKeyCensus } from '#tests/recipient-key-model.js';
-import { sourceOpeningSaltBytes } from '#tests/registration-setup-binding-model.js';
 import { compileSetupSelectionCensus } from '#tests/setup-selection-model.js';
 import type { SupportedProfile } from '#tests/supported-profile-model.js';
 
-// The complete proof length and the source opening salt.
-const contributionBodyHeaderBytes = 8n + sourceOpeningSaltBytes;
+// The complete proof length.
+const contributionBodyHeaderBytes = 8n;
 const bodyDomain = Buffer.from('sealed-lattice/contribution-body', 'ascii');
 
-// Ordinary body-hash framing; the source-opening salt is already inside
-// the body header. This calculation creates no contribution verifier
-// capability.
+// Ordinary body-hash framing. The header contains only the proof length.
+// This calculation creates no contribution verifier capability.
 export const contributionBodyHashPrefix = (bodyBytes: number) => {
     if (
         !Number.isSafeInteger(bodyBytes) ||
@@ -118,7 +116,6 @@ export const compileContributionBodyCensus = (profile: SupportedProfile) => {
         minimumProofBytes: proof.headerBytes,
         maximumProofBytes: proof.maximumMultiproofBytes,
         maximumBodyBytes,
-        sourceOpeningSaltBytes,
         hashPrefixBytes,
         minimumHashInputBytes,
         maximumHashInputBytes,

@@ -511,6 +511,24 @@ impl<const EXACT: bool> OfferAggregator<EXACT> {
         }
         result
     }
+    pub fn source(&mut self, bytes: &[u8]) -> Result<(), Refusal> {
+        if self.failed {
+            return Err(Refusal::Order);
+        }
+        let result = match self.pending.as_mut() {
+            Some(Pending {
+                incoming: IncomingOffer::Verifying(verifier),
+                ordinal: 0,
+                offset: 0,
+                ..
+            }) => verifier.source(bytes).map_err(|_| Refusal::Body),
+            _ => Err(Refusal::Order),
+        };
+        if result.is_err() {
+            self.failed = true;
+        }
+        result
+    }
     pub fn proof(&mut self, offset: usize, bytes: &[u8]) -> Result<(), Refusal> {
         if self.failed {
             return Err(Refusal::Order);

@@ -113,7 +113,7 @@ export const renderBufferedFieldSamplingObservations = (): string[] => [
         })(),
     ),
     '',
-    'The interval follows from the union and two-term Bonferroni bounds on a rejection in the exactly filled minimum degree-mask prefix. The event is sampler-work variation, not a privacy failure, and is not itself a 2^-80-small term. Discarding it would require an explicit population and whole-experiment cost charge under the accepted normalized target. The observation argument instead retains its exact waiting law; these probability bounds alone give no security verdict.',
+    'The interval follows from the union and two-term Bonferroni bounds on a rejection in the exactly filled minimum degree-mask prefix. This sampler-work variation occurs too often to discard as a security failure. Discarding it would require an explicit population and whole-experiment cost charge under the accepted normalized target. The observation argument retains its exact waiting law; these probability bounds alone give no security verdict.',
     '',
 ];
 
@@ -219,54 +219,44 @@ export const renderPrivateRandomnessScopeInventory = (): string[] => {
             ];
         })(),
         '',
-        'These scopes are separate from commitment-salt shadow scopes and explicit proof-programming records. A simulation using one shadow function per private-randomness scope must account for the additional scopes and their full query histories. Unread initialized streams still have construction and sponge work. The conditional seed-pair term is not an adversarial query-hit bound, and none of these counts supplies a complete reduction time or a new primitive assumption.',
+        'These scopes are separate from per-family source seed scopes and explicit proof-programming records. A simulation using one shadow function per private-randomness scope must account for the additional scopes and their full query histories. Unread initialized streams still have construction and sponge work. The conditional seed-pair term is not an adversarial query-hit bound, and none of these counts supplies a complete reduction time or a new primitive assumption.',
         '',
     ];
 };
 
 export const renderRegistrationSourceRandomnessAndHashWork = (): string[] => {
     const completion = completionProfile();
-    const registrationSourceRandomness = compileRegistrationSourceRandomness(
+    const value = compileRegistrationSourceRandomness(
         completion.participantCount,
         completion.optionCount,
     );
     return [
         '## Registration source randomness and hash work',
         '',
-        'This local census uses the completion profile as both the final roster and the original poll maximum. The model takes the original maximum explicitly because a smaller final roster does not erase the families sampled at enrollment. Each family has an independent retained source seed and commitment salt; the source samples one balanced FHE secret and the first encryption error. Its direct SHAKE reader has no browser RNG buffer tail. Source-output maxima below use the existing proof-only sparse draw comparison, never a runtime limit. Reconstructing a source repeats work on the same seed, while common-polynomial streams can repeat the same input across families. The summed permutations are computational work, not distinct oracle queries. Abandoned credentials, repeated reconstruction and the global source-seed population require separate accounting; these rows do not establish the composed security ledger.',
+        'Each permitted family retains one original seed. Separate purpose streams sample its FHE secret and first error, and its auxiliary encryption ephemeral and four error vectors. The signed registration binds the complete canonical ciphertexts. Regeneration repeats the original streams. Sparse comparison caps bound reduction work and do not add runtime retries; repeated common inputs remain the same oracle coordinates.',
         '',
         table(
             ['Property', 'Value'],
             [
                 [
                     'Original poll maximum',
-                    formatCount(
-                        registrationSourceRandomness.originalPollMaximumParticipants,
-                    ),
+                    formatCount(value.originalPollMaximumParticipants),
+                ],
+                ['Original source seeds', formatCount(value.sourceSeedCount)],
+                ['Fresh seed bytes', formatCount(value.freshSeedBytes)],
+                ['Finite error samples', formatCount(value.gaussianSamples)],
+                ['Balanced sparse samples', formatCount(value.sparseCalls)],
+                [
+                    'Hash permutations under the sparse comparison',
+                    formatCount(value.comparisonHashPermutations),
                 ],
                 [
-                    'Source seeds per original enrollment',
-                    formatCount(registrationSourceRandomness.sourceSeedCount),
+                    'Samples per source ciphertext comparison',
+                    formatCount(value.sourceCiphertextSamples),
                 ],
                 [
-                    'Fresh seed and salt bytes per original enrollment',
-                    formatCount(
-                        registrationSourceRandomness.freshSeedAndSaltBytes,
-                    ),
-                ],
-                [
-                    'Source Gaussian samples per original enrollment',
-                    formatCount(registrationSourceRandomness.gaussianSamples),
-                ],
-                [
-                    'Source sparse calls per original enrollment',
-                    formatCount(registrationSourceRandomness.sparseCalls),
-                ],
-                [
-                    'Hash permutations per original enrollment under the sparse comparison',
-                    formatCount(
-                        registrationSourceRandomness.comparisonHashPermutations,
-                    ),
+                    'Samples in the shared auxiliary key transition',
+                    formatCount(value.sharedAuxiliaryKeySamples),
                 ],
             ],
         ),
@@ -275,33 +265,27 @@ export const renderRegistrationSourceRandomnessAndHashWork = (): string[] => {
             [
                 'Family',
                 'Modulus bytes',
-                'Sampler bits',
-                'Source input bytes',
-                'Minimum source output bytes',
-                'Comparison maximum source output bytes',
-                'Commitment input bytes',
-                'Source-target raw mask bits',
-                'Source-target cell mask bits',
-                'Complete input-cell bits',
-                'Common stream output bytes',
+                'FHE sampler bits',
+                'Private input bytes',
+                'Maximum source stream bytes',
+                'Maximum encryption stream bytes',
+                'Ciphertext-binding input bytes',
                 'Source permutations',
-                'Commitment permutations',
+                'Encryption permutations',
+                'Binding permutations',
                 'Common permutations',
             ],
-            registrationSourceRandomness.families.map((family) => [
+            value.families.map((family) => [
                 formatCount(family.index),
                 formatCount(family.modulusBytes),
                 formatCount(family.sampleBits),
                 formatCount(family.sourceInputBytes),
-                formatCount(family.minimumSourceOutputBytes),
                 formatCount(family.comparisonMaximumSourceOutputBytes),
-                formatCount(family.commitmentInputBytes),
-                formatCount(family.commitmentMaskRawBits),
-                formatCount(family.commitmentMaskCellBits),
-                formatCount(family.commitmentInputCellBits),
-                formatCount(family.commonOutputBytes),
+                formatCount(family.comparisonMaximumEncryptionOutputBytes),
+                formatCount(family.bindingInputBytes),
                 formatCount(family.comparisonSourcePermutations),
-                formatCount(family.commitmentPermutations),
+                formatCount(family.comparisonEncryptionPermutations),
+                formatCount(family.bindingPermutations),
                 formatCount(family.commonPermutations),
             ]),
         ),

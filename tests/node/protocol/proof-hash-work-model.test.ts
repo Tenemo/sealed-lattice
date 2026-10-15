@@ -107,9 +107,9 @@ describe('proof hash work', () => {
             'relation.message_bytes = relation.minimum_message_bytes();',
         );
         for (const [participants, options, setupBytes] of [
-            [3, 2, 131072n],
+            [3, 2, 262144n],
             [10, 10, 524288n],
-            [20, 20, 524288n],
+            [20, 20, 1048576n],
         ] as const) {
             const profile = deriveSupportedProfile(participants, options);
             const roles = proofHashProfiles(profile);
@@ -181,13 +181,18 @@ describe('proof hash work', () => {
         ).toEqual([
             [
                 'setup',
-                356n * 16n + 48n,
-                377n * 48n,
-                4n * (18n + 1147n + 2n * 207n) + 8n * 375n,
-                4n + 108n + 19n * 65536n * 109n + 31n * 65536n * 21n + 64n,
+                450n * 16n + 48n,
+                485n * 48n,
+                12052n,
+                4n +
+                    96n +
+                    28n * 65536n * 97n +
+                    31n * 65536n * 21n +
+                    8n * 65536n * 6n +
+                    64n,
             ],
-            ['ballot', 576n, 1632n, 776n, 28672136n],
-            ['release', 1040n, 3360n, 1540n, 8782022n],
+            ['ballot', 544n, 1584n, 736n, 25526408n],
+            ['release', 1072n, 3504n, 1596n, 8782022n],
         ]);
         expect(profiles.map((value) => value.roleBytes)).toEqual([
             335n,
@@ -272,7 +277,7 @@ describe('proof hash work', () => {
                 BigInt(roleBytes),
             );
             for (const [index, exponent] of exponents.entries()) {
-                const width = index === 0 ? 576 : index === 1 ? 1632 : 48;
+                const width = index === 0 ? 544 : index === 1 ? 1584 : 48;
                 const leafTail = Buffer.concat([
                     frame(Buffer.alloc(4)),
                     frame(Buffer.alloc(128)),

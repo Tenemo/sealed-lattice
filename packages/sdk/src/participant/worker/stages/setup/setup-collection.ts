@@ -72,6 +72,23 @@ const outputWidth = (context: PublicProfileContext, polynomial: Polynomial) =>
 
 export const fullOfferReadBytes = (context: PublicProfileContext) => {
     const bounds = context.profile.contribution;
+    const sourceBytes = bounds.sourceCiphertextBytes;
+    if (!Number.isSafeInteger(sourceBytes) || sourceBytes <= 0)
+        throw new Error('The source family has no canonical length.');
+    // Family ranges start at integer multiples of their fixed length. Their
+    // largest offset inside a transport chunk is chunk minus gcd(chunk, length).
+    let divisor = candidateChunkBytes;
+    let remainder = sourceBytes;
+    while (remainder !== 0) {
+        const next = divisor % remainder;
+        divisor = remainder;
+        remainder = next;
+    }
+    const sourceReadBytes =
+        candidateChunkBytes *
+        Math.ceil(
+            (sourceBytes + candidateChunkBytes - divisor) / candidateChunkBytes,
+        );
     return (
         bounds.polynomials.reduce(
             (sum, polynomial) => sum + polynomial.bytes,
@@ -81,6 +98,7 @@ export const fullOfferReadBytes = (context: PublicProfileContext) => {
         candidateChunkBytes +
         bounds.bodyHeaderBytes +
         bounds.offerEnvelopeBytes +
+        sourceReadBytes +
         context.profile.registration.signatureBytes +
         2 * candidateManifestBytes
     );

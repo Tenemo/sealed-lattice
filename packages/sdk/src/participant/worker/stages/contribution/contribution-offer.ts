@@ -58,7 +58,7 @@ const readRetainedProof = (
     );
 };
 
-// Recomputes the commitment to the retained body in the module's signer.
+// Recomputes the original retained body in the module's signer.
 const bodyOffer = async (session: ContributionSession) => {
     const { context, state } = session;
     const { profile } = context;
@@ -73,7 +73,7 @@ const bodyOffer = async (session: ContributionSession) => {
             control,
         );
         if (!equalBytes(header, state.header))
-            throw new Error('The original source opening changed.');
+            throw new Error('The retained contribution header changed.');
     } finally {
         control.fill(0);
     }

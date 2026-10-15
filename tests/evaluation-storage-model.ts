@@ -53,25 +53,30 @@ export const compileRankingProgramModel = (
                 append(
                     4,
                     [value],
-                    exponent +
-                        (topCount === profile.optionCount
-                            ? 0
-                            : profile.optionCount * topCount),
+                    exponent === -1
+                        ? 0
+                        : exponent +
+                              (topCount === profile.optionCount
+                                  ? 0
+                                  : profile.optionCount * topCount),
                 ),
             addPlaintext: (value, purpose) =>
                 append(
                     5,
                     [value],
-                    purpose === 'comparison-input-offset'
-                        ? 0
-                        : purpose === 'comparison-constant'
-                          ? 1
-                          : topCount === profile.optionCount
-                            ? 2
-                            : 2 + topCount,
+                    purpose === 'padding-correction'
+                        ? 3 + profile.optionCount
+                        : purpose === 'comparison-input-offset'
+                          ? 0
+                          : purpose === 'comparison-constant'
+                            ? 1
+                            : topCount === profile.optionCount
+                              ? 2
+                              : 2 + topCount,
                 ),
             rotate: (value) => append(6, [value]),
         },
+        topCount,
     ).result;
     const seen = new Set<number>(),
         order: number[] = [];
@@ -156,8 +161,13 @@ export const compileScalarEvaluationCapacity = (profile: SupportedProfile) => {
     ];
     const evaluatorPlanningBytes = 402_653_184n;
     const scalarInstanceBoundBytes = 671_088_640n;
+    const rankingCacheBytes = 2n * fixedModulusBfvInputs.polynomialDegree * 4n;
     const reserves =
-        67_108_864n + 2_097_152n + tensor * 2n * residue + jobBytes;
+        67_108_864n +
+        2_097_152n +
+        tensor * 2n * residue +
+        jobBytes +
+        rankingCacheBytes;
     const storedValueBytes = 2n * polynomial;
     const capacities = scratchBytes.map((scratch) => {
         const available =
@@ -174,6 +184,7 @@ export const compileScalarEvaluationCapacity = (profile: SupportedProfile) => {
         capacities,
         evaluatorPlanningBytes,
         scalarInstanceBoundBytes,
+        rankingCacheBytes,
         storedValueBytes,
         keyOrdinalBytes: external * residue,
         multiplicationKeyBytes: rns.multiplicationKeyRecordBytes,

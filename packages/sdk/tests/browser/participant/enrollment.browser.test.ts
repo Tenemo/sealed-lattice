@@ -50,7 +50,10 @@ const fixture = async (): Promise<ParticipantContext> => {
     const limits = readParticipantLimits(module);
     vi.spyOn(navigator.storage, 'estimate').mockResolvedValue({
         usage: 0,
-        quota: 2 * limits.registration.publicKeyBytes,
+        quota:
+            2 *
+            (limits.registration.publicKeyBytes +
+                limits.registration.maximumSourceCiphertextBytes),
     });
     return {
         namespace,
@@ -82,7 +85,10 @@ describe('enrollment storage room', () => {
         const context = await fixture();
         vi.spyOn(navigator.storage, 'estimate').mockResolvedValue({
             usage: 1,
-            quota: 2 * context.limits.registration.publicKeyBytes,
+            quota:
+                2 *
+                (context.limits.registration.publicKeyBytes +
+                    context.limits.registration.maximumSourceCiphertextBytes),
         });
         const started = vi.fn();
         await expect(

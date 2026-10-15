@@ -20,7 +20,7 @@ fn holds_nothing_before_its_roster_verifies() {
     for length in [0, 63, 64] {
         assert!(!session.offer_available(0, length));
     }
-    let credential = Credential::from_seed([5; 32]);
+    let credential = Credential::from_seed([5; 64]);
     assert!(!session.restore_setup(&credential, &[]));
     assert!(!session.restore_inputs(&credential, &[]));
 }

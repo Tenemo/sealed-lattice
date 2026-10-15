@@ -1,8 +1,4 @@
 use crate::target::VerifiedEvaluationTarget;
-use fips204::{
-    ml_dsa_65,
-    traits::{SerDes, Verifier},
-};
 use protocol_foundations::SIGNING_PUBLIC_KEY_BYTES;
 use protocol_foundations::target_signing::{CERTIFICATION_CONTEXT, TargetVote};
 use std::sync::Arc;
@@ -25,8 +21,12 @@ fn authenticate_vote(
         return Err(Refusal::Context);
     }
     let public = keys.get(vote.position()).ok_or(Refusal::Context)?;
-    let public = ml_dsa_65::PublicKey::try_from_bytes(*public).map_err(|_| Refusal::Signature)?;
-    if !public.verify(identity, vote.signature(), CERTIFICATION_CONTEXT) {
+    if !protocol_foundations::verify_purpose_signature(
+        public,
+        identity,
+        vote.signature(),
+        CERTIFICATION_CONTEXT,
+    ) {
         return Err(Refusal::Signature);
     }
     Ok(vote)

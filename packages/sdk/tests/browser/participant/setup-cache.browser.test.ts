@@ -100,30 +100,34 @@ afterEach(async () => {
 });
 
 describe('bounded public aggregate cache reads', () => {
-    it('upgrades an existing public cache while preserving its aggregate bytes', async () => {
-        const namespace = 'setup-upgrade-' + crypto.randomUUID();
+    it('creates and reopens the current public cache with its aggregate bytes', async () => {
+        const namespace = 'setup-reopen-' + crypto.randomUUID();
         const name = namespacedName(setupCacheName, namespace);
         names.push(name);
-        const opening = indexedDB.open(name, 1);
-        opening.onupgradeneeded = () =>
-            opening.result.createObjectStore('aggregate');
-        const old = await fixtureRequest(opening, 'Legacy cache open failed.');
-        await write(old, (store) =>
+        const created = await openSetupCache(namespace);
+        databases.push(created);
+        expect(created.version).toBe(2);
+        expect([...created.objectStoreNames]).toEqual([
+            'aggregate',
+            'collection',
+        ]);
+        await write(created, (store) =>
             store.put(new Blob([Uint8Array.of(4, 9)]), [1, 7, 0]),
         );
-        old.close();
-        const upgraded = await openSetupCache(namespace);
-        databases.push(upgraded);
-        expect([...upgraded.objectStoreNames]).toEqual([
+        created.close();
+        const reopened = await openSetupCache(namespace);
+        databases.push(reopened);
+        expect(reopened.version).toBe(2);
+        expect([...reopened.objectStoreNames]).toEqual([
             'aggregate',
             'collection',
         ]);
         const saved = (await fixtureRequest(
-            upgraded
+            reopened
                 .transaction('aggregate')
                 .objectStore('aggregate')
                 .get([1, 7, 0]),
-            'Upgraded cache read failed.',
+            'Reopened cache read failed.',
         )) as Blob;
         expect([...new Uint8Array(await saved.arrayBuffer())]).toEqual([4, 9]);
     });

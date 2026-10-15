@@ -759,7 +759,7 @@ pub struct SetupStatementStream {
     encoded_length: usize,
     alpha: Element,
     indices: Vec<u32>,
-    expected_digest: [u8; 64],
+    expected_digest: Option<[u8; 64]>,
     // The statement's digest, which a helper computes when there are helpers.
     hasher: HashStream,
     header: Vec<u8>,
@@ -814,9 +814,29 @@ impl SetupStatementStream {
         });
         Ok(stream)
     }
+    /// A committed inner relation whose enclosing verifier hashes all source bytes.
+    pub fn embedded_committed(
+        profile: Profile,
+        alpha: Element,
+        indices: &[u32],
+        root: [u8; 64],
+        evaluations: &[Element],
+    ) -> Result<Self, Refusal> {
+        let mut stream = Self::committed(profile, [0; 64], alpha, indices, root, evaluations)?;
+        stream.expected_digest = None;
+        Ok(stream)
+    }
     fn with_layout(
         layout: Layout,
         expected_digest: [u8; 64],
+        alpha: Element,
+        indices: &[u32],
+    ) -> Result<Self, Refusal> {
+        Self::open_layout(layout, Some(expected_digest), alpha, indices)
+    }
+    fn open_layout(
+        layout: Layout,
+        expected_digest: Option<[u8; 64]>,
         alpha: Element,
         indices: &[u32],
     ) -> Result<Self, Refusal> {
@@ -947,7 +967,10 @@ impl SetupStatementStream {
             self.hasher.update(&committed.root);
         }
         let digest = self.hasher.finish();
-        if digest != self.expected_digest {
+        if self
+            .expected_digest
+            .is_some_and(|expected| digest != expected)
+        {
             return Err(Refusal::Binding);
         }
         let mut accumulator = self.accumulator.ok_or(Refusal::Incomplete)?;
@@ -960,6 +983,9 @@ impl SetupStatementStream {
     }
 }
 
+#[cfg(test)]
+#[path = "setup-affine-census-tests.rs"]
+mod affine_census_tests;
 #[cfg(test)]
 #[path = "setup-tests.rs"]
 mod tests;

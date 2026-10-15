@@ -26,7 +26,8 @@ use protocol_foundations::{
 };
 use supported_profile::{
     DEGREE, MAXIMUM_SCORE, MINIMUM_SCORE, Profile,
-    relation::{PROOF_HEADER_BYTES, setup_relation},
+    relation::PROOF_HEADER_BYTES,
+    source_linked::{SOURCE_POLYNOMIALS, relation as setup_relation},
 };
 
 /// A packet is a four-byte body length, the body and its signature.
@@ -53,7 +54,8 @@ pub fn limits() -> Vec<u64> {
         SIGNATURE_BYTES,
         setup_witness::registration::SEALED_KEY_BYTES,
         SEALED_SIGNING_SEED_BYTES,
-        crate::fhe_sources::maximum_capsule_bytes(),
+        protocol_foundations::source_seeds::maximum_capsule_bytes(),
+        protocol_foundations::source_seeds::maximum_public_bytes(),
         MAXIMUM_PROPOSAL_BYTES,
         BODY_HEADER_BYTES,
         PROOF_HEADER_BYTES,
@@ -104,9 +106,9 @@ pub fn profile_bounds(profile: Profile) -> Vec<u64> {
         participants,
         profile.options(),
         proposal_bytes(participants),
-        profile.setup_polynomials(),
+        profile.setup_polynomials() + SOURCE_POLYNOMIALS,
         setup_relation(profile).columns(),
-        profile.setup_statement_length(),
+        supported_profile::source_linked::statement_length(profile),
         *contribution.start(),
         *contribution.end(),
         checkpoint_header,
@@ -158,6 +160,14 @@ pub fn profile_bounds(profile: Profile) -> Vec<u64> {
         setup_aggregate::aggregate_publisher::maximum_collected_reference_bytes(profile),
         setup_aggregate::published_aggregate::retained_data_bytes(profile),
     ]);
+    bounds.push(SOURCE_POLYNOMIALS);
+    for index in 0..SOURCE_POLYNOMIALS {
+        bounds.extend([
+            profile.setup_polynomials() + index,
+            DEGREE * (1 + supported_profile::auxiliary_modulus().len()),
+            DEGREE,
+        ]);
+    }
     bounds.into_iter().map(|value| value as u64).collect()
 }
 

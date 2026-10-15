@@ -1,3 +1,4 @@
+mod authentication;
 #[path = "ballot-authentication.rs"]
 pub mod ballot_authentication;
 #[path = "ballot-body.rs"]
@@ -31,13 +32,11 @@ pub mod roster_input;
 pub mod signed_packet;
 #[path = "source-binding.rs"]
 pub mod source_binding;
+#[path = "source-seeds.rs"]
+pub mod source_seeds;
 #[path = "target-signing.rs"]
 pub mod target_signing;
 
-use fips204::{
-    ml_dsa_65,
-    traits::{KeyGen, SerDes, Signer, Verifier},
-};
 use foundation::{CanonicalItem, RegistrationHeader, hash_foundation_tuple_512};
 use parallel_work::ProtocolHash;
 use poll::VerifiedPoll;
@@ -45,12 +44,22 @@ use poll::VerifiedPoll;
 use zeroize::Zeroizing;
 
 pub const REGISTRATION_SIGNATURE_CONTEXT: &[u8] = b"sealed-lattice/registration";
-/// Every participant signature is one ML-DSA-65 signature.
-pub const SIGNATURE_BYTES: usize = ml_dsa_65::SIG_LEN;
-/// Every participant signing key is one ML-DSA-65 public key.
-pub const SIGNING_PUBLIC_KEY_BYTES: usize = ml_dsa_65::PK_LEN;
+/// Every participant signature uses its fixed one-time purpose leaf.
+pub const SIGNATURE_BYTES: usize = authentication::SIGNATURE_BYTES;
+/// A participant signing key is the root of its purpose tree.
+pub const SIGNING_PUBLIC_KEY_BYTES: usize = authentication::PUBLIC_KEY_BYTES;
 /// A tag that keys retained bytes to a credential is this long.
 pub const RETAINED_TAG_BYTES: usize = 64;
+
+/// Checks authentication; the caller still owns the message relation and capability.
+pub fn verify_purpose_signature(
+    public: &[u8; SIGNING_PUBLIC_KEY_BYTES],
+    message: &[u8],
+    signature: &[u8],
+    context: &[u8],
+) -> bool {
+    authentication::PublicKey::from_bytes(*public).verify(message, signature, context)
+}
 
 /// The jobs this crate defines.
 pub static JOBS: [&parallel_work::Job; 1] = [&registration::session::REGISTRATION];
@@ -93,10 +102,11 @@ pub enum Refusal {
 }
 
 pub struct Credential {
-    signing_seed: Zeroizing<[u8; 32]>,
+    signing_seed: Zeroizing<[u8; authentication::SEED_BYTES]>,
     signing_public: [u8; SIGNING_PUBLIC_KEY_BYTES],
     signed: bool,
     completed_body: Option<[u8; 64]>,
+    source_creation_consumed: bool,
     sealed: bool,
     poll_creation_consumed: bool,
     proposal_signed: bool,
@@ -120,15 +130,16 @@ pub struct Credential {
     locked_purposes: u16,
 }
 impl Credential {
-    pub fn from_seed(signing: [u8; 32]) -> Self {
+    pub fn from_seed(signing: [u8; authentication::SEED_BYTES]) -> Self {
         let signing_seed = Zeroizing::new(signing);
-        let (public, private) = ml_dsa_65::KG::keygen_from_seed(&signing_seed);
+        let (public, private) = crate::authentication::keypair_from_seed(&signing_seed);
         drop(private);
         Self {
             signing_seed,
             signing_public: public.into_bytes(),
             signed: false,
             completed_body: None,
+            source_creation_consumed: false,
             sealed: false,
             poll_creation_consumed: false,
             proposal_signed: false,
@@ -178,14 +189,12 @@ impl Credential {
         message: &[u8],
         context: &[u8],
     ) -> Result<[u8; SIGNATURE_BYTES], Refusal> {
-        let (_, private) = ml_dsa_65::KG::keygen_from_seed(&self.signing_seed);
-        private
-            .try_sign_with_seed(&[0; 32], message, context)
-            .map_err(|_| Refusal::Crypto)
+        let (_, mut private) = crate::authentication::keypair_from_seed(&self.signing_seed);
+        private.sign(message, context).map_err(|_| Refusal::Crypto)
     }
 
     pub fn check_retained(&self) -> bool {
-        let (public, private) = ml_dsa_65::KG::keygen_from_seed(&self.signing_seed);
+        let (public, private) = crate::authentication::keypair_from_seed(&self.signing_seed);
         drop(private);
         public.into_bytes() == self.signing_public
     }
@@ -241,7 +250,6 @@ impl BodyDigest {
         self.digest
     }
     pub fn new(header: RegistrationHeader) -> Result<Self, Refusal> {
-        check_header(&header)?;
         let encoded = header.encode()?;
         let digest = hash_foundation_tuple_512(
             "sealed-lattice/registration-body",
@@ -266,11 +274,6 @@ impl BodyDigest {
     }
 }
 
-fn check_header(header: &RegistrationHeader) -> Result<(), Refusal> {
-    ml_dsa_65::PublicKey::try_from_bytes(header.signing_public).map_err(|_| Refusal::Shape)?;
-    Ok(())
-}
-
 /// A complete registration header of the poll, checked as the registration
 /// verifier checks it.
 pub(crate) fn checked_header(
@@ -282,21 +285,18 @@ pub(crate) fn checked_header(
         return Err(Refusal::Shape);
     }
     if header.poll != poll.identity()
-        || header.fhe_key_commitments.len() != source_binding::fhe_key_families(poll).len()
+        || header.source_bindings.len() != source_binding::fhe_key_families(poll).len()
     {
         return Err(Refusal::Context);
     }
-    check_header(&header)?;
     Ok(header)
 }
 
 pub(crate) fn verify_registration_signature(body: BodyDigest, signature: &[u8]) -> bool {
-    let Ok(signature) = signature.try_into() else {
+    let Ok(signature) = <[u8; SIGNATURE_BYTES]>::try_from(signature) else {
         return false;
     };
-    let Ok(public) = ml_dsa_65::PublicKey::try_from_bytes(body.signing_public) else {
-        return false;
-    };
+    let public = crate::authentication::PublicKey::from_bytes(body.signing_public);
     public.verify(&body.digest, &signature, REGISTRATION_SIGNATURE_CONTEXT)
 }
 

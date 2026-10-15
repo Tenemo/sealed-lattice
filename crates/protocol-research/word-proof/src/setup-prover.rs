@@ -11,9 +11,10 @@ use crate::{
 };
 use parallel_work::ProtocolHash;
 use statement_stream::{
-    PolynomialStream, committed_polynomial::CommittedPolynomial, setup_polynomial_stream,
+    PolynomialStream, committed_polynomial::CommittedPolynomial,
+    source_linked::polynomial as setup_polynomial_stream,
 };
-use supported_profile::{Profile, relation::*};
+use supported_profile::{Profile, relation::*, source_linked::relation as setup_relation};
 
 use std::collections::VecDeque;
 use zeroize::Zeroizing;
@@ -202,7 +203,9 @@ impl SetupProver {
                 .affine
                 .as_ref()
                 .is_none_or(|affine| index != affine.next())
-            || index >= self.profile.setup_polynomials()
+            || index
+                >= self.profile.setup_polynomials()
+                    + supported_profile::source_linked::SOURCE_POLYNOMIALS
         {
             return Err(());
         }
@@ -265,7 +268,7 @@ impl SetupProver {
             self.first.as_ref().ok_or(())?,
             prepared,
         );
-        if affine.next() == self.profile.setup_polynomials() {
+        if affine.next() == affine.polynomials() {
             self.second_pass_hash.update(self.public_root);
             if self.second_pass_hash.clone().finalize() != self.expected {
                 return Err(());
@@ -315,7 +318,8 @@ impl SetupProver {
                     transcript.next();
                     self.public_point = transcript::challenge(&transcript.message, 0, true);
                     self.affine = Some(AffineSum::begin(
-                        self.profile,
+                        statement_stream::source_linked::plan(self.profile, self.public_point)
+                            .unwrap(),
                         witness,
                         self.first.as_ref().unwrap(),
                         Challenges {

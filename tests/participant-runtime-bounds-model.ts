@@ -11,6 +11,7 @@ import {
     compileCommittedOfferCensus,
 } from '#tests/committed-offer-model.js';
 import { compileContributionBodyCensus } from '#tests/contribution-body-model.js';
+import { sourceCiphertextBytes } from '#tests/encrypted-registration-source-model.js';
 import { compileFirstOracleCheckpointCensus } from '#tests/first-oracle-checkpoint-model.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import { compileFullWordProofLayout } from '#tests/full-word-proof-layout-model.js';
@@ -82,6 +83,9 @@ export const compileParticipantRuntimeProfile = (
                 enrollment.maximumSourceCapsuleBytes,
             ),
             maximumProposalBytes: number(enrollment.maximumProposalBytes),
+            maximumSourceCiphertextBytes: number(
+                enrollment.maximumSourceCiphertextBytes,
+            ),
         },
         root: {
             maximumRecords: number(custody.maximumRootRecords),
@@ -90,6 +94,7 @@ export const compileParticipantRuntimeProfile = (
             setupCertificateBytes: number(custody.setupCertificateBytes),
         },
         contribution: {
+            sourceCiphertextBytes: number(sourceCiphertextBytes),
             expandedPolynomials: number(
                 relation.expandedStatementPolynomialCount,
             ),

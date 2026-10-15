@@ -285,9 +285,9 @@ pub fn setup_relation(profile: Profile) -> Relation {
 }
 
 /// Word columns of the ballot relation: each FHE ciphertext component's
-/// quotient, carries and error, the packed plaintext's lower word, the
-/// packing quotient, the scores less one, and each auxiliary component's
-/// quotient and error.
+/// quotient, carries and error, the packed plaintext's two nonnegative
+/// interval words, the packing quotient, the scores less one, and each
+/// auxiliary component's quotient and error.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BallotColumns {
     limbs: usize,
@@ -312,11 +312,14 @@ impl BallotColumns {
     pub fn plaintext(self) -> usize {
         2 * (self.limbs + 1)
     }
-    pub fn packing_quotient(self) -> usize {
+    pub fn plaintext_complement(self) -> usize {
         self.plaintext() + 1
     }
-    pub fn scores(self) -> usize {
+    pub fn packing_quotient(self) -> usize {
         self.plaintext() + 2
+    }
+    pub fn scores(self) -> usize {
+        self.plaintext() + 3
     }
     pub fn auxiliary_quotient(self, component: usize) -> usize {
         assert!(component < 2);
@@ -328,16 +331,12 @@ impl BallotColumns {
     pub fn words(self) -> usize {
         self.scores() + 5
     }
-    /// The FHE and auxiliary ephemerals' positive and negative supports, then
-    /// the packed plaintext's high bit.
+    /// The FHE and auxiliary ephemerals' positive and negative supports.
     pub fn fhe_positive(self) -> usize {
         self.words()
     }
     pub fn auxiliary_positive(self) -> usize {
         self.words() + 2
-    }
-    pub fn plaintext_high_bit(self) -> usize {
-        self.words() + 4
     }
     pub fn fhe_limbs(self) -> usize {
         self.limbs
@@ -352,7 +351,7 @@ pub fn ballot_relation(profile: Profile) -> Relation {
     let mut relation = Relation {
         tag: b"linked-scored-ballot",
         words,
-        booleans: 5,
+        booleans: 4,
         public_columns: 0,
         narrow: vec![
             (columns.fhe_error(0), error),
@@ -371,7 +370,6 @@ pub fn ballot_relation(profile: Profile) -> Relation {
                 columns.auxiliary_positive(),
                 columns.auxiliary_positive() + 1,
             ),
-            (columns.plaintext(), columns.plaintext_high_bit()),
         ],
         supports: vec![
             half_support(1, FHE_SECRET_SUPPORT),
@@ -386,8 +384,8 @@ pub fn ballot_relation(profile: Profile) -> Relation {
         relation.lookups(),
         FHE_SECRET_SUPPORT,
         AUXILIARY_SECRET_SUPPORT,
-        1 << (WORD_BITS - 1),
-        1 << WORD_BITS,
+        crate::PLAINTEXT_MODULUS as usize / 2,
+        crate::PLAINTEXT_MODULUS as usize - 1,
     ];
     for (left, right) in relation.zero_product_pairs.clone() {
         relation.parameters.extend([left, right]);

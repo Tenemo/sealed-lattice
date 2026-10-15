@@ -24,12 +24,12 @@ const recordBytes = 1_048_576;
 const bounds = {
     minimumProofBytes: 17,
     maximumProofBytes: 3 * recordBytes + 37,
-    bodyHeaderBytes: 72,
+    bodyHeaderBytes: 8,
 };
 // Synthetic framing exercises storage only. Production headers come from
-// the original credential's source inventory in the Rust module.
+// the contribution-body codec in the Rust module.
 const fixtureHeader = (length: number) => {
-    const header = new Uint8Array(72).fill(43);
+    const header = new Uint8Array(bounds.bodyHeaderBytes);
     new DataView(header.buffer).setBigUint64(0, BigInt(length), true);
     return header;
 };
@@ -163,7 +163,7 @@ describe('exact-length private contribution proof storage', () => {
             const bytes = proofBytes(length);
             const retained = await fixture();
             const header = await retained.retain(bytes, pieces);
-            expect(header.length).toBe(72);
+            expect(header.length).toBe(8);
             expect(
                 new DataView(
                     header.buffer,
@@ -329,8 +329,8 @@ describe('exact-length private contribution proof storage', () => {
             shortProof,
             tooLong,
             overflowing,
-            header.subarray(0, 71),
-            new Uint8Array(73),
+            header.subarray(0, 7),
+            new Uint8Array(9),
         ])
             await expect(
                 readProof(bounds, malformed, retained.read, () => undefined),

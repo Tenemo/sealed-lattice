@@ -2,7 +2,7 @@ use sha3::{
     Shake256,
     digest::{ExtendableOutput, Update, XofReader},
 };
-use supported_profile::{Profile, relation::setup_relation};
+use supported_profile::{Profile, source_linked::relation as setup_relation};
 use word_proof::{
     transcript::{Transcript, challenge},
     tree::Tree,

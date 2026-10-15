@@ -9,7 +9,7 @@ use num_bigint::BigInt;
 use std::sync::Arc;
 use supported_profile::{
     PLAINTEXT_MODULUS, Profile,
-    plaintext::{multiply, odd_power_values, power, slot_positions},
+    plaintext::{ACTIVE_SLOTS, ENCODING_DEGREE, multiply, odd_power_values, power, slot_positions},
     relation::{SYSTEMATIC, release_coefficient_bytes},
 };
 
@@ -22,48 +22,41 @@ fn selected_positions(
 ) -> Result<Vec<usize>, Refusal> {
     let options = profile.options();
     let window = profile.rank_window();
+    let coefficient_stride = 2 * SYSTEMATIC / ENCODING_DEGREE;
     if !(1..=options).contains(&top_count)
         || coefficients.len() != SYSTEMATIC
         || coefficients.iter().any(|value| *value >= PLAINTEXT_MODULUS)
         || coefficients
             .iter()
-            .skip(1)
-            .step_by(2)
-            .any(|value| *value != 0)
+            .enumerate()
+            .any(|(index, value)| !index.is_multiple_of(coefficient_stride) && *value != 0)
     {
         return Err(Refusal::Encoding);
     }
-    let length = SYSTEMATIC / 2;
     let values = odd_power_values(coefficients);
     let mut selected = vec![None; top_count];
-    let mut used = vec![false; length];
-    for (slot, index) in slot_positions(SYSTEMATIC).enumerate() {
-        used[index] = true;
+    let mut positions = vec![None; ACTIVE_SLOTS];
+    for option in 0..options {
+        for rank in 0..top_count {
+            let slot = (option * window + ACTIVE_SLOTS - rank) % ACTIVE_SLOTS;
+            positions[slot] = Some((option, rank));
+        }
+    }
+    for (slot, index) in slot_positions(ENCODING_DEGREE).enumerate() {
+        if values[ENCODING_DEGREE / 2 - 1 - index] != 0 {
+            return Err(Refusal::Encoding);
+        }
         let value = values[index];
-        if slot < options * options * window
-            && slot.is_multiple_of(window)
-            && slot / window % options < top_count
-        {
+        if let Some((option, rank)) = positions[slot] {
             if value > 1 {
                 return Err(Refusal::Encoding);
             }
-            if value == 1 {
-                let option = slot / (options * window);
-                let rank = slot / window % options;
-                if selected[rank].replace(option).is_some() {
-                    return Err(Refusal::Encoding);
-                }
+            if value == 1 && selected[rank].replace(option).is_some() {
+                return Err(Refusal::Encoding);
             }
         } else if value != 0 {
             return Err(Refusal::Encoding);
         }
-    }
-    if values
-        .iter()
-        .enumerate()
-        .any(|(index, value)| !used[index] && *value != 0)
-    {
-        return Err(Refusal::Encoding);
     }
     let result = selected
         .into_iter()

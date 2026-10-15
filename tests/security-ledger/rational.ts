@@ -19,19 +19,8 @@ export const addRationals = (...values: readonly Rational[]): Rational =>
         rational(0n),
     );
 
-export const scale = (value: Rational, factor: bigint): Rational =>
-    rational(value.numerator * factor, value.denominator);
-
-export const divide = (value: Rational, divisor: bigint): Rational =>
-    rational(value.numerator, value.denominator * divisor);
-
 export const atMost = (left: Rational, right: Rational) =>
     left.numerator * right.denominator <= right.numerator * left.denominator;
-
-export const largest = (values: readonly Rational[]) =>
-    values.reduce((maximum, value) =>
-        atMost(value, maximum) ? maximum : value,
-    );
 
 // Smallest integer r with value <= r^2. Newton's iteration from above
 // descends to the integer square root's floor.

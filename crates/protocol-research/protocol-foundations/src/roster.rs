@@ -28,7 +28,7 @@ pub struct RetainedContributionContext {
     pub(crate) owner_body: [u8; 64],
     profile: Profile,
     role: Vec<u8>,
-    fhe_key_commitment: [u8; 64],
+    source_binding: [u8; 64],
 }
 impl RetainedContributionContext {
     /// The verified poll fixes both the profile's option count and the
@@ -46,7 +46,7 @@ impl RetainedContributionContext {
         if credential.signing_public() != &header.signing_public
             || credential.completed_body != Some(original.body_digest())
             || header.poll != verified_poll.identity()
-            || header.fhe_key_commitments.len()
+            || header.source_bindings.len()
                 != crate::source_binding::fhe_key_families(verified_poll).len()
         {
             return Err(Refusal::Context);
@@ -86,10 +86,7 @@ impl RetainedContributionContext {
         let profile = Profile::new(count, verified_poll.manifest().option_count())
             .map_err(|_| Refusal::Shape)?;
         let family = crate::source_binding::fhe_key_family_index(verified_poll, profile)?;
-        let fhe_key_commitment = *header
-            .fhe_key_commitments
-            .get(family)
-            .ok_or(Refusal::Context)?;
+        let source_binding = *header.source_bindings.get(family).ok_or(Refusal::Context)?;
         if bodies.len() != 4 + count * 64 || position >= count {
             return Err(Refusal::Shape);
         }
@@ -111,7 +108,7 @@ impl RetainedContributionContext {
             owner_body,
             profile,
             role,
-            fhe_key_commitment,
+            source_binding,
         })
     }
     pub fn identity(&self) -> &[u8; 64] {
@@ -123,8 +120,8 @@ impl RetainedContributionContext {
     pub fn profile(&self) -> Profile {
         self.profile
     }
-    pub fn fhe_key_commitment(&self) -> &[u8; 64] {
-        &self.fhe_key_commitment
+    pub fn source_binding(&self) -> &[u8; 64] {
+        &self.source_binding
     }
     /// The checkpoint's routing, the poll and proposal identities, and its
     /// profile must match this original owner before its sealed records are
@@ -200,7 +197,7 @@ impl RosterProposal {
         let mut organizer_position = None;
         for (position, record) in records.iter().enumerate() {
             let header = record.header();
-            if header.poll != poll.identity() || header.fhe_key_commitments.len() != family_count {
+            if header.poll != poll.identity() || header.source_bindings.len() != family_count {
                 return Err(Refusal::Context);
             }
             bodies.extend(record.body_digest());
@@ -257,16 +254,23 @@ impl RosterProposal {
     }
     /// The original registration commitment for this roster's exact FHE
     /// modulus and common-sampler family.
-    pub fn fhe_key_commitment(&self, position: usize) -> Result<&[u8; 64], Refusal> {
+    pub fn source_binding(&self, position: usize) -> Result<&[u8; 64], Refusal> {
         self.records
             .get(position)
             .and_then(|record| {
                 record
                     .header()
-                    .fhe_key_commitments
+                    .source_bindings
                     .get(self.fhe_key_family_index)
             })
             .ok_or(Refusal::Context)
+    }
+    /// Byte range of this roster's family in each original registration's
+    /// canonical ciphertext inventory. This is transport metadata only.
+    pub fn source_ciphertext_range(&self) -> std::ops::Range<usize> {
+        let bytes = setup_witness::encrypted_source::ciphertext_bytes();
+        let start = self.fhe_key_family_index * bytes;
+        start..start + bytes
     }
     pub fn organizer_position(&self) -> usize {
         self.organizer_position

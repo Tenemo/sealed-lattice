@@ -1,3 +1,4 @@
+import { compileCommittedOfferCensus } from '#tests/committed-offer-model.js';
 import { compileCommonAgreementDegreeCensus } from '#tests/common-agreement-degree-model.js';
 import {
     framedProofHashBytes,
@@ -441,7 +442,11 @@ export const compileProofHashDomainCensus = () => {
             const expansion =
                 BigInt(profile.setupContributorCount) *
                     (wordExpansion + census.maximumVerifierQueries) +
-                5n;
+                BigInt(
+                    compileCommittedOfferCensus(profile).committedPolynomials
+                        .length,
+                ) +
+                1n;
             return expansion > maximum ? expansion : maximum;
         },
         wordExpansion,

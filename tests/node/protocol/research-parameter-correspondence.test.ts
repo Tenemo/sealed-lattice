@@ -47,20 +47,20 @@ describe('tracked research parameter correspondence', () => {
         expect([...stored.subarray(29, 33)]).toEqual([3, 20, 2, 20]);
         expect(stored.length).toBe(33 + 18 * 19 * supportedProfileRecordBytes);
         // The completion record, independently of the search: the FHE
-        // modulus 65537*65319*2^832+1 and the release modulus
-        // 65537*65445*2^160+1, both with Proth witness 7.
+        // modulus 4289069913*2^736+1 and the release modulus
+        // 4291798071*2^160+1, with Proth witnesses 7 and 5.
         const offset =
             33 + ((10 - 3) * 19 + (10 - 2)) * supportedProfileRecordBytes;
         const record = stored.subarray(
             offset,
             offset + supportedProfileRecordBytes,
         );
-        expect(record.readUInt16LE(0)).toBe(832);
-        expect(record.readUInt32LE(2)).toBe(65537 * 65319);
+        expect(record.readUInt16LE(0)).toBe(736);
+        expect(record.readUInt32LE(2)).toBe(4289069913);
         expect(record.readUInt16LE(6)).toBe(7);
         expect(record.readUInt16LE(8)).toBe(160);
-        expect(record.readUInt32LE(10)).toBe(65537 * 65445);
-        expect(record.readUInt16LE(14)).toBe(7);
+        expect(record.readUInt32LE(10)).toBe(4291798071);
+        expect(record.readUInt16LE(14)).toBe(5);
     });
 
     it('certifies every Gaussian CDF threshold using positive-series interval bounds', async () => {

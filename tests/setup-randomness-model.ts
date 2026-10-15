@@ -33,8 +33,9 @@ export const compileSetupRandomnessCensus = (
     const degree = fixedModulusBfvInputs.polynomialDegree;
     const samplesPerContribution =
         (4n * gadgetLength + 2n * participants - 1n) * degree;
-    const samplesPerSourceFamily = degree;
-    const samplesPerEnrollment = (1n + sourceFamilyCount) * degree;
+    const samplesPerSourceFamily = 5n * degree;
+    const samplesPerEnrollment =
+        degree + sourceFamilyCount * samplesPerSourceFamily;
     const samplesPerPreparation =
         contributors * samplesPerContribution +
         participants * samplesPerEnrollment;
@@ -104,8 +105,8 @@ export const compileSetupRandomnessCensus = (
     };
 };
 
-// A radix-prefix quotient overestimates the true quotient by at most one
-// whenever its value is smaller than the leading modulus digit.
+// A radix-prefix quotient overestimates the true quotient by at most two
+// when its estimate is less than twice the leading modulus digit.
 export const reduceSignedDigitModel = (
     digits: readonly bigint[],
     radix: bigint,
@@ -128,11 +129,18 @@ export const reduceSignedDigitModel = (
         throw new Error('Invalid leading modulus digit.');
     const magnitude = value < 0n ? -value : value;
     const estimate = magnitude / scale / leading;
-    if (estimate >= leading)
-        throw new Error('The single-correction premise fails.');
-    const correction = magnitude < estimate * modulus ? 1n : 0n;
-    let quotient = estimate - correction;
+    if (estimate >= 2n * leading)
+        throw new Error('The two-correction premise fails.');
+    let quotient = estimate,
+        correction = 0n;
     let remainder = magnitude - quotient * modulus;
+    for (let pass = 0; pass < 2; pass++) {
+        if (remainder < 0n) {
+            remainder += modulus;
+            quotient--;
+            correction++;
+        }
+    }
     if (remainder > modulus / 2n) {
         remainder -= modulus;
         quotient++;

@@ -178,6 +178,10 @@ export const compileCandidatePublicationCensus = (
     publish(0, 'poll', pollFiles);
     const registrationFiles = [
         file('polynomial-01.bin', key.publicKeyBytes),
+        file(
+            'source-ciphertexts.bin',
+            registration.maximumSourceCiphertextBytes,
+        ),
         file('registration-header.bin', registration.maximumHeaderBytes),
         file('signature.bin', registration.signatureBytes),
     ];

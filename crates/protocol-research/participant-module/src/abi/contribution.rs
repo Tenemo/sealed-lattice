@@ -47,13 +47,23 @@ fn offer_operation(
                 .map_err(|_| Refusal::Shape)?;
             let enrollment = state.enrollment.as_ref().ok_or(Refusal::Context)?;
             enrollment.credential.validate_offer_owner(&context)?;
-            let header = enrollment
-                .contribution_header(context.profile(), proof_length)
-                .map_err(|_| Refusal::Context)?;
+            let header = protocol_foundations::contribution_body::body_header(
+                context.profile(),
+                proof_length,
+            )
+            .map_err(|_| Refusal::Context)?;
             if operation == Some(OfferSigningOperation::BeginBody) {
-                state
-                    .offer
-                    .begin_body(&enrollment.credential, context, &header)?;
+                let original_coordinate = super::own_registration::with_poll(|poll| {
+                    enrollment.contribution_coordinate_hash(poll, context.profile())
+                })
+                .ok_or(Refusal::Context)?
+                .map_err(|_| Refusal::Context)?;
+                state.offer.begin_body(
+                    &enrollment.credential,
+                    context,
+                    &header,
+                    original_coordinate,
+                )?;
             }
             state.participant_output = header.to_vec();
         }
@@ -152,7 +162,15 @@ pub extern "C" fn begin_contribution(position: usize) -> u32 {
         {
             return 1;
         }
-        let Ok(source) = enrollment.contribution_source(proposal.proposal().profile()) else {
+        let Some(Ok(source)) = super::own_registration::with_poll(|poll| {
+            enrollment.contribution_source(poll, proposal.proposal().profile())
+        }) else {
+            return 1;
+        };
+        let Ok(source) = enrollment
+            .credential
+            .source_contribution(proposal, position, source)
+        else {
             return 1;
         };
         CONTRIBUTION.with(|session| {

@@ -101,6 +101,7 @@ struct Ceremony {
     headers: Vec<Vec<u8>>,
     signatures: Vec<[u8; SIGNATURE_BYTES]>,
     keys: Vec<Vec<u8>>,
+    sources: Vec<Vec<u8>>,
     proposal: RosterProposal,
 }
 
@@ -121,7 +122,7 @@ fn ceremony() -> Ceremony {
         .collect();
     let draft = PollDraft::new(Manifest::new(text("Question"), options).unwrap(), 2, 3).unwrap();
     let mut credentials: Vec<Credential> = (0..3u8)
-        .map(|seed| Credential::from_seed([seed + 1; 32]))
+        .map(|seed| Credential::from_seed([seed + 1; 64]))
         .collect();
     let runtime = [4; 64];
     let packet = credentials[0].create_poll(draft, runtime, [5; 32]).unwrap();
@@ -140,16 +141,16 @@ fn ceremony() -> Ceremony {
     let mut headers = Vec::new();
     let mut signatures = Vec::new();
     let mut records = Vec::new();
+    let mut sources = Vec::new();
     for (position, credential) in credentials.iter_mut().enumerate() {
+        let (source_bindings, source_bytes) =
+            crate::tests::registration_sources(&poll, credential.signing_public());
         let header = RegistrationHeader {
             username: normalize_username(format!("Participant {position}").as_bytes()).unwrap(),
             poll: poll.identity(),
             signing_public: *credential.signing_public(),
             recipient_key_hash: ProtocolHash::digest(&keys[position]),
-            fhe_key_commitments: vec![
-                [7; 64];
-                crate::source_binding::fhe_key_families(&poll).len()
-            ],
+            source_bindings,
         }
         .encode()
         .unwrap();
@@ -160,9 +161,13 @@ fn ceremony() -> Ceremony {
             verifier.push_key(part).unwrap();
         }
         verifier.finish_key().unwrap();
+        for part in source_bytes.chunks(CHUNK_LIMIT) {
+            verifier.push_sources(part).unwrap();
+        }
         records.push(Arc::new(verifier.finish().unwrap()));
         headers.push(header);
         signatures.push(signature);
+        sources.push(source_bytes);
     }
     let proposal = RosterProposal::new(&poll, records).unwrap();
     Ceremony {
@@ -171,6 +176,7 @@ fn ceremony() -> Ceremony {
         headers,
         signatures,
         keys,
+        sources,
         proposal,
     }
 }
@@ -213,6 +219,9 @@ fn stream_record(
         verifier.push_key(position, part)?;
     }
     verifier.finish_key(position)?;
+    for part in ceremony.sources[served].chunks(65_537) {
+        verifier.push_sources(position, part)?;
+    }
     verifier.finish_record(position)
 }
 
@@ -276,6 +285,9 @@ fn records_bind_their_requested_identity_and_retries_keep_verified_positions() {
         verifier.push_key(1, part).unwrap();
     }
     verifier.finish_key(1).unwrap();
+    for part in ceremony.sources[1].chunks(CHUNK_LIMIT) {
+        verifier.push_sources(1, part).unwrap();
+    }
     assert!(matches!(verifier.finish_record(1), Err(Refusal::Crypto)));
     verifier.discard_record(1).unwrap();
     verifier
@@ -285,6 +297,9 @@ fn records_bind_their_requested_identity_and_retries_keep_verified_positions() {
         verifier.push_key(1, part).unwrap();
     }
     verifier.finish_key(1).unwrap();
+    for part in ceremony.sources[1].chunks(CHUNK_LIMIT) {
+        verifier.push_sources(1, part).unwrap();
+    }
     assert!(matches!(verifier.finish_record(1), Err(Refusal::Shape)));
     assert!(matches!(verifier.finish(), Err(Refusal::Shape)));
     verifier.discard_record(1).unwrap();

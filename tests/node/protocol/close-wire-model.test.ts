@@ -15,8 +15,8 @@ import {
     deriveSupportedProfile,
 } from '#tests/supported-profile-model.js';
 
-// FIPS 204 Table 2: an ML-DSA-65 signature has 3309 bytes.
-const signatureBytes = 3309n;
+// The purpose credential has 131 chain values and four Merkle siblings.
+const signatureBytes = 8642n;
 const rosterProfile = (participantCount: number) =>
     deriveSupportedProfile(
         participantCount,

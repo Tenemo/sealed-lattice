@@ -92,13 +92,20 @@ fn both_encryption_moduli_match_independent_integer_convolution_and_decoding() {
     let small = Profile::new(3, 2).unwrap();
     let wide = Profile::new(20, 20).unwrap();
     for (profile, family, plaintext_modulus) in [
-        (small, Family::Fhe, 65537i32),
-        (wide, Family::Fhe, 65537i32),
-        (small, Family::Auxiliary, 257i32),
+        (small, Family::Fhe, PLAINTEXT_MODULUS as i32),
+        (wide, Family::Fhe, PLAINTEXT_MODULUS as i32),
+        (small, Family::Auxiliary, AUXILIARY_PLAINTEXT_MODULUS as i32),
     ] {
         let bytes = profile.family_modulus(family);
         let modulus = BigInt::from_bytes_le(Sign::Plus, &bytes);
         let scale = (&modulus - BigInt::from(1)) / plaintext_modulus;
+        let limbs = bytes.len().div_ceil(12);
+        if family == Family::Fhe && profile == small {
+            assert_ne!(
+                &scale % (BigInt::from(1) << (96 * (limbs - 1))),
+                BigInt::from(0)
+            );
+        }
         let common: Vec<_> = (0..degree)
             .map(|index| {
                 centered(
@@ -178,7 +185,30 @@ fn both_encryption_moduli_match_independent_integer_convolution_and_decoding() {
                         + &modulus * BigInt::from(ciphertext.quotients[position])
                 );
             }
-            assert_eq!(ciphertext.carries.len(), bytes.len().div_ceil(12) - 1);
+            assert_eq!(ciphertext.carries.len(), limbs - 1);
+            // Integer remainders rebuild every lower-limb equation without
+            // the implementation's digit extraction or carry recurrence.
+            for limb in 0..limbs - 1 {
+                let boundary = BigInt::from(1) << (96 * (limb + 1));
+                let lower: Vec<_> = public.iter().map(|value| value % &boundary).collect();
+                let products = ordinary(&lower, &ephemeral);
+                for position in 0..degree {
+                    let residual = &products[position]
+                        + BigInt::from(ciphertext.errors[position])
+                        + if component_index == 0 {
+                            (&scale % &boundary) * message[position]
+                        } else {
+                            BigInt::from(0)
+                        }
+                        - (&ciphertext.coefficients[position] % &boundary)
+                        - (&modulus % &boundary) * ciphertext.quotients[position];
+                    assert_eq!(&residual % &boundary, BigInt::from(0));
+                    assert_eq!(
+                        residual / &boundary,
+                        BigInt::from(ciphertext.carries[limb][position])
+                    );
+                }
+            }
         }
         let secret_product = ordinary(&second.coefficients, &secret);
         let expected_key_noise = ordinary(&key_error, &ephemeral);

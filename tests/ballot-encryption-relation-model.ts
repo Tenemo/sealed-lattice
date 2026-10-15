@@ -42,7 +42,8 @@ export const compileBallotEncryptionColumnLayout = (
             add(`fhe-carry-${component}-${carry}`, 65535);
         errors.push(add(`fhe-error-${component}`, 127));
     }
-    const plaintext = add('plaintext-lower-word', 65535);
+    add('plaintext-lower-word', 65535);
+    add('plaintext-complement-word', 65535);
     add('packing-quotient', 65535);
     const scores = add('score-minus-one', 9);
     for (let component = 0; component < 2; component++) {
@@ -54,11 +55,9 @@ export const compileBallotEncryptionColumnLayout = (
     const fheNegative = add('fhe-negative-support', 1);
     const auxiliaryPositive = add('auxiliary-positive-support', 1);
     const auxiliaryNegative = add('auxiliary-negative-support', 1);
-    const plaintextHighBit = add('plaintext-high-bit', 1);
     const zeroProducts = [
         [fhePositive, fheNegative],
         [auxiliaryPositive, auxiliaryNegative],
-        [plaintext, plaintextHighBit],
     ] as const;
     const lookups = Array.from({ length: wordColumns }, (_unused, column) => ({
         column,
@@ -104,10 +103,9 @@ export const compileBallotEncryptionRelationCensus = (
     const trueQuotientBound =
         ((support + 1n) * (modulus / 2n) + scale * plaintextBound + error) /
         modulus;
-    // The current scale occupies only the final public radix limb. Earlier
-    // carry recurrences therefore contain no large plaintext product.
-    assert.equal(scale % radix ** BigInt(limbs - 1), 0n);
-    const trueCarryBound = support + trueQuotientBound + 3n;
+    // The plaintext product contributes to every radix limb of the scale.
+    assert(scale > 0n);
+    const trueCarryBound = support + trueQuotientBound + plaintextBound + 3n;
     // One public ciphertext digit per row; a single limb has no carries.
     const residualBound =
         (support + quotientBound + plaintextBound + 1n) * (radix - 1n) +
@@ -161,7 +159,7 @@ export const compileBallotEncryptionRelationCensus = (
             fixedModulusBfvInputs.polynomialDegree *
             compileSmallLimbProofFieldCensus().packedFieldElementByteLength,
         affineRows:
-            BigInt(2 * limbs + 1) * fixedModulusBfvInputs.polynomialDegree +
+            BigInt(2 * limbs + 2) * fixedModulusBfvInputs.polynomialDegree +
             2n * auxiliary.degree +
             4n,
     };
@@ -213,39 +211,42 @@ const inverseTransform = (values: number[], root: number) => {
     return values.map((value) => fieldReduce(value * inverseDegree));
 };
 
-// Every option has one comparison window for every rank, whatever result
-// length the poll requests.
+// Each option has one comparison window. Literal scores occupy the
+// complementary rotation orbit, which ranking masks before output.
 export const ballotPackingMatrix = (degree: number, optionCount: number) => {
     const window = 2 ** Math.ceil(Math.log2(optionCount));
-    const activeSlots = optionCount * optionCount * window;
-    assert.ok(activeSlots + optionCount < degree / 4);
-    const root = fieldPower(3, (fieldModulus - 1) / degree);
-    const orbit = Array.from({ length: degree / 4 }, () => 0);
+    const encodingDegree = Math.min(degree, 4096);
+    const coefficientStride = degree / encodingDegree;
+    assert.ok(Number.isInteger(coefficientStride));
+    const activeSlots = encodingDegree / 4;
+    assert.ok(optionCount * window <= activeSlots);
+    assert.equal((fieldModulus - 1) % encodingDegree, 0);
+    const root = fieldPower(11, (fieldModulus - 1) / encodingDegree);
+    const orbit = Array.from({ length: activeSlots }, () => 0);
     let exponent = 1;
     for (let index = 0; index < orbit.length; index++) {
         orbit[index] = exponent;
-        exponent = (exponent * 5) % degree;
+        exponent = (exponent * 5) % encodingDegree;
     }
     const columns = Array.from({ length: optionCount }, (_unused, selected) => {
-        const slots = Array.from({ length: degree / 4 }, () => 0);
+        const slots = Array.from({ length: activeSlots }, () => 0);
         for (let option = 0; option < optionCount; option++)
-            for (let rank = 0; rank < optionCount; rank++)
-                for (let opponent = 0; opponent < optionCount; opponent++)
-                    slots[(option * optionCount + rank) * window + opponent] =
-                        2 * Number(opponent === selected) -
-                        2 * Number(option === selected);
-        slots[activeSlots + selected] = 1;
-        const natural = Array.from({ length: degree / 2 }, () => 0);
+            for (let opponent = 0; opponent < optionCount; opponent++)
+                slots[option * window + opponent] =
+                    2 * Number(opponent === selected) -
+                    2 * Number(option === selected);
+        const natural = Array.from({ length: encodingDegree / 2 }, () => 0);
         orbit.forEach(
             (value, index) =>
                 (natural[(value - 1) / 2] = fieldReduce(slots[index])),
         );
+        natural[(encodingDegree - orbit[selected] - 1) / 2] = 1;
         const transformed = inverseTransform(natural, fieldReduce(root * root));
         const result = Array.from({ length: degree }, () => 0n);
         const inverseRoot = fieldPower(root, fieldModulus - 2);
         let twist = 1;
         transformed.forEach((value, index) => {
-            result[2 * index] = centered(
+            result[2 * coefficientStride * index] = centered(
                 BigInt(fieldReduce(value * twist)),
                 plaintextModulus,
             );
@@ -312,9 +313,11 @@ export const createBallotEncryptionRelationModel = (
     const plaintext = integerPlaintext.map((value) =>
         centered(value, plaintextModulus),
     );
-    const plaintextWords = plaintext.map((value) => (value + 32768n) % 65536n);
-    const plaintextHighBits = plaintext.map(
-        (value) => (value + 32768n) / 65536n,
+    const plaintextWords = plaintext.map(
+        (value) => value + plaintextModulus / 2n,
+    );
+    const plaintextComplements = plaintextWords.map(
+        (value) => plaintextModulus - 1n - value,
     );
     const packingQuotient = plaintext.map(
         (value, index) => (value - integerPlaintext[index]) / plaintextModulus,
@@ -415,10 +418,7 @@ export const createBallotEncryptionRelationModel = (
         ),
     );
     const readPlaintext = () =>
-        plaintextWords.map(
-            (value, index) =>
-                value - 32768n + 65536n * plaintextHighBits[index],
-        );
+        plaintextWords.map((value) => value - plaintextModulus / 2n);
     const fheRows = () =>
         [0, 1].map((component) =>
             Array.from({ length: limbs }, (_unused, limb) =>
@@ -454,6 +454,7 @@ export const createBallotEncryptionRelationModel = (
                 carries[component][limb][position] = value / radix;
             });
     const rows = () => ({
+        fhe: fheRows().flat(2),
         packing: readPlaintext().map(
             (value, position) =>
                 value -
@@ -464,7 +465,10 @@ export const createBallotEncryptionRelationModel = (
                 ) -
                 plaintextModulus * packingQuotient[position],
         ),
-        fhe: fheRows().flat(2),
+        interval: plaintextWords.map(
+            (value, index) =>
+                value + plaintextComplements[index] - (plaintextModulus - 1n),
+        ),
         auxiliary: [0, 1].flatMap((component) =>
             Array.from(
                 { length: auxiliaryDegree },
@@ -492,9 +496,8 @@ export const createBallotEncryptionRelationModel = (
             (value, index) =>
                 value >= 0n &&
                 value < 65536n &&
-                (plaintextHighBits[index] === 0n ||
-                    plaintextHighBits[index] === 1n) &&
-                value * plaintextHighBits[index] === 0n,
+                plaintextComplements[index] >= 0n &&
+                plaintextComplements[index] < 65536n,
         ) &&
         packingQuotient.every((value) => signedRange(value, 16)) &&
         [fhe, auxiliaryCiphertext].every(
@@ -514,7 +517,10 @@ export const createBallotEncryptionRelationModel = (
                 ),
         ) &&
         carries.flat(2).every((value) => signedRange(value, 16));
-    const decodedSlots = packing.orbit.map((exponent) => {
+    const decodedSlots = [
+        ...packing.orbit,
+        ...packing.orbit.map((exponent) => degree - exponent),
+    ].map((exponent) => {
         const point = fieldPower(packing.root, exponent);
         const subring = Array.from({ length: degree / 2 }, (_unused, index) =>
             Number(modulo(fhe.decoded[2 * index], plaintextModulus)),
@@ -527,7 +533,7 @@ export const createBallotEncryptionRelationModel = (
     return {
         scoreWords,
         plaintextWords,
-        plaintextHighBits,
+        plaintextComplements,
         packingQuotient,
         fhe,
         carries,

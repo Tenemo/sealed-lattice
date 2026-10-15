@@ -18,8 +18,7 @@ export const openSetupCache = async (namespace: string) => {
     const opened = indexedDB.open(namespacedName(setupCacheName, namespace), 2);
     opened.onupgradeneeded = () => {
         for (const store of [cacheStore, 'collection'])
-            if (!opened.result.objectStoreNames.contains(store))
-                opened.result.createObjectStore(store);
+            opened.result.createObjectStore(store);
     };
     try {
         return await requestResult(opened);

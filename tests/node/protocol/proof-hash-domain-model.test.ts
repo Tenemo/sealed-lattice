@@ -50,7 +50,7 @@ const contextFields = () => [
     Buffer.alloc(16),
     Buffer.alloc(16),
     Buffer.alloc(16),
-    Buffer.alloc(776),
+    Buffer.alloc(736),
     Buffer.alloc(16),
     Buffer.alloc(64, 25),
 ];
@@ -64,7 +64,7 @@ describe('ballot hash domain correspondence model', () => {
                     unsigned(0, 4),
                     unsigned(9, 4),
                     Buffer.alloc(128),
-                    Buffer.alloc(576),
+                    Buffer.alloc(544),
                 ]),
                 [],
             ],
@@ -130,8 +130,8 @@ describe('ballot hash domain correspondence model', () => {
 
     it('covers every leaf width and the last stage and index boundaries', () => {
         for (const [stage, index, width] of [
-            [0, 262143, 576],
-            [1, 262143, 1632],
+            [0, 262143, 544],
+            [1, 262143, 1584],
             [2, 262143, 48],
             [18, 3, 48],
         ]) {
@@ -147,8 +147,8 @@ describe('ballot hash domain correspondence model', () => {
             expect(hasProofHashLayout(parsed!)).toBe(true);
         }
         for (const [stage, index, width] of [
-            [0, 262144, 576],
-            [1, 0, 576],
+            [0, 262144, 544],
+            [1, 0, 544],
             [18, 4, 48],
             [19, 0, 48],
         ]) {
@@ -171,7 +171,7 @@ describe('ballot hash domain correspondence model', () => {
                 unsigned(0xffffffff, 4),
                 unsigned(0xffffffff, 4),
                 Buffer.alloc(128),
-                Buffer.alloc(576, 255),
+                Buffer.alloc(544, 255),
             ]),
             frame(true, 'node', [
                 unsigned(0, 4),
@@ -221,7 +221,7 @@ describe('ballot hash domain correspondence model', () => {
         // The digest a context binds hashes the raw statement, whose literal
         // marker exceeds the input as a framed length. Every raw statement is
         // challenged, whatever owner proves it.
-        const statement = Buffer.alloc(28672136);
+        const statement = Buffer.alloc(25526408);
         statement.write('LBS1', 'ascii');
         const statementDigestInput = Buffer.concat([
             protocolHashPrefix,
@@ -252,7 +252,7 @@ describe('ballot hash domain correspondence model', () => {
             unsigned(0, 4),
             unsigned(0, 4),
             Buffer.alloc(128),
-            Buffer.alloc(576),
+            Buffer.alloc(544),
         ]);
         const uppercaseOwner = Buffer.from(good);
         const ownerOffset = good.indexOf(Buffer.from('ab'.repeat(64)));
@@ -271,7 +271,7 @@ describe('ballot hash domain correspondence model', () => {
                 unsigned(0, 4),
                 unsigned(0, 4),
                 Buffer.alloc(128),
-                Buffer.alloc(576),
+                Buffer.alloc(544),
             ]),
             frame(true, 'leaf', [
                 unsigned(0, 4),
@@ -286,19 +286,44 @@ describe('ballot hash domain correspondence model', () => {
         );
     });
 
-    it('keeps the signing-key and participant-identity dependency inputs auxiliary', () => {
-        // FIPS204 Algorithms 6, 32 and 33: seed, secret-vector and pk hash.
-        for (const length of [34, 66, 1952])
-            for (const pattern of [0, 1, 255])
-                expect(
-                    parseProofHashInput(Buffer.alloc(length, pattern)),
-                ).toBeUndefined();
-        // The foundation tuple starts with its schema identifier and item
-        // count, not a proof tag.
-        const participantIdentity = Buffer.alloc(2100);
-        participantIdentity.set([1, 0, 2, 0, 0, 0]);
-        expect(parseProofHashInput(participantIdentity)).toBeUndefined();
-        // This is a raw-domain control, not a native key-generation trace.
+    it('keeps purpose-credential and participant-identity inputs outside the proof grammar', () => {
+        for (const pattern of [0, 1, 255]) {
+            const digest = Buffer.alloc(64, pattern);
+            for (const [domain, fields] of [
+                [
+                    'purpose-wots/secret/v1',
+                    [digest, unsigned(3, 1), unsigned(17, 2)],
+                ],
+                ['purpose-wots/chain/v1', [digest]],
+                [
+                    'purpose-wots/leaf/v1',
+                    [unsigned(3, 1), Buffer.alloc(131 * 64, pattern)],
+                ],
+                ['purpose-wots/node/v1', [unsigned(2, 1), digest, digest]],
+                [
+                    'purpose-wots/message/v1',
+                    [
+                        digest,
+                        unsigned(3, 1),
+                        unsigned(16, 8),
+                        Buffer.alloc(16, pattern),
+                    ],
+                ],
+                ['purpose-wots/unused/v1', [unsigned(12, 1)]],
+            ] as const) {
+                const input = Buffer.concat([
+                    protocolHashPrefix,
+                    Buffer.from(domain),
+                    ...fields,
+                ]);
+                expect(parseProofHashInput(input)).toBeUndefined();
+            }
+            const participantIdentity = tuple([
+                ascii('sealed-lattice/foundation/participant-identity'),
+                item(itemType.rawBytes, digest),
+            ]);
+            expect(parseProofHashInput(participantIdentity)).toBeUndefined();
+        }
     });
 
     it('exposes the exact chain references rather than the hexadecimal owner encoding', () => {

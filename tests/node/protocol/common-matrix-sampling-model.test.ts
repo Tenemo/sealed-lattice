@@ -97,21 +97,26 @@ describe('fixed-suite public-matrix sampling', () => {
 
     it('covers every common vector and charges the complete sampling expansion', () => {
         const census = compileCommonMatrixSamplingCensus(completionProfile());
-        // Six gadget coordinates in each of a, u, and the automorphism vector,
+        // The 768-bit completion modulus takes nine 88-bit gadget coordinates
+        // in each of a, u, and the automorphism vector,
         // plus the sharing polynomial and both fixed auxiliary coordinates.
-        expect(census.fhePolynomialCount).toBe(18n);
+        const ciphertextModulus = 4289069913n * (1n << 736n) + 1n;
+        expect(completionProfile().ciphertext.modulus).toBe(ciphertextModulus);
+        expect(ciphertextModulus).toBeGreaterThan(1n << (8n * 88n));
+        expect(ciphertextModulus).toBeLessThan(1n << (9n * 88n));
+        expect(census.fhePolynomialCount).toBe(3n * 9n);
         expect(census.coefficientCount).toBe(
-            18n * 65536n + 65536n + 2n * 4096n,
+            27n * 65536n + 65536n + 2n * 4096n,
         );
-        // FHE coefficients at 1024 bits, share and auxiliary ones at 320.
+        // FHE coefficients at 960 bits, share and auxiliary ones at 320.
         expect(census.expandedSampleBytes).toBe(
-            (18n * 65536n * 1024n + (65536n + 2n * 4096n) * 320n) / 8n,
+            (27n * 65536n * 960n + (65536n + 2n * 4096n) * 320n) / 8n,
         );
-        expect(census.distanceBits).toBe(141);
-        expect(census.distanceUpperNumerator << 141n).toBeLessThanOrEqual(
+        expect(census.distanceBits).toBe(148);
+        expect(census.distanceUpperNumerator << 148n).toBeLessThanOrEqual(
             census.distanceUpperDenominator,
         );
-        expect(census.distanceUpperNumerator << 142n).toBeGreaterThan(
+        expect(census.distanceUpperNumerator << 149n).toBeGreaterThan(
             census.distanceUpperDenominator,
         );
     });
@@ -131,9 +136,9 @@ describe('fixed-suite public-matrix sampling', () => {
         expect(fixedBound << 129n).toBeLessThanOrEqual(4n << 320n);
         expect(fixedBound << 129n).toBeGreaterThan(4n << 256n);
         for (const [participantCount, optionCount, width] of [
-            [3, 2, 768],
-            [10, 10, 1024],
-            [20, 20, 1152],
+            [3, 2, 704],
+            [10, 10, 960],
+            [20, 20, 1088],
         ] as const) {
             const profile = deriveSupportedProfile(
                 participantCount,

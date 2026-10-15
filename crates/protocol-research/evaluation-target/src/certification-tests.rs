@@ -1,13 +1,10 @@
 use super::*;
-use fips204::traits::{KeyGen, Signer};
 #[test]
 fn exact_target_owner_and_signature_context_are_required() {
-    let (public, key) = ml_dsa_65::KG::keygen_from_seed(&[19; 32]);
-    let keys = [public.into_bytes()];
+    let mut key = purpose_signature::Credential::new([19; 64]);
+    let keys = [key.public_key()];
     let target = [23; 64];
-    let signature = key
-        .try_sign_with_seed(&[31; 32], &target, CERTIFICATION_CONTEXT)
-        .unwrap();
+    let signature = key.sign_context(CERTIFICATION_CONTEXT, &target).unwrap();
     let mut packet = Vec::from(0u16.to_le_bytes());
     packet.extend(target);
     packet.extend(signature);
@@ -27,8 +24,8 @@ fn exact_target_owner_and_signature_context_are_required() {
     ));
     // A vote relabeled with another roster position fails under that
     // position's key.
-    let (other, _) = ml_dsa_65::KG::keygen_from_seed(&[20; 32]);
-    let roster = [keys[0], other.into_bytes()];
+    let other = purpose_signature::Credential::new([20; 64]);
+    let roster = [keys[0], other.public_key()];
     assert!(matches!(
         authenticate_vote(&target, &roster, &changed),
         Err(Refusal::Signature)
@@ -40,7 +37,7 @@ fn exact_target_owner_and_signature_context_are_required() {
         Err(Refusal::Signature)
     ));
     let signature = key
-        .try_sign_with_seed(&[31; 32], &target, b"sealed-lattice/close-response")
+        .sign_context(b"sealed-lattice/close-response", &target)
         .unwrap();
     let mut changed = packet;
     changed[66..].copy_from_slice(&signature);

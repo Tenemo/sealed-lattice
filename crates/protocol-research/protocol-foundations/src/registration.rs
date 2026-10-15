@@ -3,6 +3,8 @@ use crate::{
     verify_registration_signature,
 };
 use parallel_work::ProtocolHash;
+use setup_witness::encrypted_source::{SourceBodyVerifier, ciphertext_bytes};
+use supported_profile::Profile;
 
 #[path = "registration-session.rs"]
 pub mod session;
@@ -63,6 +65,10 @@ pub struct RegistrationVerifier {
     key: Vec<u8>,
     key_finished: bool,
     failed: bool,
+    source_families: Vec<Profile>,
+    source_index: usize,
+    source_remaining: usize,
+    source: Option<SourceBodyVerifier>,
 }
 impl RegistrationVerifier {
     pub fn new(
@@ -71,11 +77,24 @@ impl RegistrationVerifier {
         signature: &[u8],
     ) -> Result<Self, Refusal> {
         crate::checked_header(header_bytes, poll)?;
-        Self::open(poll.identity(), header_bytes, signature)
+        Self::open(
+            poll.identity(),
+            header_bytes,
+            signature,
+            crate::source_binding::fhe_key_families(poll),
+        )
     }
-    fn open(poll: [u8; 64], header_bytes: &[u8], signature: &[u8]) -> Result<Self, Refusal> {
+    fn open(
+        poll: [u8; 64],
+        header_bytes: &[u8],
+        signature: &[u8],
+        source_families: Vec<Profile>,
+    ) -> Result<Self, Refusal> {
         let (header, consumed) = RegistrationHeader::decode_prefix(header_bytes)?;
-        if consumed != header_bytes.len() {
+        if consumed != header_bytes.len()
+            || source_families.is_empty()
+            || source_families.len() != header.source_bindings.len()
+        {
             return Err(Refusal::Shape);
         }
         let body = BodyDigest::from_header(header_bytes, poll)?;
@@ -86,6 +105,10 @@ impl RegistrationVerifier {
             key: Vec::with_capacity(KEY_BYTES),
             key_finished: false,
             failed: false,
+            source_families,
+            source_index: 0,
+            source_remaining: 0,
+            source: None,
         })
     }
     pub fn push_key(&mut self, bytes: &[u8]) -> Result<(), Refusal> {
@@ -112,8 +135,62 @@ impl RegistrationVerifier {
         self.key_finished = true;
         Ok(())
     }
+    /// The concatenated source bodies, in the signed poll's family order.
+    /// Only one coefficient and one hash state are retained across chunks.
+    pub fn push_sources(&mut self, bytes: &[u8]) -> Result<(), Refusal> {
+        let result = self.consume_sources(bytes);
+        if result.is_err() {
+            self.failed = true;
+        }
+        result
+    }
+    fn consume_sources(&mut self, mut bytes: &[u8]) -> Result<(), Refusal> {
+        if self.failed || !self.key_finished || bytes.is_empty() || bytes.len() > CHUNK_LIMIT {
+            return Err(Refusal::Shape);
+        }
+        while !bytes.is_empty() {
+            if self.source.is_none() {
+                let profile = *self
+                    .source_families
+                    .get(self.source_index)
+                    .ok_or(Refusal::Shape)?;
+                let expected = self.header.source_bindings[self.source_index];
+                let owner =
+                    crate::foundation::derive_participant_identity(&self.header.signing_public)
+                        .map_err(|_| Refusal::Shape)?;
+                self.source = Some(SourceBodyVerifier::new(
+                    profile,
+                    &self.header.poll,
+                    owner.as_bytes(),
+                    expected,
+                ));
+                self.source_remaining = ciphertext_bytes();
+            }
+            let count = bytes.len().min(self.source_remaining);
+            self.source
+                .as_mut()
+                .ok_or(Refusal::Consumed)?
+                .push(&bytes[..count])
+                .map_err(|_| Refusal::Shape)?;
+            self.source_remaining -= count;
+            bytes = &bytes[count..];
+            if self.source_remaining == 0 {
+                self.source
+                    .take()
+                    .ok_or(Refusal::Consumed)?
+                    .finish()
+                    .map_err(|_| Refusal::Crypto)?;
+                self.source_index += 1;
+            }
+        }
+        Ok(())
+    }
     pub fn finish(self) -> Result<VerifiedRegistration, Refusal> {
-        if self.failed || !self.key_finished {
+        if self.failed
+            || !self.key_finished
+            || self.source_index != self.source_families.len()
+            || self.source.is_some()
+        {
             return Err(Refusal::Consumed);
         }
         let body_digest = self.body.bytes();

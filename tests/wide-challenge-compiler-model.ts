@@ -5,6 +5,10 @@ import {
 } from '#tests/committed-offer-model.js';
 import { compileCommonAgreementDegreeCensus } from '#tests/common-agreement-degree-model.js';
 import { compileLinkedReleaseRelationCensus } from '#tests/linked-release-relation-model.js';
+import {
+    maximumExperimentGates,
+    minimumReductionWork,
+} from '#tests/security-margin/reduction-work.js';
 import { deriveSetupContributionShape } from '#tests/setup-relation/shape.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
 import {
@@ -83,18 +87,14 @@ export const proofVerifierMessageBytes = (
               .challengeBytes
         : 262_144;
 
-// The compiler's charged caps are the same for every supported profile. The
-// ledger charges them, and the proof chronology model checks that one poll of
-// every profile against the reference population. The clear-candidate global
-// population and semantic-use inventory remain separate obligations. The query cap bounds every oracle
-// call of the experiment, including honest proving, verification and
-// expansion, and prefix and role routing make at most four base calls of each.
-// The role budget bounds the corrupt roles whose proofs can be accepted, and
-// the honest-proof budget the simulated honest proofs, each of which programs
-// one verifier message.
-const adversaryQueries = 1n << 80n;
-const roleBudget = 1n << 16n;
-const honestProofBudget = 1n << 28n;
+// Whole-horizon diagnostic caps, separate from the composed ledger's tighter
+// population-dependent query curve. Every original proof scope follows its
+// credential predecessor; there are at most three scopes per credential.
+// Corrupt roles are charged through the complete query history. The ledger
+// uses the tagged-family bound and adds no independent role-union factor.
+const adversaryQueries = maximumExperimentGates + 1n;
+const roleBudget = adversaryQueries;
+const honestProofBudget = (3n * maximumExperimentGates) / minimumReductionWork;
 const tagBits = 512n;
 export const proofCompilerCaps = {
     adversaryQueries,
@@ -103,13 +103,13 @@ export const proofCompilerCaps = {
     honestProofBudget,
     tagBits,
     saltBits: 2n * tagBits,
-    relativeBalanceBits: 160n,
+    relativeBalanceBits: 192n,
     maximumNonSaltInputBits: 1n << 40n,
     committedNodeBudget: 1n << 23n,
     programmedMessageBudget: honestProofBudget,
 } as const;
 
-export const compileProofCompilerCapCensus = () => {
+const compileProofCompilerCapCensus = () => {
     const {
         chargedQueries,
         relativeBalanceBits,

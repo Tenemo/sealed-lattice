@@ -1,25 +1,16 @@
 import { auxiliaryInputEncryptionParameters } from '#tests/auxiliary-input-encryption-parameters.js';
 import { compileCommonMatrixSamplingCensus } from '#tests/common-matrix-sampling-model.js';
+import { sourceCiphertextBytes } from '#tests/encrypted-registration-source-model.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import { operationSeedBytes } from '#tests/operation-seed-model.js';
-import { compileBoundedKeyUniqueness } from '#tests/recipient-key-uniqueness-model.js';
 import {
     deriveSupportedProfile,
     supportedProfileRanges,
 } from '#tests/supported-profile-model.js';
 
-export const sourceOpeningSaltBytes = 64n;
-
-// First-order screen for committing the FHE encryption-key coordinate
-// before the roster exists. The existing proof ties b[0] to the FHE sharing
-// constant. Registration commits to this public coordinate, not a private
-// seed whose expansion the current proof does not check.
-//
-// Each distinct FHE common matrix/modulus needs an independent original
-// seed. The honest participant later opens only the roster's chosen entry.
-// No new modulus, larger-profile substitution or cross-modulus secret reuse
-// is assumed. Hash digests and seed/salt lengths are payload subtotals;
-// canonical framing, authentication and encrypted custody are not included.
+// Registration encrypts the original FHE secret and first error for each
+// possible modulus/common-sampler family before the roster is fixed. Every
+// family retains its own seed and authenticated ciphertext binding.
 export const compileRegistrationSetupBindingScreen = (
     maximumParticipants: number,
     optionCount: number,
@@ -51,15 +42,11 @@ export const compileRegistrationSetupBindingScreen = (
         degree * (1n + BigInt(Math.ceil(modulus.toString(2).length / 8)));
     const fhe = [...families.values()].map((family) => ({
         ...family,
+        degree: fixedModulusBfvInputs.polynomialDegree,
+        sourceCiphertextBytes,
         publicCoordinateBytes: polynomialBytes(
             fixedModulusBfvInputs.polynomialDegree,
             family.modulus,
-        ),
-        uniqueness: compileBoundedKeyUniqueness(
-            fixedModulusBfvInputs.polynomialDegree,
-            family.modulus,
-            1n,
-            fixedModulusBfvInputs.errorBound,
         ),
     }));
     const auxiliaryPublicCoordinateBytes = polynomialBytes(
@@ -83,9 +70,9 @@ export const compileRegistrationSetupBindingScreen = (
         fhe,
         auxiliary,
         coordinateCount,
-        commitmentDigestPayloadBytes: coordinateCount * 64n,
-        privateSeedAndSaltPayloadBytes:
-            coordinateCount * (operationSeedBytes + sourceOpeningSaltBytes),
+        sourceBindingDigestPayloadBytes: coordinateCount * 64n,
+        privateSeedPayloadBytes: coordinateCount * operationSeedBytes,
+        sourceCiphertextPayloadBytes: coordinateCount * sourceCiphertextBytes,
         generatedPublicCoordinateBytes: fhe.reduce(
             (sum, family) => sum + family.publicCoordinateBytes,
             0n,

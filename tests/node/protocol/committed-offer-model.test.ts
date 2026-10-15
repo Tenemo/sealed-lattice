@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
 import { compileCommittedOfferCensus } from '#tests/committed-offer-model.js';
+import { compileContributionBodyCensus } from '#tests/contribution-body-model.js';
+import { sourceReadBytes } from '#tests/encrypted-registration-source-model.js';
 import {
     ascii,
     item,
@@ -8,12 +10,14 @@ import {
     tuple,
     variable,
 } from '#tests/node/protocol/reference/canonical-tuple.js';
+import { goalThresholds } from '#tests/node/protocol/reference/product-goals.js';
 import { compilePreparationResources } from '#tests/preparation-resource-model.js';
 import { isProofChallengeInput } from '#tests/proof-hash-domain-model.js';
 import {
     compilePublicEvaluationHashCensus,
     parsePublicEvaluationHashInput,
 } from '#tests/public-evaluation-hash-model.js';
+import { compileSetupSelectionWireCensus } from '#tests/setup-selection-wire-model.js';
 import { listSupportedProfiles } from '#tests/supported-profile-model.js';
 import {
     protocolHashPrefix,
@@ -58,15 +62,66 @@ describe('committed offer equations and degree bounds', () => {
     });
 
     it('bounds every complete organizer work unit and continuation across the supported family', () => {
+        const chunk = 1n << 20n;
+        const budget = ((1n << 31n) * 15n) / 16n;
         for (const profile of listSupportedProfiles()) {
             const schedule =
                 compilePreparationResources(profile).organizerSchedule;
+            const selected = BigInt(
+                goalThresholds(profile.participantCount).resultReleaseThreshold,
+            );
+            const body = compileContributionBodyCensus(profile);
+            const aggregate = compileCommittedOfferCensus(profile);
+            const wire = compileSetupSelectionWireCensus(
+                profile.participantCount,
+            );
+            const offer =
+                sourceReadBytes +
+                body.polynomialPayloadBytes +
+                body.maximumProofBytes +
+                body.headerBytes +
+                wire.offerEnvelopeBytes +
+                wire.signatureBytes +
+                3n * chunk;
+            const data = aggregate.generatedAggregateBytes + 2n * chunk;
+            const evaluation =
+                body.polynomialPayloadBytes -
+                body.streamedPolynomialPayloadBytes +
+                2n * aggregate.maximumEvaluationProofBytes +
+                4n * chunk;
+            const proof = aggregate.maximumEvaluationProofBytes + chunk;
+
+            // Each call completes an offer, publishes the aggregate, completes
+            // an evaluation, or verifies the final aggregate. Continuing this
+            // same collection stage does not create another productive visit.
             expect(schedule.calls.length).toBeGreaterThan(0);
-            expect(schedule.calls.length).toBeLessThanOrEqual(3);
+            expect(BigInt(schedule.calls.length)).toBeLessThanOrEqual(
+                2n * selected + 2n,
+            );
             for (const bytes of schedule.calls)
-                expect(bytes).toBeLessThanOrEqual(((1n << 31n) * 15n) / 16n);
-            expect(schedule.continuationReadBytes).toBeGreaterThanOrEqual(
-                schedule.replayBytes,
+                expect(bytes).toBeLessThanOrEqual(budget);
+            // Even at the last evaluation or final read, a fresh call can
+            // replay all prior proofs and finish the next indivisible unit.
+            expect(schedule.prelude + offer).toBeLessThanOrEqual(budget);
+            expect(
+                schedule.prelude + (selected - 1n) * proof + evaluation,
+            ).toBeLessThanOrEqual(budget);
+            expect(
+                schedule.prelude + selected * proof + data,
+            ).toBeLessThanOrEqual(budget);
+            expect(schedule.calls.reduce((sum, bytes) => sum + bytes, 0n)).toBe(
+                schedule.prelude +
+                    schedule.continuationReadBytes +
+                    selected * (offer + evaluation) +
+                    2n * data,
+            );
+            const continuations = BigInt(schedule.calls.length - 1);
+            expect(schedule.replayBytes % proof).toBe(0n);
+            expect(schedule.replayBytes).toBeLessThanOrEqual(
+                continuations * selected * proof,
+            );
+            expect(schedule.continuationReadBytes).toBe(
+                continuations * schedule.prelude + schedule.replayBytes,
             );
         }
     });

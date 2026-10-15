@@ -60,11 +60,18 @@ export const compileOrdinaryWorkflowResources = (
     const signature = registration.signatureBytes;
     const poll = registration.maximumPollDefinitionBytes + signature;
     const registrationRecord =
-        key.publicKeyBytes + registration.maximumHeaderBytes + signature;
+        key.publicKeyBytes +
+        registration.maximumSourceCiphertextBytes +
+        registration.maximumHeaderBytes +
+        signature;
     const registrationCorpus =
         poll + n * registrationRecord + roster.proposalBytes + signature;
     const rosterRestorePayload =
-        n * (registration.maximumHeaderBytes + key.publicKeyBytes);
+        n *
+        (registration.maximumHeaderBytes +
+            signature +
+            key.publicKeyBytes +
+            registration.maximumSourceCiphertextBytes);
     const signedOffer =
         offer.maximumBodyBytes + selection.offerEnvelopeBytes + signature;
     const response =

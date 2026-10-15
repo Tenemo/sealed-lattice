@@ -4,9 +4,8 @@ use crate::{
     oracles::{FirstOracle, SecondOracle, Witness},
 };
 use parallel_work::share;
-use statement_stream::{ProverOperatorPlan, prover_operator_plan};
+use statement_stream::ProverOperatorPlan;
 use std::collections::BTreeMap;
-use supported_profile::Profile;
 use zeroize::Zeroizing;
 
 pub use crate::linear_oracle::LinearOracle;
@@ -31,13 +30,12 @@ pub(crate) struct AffineSum {
 impl AffineSum {
     /// Starts the jobs of the fixed affine bases.
     pub fn begin(
-        profile: Profile,
+        plan: ProverOperatorPlan,
         witness: &Witness,
         first: &FirstOracle,
         challenges: Challenges,
     ) -> Self {
         let Challenges { alpha, mask } = challenges;
-        let plan = prover_operator_plan(profile, alpha).unwrap();
         let mut values = AffineValues::new();
         let mut groups: BTreeMap<(usize, usize, usize, bool), Vec<Element>> = BTreeMap::new();
         for term in &plan.fixed_terms {
@@ -84,6 +82,9 @@ impl AffineSum {
     /// The index of the next public polynomial.
     pub fn next(&self) -> usize {
         self.next
+    }
+    pub fn polynomials(&self) -> usize {
+        self.plan.common_columns.len()
     }
     /// Whether the next public polynomial arrives as its adjoint, since it
     /// has common columns, rather than as its value.

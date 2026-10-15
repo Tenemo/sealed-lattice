@@ -96,10 +96,10 @@ describe('supported profile parameters', () => {
         const profile = deriveSupportedProfile(10, 10);
         // Proth certificates maintained independently of the derivation.
         expect(profile.ciphertext.modulus).toBe(
-            verifyProthCertificate(65537n * 65319n, 832, 7n),
+            verifyProthCertificate(4289069913n, 736, 7n),
         );
         expect(profile.release.modulus).toBe(
-            verifyProthCertificate(65537n * 65445n, 160, 7n),
+            verifyProthCertificate(4291798071n, 160, 5n),
         );
         const threshold = compileThresholdReleaseNoiseCensus();
         expect(profile.interpolation).toMatchObject({
@@ -273,17 +273,19 @@ describe('supported profile parameters', () => {
                 expect(power(2n, candidate - 1n, candidate)).not.toBe(1n);
             }
         }
-        expect(census.releaseModuli).toHaveLength(1);
+        expect(census.releaseModuli.map((value) => value.bits)).toEqual([
+            144, 192,
+        ]);
         expect(() => largestTransformPrimeBelow(64)).toThrow();
     });
 
     it('keeps every ranking operation decodable and every release lifting sound', () => {
         expect(profiles).toHaveLength(18 * 19);
         for (const profile of profiles) {
-            expect(profile.ciphertext.bits % 32).toBe(0);
+            expect(profile.ciphertext.bits % 16).toBe(0);
             expect(profile.release.bits % 48).toBe(0);
             expect(profile.gadgetLength).toBe(
-                BigInt(Math.ceil(profile.ciphertext.bits / 144)),
+                BigInt(Math.ceil(profile.ciphertext.bits / 88)),
             );
             expect(
                 deriveRankingNoise(

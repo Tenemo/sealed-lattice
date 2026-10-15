@@ -74,9 +74,10 @@ export const proofRelationCatalogueEntry = (profile: SupportedProfile) =>
                         16,
                         7,
                     ]).flat(),
+                    ...Array.from({ length: 4 }, () => [16, 7]).flat(),
                 ];
                 wordColumns = 0;
-                products = profile.participantCount + 2;
+                products = profile.participantCount + 3;
                 booleanColumns = 2 * products;
                 const narrow: { column: number; factor: bigint }[] = [];
                 for (const bits of variables) {
@@ -109,6 +110,14 @@ export const proofRelationCatalogueEntry = (profile: SupportedProfile) =>
                     16,
                     7,
                     lifting.carryBits,
+                    auxiliary.degree,
+                    auxiliary.support,
+                    auxiliary.plaintextModulus,
+                    72,
+                    ...proofCatalogueInteger(
+                        auxiliary.modulus,
+                        width(auxiliary.modulus),
+                    ),
                 ];
                 header = Buffer.concat([
                     Buffer.from('SCO2'),
@@ -128,6 +137,7 @@ export const proofRelationCatalogueEntry = (profile: SupportedProfile) =>
                         degree,
                         modulus: sharing.modulus,
                     },
+                    { count: 8, degree, modulus: auxiliary.modulus },
                 ];
                 arithmeticKey = `setup:${profile.participantCount}:${profile.ciphertext.modulus}`;
                 break;
@@ -135,7 +145,7 @@ export const proofRelationCatalogueEntry = (profile: SupportedProfile) =>
             case 'ballot': {
                 const layout = compileBallotEncryptionColumnLayout(profile);
                 wordColumns = layout.wordColumns;
-                booleanColumns = 5;
+                booleanColumns = 4;
                 products = layout.zeroProducts.length;
                 lookups = layout.lookups.map(({ column, scale }) => ({
                     column,
@@ -147,8 +157,8 @@ export const proofRelationCatalogueEntry = (profile: SupportedProfile) =>
                     lookups.length,
                     fixedModulusBfvInputs.secretSupportWeight,
                     auxiliary.support,
-                    32768,
-                    65536,
+                    fixedModulusBfvInputs.plaintextModulus / 2n,
+                    fixedModulusBfvInputs.plaintextModulus - 1n,
                     ...layout.zeroProducts.flat(),
                 ];
                 header = Buffer.from('LBS1');

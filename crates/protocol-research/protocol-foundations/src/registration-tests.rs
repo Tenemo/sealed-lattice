@@ -25,7 +25,7 @@ fn recipient_poll() -> VerifiedPoll {
         })
         .collect();
     let draft = PollDraft::new(Manifest::new(text("Question"), options).unwrap(), 1, 4).unwrap();
-    let packet = Credential::from_seed([1; 32])
+    let packet = Credential::from_seed([1; 64])
         .create_poll(draft, [4; 64], [5; 32])
         .unwrap();
     verify_poll(packet.identity, [4; 64], &packet.body, &packet.signature).unwrap()
@@ -39,13 +39,28 @@ fn verify_key(
     seed: u8,
     chunk: usize,
 ) -> Result<VerifiedRegistration, Refusal> {
-    let mut credential = Credential::from_seed([seed; 32]);
+    let mut credential = Credential::from_seed([seed; 64]);
+    let owner =
+        crate::foundation::derive_participant_identity(credential.signing_public()).unwrap();
+    let source = setup_witness::encrypted_source::PublicSource {
+        polynomials: vec![vec![0; supported_profile::DEGREE]; 8],
+    };
+    let sources = source.ciphertext_records().unwrap().concat();
+    let families = crate::source_binding::fhe_key_families(poll);
+    let bindings = families
+        .iter()
+        .map(|profile| {
+            source
+                .binding(*profile, &poll.identity(), owner.as_bytes())
+                .unwrap()
+        })
+        .collect();
     let header = RegistrationHeader {
         username: normalize_username(format!("Participant {seed}").as_bytes()).unwrap(),
         poll: poll.identity(),
         signing_public: *credential.signing_public(),
         recipient_key_hash: ProtocolHash::digest(key),
-        fhe_key_commitments: vec![[7; 64]; crate::source_binding::fhe_key_families(poll).len()],
+        source_bindings: bindings,
     }
     .encode()?;
     let body = BodyDigest::from_header(&header, poll.identity())?;
@@ -55,6 +70,11 @@ fn verify_key(
         verifier.push_key(part)?;
     }
     verifier.finish_key()?;
+    for _ in families {
+        for bytes in sources.chunks(chunk) {
+            verifier.push_sources(bytes)?;
+        }
+    }
     verifier.finish()
 }
 
@@ -137,7 +157,7 @@ fn roster_poll(maximum: usize) -> VerifiedPoll {
         maximum as u16,
     )
     .unwrap();
-    let packet = Credential::from_seed([1; 32])
+    let packet = Credential::from_seed([1; 64])
         .create_poll(draft, [4; 64], [5; 32])
         .unwrap();
     verify_poll(packet.identity, [4; 64], &packet.body, &packet.signature).unwrap()
@@ -158,7 +178,7 @@ fn roster_proposal(
                     signing_public: *credential.signing_public(),
                     recipient_key_hash: [0; 64],
 
-                    fhe_key_commitments: vec![
+                    source_bindings: vec![
                         [7; 64];
                         crate::source_binding::fhe_key_families(poll).len()
                     ],
@@ -172,9 +192,9 @@ fn roster_proposal(
 
 #[test]
 fn every_supported_roster_size_up_to_the_poll_maximum_can_be_proposed() {
-    let organizer = Credential::from_seed([1; 32]);
+    let organizer = Credential::from_seed([1; 64]);
     let members: Vec<_> = (10..30)
-        .map(|seed| Credential::from_seed([seed; 32]))
+        .map(|seed| Credential::from_seed([seed; 64]))
         .collect();
     let proposal = |poll: &VerifiedPoll, size: usize| {
         let credentials: Vec<_> = std::iter::once(&organizer)
@@ -205,10 +225,10 @@ fn every_supported_roster_size_up_to_the_poll_maximum_can_be_proposed() {
 #[test]
 fn a_roster_refuses_a_repeated_signing_key() {
     let poll = roster_poll(20);
-    let organizer = Credential::from_seed([1; 32]);
+    let organizer = Credential::from_seed([1; 64]);
     let members = [
-        Credential::from_seed([10; 32]),
-        Credential::from_seed([11; 32]),
+        Credential::from_seed([10; 64]),
+        Credential::from_seed([11; 64]),
     ];
     assert!(roster_proposal(&poll, &[&organizer, &members[0], &members[1]]).is_ok());
     for credentials in [

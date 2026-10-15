@@ -157,6 +157,7 @@ export const organizer = await (async () => {
         header: record(dataKind.header),
         signature: record(dataKind.signature),
         publicKey: record(dataKind.publicKey),
+        sourceCiphertexts: record(dataKind.sourceCiphertexts),
     };
 })();
 

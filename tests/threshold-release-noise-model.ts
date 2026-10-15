@@ -1,9 +1,21 @@
 import { absolute } from '#tests/exact-integer.js';
-const participantCount = 10;
-const releaseThreshold = 4;
-const polynomialModulusDegree = 32_768;
-const spacedInterpolationSize = 16;
-const reducedInterpolationRingDegree = 8;
+import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
+import {
+    completionProfileCounts,
+    interpolationRingDegree,
+} from '#tests/supported-profile-model.js';
+import { thresholdProfileFor } from '#tests/threshold-completion-model.js';
+
+const participantCount = completionProfileCounts.participantCount;
+const releaseThreshold =
+    thresholdProfileFor(participantCount).resultReleaseThreshold;
+const polynomialModulusDegree = Number(fixedModulusBfvInputs.polynomialDegree);
+const reducedInterpolationRingDegree =
+    interpolationRingDegree(participantCount);
+const spacedInterpolationSize = 2 * reducedInterpolationRingDegree;
+const selectedStatisticalBits = fixedModulusBfvInputs.statisticalBits;
+// A comparison of component reserves, not a replacement for the selected reserve.
+const comparisonStatisticalBits = 128;
 const productionInterpolationPointExponentStride =
     polynomialModulusDegree / reducedInterpolationRingDegree;
 // 2^ceil(log2 t) for t >= 2, without a floating-point logarithm.
@@ -474,23 +486,26 @@ const requiredDominantNoiseBudgetBitLength = (
 };
 
 type ThresholdReleaseNoiseCensus = Readonly<{
+    polynomialModulusDegree: number;
+    selectedStatisticalBits: number;
+    comparisonStatisticalBits: number;
     authorizedSubsetCount: number;
     boundedIntegerSharingReconstructionCount: number;
     completionParticipantCount: number;
     exactInterpolationProduct: bigint;
-    exactConservativeSecurityDominantNoiseBudgetLowerBoundBitLength: number;
+    comparisonExactDominantNoiseBudgetBits: number;
     exactMaximumScaledReconstructionCoefficientOneNorm: bigint;
     exactMaximumSimulationCoefficientOneNorm: bigint;
     exactMaximumJointSimulationCoefficientOneNormSum: bigint;
-    jointTargetSecurityDominantNoiseReserveBitLength: number;
-    exactTargetSecurityDominantNoiseBudgetLowerBoundBitLength: number;
+    selectedJointDominantNoiseReserveBits: number;
+    selectedExactDominantNoiseBudgetBits: number;
     lagrangeCoefficientCount: number;
     productionInterpolationPointExponentStride: number;
     releaseThreshold: number;
     spacedInterpolationSize: number;
     interpolationProductBound: number;
-    targetSecurityDominantNoiseBudgetLowerBoundBitLength: number;
-    conservativeSecurityDominantNoiseBudgetLowerBoundBitLength: number;
+    selectedAnalyticDominantNoiseBudgetBits: number;
+    comparisonAnalyticDominantNoiseBudgetBits: number;
 }>;
 
 export const compileThresholdReleaseNoiseCensus =
@@ -507,18 +522,21 @@ export const compileThresholdReleaseNoiseCensus =
         // every non-dominant BFV correctness term must also be included.
         const jointDominantFactor =
             BigInt(releaseThreshold * polynomialModulusDegree) *
-            (1n << 79n) *
+            (1n << BigInt(selectedStatisticalBits - 1)) *
             exactInterpolation.exactMaximumScaledReconstructionCoefficientOneNorm *
             exactInterpolation.exactMaximumJointSimulationCoefficientOneNormSum;
         return {
+            polynomialModulusDegree,
+            selectedStatisticalBits,
+            comparisonStatisticalBits,
             authorizedSubsetCount: exactInterpolation.authorizedSubsetCount,
             boundedIntegerSharingReconstructionCount:
                 exactInterpolation.boundedIntegerSharingReconstructionCount,
             completionParticipantCount: participantCount,
             exactInterpolationProduct,
-            exactConservativeSecurityDominantNoiseBudgetLowerBoundBitLength:
+            comparisonExactDominantNoiseBudgetBits:
                 requiredDominantNoiseBudgetBitLength(
-                    128,
+                    comparisonStatisticalBits,
                     fraction(exactInterpolationProduct),
                 ),
             exactMaximumScaledReconstructionCoefficientOneNorm:
@@ -527,12 +545,12 @@ export const compileThresholdReleaseNoiseCensus =
                 exactInterpolation.exactMaximumSimulationCoefficientOneNorm,
             exactMaximumJointSimulationCoefficientOneNormSum:
                 exactInterpolation.exactMaximumJointSimulationCoefficientOneNormSum,
-            jointTargetSecurityDominantNoiseReserveBitLength: (
+            selectedJointDominantNoiseReserveBits: (
                 jointDominantFactor - 1n
             ).toString(2).length,
-            exactTargetSecurityDominantNoiseBudgetLowerBoundBitLength:
+            selectedExactDominantNoiseBudgetBits:
                 requiredDominantNoiseBudgetBitLength(
-                    80,
+                    selectedStatisticalBits,
                     fraction(exactInterpolationProduct),
                 ),
             lagrangeCoefficientCount:
@@ -541,14 +559,14 @@ export const compileThresholdReleaseNoiseCensus =
             releaseThreshold,
             spacedInterpolationSize,
             interpolationProductBound: optimizedInterpolationProductBound(),
-            targetSecurityDominantNoiseBudgetLowerBoundBitLength:
+            selectedAnalyticDominantNoiseBudgetBits:
                 requiredDominantNoiseBudgetBitLength(
-                    80,
+                    selectedStatisticalBits,
                     interpolationProductUpperBound,
                 ),
-            conservativeSecurityDominantNoiseBudgetLowerBoundBitLength:
+            comparisonAnalyticDominantNoiseBudgetBits:
                 requiredDominantNoiseBudgetBitLength(
-                    128,
+                    comparisonStatisticalBits,
                     interpolationProductUpperBound,
                 ),
         };

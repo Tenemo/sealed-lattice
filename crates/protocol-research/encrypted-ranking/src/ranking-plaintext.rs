@@ -1,7 +1,7 @@
 use super::DEGREE;
 use supported_profile::{
     PLAINTEXT_MODULUS, Profile,
-    plaintext::{centered, encode_slots, multiply, power},
+    plaintext::{ACTIVE_SLOTS, centered, encode_slots, multiply, power},
 };
 
 fn interpolate(points: &[u32], values: &[u32]) -> Vec<u32> {
@@ -40,8 +40,8 @@ pub(super) fn encode(slots: &[u32]) -> Vec<i32> {
 ///
 /// The comparison polynomial is one on every odd point of the profile's
 /// comparison degree above zero and zero below it. Slot
-/// `(option * options + rank) * window + opponent` compares the option with
-/// the opponent, and the offset breaks ties toward the lower position.
+/// `option * window + opponent` compares the option with the opponent,
+/// and the offset breaks ties toward the lower position.
 pub fn parameters(profile: Profile, top_count: usize) -> (Vec<i32>, Vec<Vec<i32>>, Vec<i32>) {
     let options = profile.options();
     let window = profile.rank_window();
@@ -75,27 +75,53 @@ pub fn parameters(profile: Profile, top_count: usize) -> (Vec<i32>, Vec<Vec<i32>
         .collect();
     let ranking = (0..options)
         .map(|exponent| {
-            let mut slots = vec![0; DEGREE / 4];
-            for option in 0..options {
-                for rank in 0..top_count {
-                    slots[(option * options + rank) * window] = equality[rank][exponent];
+            let mut slots = vec![0; ACTIVE_SLOTS];
+            for (position, value) in slots.iter_mut().enumerate() {
+                let rank = (window - position % window) % window;
+                if rank < top_count {
+                    *value = equality[rank][exponent];
                 }
             }
             encode(&slots)
         })
         .collect();
-    let mut offset = vec![PLAINTEXT_MODULUS - 1; DEGREE / 4];
+    let mut offset = vec![PLAINTEXT_MODULUS - 1; ACTIVE_SLOTS];
     for option in 0..options {
-        for rank in 0..options {
-            for opponent in 0..option {
-                offset[(option * options + rank) * window + opponent] = 1;
-            }
+        for opponent in 0..option {
+            offset[option * window + opponent] = 1;
         }
     }
     (
         comparison.into_iter().map(centered).collect(),
         ranking,
         encode(&offset),
+    )
+}
+
+/// Keeps exactly the base of each comparison window and removes the entire
+/// literal-score orbit before broadcasting the ranks.
+pub fn rank_mask(profile: Profile) -> Vec<i32> {
+    encode(
+        &(0..ACTIVE_SLOTS)
+            .map(|position| u32::from(position.is_multiple_of(profile.rank_window())))
+            .collect::<Vec<_>>(),
+    )
+}
+
+/// Removes the rank-zero constant contributed by the unused option windows.
+pub fn padding_correction(profile: Profile) -> Vec<i32> {
+    encode(
+        &(0..ACTIVE_SLOTS)
+            .map(|position| {
+                if position.is_multiple_of(profile.rank_window())
+                    && position / profile.rank_window() >= profile.options()
+                {
+                    PLAINTEXT_MODULUS - 1
+                } else {
+                    0
+                }
+            })
+            .collect::<Vec<_>>(),
     )
 }
 

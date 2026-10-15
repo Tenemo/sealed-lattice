@@ -67,9 +67,9 @@ describe('shared participant custody', () => {
             compileRegistrationEnrollmentCensus().maximumRecords + 1n,
         );
         // The inventory identity and the public-polynomial identities of the
-        // 44 aggregate polynomials, followed by a 64-byte protocol tag.
-        expect(body.polynomials).toHaveLength(44);
-        expect(value.setupReferenceBytes).toBe(64n + 44n * 64n + 64n);
+        // 56 aggregate polynomials, followed by a 64-byte protocol tag.
+        expect(body.polynomials).toHaveLength(56);
+        expect(value.setupReferenceBytes).toBe(64n + 56n * 64n + 64n);
         expect(value.publicRecords.some((record) => record.object === 0)).toBe(
             false,
         );
@@ -125,7 +125,7 @@ describe('shared participant custody', () => {
             expect(storage.dataKeyBytes).toBe(32n * records);
             expect(storage.recordIdentityBytes).toBe(64n * records);
             expect(storage.recordReferenceBytes).toBe(referenceBytes * records);
-            expect(storage.completedBodyHeaderBytes).toBe(8n + 64n);
+            expect(storage.completedBodyHeaderBytes).toBe(8n);
             const bodyRecords = body.polynomials.reduce(
                 (count, polynomial) =>
                     count + (polynomial.bytes + chunk - 1n) / chunk,
@@ -133,8 +133,9 @@ describe('shared participant custody', () => {
             );
             expect(custody.maximumPublicBodyCiphertextBytes).toBe(
                 body.polynomialPayloadBytes +
+                    8n * 65536n * 6n +
                     body.maximumProofBytes +
-                    16n * (bodyRecords + records),
+                    16n * (bodyRecords + 8n + records),
             );
         },
     );
@@ -163,27 +164,27 @@ describe('shared participant custody', () => {
             const checkpointBytes =
                 ownPrefix +
                 checkpoint.maximumHeaderBytes +
-                106n * bodyRecords +
+                106n * (bodyRecords + 8n) +
                 96n * checkpoint.recordCount +
                 64n;
             const completedBytes =
                 ownPrefix +
                 body.headerBytes +
-                106n * (bodyRecords + proofRecords) +
+                106n * (bodyRecords + 8n + proofRecords) +
                 2n * 102n;
             const maximum = (...values: bigint[]) =>
                 values.reduce((largest, value) =>
                     value > largest ? value : largest,
                 );
             const reference = 64n + BigInt(body.polynomials.length) * 64n + 64n;
-            const selectionSlot = 1n + wire.selectionBodyBytes + 3309n;
+            const selectionSlot = 1n + wire.selectionBodyBytes + 8642n;
             const endorsementSlot =
                 1n +
                 wire.selectionBodyBytes +
-                3309n +
+                8642n +
                 reference +
                 wire.endorsementBodyBytes +
-                3309n;
+                8642n;
             const journal =
                 3n * 4n +
                 maximum(checkpointBytes, completedBytes) +
@@ -429,7 +430,7 @@ describe('shared participant custody', () => {
                 .slice(1)
                 .every((value) => value.encryptionWork.invocations === 1n),
         ).toBe(true);
-        expect(classes[3].encryptionWork.distinctAesInputUpperBound).toBe(4n);
+        expect(classes[3].encryptionWork.distinctAesInputUpperBound).toBe(7n);
     });
 
     it('includes target-bound release records without turning corpus maxima into lifetime limits', () => {

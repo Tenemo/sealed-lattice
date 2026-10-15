@@ -1,5 +1,10 @@
 import { committedOfferColumns } from '#tests/committed-offer-model.js';
 import { compileCommonAgreementDegreeCensus } from '#tests/common-agreement-degree-model.js';
+import {
+    sourceStatementPolynomialBytes,
+    sourceWorkingBytes,
+    sourceCiphertextBytes,
+} from '#tests/encrypted-registration-source-model.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import {
     compileFullWordProofLayout,
@@ -174,7 +179,7 @@ export const compileBrowserWordProverResources = (
     const agreement = compileCommonAgreementDegreeCensus();
     const field = compileSmallLimbProofFieldCensus();
     const fullDegreeCommonPolynomials =
-        3n * profile.gadgetLength + BigInt(profile.participantCount) + 1n;
+        3n * profile.gadgetLength + BigInt(profile.participantCount) + 5n;
     return {
         fullDegreeCommonPolynomials,
         ...compileWordProverResources({
@@ -208,6 +213,7 @@ export const compileContributionGenerationResources = (
     const privateWorkspace = 24n * degree * 16n;
     const publicWorkspace = 4n * degree * publicCoefficientAllowance;
     const generationAllowance =
+        sourceWorkingBytes +
         relation.syntheticWitnessByteLength +
         sparseData +
         transforms +
@@ -220,12 +226,14 @@ export const compileContributionGenerationResources = (
     const gadgetLength = profile.gadgetLength;
     const sharingGroupBytes =
         relation.expandedStatementByteLength -
+        sourceStatementPolynomialBytes -
         relation.expandedStatementHeaderByteLength -
         7n * gadgetLength * relation.largestPublicPolynomialByteLength;
     const sharingPolynomialBytes = sharingGroupBytes / (3n * participants + 1n);
     if (sharingPolynomialBytes * (3n * participants + 1n) !== sharingGroupBytes)
         throw new Error('Nonintegral sharing statement shape.');
     const regeneratedCommonBytes =
+        sourceCiphertextBytes +
         3n * gadgetLength * relation.largestPublicPolynomialByteLength +
         sharingPolynomialBytes;
     return {

@@ -18,22 +18,13 @@ describe('scalar evaluation storage schedule', () => {
         const profile = deriveSupportedProfile(10, 10);
         const complete = compileRankingProgramModel(profile);
         expect(complete.identity).toBe(
-            '017f859de532edf89af14dc72c7aea96b7917da7ffdebb01b4a853cf087d7d48d747640bc29f8a201fd5f699612f13de57dec36a18ded4d883deec289d3ac421',
+            '10edd939fb4f0d0decc6f446ba3194f2dfacf7640b3c3993a4808b7fbedb9423c523c16f22e1a27810400f539f184874e79940b730ebb13e761979c7fc65671a',
         );
-        expect(complete.instructions).toHaveLength(284);
+        expect(complete.instructions).toHaveLength(304);
         for (let top = 1; top < 10; top++) {
             const selected = compileRankingProgramModel(profile, top);
-            expect(
-                selected.instructions.map(({ operation, inputs }) => ({
-                    operation,
-                    inputs,
-                })),
-            ).toEqual(
-                complete.instructions.map(({ operation, inputs }) => ({
-                    operation,
-                    inputs,
-                })),
-            );
+            // Each additional rank needs one rotation and one addition.
+            expect(selected.instructions).toHaveLength(304 - 2 * (10 - top));
             expect(selected.identity).not.toBe(complete.identity);
         }
         expect(() => compileRankingProgramModel(profile, 0)).toThrow('prefix');
@@ -43,15 +34,15 @@ describe('scalar evaluation storage schedule', () => {
     it.each([
         {
             n: 10,
-            capacities: [19, 19, 13, 19, 17, 19, 16],
-            primes: [31n, 18n, 16n],
-            job: 15_844_384n,
+            capacities: [22, 22, 16, 22, 20, 22, 19],
+            primes: [27n, 16n, 14n],
+            job: 15_828_000n,
         },
         {
             n: 20,
-            capacities: [17, 17, 11, 17, 15, 17, 15],
-            primes: [34n, 20n, 18n],
-            job: 15_852_576n,
+            capacities: [19, 19, 13, 19, 17, 19, 16],
+            primes: [31n, 18n, 16n],
+            job: 15_844_384n,
         },
     ])(
         'keeps the source-derived scalar capacities at $n',
@@ -66,6 +57,7 @@ describe('scalar evaluation storage schedule', () => {
                 result.rns.keyProductPrimes,
             ]).toEqual(primes);
             expect(result.jobBytes).toBe(job);
+            expect(result.rankingCacheBytes).toBe(2n * 65536n * 4n);
             const engine = readFileSync(
                 'crates/protocol-research/encrypted-ranking/src/ranking.rs',
                 'utf8',
@@ -98,27 +90,27 @@ describe('scalar evaluation storage schedule', () => {
     it.each([
         {
             n: 10,
-            count: 284,
-            writes: 5,
-            reloads: 6,
-            drops: 1,
-            step: 130,
-            stored: [43, 98, 99],
-            keyMiB: 216n,
-            valueMiB: 14n,
-            peakMiB: 258n,
+            count: 304,
+            writes: 0,
+            reloads: 0,
+            drops: 0,
+            step: 21,
+            stored: [],
+            keyMiB: 288n,
+            valueMiB: 12n,
+            peakMiB: 288n,
         },
         {
             n: 20,
-            count: 558,
-            writes: 11,
-            reloads: 29,
-            drops: 18,
+            count: 598,
+            writes: 8,
+            reloads: 14,
+            drops: 6,
             step: 285,
-            stored: [56, 59, 63, 84, 119, 187, 188, 254],
-            keyMiB: 280n,
-            valueMiB: 15n,
-            peakMiB: 400n,
+            stored: [63, 119, 187, 188, 254],
+            keyMiB: 360n,
+            valueMiB: 14n,
+            peakMiB: 430n,
         },
     ])(
         'matches independently reviewed creation/reload/retirement trace at $n',
@@ -172,13 +164,13 @@ describe('scalar evaluation storage schedule', () => {
         );
         const larger = compileEvaluationStorage(deriveSupportedProfile(20, 20));
         expect(smaller.peakBytes - smaller.scratchPlanningBytes).toBe(
-            2n * 1024n ** 2n,
+            32n * 1024n ** 2n,
         );
         expect(smaller.peakBytes).toBeLessThan(
             smaller.scratchVarianceCeilingBytes,
         );
         expect(larger.peakBytes - larger.scratchVarianceCeilingBytes).toBe(
-            16n * 1024n ** 2n,
+            46n * 1024n ** 2n,
         );
     });
 });

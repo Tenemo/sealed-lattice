@@ -401,6 +401,19 @@ describe('reference word verifier', () => {
             'crates/protocol-research/supported-profile/src/relation.rs',
             'utf8',
         );
+        const sourceLinked = readFileSync(
+            'crates/protocol-research/supported-profile/src/source-linked.rs',
+            'utf8',
+        );
+        const nativeTags = {
+            setup: sourceLinked.match(/result\.tag\s*=\s*b"([^"]+)";/u)?.[1],
+            ballot: source.match(
+                /pub fn ballot_relation\b[\s\S]*?tag:\s*b"([^"]+)"/u,
+            )?.[1],
+            release: source.match(
+                /pub fn release_relation\b[\s\S]*?tag:\s*b"([^"]+)"/u,
+            )?.[1],
+        };
         const catalogue = proofRelationCatalogue();
         expect(catalogue).toHaveLength(3 * 342);
         for (const entry of catalogue) {
@@ -414,18 +427,17 @@ describe('reference word verifier', () => {
             const shape = wordRelationShape(supported, production);
             expect(BigInt(shape.firstWidth)).toBe(entry.firstWidth);
             expect(BigInt(shape.secondWidth)).toBe(entry.secondWidth);
-            // Every product pair ends at a Boolean column after its left
-            // column: a sparse sign pair, or the ballot's plaintext word and
-            // its high bit.
+            // Every product pair joins the two Boolean signs of a sparse
+            // source. The compact plaintext uses its complement interval.
             for (const [left, right] of supported.zeroProducts) {
                 expect(left).toBeLessThan(right);
-                expect(right).toBeGreaterThanOrEqual(supported.words);
+                expect(left).toBeGreaterThanOrEqual(supported.words);
                 expect(right).toBeLessThan(
                     supported.words + supported.booleans,
                 );
             }
-            expect(source).toContain(
-                `tag: b"${Buffer.from(supported.tag).toString('ascii')}"`,
+            expect(nativeTags[entry.role]).toBe(
+                Buffer.from(supported.tag).toString('ascii'),
             );
         }
         for (const [participants, options] of [

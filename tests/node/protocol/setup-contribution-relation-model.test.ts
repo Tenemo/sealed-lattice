@@ -53,9 +53,9 @@ describe('complete setup contribution relation in a reduced ring', () => {
             expect(
                 model.rows().every((row) => model.evaluateRow(row) === 0n),
             ).toBe(true);
-            expect(model.rows()).toHaveLength((24 * 9 + 20 * 2) * 16 + 24);
+            expect(model.rows()).toHaveLength((36 * 8 + 20 * 2 + 4) * 16 + 26);
             expect(model.decryptedShares).toEqual(model.expectedShares);
-            expect(model.equations).toHaveLength(24 + 20);
+            expect(model.equations).toHaveLength(36 + 20 + 4);
         }
     });
 
@@ -74,7 +74,7 @@ describe('complete setup contribution relation in a reduced ring', () => {
             expect(model.verify()).toBe(true);
             expect(model.decryptedShares).toEqual(model.expectedShares);
             expect(model.equations).toHaveLength(
-                4 * Number(profile.gadgetLength) + 2 * participantCount,
+                4 * Number(profile.gadgetLength) + 2 * participantCount + 4,
             );
             const layout = compileSetupContributionColumnLayout(profile);
             const shape = deriveSetupContributionShape(profile);
@@ -102,31 +102,35 @@ describe('complete setup contribution relation in a reduced ring', () => {
             compileSetupContributionRelationCensus(completionProfile()),
         ).toEqual({
             // Each 112-bit sharing coefficient fills seven words.
-            wordColumns: 24 * 10 + 3 * 7 + 10 * 7,
-            booleanColumns: 2 * (2 + 10),
-            errorColumns: 24 + 2 * 10,
-            disjointPairs: 12,
-            supportRows: 24,
-            affineRows: BigInt((24 * 9 + 20 * 2) * 65536 + 24),
-            lookupEntries: 331 + 44,
-            fullAffineCoefficientByteLength: 355n * 65536n * (3n * 16n),
+            wordColumns: 36 * 9 + 3 * 7 + 10 * 7 + 8,
+            booleanColumns: 2 * (2 + 10 + 1),
+            errorColumns: 36 + 2 * 10 + 4,
+            disjointPairs: 13,
+            supportRows: 26,
+            affineRows: BigInt((36 * 8 + 20 * 2 + 4) * 65536 + 26),
+            lookupEntries: 423 + 60,
+            fullAffineCoefficientByteLength: 449n * 65536n * (3n * 16n),
             singlePublicAdjointCoefficientByteLength: 65536n * (3n * 16n),
-            largestPublicPolynomialByteLength: 65536n * (1n + 108n),
+            largestPublicPolynomialByteLength: 65536n * (1n + 96n),
             maximumPublicQueryCount: 2 * 704,
             publicQueryValueByteLength: 2n * 704n * (3n * 16n),
-            fullAffineQueryValueByteLength: 355n * 2n * 704n * (3n * 16n),
+            fullAffineQueryValueByteLength: 449n * 2n * 704n * (3n * 16n),
             publicQueryTransformVectorByteLength:
                 2n * 65536n * (3n * 16n) + 32768n * 16n + 1408n * 48n,
             fullRingQueryCosets: 4n,
-            expandedStatementPolynomialCount: 42n + 31n,
-            expandedStatementHeaderByteLength: 4n + 108n,
+            expandedStatementPolynomialCount: 63n + 31n + 8n,
+            expandedStatementHeaderByteLength: 4n + 96n,
             expandedStatementByteLength:
-                4n + 108n + 42n * 65536n * 109n + 31n * 65536n * 21n,
+                4n +
+                96n +
+                63n * 65536n * 97n +
+                31n * 65536n * 21n +
+                8n * 65536n * 6n,
             maximumEncodedOperatorByteLength:
-                64n + 2n * 48n + 355n * 1408n * 48n,
+                64n + 2n * 48n + 449n * 1408n * 48n,
             maximumIntegerLimbConvolutionMagnitude: 1024n * ((1n << 96n) - 1n),
             syntheticWitnessHeaderByteLength: 4n + 3n * 4n + 64n,
-            syntheticWitnessByteLength: 80n + 355n * 65536n * 2n,
+            syntheticWitnessByteLength: 80n + 449n * 65536n * 2n,
         });
     });
 
@@ -137,27 +141,31 @@ describe('complete setup contribution relation in a reduced ring', () => {
             [...layout.modelToCanonicalColumn].sort(
                 (left, right) => left - right,
             ),
-        ).toEqual(Array.from({ length: 355 }, (_unused, index) => index));
-        expect(layout.lookups.slice(0, 331)).toEqual(
-            Array.from({ length: 331 }, (_unused, column) => ({
+        ).toEqual(Array.from({ length: 449 }, (_unused, index) => index));
+        expect(layout.lookups.slice(0, 423)).toEqual(
+            Array.from({ length: 423 }, (_unused, column) => ({
                 column,
                 scale: 1n,
             })),
         );
         const errorColumns = [
-            ...Array.from({ length: 24 }, (_unused, index) => 30 + 10 * index),
+            ...Array.from({ length: 36 }, (_unused, index) => 29 + 9 * index),
             ...Array.from({ length: 10 }, (_unused, index) => [
-                264 + 7 * index,
-                267 + 7 * index,
+                348 + 7 * index,
+                351 + 7 * index,
             ]).flat(),
+            416,
+            418,
+            420,
+            422,
         ];
-        expect(layout.lookups.slice(331)).toEqual(
+        expect(layout.lookups.slice(423)).toEqual(
             errorColumns.map((column) => ({ column, scale: 512n })),
         );
         expect(layout.disjointBooleanPairs).toEqual(
-            Array.from({ length: 12 }, (_unused, index) => [
-                331 + 2 * index,
-                332 + 2 * index,
+            Array.from({ length: 13 }, (_unused, index) => [
+                423 + 2 * index,
+                424 + 2 * index,
             ]),
         );
     });
@@ -191,7 +199,7 @@ describe('complete setup contribution relation in a reduced ring', () => {
 
     it('uses the same common encryption coordinate for encryption and first relinearization', () => {
         const model = createSetupContributionRelationModel(completionProfile());
-        for (let gadget = 0; gadget < 6; gadget++) {
+        for (let gadget = 0; gadget < 9; gadget++) {
             const encryption = model.equations[4 * gadget];
             const relinearization = model.equations[4 * gadget + 1];
             expect(encryption.convolution[0].publicCoefficients).toBe(
@@ -263,5 +271,93 @@ describe('complete setup contribution relation in a reduced ring', () => {
         expect(model.verify()).toBe(false);
         negative.values[active] = 0n;
         expect(model.verify()).toBe(true);
+    });
+    it('binds each registered source ciphertext to the original secret and first error', () => {
+        const model = createSetupContributionRelationModel(
+            completionProfile(),
+            23n,
+        );
+        expect(model.sourceEquations).toHaveLength(4);
+        for (const equation of model.sourceEquations) {
+            const original = equation.publicValue[1];
+            equation.publicValue[1]++;
+            expect(model.verify(), equation.name).toBe(false);
+            equation.publicValue[1] = original;
+            const error = model.columns[equation.error.terms[0].column];
+            const saved = error.values[1];
+            error.values[1] = 128n;
+            expect(model.verify()).toBe(false);
+            error.values[1] = saved;
+        }
+        // A source ephemeral coefficient outside the honest embedding is
+        // still a proof variable, not an ignored position.
+        const positive = model.columns[model.sourceEphemeral.terms[0].column];
+        const active = positive.values.findIndex((value) => value === 1n);
+        positive.values[active] = 0n;
+        positive.values[1] = 1n;
+        expect(model.verify()).toBe(false);
+        positive.values[1] = 0n;
+        positive.values[active] = 1n;
+        expect(model.verify()).toBe(true);
+    });
+    it('checks source equations over the full ambient support rather than only the honest embedding', () => {
+        const model = createSetupContributionRelationModel(
+            completionProfile(),
+            31n,
+        );
+        const read = (
+            variable: typeof model.sourceEphemeral,
+            position: number,
+        ) =>
+            variable.terms.reduce(
+                (value, term) =>
+                    value +
+                    term.factor *
+                        model.columns[term.column].values[
+                            position * variable.stride
+                        ],
+                variable.offset,
+            );
+        for (const term of model.sourceEphemeral.terms) {
+            const column = model.columns[term.column];
+            column.values = [
+                column.values[column.values.length - 1],
+                ...column.values.slice(0, -1),
+            ];
+        }
+        for (const equation of model.sourceEquations) {
+            const common = equation.convolution[0].publicCoefficients;
+            for (let position = 0; position < model.degree; position++) {
+                let raw = equation.offset?.[position] ?? 0n;
+                raw += read(equation.error, position);
+                for (const term of equation.direct)
+                    raw += term.factor * read(term.variable, position);
+                for (let shift = 0; shift < model.degree; shift++) {
+                    const target =
+                        (position - shift + model.degree) % model.degree;
+                    raw +=
+                        common[target] *
+                        read(model.sourceEphemeral, shift) *
+                        (position < shift ? -1n : 1n);
+                }
+                let canonical =
+                    ((raw % equation.modulus) + equation.modulus) %
+                    equation.modulus;
+                if (canonical > equation.modulus / 2n)
+                    canonical -= equation.modulus;
+                equation.publicValue[position] = canonical;
+                const quotient = (raw - canonical) / equation.modulus;
+                model.columns[equation.quotient.terms[0].column].values[
+                    position
+                ] = quotient - equation.quotient.offset;
+            }
+        }
+        expect(model.verify()).toBe(true);
+        for (const term of model.sourceEphemeral.terms)
+            expect(
+                model.columns[term.column].values.some(
+                    (value, position) => position % 2 === 1 && value === 1n,
+                ),
+            ).toBe(true);
     });
 });

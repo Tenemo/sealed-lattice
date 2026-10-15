@@ -187,6 +187,10 @@ const verifyRoster = async (
                 [registrationFile.header, dataKind.header],
                 [registrationFile.signature, dataKind.signature],
                 [registrationFile.publicKey, dataKind.publicKey],
+                [
+                    registrationFile.sourceCiphertexts,
+                    dataKind.sourceCiphertexts,
+                ],
             ].map(
                 ([file, kind]) =>
                     [file as string, records.get(kind as number)!] as const,
@@ -306,12 +310,16 @@ describe('participant helpers with registration work', () => {
                     .records,
             );
         const registrationBodyDigests = registrations.map(registrationIdentity);
-        // The true roster, a public key coefficient changed and a signature changed.
+        // The true roster and changed recipient, source and signature records.
         for (const [candidate, accepted] of [
             [registrations, true],
 
             [changed(registrations, 2, dataKind.publicKey, 1000), false],
             [changed(registrations, 0, dataKind.signature, 7), false],
+            [
+                changed(registrations, 1, dataKind.sourceCiphertexts, 1000),
+                false,
+            ],
             [[registrations[0], registrations[2], registrations[1]], false],
         ] as const) {
             const verdictAlone = await verifyRoster(

@@ -4,9 +4,7 @@ import {
     compileCompletedAuthenticationCensus,
     compileCredentialIntentBoundsThroughBallot,
     compileSignatureHashInputs,
-    compileSignatureSamplingBounds,
-    compileSignatureCounterBoundary,
-    compileBallotSignatureHashWork,
+    compilePurposeSignatureWork,
 } from '#tests/authentication-work-model.js';
 import { compileCommittedOfferCensus } from '#tests/committed-offer-model.js';
 import { compileFheKeySourceScreenResources } from '#tests/fhe-key-source-resource-model.js';
@@ -25,7 +23,6 @@ import {
 } from '#tests/setup-selection-model.js';
 import { compileSetupSelectionWireCensus } from '#tests/setup-selection-wire-model.js';
 import { compileSetupShareArithmeticBounds } from '#tests/setup-share-arithmetic-model.js';
-import { compileSigningLoopSourceComparison } from '#tests/signing-loop-estimate-model.js';
 import {
     compileFheGadgetArithmeticBounds,
     compileRecipientKeyArithmeticBounds,
@@ -33,7 +30,6 @@ import {
     compileSourceCoefficientAllocation,
 } from '#tests/source-coefficient-allocation-model.js';
 import {
-    compileProfileBfvCensus,
     completionProfile,
     deriveSupportedProfile,
     largestSupportedProfile,
@@ -44,17 +40,17 @@ import { formatCount, table } from '#tools/ci/census/format.js';
 
 export const renderAuthenticationFramesAndCompletedPrefix = (): string[] => {
     const completion = completionProfile();
-    const fixedModulusBfv = compileProfileBfvCensus(completion);
+    const work = compilePurposeSignatureWork();
     return [
         '## Authentication frames and completed prefix',
         '',
-        'The pure FIPS 204 interface frames each participant application message as zero, one-byte context length, context, message. The representative hashes tr followed by that frame. These rows cover participant credentials. The counts exclude all other ML-DSA hashing, key expansion, rejection loops, semantic-body hashing, state and transfer work. Signing an application digest through this interface is distinct from HashML-DSA.',
+        'Each credential commits twelve purpose keys under one Merkle root. A purpose signs one original frame; identical replay preserves that frame and still incurs actual work. Every message representative binds the root, purpose, complete length and bytes. The fixed-loop signature has no rejection-sampling failure term.',
         '',
         table(
             [
                 'Purpose',
                 'Message bytes',
-                'FIPS frame bytes',
+                'Bound frame bytes',
                 'Representative input bytes',
                 'Representative permutations',
             ],
@@ -67,142 +63,75 @@ export const renderAuthenticationFramesAndCompletedPrefix = (): string[] => {
             ]),
         ),
         '',
-        'The current pure ML-DSA-65 internal calls have the following input shapes. A missing literal output cap is recorded for each rejection sampler. This does not bound arbitrary adversary queries or future protocol purposes.',
-        '',
         table(
-            ['Purpose', 'Primitive', 'Input bytes', 'Literal output bytes'],
+            ['Hash purpose', 'Input bytes', 'Output bytes', 'Permutations'],
             compileSignatureHashInputs().rows.map((row) => [
                 row.purpose,
-                row.family,
                 formatCount(row.inputBytes),
-                row.outputBytes === null
-                    ? 'No source cap'
-                    : formatCount(row.outputBytes),
+                formatCount(row.outputBytes),
+                formatCount(row.permutations),
             ]),
         ),
-        '',
-        'The following ideal-XOF bad-event bounds union over the entire sampler seed space before adaptive input selection. Analytical output caps do not change the library. Subsequent preservation requires the stated oracle-programming chronology; the main signing rejection event and complete time conversion remain separate.',
         '',
         table(
+            ['Construction', 'Bound'],
             [
-                'Sampler',
-                'Seed bytes',
-                'Candidate positions',
-                'Required rejections',
-                'Analytical output cap bytes',
-                'All-seed failure exponent',
+                [
+                    'Complete key-tree hash calls',
+                    formatCount(work.keyHashCalls),
+                ],
+                [
+                    'Complete key-tree permutations',
+                    formatCount(work.keyPermutations),
+                ],
+                [
+                    'Maximum first-signature hash calls',
+                    formatCount(work.maximumSignatureHashCalls),
+                ],
+                [
+                    'Maximum signature-verification hash calls',
+                    formatCount(work.maximumVerificationHashCalls),
+                ],
+                [
+                    'Mandatory credential predecessor gates',
+                    formatCount(work.credentialPredecessorGates),
+                ],
             ],
-            compileSignatureSamplingBounds().map((row) => [
-                row.purpose,
-                ...[
-                    row.inputBytes,
-                    row.candidatePositions,
-                    row.requiredRejections,
-                    row.outputBytes,
-                    row.failureExponent,
-                ].map(formatCount),
-            ]),
         ),
         '',
-        'The preserved through-ballot prefix counts first-evaluated intents, including signatures never delivered. Repeated deterministic signing consumes runtime but no new cached signing-oracle query. Keep this prefix separate from the full-action branches below; neither table supplies a lifetime credential population, repeated-work bound or complete signature-security claim.',
+        'The following counts concern original first-evaluated intents. Missing retained state cannot recreate authority, and uncertain acknowledgement preserves the original frame. Public record counts do not bound verification, arbitrary repeated work or the lifetime original-credential population.',
         '',
         table(
             [
                 'Credential role',
-                'Current purposes',
-                'First-evaluated intent bound',
+                'Through-ballot purposes',
+                'First intent bound',
             ],
-            compileCredentialIntentBoundsThroughBallot().map((value) => [
-                value.role,
-                value.purposes.join(', '),
-                formatCount(value.firstEvaluatedIntentBound),
+            compileCredentialIntentBoundsThroughBallot().map((row) => [
+                row.role,
+                row.purposes.join(', '),
+                formatCount(row.firstEvaluatedIntentBound),
             ]),
         ),
         '',
-        "For one original credential/action under the retained-state invariant, the ballot is optional and at most one; the close intent blocks a new ballot attempt. Every participant signs one close response, and the organizer also its close intent and proposal. No-result omits release. Encrypted release may omit the participant's own target vote, but cannot bypass a pending target intent or start target signing after release begins. The no-result row is a maximum allowing an own target vote, not a claim that every participant supplies one.",
-        '',
         table(
             [
-                'Participants',
                 'Branch',
                 'Credential role',
                 'Fixed purposes',
                 'Optional purposes',
-                'First-evaluated intent bound',
+                'First intent bound',
             ],
             compileCompleteCredentialIntentBounds(
                 completion.participantCount,
-            ).map((value) => [
-                formatCount(value.participantCount),
-                value.branch,
-                value.role,
-                value.fixedPurposes.join(', '),
-                value.optionalPurposes.join(', '),
-                formatCount(value.firstEvaluatedIntentBound),
+            ).map((row) => [
+                row.branch,
+                row.role,
+                row.fixedPurposes.join(', '),
+                row.optionalPurposes.join(', '),
+                formatCount(row.firstEvaluatedIntentBound),
             ]),
         ),
-        '',
-        'One native ballot-signing evaluation regenerates the original ML-DSA key, then Sign expands the public matrix again. The checked-counter boundary below is conditional on the declared overflow-checking build and the sampler read event. It bounds work until success or the arithmetic boundary; it does not bound the probability of signing failure. Hash-permutation work applies when executing the concrete SHAKE implementation; a simulated oracle instead needs its own circuit cost.',
-        '',
-        table(
-            ['Property', 'Value'],
-            (() => {
-                const boundary = compileSignatureCounterBoundary(),
-                    work = compileBallotSignatureHashWork(
-                        boundary.fullIterations,
-                        boundary.partialMaskCalls,
-                    );
-                const rows: [string, bigint][] = [
-                    ['Distinct mask nonces', boundary.nonceCapacity],
-                    [
-                        'Complete mask-vector iterations',
-                        boundary.fullIterations,
-                    ],
-                    ['Partial final mask calls', boundary.partialMaskCalls],
-                    ['Hash calls including key regeneration', work.hashCalls],
-                    ['Cumulative hash input bytes', work.inputBytes],
-                    [
-                        'Cumulative hash output byte bound',
-                        work.outputBytesUpperBound,
-                    ],
-                    [
-                        'Concrete SHAKE permutation bound',
-                        work.permutationsUpperBound,
-                    ],
-                ];
-                return rows.map(([label, value]) => [
-                    label,
-                    formatCount(value),
-                ]);
-            })(),
-        ),
-        '',
-        'FIPS 204 Appendix C uses a geometric repetition estimate. The official potential-update supplement corrects the mean and minimum loop limit. The following exponents are exact calculations within that source model, not established implementation failure probabilities or security levels; mean alone does not imply the geometric tail. The inspected counter remains above both source limits.',
-        '',
-        table(
-            [
-                'Source model',
-                'Mean numerator',
-                'Mean denominator',
-                'Source minimum iterations',
-                'Estimated exponent at source limit',
-                'Estimated exponent at original limit',
-                'Estimated exponent at checked counter',
-            ],
-            compileSigningLoopSourceComparison().map((row) => [
-                row.source,
-                ...[
-                    row.meanNumerator,
-                    row.meanDenominator,
-                    row.minimumIterations,
-                    row.atSourceLimit.failureExponent,
-                    row.atOriginalLimit.failureExponent,
-                    row.atCheckedCounter.failureExponent,
-                ].map(formatCount),
-            ]),
-        ),
-        '',
-        'The following completed, all-cooperating prefixes use the completion profile and one completed registration per roster participant. A signed ballot counts here even if it will fail inner verification. Additional registrations are an explicit census input. These public record counts are not lifetime honest-key or signing-oracle bounds; they exclude abandoned enrollment, additional intents, repeated evaluation, verification, recovery and the unimplemented closing/release purposes.',
         '',
         table(
             [
@@ -210,22 +139,22 @@ export const renderAuthenticationFramesAndCompletedPrefix = (): string[] => {
                 'Signed records',
                 'Signature bytes',
                 'Application message bytes',
-                'FIPS frame bytes',
+                'Bound frame bytes',
                 'Representative permutations',
             ],
-            [0, Number(fixedModulusBfv.participantCount)].map((ballots) => {
-                const value = compileCompletedAuthenticationCensus(
-                    Number(fixedModulusBfv.participantCount),
-                    fixedModulusBfv.participantCount,
+            [0, completion.participantCount].map((ballots) => {
+                const row = compileCompletedAuthenticationCensus(
+                    completion.participantCount,
+                    BigInt(completion.participantCount),
                     ballots,
                 );
                 return [
                     formatCount(ballots),
-                    formatCount(value.signatures),
-                    formatCount(value.signatureBytes),
-                    formatCount(value.signingMessageBytes),
-                    formatCount(value.signingFrameBytes),
-                    formatCount(value.representativePermutations),
+                    formatCount(row.signatures),
+                    formatCount(row.signatureBytes),
+                    formatCount(row.signingMessageBytes),
+                    formatCount(row.signingFrameBytes),
+                    formatCount(row.representativePermutations),
                 ];
             }),
         ),
@@ -266,7 +195,7 @@ export const renderOriginalSourceArithmeticBounds = (): string[] => {
     return [
         '## Original-source arithmetic bounds',
         '',
-        'These bounds apply to the original first FHE key coordinate with centered common coefficients, the fixed sparse-secret support and the bounded source error. Every supported profile is checked against the transform range, signed machine integers, reducer leading-digit and one-correction premises, and the emitted quotient/carry widths. They rule out the named arithmetic refusals for those source inputs; they are not peak-allocation bounds or claims about other setup equations.',
+        'These bounds apply to the original first FHE key coordinate with centered common coefficients, the fixed sparse-secret support and the bounded source error. Every supported profile is checked against the transform range, signed machine integers, reducer leading-digit and two-correction premises, and the emitted quotient/carry widths. They rule out the named arithmetic refusals for those source inputs; they are not peak-allocation bounds or claims about other setup equations.',
         '',
         table(
             [
@@ -453,7 +382,7 @@ export const renderRegistrationEnrollmentCensus = (): string[] => {
     return [
         '## Registration enrollment census',
         '',
-        'The combined enrollment record binds a canonical public username, the actual signing credential, the hash of the recipient public key and the FHE source commitments to the poll, whose identity names the runtime. Separate data keys seal the original recipient key and signing seed; the encrypted local root retains those keys and references every record. From the roster transition on, the root also references the roster proposal and, once signed, its signature. Payload counts exclude database metadata and browser-managed root-key storage.',
+        'The combined enrollment record binds a canonical public username, the actual signing credential, the hash of the recipient public key and the encrypted-source bindings to the poll, whose identity names the runtime. Separate data keys seal the original recipient key, signing seed and per-family source seeds; the encrypted local root retains those keys and references every record. From the roster transition on, the root also references the roster proposal and, once signed, its signature. Payload counts exclude database metadata and browser-managed root-key storage. Enrollment retains its staged arrays through the atomic commit; its allocation allowance counts staged arrays, record-copy arrays and Blob payload snapshots separately and does not bound garbage collection or browser overhead.',
         '',
         table(
             ['Property', 'Value'],
@@ -513,6 +442,36 @@ export const renderRegistrationEnrollmentCensus = (): string[] => {
                 [
                     'Signing-seed capsule bytes',
                     formatCount(registrationEnrollment.signingCapsuleBytes),
+                ],
+                [
+                    'Maximum published encrypted-source bytes',
+                    formatCount(
+                        registrationEnrollment.maximumSourceCiphertextBytes,
+                    ),
+                ],
+                [
+                    'Maximum retained source seed capsule bytes',
+                    formatCount(
+                        registrationEnrollment.maximumSourceCapsuleBytes,
+                    ),
+                ],
+                [
+                    'Maximum enrollment staged payload bytes',
+                    formatCount(
+                        registrationEnrollment.maximumEnrollmentStagedPayloadBytes,
+                    ),
+                ],
+                [
+                    'Maximum enrollment staged source records',
+                    formatCount(
+                        registrationEnrollment.maximumEnrollmentStagedSourceRecords,
+                    ),
+                ],
+                [
+                    'Enrollment staged arrays, record copies and Blob payload allowance',
+                    formatCount(
+                        registrationEnrollment.maximumEnrollmentStagingAndBlobPayloadBytes,
+                    ),
                 ],
                 [
                     'Maximum enrollment records before proposal signing',
@@ -703,17 +662,17 @@ export const renderSetupSelectionAndRegistrationBindingScreen =
             ]),
         ),
         '',
-        'The [registration binding screen](../tests/registration-setup-binding-model.ts) commits separately to each possible FHE encryption-key coordinate. It derives distinct FHE families from both modulus and common-matrix sample width for every roster the poll permits. Only the final roster entry opens; seeds are independent across families. Generated bytes count all candidate coordinates hashed during registration, not their simultaneous residency or upload. Digest and private seed/salt figures are payload subtotals excluding canonical framing, signatures, custody, work and restart amplification. The auxiliary pair is fixed public input with no real participant secret; its separate good-key phase bound is used only in the [candidate proof games](private:preparation-argument). This does not change the existing parameter table or prove the changed simulator.',
+        'The [registration source model](../tests/registration-setup-binding-model.ts) enumerates each FHE modulus and common-sampler family permitted before roster fixing. Each family has an independent retained seed and four published auxiliary ciphertext polynomials that encrypt its original secret and first error. The source binding digest authenticates those ciphertexts under the poll, owner and family. Enrollment generates these auxiliary ciphertexts; it does not generate the FHE first public coordinates. The first-coordinate columns give their potential encoded sizes across the permitted families, separately from uploaded ciphertext bytes and retained seed bytes. None of these totals is a live-memory measurement.',
         '',
         table(
             [
                 'Maximum participants / options',
                 'FHE families',
-                'Commitment digest payload bytes',
-                'Private seed and salt payload bytes',
-                'Generated public coordinate bytes',
-                'Largest public coordinate bytes',
-                'Weakest FHE uniform-matrix uniqueness exponent',
+                'Source binding digest payload bytes',
+                'Private seed payload bytes',
+                'Published source ciphertext bytes',
+                'FHE first-coordinate bytes across families',
+                'Largest FHE first-coordinate bytes',
                 'Fixed auxiliary public pair bytes',
                 'Auxiliary good-key phase error bound',
                 'Auxiliary scale',
@@ -727,21 +686,14 @@ export const renderSetupSelectionAndRegistrationBindingScreen =
                     participants,
                     options,
                 );
-                const weakest = screen.fhe.reduce(
-                    (minimum, family) =>
-                        family.uniqueness.uniformMatrixFailureExponent < minimum
-                            ? family.uniqueness.uniformMatrixFailureExponent
-                            : minimum,
-                    screen.fhe[0].uniqueness.uniformMatrixFailureExponent,
-                );
                 return [
                     `${participants} / ${options}`,
                     formatCount(screen.fhe.length),
-                    formatCount(screen.commitmentDigestPayloadBytes),
-                    formatCount(screen.privateSeedAndSaltPayloadBytes),
+                    formatCount(screen.sourceBindingDigestPayloadBytes),
+                    formatCount(screen.privateSeedPayloadBytes),
+                    formatCount(screen.sourceCiphertextPayloadBytes),
                     formatCount(screen.generatedPublicCoordinateBytes),
                     formatCount(screen.largestPublicCoordinateBytes),
-                    formatCount(weakest),
                     formatCount(screen.auxiliary.fixedPublicPairBytes),
                     formatCount(screen.auxiliary.goodKeyPhaseError),
                     formatCount(screen.auxiliary.scale),
@@ -749,7 +701,7 @@ export const renderSetupSelectionAndRegistrationBindingScreen =
             }),
         ),
         '',
-        'The FHE uniqueness exponents apply to independently uniform common polynomials and all bounded public keys, using the existing determinant lemma with the current ternary and error supports. The auxiliary good-key bound is `(2*h_aux+1)*E`, and twice this value must be strictly below its scale. Fixed-suite sampling and initialization, all distinct matrices, global auxiliary-key reuse, commitment extraction/equivocation, adaptive selection, proof soundness and the complete global credential population still require their separate charges. These exponents are not end-to-end security bits.',
+        'The auxiliary good-key bound is `(2*h_aux+1)*E`, and twice this value must be strictly below its scale. Fixed-suite sampling and initialization, global auxiliary-key reuse, encrypted-source hybrids, adaptive selection, proof soundness and the complete original credential population have their separate charges in the composed ledger.',
         '',
         '### FHE key source generation screen',
         '',
@@ -1153,9 +1105,9 @@ export const renderSetupSelectionWireAndResources = (): string[] => {
             ],
         ),
         '',
-        'Fresh participants fuse selected-body polynomial reads with full offer verification and aggregation, retaining bounded proof-header lookahead and certificate handling. Organizer discovery verifies selected offers before signing; endorsement reuses those verified holders in the same worker and rereads only their polynomials for aggregation. A matching original selection reference avoids another proof pass at activation; losing or absent local endorsement uses the fresh certificate path. Complete exact named reads with owning verification establish publication under the monotone public-store premise, so selected bodies are not uploaded again. Each extra cache miss or restart must charge its actual verification and aggregation passes; there is no finite lifetime count. These preparation-only logical payload margins exclude registration, ballots, closing, release and transport overhead, and therefore do not establish complete-action qualification.',
+        'Fresh participants verify the selected compact offers, their registered source families and the published aggregate with its per-offer evaluation proofs. Organizer discovery verifies and collects the full selected polynomials into bounded local storage, publishes the aggregate, creates and verifies its per-offer evaluation proofs, and rereads the aggregate before signing the selection. A matching original selection reference avoids another proof pass at activation; losing or absent local endorsement uses the fresh certificate path. Complete exact named reads with owning verification establish publication under the monotone public-store premise, so selected bodies are not uploaded again. Each extra cache miss or restart must charge its actual verification and collection work; there is no finite lifetime count. These preparation-only logical payload margins exclude the other workflow phases and browser bootstrap and therefore do not establish complete-action qualification.',
         '',
-        'The organizer performs one full selected-offer verification pass during discovery and reuses those holders when endorsing in the same worker; the additional read is only the selected polynomial payload. The following preparation-only screen charges that reread and every eligible discovery page. Polynomial-only floors exclude proofs and metadata; exceeding the planning variance ceiling with such a floor requires architecture review. The variance ceiling is not an absolute cryptographic or allocation limit.',
+        'The following preparation screen charges selected-offer collection, committed-polynomial reads for the evaluation proofs, aggregate publication and verification reads, every eligible discovery page, and the repeated roster prelude and completed-proof verification on continuation calls. All organizer collection calls belong to one stage. Polynomial-only floors exclude proofs and metadata. Transfer overruns remain unaccepted obligations under the runtime planning rule; the variance ceiling is not an absolute cryptographic or allocation limit.',
         '',
         table(
             [
@@ -1202,7 +1154,7 @@ export const renderRosterProposalCensus = (): string[] => {
     return [
         '## Roster proposal census',
         '',
-        'The proposal binds the ordered complete registration-body identities under an authenticated poll. Its public corpus includes every recipient key and proof, registration header and signature, and one signed poll definition. The contribution generator consumes the verified records directly and has no caller-supplied key-digest carrier. Retained payload counts exclude allocator and verifier scratch. These public input records do not supply organizer authorization or participant confirmation.',
+        'The proposal binds the ordered complete registration-body identities under an authenticated poll. Its public corpus includes every recipient key, registered source ciphertext body, registration header and signature, and one signed poll definition. The contribution generator consumes the verified records directly and has no caller-supplied key-digest carrier. Retained payload counts exclude allocator and verifier scratch. These public input records do not supply organizer authorization or participant confirmation.',
         '',
         table(
             [

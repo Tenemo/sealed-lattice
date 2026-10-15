@@ -43,29 +43,29 @@ const isPrime = (value: bigint): boolean => {
 describe('exact RNS arithmetic resource floor', () => {
     it('refuses recursively duplicated transform tables before materialization', () => {
         const census = compileRnsArithmeticResourceCensus(completionProfile());
-        const layers = Array.from({ length: 30 }, (_, index) =>
+        const layers = Array.from({ length: 29 }, (_, index) =>
             BigInt(index + 1),
         );
         const independentTotal = layers.reduce(
             (sum, count) => sum + count * 4n * 65536n * 8n,
             0n,
         );
-        expect(census.multiplicationPrimes).toBe(30n);
+        expect(census.multiplicationPrimes).toBe(29n);
         expect(census.recursiveTableBytes).toBe(independentTotal);
         expect(census.recursiveTableBytes).toBeGreaterThan(
             640n * 1024n * 1024n,
         );
-        expect(census.exactProductPrimes).toBe(31n);
+        expect(census.exactProductPrimes).toBe(27n);
         expect(census.flatTableBytesPerPrime).toBe(2n * 65536n * 8n);
-        expect(census.flatTableBytes).toBe(31n * 2n * 65536n * 8n);
+        expect(census.flatTableBytes).toBe(27n * 2n * 65536n * 8n);
     });
 
     it('charges fixed public coefficients and transformed multiplication keys separately', () => {
         const census = compileRnsArithmeticResourceCensus(completionProfile());
-        expect(census.coefficientWords).toBe(14n);
-        expect(census.canonicalPolynomialBytes).toBe(7340032n);
-        expect(census.externalProductPrimes).toBe(18n);
-        expect(census.multiplicationKeyRecordBytes).toBe(226492416n);
+        expect(census.coefficientWords).toBe(12n);
+        expect(census.canonicalPolynomialBytes).toBe(6291456n);
+        expect(census.externalProductPrimes).toBe(16n);
+        expect(census.multiplicationKeyRecordBytes).toBe(301989888n);
     });
 
     it('selects decreasing certified transform primes below 2^58', () => {
@@ -84,9 +84,9 @@ describe('exact RNS arithmetic resource floor', () => {
     it('lifts every profile from the fewest primes that exceed its bounds', () => {
         // Bit lengths of the centered bounds: each prime has 58 bits.
         for (const [participantCount, optionCount, gadgetLength] of [
-            [3, 2, 4n],
-            [10, 10, 6n],
-            [20, 20, 7n],
+            [3, 2, 6n],
+            [10, 10, 9n],
+            [20, 20, 10n],
         ] as const) {
             const profile = deriveSupportedProfile(
                 participantCount,
@@ -99,7 +99,7 @@ describe('exact RNS arithmetic resource floor', () => {
                 [census.exactProductPrimes, 2n * 65536n * half * half],
                 [
                     census.externalProductPrimes,
-                    2n * gadgetLength * 65536n * ((1n << 144n) - 1n) * half,
+                    2n * gadgetLength * 65536n * ((1n << 88n) - 1n) * half,
                 ],
             ] as const) {
                 let product = 1n;

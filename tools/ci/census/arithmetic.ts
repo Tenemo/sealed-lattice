@@ -521,8 +521,8 @@ export const renderSupportedProfileCensus = (): string[] => {
                 'Setup word columns',
                 'Setup affine rows',
                 'Verifier message bytes',
-                'Largest contribution body bytes',
-                'All contribution body bytes',
+                'Largest compact contribution body bytes',
+                'All eligible compact contribution body bytes',
                 'Largest ballot body bytes',
             ],
             supportedProfiles.profiles.map((row, index) => [
@@ -572,7 +572,7 @@ export const renderSupportedProfileCensus = (): string[] => {
             ]),
         ),
         '',
-        'The first `d + f` roster positions are eligible to contribute, and the setup selects `d` of them. Every participant verifies all contributions of its roster. The mobile runtime sets the public corpus variance ceiling fifty percent above its planning target. A participant count is listed when some option count exceeds the ceiling.',
+        'The first `d + f` roster positions are eligible to contribute, and the setup selects `d` of them. Each reader verifies those selected compact offers and the published aggregate with its evaluation proofs. The following comparison includes only the compact contribution bodies of all eligible contributors. It excludes the published aggregate, evaluation proofs, registrations and other workflow records; the [complete ordinary workflow screen](#complete-ordinary-workflow-resource-screen) owns the complete corpus comparison. The mobile runtime sets the public corpus variance ceiling fifty percent above its planning target. A participant count is listed when some option count exceeds that ceiling for this body-only subtotal.',
         '',
         table(
             ['Property', 'Value'],
@@ -582,7 +582,7 @@ export const renderSupportedProfileCensus = (): string[] => {
                     formatCount(publicCorpusVarianceCeiling),
                 ],
                 [
-                    'Participant counts whose contributions exceed the variance ceiling',
+                    'Participant counts whose eligible compact body subtotal exceeds the variance ceiling',
                     countsAbove(publicCorpusVarianceCeiling),
                 ],
             ],

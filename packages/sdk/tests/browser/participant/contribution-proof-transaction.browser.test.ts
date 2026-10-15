@@ -15,7 +15,7 @@ const chunk = 1_048_576;
 const bounds = {
     minimumProofBytes: 17,
     maximumProofBytes: 3 * chunk + 37,
-    bodyHeaderBytes: 72,
+    bodyHeaderBytes: 8,
 };
 type RecordEntry = { offset: number; length: number; key: Uint8Array };
 type Head = {
@@ -40,7 +40,7 @@ const checksum = async (bytes: Uint8Array) =>
         (value) => value.toString(16).padStart(2, '0'),
     ).join('');
 const frame = (length: number) => {
-    const bytes = new Uint8Array(72).fill(43);
+    const bytes = new Uint8Array(bounds.bodyHeaderBytes);
     new DataView(bytes.buffer).setBigUint64(0, BigInt(length), true);
     return bytes;
 };

@@ -75,7 +75,7 @@ fn fixture() -> Fixture {
         })
         .collect();
     let mut credentials: Vec<_> = (1..=3)
-        .map(|seed| Credential::from_seed([seed; 32]))
+        .map(|seed| Credential::from_seed([seed; 64]))
         .collect();
     let packet = credentials[0]
         .create_poll(
@@ -85,6 +85,13 @@ fn fixture() -> Fixture {
         )
         .unwrap();
     let poll = verify_poll(packet.identity, [21; 64], &packet.body, &packet.signature).unwrap();
+    let public_source = setup_witness::encrypted_source::PublicSource {
+        polynomials: vec![
+            vec![0; supported_profile::DEGREE];
+            supported_profile::source_linked::SOURCE_POLYNOMIALS
+        ],
+    };
+    let source_body = public_source.ciphertext_records().unwrap().concat();
     let mut records = Vec::new();
     for (position, credential) in credentials.iter_mut().enumerate() {
         let mut key = vec![0; KEY_BYTES];
@@ -94,11 +101,11 @@ fn fixture() -> Fixture {
             poll: poll.identity(),
             signing_public: *credential.signing_public(),
             recipient_key_hash: parallel_work::ProtocolHash::digest(&key),
-            fhe_key_commitments: vec![
-                [23; 64];
-                protocol_foundations::source_binding::fhe_key_families(&poll)
-                    .len()
-            ],
+            source_bindings: protocol_foundations::source_binding::fhe_key_families(&poll)
+                .iter().map(|family| public_source.binding(
+                    *family, &poll.identity(),
+                    protocol_foundations::foundation::participant_identity::derive_participant_identity(credential.signing_public()).unwrap().as_bytes(),
+                ).unwrap()).collect(),
         }
         .encode()
         .unwrap();
@@ -110,6 +117,11 @@ fn fixture() -> Fixture {
             verifier.push_key(part).unwrap();
         }
         verifier.finish_key().unwrap();
+        for _ in protocol_foundations::source_binding::fhe_key_families(&poll) {
+            for chunk in source_body.chunks(CHUNK_BYTES) {
+                verifier.push_sources(chunk).unwrap();
+            }
+        }
         records.push(Arc::new(verifier.finish().unwrap()));
     }
     let proposal = RosterProposal::new(&poll, records).unwrap();
@@ -339,7 +351,7 @@ fn published_aggregate_checks_resumed_sums_every_evaluation_and_normalized_bytes
     );
     assert!(
         restored
-            .restore_data(&Credential::from_seed([99; 32]), &fixture.poll, &retained)
+            .restore_data(&Credential::from_seed([99; 64]), &fixture.poll, &retained)
             .is_err()
     );
     restored
