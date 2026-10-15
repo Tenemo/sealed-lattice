@@ -6,6 +6,8 @@
                 "tests/**/*.test.ts",
                 // Browser entry bundled by the guarded preparation runner.
                 "tools/ci/participant-preparation-storage.ts",
+                // Browser replay subprocess launched by the guarded profiler.
+                "tools/ci/participant-evaluation-replay.ts",
                 // Workers the FHE key source screen starts by path.
                 "tools/ci/fhe-key-source-browser-worker.mjs",
                 "tools/ci/fhe-key-source-scalar-worker.mjs",

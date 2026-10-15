@@ -20,6 +20,10 @@ import {
     type CpuProfileSummary,
     summarizeCpuTrace,
 } from '#tools/ci/participant-cpu-profile.js';
+import {
+    summarizeEvaluationProfile,
+    type EvaluationProfile,
+} from '#tools/ci/participant-evaluation-profile.js';
 import type { ParticipantOperationMeasurement } from '#tools/ci/participant-workflow-measurements.js';
 
 // An honest page answers through the SDK's participant API; a patched
@@ -206,6 +210,23 @@ export const createParticipantRequests = async ({
             if (scalar && result.status === 'completed')
                 requireScalarMemory(result.details);
             const milliseconds = performance.now() - started;
+            const evaluationProfiles = (await chrome.evaluate(
+                'window.evaluationProfiles',
+            )) as EvaluationProfile[] | undefined;
+            if (
+                evaluationProfiles !== undefined &&
+                evaluationProfiles.length > 0
+            )
+                log.writeEvent({
+                    eventType: 'participant-evaluation-profile',
+                    details: {
+                        position,
+                        operation,
+                        profiles: evaluationProfiles.map(
+                            summarizeEvaluationProfile,
+                        ),
+                    },
+                });
             if (
                 recovery &&
                 result.status === 'completed' &&

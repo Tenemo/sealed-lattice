@@ -18,6 +18,7 @@ import {
     type ViewedParticipantRecord,
     participantCandidateView,
 } from '#tools/ci/participant-candidate-view.js';
+import { instrumentEvaluationSdk } from '#tools/ci/participant-evaluation-profile.js';
 import {
     participantOfferAnnouncements,
     serveOfferAnnouncements,
@@ -106,9 +107,13 @@ const participantPage = harnessPage(
     `
 import { openParticipant, verifyOutcome } from '/sdk/index.js';
 const relay = new URL('./', location.href).href;
-window.verifyOutcome = (poll) => verifyOutcome({ poll, relay });
-window.runParticipant = (operation, parameters) =>
-    openParticipant({ namespace: ${JSON.stringify(participantNamespace)}, relay }).run({ operation, parameters });
+window.evaluationProfiles = [];
+window.addEventListener('participant-evaluation-profile', event => window.evaluationProfiles.push(event.detail));
+window.verifyOutcome = (poll) => { window.evaluationProfiles = []; return verifyOutcome({ poll, relay }); };
+window.runParticipant = (operation, parameters) => {
+    window.evaluationProfiles = [];
+    return openParticipant({ namespace: ${JSON.stringify(participantNamespace)}, relay }).run({ operation, parameters });
+};
 `,
     { module: true },
 );
@@ -173,6 +178,7 @@ export const startRelay = async (
         participantCount: number;
         publicationFaults: boolean;
         scalar: boolean;
+        evaluationProfiling?: boolean;
     }>,
     runtime: ParticipantRuntime,
     publicDirectory: string,
@@ -189,6 +195,9 @@ export const startRelay = async (
         publicationFaults,
         scalar,
     } = settings;
+    const diagnostic = settings.evaluationProfiling
+        ? instrumentEvaluationSdk(runtime.sdk, runtime.worker)
+        : undefined;
     const views = Array.from(
         { length: originCount },
         () => new Map<string, ViewedRecord>(),
@@ -236,7 +245,13 @@ export const startRelay = async (
                     ),
                 },
             ],
-            ['/sdk/index.js', { type: 'text/javascript', bytes: runtime.sdk }],
+            [
+                '/sdk/index.js',
+                {
+                    type: 'text/javascript',
+                    bytes: diagnostic?.sdk ?? runtime.sdk,
+                },
+            ],
             [
                 '/sdk/participant.wasm',
                 { type: 'application/wasm', bytes: runtime.module },

@@ -8,6 +8,18 @@ import {
 } from '#tools/ci/participant-browser-options.js';
 
 describe('participant browser cohort selection', () => {
+    it('requires scalar execution for evaluation phase diagnostics', () => {
+        expect(() =>
+            selectParticipantBrowserOptions(['plain', '--evaluation-profile']),
+        ).toThrow('scalar');
+        expect(
+            selectParticipantBrowserOptions([
+                'plain',
+                '--scalar',
+                '--evaluation-profile',
+            ]).evaluationProfiling,
+        ).toBe(true);
+    });
     it('selects tolerated departures only for a concurrent plain cohort', () => {
         expect(
             selectParticipantBrowserOptions([

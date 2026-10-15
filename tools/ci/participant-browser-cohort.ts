@@ -36,6 +36,7 @@ import {
     type ParticipantOperation,
     type Member,
 } from '#tools/ci/participant-cohort-state.js';
+import { instrumentEvaluationSdk } from '#tools/ci/participant-evaluation-profile.js';
 import type { CheckpointCustodyObservation } from '#tools/ci/participant-preparation-storage.js';
 import { proofCompletionHaltingClient } from '#tools/ci/participant-proof-completion.js';
 import { assembleParticipantRuntime } from '#tools/ci/participant-runtime-assembly.js';
@@ -144,6 +145,27 @@ export const openParticipantCohort = async (
         log,
         invalidAuthor !== undefined,
     );
+    if (settings.evaluationProfiling) {
+        const diagnostic = instrumentEvaluationSdk(runtime.sdk, runtime.worker);
+        await writeFile(
+            path.join(log.artifactDirectoryPath, 'evaluation-worker.js'),
+            diagnostic.worker,
+            { flag: 'wx' },
+        );
+        await writeFile(
+            path.join(log.artifactDirectoryPath, 'evaluation-sdk.js'),
+            diagnostic.sdk,
+            { flag: 'wx' },
+        );
+        log.writeEvent({
+            eventType: 'participant-evaluation-instrumentation',
+            details: {
+                originalWorkerSha512: runtime.identity.worker,
+                instrumentedWorkerSha512: diagnostic.digest,
+                scalar: true,
+            },
+        });
+    }
     // The runner's own sources, every repository file it imports, and the
     // browser entry it bundles by path, beside the runtime sources the
     // assembly recorded.

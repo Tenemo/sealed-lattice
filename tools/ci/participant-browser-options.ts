@@ -111,6 +111,9 @@ export const scheduleParticipantDepartures = (
 // The runner's options: each switch, and each option with its value, and
 // what it selects.
 const browserOptions = {
+    'evaluation-profile': {
+        usage: 'Record scalar target phases, overlapping retrieval and working storage in a diagnostic worker copy.',
+    },
     'cpu-profile': {
         usage: "Record every operation's CPU samples and summarize them beside the run.",
     },
@@ -216,6 +219,10 @@ export const selectParticipantBrowserOptions = (
             (counts.length === 2 &&
                 counts.every((value) => /^[1-9]\d*$/u.test(value))),
         'Optionally select the participant and option counts, then no-result, empty, rosters, plain or preparation.',
+    );
+    assert.ok(
+        !switches.has('--evaluation-profile') || switches.has('--scalar'),
+        'Evaluation phase diagnostics require the scalar worker.',
     );
     const setupDeparture = switches.has('--setup-departure');
     const unselectedCheckpoint = switches.has('--unselected-checkpoint');
@@ -323,6 +330,7 @@ export const selectParticipantBrowserOptions = (
         mode,
         foreignPoll,
         cpuProfiling: switches.has('--cpu-profile'),
+        evaluationProfiling: switches.has('--evaluation-profile'),
         scalar: switches.has('--scalar'),
         setupDeparture,
         unselectedCheckpoint,
