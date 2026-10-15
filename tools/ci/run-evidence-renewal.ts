@@ -76,10 +76,12 @@ type EvidenceRenewalPlan = Readonly<{
 // Without a resumed record, every step runs. With one, the steps before the
 // starting step are carried from it and must have passed; the starting step
 // is `from` or the first step the record has not passed. A step that
-// prepares the checkout runs in every invocation.
+// prepares or audits the checkout runs in every invocation.
 export const planEvidenceRenewal = (
     steps: readonly EvidenceRenewalStep[],
     input: Readonly<{
+        commit: string;
+        checkoutDirty?: boolean;
         from?: string;
         resumed?: ReadonlyMap<string, EvidenceRenewalStepRecord>;
         // Whether a run named relative to the repository root exists.
@@ -99,6 +101,18 @@ export const planEvidenceRenewal = (
             );
         return { carried: [], run: steps };
     }
+    if (input.checkoutDirty === true)
+        throw new Error(
+            'Cannot resume evidence renewal with uncommitted changes in the renewed checkout.',
+        );
+    for (const record of resumed.values())
+        if (record.commit !== input.commit)
+            throw new Error(
+                `The resumed record of ${record.name} at ${record.commit} does not match the renewed checkout at ${input.commit}.`,
+            );
+    const repeat = (step: EvidenceRenewalStep) =>
+        step.preparesCheckout === true ||
+        ('tool' in step.command && step.command.checkout === true);
     const passed = (step: EvidenceRenewalStep) => {
         const record = resumed.get(step.name);
         return record !== undefined && stepPassed(record);
@@ -115,7 +129,7 @@ export const planEvidenceRenewal = (
         );
     const carried: EvidenceRenewalStepRecord[] = [];
     for (const step of steps.slice(0, start)) {
-        if (step.preparesCheckout === true) continue;
+        if (repeat(step)) continue;
         const record = resumed.get(step.name);
         if (record === undefined || !stepPassed(record))
             throw new Error(
@@ -137,12 +151,7 @@ export const planEvidenceRenewal = (
     }
     return {
         carried,
-        run: [
-            ...steps
-                .slice(0, start)
-                .filter((step) => step.preparesCheckout === true),
-            ...steps.slice(start),
-        ],
+        run: [...steps.slice(0, start).filter(repeat), ...steps.slice(start)],
     };
 };
 
@@ -610,7 +619,17 @@ const main = async (): Promise<void> => {
     validateEvidenceRenewalSteps(evidenceRenewalSteps);
     const resumeSource =
         options.resume === undefined ? undefined : path.resolve(options.resume);
+    const commit = resolveCommit(options.worktree ?? 'HEAD');
     const plan = planEvidenceRenewal(evidenceRenewalSteps, {
+        commit,
+        checkoutDirty:
+            resumeSource !== undefined &&
+            options.worktree === undefined &&
+            execFileSync('git', ['status', '--porcelain'], {
+                cwd: repositoryRoot,
+                encoding: 'utf8',
+                windowsHide: true,
+            }).trim().length > 0,
         from: options.from,
         resumed:
             resumeSource === undefined
@@ -628,7 +647,6 @@ const main = async (): Promise<void> => {
                 `No step this invocation runs uses the ${role} placement.`,
             );
     }
-    const commit = resolveCommit(options.worktree ?? 'HEAD');
     const checkout =
         options.worktree === undefined
             ? `this checkout at ${commit}`

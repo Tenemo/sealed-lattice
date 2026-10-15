@@ -142,6 +142,16 @@ export const readEvidenceRenewalRecord = async (
     source: string,
 ): Promise<ReadonlyMap<string, EvidenceRenewalStepRecord>> => {
     const records = new Map<string, EvidenceRenewalStepRecord>();
+    let commit: string | undefined;
+    const accept = (value: unknown) => {
+        const record = parseStepRecord(value, source);
+        if (commit !== undefined && record.commit !== commit)
+            throw new Error(
+                `${source} mixes commits ${commit} and ${record.commit}.`,
+            );
+        commit = record.commit;
+        records.set(record.name, record);
+    };
     if ((await stat(source)).isDirectory()) {
         const text = await readFile(path.join(source, 'events.jsonl'), 'utf8');
         // A line the renewal is still writing ends without a line break.
@@ -153,8 +163,7 @@ export const readEvidenceRenewalRecord = async (
                 eventType?: unknown;
             };
             if (event.eventType !== recordedStepEventType) continue;
-            const record = parseStepRecord(event.details, source);
-            records.set(record.name, record);
+            accept(event.details);
         }
         return records;
     }
@@ -165,10 +174,16 @@ export const readEvidenceRenewalRecord = async (
         !Array.isArray((parsed as { steps?: unknown }).steps)
     )
         throw new Error(`${source} lists no steps.`);
-    for (const value of (parsed as { steps: unknown[] }).steps) {
-        const record = parseStepRecord(value, source);
-        records.set(record.name, record);
+    const declaredCommit = (parsed as { commit?: unknown }).commit;
+    if (declaredCommit !== undefined) {
+        if (
+            typeof declaredCommit !== 'string' ||
+            !/^[0-9a-f]{40}$/u.test(declaredCommit)
+        )
+            throw new Error(`${source} names a malformed commit.`);
+        commit = declaredCommit;
     }
+    for (const value of (parsed as { steps: unknown[] }).steps) accept(value);
     return records;
 };
 
