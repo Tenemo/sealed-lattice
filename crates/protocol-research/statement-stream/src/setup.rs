@@ -292,7 +292,8 @@ impl Accumulator {
         let limb_weight = power(alpha, layout.degree);
         let gadget_bits = Profile::gadget_base_bits();
         for gadget in 0..profile.gadget_length() {
-            // The gadget digit 2^(144 * gadget) in 96-bit limb fingerprints.
+            // The gadget digit 2^(gadget_bits * gadget) in 96-bit limb
+            // fingerprints.
             let factor = scale(
                 power(limb_weight, gadget_bits * gadget / FHE_LIMB_BITS),
                 1u128 << (gadget_bits * gadget % FHE_LIMB_BITS),

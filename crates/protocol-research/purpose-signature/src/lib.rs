@@ -79,7 +79,11 @@ struct UsedPurpose {
     signature: Vec<u8>,
 }
 
-// An in-memory research fixture only. Durable intent reservation and source-role mapping are separate obligations.
+// One credential's signer. Within one value it keeps the first representative
+// of each purpose, refuses a different frame for it and repeats the first
+// signature for the same frame. The protocol credential builds a new signer
+// for every signature, so its one-shot purpose flags, the custody capsule and
+// the worker's committed purpose generations carry the one-frame rule.
 pub struct Credential {
     seed: Zeroizing<Digest>,
     tree: Vec<Digest>,
@@ -289,5 +293,44 @@ mod tests {
                 .is_err()
         );
         assert!(!verify_context(&root, b"unknown", b"invalid", &[]));
+    }
+
+    fn hex(bytes: &[u8]) -> String {
+        bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+    }
+
+    // The independent purpose-signature model computes the same root and
+    // signature digests on Node's SHAKE256 for this seed and these frames.
+    #[test]
+    fn signatures_match_the_independent_model() {
+        let mut credential = Credential::new([0x39; 64]);
+        assert_eq!(
+            hex(&credential.public_key()),
+            "1cb9cbd79d9d8a0333b75f285eaaccf81857802b58ac0fda955545688c05fd45\
+             85ef64d81f18f860344c622823a5904df69af3a2b44c4c264dc3751cb8e3c310"
+        );
+        for (purpose, expected) in [
+            (
+                0,
+                "c0831560df1e820c0cfa5efdecd71d9845370ef3cf345128c13a729e3d07bdee\
+                 05a85d0f7f87bfca8adcff8bf50817a516d823a0ef13a09ecae08ff3ed38a237",
+            ),
+            (
+                7,
+                "bb71e80e088b4d46b8eda9c2a79a8d9a7f80b723f6b9478dd3806b0b3ab4fc37\
+                 be65ecc87b7d5593ebc6fbfbd35a5903ea35f69b48de1fbbd74d0b6db1deeac2",
+            ),
+            (
+                11,
+                "af861de5533718b1a5e99c3ed3281c45c186b6ead1bea3b007fd811d80ca8cdf\
+                 107621a15fd56ad6e4826c5995ebae636c016431f13a3d5761d0c65d23b5476f",
+            ),
+        ] {
+            let message: Vec<u8> = (0..usize::from(purpose) * 97)
+                .map(|i| (i * 11) as u8)
+                .collect();
+            let signature = credential.sign(purpose, &message).unwrap();
+            assert_eq!(hex(&ProtocolHash::digest(&signature)), expected);
+        }
     }
 }

@@ -29,6 +29,13 @@ describe('scalar evaluation storage schedule', () => {
         }
         expect(() => compileRankingProgramModel(profile, 0)).toThrow('prefix');
         expect(() => compileRankingProgramModel(profile, 11)).toThrow('prefix');
+        const largest = compileRankingProgramModel(
+            deriveSupportedProfile(20, 20),
+        );
+        expect(largest.identity).toBe(
+            'cef6e51e5f8a023041e02d2bcb016921e26a94df0c9426a7165c95b1d6b9376def5b49485a24fdcd8dee0d5168ee3dfc5949034771e5b1f6f810498b096c0322',
+        );
+        expect(largest.instructions).toHaveLength(598);
     });
 
     it.each([

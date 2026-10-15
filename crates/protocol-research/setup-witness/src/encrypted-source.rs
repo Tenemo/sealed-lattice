@@ -168,6 +168,30 @@ impl SourceWitness {
     }
 }
 
+/// One private stream of an original source seed: purpose 0 samples the
+/// source and purpose 1 its encryption, each bound to the poll, the owner
+/// and the source family's degree, modulus and common-sampler width.
+fn private_stream(
+    profile: Profile,
+    poll: &[u8; 64],
+    owner: &[u8; 64],
+    seed: &[u8; 64],
+    purpose: u8,
+) -> impl XofReader + use<> {
+    let mut state = Shake256::default();
+    state.update(b"sealed-lattice/source-private/v1");
+    state.update(&[purpose]);
+    state.update(seed);
+    state.update(poll);
+    state.update(owner);
+    state.update(&(DEGREE as u32).to_le_bytes());
+    let modulus = profile.ciphertext_modulus().to_bytes();
+    state.update(&(modulus.len() as u16).to_le_bytes());
+    state.update(&modulus);
+    state.update(&(profile.fhe_common_sample_bits() as u32).to_le_bytes());
+    state.finalize_xof()
+}
+
 /// An original source and its encryption, created before contribution work.
 /// The owner retains the original randomness and authenticates the published
 /// ciphertexts. This object grants no registration or contribution authority.
@@ -190,22 +214,9 @@ impl EncryptedSource {
         seed: [u8; 64],
     ) -> Result<Self, Refusal> {
         let seed = Zeroizing::new(seed);
-        let reader = |purpose: u8| {
-            let mut state = Shake256::default();
-            state.update(b"sealed-lattice/source-private/v1");
-            state.update(&[purpose]);
-            state.update(seed.as_ref());
-            state.update(poll);
-            state.update(owner);
-            state.update(&(DEGREE as u32).to_le_bytes());
-            let modulus = profile.ciphertext_modulus().to_bytes();
-            state.update(&(modulus.len() as u16).to_le_bytes());
-            state.update(&modulus);
-            state.update(&(profile.fhe_common_sample_bits() as u32).to_le_bytes());
-            state.finalize_xof()
-        };
-        let source = FheKeySource::from_reader(profile, &mut reader(0));
-        source.encrypt(&mut reader(1))
+        let source =
+            FheKeySource::from_reader(profile, &mut private_stream(profile, poll, owner, &seed, 0));
+        source.encrypt(&mut private_stream(profile, poll, owner, &seed, 1))
     }
 
     pub(crate) fn new(source: FheKeySource, public: PublicSource, witness: SourceWitness) -> Self {
@@ -536,3 +547,7 @@ pub(crate) fn generate(
         },
     ))
 }
+
+#[cfg(test)]
+#[path = "encrypted-source-tests.rs"]
+mod tests;

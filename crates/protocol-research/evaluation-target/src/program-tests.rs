@@ -224,20 +224,35 @@ fn mixed_or_noncanonical_rank_parameters_refuse_after_rehashing() {
     }
 }
 
+// Instruction counts and identities of the independent compact ranking
+// model's complete programs, which its own test pins to the same values.
 #[test]
-fn representative_programs_match_the_independent_compact_instruction_counts() {
-    for (participants, options, instructions) in [(10, 10, 304), (20, 20, 598)] {
+fn representative_programs_match_the_independent_compact_model() {
+    for (participants, options, instructions, expected) in [
+        (
+            10,
+            10,
+            304,
+            "10edd939fb4f0d0decc6f446ba3194f2dfacf7640b3c3993a4808b7fbedb9423\
+             c523c16f22e1a27810400f539f184874e79940b730ebb13e761979c7fc65671a",
+        ),
+        (
+            20,
+            20,
+            598,
+            "cef6e51e5f8a023041e02d2bcb016921e26a94df0c9426a7165c95b1d6b9376d\
+             ef5b49485a24fdcd8dee0d5168ee3dfc5949034771e5b1f6f810498b096c0322",
+        ),
+    ] {
         let profile = Profile::new(participants, options).unwrap();
         let program = RankingProgram::for_profile(profile, options).unwrap();
         assert_eq!((program.bytes().len() - 12) / 16, instructions);
-        let identity = encrypted_ranking::ranking::program_identity(program.bytes()).unwrap();
-        let identity: String = identity
+        let identity: String = encrypted_ranking::ranking::program_identity(program.bytes())
+            .unwrap()
             .iter()
             .map(|value| format!("{value:02x}"))
             .collect();
-        println!(
-            "Native compact program: participants={participants} options={options} instructions={instructions} identity={identity}"
-        );
+        assert_eq!(identity, expected);
         assert!(Engine::new(profile, program.bytes()).is_ok());
     }
 }

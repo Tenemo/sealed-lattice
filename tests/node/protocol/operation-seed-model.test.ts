@@ -160,14 +160,20 @@ describe('original private-randomness scope populations', () => {
         const encryptedSource = await readRustSource(
             'crates/protocol-research/setup-witness/src/encrypted-source.rs',
         );
-        const sourceReader = rustFunctionBody(encryptedSource, 'from_seed');
-        expect(sourceReader).toContain(`b"${rows[0].domain}"`);
-        expect(sourceReader).toContain('state.update(&[purpose]);');
-        expect(sourceReader).toContain('state.update(seed.as_ref());');
+        const sourceStream = rustFunctionBody(
+            encryptedSource,
+            'private_stream',
+        );
+        expect(sourceStream).toContain(`b"${rows[0].domain}"`);
+        expect(sourceStream).toContain('state.update(&[purpose]);');
+        expect(sourceStream).toContain('state.update(seed);');
+        // The source and its encryption read the purpose 0 and 1 streams.
         expect(
-            [...sourceReader.matchAll(/reader\((\d+)\)/gu)].map((match) =>
-                Number(match[1]),
-            ),
+            [
+                ...rustFunctionBody(encryptedSource, 'from_seed').matchAll(
+                    /private_stream\([^)]*,\s*(\d+)\)/gu,
+                ),
+            ].map((match) => Number(match[1])),
         ).toEqual([0, 1]);
         for (const row of rows.slice(1, -1))
             expect(operation).toContain(`"${row.domain}"`);
