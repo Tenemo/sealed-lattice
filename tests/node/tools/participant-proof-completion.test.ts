@@ -7,24 +7,39 @@ import { runInNewContext } from 'node:vm';
 import { describe, expect, it } from 'vitest';
 
 import {
-    paddingHaltingClient,
+    proofCompletionHaltingClient,
     preparationHaltingClient,
-    validatePaddingObservation,
-} from '#tools/ci/participant-padding-halt.js';
+    validateProofCompletionObservation,
+} from '#tools/ci/participant-proof-completion.js';
 import type {
-    PaddingHaltObservation,
-    PaddingSlotObservation,
+    ProofCompletionHaltObservation,
+    ProofCompletionSlotObservation,
     PreparationCut,
-} from '#tools/ci/participant-padding-halt.js';
+} from '#tools/ci/participant-proof-completion.js';
 
 const source =
-    Buffer.from(`globalThis.append = async (store, buffer, slot, next, slots, length) => {
-    await store(slot, buffer.subarray(0, slot.length));
-    return 'finished';
+    Buffer.from(`globalThis.run = async (store, commitContribution) => {
+    const proof = [], state = { publicRecords: [] }, contributionPhase = { body: 7 }, session = {}, context = {}, offerSigningOperation = {bodyHeader: 0};
+    let header = new Uint8Array();
+    const signing = () => header, concatenate = () => header, unsigned16 = () => header, unsigned64 = () => header;
+    let stored = 0, used = 4;
+    const buffer = Uint8Array.of(1, 2, 3, 4);
+    const appendSlot = async () => {
+        await store({ offset: stored, length: used }, buffer.subarray(0, used));
+        proof.push({ offset: stored, length: used });
+        stored += used;
+    };
+    await appendSlot();
+    used = 3;
+    const writer = { finish: async () => { await appendSlot(); return 7; } };
+    const length = await writer.finish();
+    header = signing(context, offerSigningOperation.bodyHeader, concatenate(unsigned16(state.position), unsigned64(BigInt(length))));
+    await commitContribution(session, { state: { ...state, phase: contributionPhase.body, header, publicRecords: [...state.publicRecords, ...proof], privateRecords: [], seed: new Uint8Array() }, staged: true, clearCheckpoint: true });
+    return length;
 };`);
 
-describe('instrumented participant padding boundaries', () => {
-    it('finds every preparation and padding interruption boundary in the built participant worker', async () => {
+describe('instrumented participant proof completion boundaries', () => {
+    it('finds every preparation and proof completion interruption boundary in the built participant worker', async () => {
         const worker = await readFile(
             path.resolve('packages/sdk/dist/participant-worker.js'),
         );
@@ -42,8 +57,10 @@ describe('instrumented participant padding boundaries', () => {
                 expect(() =>
                     preparationHaltingClient(worker, { kind, phase }),
                 ).not.toThrow();
-        for (const cut of ['padding', 'final-slot'] as const)
-            expect(() => paddingHaltingClient(worker, cut)).not.toThrow();
+        for (const cut of ['final-record', 'body-commit'] as const)
+            expect(() =>
+                proofCompletionHaltingClient(worker, cut),
+            ).not.toThrow();
     });
     it('halts after authenticated selection readback and before any endorsement work', async () => {
         const worker = Buffer.from(`globalThis.select = async () => {
@@ -191,118 +208,87 @@ describe('instrumented participant padding boundaries', () => {
     it.each([
         source,
         Buffer.from(
-            source
-                .toString('utf8')
-                .replace(
-                    'await store(slot, buffer.subarray(0, slot.length));',
-                    'await /* completed store */ store(slot, buffer /* fragment */ . subarray(0, slot.length));',
-                ),
-        ),
-        Buffer.from(
             'const documentation = ' +
                 JSON.stringify(source.toString('utf8')) +
                 ';\n' +
                 source.toString('utf8'),
         ),
     ])(
-        'halts only after the awaited store despite formatting and nonexecuting lookalikes',
+        'observes awaited writes and halts before committing completed authority',
         async (workerSource) => {
-            for (const cut of ['padding', 'final-slot'] as const) {
-                const client = paddingHaltingClient(workerSource, cut);
-                const observed: PaddingSlotObservation[] = [];
-                let resolve!: (halt: PaddingHaltObservation) => void;
-                const reached = new Promise<PaddingHaltObservation>(
-                    (accept) => {
-                        resolve = accept;
+            for (const cut of ['final-record', 'body-commit'] as const) {
+                const client = proofCompletionHaltingClient(workerSource, cut);
+                const slots: ProofCompletionSlotObservation[] = [];
+                let accept!: (value: ProofCompletionHaltObservation) => void;
+                const reached = new Promise<ProofCompletionHaltObservation>(
+                    (resolve) => {
+                        accept = resolve;
                     },
                 );
-                let stored = 0;
+                let completedWrites = 0;
+                let release!: () => void;
+                const firstWrite = new Promise<void>((resolve) => {
+                    release = resolve;
+                });
                 const context = {
                     crypto: webcrypto,
                     performance,
                     self: {
                         postMessage: (
-                            message:
-                                PaddingSlotObservation | PaddingHaltObservation,
+                            value:
+                                | ProofCompletionSlotObservation
+                                | ProofCompletionHaltObservation,
                         ) => {
-                            if (message.type === 'participant-padding-slot') {
-                                assert.equal(stored, observed.length + 1);
-                                observed.push(message);
-                            } else resolve(message);
+                            if (value.type === 'participant-proof-record') {
+                                assert.equal(completedWrites, slots.length + 1);
+                                slots.push(value);
+                            } else accept(value);
                         },
                     },
-                    append: undefined as
+                    run: undefined as
                         | undefined
                         | ((
                               store: () => Promise<void>,
-                              bytes: Uint8Array,
-                              slot: { offset: number; length: number },
-                              next: number,
-                              slots: readonly {
-                                  offset: number;
-                                  length: number;
-                              }[],
-                              length: number,
-                          ) => Promise<string>),
+                              commit: () => void,
+                          ) => Promise<number>),
                 };
                 runInNewContext(client.worker.toString('utf8'), context);
-                const slots = [
-                    { offset: 0, length: 4 },
-                    { offset: 4, length: 4 },
-                ];
-                const buffers = [
-                    new Uint8Array([1, 2, 3, 0]),
-                    new Uint8Array(4),
-                ];
-                for (const [index, slot] of slots.entries()) {
-                    const running = context.append!(
-                        () => {
-                            stored++;
-                            return Promise.resolve();
-                        },
-                        buffers[index],
-                        slot,
-                        index,
-                        slots,
-                        3,
-                    );
-                    if (cut === 'final-slot' && index === 0)
-                        assert.equal(await running, 'finished');
-                    else {
-                        const halt = await Promise.race([
-                            reached,
-                            running.then(() => {
-                                throw new Error(
-                                    'The instrumented operation finished before its cut.',
-                                );
-                            }),
-                        ]);
-                        assert.equal(halt.cut, cut);
-                        assert.equal(halt.proofBytes, 3);
-                        assert.equal(
-                            halt.slotOffset,
-                            cut === 'padding' ? 0 : 4,
+                const running = context.run!(
+                    async () => {
+                        await firstWrite;
+                        completedWrites++;
+                    },
+                    () => {
+                        throw new Error(
+                            'Completed body committed before interruption',
                         );
-                        assert.equal(
-                            halt.storedSlots,
-                            cut === 'padding' ? 1 : 2,
-                        );
-                        assert.equal(halt.totalSlots, 2);
-                        assert.equal(halt.paddingOnly, cut === 'final-slot');
-                        validatePaddingObservation(
-                            { slots: observed, halt },
-                            { minimumProofBytes: 1, maximumProofBytes: 8 },
-                            4,
-                        );
-                        break;
-                    }
-                }
-                for (const [index, slot] of observed.entries())
-                    expect(slot.sha512).toBe(
+                    },
+                );
+                await Promise.resolve();
+                expect(slots).toEqual([]);
+                release();
+                const halt = await Promise.race([
+                    reached,
+                    running.then(() => {
+                        throw new Error('Did not halt');
+                    }),
+                ]);
+                expect(halt.cut).toBe(cut);
+                expect(halt.proofBytes).toBe(7);
+                validateProofCompletionObservation(
+                    { slots, halt },
+                    { minimumProofBytes: 1, maximumProofBytes: 8 },
+                    4,
+                );
+                expect(slots.map((slot) => slot.sha512)).toEqual(
+                    [4, 3].map((length) =>
                         createHash('sha512')
-                            .update(buffers[index])
+                            .update(
+                                Uint8Array.of(1, 2, 3, 4).subarray(0, length),
+                            )
                             .digest('hex'),
-                    );
+                    ),
+                );
                 expect(client.originalDigest).toBe(
                     createHash('sha512').update(workerSource).digest('hex'),
                 );
@@ -310,50 +296,41 @@ describe('instrumented participant padding boundaries', () => {
             }
         },
     );
-    it('refuses missing or ambiguous store boundaries and malformed replay observations', () => {
-        expect(() => paddingHaltingClient(Buffer.from(''), 'padding')).toThrow(
-            'one completed',
-        );
-        expect(() =>
-            paddingHaltingClient(Buffer.concat([source, source]), 'padding'),
-        ).toThrow('one completed');
-        const slot: PaddingSlotObservation = {
-            type: 'participant-padding-slot',
+    it('refuses ambiguous boundaries and malformed replay inventories', () => {
+        for (const input of [Buffer.from(''), Buffer.concat([source, source])])
+            expect(() =>
+                proofCompletionHaltingClient(input, 'final-record'),
+            ).toThrow('one completed');
+        const slot: ProofCompletionSlotObservation = {
+            type: 'participant-proof-record',
             offset: 0,
-            length: 4,
+            length: 3,
             sha512: 'a'.repeat(128),
             instrumentationMilliseconds: 0,
         };
-        const halt: PaddingHaltObservation = {
-            type: 'participant-padding-halt',
-            cut: 'padding',
+        const halt: ProofCompletionHaltObservation = {
+            type: 'participant-proof-completion',
+            cut: 'final-record',
             proofBytes: 3,
-            slotOffset: 0,
-            slotLength: 4,
             storedSlots: 1,
-            totalSlots: 2,
-            paddingOnly: false,
         };
-        expect(() =>
-            validatePaddingObservation(
-                { slots: [slot], halt: { ...halt, proofBytes: 4 } },
-                { minimumProofBytes: 1, maximumProofBytes: 8 },
-                4,
-            ),
-        ).toThrow();
-        expect(() =>
-            validatePaddingObservation(
-                { slots: [{ ...slot, offset: 1 }], halt },
-                { minimumProofBytes: 1, maximumProofBytes: 8 },
-                4,
-            ),
-        ).toThrow();
-        expect(() =>
-            validatePaddingObservation(
-                { slots: [slot], halt: { ...halt, cut: 'final-slot' } },
-                { minimumProofBytes: 1, maximumProofBytes: 8 },
-                4,
-            ),
-        ).toThrow();
+        validateProofCompletionObservation(
+            { slots: [slot], halt },
+            { minimumProofBytes: 1, maximumProofBytes: 8 },
+            4,
+        );
+        for (const slots of [
+            [],
+            [slot, slot],
+            [{ ...slot, length: 4 }],
+            [{ ...slot, offset: 1 }],
+        ])
+            expect(() =>
+                validateProofCompletionObservation(
+                    { slots, halt },
+                    { minimumProofBytes: 1, maximumProofBytes: 8 },
+                    4,
+                ),
+            ).toThrow();
     });
 });

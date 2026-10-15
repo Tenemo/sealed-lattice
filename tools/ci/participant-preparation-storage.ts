@@ -22,7 +22,7 @@ import {
     readDataKind,
 } from '#packages/sdk/src/participant/worker/storage/root.js';
 
-export { mutateParticipantPadding } from './participant-padding-corruption.js';
+export { mutateParticipantProof } from './participant-proof-corruption.js';
 
 export type SourceCustodyObservation = Readonly<{
     generation: number;

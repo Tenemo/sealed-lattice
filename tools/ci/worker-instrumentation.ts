@@ -6,6 +6,8 @@ type Checkpoint =
     | 'root-readback'
     | 'selection-readback'
     | 'proof-slot-store'
+    | 'proof-finish'
+    | 'proof-body-commit'
     | 'operation-module';
 
 const statement = (source: string) =>
@@ -26,9 +28,22 @@ const checkpoints = {
     },
     'proof-slot-store': {
         statement: statement(
-            'await store(slot, buffer.subarray(0, slot.length));',
+            'await store({ offset: stored, length: used }, buffer.subarray(0, used));',
         ),
         description: 'one completed private proof-slot store',
+    },
+    'proof-finish': {
+        statement: statement('const length = await writer.finish();'),
+        next: statement(
+            'header = signing(context, offerSigningOperation.bodyHeader, concatenate(unsigned16(state.position), unsigned64(BigInt(length))));',
+        ),
+        description: 'one completed contribution proof writer',
+    },
+    'proof-body-commit': {
+        statement: statement(
+            'await commitContribution(session, { state: { ...state, phase: contributionPhase.body, header, publicRecords: [...state.publicRecords, ...proof], privateRecords: [], seed: new Uint8Array() }, staged: true, clearCheckpoint: true });',
+        ),
+        description: 'one completed contribution body commit',
     },
     'operation-module': {
         statement: statement('await WebAssembly.compile(delivered.bytes);'),

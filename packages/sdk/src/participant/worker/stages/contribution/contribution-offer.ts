@@ -30,7 +30,7 @@ import {
     proofObject,
 } from './contribution-state.js';
 
-// Reads every authenticated private proof slot and its padding. Only the
+// Reads every authenticated private proof record. Only the
 // exact framed proof reaches the signer or relay, and completion of either
 // caller waits for the full fixed record pass.
 const readRetainedProof = (

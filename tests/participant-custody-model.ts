@@ -31,15 +31,20 @@ const proofRecordLayout = (maximumProofBytes: bigint) => {
     return records;
 };
 
-export const compileContributionProofStorage = (profile: SupportedProfile) => {
+export const compileContributionProofStorage = (
+    profile: SupportedProfile,
+    proofBytes?: bigint,
+) => {
     const body = compileContributionBodyCensus(profile);
-    const records = proofRecordLayout(body.maximumProofBytes);
+    const length = proofBytes ?? body.maximumProofBytes;
+    if (length < body.minimumProofBytes || length > body.maximumProofBytes)
+        throw new RangeError('Proof length is outside its bounds.');
+    const records = proofRecordLayout(length);
     const count = BigInt(records.length);
     return {
         records,
-        plaintextBytes: body.maximumProofBytes,
-        ciphertextBytes:
-            body.maximumProofBytes + retainedRecordTagBytes * count,
+        plaintextBytes: length,
+        ciphertextBytes: length + retainedRecordTagBytes * count,
         dataKeyBytes: 32n * count,
         recordIdentityBytes: 64n * count,
         recordReferenceBytes: retainedPublicReferenceBytes * count,
@@ -49,9 +54,9 @@ export const compileContributionProofStorage = (profile: SupportedProfile) => {
 
 // A byte/work projection for one observed complete proof length. The format's
 // lower framing bound does not assert that a proof of that length is possible.
-// Every full consumer authenticates the whole fixed slot set, including its
-// zero tail; only the original proof prefix is hashed or published publicly.
-export const projectContributionProofPadding = (
+// The maximum remains an allocation bound. Actual custody and every complete
+// read use the authenticated length; both formats keep the same body header.
+export const projectContributionProofStorageSavings = (
     profile: SupportedProfile,
     observedProofBytes: bigint,
     completeReadPasses: bigint,
@@ -70,28 +75,26 @@ export const projectContributionProofPadding = (
     );
     const fixed = compileContributionProofStorage(profile);
     const addedRecords = BigInt(fixed.records.length) - variableRecords;
-    const paddingBytes = fixed.plaintextBytes - observedProofBytes;
-    const additionalProofCiphertextBytes =
-        paddingBytes + retainedRecordTagBytes * addedRecords;
-    const additionalCompletedRootBytes =
-        body.headerBytes + retainedPublicReferenceBytes * addedRecords;
+    const unusedCapacityBytes = fixed.plaintextBytes - observedProofBytes;
+    const savedProofCiphertextBytes =
+        unusedCapacityBytes + retainedRecordTagBytes * addedRecords;
+    const savedCompletedRootBytes = retainedPublicReferenceBytes * addedRecords;
     return {
         observedProofBytes,
         completeReadPasses,
-        paddingBytes,
-        additionalProofRecords: addedRecords,
-        additionalProofRecordKeyBytes: 32n * addedRecords,
-        additionalProofRecordIdentityBytes: 64n * addedRecords,
-        additionalProofRecordTagBytes: retainedRecordTagBytes * addedRecords,
-        additionalProofCiphertextBytes,
-        additionalCompletedRootBytes,
-        additionalCompletedRetainedBytes:
-            additionalProofCiphertextBytes + additionalCompletedRootBytes,
-        additionalProofWriteBytes: additionalProofCiphertextBytes,
-        additionalProofReadBytes:
-            completeReadPasses * additionalProofCiphertextBytes,
-        additionalProofVerificationCalls: completeReadPasses * addedRecords,
-        // The source-opening salt stays in the body header; padding changes
+        unusedCapacityBytes,
+        savedProofRecords: addedRecords,
+        savedProofRecordKeyBytes: 32n * addedRecords,
+        savedProofRecordIdentityBytes: 64n * addedRecords,
+        savedProofRecordTagBytes: retainedRecordTagBytes * addedRecords,
+        savedProofCiphertextBytes,
+        savedCompletedRootBytes,
+        savedCompletedRetainedBytes:
+            savedProofCiphertextBytes + savedCompletedRootBytes,
+        savedProofWriteBytes: savedProofCiphertextBytes,
+        savedProofReadBytes: completeReadPasses * savedProofCiphertextBytes,
+        savedProofVerificationCalls: completeReadPasses * addedRecords,
+        // The source-opening salt stays in the body header; storage changes
         // no proof bytes.
         publishedProofBytes: observedProofBytes,
     };
@@ -336,7 +339,7 @@ export const compileGcmKeyHistory = (
         algorithmicAesCallUpperBound,
         maximumHashDegree,
         // Conditional terms after replacing the secret-key AES instances.
-        // The multi-key QPT PRP advantage is additional, not zero.
+        // The multi-key QPT PRP advantage is saved, not zero.
         permutationSwitchNumerator:
             (distinctAesInputUpperBound * (distinctAesInputUpperBound - 1n)) /
             2n,

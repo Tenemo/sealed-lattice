@@ -9,7 +9,7 @@ import {
     compileGcmKeyHistory,
     compileParticipantCustodyCensus,
     compileParticipantVaultKeyClasses,
-    projectContributionProofPadding,
+    projectContributionProofStorageSavings,
 } from '#tests/participant-custody-model.js';
 import { compileParticipantReleaseCustody } from '#tests/participant-release-custody-model.js';
 import { compileRegistrationEnrollmentCensus } from '#tests/registration-enrollment-model.js';
@@ -233,7 +233,7 @@ describe('shared participant custody', () => {
         },
     );
 
-    it('projects padding, new record keys and complete read passes from a supplied proof length', () => {
+    it('projects actual storage and savings without subtracting the retained header', () => {
         const profile = completionProfile();
         const body = compileContributionBodyCensus(profile);
         const chunk = 1n << 20n;
@@ -253,58 +253,56 @@ describe('shared participant custody', () => {
             const expectedCiphertextDelta =
                 body.maximumProofBytes - length + 16n * added;
             for (const passes of [0n, 1n, 2n, 5n]) {
-                const projection = projectContributionProofPadding(
+                const projection = projectContributionProofStorageSavings(
                     profile,
                     length,
                     passes,
                 );
-                expect(projection.paddingBytes).toBe(
+                expect(projection.unusedCapacityBytes).toBe(
                     body.maximumProofBytes - length,
                 );
-                expect(projection.additionalProofRecords).toBe(added);
-                expect(projection.additionalProofRecordKeyBytes).toBe(
-                    32n * added,
-                );
-                expect(projection.additionalProofRecordIdentityBytes).toBe(
+                expect(projection.savedProofRecords).toBe(added);
+                expect(projection.savedProofRecordKeyBytes).toBe(32n * added);
+                expect(projection.savedProofRecordIdentityBytes).toBe(
                     64n * added,
                 );
-                expect(projection.additionalProofRecordTagBytes).toBe(
-                    16n * added,
-                );
-                expect(projection.additionalProofCiphertextBytes).toBe(
+                expect(projection.savedProofRecordTagBytes).toBe(16n * added);
+                expect(projection.savedProofCiphertextBytes).toBe(
                     expectedCiphertextDelta,
                 );
-                expect(projection.additionalCompletedRootBytes).toBe(
-                    body.headerBytes + 106n * added,
-                );
-                expect(projection.additionalProofWriteBytes).toBe(
+                expect(projection.savedCompletedRootBytes).toBe(106n * added);
+                expect(projection.savedProofWriteBytes).toBe(
                     expectedCiphertextDelta,
                 );
-                expect(projection.additionalProofReadBytes).toBe(
+                expect(projection.savedProofReadBytes).toBe(
                     passes * expectedCiphertextDelta,
                 );
-                expect(projection.additionalProofVerificationCalls).toBe(
+                expect(projection.savedProofVerificationCalls).toBe(
                     passes * added,
                 );
                 expect(projection.publishedProofBytes).toBe(length);
+                const actual = compileContributionProofStorage(profile, length);
+                expect(actual.plaintextBytes).toBe(length);
+                expect(actual.records.length).toBe(Number(oldSlots));
+                expect(actual.completedBodyHeaderBytes).toBe(body.headerBytes);
             }
         }
         expect(() =>
-            projectContributionProofPadding(
+            projectContributionProofStorageSavings(
                 profile,
                 body.minimumProofBytes - 1n,
                 1n,
             ),
         ).toThrow('bounds');
         expect(() =>
-            projectContributionProofPadding(
+            projectContributionProofStorageSavings(
                 profile,
                 body.maximumProofBytes + 1n,
                 1n,
             ),
         ).toThrow('bounds');
         expect(() =>
-            projectContributionProofPadding(
+            projectContributionProofStorageSavings(
                 profile,
                 body.maximumProofBytes,
                 -1n,

@@ -21,17 +21,15 @@ const fixtureHeader = (length: number) => {
     return header;
 };
 const proofObject = bounds.expandedPolynomials + 1;
-const slots = Array.from(
-    { length: Math.ceil(bounds.maximumProofBytes / recordBytes) },
-    (_unused, index) => ({
-        object: proofObject,
-        offset: index * recordBytes,
-        length: Math.min(
-            recordBytes,
-            bounds.maximumProofBytes - index * recordBytes,
-        ),
-    }),
-);
+const slots = (length: number) =>
+    Array.from(
+        { length: Math.ceil(length / recordBytes) },
+        (_unused, index) => ({
+            object: proofObject,
+            offset: index * recordBytes,
+            length: Math.min(recordBytes, length - index * recordBytes),
+        }),
+    );
 const record = (
     location: Readonly<{ object: number; offset: number; length: number }>,
     index: number,
@@ -59,9 +57,10 @@ const stateAt = (
     publicRecords:
         phase === 4
             ? []
-            : [...bounds.publicRecords, ...(phase >= 7 ? slots : [])].map(
-                  record,
-              ),
+            : [
+                  ...bounds.publicRecords,
+                  ...(phase >= 7 ? slots(proofLength) : []),
+              ].map(record),
     privateRecords:
         phase === 5 || phase === 6
             ? bounds.checkpointLengths.map((_length, index) => ({
@@ -77,7 +76,7 @@ const stateAt = (
         .map((length, index) =>
             record(
                 { object: proofObject + 1 + index, offset: 0, length },
-                bounds.publicRecords.length + slots.length + index,
+                bounds.publicRecords.length + slots(proofLength).length + index,
             ),
         ),
     seed: new Uint8Array(phase === 4 || phase === 6 ? 64 : 0).fill(61),
@@ -116,9 +115,8 @@ describe('independent contribution state framing', () => {
             );
     });
 
-    it('retains the same maximum proof slot inventory for varied logical lengths', () => {
+    it('derives the exact proof inventory from the authenticated length', () => {
         for (const phase of [7, 8, 9] as const) {
-            let encodedLength: number | undefined;
             for (const length of [
                 bounds.minimumProofBytes,
                 recordBytes - 1,
@@ -141,9 +139,12 @@ describe('independent contribution state framing', () => {
                             offset,
                             length: bytes,
                         })),
-                ).toEqual(slots);
-                encodedLength ??= encoded.length;
-                expect(encoded.length).toBe(encodedLength);
+                ).toEqual(slots(length));
+                expect(
+                    decoded.publicRecords
+                        .slice(bounds.publicRecords.length)
+                        .reduce((sum, entry) => sum + entry.length, 0),
+                ).toBe(length);
             }
         }
     });
@@ -184,6 +185,16 @@ describe('independent contribution state framing', () => {
                 state.publicRecords.map((value, index) =>
                     index === last
                         ? { ...value, length: value.length - 1 }
+                        : value,
+                ),
+                [
+                    ...state.publicRecords.slice(0, last - 1),
+                    state.publicRecords[last],
+                    state.publicRecords[last - 1],
+                ],
+                state.publicRecords.map((value, index) =>
+                    index === last
+                        ? { ...value, length: value.length + 1 }
                         : value,
                 ),
                 state.publicRecords.map((value, index) =>

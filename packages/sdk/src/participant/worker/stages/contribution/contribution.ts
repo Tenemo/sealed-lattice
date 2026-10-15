@@ -579,7 +579,7 @@ export const continueContribution = async (session: ContributionSession) => {
         if (run.phase() !== proverPhase.done)
             throw new Error('The continued proof is incomplete.');
         // The own intent remains at phase six while the same record writer
-        // fills every remaining profile slot, including padding-only slots.
+        // retains the final proof record before the completed body commits.
         const length = await writer.finish();
         header = signing(
             context,

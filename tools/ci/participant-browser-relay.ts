@@ -22,7 +22,7 @@ import {
     participantOfferAnnouncements,
     serveOfferAnnouncements,
 } from '#tools/ci/participant-offer-announcements.js';
-import type { PreparationCut } from '#tools/ci/participant-padding-halt.js';
+import type { PreparationCut } from '#tools/ci/participant-proof-completion.js';
 import { participantRelayStore } from '#tools/ci/participant-relay-record.js';
 import type {
     CorruptParticipantClient,
@@ -121,7 +121,7 @@ const clientPage = (runtime: ParticipantRuntime, workerDigest: string) =>
         `
 const runtime = ${JSON.stringify({ identity: runtime.identity, worker: workerDigest })};
 window.runParticipant = async (operation, parameters) => {
-    window.paddingReplay = {slots: [], halt: null};
+    window.proofCompletionReplay = {slots: [], halt: null};
     window.preparationHalt = null;
     const response = await fetch('/worker.js', { cache: 'no-store' });
     const bytes = new Uint8Array(await response.arrayBuffer());
@@ -138,8 +138,8 @@ window.runParticipant = async (operation, parameters) => {
             URL.revokeObjectURL(url);
         };
         worker.onmessage = ({ data }) => {
-            if (data?.type === 'participant-padding-slot') { window.paddingReplay.slots.push(data); return; }
-            if (data?.type === 'participant-padding-halt') { window.paddingReplay.halt = data; return; }
+            if (data?.type === 'participant-proof-record') { window.proofCompletionReplay.slots.push(data); return; }
+            if (data?.type === 'participant-proof-completion') { window.proofCompletionReplay.halt = data; return; }
             if (data?.type === 'participant-preparation-halt') { window.preparationHalt = data; return; }
             finish();
             resolve(data);

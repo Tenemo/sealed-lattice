@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 
 import { rewriteWorkerCheckpoint } from './worker-instrumentation.js';
 
-export type PaddingCut = 'padding' | 'final-slot';
+export type ProofCompletionCut = 'final-record' | 'body-commit';
 export type PreparationCut = Readonly<{
     kind: 'contribution' | 'selection' | 'selection-readback' | 'endorsement';
     phase: number;
@@ -68,46 +68,45 @@ export const preparationHaltingClient = (
         preparationCut: cut,
     };
 };
-export type PaddingSlotObservation = Readonly<{
-    type: 'participant-padding-slot';
+export type ProofCompletionSlotObservation = Readonly<{
+    type: 'participant-proof-record';
     offset: number;
     length: number;
     sha512: string;
     instrumentationMilliseconds: number;
 }>;
-export type PaddingHaltObservation = Readonly<{
-    type: 'participant-padding-halt';
-    cut: PaddingCut;
+export type ProofCompletionHaltObservation = Readonly<{
+    type: 'participant-proof-completion';
+    cut: ProofCompletionCut;
     proofBytes: number;
-    slotOffset: number;
-    slotLength: number;
     storedSlots: number;
-    totalSlots: number;
-    paddingOnly: boolean;
 }>;
 
-// This code exists only in an explicitly instrumented research worker. The
-// store callback has completed before the observation or halt; the product
-// worker, private state schema and cryptographic acceptance are unchanged.
-export const paddingHaltingClient = (worker: Buffer, cut: PaddingCut) => {
-    const condition =
-        cut === 'padding'
-            ? 'slot.offset + slot.length > length'
-            : 'next + 1 === slots.length';
-    const patched = rewriteWorkerCheckpoint(
+// Only the diagnostic worker observes private record hashes. Each store has
+// completed before its observation; neither observation creates authority.
+export const proofCompletionHaltingClient = (
+    worker: Buffer,
+    cut: ProofCompletionCut,
+) => {
+    const observed = rewriteWorkerCheckpoint(
         worker,
         'proof-slot-store',
         (matched) =>
             matched +
             `
-        const paddingObservationStarted = performance.now();
-        const paddingObservationHash = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-512', buffer.subarray(0, slot.length))), value => value.toString(16).padStart(2, '0')).join('');
-        self.postMessage({type:'participant-padding-slot',offset:slot.offset,length:slot.length,sha512:paddingObservationHash,instrumentationMilliseconds:performance.now()-paddingObservationStarted});
-        if (${condition}) {
-            self.postMessage({type:'participant-padding-halt',cut:${JSON.stringify(cut)},proofBytes:length,slotOffset:slot.offset,slotLength:slot.length,storedSlots:next+1,totalSlots:slots.length,paddingOnly:slot.offset>=length});
-            await new Promise(() => undefined);
-        }
+        const observationStarted = performance.now();
+        const observationHash = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-512', buffer.subarray(0, used))), value => value.toString(16).padStart(2, '0')).join('');
+        self.postMessage({type:'participant-proof-record',offset:stored,length:used,sha512:observationHash,instrumentationMilliseconds:performance.now()-observationStarted});
     `,
+    );
+    const halt = `self.postMessage({type:'participant-proof-completion',cut:${JSON.stringify(cut)},proofBytes:proof.reduce((sum, record) => sum + record.length, 0),storedSlots:proof.length}); await new Promise(() => undefined);`;
+    const patched = rewriteWorkerCheckpoint(
+        observed,
+        cut === 'final-record' ? 'proof-finish' : 'proof-body-commit',
+        (matched) =>
+            cut === 'final-record'
+                ? matched + '\n' + halt
+                : halt + '\n' + matched,
     );
     return {
         generation: 4,
@@ -118,47 +117,33 @@ export const paddingHaltingClient = (worker: Buffer, cut: PaddingCut) => {
     };
 };
 
-// Private replay diagnostics compare fixed slots, including zeros beyond the
-// logical proof. Neither these hashes nor this check grants a capability.
-export const validatePaddingObservation = (
+export const validateProofCompletionObservation = (
     value: Readonly<{
-        slots: readonly PaddingSlotObservation[];
-        halt: PaddingHaltObservation;
+        slots: readonly ProofCompletionSlotObservation[];
+        halt: ProofCompletionHaltObservation;
     }>,
     bounds: Readonly<{ minimumProofBytes: number; maximumProofBytes: number }>,
     chunkBytes: number,
 ) => {
     const { slots, halt } = value;
     assert.ok(
-        halt.proofBytes >= bounds.minimumProofBytes &&
+        Number.isSafeInteger(halt.proofBytes) &&
+            halt.proofBytes >= bounds.minimumProofBytes &&
             halt.proofBytes <= bounds.maximumProofBytes,
     );
-    assert.equal(
-        halt.totalSlots,
-        Math.ceil(bounds.maximumProofBytes / chunkBytes),
-    );
+    assert.ok(halt.cut === 'final-record' || halt.cut === 'body-commit');
+    assert.equal(halt.storedSlots, Math.ceil(halt.proofBytes / chunkBytes));
     assert.equal(slots.length, halt.storedSlots);
-    assert.ok(slots.length > 0 && slots.length <= halt.totalSlots);
     for (const [index, slot] of slots.entries()) {
         assert.equal(slot.offset, index * chunkBytes);
         assert.equal(
             slot.length,
-            Math.min(chunkBytes, bounds.maximumProofBytes - slot.offset),
+            Math.min(chunkBytes, halt.proofBytes - slot.offset),
         );
         assert.match(slot.sha512, /^[0-9a-f]{128}$/u);
         assert.ok(
             Number.isFinite(slot.instrumentationMilliseconds) &&
                 slot.instrumentationMilliseconds >= 0,
         );
-    }
-    const last = slots[slots.length - 1];
-    assert.equal(last.offset, halt.slotOffset);
-    assert.equal(last.length, halt.slotLength);
-    assert.equal(halt.paddingOnly, last.offset >= halt.proofBytes);
-    if (halt.cut === 'padding')
-        assert.ok(last.offset + last.length > halt.proofBytes);
-    else {
-        assert.equal(halt.cut, 'final-slot');
-        assert.equal(halt.storedSlots, halt.totalSlots);
     }
 };
