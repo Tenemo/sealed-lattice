@@ -22,7 +22,7 @@ export const renderBrowserWordProverResourceCensus = (): string[] => {
     return [
         '## Browser word-prover resource census',
         '',
-        'The browser experiment streams public inputs, retains their prepared common-polynomial adjoints until the affine pass, and emits one proof record at a time. These conservative allocation allowances describe the experimental live-data schedule. They are not measurements of browser-private memory, authenticated checkpoints, a complete action, or supported-phone qualification.',
+        'The browser experiment streams public inputs, retains their prepared common-polynomial adjoints until the affine pass, and emits one proof record at a time. Private Merkle trees retain one salt seed and the implemented upper-node arrays; the first two retain leaf digests, while linear and folding trees reconstruct them. The schedule also charges temporary leaf allocation before those trees discard it. These conservative allocation allowances are not measurements of browser-private memory, authenticated checkpoints, a complete action, or supported-phone qualification.',
         '',
         table(
             ['Property', 'Value'],
@@ -34,6 +34,18 @@ export const renderBrowserWordProverResourceCensus = (): string[] => {
                 [
                     'Prepared adjoint bytes',
                     formatCount(browserWordProver.preparedAdjointBytes),
+                ],
+                [
+                    'Private tree bytes with retained leaf digests',
+                    formatCount(browserWordProver.retainedPrivateTreeBytes),
+                ],
+                [
+                    'Private tree bytes with reconstructed leaf digests',
+                    formatCount(browserWordProver.forgottenPrivateTreeBytes),
+                ],
+                [
+                    'Retained folding values and private trees',
+                    formatCount(browserWordProver.retainedFoldingBytes),
                 ],
                 [
                     'Enforced maximum bytes per opaque hasher',

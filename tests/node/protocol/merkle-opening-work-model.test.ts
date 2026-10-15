@@ -156,6 +156,12 @@ describe('prover Merkle opening work', () => {
             readRustSource('crates/protocol-research/word-proof/src/fri.rs'),
         ]);
         expect(rustIntegerConstant(tree, 'RECOMPUTED_LEVELS')).toBe(4n);
+        expect(rustIntegerConstant(tree, 'SALT_SEED_BYTES')).toBe(64n);
+        expect(tree).toContain('leaves: vec![[0; 64]; length]');
+        expect(tree).toContain(
+            'upper: vec![[0; 64]; length >> recomputed_levels(length)]',
+        );
+        expect(tree).toContain('self.leaves = Vec::new();');
         expect(tree).toContain('for local in (2..span).rev()');
         expect(oracles).toContain(
             'let tree = Tree::new(role, 0, EVALUATION_DOMAIN_SIZE, relation.first_width());',

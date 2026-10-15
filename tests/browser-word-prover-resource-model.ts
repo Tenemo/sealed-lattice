@@ -5,6 +5,7 @@ import {
     compileFullWordProofLayout,
     compileWordProofLayout,
 } from '#tests/full-word-proof-layout-model.js';
+import { merkleTreeStorage } from '#tests/merkle-opening-work-model.js';
 import { compileRosterProposalCensus } from '#tests/roster-proposal-model.js';
 import { compileSetupContributionRelationCensus } from '#tests/setup-relation/shape.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
@@ -35,7 +36,8 @@ const compileWordProverResources = (
     const lookups = BigInt(input.lookups);
     const preparedAdjointBytes = input.preparedAdjointBytes;
     const witness = 2n * columns * systematic + systematic * base;
-    const tree = domain * (2n * 64n + 128n);
+    const tree = merkleTreeStorage(Number(domain), false).residentBytes;
+    const forgottenTree = merkleTreeStorage(Number(domain), true).residentBytes;
     const first =
         tree +
         (columns + 1n) * mask * base +
@@ -45,8 +47,17 @@ const compileWordProverResources = (
         ((lookups + 1n) * mask + 2n * BigInt(agreement.witnessDegree + 1)) *
             extension;
     const linear =
-        tree + (BigInt(agreement.witnessDegree) + systematic - 1n) * extension;
-    const folding = (domain - 4n) * (extension + 2n * 64n + 128n);
+        forgottenTree +
+        (BigInt(agreement.witnessDegree) + systematic - 1n) * extension;
+    let folding = 0n;
+    for (let length = Number(domain / 2n); length > 2; length /= 2)
+        folding +=
+            BigInt(length) * extension +
+            merkleTreeStorage(length, true).residentBytes;
+    // Tree::new allocates leaves before forget_leaves releases them. Charge
+    // that temporary allocation even beside the complete retained state.
+    const transientLinearLeaves = domain * 64n;
+    const transientFoldingLeaves = (domain / 2n) * 64n;
     const reciprocals = systematic * extension;
     // These are explicit allocation allowances, not measured object sizes.
     // The setup prover checks the opaque hasher bound before starting work.
@@ -83,7 +94,8 @@ const compileWordProverResources = (
                 second +
                 reciprocals +
                 linear +
-                polynomialWorkspace,
+                polynomialWorkspace +
+                transientLinearLeaves,
         ],
         [
             'public oracle',
@@ -104,7 +116,8 @@ const compileWordProverResources = (
                 folding +
                 reciprocals +
                 polynomialWorkspace +
-                publicTree,
+                publicTree +
+                transientFoldingLeaves,
         ],
         [
             'first openings',
@@ -136,6 +149,9 @@ const compileWordProverResources = (
         bytes: (bytes as bigint) + metadataAndAllocatorAllowance,
     }));
     return {
+        retainedPrivateTreeBytes: tree,
+        forgottenPrivateTreeBytes: forgottenTree,
+        retainedFoldingBytes: folding,
         preparedAdjointBytes,
         maximumHasherBytes,
         publicPolynomial,

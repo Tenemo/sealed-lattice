@@ -16,6 +16,21 @@ const shape = (length: number) => {
     return { omittedLevels, blockLeaves: 2 ** (omittedLevels + 1) };
 };
 
+// A private tree keeps one salt seed. Its upper array includes the unused
+// heap slot zero; its leaf digests are optional and no leaf salts are stored.
+export const merkleTreeStorage = (length: number, leavesForgotten: boolean) => {
+    const { omittedLevels } = shape(length);
+    const saltSeedBytes = 64n;
+    const innerNodeBytes = BigInt(length / 2 ** omittedLevels) * 64n;
+    const leafDigestBytes = leavesForgotten ? 0n : BigInt(length) * 64n;
+    return {
+        saltSeedBytes,
+        innerNodeBytes,
+        leafDigestBytes,
+        residentBytes: saltSeedBytes + innerNodeBytes + leafDigestBytes,
+    };
+};
+
 const work = (
     openedLeaves: number,
     blocks: number,
