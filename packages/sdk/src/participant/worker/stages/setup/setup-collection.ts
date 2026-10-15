@@ -572,18 +572,30 @@ export const publishCollectedAggregate = async (
                             let start = 0;
                             start < bytes.length;
                             start += context.module.setup_chunk_capacity()
-                        )
-                            publicStep(
-                                context,
-                                publicOperation.aggregatePolynomial,
-                                bytes.subarray(
-                                    start,
-                                    start +
-                                        context.module.setup_chunk_capacity(),
-                                ),
-                                polynomial.expandedIndex,
-                                outputOffset + start,
-                            );
+                        ) {
+                            try {
+                                publicStep(
+                                    context,
+                                    publicOperation.aggregatePolynomial,
+                                    bytes.subarray(
+                                        start,
+                                        start +
+                                            context.module.setup_chunk_capacity(),
+                                    ),
+                                    polynomial.expandedIndex,
+                                    outputOffset + start,
+                                );
+                            } catch (error) {
+                                if (error instanceof PublicInputFailure)
+                                    throw Object.assign(
+                                        new StorageFailure(
+                                            'The collected aggregate cache failed verification.',
+                                        ),
+                                        { cause: error },
+                                    );
+                                throw error;
+                            }
+                        }
                         await accept(bytes);
                     }
                 },

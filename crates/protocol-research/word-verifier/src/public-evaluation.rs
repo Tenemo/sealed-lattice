@@ -19,6 +19,10 @@ struct Transcript {
     message: Vec<u8>,
     round: u32,
 }
+
+#[cfg(test)]
+#[path = "public-evaluation-tests.rs"]
+mod tests;
 impl Transcript {
     fn next(&mut self) {
         self.round += 1;

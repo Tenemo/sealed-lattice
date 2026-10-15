@@ -19,6 +19,10 @@ use word_verifier::{
     CHUNK_LIMIT, HEADER_LENGTH, SetupContributionVerifier, setup_contribution_verifier,
 };
 
+#[cfg(test)]
+#[path = "published-aggregate-tests.rs"]
+mod aggregate_tests;
+
 /// The most common polynomials whose records helpers compute ahead of
 /// their use; the host holds each one's records until the verifier takes
 /// them.
