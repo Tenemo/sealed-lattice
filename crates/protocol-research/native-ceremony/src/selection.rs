@@ -148,13 +148,17 @@ pub fn run(
         &selected_directories,
         &output.join("aggregates"),
     ));
+    // The organizer's credential restores the retained committed-offer state
+    // and another remaining participant's credential must not; a departed
+    // position has no credential.
+    let other = enrollments.positions()[1];
     let inputs = Arc::new(crate::committed_offer::verify_selection(
         proposal.clone(),
         &selected,
         &selected_directories,
         output,
         &inputs,
-        [&enrollments[0].credential, &enrollments[1].credential],
+        [&enrollments[0].credential, &enrollments[other].credential],
         poll,
     ));
     let selected_indices: Vec<_> = selected_authors
