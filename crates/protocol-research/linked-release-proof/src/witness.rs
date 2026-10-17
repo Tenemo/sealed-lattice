@@ -126,13 +126,15 @@ impl Layout {
         }
     }
 }
-pub struct ReleaseInputs {
+/// Checked public operands stay immutably borrowed through witness
+/// construction; only the lent recipient secret needs separate custody.
+pub struct ReleaseInputs<'a> {
     profile: Profile,
-    common: Vec<BigInt>,
-    public_key: Vec<BigInt>,
-    encrypted_constant: Vec<BigInt>,
-    encrypted_linear: Vec<BigInt>,
-    target_linear: Vec<BigInt>,
+    common: &'a [BigInt],
+    public_key: &'a [BigInt],
+    encrypted_constant: &'a [BigInt],
+    encrypted_linear: &'a [BigInt],
+    target_linear: &'a [BigInt],
     secret: Zeroizing<Vec<i128>>,
 }
 pub struct PreparedRelease {
@@ -145,20 +147,20 @@ pub enum ReleaseInputRefusal {
     Key,
     Share,
 }
-impl ReleaseInputs {
+impl<'a> ReleaseInputs<'a> {
     pub fn new(
         profile: Profile,
-        common: Vec<BigInt>,
-        public_key: Vec<BigInt>,
-        encrypted_constant: Vec<BigInt>,
-        encrypted_linear: Vec<BigInt>,
-        target_linear: Vec<BigInt>,
+        common: &'a [BigInt],
+        public_key: &'a [BigInt],
+        encrypted_constant: &'a [BigInt],
+        encrypted_linear: &'a [BigInt],
+        target_linear: &'a [BigInt],
         secret: Zeroizing<Vec<i128>>,
     ) -> Result<Self, ReleaseInputRefusal> {
         let share_half = statement::share_modulus() >> 1usize;
         let release_half = statement::release_modulus(profile) >> 1usize;
         let half_support = RECIPIENT_SECRET_SUPPORT / 2;
-        if [&common, &public_key, &encrypted_constant, &encrypted_linear]
+        if [common, public_key, encrypted_constant, encrypted_linear]
             .iter()
             .any(|values| {
                 values.len() != SYSTEMATIC || values.iter().any(|value| value.abs() > share_half)
@@ -185,14 +187,14 @@ impl ReleaseInputs {
 }
 /// Derives the release of the header's roster position.
 pub fn prepare_release(
-    inputs: ReleaseInputs,
+    inputs: ReleaseInputs<'_>,
     header: [u8; RELEASE_HEADER_BYTES],
 ) -> Result<PreparedRelease, ReleaseInputRefusal> {
     release_header_position(inputs.profile, &header).ok_or(ReleaseInputRefusal::Shape)?;
     derive_inner(inputs, header)
 }
 fn derive_inner(
-    inputs: ReleaseInputs,
+    inputs: ReleaseInputs<'_>,
     header: [u8; RELEASE_HEADER_BYTES],
 ) -> Result<PreparedRelease, ReleaseInputRefusal> {
     let profile = inputs.profile;
@@ -211,9 +213,9 @@ fn derive_inner(
     let share_radius = BigInt::from(1) << (layout.bits[SHARE] - 1);
     let decoding_error_radius = BigInt::from(1) << (layout.bits[DECODING_ERROR] - 1);
     let private = Zeroizing::new(vec![inputs.secret.to_vec()]);
-    let key_product = multiply_digits(&inputs.common, &private, RELEASE_LIMB_BITS, share_digits);
+    let key_product = multiply_digits(inputs.common, &private, RELEASE_LIMB_BITS, share_digits);
     let decryption_product = multiply_digits(
-        &inputs.encrypted_linear,
+        inputs.encrypted_linear,
         &private,
         RELEASE_LIMB_BITS,
         share_digits,
@@ -314,7 +316,7 @@ fn derive_inner(
     }
     let public_limbs = profile.release_public_limbs();
     let product = multiply_digits(
-        &inputs.target_linear,
+        inputs.target_linear,
         &private,
         RELEASE_LIMB_BITS,
         public_limbs,
@@ -374,11 +376,11 @@ fn derive_inner(
     }
     let release_bytes = release_coefficient_bytes(profile);
     let polynomials = [
-        &inputs.common,
-        &inputs.public_key,
-        &inputs.encrypted_constant,
-        &inputs.encrypted_linear,
-        &inputs.target_linear,
+        inputs.common,
+        inputs.public_key,
+        inputs.encrypted_constant,
+        inputs.encrypted_linear,
+        inputs.target_linear,
         &partial,
     ]
     .into_iter()

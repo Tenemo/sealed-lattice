@@ -100,17 +100,43 @@ fn fingerprint(bytes: &[u8], chunk: usize, weight: Element) -> Element {
     })
 }
 pub fn encode_polynomial(values: &[BigInt], width: usize) -> Result<Vec<u8>, Refusal> {
-    let mut output = Vec::with_capacity(values.len() * width);
-    for value in values {
-        let (sign, bytes) = value.to_bytes_le();
-        if bytes.len() >= width {
-            return Err(Refusal::Encoding);
-        }
-        output.push(u8::from(sign == Sign::Minus));
-        output.extend(&bytes);
-        output.resize(output.len() + width - 1 - bytes.len(), 0);
+    if !(2..=statement_stream::CHUNK_LIMIT).contains(&width) {
+        return Err(Refusal::Shape);
     }
+    let length = values.len().checked_mul(width).ok_or(Refusal::Shape)?;
+    let mut output = Vec::with_capacity(length);
+    polynomial_chunks(values, width, |bytes| -> Result<(), Refusal> {
+        output.extend_from_slice(bytes);
+        Ok(())
+    })?;
     Ok(output)
+}
+/// Encodes complete coefficient records with one bounded reusable buffer.
+/// The owning statement checks centering; this encoder checks record width.
+pub fn polynomial_chunks<E: From<Refusal>>(
+    values: &[BigInt],
+    width: usize,
+    mut consume: impl FnMut(&[u8]) -> Result<(), E>,
+) -> Result<(), E> {
+    if !(2..=statement_stream::CHUNK_LIMIT).contains(&width) {
+        return Err(Refusal::Shape.into());
+    }
+    let records = (statement_stream::CHUNK_LIMIT / width).min(values.len());
+    if records == 0 {
+        return Ok(());
+    }
+    let mut buffer = vec![0; records * width];
+    for chunk in values.chunks(records) {
+        let bytes = &mut buffer[..chunk.len() * width];
+        for (value, record) in chunk.iter().zip(bytes.chunks_exact_mut(width)) {
+            if value.magnitude().bits().div_ceil(8) > (width - 1) as u64 {
+                return Err(Refusal::Encoding.into());
+            }
+            statement_stream::coefficient::encode(value, record);
+        }
+        consume(bytes)?;
+    }
+    Ok(())
 }
 /// The stream that fingerprints the statement's polynomial at the index:
 /// share-modulus polynomials in decoding limbs and release-modulus
