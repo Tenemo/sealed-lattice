@@ -1,5 +1,8 @@
 import { auxiliaryInputEncryptionParameters } from '#tests/auxiliary-input-encryption-parameters.js';
-import { sourceCiphertextBytes } from '#tests/encrypted-registration-source-model.js';
+import {
+    sourceCiphertextBytes,
+    sourceCiphertextPolynomialCount,
+} from '#tests/encrypted-registration-source-model.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import { byteAlignedSpongePermutations } from '#tests/proof-hash-work-model.js';
 import { compileRegistrationSetupBindingScreen } from '#tests/registration-setup-binding-model.js';
@@ -30,7 +33,8 @@ export const compileRegistrationSourceRandomness = (
         auxiliary.support,
     );
     const errorBytes = degree * (setupGaussianParameters.sampleBits / 8n);
-    const sourceCommonCalls = (4n * degree) / auxiliary.degree;
+    const sourceCommonCalls =
+        (sourceCiphertextPolynomialCount * degree) / auxiliary.degree;
     const sourceCommonInputBytes =
         BigInt(Buffer.byteLength('sealed-lattice/source-common/v1')) + 5n;
     const sourceCommonOutputBytes =
@@ -52,9 +56,11 @@ export const compileRegistrationSourceRandomness = (
         const comparisonMaximumSourceOutputBytes =
             sourceSparse.maximumExaminedBytes + errorBytes;
         const minimumEncryptionOutputBytes =
-            4n * encryptionSparse.support + 4n * errorBytes;
+            4n * encryptionSparse.support +
+            sourceCiphertextPolynomialCount * errorBytes;
         const comparisonMaximumEncryptionOutputBytes =
-            encryptionSparse.maximumExaminedBytes + 4n * errorBytes;
+            encryptionSparse.maximumExaminedBytes +
+            sourceCiphertextPolynomialCount * errorBytes;
         const bindingInputBytes =
             64n +
             BigInt(Buffer.byteLength('sealed-lattice/registered-source/v1')) +
@@ -112,7 +118,10 @@ export const compileRegistrationSourceRandomness = (
         families,
         sourceSeedCount: inventory.coordinateCount,
         freshSeedBytes: inventory.coordinateCount * registrationSourceSeedBytes,
-        gaussianSamples: 5n * inventory.coordinateCount * degree,
+        gaussianSamples:
+            (1n + sourceCiphertextPolynomialCount) *
+            inventory.coordinateCount *
+            degree,
         sparseCalls: 2n * inventory.coordinateCount,
         sparseComparisons: [sourceSparse, encryptionSparse].map((sampler) => ({
             ...sampler,
@@ -127,7 +136,8 @@ export const compileRegistrationSourceRandomness = (
                 family.commonPermutations,
             0n,
         ),
-        sourceCiphertextSamples: (4n * degree) / auxiliary.degree,
-        sharedAuxiliaryKeySamples: (2n * degree) / auxiliary.degree + 1n,
+        sourceCiphertextSamples:
+            (sourceCiphertextPolynomialCount * degree) / auxiliary.degree,
+        sharedAuxiliaryKeySamples: degree / auxiliary.degree + 1n,
     };
 };

@@ -133,9 +133,9 @@ describe('shared participant custody', () => {
             );
             expect(custody.maximumPublicBodyCiphertextBytes).toBe(
                 body.polynomialPayloadBytes +
-                    8n * 65536n * 6n +
+                    4n * 65536n * 6n +
                     body.maximumProofBytes +
-                    16n * (bodyRecords + 8n + records),
+                    16n * (bodyRecords + 4n + records),
             );
         },
     );
@@ -164,13 +164,13 @@ describe('shared participant custody', () => {
             const checkpointBytes =
                 ownPrefix +
                 checkpoint.maximumHeaderBytes +
-                106n * (bodyRecords + 8n) +
+                106n * (bodyRecords + 4n) +
                 96n * checkpoint.recordCount +
                 64n;
             const completedBytes =
                 ownPrefix +
                 body.headerBytes +
-                106n * (bodyRecords + 8n + proofRecords) +
+                106n * (bodyRecords + 4n + proofRecords) +
                 2n * 102n;
             const maximum = (...values: bigint[]) =>
                 values.reduce((largest, value) =>

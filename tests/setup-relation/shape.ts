@@ -1,5 +1,9 @@
 import { compileCommonAgreementDegreeCensus } from '#tests/common-agreement-degree-model.js';
-import { sourceStatementPolynomialBytes } from '#tests/encrypted-registration-source-model.js';
+import {
+    sourceCiphertextPolynomialCount,
+    sourceStatementPolynomialBytes,
+    sourceStatementPolynomialCount,
+} from '#tests/encrypted-registration-source-model.js';
 import { integerLimbConvolutionMagnitudeBound } from '#tests/exact-integer-convolution-model.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import {
@@ -107,10 +111,13 @@ export const deriveSetupContributionShape = (profile: SupportedProfile) => {
     // The FHE secret, FHE auxiliary secret and recipient ephemerals each
     // have a positive and a negative column.
     const disjointPairs = participants + 3;
+    const sourceEquations = Number(sourceCiphertextPolynomialCount);
     const wordColumns =
-        8 + columns.reduce((sum, value) => sum + value.words, 0);
+        2 * sourceEquations +
+        columns.reduce((sum, value) => sum + value.words, 0);
     const narrowWords =
-        4 + columns.reduce((sum, value) => sum + value.narrowWords, 0);
+        sourceEquations +
+        columns.reduce((sum, value) => sum + value.narrowWords, 0);
     const booleanColumns =
         2 * disjointPairs +
         columns.reduce((sum, value) => sum + value.booleans, 0);
@@ -119,12 +126,15 @@ export const deriveSetupContributionShape = (profile: SupportedProfile) => {
         wordColumns,
         booleanColumns,
         errorColumns:
-            4 + variableBits.filter((bits) => bits === errorBits).length,
+            sourceEquations +
+            variableBits.filter((bits) => bits === errorBits).length,
         disjointPairs,
         supportRows,
         lookupEntries: wordColumns + narrowWords,
         affineRows:
-            BigInt(fheEquations * fheLimbs + 4 * participants + 4) *
+            BigInt(
+                fheEquations * fheLimbs + 4 * participants + sourceEquations,
+            ) *
                 fixedModulusBfvInputs.polynomialDegree +
             BigInt(supportRows),
     };
@@ -182,7 +192,9 @@ export const compileSetupContributionRelationCensus = (
             publicQueryValueByteLength,
         fullRingQueryCosets: BigInt(agreement.domainSize) / degree,
         expandedStatementPolynomialCount:
-            fheStatementPolynomials + sharingStatementPolynomials + 8n,
+            fheStatementPolynomials +
+            sharingStatementPolynomials +
+            sourceStatementPolynomialCount,
         expandedStatementHeaderByteLength,
         expandedStatementByteLength:
             sourceStatementPolynomialBytes +

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 
 import { auxiliaryInputEncryptionParameters } from '#tests/auxiliary-input-encryption-parameters.js';
 import { compileBallotEncryptionColumnLayout } from '#tests/ballot-encryption-relation-model.js';
+import { sourceMessageScale } from '#tests/encrypted-registration-source-model.js';
 import { bitLength, maximum } from '#tests/exact-integer.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import { compileLinkedReleaseColumnLayout } from '#tests/linked-release-relation-model.js';
@@ -232,10 +233,12 @@ const setupFamilies = (profile: SupportedProfile): IntegerLiftingFamily[] => {
                     bound: auxiliary.support * (auxiliary.modulus / 2n),
                 },
                 {
-                    // The first source message is s + 1 in 0..2; the
-                    // original first-error word e + 64 spans 0..127.
+                    // One source message packs s + 1 in 0..2 and the
+                    // original first-error word e + 64 in 0..127.
                     term: 'source message',
-                    bound: ((1n << BigInt(errorBits)) - 1n) * auxiliary.scale,
+                    bound:
+                        (3n * ((1n << BigInt(errorBits)) - 1n) + 2n) *
+                        sourceMessageScale,
                 },
                 {
                     term: 'quotient product',

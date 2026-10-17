@@ -210,13 +210,14 @@ fn replayed_release(seed: u8) -> String {
     let (header, [constant, linear, target]) = release_inputs(&key, profile, seed);
     let (statement, proof) = key
         .lend_secret(|secret| {
+            let common = common_share_polynomial();
             let inputs = ReleaseInputs::new(
                 profile,
-                common_share_polynomial(),
-                key.public_key().to_vec(),
-                constant,
-                linear,
-                target,
+                &common,
+                key.public_key(),
+                &constant,
+                &linear,
+                &target,
                 secret,
             )
             .unwrap();

@@ -61,12 +61,12 @@ describe('relation integer lifting', () => {
             expect(family.hundredthsBelowField).toBeGreaterThan(0n);
         }
         // Independent fixed-instance operands and the signed word/error
-        // ranges bound all four source components, including e + 64.
+        // ranges bound the packed source pair, including 3*(e+64)+(s+1).
         const auxiliaryScale = 101n << 20n;
         const auxiliaryModulus = 257n * auxiliaryScale + 1n;
         const sourceBound =
             (256n + 1n) * (auxiliaryModulus / 2n) +
-            127n * auxiliaryScale +
+            383n * ((auxiliaryModulus - 1n) / 769n) +
             64n +
             auxiliaryModulus * (1n << 15n);
         // The relation models that derive each profile's layout charge the
@@ -145,8 +145,8 @@ describe('relation integer lifting', () => {
             const sourceRows = model.sourceEquations.flatMap((equation) =>
                 compileSetupEquation(equation, model.degree),
             );
-            expect(model.sourceEquations).toHaveLength(4);
-            expect(sourceRows).toHaveLength(4 * model.degree);
+            expect(model.sourceEquations).toHaveLength(2);
+            expect(sourceRows).toHaveLength(2 * model.degree);
             expect(
                 rows.slice(firstSourceRow, firstSourceRow + sourceRows.length),
             ).toEqual(sourceRows);

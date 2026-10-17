@@ -29,11 +29,11 @@ describe('encrypted registration source randomness', () => {
                 64n * BigInt(value.families.length),
             );
             expect(value.gaussianSamples).toBe(
-                5n * 65536n * BigInt(value.families.length),
+                3n * 65536n * BigInt(value.families.length),
             );
             expect(value.sparseCalls).toBe(2n * BigInt(value.families.length));
-            expect(value.sourceCiphertextSamples).toBe(64n);
-            expect(value.sharedAuxiliaryKeySamples).toBe(33n);
+            expect(value.sourceCiphertextSamples).toBe(32n);
+            expect(value.sharedAuxiliaryKeySamples).toBe(17n);
             for (const family of value.families) {
                 const privateFrame = Buffer.concat([
                     Buffer.from('sealed-lattice/source-private/v1'),
@@ -48,7 +48,7 @@ describe('encrypted registration source randomness', () => {
                     4n * 1024n + 20n * 65536n,
                 );
                 expect(family.minimumEncryptionOutputBytes).toBe(
-                    4n * 256n + 4n * 20n * 65536n,
+                    4n * 256n + 2n * 20n * 65536n,
                 );
                 expect(
                     family.comparisonMaximumSourceOutputBytes,
@@ -63,7 +63,7 @@ describe('encrypted registration source randomness', () => {
                         shake256RateBytes,
                     ),
                 );
-                expect(family.sourceCommonCalls).toBe(64n);
+                expect(family.sourceCommonCalls).toBe(32n);
             }
         },
     );

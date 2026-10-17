@@ -53,9 +53,9 @@ describe('complete setup contribution relation in a reduced ring', () => {
             expect(
                 model.rows().every((row) => model.evaluateRow(row) === 0n),
             ).toBe(true);
-            expect(model.rows()).toHaveLength((36 * 8 + 20 * 2 + 4) * 16 + 26);
+            expect(model.rows()).toHaveLength((36 * 8 + 20 * 2 + 2) * 16 + 26);
             expect(model.decryptedShares).toEqual(model.expectedShares);
-            expect(model.equations).toHaveLength(36 + 20 + 4);
+            expect(model.equations).toHaveLength(36 + 20 + 2);
         }
     });
 
@@ -74,7 +74,7 @@ describe('complete setup contribution relation in a reduced ring', () => {
             expect(model.verify()).toBe(true);
             expect(model.decryptedShares).toEqual(model.expectedShares);
             expect(model.equations).toHaveLength(
-                4 * Number(profile.gadgetLength) + 2 * participantCount + 4,
+                4 * Number(profile.gadgetLength) + 2 * participantCount + 2,
             );
             const layout = compileSetupContributionColumnLayout(profile);
             const shape = deriveSetupContributionShape(profile);
@@ -102,35 +102,35 @@ describe('complete setup contribution relation in a reduced ring', () => {
             compileSetupContributionRelationCensus(completionProfile()),
         ).toEqual({
             // Each 112-bit sharing coefficient fills seven words.
-            wordColumns: 36 * 9 + 3 * 7 + 10 * 7 + 8,
+            wordColumns: 36 * 9 + 3 * 7 + 10 * 7 + 4,
             booleanColumns: 2 * (2 + 10 + 1),
-            errorColumns: 36 + 2 * 10 + 4,
+            errorColumns: 36 + 2 * 10 + 2,
             disjointPairs: 13,
             supportRows: 26,
-            affineRows: BigInt((36 * 8 + 20 * 2 + 4) * 65536 + 26),
-            lookupEntries: 423 + 60,
-            fullAffineCoefficientByteLength: 449n * 65536n * (3n * 16n),
+            affineRows: BigInt((36 * 8 + 20 * 2 + 2) * 65536 + 26),
+            lookupEntries: 419 + 58,
+            fullAffineCoefficientByteLength: 445n * 65536n * (3n * 16n),
             singlePublicAdjointCoefficientByteLength: 65536n * (3n * 16n),
             largestPublicPolynomialByteLength: 65536n * (1n + 96n),
             maximumPublicQueryCount: 2 * 704,
             publicQueryValueByteLength: 2n * 704n * (3n * 16n),
-            fullAffineQueryValueByteLength: 449n * 2n * 704n * (3n * 16n),
+            fullAffineQueryValueByteLength: 445n * 2n * 704n * (3n * 16n),
             publicQueryTransformVectorByteLength:
                 2n * 65536n * (3n * 16n) + 32768n * 16n + 1408n * 48n,
             fullRingQueryCosets: 4n,
-            expandedStatementPolynomialCount: 63n + 31n + 8n,
+            expandedStatementPolynomialCount: 63n + 31n + 4n,
             expandedStatementHeaderByteLength: 4n + 96n,
             expandedStatementByteLength:
                 4n +
                 96n +
                 63n * 65536n * 97n +
                 31n * 65536n * 21n +
-                8n * 65536n * 6n,
+                4n * 65536n * 6n,
             maximumEncodedOperatorByteLength:
-                64n + 2n * 48n + 449n * 1408n * 48n,
+                64n + 2n * 48n + 445n * 1408n * 48n,
             maximumIntegerLimbConvolutionMagnitude: 1024n * ((1n << 96n) - 1n),
             syntheticWitnessHeaderByteLength: 4n + 3n * 4n + 64n,
-            syntheticWitnessByteLength: 80n + 449n * 65536n * 2n,
+            syntheticWitnessByteLength: 80n + 445n * 65536n * 2n,
         });
     });
 
@@ -141,9 +141,9 @@ describe('complete setup contribution relation in a reduced ring', () => {
             [...layout.modelToCanonicalColumn].sort(
                 (left, right) => left - right,
             ),
-        ).toEqual(Array.from({ length: 449 }, (_unused, index) => index));
-        expect(layout.lookups.slice(0, 423)).toEqual(
-            Array.from({ length: 423 }, (_unused, column) => ({
+        ).toEqual(Array.from({ length: 445 }, (_unused, index) => index));
+        expect(layout.lookups.slice(0, 419)).toEqual(
+            Array.from({ length: 419 }, (_unused, column) => ({
                 column,
                 scale: 1n,
             })),
@@ -156,16 +156,14 @@ describe('complete setup contribution relation in a reduced ring', () => {
             ]).flat(),
             416,
             418,
-            420,
-            422,
         ];
-        expect(layout.lookups.slice(423)).toEqual(
+        expect(layout.lookups.slice(419)).toEqual(
             errorColumns.map((column) => ({ column, scale: 512n })),
         );
         expect(layout.disjointBooleanPairs).toEqual(
             Array.from({ length: 13 }, (_unused, index) => [
-                423 + 2 * index,
-                424 + 2 * index,
+                419 + 2 * index,
+                420 + 2 * index,
             ]),
         );
     });
@@ -277,7 +275,7 @@ describe('complete setup contribution relation in a reduced ring', () => {
             completionProfile(),
             23n,
         );
-        expect(model.sourceEquations).toHaveLength(4);
+        expect(model.sourceEquations).toHaveLength(2);
         for (const equation of model.sourceEquations) {
             const original = equation.publicValue[1];
             equation.publicValue[1]++;

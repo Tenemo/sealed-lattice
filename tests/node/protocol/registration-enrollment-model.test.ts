@@ -33,16 +33,16 @@ describe('signed registration and original-key custody', () => {
         expect(value.maximumJoinInputBytes).toBeLessThan(1_572_864n);
         expect(value.recipientCapsuleBytes).toBe(528n);
         expect(value.signingCapsuleBytes).toBe(84n);
-        expect(value.maximumEnrollmentRecords).toBe(23n);
-        expect(value.maximumRecords).toBe(25n);
+        expect(value.maximumEnrollmentRecords).toBe(16n);
+        expect(value.maximumRecords).toBe(18n);
         expect(value.maximumEnrollmentManifestBytes).toBe(
-            96n + 64n + 4n + 23n * 73n,
+            96n + 64n + 4n + 16n * 73n,
         );
         expect(value.maximumProposalIntentManifestBytes).toBe(
-            96n + 64n + 4n + 24n * 73n,
+            96n + 64n + 4n + 17n * 73n,
         );
-        expect(value.maximumManifestBytes).toBe(96n + 64n + 4n + 25n * 73n);
-        expect(value.maximumRootBytes).toBe(96n + 64n + 4n + 25n * 73n + 16n);
+        expect(value.maximumManifestBytes).toBe(96n + 64n + 4n + 18n * 73n);
+        expect(value.maximumRootBytes).toBe(96n + 64n + 4n + 18n * 73n + 16n);
         expect(value.maximumRestoreInputBytes).toBeLessThan(1_572_864n);
         expect(value.maximumRetainedPayloadBytes).toBeLessThan(
             16n * 1024n ** 2n,
@@ -58,8 +58,8 @@ describe('signed registration and original-key custody', () => {
             BigInt(Buffer.byteLength('sealed-lattice/recipient-key-custody')) +
                 64n,
         );
-        expect(value.initialRootDistinctBlockInputs).toBe(123n);
-        expect(value.rootDistinctBlockInputs).toBe(127n);
+        expect(value.initialRootDistinctBlockInputs).toBe(91n);
+        expect(value.rootDistinctBlockInputs).toBe(95n);
         expect(value.signingDistinctBlockInputs).toBe(7n);
         expect(value.sourceDistinctBlockInputs).toBe(
             2n + (value.maximumSourceCapsuleBytes - 16n + 15n) / 16n,
@@ -118,7 +118,7 @@ describe('signed registration and original-key custody', () => {
         const inputs = new Set<bigint>([0n]);
         for (const [nonceOrdinal, plaintextBlocks] of [
             [0n, 4],
-            [1n, 116],
+            [1n, 84],
         ] as const) {
             const initial = (nonceOrdinal << 32n) + 1n;
             for (let counter = 0; counter <= plaintextBlocks; counter++) {
@@ -132,8 +132,8 @@ describe('signed registration and original-key custody', () => {
                 .initialRootDistinctBlockInputs,
         );
         for (const [nonceOrdinal, blocks] of [
-            [2n, 120],
-            [3n, 125],
+            [2n, 88],
+            [3n, 93],
         ] as const) {
             const rotatedKeyInputs = new Set<bigint>([0n]);
             for (let counter = 0; counter <= blocks; counter++) {

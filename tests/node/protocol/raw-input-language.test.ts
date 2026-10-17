@@ -264,7 +264,7 @@ const readLanguages = async () => {
     const transcriptDomains = new Set<string>();
     for (const path of await productionRustFiles())
         for (const call of (await readRustSource(path)).matchAll(
-            /(?<![\w.])wide\(\s*([^,]*),/gu,
+            /(?<!fn )(?<![\w.])wide\(\s*([^,]*),/gu,
         ))
             if (!call[1].startsWith('domain:')) {
                 expect(call[1], path).toMatch(/^b"[^"]+"$/u);
@@ -276,6 +276,28 @@ const readLanguages = async () => {
         'bounded-proof/verifier-message',
     ]);
     expect(transcriptDomains.size).toBe(2);
+    const compactTranscript = await readRustSource(
+        `${research}/compact-rank-proof/src/transcript.rs`,
+    );
+    containsStatements(
+        rustFunctionBody(compactTranscript, 'shake'),
+        'for part in parts { state.update(&word(part.len())); state.update(part); }',
+    );
+    expect(normalized(rustFunctionBody(compactTranscript, 'word'))).toMatch(
+        /u32::try_from\(value\).*\.to_le_bytes\(\)/u,
+    );
+    const compactDomains = [
+        ...compactTranscript.matchAll(/(?<!fn )\bshake\(\s*&\[\s*b"([^"]+)"/gu),
+    ]
+        .map((match) => match[1])
+        .sort();
+    expect(compactTranscript.match(/(?<!fn )\bshake\(/gu)).toHaveLength(
+        compactDomains.length,
+    );
+    expect(compactDomains).toEqual([
+        'compact-proof/chain-state',
+        'compact-proof/verifier-message',
+    ]);
     const saltDomain = rustStringConstant(proofTree, 'SALT_DOMAIN');
     const saltSeedBytes = Number(
         rustIntegerConstant(proofTree, 'SALT_SEED_BYTES'),
@@ -296,6 +318,7 @@ const readLanguages = async () => {
         signatureChainDomain,
         chainState: ascii(chainState),
         verifierMessage: ascii(verifierMessage),
+        compactDomains,
         synthetic: ascii(synthetic![1]),
         sourceCommon: ascii(sourceCommon![1]),
         sourcePrivate: ascii(sourcePrivate![1]),
@@ -324,6 +347,7 @@ describe('raw-input language separation', () => {
         // private stream, a length-framed proof language, or the fixed input
         // of the public source screen.
         expect(counts).toEqual({
+            'compact-rank-proof/src/transcript.rs': 1,
             'parallel-work/src/protocol-hash.rs': 2,
             'parallel-work/src/stream.rs': 1,
             'participant-module/src/operation-random.rs': 1,
@@ -734,6 +758,12 @@ describe('raw-input language separation', () => {
                 languages.chainState,
                 'open',
             ],
+            ...Object.fromEntries(
+                languages.compactDomains.map((domain) => [
+                    domain,
+                    [word(domain.length, 4), ascii(domain), 'open'],
+                ]),
+            ),
             'leaf salt': [
                 word(languages.saltDomain.length, 4),
                 languages.saltDomain,

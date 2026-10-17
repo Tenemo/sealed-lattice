@@ -63,7 +63,7 @@ fn binding(profile: Profile, poll: [u8; 64], key: &[u8; 64], bytes: &[u8]) -> [u
     hash.update((modulus.len() as u16).to_le_bytes());
     hash.update(modulus);
     hash.update((profile.fhe_common_sample_bits() as u32).to_le_bytes());
-    hash.update(((4 * DEGREE * 6) as u64).to_le_bytes());
+    hash.update(((2 * DEGREE * 6) as u64).to_le_bytes());
     hash.update(bytes);
     hash.finalize()
 }

@@ -28,6 +28,7 @@ type ProtocolResearchSelection = {
 } & (
     | { name: keyof typeof protocolResearchCases }
     | { name: 'native-fhe-key-source' }
+    | { name: 'compact-rank-proof'; fixtureManifest: string }
     | { name: 'native-committed-offer' }
     | { name: 'native-setup-departure' | 'native-selection-fork' }
     | {
@@ -40,6 +41,21 @@ export const selectProtocolResearchCase = (
     commandLineArguments: readonly string[],
 ): ProtocolResearchSelection => {
     const values = [...toolArguments(commandLineArguments)];
+    if (values[0] === 'compact-rank-proof') {
+        if (values.length !== 2 || !values[1]?.trim())
+            throw new Error(
+                'The compact rank screen requires one nonempty fixture manifest.',
+            );
+        return {
+            name: 'compact-rank-proof',
+            fixtureManifest: values[1],
+            execution: true,
+            noResult: false,
+            participantCount: 3,
+            optionCount: 3,
+            simulatedHelpers: 0,
+        };
+    }
     if (values[0] === 'native-committed-offer') {
         if (values.length !== 1)
             throw new Error(

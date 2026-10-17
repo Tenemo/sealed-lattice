@@ -82,9 +82,9 @@ fn layout_extends_every_profile_without_duplicating_the_original_source() {
     for profile in Profile::all() {
         let old = setup_relation(profile);
         let extended = relation(profile);
-        assert_eq!(extended.columns(), old.columns() + 10);
-        assert_eq!(extended.lookups(), old.lookups() + 12);
-        assert_eq!(extended.oracles(), old.oracles() + 37);
+        assert_eq!(extended.columns(), old.columns() + 6);
+        assert_eq!(extended.lookups(), old.lookups() + 6);
+        assert_eq!(extended.oracles(), old.oracles() + 21);
         assert_eq!(
             extended.zero_product_pairs.len(),
             old.zero_product_pairs.len() + 1
@@ -96,7 +96,7 @@ fn layout_extends_every_profile_without_duplicating_the_original_source() {
             .iter()
             .zip(&extended.zero_product_pairs)
         {
-            assert_eq!(*new_pair, (old_pair.0 + 8, old_pair.1 + 8));
+            assert_eq!(*new_pair, (old_pair.0 + 4, old_pair.1 + 4));
         }
         assert!(extended.message_bytes >= extended.minimum_message_bytes());
         checked += 1;
@@ -153,7 +153,7 @@ fn native_full_degree_contribution_and_source_share_the_same_witness() {
     let words = old_relation.words;
     let columns: Vec<_> = combined[..words]
         .iter()
-        .chain(&combined[words + 8..words + 8 + old_relation.booleans])
+        .chain(&combined[words + 4..words + 4 + old_relation.booleans])
         .cloned()
         .collect();
     let error_column = original_error_column(profile);
@@ -186,8 +186,8 @@ fn native_full_degree_contribution_and_source_share_the_same_witness() {
     let common = common_polynomials();
     let ephemeral: Vec<i8> = (0..DEGREE)
         .map(|index| {
-            (combined[old_relation.columns() + 8][index] as i16
-                - combined[old_relation.columns() + 9][index] as i16) as i8
+            (combined[old_relation.columns() + 4][index] as i16
+                - combined[old_relation.columns() + 5][index] as i16) as i8
         })
         .collect();
     let stride = DEGREE / AUXILIARY_DEGREE;
@@ -197,7 +197,7 @@ fn native_full_degree_contribution_and_source_share_the_same_witness() {
             .enumerate()
             .all(|(index, value)| index % stride == 0 || *value == 0)
     );
-    let errors: Vec<Vec<i8>> = (0..4)
+    let errors: Vec<Vec<i8>> = (0..2)
         .map(|component| {
             combined[words + 2 * component + 1]
                 .iter()
@@ -207,14 +207,14 @@ fn native_full_degree_contribution_and_source_share_the_same_witness() {
         .collect();
     // Independent wide-integer rows check the precise messages and offsets,
     // rather than only agreement between the producer and its operator.
-    for component in 0..4 {
+    for component in 0..2 {
         for position in [0, 7, DEGREE / 2, DEGREE - 1] {
             let message = match component {
                 0 => {
                     1 + i64::from(columns[words][position])
                         - i64::from(columns[words + 1][position])
+                        + 3 * i64::from(columns[error_column][position])
                 }
-                2 => i64::from(columns[error_column][position]),
                 _ => 0,
             };
             let mut residual = BigInt::from(errors[component][position])
@@ -246,7 +246,7 @@ fn native_full_degree_contribution_and_source_share_the_same_witness() {
     assert_eq!(apply(&operator, &witness.columns), operator.target);
     assert_eq!(
         operator.lookup_weight,
-        field::multiply(original_end, power(alpha, 4 * DEGREE + 2))
+        field::multiply(original_end, power(alpha, 2 * DEGREE + 2))
     );
 
     // Isolate the added rows to make each hostile control cheap while keeping
@@ -261,7 +261,7 @@ fn native_full_degree_contribution_and_source_share_the_same_witness() {
         rejected += 1;
     }
     let mut alternate_secret = witness.columns.clone();
-    let positive = words + 8;
+    let positive = words + 4;
     let at_positive = alternate_secret[positive]
         .iter()
         .position(|value| *value == 1)
@@ -275,7 +275,7 @@ fn native_full_degree_contribution_and_source_share_the_same_witness() {
     alternate_secret[positive][at_empty] = 1;
     assert_ne!(apply(&source, &alternate_secret), source.target);
     rejected += 1;
-    for component in 0..4 {
+    for component in 0..2 {
         let mut changed = public.clone();
         changed.polynomials[2 * component + 1][0] =
             centered(changed.polynomials[2 * component + 1][0] + 1);
@@ -311,12 +311,23 @@ fn native_full_degree_contribution_and_source_share_the_same_witness() {
     unbalanced[ephemeral_positive][selected_position] = 0;
     assert!(Witness::from_columns(&combined_relation, digest, unbalanced).is_err());
     rejected += 1;
+    // The affine packed message alone permits s + 3 and e - 1. The same
+    // original Boolean secret columns must still reject that decomposition.
+    let mut alias = witness.columns.clone();
+    let position = (0..DEGREE)
+        .find(|position| alias[error_column][*position] > 0)
+        .unwrap();
+    alias[positive][position] += 3;
+    alias[error_column][position] -= 1;
+    assert_eq!(apply(&source, &alias), source.target);
+    assert!(Witness::from_columns(&combined_relation, digest, alias).is_err());
+    rejected += 1;
     println!(
         "Source-link checks: native degree {DEGREE}, original columns {}, combined columns {}, hostile controls {rejected}",
         old_relation.columns(),
         combined_relation.columns()
     );
-    assert_eq!(rejected, 12);
+    assert_eq!(rejected, 11);
 
     drop(operator);
     drop(source);
@@ -371,7 +382,7 @@ fn original_encryption_package_replays_and_refuses_different_sources() {
     };
     let original = package(7, 11);
     let ciphertexts = original.public().ciphertext_records().unwrap();
-    assert_eq!(ciphertexts.len(), 4);
+    assert_eq!(ciphertexts.len(), 2);
     assert!(ciphertexts.iter().all(|bytes| bytes.len() == DEGREE * 6));
     original.check_ciphertexts(&ciphertexts).unwrap();
     package(7, 11).check_ciphertexts(&ciphertexts).unwrap();

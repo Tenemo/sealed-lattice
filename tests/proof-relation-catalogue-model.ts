@@ -1,6 +1,11 @@
 import { auxiliaryInputEncryptionParameters } from '#tests/auxiliary-input-encryption-parameters.js';
 import { compileBallotEncryptionColumnLayout } from '#tests/ballot-encryption-relation-model.js';
 import { compileCommonAgreementDegreeCensus } from '#tests/common-agreement-degree-model.js';
+import {
+    sourceCiphertextPolynomialCount,
+    sourcePlaintextModulus,
+    sourceStatementPolynomialCount,
+} from '#tests/encrypted-registration-source-model.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import { compileLinkedReleaseColumnLayout } from '#tests/linked-release-relation-model.js';
 import { proofHashProfiles } from '#tests/proof-hash-work-model.js';
@@ -74,7 +79,10 @@ export const proofRelationCatalogueEntry = (profile: SupportedProfile) =>
                         16,
                         7,
                     ]).flat(),
-                    ...Array.from({ length: 4 }, () => [16, 7]).flat(),
+                    ...Array.from(
+                        { length: Number(sourceCiphertextPolynomialCount) },
+                        () => [16, 7],
+                    ).flat(),
                 ];
                 wordColumns = 0;
                 products = profile.participantCount + 3;
@@ -112,7 +120,7 @@ export const proofRelationCatalogueEntry = (profile: SupportedProfile) =>
                     lifting.carryBits,
                     auxiliary.degree,
                     auxiliary.support,
-                    auxiliary.plaintextModulus,
+                    sourcePlaintextModulus,
                     72,
                     ...proofCatalogueInteger(
                         auxiliary.modulus,
@@ -137,7 +145,11 @@ export const proofRelationCatalogueEntry = (profile: SupportedProfile) =>
                         degree,
                         modulus: sharing.modulus,
                     },
-                    { count: 8, degree, modulus: auxiliary.modulus },
+                    {
+                        count: Number(sourceStatementPolynomialCount),
+                        degree,
+                        modulus: auxiliary.modulus,
+                    },
                 ];
                 arithmeticKey = `setup:${profile.participantCount}:${profile.ciphertext.modulus}`;
                 break;

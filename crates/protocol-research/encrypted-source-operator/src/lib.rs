@@ -23,6 +23,7 @@ use word_proof::field::{self, Element, ONE, ZERO};
 mod statement;
 pub use statement::LinkedStatementStream;
 
+use supported_profile::source_linked::CIPHERTEXT_POLYNOMIALS;
 pub use supported_profile::source_linked::{ADDED_WORDS, original_error_column, relation, remap};
 fn scalar(value: i128) -> u128 {
     assert!(value.unsigned_abs() < field::MODULUS);
@@ -68,7 +69,7 @@ pub fn source_operator(
     let mut target = ZERO;
     let mut terms = Vec::new();
     let power_sum = PublicColumn::Powers(DEGREE).sum(alpha);
-    for component in 0..4 {
+    for component in 0..CIPHERTEXT_POLYNOMIALS {
         let records = |polynomial: &[i64]| {
             let mut bytes = Vec::with_capacity(DEGREE * 6);
             for value in polynomial {
@@ -117,13 +118,11 @@ pub fn source_operator(
                 secret + 1,
                 field::scale(weight, scalar(-i128::from(scale()))),
             ));
-            offset -= i128::from(scale());
-        }
-        if component == 2 {
             weights.push((
                 original_error_column(profile),
-                field::scale(weight, scale() as u128),
+                field::scale(weight, 3 * scale() as u128),
             ));
+            offset -= i128::from(scale());
         }
         target = field::add(
             target,

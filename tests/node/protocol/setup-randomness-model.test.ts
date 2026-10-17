@@ -15,12 +15,12 @@ describe('setup randomness and bounded integer reduction', () => {
             10,
         ).coordinateCount;
         expect(result.samplesPerContribution).toBe(55n * 65536n);
-        expect(result.samplesPerSourceFamily).toBe(5n * 65536n);
-        expect(result.samplesPerEnrollment).toBe((1n + 5n * families) * 65536n);
+        expect(result.samplesPerSourceFamily).toBe(3n * 65536n);
+        expect(result.samplesPerEnrollment).toBe((1n + 3n * families) * 65536n);
         // All seven eligible contributors reuse their original first error. Every
         // registrant generated all families, including unselected ones.
         expect(result.samplesPerPreparation).toBe(
-            7n * 55n * 65536n + 10n * (1n + 5n * families) * 65536n,
+            7n * 55n * 65536n + 10n * (1n + 3n * families) * 65536n,
         );
         expect(result.encodedThresholdBytes).toBe(127n * 20n);
         expect(result.quantizationBits).toBeGreaterThan(120);
@@ -46,7 +46,7 @@ describe('setup randomness and bounded integer reduction', () => {
             small.samplesPerContribution,
         );
         expect(larger.samplesPerPreparation - small.samplesPerPreparation).toBe(
-            10n * 5n * 65536n * (families - small.sourceFamilyCount),
+            10n * 3n * 65536n * (families - small.sourceFamilyCount),
         );
         expect(() => compileSetupRandomnessCensus(profile, 9)).toThrow(
             'exclude',

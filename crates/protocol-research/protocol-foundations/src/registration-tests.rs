@@ -43,7 +43,7 @@ fn verify_key(
     let owner =
         crate::foundation::derive_participant_identity(credential.signing_public()).unwrap();
     let source = setup_witness::encrypted_source::PublicSource {
-        polynomials: vec![vec![0; supported_profile::DEGREE]; 8],
+        polynomials: vec![vec![0; supported_profile::DEGREE]; 4],
     };
     let sources = source.ciphertext_records().unwrap().concat();
     let families = crate::source_binding::fhe_key_families(poll);

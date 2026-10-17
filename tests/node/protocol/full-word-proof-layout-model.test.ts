@@ -47,12 +47,12 @@ describe('full word-proof layout and theorem operands', () => {
         expect(layout.headerBytes).toBe(
             64n + 192n + 48n + 20n * 128n + 16n * 64n + 48n + 64n + 48n * 280n,
         );
-        expect(layout.firstWidth).toBe(450n * 16n + 48n);
-        expect(layout.secondWidth).toBe(485n * 48n);
+        expect(layout.firstWidth).toBe(446n * 16n + 48n);
+        expect(layout.secondWidth).toBe(479n * 48n);
         expect(layout.proverInterpolationPoints).toBe(131072);
         expect(
             layout.expandedFirstOracleBytes + layout.expandedSecondOracleBytes,
-        ).toBe(262144n * (7248n + 23280n));
+        ).toBe(262144n * (7184n + 22992n));
         expect(layout.maximumProofBytes).toBeLessThan(0xffff_fffbn);
         expect(layout.maximumMultiproofBytes).toBeLessThan(
             layout.maximumProofBytes,
@@ -61,11 +61,11 @@ describe('full word-proof layout and theorem operands', () => {
     });
     it('charges the actual lookup, affine, batching, and first-fold events', () => {
         const census = compileWideChallengeCompilerCensus(completionProfile());
-        expect(census.lookupEntryCount).toBe(483n * 65536n);
-        expect(census.lookupRootDegree).toBe(484n * 65536n - 1n);
-        expect(census.correlatedRowCount).toBe(2n * (936n + 524n + 2n * 280n));
+        expect(census.lookupEntryCount).toBe(477n * 65536n);
+        expect(census.lookupRootDegree).toBe(478n * 65536n - 1n);
+        expect(census.correlatedRowCount).toBe(2n * (926n + 518n + 2n * 280n));
         expect(census.batchingAndFirstFoldNumerator).toBe(
-            (2920n + 4n * 280n) * 262144n + (17n ** 7n * 262144n ** 2n) / 512n,
+            (2888n + 4n * 280n) * 262144n + (17n ** 7n * 262144n ** 2n) / 512n,
         );
         expect(census.ordinaryAlgebraicNumerator).toBe(
             census.batchingAndFirstFoldNumerator,

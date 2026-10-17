@@ -37,20 +37,20 @@ describe('browser word prover live-data schedule', () => {
         expect(result.combinedAllowance).toBeLessThan(671_088_640n);
         expect(result.maximumPublicEmissionBatch).toBe(7n * 65536n * 97n);
         expect(result.regeneratedCommonBytes).toBe(
-            4n * 65536n * 6n + 27n * 65536n * 97n + 65536n * 21n,
+            2n * 65536n * 6n + 27n * 65536n * 97n + 65536n * 21n,
         );
         expect(result.reusedRecipientBytes).toBe(10n * 65536n * 21n);
         expect(result.publicWorkingBytes).toBe(
             result.expandedPublicWorkingBytes -
-                (4n * 65536n * 6n + 27n * 65536n * 97n + 11n * 65536n * 21n),
+                (2n * 65536n * 6n + 27n * 65536n * 97n + 11n * 65536n * 21n),
         );
-        expect(result.publicWorkingBytes).toBe(316_018_180n);
+        expect(result.publicWorkingBytes).toBe(314_736_132n);
         expect(result.expandedPublicWorkingBytes).toBeGreaterThan(268_435_456n);
     });
     it('counts common adjoints beside the streamed public-polynomial schedule', () => {
         const result = compileBrowserWordProverResources(completionProfile());
-        expect(result.fullDegreeCommonPolynomials).toBe(3n * 9n + 10n + 5n);
-        expect(result.preparedAdjointBytes).toBe(42n * 65536n * 48n);
+        expect(result.fullDegreeCommonPolynomials).toBe(3n * 9n + 10n + 3n);
+        expect(result.preparedAdjointBytes).toBe(40n * 65536n * 48n);
         expect(result.maximumLiveBytes).toBeLessThan(671_088_640n);
     });
 });

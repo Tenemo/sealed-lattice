@@ -11,6 +11,9 @@
                 // Workers the FHE key source screen starts by path.
                 "tools/ci/fhe-key-source-browser-worker.mjs",
                 "tools/ci/fhe-key-source-scalar-worker.mjs",
+                // Workers the compact rank proof screen starts by path.
+                "tools/ci/compact-rank-screen-worker.mjs",
+                "tools/ci/compact-rank-browser-worker.mjs",
             ],
             "project": ["tests/**/*.{ts,mjs}", "tools/**/*.{ts,mjs}"],
         },

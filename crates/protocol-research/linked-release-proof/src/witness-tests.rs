@@ -48,7 +48,7 @@ pub(crate) fn synthetic_release(profile: Profile) -> (PreparedRelease, Vec<BigIn
     let ephemeral = Zeroizing::new(vec![random.sparse(RECIPIENT_SECRET_SUPPORT).to_vec()]);
     let first = multiply_digits(&public_key, &ephemeral, RELEASE_LIMB_BITS, digits);
     let second = multiply_digits(&common, &ephemeral, RELEASE_LIMB_BITS, digits);
-    let encrypted_constant = (0..SYSTEMATIC)
+    let encrypted_constant: Vec<_> = (0..SYSTEMATIC)
         .map(|position| {
             center(
                 reconstruct(&first, position)
@@ -58,11 +58,11 @@ pub(crate) fn synthetic_release(profile: Profile) -> (PreparedRelease, Vec<BigIn
             )
         })
         .collect();
-    let encrypted_linear = (0..SYSTEMATIC)
+    let encrypted_linear: Vec<_> = (0..SYSTEMATIC)
         .map(|position| center(reconstruct(&second, position) + random.error(), &modulus))
         .collect();
     let release_modulus = statement::release_modulus(profile);
-    let target_linear = (0..SYSTEMATIC)
+    let target_linear: Vec<_> = (0..SYSTEMATIC)
         .map(|_| {
             center(
                 random.signed(release_modulus.bits() as usize + 64),
@@ -72,11 +72,11 @@ pub(crate) fn synthetic_release(profile: Profile) -> (PreparedRelease, Vec<BigIn
         .collect();
     let inputs = ReleaseInputs::new(
         profile,
-        common,
-        public_key,
-        encrypted_constant,
-        encrypted_linear,
-        target_linear,
+        &common,
+        &public_key,
+        &encrypted_constant,
+        &encrypted_linear,
+        &target_linear,
         secret,
     )
     .unwrap();

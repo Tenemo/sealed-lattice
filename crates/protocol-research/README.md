@@ -106,6 +106,16 @@ pnpm run research:protocol -- browser-fhe-key-source <passed-native-run>
 
 It checks selected coefficients with direct integer convolution and compares identical public report bytes across native, scalar Node and external Chrome. Both scalar hosts acknowledge each bounded output span to Rust only after the run's local sink has durably written it and returned a receipt for that exact span; the sink refuses out-of-order, overlapping or excess output and never overwrites an existing artifact. The screen creates no registration, proof, authenticated checkpoint or setup capability, and does not exercise the clear-offer selection or its departure behavior.
 
+### Compact rank proof screen
+
+The `compact-rank-proof` crate checks the compact rank relation against immutable canonical statement and proof bytes, using an ordinary SHAKE transcript. It authenticates every opening before calculating the public source operator, then checks the complete word relation and constrained-code proof. Its return value grants no participant or result-release capability; the enclosing protocol must authenticate the original signing owner and preceding records.
+
+```text
+pnpm run research:protocol -- compact-rank-proof <fixture-manifest>
+```
+
+The manifest supplies a nonempty set of named positive and negative cases, their role and public context, and statement/proof files with byte lengths and SHA-512 digests. The guarded runner checks the same bytes natively, in a scalar WebAssembly worker, and in an external Chrome worker. It also checks malformed and wrongly bound inputs and replay in a fresh instance. The `screen` feature supplies only the bounded fixture interface; it is absent from the SDK participant module.
+
 ## Public records
 
 `research:protocol:public-records` reads the public records of a passed native run. The ceremony publishes each offer under `contribution-<position>/<body-identity>/` with `offer.bin`, `offer-signature.bin`, `body-header.bin`, `proof.bin` and the polynomial files, discovered through the relay's untrusted [offer announcements](../../README.md#relay). The selection is published as `selection.bin` and `selection-signature.bin`, endorsements as `selection-endorsement-<position>.bin`, and the setup certificate as `setup-certificate.bin` and `setup-identity.bin`; a native carrier comparison additionally writes `setup-certificate-alternative.bin`. Public consumers reconstruct and verify the named records; filenames and discovery announcements grant no capability.

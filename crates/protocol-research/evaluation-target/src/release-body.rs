@@ -1,5 +1,5 @@
 use crate::release::{Refusal, ReleaseContext};
-use linked_release_proof::{CHUNK_LIMIT, HEADER_LENGTH, Verifier, verifier};
+use linked_release_proof::{CHUNK_LIMIT, HEADER_LENGTH, Verifier};
 use num_bigint::BigInt;
 use protocol_foundations::{
     SIGNATURE_BYTES,
@@ -114,20 +114,7 @@ impl ReleaseBodyVerifier {
             self.proof_prefix.extend(&bytes[..count]);
             bytes = &bytes[count..];
             if self.proof_prefix.len() == HEADER_LENGTH {
-                let statement = self.context.statement(&self.partial)?;
-                let mut verifier = verifier(
-                    self.context.profile(),
-                    &self.context.proof_role()?,
-                    &self.proof_prefix,
-                )
-                .map_err(|_| Refusal::Proof)?;
-                for values in std::iter::once(&statement.header).chain(&statement.polynomials) {
-                    for chunk in values.chunks(CHUNK_LIMIT) {
-                        verifier.push_statement(chunk).map_err(|_| Refusal::Proof)?;
-                    }
-                }
-                verifier.finish_statement().map_err(|_| Refusal::Proof)?;
-                self.verifier = Some(verifier);
+                self.verifier = Some(self.context.verifier(&self.partial, &self.proof_prefix)?);
             }
         }
         if !bytes.is_empty() {

@@ -50,13 +50,14 @@ impl ReleaseWork {
         // proof, which leave it with the public statement and proof alone.
         let (statement, proof) = key
             .lend_secret(|secret| {
+                let common = common_share_polynomial();
                 let inputs = ReleaseInputs::new(
                     self.context.profile(),
-                    common_share_polynomial(),
-                    key.public_key().to_vec(),
-                    self.context.encrypted_constant().to_vec(),
-                    self.context.encrypted_linear().to_vec(),
-                    self.context.target_linear().to_vec(),
+                    &common,
+                    self.context.public_key(),
+                    self.context.encrypted_constant(),
+                    self.context.encrypted_linear(),
+                    self.context.target_linear(),
                     secret,
                 )
                 .map_err(|_| Refusal::Crypto)?;
@@ -66,13 +67,9 @@ impl ReleaseWork {
                 Ok(prove(&role, prepared))
             })
             .map_err(|_| Refusal::Crypto)??;
-        let expected = self
-            .context
-            .statement(&statement.polynomials[5])
-            .map_err(|_| Refusal::Crypto)?;
-        if statement.header != expected.header || statement.polynomials != expected.polynomials {
-            return Err(Refusal::Context);
-        }
+        self.context
+            .check_statement(&statement)
+            .map_err(|_| Refusal::Context)?;
         Ok((self.context, statement, proof))
     }
 }
