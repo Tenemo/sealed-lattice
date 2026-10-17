@@ -1,8 +1,19 @@
 import { auxiliaryInputEncryptionParameters } from '#tests/auxiliary-input-encryption-parameters.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 
+export const sourceCiphertextPolynomialCount = 2n;
+export const sourcePlaintextModulus = 769n;
+export const sourceMessageScale =
+    (auxiliaryInputEncryptionParameters.modulus - 1n) / sourcePlaintextModulus;
+export const sourceMessageMaximum =
+    3n * (2n * fixedModulusBfvInputs.errorBound) - 1n;
+export const sourceGoodKeyPhaseError =
+    (2n * auxiliaryInputEncryptionParameters.support + 1n) *
+    fixedModulusBfvInputs.errorBound;
+export const sourceMaximumPhase =
+    sourceMessageScale * sourceMessageMaximum + sourceGoodKeyPhaseError;
 export const sourceCiphertextBytes =
-    4n *
+    sourceCiphertextPolynomialCount *
     fixedModulusBfvInputs.polynomialDegree *
     (1n +
         BigInt(
@@ -28,7 +39,8 @@ export const sourceReadBytes = (() => {
     return largest;
 })();
 export const sourceStatementPolynomialBytes = 2n * sourceCiphertextBytes;
-export const sourceStatementPolynomialCount = 8n;
+export const sourceStatementPolynomialCount =
+    2n * sourceCiphertextPolynomialCount;
 export const sourceOperandPolynomials = (firstExpandedIndex: number) => {
     if (!Number.isSafeInteger(firstExpandedIndex) || firstExpandedIndex < 0)
         throw new RangeError('Invalid first source operand index.');
@@ -44,4 +56,7 @@ export const sourceOperandPolynomials = (firstExpandedIndex: number) => {
 };
 // Allow both public source representations beside the new witness columns.
 export const sourceWorkingBytes =
-    2n * 8n * fixedModulusBfvInputs.polynomialDegree * 8n;
+    2n *
+    sourceStatementPolynomialCount *
+    fixedModulusBfvInputs.polynomialDegree *
+    8n;

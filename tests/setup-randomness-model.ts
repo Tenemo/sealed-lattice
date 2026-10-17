@@ -1,3 +1,4 @@
+import { sourceCiphertextPolynomialCount } from '#tests/encrypted-registration-source-model.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import { compileRegistrationSetupBindingScreen } from '#tests/registration-setup-binding-model.js';
 import { compileSetupSelectionCensus } from '#tests/setup-selection-model.js';
@@ -33,7 +34,8 @@ export const compileSetupRandomnessCensus = (
     const degree = fixedModulusBfvInputs.polynomialDegree;
     const samplesPerContribution =
         (4n * gadgetLength + 2n * participants - 1n) * degree;
-    const samplesPerSourceFamily = 5n * degree;
+    const samplesPerSourceFamily =
+        (1n + sourceCiphertextPolynomialCount) * degree;
     const samplesPerEnrollment =
         degree + sourceFamilyCount * samplesPerSourceFamily;
     const samplesPerPreparation =

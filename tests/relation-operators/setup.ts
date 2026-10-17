@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
 
 import { auxiliaryInputEncryptionParameters } from '#tests/auxiliary-input-encryption-parameters.js';
+import {
+    sourceCiphertextPolynomialCount,
+    sourceMessageScale,
+    sourceStatementPolynomialCount,
+} from '#tests/encrypted-registration-source-model.js';
 import { bitLength, byteLength, littleEndian } from '#tests/exact-integer.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import {
@@ -78,7 +83,8 @@ export const setupRelationOperator = (
     const participants = profile.participantCount;
     const shareCommon = gadgetPolynomials * gadgetLength;
     const sourceStart = shareCommon + 3 * participants + 1;
-    const polynomialCount = sourceStart + 8;
+    const polynomialCount =
+        sourceStart + Number(sourceStatementPolynomialCount);
     const header = setupHeader(profile);
     if (
         statement.length !==
@@ -87,7 +93,7 @@ export const setupRelationOperator = (
             (sourceStart - shareCommon) *
                 degree *
                 (1 + byteLength(share.modulus)) +
-            8 *
+            Number(sourceStatementPolynomialCount) *
                 degree *
                 (1 + byteLength(auxiliaryInputEncryptionParameters.modulus))
     )
@@ -307,7 +313,11 @@ export const setupRelationOperator = (
     const oldSupportCount = supports.length;
     const sourceEphemeral = allocateSparse(layout.sourceHalfSupport);
     const sourceParameters = auxiliaryInputEncryptionParameters;
-    for (let component = 0; component < 4; component++) {
+    for (
+        let component = 0;
+        component < Number(sourceCiphertextPolynomialCount);
+        component++
+    ) {
         const quotient = signed(quotientBits);
         const error = signed(errorBits);
         register(
@@ -322,18 +332,18 @@ export const setupRelationOperator = (
             scale(weight, -sourceParameters.modulus),
         );
         builder.putGeometric(error, degree, weight);
-        if (component === 0)
+        if (component === 0) {
             builder.putGeometric(
                 { ...secret, offset: 1n },
                 degree,
-                scale(weight, sourceParameters.scale),
+                scale(weight, sourceMessageScale),
             );
-        if (component === 2)
             builder.putGeometric(
                 { ...originalError, offset: originalError.offset + 64n },
                 degree,
-                scale(weight, sourceParameters.scale),
+                scale(weight, 3n * sourceMessageScale),
             );
+        }
         weight = multiply(weight, limbWeight);
     }
     for (const [supportColumn, half] of supports.slice(oldSupportCount)) {

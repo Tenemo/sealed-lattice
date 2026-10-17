@@ -6,7 +6,10 @@ use crate::{
 use supported_profile::{
     AUXILIARY_SECRET_SUPPORT, DEGREE, Profile, auxiliary_modulus,
     relation::setup_relation,
-    source_linked::{ADDED_WORDS, SOURCE_POLYNOMIALS, original_error_column, remap},
+    source_linked::{
+        ADDED_WORDS, CIPHERTEXT_POLYNOMIALS, SOURCE_PLAINTEXT_MODULUS, SOURCE_POLYNOMIALS,
+        original_error_column, remap,
+    },
 };
 fn source_modulus() -> i64 {
     let mut bytes = [0; 8];
@@ -15,7 +18,7 @@ fn source_modulus() -> i64 {
     i64::from_le_bytes(bytes)
 }
 fn source_scale() -> i64 {
-    source_modulus() / 257
+    (source_modulus() - 1) / SOURCE_PLAINTEXT_MODULUS as i64
 }
 fn scalar(value: i128) -> u128 {
     if value < 0 {
@@ -63,7 +66,7 @@ pub fn plan(profile: Profile, alpha: Element) -> Result<ProverOperatorPlan, Refu
             (plus(sum, value), times(value, alpha))
         })
         .0;
-    for component in 0..4 {
+    for component in 0..CIPHERTEXT_POLYNOMIALS {
         plan.common_columns.push(vec![
             (ephemeral, weight),
             (ephemeral + 1, minus(ZERO, weight)),
@@ -88,13 +91,11 @@ pub fn plan(profile: Profile, alpha: Element) -> Result<ProverOperatorPlan, Refu
                     scale_element(weight, scalar(-i128::from(source_scale()))),
                 ),
             ]);
-            offset -= i128::from(source_scale());
-        }
-        if component == 2 {
             columns.push((
                 original_error_column(profile),
-                scale_element(weight, source_scale() as u128),
+                scale_element(weight, 3 * source_scale() as u128),
             ));
+            offset -= i128::from(source_scale());
         }
         plan.fixed_terms.push(ProverFixedTerm {
             degree: DEGREE,

@@ -1,3 +1,4 @@
+import { auxiliaryInputEncryptionParameters } from '#tests/auxiliary-input-encryption-parameters.js';
 import {
     compilePreparationFamilyInventory,
     compilePreparationLedger,
@@ -14,6 +15,15 @@ import {
     semanticMacroEdges,
 } from '#tests/security-ledger-model.js';
 import { latticeAssumptionGroups } from '#tests/security-margin/attack-screens.js';
+import {
+    reductionConstructorDimensions,
+    reductionConstructorOperands,
+} from '#tests/security-margin/constructor-operands.js';
+import { sourceRecoveryAllowance } from '#tests/security-margin/constructor-price.js';
+import {
+    buildPackedSourceRecoveryProgram,
+    packedSourceRecoveryBounds,
+} from '#tests/security-margin/packed-source-recovery.js';
 import { compileLatticePopulationLimits } from '#tests/security-margin/population-limits.js';
 import {
     compileReductionWork,
@@ -25,6 +35,7 @@ import {
     securityTargetBits,
     slopeReductionComponentBounds,
 } from '#tests/security-margin/reduction-work.js';
+import { auditWordProgram } from '#tests/security-margin/word-program.js';
 import {
     latticeRequirementAt,
     profilesByParticipantCount,
@@ -52,6 +63,17 @@ export const renderComposedSecurityLedger = (): string[] => {
         ledger[0].criterion.binding.limit,
     );
     const work = compileReductionWork(constructionPopulation);
+    const sourceRecoveryShape = auditWordProgram(
+        buildPackedSourceRecoveryProgram(),
+    );
+    const sourceRecoveryBounds = packedSourceRecoveryBounds(
+        reductionConstructorDimensions.degree,
+        auxiliaryInputEncryptionParameters.degree,
+        auxiliaryInputEncryptionParameters.support,
+    );
+    const sourceRecoveryPrice = sourceRecoveryAllowance(
+        reductionConstructorDimensions.degree,
+    );
     const ratioBits = (
         value: { numerator: bigint; denominator: bigint },
         originalWork: bigint,
@@ -152,6 +174,45 @@ export const renderComposedSecurityLedger = (): string[] => {
                     formatCount(bound),
                 ],
             ),
+        ),
+        '',
+        'The [packed-source recovery program](../tests/security-margin/packed-source-recovery.ts) uses the same classical word-machine lowering as the existing source-recovery allowance. Its event and storage bounds cover complete loops and malformed prefixes, while the control-graph audit bounds the interval between charged operations. The separate source-construction and transcript applications remain with the security argument.',
+        '',
+        table(
+            ['Source recovery operand', 'Packed program', 'Priced allowance'],
+            [
+                [
+                    'Instructions',
+                    sourceRecoveryShape.instructions,
+                    reductionConstructorOperands.banks.sourceRecovery
+                        .instructions,
+                ],
+                [
+                    'Registers',
+                    sourceRecoveryShape.registers,
+                    reductionConstructorOperands.banks.sourceRecovery.registers,
+                ],
+                [
+                    'Maximum event gap',
+                    sourceRecoveryShape.maximumEventGap,
+                    reductionConstructorOperands.banks.sourceRecovery
+                        .maximumEventGap,
+                ],
+                [
+                    'Events',
+                    sourceRecoveryBounds.events,
+                    sourceRecoveryPrice.events,
+                ],
+                [
+                    'Span storage bits',
+                    sourceRecoveryBounds.spanBits,
+                    sourceRecoveryPrice.spanBits,
+                ],
+            ].map(([name, actual, allowance]) => [
+                String(name),
+                formatCount(actual as bigint),
+                formatCount(allowance as bigint),
+            ]),
         ),
         '',
         table(

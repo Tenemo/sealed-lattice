@@ -4,6 +4,7 @@ import {
     sourceStatementPolynomialBytes,
     sourceWorkingBytes,
     sourceCiphertextBytes,
+    sourceCiphertextPolynomialCount,
 } from '#tests/encrypted-registration-source-model.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import {
@@ -179,7 +180,10 @@ export const compileBrowserWordProverResources = (
     const agreement = compileCommonAgreementDegreeCensus();
     const field = compileSmallLimbProofFieldCensus();
     const fullDegreeCommonPolynomials =
-        3n * profile.gadgetLength + BigInt(profile.participantCount) + 5n;
+        3n * profile.gadgetLength +
+        BigInt(profile.participantCount) +
+        1n +
+        sourceCiphertextPolynomialCount;
     return {
         fullDegreeCommonPolynomials,
         ...compileWordProverResources({

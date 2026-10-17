@@ -188,8 +188,8 @@ describe('fixed three-purpose raw-domain catalogue', () => {
         expect(completion[0].encodedParameters.subarray(0, 72)).toEqual(
             Buffer.concat(
                 [
-                    65536, 704, 1409, 262144, 131071, 2, 524288, 65536, 423, 26,
-                    483, 1024, 256, 112, 96, 16, 7, 32,
+                    65536, 704, 1409, 262144, 131071, 2, 524288, 65536, 419, 26,
+                    477, 1024, 256, 112, 96, 16, 7, 32,
                 ].map((value) => unsigned(value, 4)),
             ),
         );
@@ -234,7 +234,7 @@ describe('fixed three-purpose raw-domain catalogue', () => {
         expect(source).toContain('pub zero_product_pairs: Vec<(usize, usize)>');
         expect(source).toContain('pub narrow: Vec<(usize, u128)>');
         expect(
-            completion[0].encodedParameters.subarray(-60 * 8, -59 * 8),
+            completion[0].encodedParameters.subarray(-58 * 8, -57 * 8),
         ).toEqual(Buffer.concat([unsigned(29, 4), unsigned(512, 4)]));
         // Those generic fields are not a public constructor input here.
         expect(

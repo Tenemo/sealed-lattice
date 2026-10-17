@@ -93,7 +93,7 @@ describe('complete first-oracle proof checkpoint', () => {
         // Independent request schedule for the completion profile: one full
         // read for each base mask, the degree mask, then one retained seed.
         const buffer = 65_536n;
-        const firstMasks = 450n;
+        const firstMasks = 446n;
         const degreeMaskWords = 3n * 131_072n;
         const generation = firstMasks * buffer + degreeMaskWords * 16n + 64n;
         expect(model.minimumGenerationProofRandomBytes).toBe(generation);
@@ -103,17 +103,17 @@ describe('complete first-oracle proof checkpoint', () => {
             ((firstMasks * 1409n * 16n + buffer - 1n) / buffer) * buffer;
         expect(incorrectlyBatched).toBeLessThan(firstMasks * buffer);
         // The remaining eighteen tree seeds, all twenty response salts,
-        // the 484 extension masks (two reads each), and the sum mask.
+        // the 478 extension masks (two reads each), and the sum mask.
         expect(model.minimumContinuationProofRandomBytes).toBe(
-            18n * 64n + 20n * 128n + (484n * 2n + 50n) * buffer,
+            18n * 64n + 20n * 128n + (478n * 2n + 50n) * buffer,
         );
     });
 
     it('accounts for every required private field without deterministic caches', () => {
         const model = compileFirstOracleCheckpointCensus(completionProfile());
         expect(model.fields.map((field) => field.plaintextBytes)).toEqual([
-            449n * 65536n * 2n,
-            450n * 1409n * 16n,
+            445n * 65536n * 2n,
+            446n * 1409n * 16n,
             131072n * 48n,
             64n,
             262144n * 201n,
@@ -170,13 +170,13 @@ describe('complete first-oracle proof checkpoint', () => {
         expect(model.headerDigestPermutationsPerPass).toBe(
             model.recordCount * digestPermutations,
         );
-        expect(model.publicRecordCount).toBe(1n + 36n * 7n + 20n * 2n + 8n);
+        expect(model.publicRecordCount).toBe(1n + 36n * 7n + 20n * 2n + 4n);
         expect(model.publicPlaintextBytes).toBe(
             4n +
                 96n +
                 36n * 65536n * 97n +
                 20n * 65536n * 21n +
-                8n * 65536n * 6n,
+                4n * 65536n * 6n,
         );
         expect(model.maximumRootPlaintextBytes).toBeLessThan(1_048_576n);
         expect(model.maximumRetainedPayloadBytes).toBeLessThan(402_653_184n);

@@ -1,6 +1,12 @@
 import { auxiliaryInputEncryptionParameters } from '#tests/auxiliary-input-encryption-parameters.js';
 import { compileCommonMatrixSamplingCensus } from '#tests/common-matrix-sampling-model.js';
-import { sourceCiphertextBytes } from '#tests/encrypted-registration-source-model.js';
+import {
+    sourceCiphertextBytes,
+    sourceGoodKeyPhaseError,
+    sourceMessageMaximum,
+    sourceMessageScale,
+    sourceMaximumPhase,
+} from '#tests/encrypted-registration-source-model.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import { operationSeedBytes } from '#tests/operation-seed-model.js';
 import {
@@ -58,10 +64,10 @@ export const compileRegistrationSetupBindingScreen = (
     const auxiliary = {
         publicCoordinateBytes: auxiliaryPublicCoordinateBytes,
         fixedPublicPairBytes: 2n * auxiliaryPublicCoordinateBytes,
-        goodKeyPhaseError:
-            (2n * auxiliaryInputEncryptionParameters.support + 1n) *
-            fixedModulusBfvInputs.errorBound,
-        scale: auxiliaryInputEncryptionParameters.scale,
+        goodKeyPhaseError: sourceGoodKeyPhaseError,
+        scale: sourceMessageScale,
+        maximumMessage: sourceMessageMaximum,
+        maximumPhase: sourceMaximumPhase,
     };
     const coordinateCount = BigInt(fhe.length);
     return {

@@ -28,7 +28,7 @@ describe('wide verifier messages and short authentication tags', () => {
                 role.virtualOracles,
             ]),
         ).toEqual([
-            ['setup', 1216, 804],
+            ['setup', 1206, 798],
             ['ballot', 65, 39],
             ['release', 138, 76],
         ]);

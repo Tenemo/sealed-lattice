@@ -662,7 +662,7 @@ export const renderSetupSelectionAndRegistrationBindingScreen =
             ]),
         ),
         '',
-        'The [registration source model](../tests/registration-setup-binding-model.ts) enumerates each FHE modulus and common-sampler family permitted before roster fixing. Each family has an independent retained seed and four published auxiliary ciphertext polynomials that encrypt its original secret and first error. The source binding digest authenticates those ciphertexts under the poll, owner and family. Enrollment generates these auxiliary ciphertexts; it does not generate the FHE first public coordinates. The first-coordinate columns give their potential encoded sizes across the permitted families, separately from uploaded ciphertext bytes and retained seed bytes. None of these totals is a live-memory measurement.',
+        'The [registration source model](../tests/registration-setup-binding-model.ts) enumerates each FHE modulus and common-sampler family permitted before roster fixing. Each family has an independent retained seed and one published auxiliary ciphertext pair that jointly encrypts its original secret and first error. The source binding digest authenticates those ciphertexts under the poll, owner and family. Enrollment generates these auxiliary ciphertexts; it does not generate the FHE first public coordinates. The first-coordinate columns give their potential encoded sizes across the permitted families, separately from uploaded ciphertext bytes and retained seed bytes. None of these totals is a live-memory measurement.',
         '',
         table(
             [
@@ -675,7 +675,9 @@ export const renderSetupSelectionAndRegistrationBindingScreen =
                 'Largest FHE first-coordinate bytes',
                 'Fixed auxiliary public pair bytes',
                 'Auxiliary good-key phase error bound',
-                'Auxiliary scale',
+                'Source scale',
+                'Maximum packed source message',
+                'Maximum good-key phase magnitude',
             ],
             [
                 [3, 2],
@@ -697,11 +699,13 @@ export const renderSetupSelectionAndRegistrationBindingScreen =
                     formatCount(screen.auxiliary.fixedPublicPairBytes),
                     formatCount(screen.auxiliary.goodKeyPhaseError),
                     formatCount(screen.auxiliary.scale),
+                    formatCount(screen.auxiliary.maximumMessage),
+                    formatCount(screen.auxiliary.maximumPhase),
                 ];
             }),
         ),
         '',
-        'The auxiliary good-key bound is `(2*h_aux+1)*E`, and twice this value must be strictly below its scale. Fixed-suite sampling and initialization, global auxiliary-key reuse, encrypted-source hybrids, adaptive selection, proof soundness and the complete original credential population have their separate charges in the composed ledger.',
+        'The auxiliary good-key bound is `(2*h_aux+1)*E`; twice this value must be strictly below the source scale, and twice the maximum phase magnitude must be strictly below the auxiliary modulus. The packed message is `3*(firstError+E)+(secret+1)`, whose quotient and remainder by three recover both original source values. Fixed-suite sampling and initialization, global auxiliary-key reuse, encrypted-source hybrids, adaptive selection, proof soundness and the complete original credential population have their separate charges in the composed ledger.',
         '',
         '### FHE key source generation screen',
         '',

@@ -2,6 +2,10 @@ import assert from 'node:assert/strict';
 
 import { auxiliaryInputEncryptionParameters } from '#tests/auxiliary-input-encryption-parameters.js';
 import { isCanonicalCenteredPolynomial } from '#tests/canonical-polynomial-model.js';
+import {
+    sourceCiphertextPolynomialCount,
+    sourceMessageScale,
+} from '#tests/encrypted-registration-source-model.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import {
     type Column,
@@ -519,16 +523,20 @@ export const createSetupContributionRelationModel = (
             variable.offset,
         );
     const sourceModulus = auxiliaryInputEncryptionParameters.modulus;
-    const sourceScale = auxiliaryInputEncryptionParameters.scale;
-    for (let component = 0; component < 4; component++) {
+    const sourceScale = sourceMessageScale;
+    for (
+        let component = 0;
+        component < Number(sourceCiphertextPolynomialCount);
+        component++
+    ) {
         const common = publicPolynomial(sourceModulus);
         const error = errors();
         const message = Array.from({ length: degree }, (_unused, position) =>
             component === 0
-                ? secret.values[position] + 1n
-                : component === 2
-                  ? readVariable(originalError, position) + 64n
-                  : 0n,
+                ? secret.values[position] +
+                  1n +
+                  3n * (readVariable(originalError, position) + 64n)
+                : 0n,
         );
         const product = convolution(common, sourceValues);
         const raw = product.map(
@@ -548,16 +556,19 @@ export const createSetupContributionRelationModel = (
                 ],
                 direct:
                     component === 0
-                        ? [{ variable: secret.variable, factor: sourceScale }]
-                        : component === 2
-                          ? [{ variable: originalError, factor: sourceScale }]
-                          : [],
+                        ? [
+                              {
+                                  variable: secret.variable,
+                                  factor: sourceScale,
+                              },
+                              {
+                                  variable: originalError,
+                                  factor: 3n * sourceScale,
+                              },
+                          ]
+                        : [],
                 offset: Array.from({ length: degree }, () =>
-                    component === 0
-                        ? sourceScale
-                        : component === 2
-                          ? 64n * sourceScale
-                          : 0n,
+                    component === 0 ? (1n + 3n * 64n) * sourceScale : 0n,
                 ),
                 errorSign: 1n,
                 limbs: 1,

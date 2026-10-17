@@ -20,6 +20,13 @@ type InstructionBank = {
     maximumEventGap: bigint;
 };
 
+// Retain the independently priced source-recovery envelope. The packed
+// decoder's literal table and complete loop bounds are checked beneath it.
+export const sourceRecoveryAllowance = (degree: bigint) => ({
+    events: 16n * degree * (256n + 256n) + 16n * 4096n + 16n * 256n + 1024n,
+    spanBits: 480n * degree + 2n * 4096n + 32n * 256n,
+});
+
 // The constructor's populations per original honest credential: one source
 // statement per family, one recipient-key statement, three proof scopes with
 // their role statements and descriptors, one early source recovery per roster
@@ -761,8 +768,8 @@ export const compileReductionConstructorPrice = (honestRegistrations = 20n) => {
         honestRegistrations *
         (events(
             banks.sourceRecovery,
-            16n * degree * (256n + 256n) + 16n * 4096n + 16n * 256n + 1024n,
-            480n * degree + 2n * 4096n + 32n * 256n,
+            sourceRecoveryAllowance(degree).events,
+            sourceRecoveryAllowance(degree).spanBits,
             false,
         ) +
             events(

@@ -12,17 +12,18 @@ use supported_profile::{
 };
 use zeroize::Zeroizing;
 
-pub use supported_profile::source_linked::SOURCE_POLYNOMIALS;
+use supported_profile::source_linked::{ADDED_WORDS, SOURCE_PLAINTEXT_MODULUS};
+pub use supported_profile::source_linked::{CIPHERTEXT_POLYNOMIALS, SOURCE_POLYNOMIALS};
 
 pub fn ciphertext_bytes() -> usize {
-    4 * DEGREE * (1 + auxiliary_modulus().len())
+    CIPHERTEXT_POLYNOMIALS * DEGREE * (1 + auxiliary_modulus().len())
 }
 
 /// Fixed public block matrices. Smaller ring families use the same block
 /// prefixes; there is no poll, roster, participant or private seed input.
 pub fn common_polynomials() -> Vec<Vec<i64>> {
     let blocks = DEGREE / AUXILIARY_DEGREE;
-    (0..4)
+    (0..CIPHERTEXT_POLYNOMIALS)
         .map(|component| {
             let mut values = vec![0; DEGREE];
             for block in 0..blocks {
@@ -64,7 +65,7 @@ pub fn modulus() -> i64 {
     i64::from_le_bytes(bytes)
 }
 pub fn scale() -> i64 {
-    (modulus() - 1) / 257
+    (modulus() - 1) / SOURCE_PLAINTEXT_MODULUS as i64
 }
 pub fn centered(value: i64) -> i64 {
     let modulus = modulus();
@@ -76,7 +77,8 @@ pub fn centered(value: i64) -> i64 {
     }
 }
 /// Canonical expanded public operands, common then ciphertext for each of
-/// the secret-first, secret-second, error-first and error-second equations.
+/// the packed-message and zero-message equations. The packed message is
+/// `3 * (first_error + 64) + (secret + 1)` in `0..=383`.
 /// The enclosing protocol supplies its fixed common matrices and the source
 /// ciphertexts from the original authenticated registration.
 #[derive(Clone)]
@@ -296,7 +298,7 @@ impl LinkedContribution {
 }
 
 impl PublicSource {
-    /// Registration carries only the four ciphertexts; the fixed common
+    /// Registration carries only the two ciphertexts; the fixed common
     /// matrices are reconstructed when the linked statement is verified.
     pub fn ciphertext_records(&self) -> Result<Vec<Vec<u8>>, Refusal> {
         Ok(self
@@ -453,14 +455,14 @@ impl SourceCiphertextVerifier {
                 .last_mut()
                 .expect("The first ciphertext exists.");
             current.push(value);
-            if current.len() == DEGREE && ciphertexts.len() < 4 {
+            if current.len() == DEGREE && ciphertexts.len() < CIPHERTEXT_POLYNOMIALS {
                 ciphertexts.push(Vec::new());
             }
         })
     }
     pub fn finish(self) -> Result<VerifiedSource, Refusal> {
         self.body.finish()?;
-        if self.ciphertexts.len() != 4
+        if self.ciphertexts.len() != CIPHERTEXT_POLYNOMIALS
             || self.ciphertexts.iter().any(|values| values.len() != DEGREE)
         {
             return Err(Refusal::Shape);
@@ -501,7 +503,7 @@ pub(crate) fn generate(
     }
     let common = common_polynomials();
     let mut polynomials = Vec::with_capacity(SOURCE_POLYNOMIALS);
-    let mut words = Zeroizing::new(Vec::with_capacity(8));
+    let mut words = Zeroizing::new(Vec::with_capacity(ADDED_WORDS));
     for (component, common_polynomial) in common.iter().enumerate() {
         let errors = Zeroizing::new(crate::errors_from_reader(DEGREE, random));
         let mut values = product(common_polynomial, &ephemeral);
@@ -509,8 +511,7 @@ pub(crate) fn generate(
         let mut error_words = Vec::with_capacity(DEGREE);
         for position in 0..DEGREE {
             let message = match component {
-                0 => 1 + i64::from(secret[position]),
-                2 => (first_error[position] + 64) as i64,
+                0 => 3 * (first_error[position] + 64) as i64 + 1 + i64::from(secret[position]),
                 _ => 0,
             };
             let raw = values[position] + errors[position] as i64 + scale() * message;

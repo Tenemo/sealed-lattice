@@ -22,7 +22,7 @@ fn binding(profile: Profile, poll: &[u8; 64], owner: &[u8; 64], bytes: &[u8]) ->
     state.update(&(modulus.len() as u16).to_le_bytes());
     state.update(&modulus);
     state.update(&(profile.fhe_common_sample_bits() as u32).to_le_bytes());
-    state.update(&((4 * DEGREE * 6) as u64).to_le_bytes());
+    state.update(&((2 * DEGREE * 6) as u64).to_le_bytes());
     state.update(bytes);
     let mut output = [0u8; 64];
     state.finalize_xof().read(&mut output);
