@@ -652,6 +652,124 @@ fn full_layouts_encode_the_profile_statement() {
 }
 
 #[test]
+fn committed_statement_preserves_the_full_operator_and_binds_its_root() {
+    let mut random = Random(0x517c_c1b7_2722_0a95);
+    let alpha = [17, 37, 91];
+    let indices = [0, 3, 17, 63];
+    for (participants, options) in [(3, 2), (10, 10), (20, 20)] {
+        let profile = Profile::new(participants, options).unwrap();
+        let layout = reduced(profile);
+        let (statement, witness) = satisfying_relation(layout, &mut random);
+        let full = stream(
+            layout,
+            &statement,
+            ProtocolHash::digest(&statement),
+            &indices,
+        )
+        .unwrap();
+        let committed = profile.committed_polynomials();
+        let mut compact = layout.header();
+        let mut evaluations = Vec::new();
+        let mut offset = compact.len();
+        for index in 0..profile.setup_polynomials() {
+            let family = profile.setup_family(index).unwrap();
+            let width = 1 + profile.family_magnitude_bytes(family);
+            let bytes = &statement[offset..offset + layout.degree * width];
+            offset += bytes.len();
+            if committed.contains(&index) {
+                let values: Vec<BigInt> = bytes
+                    .chunks_exact(width)
+                    .map(|record| {
+                        let value = BigInt::from_bytes_le(Sign::Plus, &record[1..]);
+                        if record[0] == 1 { -value } else { value }
+                    })
+                    .collect();
+                for limb in 0..profile.fhe_limbs() {
+                    let value = values
+                        .iter()
+                        .enumerate()
+                        .fold(ZERO, |sum, (position, value)| {
+                            let signed = digit(value, limb, FHE_LIMB_BITS).to_i128().unwrap();
+                            plus(sum, times([base(signed), 0, 0], power(alpha, position)))
+                        });
+                    evaluations.push(value);
+                }
+            } else {
+                compact.extend(bytes);
+            }
+        }
+        let root = [43; 64];
+        let digest = ProtocolHash::digest([compact.as_slice(), &root].concat());
+        let make_stream = |root, evaluations: Vec<Element>| {
+            let mut stream =
+                SetupStatementStream::with_layout(layout, digest, alpha, &indices).unwrap();
+            stream.encoded_length = compact.len();
+            stream.committed = Some(CommittedStatement {
+                root,
+                evaluations,
+                polynomials: committed.clone(),
+                next: 0,
+            });
+            stream
+        };
+        for chunk in [1, 107, 1024] {
+            let mut stream = make_stream(root, evaluations.clone());
+            for part in compact.chunks(chunk) {
+                stream.push(part).unwrap();
+            }
+            let output = stream.finish().unwrap();
+            assert_eq!(output.target, full.target);
+            assert_eq!(output.lookup_weight, full.lookup_weight);
+            assert_eq!(output.coefficients, full.coefficients);
+        }
+        let mut wrong_root = make_stream([44; 64], evaluations.clone());
+        wrong_root.push(&compact).unwrap();
+        assert!(matches!(wrong_root.finish(), Err(Refusal::Binding)));
+        let mut truncated = make_stream(root, evaluations.clone());
+        truncated.push(&compact[..compact.len() - 1]).unwrap();
+        assert!(matches!(truncated.finish(), Err(Refusal::Incomplete)));
+        let mut excessive = make_stream(root, evaluations.clone());
+        let mut bytes = compact.clone();
+        bytes.push(0);
+        assert!(excessive.push(&bytes).is_err());
+        assert!(excessive.finish().is_err());
+        evaluations[0] = plus(evaluations[0], ONE);
+        let mut changed = make_stream(root, evaluations);
+        changed.push(&compact).unwrap();
+        assert_ne!(changed.finish().unwrap().target, full.target);
+        let (operator, target) = systematic_operator(layout, alpha, &statement);
+        assert_eq!(apply(&operator, &witness.columns()), target);
+    }
+}
+
+#[test]
+fn committed_statement_refuses_wrong_claim_shape_and_noncanonical_elements() {
+    let profile = Profile::new(3, 2).unwrap();
+    let values = vec![ZERO; profile.committed_columns()];
+    for count in [0, values.len() - 1, values.len() + 1] {
+        assert!(
+            SetupStatementStream::committed(
+                profile,
+                [0; 64],
+                [1, 2, 3],
+                &[0],
+                [0; 64],
+                &vec![ZERO; count]
+            )
+            .is_err()
+        );
+    }
+    for coordinate in 0..3 {
+        let mut changed = values.clone();
+        changed[0][coordinate] = MODULUS;
+        assert!(
+            SetupStatementStream::committed(profile, [0; 64], [1, 2, 3], &[0], [0; 64], &changed)
+                .is_err()
+        );
+    }
+}
+
+#[test]
 fn both_relinearization_equations_keep_the_original_full_ring_auxiliary() {
     let mut random = Random(0x082e_fa98_ec4e_6c89);
     let alpha = [17, 37, 91];

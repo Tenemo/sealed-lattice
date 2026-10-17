@@ -1,89 +1,149 @@
 import assert from 'node:assert/strict';
 
 import { compileCommonMatrixSamplingCensus } from '#tests/common-matrix-sampling-model.js';
-import { sourceCacheWork } from '#tests/compressed-oracle/source-extraction.js';
 import { binomial } from '#tests/exact-integer.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
-import { compileRegistrationSetupBindingScreen } from '#tests/registration-setup-binding-model.js';
 import { compileSetupSelectionCensus } from '#tests/setup-selection-model.js';
 import {
     listSupportedProfiles,
+    supportedProfileRanges,
     type SupportedProfile,
 } from '#tests/supported-profile-model.js';
 import { thresholdProfileFor } from '#tests/threshold-completion-model.js';
 
-// Structural comparison counts start at an original retained contribution
-// intent's first private generation, including work that never publishes an
-// offer. H includes abandoned and unselected original honest registrations.
-// Profile rows assume that roster size throughout; the separate poll census
-// covers mixed-size forks. Neither supplies primitive advantages, complete
-// reduction times, semantic-use errors or a numerical security limit on H.
-let sourceCatalogue:
-    | {
-          families: bigint;
-          ciphertextModuli: bigint;
-          maximumModulusBytes: bigint;
-      }
-    | undefined;
-const fixedSourceCatalogue = () => {
-    if (sourceCatalogue !== undefined) return sourceCatalogue;
-    const families = new Set<string>();
-    const moduli = new Set<bigint>();
+const powerOfTwoCeiling = (value: bigint) =>
+    value <= 1n ? 1n : 1n << BigInt((value - 1n).toString(2).length);
+
+export const compilePreparationFamilyInventory = () => {
+    const families = new Map<
+        string,
+        {
+            degree: bigint;
+            modulus: bigint;
+            sampleBits: bigint;
+            maximumPositions: bigint;
+            selectedSetRange: bigint;
+        }
+    >();
     for (const profile of listSupportedProfiles()) {
-        const bits =
-            compileCommonMatrixSamplingCensus(profile).fheBitsPerCoefficient;
-        families.add(`${profile.ciphertext.modulus}:${bits}`);
-        moduli.add(profile.ciphertext.modulus);
+        const sampleBits = BigInt(
+            compileCommonMatrixSamplingCensus(profile).fheBitsPerCoefficient,
+        );
+        const key = `${profile.ciphertext.modulus}:${sampleBits}`;
+        const selection = compileSetupSelectionCensus(profile.participantCount);
+        const selectedSets = binomial(
+            selection.eligibleContributorCount,
+            selection.setupContributorCount,
+        );
+        const previous = families.get(key) ?? {
+            degree: fixedModulusBfvInputs.polynomialDegree,
+            modulus: profile.ciphertext.modulus,
+            sampleBits,
+            maximumPositions: 0n,
+            selectedSetRange: 1n,
+        };
+        if (BigInt(profile.participantCount) > previous.maximumPositions)
+            previous.maximumPositions = BigInt(profile.participantCount);
+        if (powerOfTwoCeiling(selectedSets) > previous.selectedSetRange)
+            previous.selectedSetRange = powerOfTwoCeiling(selectedSets);
+        families.set(key, previous);
     }
-    sourceCatalogue = {
-        families: BigInt(families.size),
-        ciphertextModuli: BigInt(moduli.size),
-        maximumModulusBytes: [...moduli].reduce((maximum, modulus) => {
-            const bytes = BigInt(Math.ceil(modulus.toString(2).length / 8));
-            return bytes > maximum ? bytes : maximum;
-        }, 0n),
-    };
-    return sourceCatalogue;
+    return [...families.values()];
 };
 
-// A registration's source coordinates depend only on the poll maximum and
-// option count, so population sweeps compile each binding screen once.
-const coordinateCounts = new Map<string, bigint>();
-const registrationCoordinateCount = (
-    pollMaximumParticipants: number,
+let catalogue: ReturnType<typeof compilePreparationFamilyInventory> | undefined;
+const sourceCatalogue = () =>
+    (catalogue ??= compilePreparationFamilyInventory());
+const pollFamilies = new Map<string, bigint>();
+const registrationSourceFamilyCount = (
+    maximumParticipants: number,
     optionCount: number,
 ) => {
-    const key = `${String(pollMaximumParticipants)}:${String(optionCount)}`;
-    let count = coordinateCounts.get(key);
+    const key = `${maximumParticipants}:${optionCount}`;
+    let count = pollFamilies.get(key);
     if (count === undefined) {
-        count = compileRegistrationSetupBindingScreen(
-            pollMaximumParticipants,
-            optionCount,
-        ).coordinateCount;
-        coordinateCounts.set(key, count);
+        const identities = new Set(
+            listSupportedProfiles()
+                .filter(
+                    (profile) =>
+                        profile.optionCount === optionCount &&
+                        profile.participantCount <= maximumParticipants,
+                )
+                .map(
+                    (profile) =>
+                        `${profile.ciphertext.modulus}:${compileCommonMatrixSamplingCensus(profile).fheBitsPerCoefficient}`,
+                ),
+        );
+        assert.ok(identities.size > 0);
+        count = BigInt(identities.size);
+        pollFamilies.set(key, count);
     }
     return count;
 };
 
-const compileSourceCache = (requests: bigint) => {
-    const catalogue = fixedSourceCatalogue();
-    const familyIndexBits = BigInt(
-        (catalogue.families - 1n).toString(2).length,
+// The early primitive guess covers the complete catalogue, even when the
+// public poll parameters are chosen after shared-oracle preprocessing.
+// An actual original credential still creates only its poll's source list.
+export const compilePreparationLedger = (
+    profile: SupportedProfile,
+    originalHonestRegistrations: bigint,
+    pollMaximumParticipants = profile.participantCount,
+) => {
+    assert.ok(originalHonestRegistrations >= 0n);
+    assert.ok(
+        Number.isInteger(pollMaximumParticipants) &&
+            pollMaximumParticipants >= profile.participantCount &&
+            pollMaximumParticipants <=
+                supportedProfileRanges().participants.maximum,
     );
-    return sourceCacheWork(
-        requests,
-        // The authenticated registration digest binds its original owner,
-        // context, recipient key and ordered source commitments. The fixed
-        // family ordinal selects the particular commitment within that body.
-        512n + familyIndexBits,
-        // Canonical salt/coordinate plus the decoder's separate valid bit;
-        // shorter families are zero-padded to the fixed catalogue maximum.
-        1n +
-            8n *
-                (64n +
-                    fixedModulusBfvInputs.polynomialDegree *
-                        (1n + catalogue.maximumModulusBytes)),
+    const participants = BigInt(pollMaximumParticipants);
+    const threshold = thresholdProfileFor(profile.participantCount);
+    const corrupt = BigInt(threshold.maximumCorruptParticipantCount);
+    const honestEndorsersPerCertificate =
+        BigInt(profile.participantCount) - 2n * corrupt;
+    const sourceFamilies = registrationSourceFamilyCount(
+        pollMaximumParticipants,
+        profile.optionCount,
     );
+    const allFamilies = sourceCatalogue();
+    const selectedPositionEvents = allFamilies.reduce(
+        (sum, family) =>
+            sum + family.maximumPositions * family.selectedSetRange,
+        0n,
+    );
+    const selection = compileSetupSelectionCensus(profile.participantCount);
+    return {
+        originalHonestRegistrations,
+        honestEndorsersPerCertificate,
+        maximumStartedPreparationRosters: originalHonestRegistrations,
+        maximumCertifiedRosters:
+            originalHonestRegistrations / honestEndorsersPerCertificate,
+        maximumHonestContributionScopes: originalHonestRegistrations,
+        maximumHonestBallots: originalHonestRegistrations,
+        maximumHonestReleases: originalHonestRegistrations,
+        maximumHonestProofScopes: 3n * originalHonestRegistrations,
+        sourceFamilies,
+        generatedSourceEntries: sourceFamilies * originalHonestRegistrations,
+        maximumSourceDecodes: participants * originalHonestRegistrations,
+        maximumHonestRecipientRows: participants * originalHonestRegistrations,
+        recipientKeyComparisons: 2n * originalHonestRegistrations,
+        recipientCiphertextComparisons:
+            2n * participants * originalHonestRegistrations,
+        sourceCiphertextComparisons:
+            2n * sourceFamilies * originalHonestRegistrations,
+        fheTupleComparisons:
+            2n * BigInt(allFamilies.length) * originalHonestRegistrations,
+        selectedPositionSets: binomial(
+            selection.eligibleContributorCount,
+            selection.setupContributorCount,
+        ),
+        guessedFheFamilies: BigInt(allFamilies.length),
+        selectedPositionEvents,
+        fheBallotComparisons:
+            2n * originalHonestRegistrations * selectedPositionEvents,
+        auxiliaryKeyComparisons: 3n,
+        auxiliaryBallotComparisons: 2n * originalHonestRegistrations,
+    };
 };
 
 export const compilePreparationPollPopulations = (
@@ -92,126 +152,37 @@ export const compilePreparationPollPopulations = (
     originalHonestRegistrations: bigint,
 ) => {
     assert.ok(originalHonestRegistrations >= 0n);
-    const coordinateCount = registrationCoordinateCount(
+    const families = registrationSourceFamilyCount(
         pollMaximumParticipants,
         optionCount,
     );
-    const thresholds = Array.from(
-        { length: pollMaximumParticipants - 2 },
-        (_, index) => thresholdProfileFor(index + 3),
-    );
-    const minimumHonestEndorsersPerCertificate = BigInt(
-        Math.min(
-            ...thresholds.map(
-                (row, index) =>
-                    index + 3 - 2 * row.maximumCorruptParticipantCount,
-            ),
-        ),
-    );
-    const maximumCorruptParticipants = BigInt(
-        Math.max(
-            ...thresholds.map((row) => row.maximumCorruptParticipantCount),
-        ),
-    );
-    const maximumSourceCacheLookups =
-        originalHonestRegistrations * maximumCorruptParticipants;
+    let minimumHonestEndorsersPerCertificate = pollMaximumParticipants;
+    for (
+        let participants = 3;
+        participants <= pollMaximumParticipants;
+        participants++
+    ) {
+        const corrupt =
+            thresholdProfileFor(participants).maximumCorruptParticipantCount;
+        minimumHonestEndorsersPerCertificate = Math.min(
+            minimumHonestEndorsersPerCertificate,
+            participants - 2 * corrupt,
+        );
+    }
     return {
         pollMaximumParticipants,
         originalHonestRegistrations,
-        minimumHonestEndorsersPerCertificate,
+        minimumHonestEndorsersPerCertificate: BigInt(
+            minimumHonestEndorsersPerCertificate,
+        ),
         maximumStartedPreparationRosters: originalHonestRegistrations,
         maximumCertifiedRosters:
-            originalHonestRegistrations / minimumHonestEndorsersPerCertificate,
+            originalHonestRegistrations /
+            BigInt(minimumHonestEndorsersPerCertificate),
         maximumHonestRecipientRows:
             BigInt(pollMaximumParticipants) * originalHonestRegistrations,
-        maximumSourceCacheLookups,
-        maximumCorruptSourceExtractions: maximumSourceCacheLookups,
-        generatedSourceEntries: originalHonestRegistrations * coordinateCount,
-        sourceMaskScopes:
-            originalHonestRegistrations * fixedSourceCatalogue().families,
-        sourceCache: compileSourceCache(maximumSourceCacheLookups),
-    };
-};
-
-export const compilePreparationLedger = (
-    profile: SupportedProfile,
-    originalHonestRegistrations: bigint,
-    pollMaximumParticipants = profile.participantCount,
-) => {
-    assert.ok(originalHonestRegistrations >= 0n);
-    assert.ok(pollMaximumParticipants >= profile.participantCount);
-    const participants = BigInt(profile.participantCount);
-    const thresholds = thresholdProfileFor(profile.participantCount);
-    const corrupt = BigInt(thresholds.maximumCorruptParticipantCount);
-    const selection = compileSetupSelectionCensus(profile.participantCount);
-    const coordinateCount = registrationCoordinateCount(
-        pollMaximumParticipants,
-        profile.optionCount,
-    );
-    const catalogue = fixedSourceCatalogue();
-    const honestEndorsersPerCertificate = participants - 2n * corrupt;
-    const maximumStartedPreparationRosters = originalHonestRegistrations;
-    const maximumCertifiedRosters =
-        originalHonestRegistrations / honestEndorsersPerCertificate;
-    const maximumHonestContributionScopes = originalHonestRegistrations;
-    const certifiedBallotSlots = maximumCertifiedRosters * participants;
-    const maximumHonestBallots =
-        certifiedBallotSlots < originalHonestRegistrations
-            ? certifiedBallotSlots
-            : originalHonestRegistrations;
-    const maximumHonestReleases = maximumHonestBallots;
-    const maximumHonestRecipientRows =
-        participants * maximumHonestContributionScopes;
-    const selectedPositionSets = binomial(
-        selection.eligibleContributorCount,
-        selection.setupContributorCount,
-    );
-    // The embedding precedes private generation and guesses the ordinal of a
-    // roster's first honest generation, the selected positions and (where
-    // necessary) shared-stream modulus. Publication or certification counts
-    // cannot supply an earlier online guess space.
-    const selectedKeyEventComparisons =
-        maximumStartedPreparationRosters *
-        selectedPositionSets *
-        catalogue.ciphertextModuli;
-    // One lookup per corrupt eligible record at each first honest generation.
-    // Replaying the retained generation intent reuses its already resolved
-    // cache references. Cache misses, including unsuccessful extraction, are
-    // immutable entries. No hit is counted as another oracle extraction.
-    const maximumSourceCacheLookups =
-        maximumStartedPreparationRosters * corrupt;
-    return {
-        originalHonestRegistrations,
-        honestEndorsersPerCertificate,
-        maximumStartedPreparationRosters,
-        maximumCertifiedRosters,
-        maximumHonestContributionScopes,
-        maximumHonestBallots,
-        maximumHonestReleases,
-        maximumHonestProofScopes:
-            maximumHonestContributionScopes +
-            maximumHonestBallots +
-            maximumHonestReleases,
-        generatedSourceEntries: originalHonestRegistrations * coordinateCount,
-        sourceMaskScopes: originalHonestRegistrations * catalogue.families,
-        maximumCorruptSourceExtractions:
-            maximumStartedPreparationRosters * corrupt,
-        maximumSourceCacheLookups,
-        sourceCache: compileSourceCache(maximumSourceCacheLookups),
-        maximumHonestRecipientRows,
-        recipientKeyComparisons: 2n * originalHonestRegistrations,
-        recipientCiphertextComparisons: 2n * maximumHonestRecipientRows,
-        fheTupleComparisons:
-            2n * maximumHonestContributionScopes * catalogue.ciphertextModuli,
-        selectedPositionSets,
-        sharedFheModulusGuesses: catalogue.ciphertextModuli,
-        fheSelectedKeyComparisons: 2n * selectedKeyEventComparisons,
-        fheBallotComparisons: selectedKeyEventComparisons,
-        // Each multi-message comparison must cover every potential ballot in
-        // its guessed roster, even when fewer are ultimately published.
-        messagesPerFheBallotComparison: participants,
-        auxiliaryKeyComparisons: 1n,
-        auxiliaryBallotComparisons: maximumHonestBallots === 0n ? 0n : 1n,
-        messagesPerAuxiliaryBallotComparison: maximumHonestBallots,
+        maximumSourceDecodes:
+            BigInt(pollMaximumParticipants) * originalHonestRegistrations,
+        generatedSourceEntries: originalHonestRegistrations * families,
     };
 };

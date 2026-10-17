@@ -14,7 +14,12 @@ import path from 'node:path';
 
 import { compileBallotBodyCensus } from '#tests/ballot-body-model.js';
 import { compileCloseWireCensus } from '#tests/close-wire-model.js';
+import { compileCommittedOfferCensus } from '#tests/committed-offer-model.js';
 import { compileContributionBodyCensus } from '#tests/contribution-body-model.js';
+import {
+    sourceCiphertextBytes,
+    sourceStatementPolynomialBytes,
+} from '#tests/encrypted-registration-source-model.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import { compileLinkedReleaseWordProofLayout } from '#tests/full-word-proof-layout-model.js';
 import { compilePreparationResources } from '#tests/preparation-resource-model.js';
@@ -32,6 +37,7 @@ import { runWithLocalRunLog } from '#tools/ci/local-run-log.js';
 import { acquireProtocolResearchLock } from '#tools/ci/protocol-research-lock.js';
 import { selectProtocolResearchCase } from '#tools/ci/protocol-research-registry.js';
 import { deriveResearchScenario } from '#tools/ci/protocol-research-scenario.js';
+import { runCommittedOfferScreen } from '#tools/ci/run-committed-offer-screen.js';
 import { runFheKeySourceScreen } from '#tools/ci/run-fhe-key-source-screen.js';
 import { snapshotResearchSources } from '#tools/ci/run-sources.js';
 import {
@@ -60,6 +66,10 @@ type NativeResult = {
     }[];
 };
 const selected = selectProtocolResearchCase(process.argv.slice(2));
+if (selected.name === 'native-committed-offer') {
+    await runCommittedOfferScreen();
+    process.exit(process.exitCode ?? 0);
+}
 if (
     selected.name === 'native-fhe-key-source' ||
     selected.name === 'scalar-fhe-key-source' ||
@@ -216,6 +226,7 @@ await runWithLocalRunLog(
             const roster = compileRosterProposalCensus(Number(participants));
             const close = compileCloseWireCensus(profile);
             const release = compileLinkedReleaseWordProofLayout(profile);
+            const committed = compileCommittedOfferCensus(profile);
             const degree = fixedModulusBfvInputs.polynomialDegree;
             const coefficientBytes =
                 1n +
@@ -278,8 +289,35 @@ await runWithLocalRunLog(
                         270n +
                         enrollment.signatureBytes) +
                 enrollment.maximumPollDefinitionBytes;
+            // The diagnostic files also keep each registration's source
+            // ciphertexts and, for each eligible author, the committed
+            // polynomials its body does not stream, its source statement
+            // polynomials and its copy of the registered source. The
+            // committed-offer check writes the published aggregate and each
+            // earlier collected prefix at the maximum limb width, each
+            // compact prefix, the manifest, the normalized committed
+            // polynomials, one evaluation proof per selected author for the
+            // published and for an altered aggregate, and the one altered
+            // polynomial. Every committed polynomial has the same number of
+            // limb columns.
+            const committedOfferBound =
+                participants * sourceCiphertextBytes +
+                BigInt(preparation.eligibleContributorCount) *
+                    (contribution.polynomialPayloadBytes -
+                        contribution.streamedPolynomialPayloadBytes +
+                        sourceStatementPolynomialBytes +
+                        sourceCiphertextBytes) +
+                contributors *
+                    (committed.maximumAggregateBytes +
+                        2n * contribution.streamedPolynomialPayloadBytes +
+                        2n * committed.maximumEvaluationProofBytes) +
+                committed.aggregateManifestBytes +
+                aggregate.aggregateBytes +
+                committed.maximumAggregateBytes /
+                    BigInt(committed.committedPolynomials.length);
             const diagnosticBound =
                 publicPayloadBound +
+                committedOfferBound +
                 contributors *
                     aggregate.aggregateBytes *
                     (selected.name === 'native-selection-fork' ? 2n : 1n) +

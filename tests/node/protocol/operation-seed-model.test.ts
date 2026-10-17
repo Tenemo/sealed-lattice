@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
     readRustSource,
     rustIntegerConstant,
+    rustFunctionBody,
 } from '#tests/node/rust-source.js';
 import { compilePrivateRandomnessScopes } from '#tests/operation-seed-model.js';
 
@@ -35,7 +36,10 @@ const enumerate = (
     };
     for (let visit = 0; visit < (replay ? 3 : 1); visit++) {
         for (let source = 0; source < sources; source++)
-            root(`source:${source}`, [['source', true]]);
+            root(`source:${source}`, [
+                ['source-generation', true],
+                ['source-encryption', true],
+            ]);
         for (let author = 0; author < contributions; author++) {
             root(`contribution:${author}:generation`, [
                 ['witness', true],
@@ -128,13 +132,13 @@ describe('original private-randomness scope populations', () => {
             registered,
         );
         const noOffers = compilePrivateRandomnessScopes(sources, 0n, 0n, 0n);
-        expect(noOffers.maximumReadScopes).toBe(sources);
+        expect(noOffers.maximumReadScopes).toBe(2n * sources);
         expect(noOffers.maximumSeedDraws).toBe(sources);
         expect(worst.maximumSeedDraws).toBe(
             sources + 4n * registered + 3n * 19n * registered,
         );
         expect(worst.maximumReadScopes).toBe(
-            sources + 6n * registered + 3n * 19n * registered,
+            2n * sources + 6n * registered + 3n * 19n * registered,
         );
         expect(worst.maximumReadScopes).toBeGreaterThan(worst.maximumSeedDraws);
     });
@@ -144,7 +148,7 @@ describe('original private-randomness scope populations', () => {
             'crates/protocol-research/participant-module/src/operation-random.rs',
         );
         const source = await readRustSource(
-            'crates/protocol-research/participant-module/src/fhe-sources.rs',
+            'crates/protocol-research/protocol-foundations/src/source-seeds.rs',
         );
         const tree = await readRustSource(
             'crates/protocol-research/word-proof/src/tree.rs',
@@ -153,7 +157,24 @@ describe('original private-randomness scope populations', () => {
         expect(rustIntegerConstant(operation, 'SEED_BYTES')).toBe(64n);
         expect(rustIntegerConstant(source, 'SEED_BYTES')).toBe(64n);
         expect(rustIntegerConstant(tree, 'SALT_SEED_BYTES')).toBe(64n);
-        expect(source).toContain(`"${rows[0].domain}"`);
+        const encryptedSource = await readRustSource(
+            'crates/protocol-research/setup-witness/src/encrypted-source.rs',
+        );
+        const sourceStream = rustFunctionBody(
+            encryptedSource,
+            'private_stream',
+        );
+        expect(sourceStream).toContain(`b"${rows[0].domain}"`);
+        expect(sourceStream).toContain('state.update(&[purpose]);');
+        expect(sourceStream).toContain('state.update(seed);');
+        // The source and its encryption read the purpose 0 and 1 streams.
+        expect(
+            [
+                ...rustFunctionBody(encryptedSource, 'from_seed').matchAll(
+                    /private_stream\([^)]*,\s*(\d+)\)/gu,
+                ),
+            ].map((match) => Number(match[1])),
+        ).toEqual([0, 1]);
         for (const row of rows.slice(1, -1))
             expect(operation).toContain(`"${row.domain}"`);
         expect(tree).toContain(`b"${rows[rows.length - 1].domain}"`);

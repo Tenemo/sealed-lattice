@@ -1,5 +1,5 @@
 use super::*;
-use encrypted_ranking::ranking::{Engine, MAXIMUM_INSTRUCTIONS, program_identity};
+use encrypted_ranking::ranking::{Engine, MAXIMUM_INSTRUCTIONS};
 use num_bigint::BigUint;
 
 fn completion() -> Profile {
@@ -7,32 +7,30 @@ fn completion() -> Profile {
 }
 
 #[test]
-fn requested_prefixes_preserve_the_reference_schedule_and_complete_ordering() {
+fn requested_prefixes_share_the_comparison_and_mask_before_rank_expansion() {
     let complete = RankingProgram::for_profile(completion(), 10).unwrap();
-    // Pinned identity of the independently emitted pre-extension schedule.
-    assert_eq!(
-        program_identity(complete.bytes())
+    let mask = |program: &RankingProgram| {
+        program.bytes()[12..]
+            .chunks_exact(16)
+            .position(|bytes| {
+                u32::from_le_bytes(bytes[..4].try_into().unwrap()) == 4
+                    && u32::from_le_bytes(bytes[12..].try_into().unwrap()) == 0
+            })
             .unwrap()
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect::<String>(),
-        "017f859de532edf89af14dc72c7aea96b7917da7ffdebb01b4a853cf087d7d48d747640bc29f8a201fd5f699612f13de57dec36a18ded4d883deec289d3ac421"
-    );
+    };
     for top_count in 1..10 {
         let selected = RankingProgram::for_profile(completion(), top_count).unwrap();
-        assert_eq!(selected.bytes().len(), complete.bytes().len());
-        assert_eq!(selected.bytes()[..12], complete.bytes()[..12]);
-        for (before, after) in complete.bytes()[12..]
-            .chunks_exact(16)
-            .zip(selected.bytes()[12..].chunks_exact(16))
-        {
-            assert_eq!(before[..12], after[..12]);
-            let operation = u32::from_le_bytes(before[..4].try_into().unwrap());
-            let parameter = u32::from_le_bytes(before[12..].try_into().unwrap());
-            if operation != 4 && !(operation == 5 && parameter == 2) {
-                assert_eq!(before, after);
-            }
-        }
+        assert_eq!(
+            selected.bytes().len() + 32 * (10 - top_count),
+            complete.bytes().len()
+        );
+        assert_eq!(mask(&selected), mask(&complete));
+        let end = 12 + 16 * (mask(&selected) + 1);
+        assert_eq!(selected.bytes()[12..end], complete.bytes()[12..end]);
+        assert_eq!(
+            &selected.bytes()[selected.bytes().len() - 4..],
+            &13u32.to_le_bytes()
+        );
     }
 }
 
@@ -54,13 +52,13 @@ fn every_profile_and_requested_result_length_has_an_executable_program() {
             let counts = operations(&program);
             // One input per roster position, one weight per odd
             // comparison coefficient, one rotation per further window
-            // slot, one weight per nonconstant rank-equality power and
-            // three plaintext additions.
+            // slot and requested rank, one mask, one weight per
+            // nonconstant equality power, and four plaintext additions.
             assert_eq!(counts[0], profile.participants());
             assert_eq!(counts[3], profile.comparison_degree().div_ceil(2));
-            assert_eq!(counts[6], profile.rank_window() - 1);
-            assert_eq!(counts[4], options - 1);
-            assert_eq!(counts[5], 3);
+            assert_eq!(counts[6], profile.rank_window() + top_count - 2);
+            assert_eq!(counts[4], options);
+            assert_eq!(counts[5], 4);
             assert!(counts.iter().sum::<usize>() <= MAXIMUM_INSTRUCTIONS);
         }
         for top_count in [0, options + 1] {
@@ -202,7 +200,10 @@ fn mixed_or_noncanonical_rank_parameters_refuse_after_rehashing() {
     let program = RankingProgram::for_profile(completion(), 3).unwrap();
     let weighted = program.bytes()[12..]
         .chunks_exact(16)
-        .position(|bytes| u32::from_le_bytes(bytes[..4].try_into().unwrap()) == 4)
+        .position(|bytes| {
+            u32::from_le_bytes(bytes[..4].try_into().unwrap()) == 4
+                && u32::from_le_bytes(bytes[12..].try_into().unwrap()) != 0
+        })
         .unwrap();
     let parameter_offset = 12 + 16 * weighted + 12;
     let original = u32::from_le_bytes(
@@ -210,7 +211,7 @@ fn mixed_or_noncanonical_rank_parameters_refuse_after_rehashing() {
             .try_into()
             .unwrap(),
     );
-    for parameter in [original + 10, 0, 100, u32::MAX] {
+    for parameter in [original + 10, 10, 100, u32::MAX] {
         let mut changed = program.bytes().to_vec();
         changed[parameter_offset..parameter_offset + 4].copy_from_slice(&parameter.to_le_bytes());
         assert!(Engine::new(completion(), &changed).is_err());
@@ -220,5 +221,38 @@ fn mixed_or_noncanonical_rank_parameters_refuse_after_rehashing() {
         let offset = changed.len() - 4;
         changed[offset..].copy_from_slice(&constant.to_le_bytes());
         assert!(Engine::new(completion(), &changed).is_err());
+    }
+}
+
+// Instruction counts and identities of the independent compact ranking
+// model's complete programs, which its own test pins to the same values.
+#[test]
+fn representative_programs_match_the_independent_compact_model() {
+    for (participants, options, instructions, expected) in [
+        (
+            10,
+            10,
+            304,
+            "10edd939fb4f0d0decc6f446ba3194f2dfacf7640b3c3993a4808b7fbedb9423\
+             c523c16f22e1a27810400f539f184874e79940b730ebb13e761979c7fc65671a",
+        ),
+        (
+            20,
+            20,
+            598,
+            "cef6e51e5f8a023041e02d2bcb016921e26a94df0c9426a7165c95b1d6b9376d\
+             ef5b49485a24fdcd8dee0d5168ee3dfc5949034771e5b1f6f810498b096c0322",
+        ),
+    ] {
+        let profile = Profile::new(participants, options).unwrap();
+        let program = RankingProgram::for_profile(profile, options).unwrap();
+        assert_eq!((program.bytes().len() - 12) / 16, instructions);
+        let identity: String = encrypted_ranking::ranking::program_identity(program.bytes())
+            .unwrap()
+            .iter()
+            .map(|value| format!("{value:02x}"))
+            .collect();
+        assert_eq!(identity, expected);
+        assert!(Engine::new(profile, program.bytes()).is_ok());
     }
 }

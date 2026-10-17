@@ -36,9 +36,7 @@ import {
     type EvidenceRenewalStep,
 } from '#tools/ci/evidence-renewal-steps.js';
 import {
-    busyProcessors,
     estimateProbeSlowdown,
-    parseProcessTimes,
     selectMonitorOptions,
 } from '#tools/ci/monitor-host-contention.js';
 import {
@@ -227,20 +225,63 @@ describe('evidence renewal steps', () => {
 });
 
 describe('evidence renewal plan', () => {
+    it('refuses carried evidence for another commit or a changed working tree', () => {
+        const resumed = recordsThrough('audit');
+        expect(() =>
+            planEvidenceRenewal(evidenceRenewalSteps, {
+                commit: 'b'.repeat(40),
+                resumed,
+            }),
+        ).toThrow('does not match the renewed checkout');
+        expect(() =>
+            planEvidenceRenewal(evidenceRenewalSteps, {
+                commit,
+                checkoutDirty: true,
+                resumed,
+            }),
+        ).toThrow('uncommitted changes');
+        const mixed = new Map(resumed);
+        mixed.set(
+            'rust-fast',
+            stepRecord('rust-fast', { commit: 'b'.repeat(40) }),
+        );
+        expect(() =>
+            planEvidenceRenewal(evidenceRenewalSteps, {
+                commit,
+                resumed: mixed,
+            }),
+        ).toThrow('does not match the renewed checkout');
+    });
+
+    it('reruns the checkout audit when resuming after a passed audit', () => {
+        const plan = planEvidenceRenewal(evidenceRenewalSteps, {
+            commit,
+            resumed: recordsThrough('audit'),
+            from: 'projection',
+        });
+        expect(stepNames(plan.run)).toEqual(['build', 'audit', 'projection']);
+        expect(plan.carried.map((record) => record.name)).not.toContain(
+            'audit',
+        );
+    });
     it('runs every step without a resumed record', () => {
-        expect(planEvidenceRenewal(evidenceRenewalSteps, {})).toEqual({
+        expect(planEvidenceRenewal(evidenceRenewalSteps, { commit })).toEqual({
             carried: [],
             run: evidenceRenewalSteps,
         });
         expect(
-            planEvidenceRenewal(evidenceRenewalSteps, { from: 'build' }).run,
+            planEvidenceRenewal(evidenceRenewalSteps, { commit, from: 'build' })
+                .run,
         ).toEqual(evidenceRenewalSteps);
     });
 
     it('resumes at the first step the record has not passed and prepares the checkout again', () => {
         const resumed = recordsThrough('departures');
         resumed.set('ordinary', stepRecord('ordinary', { exitCode: 1 }));
-        const plan = planEvidenceRenewal(evidenceRenewalSteps, { resumed });
+        const plan = planEvidenceRenewal(evidenceRenewalSteps, {
+            commit,
+            resumed,
+        });
         const ordinary = stepNames(evidenceRenewalSteps).indexOf('ordinary');
         expect(stepNames(plan.run)).toEqual([
             'build',
@@ -254,6 +295,7 @@ describe('evidence renewal plan', () => {
     it('carries the passed steps before a named step', () => {
         const resumed = recordsThrough('projection');
         const plan = planEvidenceRenewal(evidenceRenewalSteps, {
+            commit,
             from: 'audit',
             resumed,
         });
@@ -265,13 +307,19 @@ describe('evidence renewal plan', () => {
     it('refuses a start that the record cannot support', () => {
         const resumed = recordsThrough('projection');
         expect(() =>
-            planEvidenceRenewal(evidenceRenewalSteps, { from: 'absent-step' }),
+            planEvidenceRenewal(evidenceRenewalSteps, {
+                commit,
+                from: 'absent-step',
+            }),
         ).toThrow('No step is named absent-step');
         expect(() =>
-            planEvidenceRenewal(evidenceRenewalSteps, { from: 'audit' }),
+            planEvidenceRenewal(evidenceRenewalSteps, {
+                commit,
+                from: 'audit',
+            }),
         ).toThrow('--from needs --resume');
         expect(() =>
-            planEvidenceRenewal(evidenceRenewalSteps, { resumed }),
+            planEvidenceRenewal(evidenceRenewalSteps, { commit, resumed }),
         ).toThrow('passed every step');
         const failedEarlier = new Map(resumed);
         failedEarlier.set(
@@ -280,6 +328,7 @@ describe('evidence renewal plan', () => {
         );
         expect(() =>
             planEvidenceRenewal(evidenceRenewalSteps, {
+                commit,
                 from: 'audit',
                 resumed: failedEarlier,
             }),
@@ -294,6 +343,7 @@ describe('evidence renewal plan', () => {
         });
         expect(() =>
             planEvidenceRenewal(evidenceRenewalSteps, {
+                commit,
                 from: 'audit',
                 resumed: runless,
             }),
@@ -306,6 +356,7 @@ describe('evidence renewal plan', () => {
         const deleted = runOfStep('result');
         expect(() =>
             planEvidenceRenewal(evidenceRenewalSteps, {
+                commit,
                 from: 'audit',
                 resumed,
                 runExists: (run) => run !== deleted,
@@ -315,6 +366,7 @@ describe('evidence renewal plan', () => {
         );
         expect(
             planEvidenceRenewal(evidenceRenewalSteps, {
+                commit,
                 from: 'audit',
                 resumed,
                 runExists: () => true,
@@ -433,6 +485,57 @@ describe('evidence renewal records', () => {
     afterEach(async () => {
         assert.ok(root.startsWith(temporaryRoot + path.sep));
         await rm(root, { recursive: true, force: true });
+    });
+
+    it.each(['file', 'events'] as const)(
+        'refuses mixed commits from %s, including overwritten steps',
+        async (format) => {
+            const other = 'b'.repeat(40);
+            for (const name of ['participant-module', 'rust-fast']) {
+                const steps = [
+                    stepRecord('rust-fast'),
+                    stepRecord(name, { commit: other }),
+                ];
+                const source = path.join(
+                    root,
+                    format === 'file' ? 'record.json' : name,
+                );
+                if (format === 'file')
+                    await writeFile(source, JSON.stringify({ steps }));
+                else {
+                    await mkdir(source);
+                    await writeFile(
+                        path.join(source, 'events.jsonl'),
+                        steps
+                            .map(
+                                (details) =>
+                                    JSON.stringify({
+                                        eventType: recordedStepEventType,
+                                        details,
+                                    }) + '\n',
+                            )
+                            .join(''),
+                    );
+                }
+                await expect(readEvidenceRenewalRecord(source)).rejects.toThrow(
+                    'mixes commits',
+                );
+            }
+        },
+    );
+
+    it('checks the record file commit against its steps', async () => {
+        const source = path.join(root, 'record.json');
+        await writeFile(
+            source,
+            JSON.stringify({
+                commit: 'b'.repeat(40),
+                steps: [stepRecord('rust-fast')],
+            }),
+        );
+        await expect(readEvidenceRenewalRecord(source)).rejects.toThrow(
+            'mixes commits',
+        );
     });
 
     it('reads the latest record of each step from a renewal run, ignoring a line still being written', async () => {
@@ -560,6 +663,16 @@ describe('evidence renewal records', () => {
         );
         await run('2026-10-13', '2026-10-13T00-00-12.000Z-starting', undefined);
         await run('2026-10-13', '2026-10-13T00-00-13.000Z-torn', '{"parent');
+        for (const name of [
+            '2026-10-13T12-00-00.000Z-cutoff-a',
+            '2026-10-13T12-00-00.000Z-cutoff-b',
+            '2026-10-13T18-00-00.000Z-late',
+        ])
+            await run('2026-10-13', name, child(renewal, 'check'));
+        const atCutoff = ['a', 'b'].map((suffix) => ({
+            run: `logs/2026-10-13/2026-10-13T12-00-00.000Z-cutoff-${suffix}`,
+            scriptName: 'check',
+        }));
         expect(
             await listChildRuns({
                 parentRunDirectoryPath: renewal,
@@ -576,7 +689,24 @@ describe('evidence renewal records', () => {
                 run: 'logs/2026-10-13/2026-10-13T00-00-10.000Z-research-protocol',
                 scriptName: 'research:protocol',
             },
+            ...atCutoff,
         ]);
+        expect(
+            await listChildRuns({
+                parentRunDirectoryPath: renewal,
+                repositoryRoot: root,
+                since: new Date('2026-10-13T12:00:00.000Z'),
+                until: new Date('2026-10-13T12:00:00.000Z'),
+            }),
+        ).toEqual(atCutoff);
+        expect(
+            await listChildRuns({
+                parentRunDirectoryPath: renewal,
+                repositoryRoot: root,
+                since: new Date('2026-10-13T12:00:00.001Z'),
+                until: new Date('2026-10-13T12:00:00.000Z'),
+            }),
+        ).toEqual([]);
     });
 
     it('removes links without following them and keeps a directory that replaced one', async () => {
@@ -748,55 +878,23 @@ describe('evidence renewal measurements', () => {
         );
     });
 
-    it('splits processor time between own and other processes present in both readings', () => {
-        const previous = parseProcessTimes(
-            [
-                '0|System Idle Process|50|0',
-                '4|chrome.exe|1|1',
-                '8|game.exe|10|0',
-                '12|old.exe|5|0',
-                '16|clock.exe|9|0',
-                'malformed line',
-            ].join('\r\n'),
-            0,
-        );
-        const current = parseProcessTimes(
-            [
-                '0|System Idle Process|90|0',
-                '4|chrome.exe|3|1',
-                '8|game.exe|11|0',
-                '12|new.exe|7|0',
-                '16|clock.exe|8|0',
-            ].join('\n'),
-            2000,
-        );
-        expect(busyProcessors(previous, current)).toEqual({
-            ownProcessors: 1,
-            otherProcessors: 0.5,
-        });
-        expect(() => busyProcessors(current, current)).toThrow(
-            'must advance in time',
-        );
-    });
-
-    it('requires a label, a stop file and the checkouts whose processes are own', () => {
+    it('requires a label, a stop file and the accounting job', () => {
         expect(
             selectMonitorOptions([
                 '--',
                 '--label=ordinary',
                 '--stop-file=temp/ordinary.stop',
-                '--own-path=.',
-                '--own-path=temp/worktree',
+                '--job=shared-job',
             ]),
         ).toEqual({
             label: 'ordinary',
-            ownPaths: [path.resolve('.'), path.resolve('temp/worktree')],
+            job: 'shared-job',
             stopFile: path.resolve('temp/ordinary.stop'),
         });
         for (const values of [
-            ['--stop-file=a', '--own-path=.'],
-            ['--label=Ordinary', '--stop-file=a', '--own-path=.'],
-            ['--label=ordinary', '--own-path=.'],
+            ['--stop-file=a', '--job=shared-job'],
+            ['--label=Ordinary', '--stop-file=a', '--job=shared-job'],
+            ['--label=ordinary', '--job=shared-job'],
             ['--label=ordinary', '--stop-file=a'],
         ])
             expect(() => selectMonitorOptions(values)).toThrow('Usage:');

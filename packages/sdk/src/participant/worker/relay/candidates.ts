@@ -171,6 +171,7 @@ export const streamCandidateFile = async (
     name: string,
     maximum: number,
     accept: (bytes: Uint8Array) => void | Promise<void>,
+    range?: Readonly<{ start: number; length: number }>,
 ) => {
     const file = (await candidate.manifest()).files.find(
         (entry) => entry.name === name,
@@ -184,19 +185,41 @@ export const streamCandidateFile = async (
         throw new PublicInputFailure(
             'A candidate file is missing or exceeds its bound.',
         );
-    let remaining = file.length;
-    for (const locator of file.chunks) {
-        const length = Math.min(candidateChunkBytes, remaining);
+    const start = range?.start ?? 0,
+        length = range?.length ?? file.length;
+    if (
+        !Number.isSafeInteger(start) ||
+        !Number.isSafeInteger(length) ||
+        start < 0 ||
+        length < 0 ||
+        start > file.length ||
+        length > file.length - start
+    )
+        throw new PublicInputFailure('A candidate file range is invalid.');
+    if (length === 0) return 0;
+    const end = start + length;
+    for (
+        let index = Math.floor(start / candidateChunkBytes);
+        index * candidateChunkBytes < end;
+        index++
+    ) {
+        const offset = index * candidateChunkBytes;
+        const expected = Math.min(candidateChunkBytes, file.length - offset);
+        const locator = file.chunks[index];
         const bytes = await readBounded(
             relay.base + 'chunk/' + locator,
-            length,
+            expected,
         );
-        if (bytes.length !== length)
+        if (bytes.length !== expected)
             throw new PublicInputFailure('A candidate chunk is incomplete.');
-        await accept(bytes);
-        remaining -= length;
+        await accept(
+            bytes.subarray(
+                Math.max(0, start - offset),
+                Math.min(bytes.length, end - offset),
+            ),
+        );
     }
-    return file.length;
+    return length;
 };
 
 export const readCandidateFile = async (

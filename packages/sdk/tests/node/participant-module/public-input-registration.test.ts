@@ -132,12 +132,17 @@ describe('participant module registration input', () => {
                 ...streamed(1, organizer.publicKey),
             ];
             steps.push(step(2));
+            steps.push(...streamed(3, organizer.sourceCiphertexts));
             steps.push(step(4));
             return steps;
         };
         const accepted = genuineRecord();
         expect(accepted.every((result) => result === 0)).toBe(true);
-        const pieces = [recordBegin, organizer.publicKey];
+        const pieces = [
+            recordBegin,
+            organizer.publicKey,
+            organizer.sourceCiphertexts,
+        ];
         const positions = [
             0,
             1,
@@ -184,6 +189,7 @@ describe('participant module registration input', () => {
             header: Uint8Array;
             signature: Uint8Array;
             publicKey: Uint8Array;
+            sourceCiphertexts: Uint8Array;
         }>;
         // Streams a record in parts of drawn sizes, the first few small so
         // that parts end inside encoded key coefficients; a fresh instance
@@ -215,6 +221,9 @@ describe('participant module registration input', () => {
                 ],
                 ...parts(record.publicKey).map((part) => [1, part] as const),
                 [2, new Uint8Array()],
+                ...parts(record.sourceCiphertexts).map(
+                    (part) => [3, part] as const,
+                ),
                 [4, new Uint8Array()],
             ];
             // The poll the module verified the registration against, which
@@ -270,6 +279,7 @@ describe('participant module registration input', () => {
             ['header', 2],
             ['signature', 1],
             ['publicKey', 1],
+            ['sourceCiphertexts', 1],
         ] as const)
             for (let index = 0; index < count; index += 1) {
                 const label = `own/${field}/${String(index)}`;
@@ -302,6 +312,19 @@ describe('participant module registration input', () => {
                 'own/shortened',
             ),
         ).toBeUndefined();
+        for (const sourceCiphertexts of [
+            new Uint8Array(),
+            organizer.sourceCiphertexts.subarray(
+                0,
+                organizer.sourceCiphertexts.length - 1,
+            ),
+        ])
+            expect(
+                await verify(
+                    { ...organizer, sourceCiphertexts },
+                    'own/incomplete-source/' + sourceCiphertexts.length,
+                ),
+            ).toBeUndefined();
         // The verified poll is its result length, its question, its option
         // count and each option's identifier and label, the label in NFC.
         expect(await verify(organizer, 'own/genuine')).toEqual({

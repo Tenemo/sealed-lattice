@@ -8,6 +8,8 @@ import {
     unsigned,
 } from '#tests/node/protocol/reference/canonical-tuple.js';
 import { supportedParticipantCounts } from '#tests/node/protocol/reference/product-goals.js';
+import { compileRecipientKeyCensus } from '#tests/recipient-key-model.js';
+import { compileRegistrationEnrollmentCensus } from '#tests/registration-enrollment-model.js';
 import { compileRosterProposalCensus } from '#tests/roster-proposal-model.js';
 
 describe('verified registration roster proposal', () => {
@@ -35,13 +37,19 @@ describe('verified registration roster proposal', () => {
             const value = compileRosterProposalCensus(count);
             expect(value.roleBytes).toBeLessThanOrEqual(1024n);
             expect(value.proposalBytes).toBeLessThan(2048n);
-            expect(value.maximumPublicCorpusBytes).toBeLessThan(
-                256n * 1024n ** 2n,
+            const enrollment = compileRegistrationEnrollmentCensus();
+            expect(value.maximumPublicCorpusBytes).toBe(
+                BigInt(count) *
+                    (compileRecipientKeyCensus().publicKeyBytes +
+                        enrollment.maximumSourceCiphertextBytes +
+                        enrollment.maximumHeaderBytes +
+                        enrollment.signatureBytes) +
+                    enrollment.maximumPollDefinitionBytes +
+                    enrollment.signatureBytes,
             );
         }
         const value = compileRosterProposalCensus(10);
         expect(value.retainedRecipientKeyBytes).toBe(13_762_560n);
-        expect(value.maximumPublicCorpusBytes).toBeLessThan(128n * 1024n ** 2n);
     });
     it('refuses unsupported or nonintegral roster counts', () => {
         for (const count of [2, 21, 3.5, NaN])

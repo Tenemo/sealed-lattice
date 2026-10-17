@@ -8,10 +8,6 @@ use crate::{
     roster::RosterProposal,
     roster_authentication::AuthenticatedRosterProposal,
 };
-use fips204::{
-    ml_dsa_65,
-    traits::{SerDes, Verifier},
-};
 use std::sync::Arc;
 use supported_profile::Profile;
 
@@ -167,7 +163,7 @@ pub fn authenticate_selection(
     signature: &[u8],
 ) -> Result<AuthenticatedSelectionProposal, Refusal> {
     let selection = SelectionProposal::decode(roster.proposal(), body)?;
-    let signature = signature.try_into().map_err(|_| Refusal::Shape)?;
+    let signature: [u8; SIGNATURE_BYTES] = signature.try_into().map_err(|_| Refusal::Shape)?;
     verify(
         roster.proposal(),
         roster.proposal().organizer_position(),
@@ -194,7 +190,7 @@ fn verify(
         .ok_or(Refusal::Context)?
         .header()
         .signing_public;
-    let key = ml_dsa_65::PublicKey::try_from_bytes(key).map_err(|_| Refusal::Shape)?;
+    let key = crate::authentication::PublicKey::from_bytes(key);
     if !key.verify(digest, signature, purpose) {
         return Err(Refusal::Crypto);
     }

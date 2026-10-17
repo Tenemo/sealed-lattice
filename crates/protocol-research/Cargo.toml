@@ -1,6 +1,8 @@
 [workspace]
 members = [
     "native-ceremony",
+    "purpose-signature",
+    "encrypted-source-operator",
     "participant-module",
     "protocol-foundations",
     "setup-witness",
@@ -26,18 +28,12 @@ publish = false
 [workspace.dependencies]
 aes = "=0.9.3"
 aes-gcm = { version = "=0.11.1", default-features = false }
-fips204 = { version = "=0.4.6", default-features = false }
 getrandom = "=0.4.3"
 num-bigint = "=0.5.1"
 num-traits = "=0.2.19"
 sha3 = "=0.10.9"
 zeroize = "=1.9.1"
 
-# fips204 0.4.6 with its inverse transform reducing each input coefficient
-# first, so that verifying a signature from another party cannot overflow the
-# checked arithmetic below.
-[patch.crates-io]
-fips204 = { path = "vendor/fips204" }
 
 [profile.test]
 opt-level = 3

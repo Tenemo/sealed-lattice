@@ -14,6 +14,7 @@ import {
     readParticipantProfile,
     tagBytes,
 } from '../../module/runtime-bounds.js';
+import type { CandidateView } from '../../relay/candidates.js';
 import {
     findCandidate,
     readCandidateFile,
@@ -48,6 +49,7 @@ import type { RestoredEnrollment } from '../enrollment/enrollment.js';
 // registration body digest.
 export const registrationFile = {
     publicKey: 'polynomial-01.bin',
+    sourceCiphertexts: 'source-ciphertexts.bin',
     header: 'registration-header.bin',
     signature: 'signature.bin',
 } as const;
@@ -80,6 +82,7 @@ const recordStep = {
     begin: 0,
     key: 1,
     keyFinish: 2,
+    sources: 3,
     finish: 4,
     discard: 5,
 } as const;
@@ -95,6 +98,7 @@ export const streamRegistrations = async (
     openRecords: number,
     step: (operation: number, position: number, bytes: Uint8Array) => boolean,
 ) => {
+    const candidates = new Array<CandidateView>(registrationBodyDigests.length);
     let failure: { error: unknown } | undefined;
     const run = (
         operation: number,
@@ -108,7 +112,7 @@ export const streamRegistrations = async (
     };
     const record = async (position: number) => {
         const registrationBodyDigest = registrationBodyDigests[position];
-        await findCandidate(
+        candidates[position] = await findCandidate(
             relay,
             registrationCandidateKey(registrationBodyDigest),
             async (candidate) => {
@@ -157,12 +161,26 @@ export const streamRegistrations = async (
                         new Uint8Array(),
                         'A recipient key is incomplete.',
                     );
+                    await streamCandidateFile(
+                        relay,
+                        candidate,
+                        registrationFile.sourceCiphertexts,
+                        registration.maximumSourceCiphertextBytes,
+                        (bytes) =>
+                            run(
+                                recordStep.sources,
+                                position,
+                                bytes,
+                                'A registered source body was refused.',
+                            ),
+                    );
                     run(
                         recordStep.finish,
                         position,
                         new Uint8Array(),
                         'A registration record was refused.',
                     );
+                    return candidate;
                 } catch (error) {
                     if (
                         error instanceof PublicInputFailure &&
@@ -203,6 +221,7 @@ export const streamRegistrations = async (
         ),
     );
     if (failure !== undefined) throw failure.error;
+    return candidates;
 };
 
 // The module decides whether it supports a roster of this size; a request

@@ -5,10 +5,6 @@ use crate::{
     roster::{RetainedContributionContext, RosterProposal},
     roster_authentication::AuthenticatedRosterProposal,
 };
-use fips204::{
-    ml_dsa_65,
-    traits::{SerDes, Verifier},
-};
 use std::sync::Arc;
 pub const OFFER_PURPOSE: &str = "sealed-lattice/contribution-offer";
 pub(crate) const OFFER_IDENTITY_DOMAIN: &str = "sealed-lattice/contribution-offer-identity";
@@ -193,13 +189,12 @@ pub fn authenticate_offer(
     signature: &[u8],
 ) -> Result<AuthenticatedContributionOffer, Refusal> {
     let envelope = OfferEnvelope::decode(roster.proposal(), bytes)?;
-    let signature = signature.try_into().map_err(|_| Refusal::Shape)?;
-    let key = ml_dsa_65::PublicKey::try_from_bytes(
+    let signature: [u8; SIGNATURE_BYTES] = signature.try_into().map_err(|_| Refusal::Shape)?;
+    let key = crate::authentication::PublicKey::from_bytes(
         roster.proposal().records()[envelope.position()]
             .header()
             .signing_public,
-    )
-    .map_err(|_| Refusal::Shape)?;
+    );
     if !key.verify(&envelope.identity(), &signature, OFFER_PURPOSE.as_bytes()) {
         return Err(Refusal::Crypto);
     }

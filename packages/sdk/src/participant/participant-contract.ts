@@ -152,7 +152,8 @@ export type ParticipantReportedDetails = Readonly<{
 
 /**
  * A refused request changed nothing, and its reason says why; a pending one
- * waits for public input, storage or a device resource such as memory, or
+ * has saved work to continue by repeating the same request, waits for public
+ * input, storage or a device resource such as memory, or
  * follows a module or worker failure, as its cause names and its detail
  * describes, and a later operation continues from the participant's last
  * committed state. A stopped one ended on missing or inconsistent local

@@ -20,8 +20,6 @@ pub mod custody_identity;
 #[cfg(any(target_arch = "wasm32", test))]
 #[path = "enrollment-input.rs"]
 mod enrollment_input;
-#[path = "fhe-sources.rs"]
-mod fhe_sources;
 #[path = "finality-work.rs"]
 pub mod finality_work;
 #[cfg(test)]
@@ -71,7 +69,7 @@ static ALLOCATOR: parallel_work::scalar_allocator::ScalarAllocator =
 pub struct Enrollment {
     pub key: RecipientKey,
     pub credential: Credential,
-    sources: Option<fhe_sources::Sources>,
+    sources: Option<protocol_foundations::source_seeds::SourceSeeds>,
 }
 #[derive(Debug)]
 pub enum Refusal {
@@ -149,6 +147,7 @@ pub mod data_kind {
     pub const POLL_DEFINITION: u32 = 5;
     pub const POLL_SIGNATURE: u32 = 6;
     pub const SOURCE_CAPSULE: u32 = 11;
+    pub const SOURCE_CIPHERTEXTS: u32 = 13;
 }
 
 impl Enrollment {
@@ -194,7 +193,22 @@ impl Enrollment {
     ) -> Result<(Self, DataKeys), Refusal> {
         let username = normalize_username(username).map_err(|_| Refusal::Shape)?;
         let poll = verified_poll.identity();
-        let mut sources = fhe_sources::Sources::create(verified_poll, &credential)?;
+        let mut source_output = RecordWriter::new(data_kind::SOURCE_CIPHERTEXTS, &mut output);
+        let mut sources = protocol_foundations::source_seeds::SourceSeeds::create(
+            verified_poll,
+            &mut credential,
+            |offset, bytes| {
+                if offset != source_output.offset + source_output.buffer.len() {
+                    return Err(protocol_foundations::Refusal::Shape);
+                }
+                source_output
+                    .write_all(bytes)
+                    .map_err(|_| protocol_foundations::Refusal::Shape)
+            },
+        )
+        .map_err(|_| Refusal::State)?;
+        source_output.flush().map_err(|_| Refusal::State)?;
+        drop(source_output);
         let mut key = RecipientKey::new();
         let public = key.public_key_bytes();
         let key_hash = ProtocolHash::digest(&public);
@@ -202,20 +216,21 @@ impl Enrollment {
         key_output.write_all(&public).unwrap();
         key_output.flush().unwrap();
         drop(key_output);
-        let header = RegistrationHeader {
+        let registration_header = RegistrationHeader {
             username,
             poll,
             signing_public: *credential.signing_public(),
             recipient_key_hash: key_hash,
-            fhe_key_commitments: sources.commitments().to_vec(),
-        }
-        .encode()
-        .map_err(|_| Refusal::Shape)?;
+            source_bindings: sources.bindings().to_vec(),
+        };
+        let header = registration_header.encode().map_err(|_| Refusal::Shape)?;
         let body = BodyDigest::from_header(&header, poll).map_err(|_| Refusal::State)?;
         let body_digest = body.bytes();
-        let sealed_sources = sources.seal(body_digest)?;
         let signature = credential
             .sign_registration(body)
+            .map_err(|_| Refusal::State)?;
+        let sealed_sources = sources
+            .seal(&credential, &registration_header)
             .map_err(|_| Refusal::State)?;
         let sealed_key = key
             .seal_retained(&key_associated(body_digest))
@@ -250,22 +265,42 @@ impl Enrollment {
             data_keys,
         ))
     }
-    /// Reconstructs only this enrollment's original source for the selected family.
+    /// Reconstructs the registered source after checking the original family.
     pub fn contribution_source(
         &self,
+        poll: &protocol_foundations::poll::VerifiedPoll,
         profile: supported_profile::Profile,
-    ) -> Result<setup_witness::fhe_key_source::FheKeySource, Refusal> {
-        self.sources.as_ref().ok_or(Refusal::State)?.source(profile)
-    }
-    pub fn contribution_header(
-        &self,
-        profile: supported_profile::Profile,
-        proof_length: usize,
-    ) -> Result<[u8; protocol_foundations::contribution_body::BODY_HEADER_BYTES], Refusal> {
+    ) -> Result<setup_witness::encrypted_source::EncryptedSource, Refusal> {
         self.sources
             .as_ref()
             .ok_or(Refusal::State)?
-            .body_header(profile, proof_length)
+            .package(poll, profile)
+            .map_err(|_| Refusal::State)
+    }
+    pub fn contribution_coordinate_hash(
+        &self,
+        poll: &protocol_foundations::poll::VerifiedPoll,
+        profile: supported_profile::Profile,
+    ) -> Result<[u8; 64], Refusal> {
+        struct CoordinateHash(ProtocolHash);
+        impl setup_witness::PolynomialOutput for CoordinateHash {
+            fn polynomial(
+                &mut self,
+                values: &[num_bigint::BigInt],
+                _modulus: &num_bigint::BigInt,
+                width: usize,
+            ) {
+                let mut record = vec![0; width + 1];
+                for value in values {
+                    statement_stream::coefficient::encode(value, &mut record);
+                    self.0.update(&record);
+                }
+            }
+        }
+        let source = self.contribution_source(poll, profile)?;
+        let mut output = CoordinateHash(ProtocolHash::new());
+        source.public_coordinate(&mut output);
+        Ok(output.0.finalize())
     }
     /// Retires the seed material that could reconstruct contribution secrets.
     /// The participant root owns authentication and durable retirement first.
@@ -278,28 +313,28 @@ impl Enrollment {
     }
     pub fn restore(
         poll: &protocol_foundations::poll::VerifiedPoll,
-        header: &RegistrationHeader,
-        public_bytes: &[u8],
-        body_digest: [u8; 64],
+        original: &protocol_foundations::registration::VerifiedRegistration,
         data_keys: &[u8; 96],
         records: [&[u8]; 3],
     ) -> Result<Self, Refusal> {
         let mut result = Self::restore_base(
             poll,
-            header,
-            public_bytes,
-            body_digest,
+            original.header(),
+            original.public_key(),
+            original.body_digest(),
             data_keys[..64].try_into().unwrap(),
             [records[0], records[1]],
         )?;
-        result.sources = Some(fhe_sources::Sources::open(
-            poll,
-            &result.credential,
-            &header.fhe_key_commitments,
-            body_digest,
-            data_keys[64..].try_into().unwrap(),
-            records[2],
-        )?);
+        result.sources = Some(
+            protocol_foundations::source_seeds::SourceSeeds::open(
+                poll,
+                &result.credential,
+                original,
+                data_keys[64..].try_into().unwrap(),
+                records[2],
+            )
+            .map_err(|_| Refusal::State)?,
+        );
         Ok(result)
     }
 
@@ -375,5 +410,5 @@ impl Enrollment {
 }
 
 fn fresh_credential() -> Credential {
-    Credential::from_seed(*random::<32>())
+    Credential::from_seed(*random::<64>())
 }

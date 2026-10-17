@@ -24,22 +24,21 @@ const recordBytes = 1_048_576;
 const bounds = {
     minimumProofBytes: 17,
     maximumProofBytes: 3 * recordBytes + 37,
-    bodyHeaderBytes: 72,
+    bodyHeaderBytes: 8,
 };
 // Synthetic framing exercises storage only. Production headers come from
-// the original credential's source inventory in the Rust module.
+// the contribution-body codec in the Rust module.
 const fixtureHeader = (length: number) => {
-    const header = new Uint8Array(72).fill(43);
+    const header = new Uint8Array(bounds.bodyHeaderBytes);
     new DataView(header.buffer).setBigUint64(0, BigInt(length), true);
     return header;
 };
-const expectedSlots = [
-    { offset: 0, length: recordBytes },
-    { offset: recordBytes, length: recordBytes },
-    { offset: 2 * recordBytes, length: recordBytes },
-    { offset: 3 * recordBytes, length: 37 },
-];
-type Slot = (typeof expectedSlots)[number];
+const expectedSlots = (length: number) =>
+    Array.from({ length: Math.ceil(length / recordBytes) }, (_, index) => ({
+        offset: index * recordBytes,
+        length: Math.min(recordBytes, length - index * recordBytes),
+    }));
+type Slot = ReturnType<typeof expectedSlots>[number];
 const databases: IDBDatabase[] = [];
 
 const write = (
@@ -137,7 +136,7 @@ afterEach(async () => {
     }
 });
 
-describe('fixed private contribution proof storage', () => {
+describe('exact-length private contribution proof storage', () => {
     it.each(
         [
             17,
@@ -159,12 +158,12 @@ describe('fixed private contribution proof storage', () => {
             },
         ]),
     )(
-        'keeps fixed slot traces for $length proof bytes and $partition',
+        'stores only the required records for $length proof bytes and $partition',
         async ({ length, pieces }) => {
             const bytes = proofBytes(length);
-            const fixed = await fixture();
-            const header = await fixed.retain(bytes, pieces);
-            expect(header.length).toBe(72);
+            const retained = await fixture();
+            const header = await retained.retain(bytes, pieces);
+            expect(header.length).toBe(8);
             expect(
                 new DataView(
                     header.buffer,
@@ -173,10 +172,10 @@ describe('fixed private contribution proof storage', () => {
                 ).getBigUint64(0, true),
             ).toBe(BigInt(length));
             expect(proofLength(bounds, header)).toBe(length);
-            expect(fixed.writes).toEqual(expectedSlots);
-            for (const slot of expectedSlots) {
+            expect(retained.writes).toEqual(expectedSlots(length));
+            for (const slot of expectedSlots(length)) {
                 const ciphertext = await readParticipantValue(
-                    fixed.database,
+                    retained.database,
                     'contribution',
                     [1, slot.offset],
                 );
@@ -185,125 +184,133 @@ describe('fixed private contribution proof storage', () => {
             }
             const recovered = new Uint8Array(length);
             let consumed = 0;
-            await readProof(bounds, header, fixed.read, (offset, part) => {
+            await readProof(bounds, header, retained.read, (offset, part) => {
                 expect(offset).toBe(consumed);
                 recovered.set(part, offset);
                 consumed += part.length;
             });
             expect(consumed).toBe(length);
             expect(recovered).toEqual(bytes);
-            expect(fixed.reads).toEqual(expectedSlots);
+            expect(retained.reads).toEqual(expectedSlots(length));
             expect(
-                fixed.writePlaintexts.every((part) =>
+                retained.writePlaintexts.every((part) =>
                     part.every((byte) => byte === 0),
                 ),
             ).toBe(true);
             expect(
-                fixed.readPlaintexts.every((part) =>
+                retained.readPlaintexts.every((part) =>
                     part.every((byte) => byte === 0),
                 ),
             ).toBe(true);
         },
     );
 
-    it('requires every padding record and authenticates its bytes before completing a read', async () => {
-        for (const damage of [
-            'missing',
-            'ciphertext',
-            'authenticated padding',
-        ] as const) {
-            const fixed = await fixture();
-            const header = await fixed.retain(proofBytes(17), [7, 10]);
-            const slot = expectedSlots[3];
+    it.each([
+        'missing',
+        'ciphertext',
+        'truncated',
+        'extended',
+        'reordered',
+    ] as const)(
+        'refuses %s required final records before completing a read',
+        async (damage) => {
+            const retained = await fixture();
+            const length = recordBytes + 17;
+            const header = await retained.retain(proofBytes(length), [
+                recordBytes,
+                17,
+            ]);
+            const slot = expectedSlots(length)[1];
             const key = [1, slot.offset];
-            if (damage === 'missing')
-                await write(fixed.database, (store) => store.delete(key));
-            else if (damage === 'ciphertext') {
-                const blob = await readParticipantValue(
-                    fixed.database,
-                    'contribution',
-                    key,
-                );
-                if (!(blob instanceof Blob))
-                    throw new Error('Fixture ciphertext is missing.');
-                const ciphertext = new Uint8Array(await blob.arrayBuffer());
-                ciphertext[ciphertext.length - 1] ^= 1;
-                await write(fixed.database, (store) =>
-                    store.put(new Blob([ciphertext]), key),
-                );
-            } else {
-                // Valid AEAD cannot turn nonzero framing padding into a
-                // canonical proof. Alter the final byte, not the proof prefix.
-                const record = fixed.records.get(slot.offset)!;
-                const padding = new Uint8Array(slot.length);
-                padding[padding.length - 1] = 1;
-                const sealed = await sealRecord(record.additionalData, padding);
-                fixed.records.set(slot.offset, { ...record, key: sealed.key });
-                await write(fixed.database, (store) =>
-                    store.put(
-                        new Blob([new Uint8Array(sealed.ciphertext)]),
-                        key,
-                    ),
-                );
-            }
+            const original = await readParticipantValue(
+                retained.database,
+                'contribution',
+                key,
+            );
+            if (!(original instanceof Blob)) throw new Error('Missing fixture');
+            const ciphertext = new Uint8Array(await original.arrayBuffer());
+            const first = await readParticipantValue(
+                retained.database,
+                'contribution',
+                [1, 0],
+            );
+            await write(retained.database, (store) => {
+                if (damage === 'missing') store.delete(key);
+                if (damage === 'ciphertext') {
+                    ciphertext[0] ^= 1;
+                    store.put(new Blob([ciphertext]), key);
+                }
+                if (damage === 'truncated')
+                    store.put(new Blob([ciphertext.slice(0, -1)]), key);
+                if (damage === 'extended')
+                    store.put(new Blob([ciphertext, Uint8Array.of(0)]), key);
+                if (damage === 'reordered') store.put(first, key);
+            });
             let consumed = 0;
             await expect(
-                readProof(bounds, header, fixed.read, (_offset, bytes) => {
+                readProof(bounds, header, retained.read, (_offset, bytes) => {
                     consumed += bytes.length;
                 }),
             ).rejects.toThrow();
-            expect(consumed).toBe(17);
-            expect(fixed.reads).toEqual(expectedSlots);
+            expect(consumed).toBe(recordBytes);
+            expect(retained.reads).toEqual(expectedSlots(length));
             expect(
-                fixed.readPlaintexts.every((part) =>
+                retained.readPlaintexts.every((part) =>
                     part.every((byte) => byte === 0),
                 ),
             ).toBe(true);
-        }
-    });
+        },
+    );
 
     it('propagates consumer and storage failures and clears the opened plaintext', async () => {
-        const fixed = await fixture();
-        const header = await fixed.retain(proofBytes(recordBytes + 3), [
+        const retained = await fixture();
+        const header = await retained.retain(proofBytes(recordBytes + 3), [
             recordBytes + 3,
         ]);
         const failure = new Error('Consumer refused the proof prefix.');
         await expect(
-            readProof(bounds, header, fixed.read, () => {
+            readProof(bounds, header, retained.read, () => {
                 throw failure;
             }),
         ).rejects.toBe(failure);
-        expect(fixed.reads).toEqual([expectedSlots[0]]);
-        expect(fixed.readPlaintexts[0].every((byte) => byte === 0)).toBe(true);
+        expect(retained.reads).toEqual([expectedSlots(recordBytes)[0]]);
+        expect(retained.readPlaintexts[0].every((byte) => byte === 0)).toBe(
+            true,
+        );
 
         const pending = await fixture();
-        const writeFailure = new Error('Padding storage is unavailable.');
+        const writeFailure = new Error('Final record storage is unavailable.');
         const writer = createProofWriter(bounds, async (slot, bytes) => {
             if (slot.offset === recordBytes) throw writeFailure;
             await pending.store(slot, bytes);
         });
         try {
-            await writer.append(proofBytes(17));
+            await writer.append(proofBytes(recordBytes + 17));
             await expect(writer.finish()).rejects.toBe(writeFailure);
         } finally {
             writer.close();
         }
-        expect(pending.writes).toEqual([expectedSlots[0]]);
+        expect(pending.writes).toEqual([expectedSlots(recordBytes)[0]]);
         expect(
             pending.writePlaintexts.every((part) =>
                 part.every((byte) => byte === 0),
             ),
         ).toBe(true);
-        // No completed header or synthesized padding can hide the missing
+        // No completed header can hide the missing
         // remainder. The original generation checkpoint is a separate owner.
         await expect(
-            readProof(bounds, fixtureHeader(17), pending.read, () => undefined),
+            readProof(
+                bounds,
+                fixtureHeader(recordBytes + 17),
+                pending.read,
+                () => undefined,
+            ),
         ).rejects.toThrow();
     });
 
     it('refuses malformed body framing before reading private records', async () => {
-        const fixed = await fixture();
-        const header = await fixed.retain(proofBytes(17), [17]);
+        const retained = await fixture();
+        const header = await retained.retain(proofBytes(17), [17]);
         const shortProof = header.slice();
         new DataView(shortProof.buffer).setBigUint64(0, 16n, true);
         const tooLong = header.slice();
@@ -322,12 +329,12 @@ describe('fixed private contribution proof storage', () => {
             shortProof,
             tooLong,
             overflowing,
-            header.subarray(0, 71),
-            new Uint8Array(73),
+            header.subarray(0, 7),
+            new Uint8Array(9),
         ])
             await expect(
-                readProof(bounds, malformed, fixed.read, () => undefined),
+                readProof(bounds, malformed, retained.read, () => undefined),
             ).rejects.toThrow();
-        expect(fixed.reads).toEqual([]);
+        expect(retained.reads).toEqual([]);
     });
 });

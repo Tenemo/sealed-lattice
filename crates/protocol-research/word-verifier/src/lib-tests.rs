@@ -1,6 +1,7 @@
 use supported_profile::{
     Profile,
-    relation::{ballot_relation, release_relation, setup_relation},
+    relation::{ballot_relation, release_relation},
+    source_linked::relation as setup_relation,
 };
 
 // The verifier's own statement context equals the prover's for every

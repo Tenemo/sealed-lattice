@@ -172,9 +172,14 @@ const fixture = (entry: ProofRelationCatalogueEntry, rounds = 21) => {
                 ? [firstRoot]
                 : round === 2
                   ? [secondRoot, Buffer.alloc(48)]
-                  : round === 20
-                    ? [Buffer.alloc(48)]
-                    : [Buffer.alloc(64, round + 79)];
+                  : round === 3 && entry.publicColumns > 0
+                    ? [
+                          Buffer.alloc(64, round + 79),
+                          Buffer.alloc(48 * entry.publicColumns),
+                      ]
+                    : round === 20
+                      ? [Buffer.alloc(48)]
+                      : [Buffer.alloc(64, round + 79)];
         const response = record(true, 'message-root', [
             context.output,
             unsigned(round, 4),
@@ -280,7 +285,9 @@ describe('raw proof transcript backward extraction', () => {
             expect(result!.responses).toEqual(value.responses);
             expect(result!.relation.arithmeticKey).toBe(entry.arithmeticKey);
             expect(result!.statement.equals(value.statement)).toBe(true);
-            expect(result!.oracles).toHaveLength(19);
+            expect(result!.oracles).toHaveLength(
+                entry.publicColumns > 0 ? 20 : 19,
+            );
             for (const leaf of value.leaves) {
                 expect(result!.oracles[leaf.stage].leaf(leaf.position)).toEqual(
                     leaf.data,

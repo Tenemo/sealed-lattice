@@ -142,6 +142,16 @@ export const readEvidenceRenewalRecord = async (
     source: string,
 ): Promise<ReadonlyMap<string, EvidenceRenewalStepRecord>> => {
     const records = new Map<string, EvidenceRenewalStepRecord>();
+    let commit: string | undefined;
+    const accept = (value: unknown) => {
+        const record = parseStepRecord(value, source);
+        if (commit !== undefined && record.commit !== commit)
+            throw new Error(
+                `${source} mixes commits ${commit} and ${record.commit}.`,
+            );
+        commit = record.commit;
+        records.set(record.name, record);
+    };
     if ((await stat(source)).isDirectory()) {
         const text = await readFile(path.join(source, 'events.jsonl'), 'utf8');
         // A line the renewal is still writing ends without a line break.
@@ -153,8 +163,7 @@ export const readEvidenceRenewalRecord = async (
                 eventType?: unknown;
             };
             if (event.eventType !== recordedStepEventType) continue;
-            const record = parseStepRecord(event.details, source);
-            records.set(record.name, record);
+            accept(event.details);
         }
         return records;
     }
@@ -165,10 +174,16 @@ export const readEvidenceRenewalRecord = async (
         !Array.isArray((parsed as { steps?: unknown }).steps)
     )
         throw new Error(`${source} lists no steps.`);
-    for (const value of (parsed as { steps: unknown[] }).steps) {
-        const record = parseStepRecord(value, source);
-        records.set(record.name, record);
+    const declaredCommit = (parsed as { commit?: unknown }).commit;
+    if (declaredCommit !== undefined) {
+        if (
+            typeof declaredCommit !== 'string' ||
+            !/^[0-9a-f]{40}$/u.test(declaredCommit)
+        )
+            throw new Error(`${source} names a malformed commit.`);
+        commit = declaredCommit;
     }
+    for (const value of (parsed as { steps: unknown[] }).steps) accept(value);
     return records;
 };
 
@@ -196,9 +211,9 @@ const utcDates = (from: Date, to: Date): string[] => {
     return dates;
 };
 
-// The runs, oldest first, that started at or after `since` under the
-// repository's logs and whose metadata names the parent run directory. A run
-// whose metadata another process has not yet written names no parent.
+// The runs, oldest first, that started in the inclusive interval from `since`
+// through `until` (now by default) and whose metadata names the parent run.
+// A run whose metadata has not yet been written names no parent.
 export const listChildRuns = async (input: {
     readonly repositoryRoot: string;
     readonly parentRunDirectoryPath: string;
@@ -207,8 +222,10 @@ export const listChildRuns = async (input: {
 }): Promise<readonly Readonly<{ run: string; scriptName: string }>[]> => {
     const parent = runKey(input.parentRunDirectoryPath);
     const earliest = runNamePrefix(input.since);
+    const until = input.until ?? new Date();
+    const latest = runNamePrefix(until);
     const children: { run: string; scriptName: string }[] = [];
-    for (const date of utcDates(input.since, input.until ?? new Date())) {
+    for (const date of utcDates(input.since, until)) {
         const dateDirectoryPath = path.join(input.repositoryRoot, 'logs', date);
         let names: string[];
         try {
@@ -218,7 +235,8 @@ export const listChildRuns = async (input: {
             throw error;
         }
         for (const name of names.sort()) {
-            if (name < earliest) continue;
+            const timestamp = name.slice(0, earliest.length);
+            if (timestamp < earliest || timestamp > latest) continue;
             let metadata: {
                 parentRunDirectoryPath?: unknown;
                 scriptName?: unknown;

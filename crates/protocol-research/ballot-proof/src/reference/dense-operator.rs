@@ -11,8 +11,8 @@ pub(crate) struct Dense {
     pub(crate) lookup_weight: Element,
 }
 /// Rows of the ballot equations: each FHE ciphertext component's limbs,
-/// one ring degree per limb, then the packing equation, then each auxiliary
-/// ciphertext component, then the secrets' supports.
+/// one ring degree per limb, then packing and plaintext interval equations,
+/// then each auxiliary ciphertext component and the secrets' supports.
 struct Builder {
     profile: Profile,
     columns: BallotColumns,
@@ -41,7 +41,7 @@ impl Builder {
         self.fhe_row(2)
     }
     fn auxiliary_row(&self, component: usize) -> usize {
-        self.packing_row() + SYSTEMATIC + component * AUXILIARY_DEGREE
+        self.packing_row() + 2 * SYSTEMATIC + component * AUXILIARY_DEGREE
     }
     fn add_geometric(&mut self, column: usize, weight: Element, degree: usize) {
         let stride = SYSTEMATIC / degree;
@@ -114,7 +114,6 @@ impl Builder {
             limb_weight,
         );
         let radix = [1u128 << FHE_LIMB_BITS, 0, 0];
-        let word = 1u128 << WORD_BITS;
         for component in 0..2 {
             let weight = power(self.alpha, self.fhe_row(component));
             self.add_geometric(
@@ -139,20 +138,22 @@ impl Builder {
             }
             if component == 0 {
                 self.add_geometric(columns.plaintext(), scale, SYSTEMATIC);
-                self.add_geometric(
-                    columns.plaintext_high_bit(),
-                    field::scale(scale, word),
-                    SYSTEMATIC,
-                );
             }
         }
         let packing_weight = power(self.alpha, self.packing_row());
         self.add_geometric(columns.plaintext(), packing_weight, SYSTEMATIC);
-        self.add_geometric(
-            columns.plaintext_high_bit(),
-            field::scale(packing_weight, word),
-            SYSTEMATIC,
-        );
+        let interval_weight = field::multiply(packing_weight, limb_weight);
+        self.add_geometric(columns.plaintext(), interval_weight, SYSTEMATIC);
+        self.add_geometric(columns.plaintext_complement(), interval_weight, SYSTEMATIC);
+        for point in powers(self.alpha, SYSTEMATIC) {
+            self.target = field::add(
+                self.target,
+                field::scale(
+                    field::multiply(interval_weight, point),
+                    u128::from(PLAINTEXT_MODULUS / 2),
+                ),
+            );
+        }
         self.add_geometric(
             columns.packing_quotient(),
             field::scale(packing_weight, signed(-i64::from(PLAINTEXT_MODULUS))),
@@ -224,6 +225,10 @@ impl Builder {
         for column in 0..columns.words() {
             let offset = if column == columns.scores() {
                 -1
+            } else if column == columns.plaintext() {
+                i64::from(PLAINTEXT_MODULUS / 2)
+            } else if column == columns.plaintext_complement() {
+                0
             } else if narrow.contains(&column) {
                 1 << (SETUP_ERROR_BITS - 1)
             } else {

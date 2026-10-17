@@ -1,5 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 
@@ -18,8 +17,21 @@ import { participantRelayStore } from '#tools/ci/participant-relay-record.js';
 // authenticates a protocol record; tests may alter these public bytes
 // independently of the owning verifier.
 export const participantRelayFixture = () => {
-    const directory = mkdtempSync(path.join(tmpdir(), 'participant-relay-'));
-    onTestFinished(() => rmSync(directory, { recursive: true, force: true }));
+    const repository = realpathSync(path.resolve('.'));
+    const scratch = path.join(repository, 'temp/test-relay-fixtures');
+    mkdirSync(scratch, { recursive: true });
+    const resolvedScratch = realpathSync(scratch);
+    if (!resolvedScratch.startsWith(repository + path.sep))
+        throw new Error('Relay fixtures escaped the repository.');
+    const directory = mkdtempSync(
+        path.join(resolvedScratch, 'participant-relay-'),
+    );
+    onTestFinished(() => {
+        const resolved = realpathSync(directory);
+        if (!resolved.startsWith(resolvedScratch + path.sep))
+            throw new Error('Relay fixture escaped its scratch directory.');
+        rmSync(resolved, { recursive: true, force: true });
+    });
     const store = participantRelayStore(directory);
     const publish = async (
         key: string,

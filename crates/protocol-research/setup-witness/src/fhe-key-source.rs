@@ -33,6 +33,19 @@ impl FheKeySource {
         }
     }
 
+    /// Encrypts these original operands before any contribution is generated.
+    /// The registration owner supplies its independently retained encryption stream.
+    pub fn encrypt(
+        self,
+        random: &mut impl XofReader,
+    ) -> Result<crate::encrypted_source::EncryptedSource, crate::encrypted_source::Refusal> {
+        let (public, witness) =
+            crate::encrypted_source::generate(&self.secret, &self.error, random)?;
+        Ok(crate::encrypted_source::EncryptedSource::new(
+            self, public, witness,
+        ))
+    }
+
     /// Emits only b[0], using the same common polynomial, integer lifting and
     /// canonical polynomial-output contract as contribution generation.
     pub fn public_coordinate(&self, output: &mut impl PolynomialOutput) {

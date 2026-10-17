@@ -156,7 +156,17 @@ pub(crate) fn restore_input(input: &[u8], prepared: bool) -> Option<RestoreInput
 
 impl RestoreInput<'_> {
     /// Reopens the retained credential under the signed poll it names.
-    pub(crate) fn enrollment(&self, poll: &VerifiedPoll) -> Result<Enrollment, Refusal> {
+    pub(crate) fn enrollment(
+        &self,
+        poll: &VerifiedPoll,
+        original: &protocol_foundations::registration::VerifiedRegistration,
+    ) -> Result<Enrollment, Refusal> {
+        if original.header().encode().ok().as_deref() != Some(self.header_bytes)
+            || original.body_digest() != self.body_digest
+            || original.public_key() != self.public_key
+        {
+            return Err(Refusal::State);
+        }
         let [recipient_capsule, signing_capsule] = self.capsules;
         if self.prepared {
             let (length, setup) = self
@@ -175,14 +185,12 @@ impl RestoreInput<'_> {
                 [recipient_capsule, signing_capsule, setup],
             )
         } else {
-            if self.sources.len() != crate::fhe_sources::capsule_bytes(poll) {
+            if self.sources.len() != protocol_foundations::source_seeds::capsule_bytes(poll) {
                 return Err(Refusal::Shape);
             }
             Enrollment::restore(
                 poll,
-                &self.header,
-                self.public_key,
-                self.body_digest,
+                original,
                 self.data_keys.try_into().unwrap(),
                 [recipient_capsule, signing_capsule, self.sources],
             )

@@ -13,6 +13,10 @@ import { type ParticipantCohort } from '#tools/ci/participant-browser-cohort.js'
 import { generatedOfferIdentity } from '#tools/ci/participant-browser-public-records.js';
 import { completeRoster } from '#tools/ci/participant-browser-roster-completion.js';
 import { requireScalarMemory } from '#tools/ci/participant-cohort-state.js';
+import {
+    summarizeEvaluationProfile,
+    type EvaluationProfile,
+} from '#tools/ci/participant-evaluation-profile.js';
 import { summarizeParticipantWorkflow } from '#tools/ci/participant-workflow-measurements.js';
 
 // Carries one roster through each stage once, with the recovery,
@@ -337,6 +341,36 @@ export const runSingleRoster = async (cohort: ParticipantCohort) => {
         assert.ok(independentOutcome.status === 'completed');
         assert.deepEqual(independentOutcome.details.identifiers, identifiers);
     }
+    if (independentOutcome === undefined) {
+        const started = performance.now();
+        independentOutcome = (await inBrowser(leftOut, undefined, (chrome) =>
+            chrome.evaluate(
+                'window.verifyOutcome(' + JSON.stringify(organizer.poll) + ')',
+            ),
+        )) as WorkerResult;
+        standaloneMilliseconds = performance.now() - started;
+        assert.ok(independentOutcome.status === 'completed');
+        assert.equal(independentOutcome.details.hasResult, true);
+        assert.deepEqual(independentOutcome.details.identifiers, identifiers);
+        if (scalar) requireScalarMemory(independentOutcome.details);
+        log.writeEvent({
+            eventType: 'participant-standalone-outcome',
+            details: {
+                milliseconds: standaloneMilliseconds,
+                independentOutcome,
+            },
+        });
+    }
+    const evaluationProfiles = (await inBrowser(leftOut, undefined, (chrome) =>
+        chrome.evaluate('window.evaluationProfiles'),
+    )) as EvaluationProfile[] | undefined;
+    if (evaluationProfiles !== undefined && evaluationProfiles.length > 0)
+        log.writeEvent({
+            eventType: 'participant-standalone-evaluation-profile',
+            details: {
+                profiles: evaluationProfiles.map(summarizeEvaluationProfile),
+            },
+        });
     await writeFile(
         path.join(log.runDirectoryPath, 'result.json'),
         JSON.stringify(
@@ -349,7 +383,6 @@ export const runSingleRoster = async (cohort: ParticipantCohort) => {
                 ...(measureRecovery
                     ? {
                           interruptions,
-                          standaloneMilliseconds,
                       }
                     : {}),
                 scalar,
@@ -407,6 +440,7 @@ export const runSingleRoster = async (cohort: ParticipantCohort) => {
                       }
                     : {}),
                 independentOutcome,
+                standaloneMilliseconds,
                 setupDiscoveryFaults,
                 poll: organizer.poll,
                 registrationBodyDigests: plainRecordIds,

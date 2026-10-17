@@ -11,6 +11,12 @@ import {
     equal,
     point,
     tableOnDomain,
+    add,
+    subtract,
+    multiply,
+    scale,
+    base,
+    invertExtension,
 } from '#tests/word-proof-reference/field.js';
 import {
     combinedValue,
@@ -28,6 +34,8 @@ import {
     deriveWordProofChallenges,
     requestedPositions,
     type WordStatementParser,
+    protocolHash,
+    word32,
 } from '#tests/word-proof-reference/transcript.js';
 
 // An independent reading of the bounded word proof from the protocol's
@@ -53,6 +61,8 @@ export type WordProofInput = Readonly<{
         statement: Uint8Array,
         affine: Extension,
         positions: readonly number[],
+        publicRoot: Uint8Array | undefined,
+        evaluations: readonly Extension[],
     ) => WordStatementParser | undefined;
     proof: Uint8Array;
 }>;
@@ -79,7 +89,11 @@ const verifyStages = (input: WordProofInput) => {
     const { relation, domain, role } = input;
     if (role.length === 0 || role.length > 1024)
         throw new Refused('Context', 'open');
-    const header = parseHeader(input.header, domain);
+    const header = parseHeader(
+        input.header,
+        domain,
+        relation.publicColumns ?? 0,
+    );
     const shape = wordRelationShape(relation, domain);
     const challenges = deriveWordProofChallenges(
         relation,
@@ -95,6 +109,8 @@ const verifyStages = (input: WordProofInput) => {
         header.statement,
         challenges.affine,
         firstPositions,
+        header.publicRoot,
+        header.evaluations,
     );
     if (parser === undefined) throw new Refused('Context', 'open');
     for (const chunk of input.statement)
@@ -132,17 +148,29 @@ const verifyStages = (input: WordProofInput) => {
     const firstRows: FirstRow[] = [];
     const secondRows: Extension[][] = [];
     let expected = new Map<number, Extension>();
-    const stages = 3 + (domain.folds - 1);
+    const publicStages = Number(shape.publicColumns > 0);
+    const stages = 3 + publicStages + (domain.folds - 1);
+    let wordValues = new Map<number, Extension>();
     for (; stage < stages; stage++) {
-        const length = stage < 3 ? domain.domain : domain.domain >> (stage - 2);
+        const publicStage = publicStages > 0 && stage === 3;
+        const length =
+            stage < 3 + publicStages
+                ? domain.domain
+                : domain.domain >> (stage - 2 - publicStages);
         const width =
             stage === 0
                 ? shape.firstWidth
                 : stage === 1
                   ? shape.secondWidth
-                  : 48;
+                  : publicStage
+                    ? 16 * shape.publicColumns
+                    : 48;
         const root =
-            stage < 3 ? header.roots[stage] : header.foldRoots[stage - 3];
+            stage < 3
+                ? header.roots[stage]
+                : publicStage
+                  ? header.publicRoot!
+                  : header.foldRoots[stage - 3 - publicStages];
         const positions = requestedPositions(challenges.queries, length);
         if (readLittleEndian(take(4)) !== BigInt(positions.length))
             throw new Refused('Encoding', stage);
@@ -159,16 +187,23 @@ const verifyStages = (input: WordProofInput) => {
                 node >>= 1
             )
                 if (!authenticated.has(node ^ 1)) missing++;
-            const opening = take(4 + width + 128 + 64 * missing);
+            const saltBytes = publicStage ? 0 : 128;
+            const opening = take(4 + width + saltBytes + 64 * missing);
             if (opening.readUInt32LE(0) !== position)
                 throw new Refused('Encoding', stage);
             const data = opening.subarray(4, 4 + width);
             const fields = Array.from({ length: width / 16 }, (_, index) =>
                 canonical(data.subarray(16 * index, 16 * (index + 1)), stage),
             );
-            const salt = opening.subarray(4 + width, 4 + width + 128);
-            let sibling = 4 + width + 128;
-            let digest = merkleLeaf(role, stage, position, salt, data);
+            const salt = opening.subarray(4 + width, 4 + width + saltBytes);
+            let sibling = 4 + width + saltBytes;
+            let digest = publicStage
+                ? protocolHash('committed-key/leaf', [
+                      role,
+                      word32(position),
+                      data,
+                  ])
+                : merkleLeaf(role, stage, position, salt, data);
             let node = length + position;
             const pending: [number, Buffer][] = [];
             for (let level = 1; node > 1 && !authenticated.has(node); level++) {
@@ -180,10 +215,19 @@ const verifyStages = (input: WordProofInput) => {
                     );
                     pending.push([node ^ 1, label]);
                 }
+                const hashNode = (left: Buffer, right: Buffer) =>
+                    publicStage
+                        ? protocolHash('committed-key/node', [
+                              role,
+                              word32(level),
+                              left,
+                              right,
+                          ])
+                        : merkleNode(role, stage, level, left, right);
                 digest =
                     node % 2 === 0
-                        ? merkleNode(role, stage, level, digest, label)
-                        : merkleNode(role, stage, level, label, digest);
+                        ? hashNode(digest, label)
+                        : hashNode(label, digest);
                 node >>= 1;
             }
             if (!digest.equals(authenticated.get(node) ?? root))
@@ -208,7 +252,45 @@ const verifyStages = (input: WordProofInput) => {
                         fields[3 * index + 2],
                     ]),
                 );
-            else {
+            else if (publicStage) {
+                const x = point(domain, position);
+                const denominator = invertExtension(
+                    subtract(base(x), challenges.affine),
+                );
+                let combined = wordValues.get(position)!;
+                for (let column = 0; column < shape.publicColumns; column++) {
+                    const oracle = shape.wordOracles + 2 * column;
+                    const weight = (index: number) =>
+                        add(
+                            challenges.combination[2 * index],
+                            scale(
+                                challenges.combination[2 * index + 1],
+                                power(
+                                    x,
+                                    BigInt(
+                                        domain.maximumDegree -
+                                            shape.degrees[index],
+                                    ),
+                                ),
+                            ),
+                        );
+                    const quotient = multiply(
+                        subtract(
+                            base(fields[column]),
+                            header.evaluations[column],
+                        ),
+                        denominator,
+                    );
+                    combined = add(
+                        combined,
+                        add(
+                            scale(weight(oracle), fields[column]),
+                            multiply(weight(oracle + 1), quotient),
+                        ),
+                    );
+                }
+                values.set(position, combined);
+            } else {
                 const value: Extension = [fields[0], fields[1], fields[2]];
                 if (stage > 2) {
                     const folded = expected.get(position);
@@ -254,9 +336,10 @@ const verifyStages = (input: WordProofInput) => {
                 }
             }
         });
-        if (stage >= 2) {
+        if (stage === 2 && publicStages > 0) wordValues = values;
+        if (stage >= 2 + publicStages) {
             // Fold this stage's word at the round's challenge.
-            const round = stage - 2;
+            const round = stage - 2 - publicStages;
             const folded = positions.filter((value) => value < length / 2);
             const pointInverses = inverses(
                 folded.map((position) =>

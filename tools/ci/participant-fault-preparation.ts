@@ -34,8 +34,8 @@ export const prepareFaultCohort = async (
         | 'interruptStaged'
         | 'interruptPreparation'
         | 'loseState'
-        | 'interruptPadding'
-        | 'paddingInterruptions'
+        | 'interruptProofCompletion'
+        | 'proofCompletionInterruptions'
         | 'preparationStorageBundle'
         | 'copyState'
         | 'inBrowser'
@@ -80,8 +80,8 @@ export const prepareFaultCohort = async (
         interruptStaged,
         interruptPreparation,
         loseState,
-        interruptPadding,
-        paddingInterruptions,
+        interruptProofCompletion,
+        proofCompletionInterruptions,
         preparationStorageBundle,
         copyState,
         inBrowser,
@@ -166,29 +166,29 @@ export const prepareFaultCohort = async (
                     bodyRecords + 1,
                 );
                 if (mode === 'preparation') {
-                    await interruptPadding(position, 'padding');
-                    await interruptPadding(position, 'final-slot');
-                    const [padding, final] = paddingInterruptions;
+                    await interruptProofCompletion(position, 'final-record');
+                    await interruptProofCompletion(position, 'body-commit');
+                    const [first, final] = proofCompletionInterruptions;
                     assert.deepEqual(
-                        padding.head,
+                        first.head,
                         final.head,
-                        'Padding replay recreated its continuation intent.',
+                        'Proof replay recreated its continuation intent.',
                     );
                     assert.equal(
-                        padding.observation.halt.proofBytes,
+                        first.observation.halt.proofBytes,
                         final.observation.halt.proofBytes,
                     );
                     for (const [
                         index,
                         slot,
-                    ] of padding.observation.slots.entries())
+                    ] of first.observation.slots.entries())
                         assert.equal(
                             slot.sha512,
                             final.observation.slots[index].sha512,
-                            'Padding replay changed its original proof bytes.',
+                            'Proof replay changed its original proof bytes.',
                         );
                     // Keep the unsigned complete body for authenticated
-                    // damaged-padding probes before any offer publication.
+                    // damaged-proof probes before any offer publication.
                     await interruptPreparation(position, 'contribute', {
                         kind: 'contribution',
                         phase: 7,
@@ -203,17 +203,17 @@ export const prepareFaultCohort = async (
             assert.equal((await run(position, 'contribute')).generation, 4);
         }),
     );
-    const paddingRefusals: Record<string, unknown>[] = [];
+    const proofCompletionRefusals: Record<string, unknown>[] = [];
     if (mode === 'preparation') {
         assert.ok(preparationStorageBundle && setupReplay !== undefined);
-        for (const kind of ['missing', 'nonzero'] as const) {
-            const copy = 'padding-' + kind;
+        for (const kind of ['missing', 'altered'] as const) {
+            const copy = 'proof-completion-' + kind;
             await copyState(setupReplay, copy);
             try {
                 const mutation = await inBrowser(setupReplay, copy, (chrome) =>
                     chrome.evaluate(
                         preparationStorageBundle +
-                            '\nparticipantPreparationFixture.mutateParticipantPadding(' +
+                            '\nparticipantPreparationFixture.mutateParticipantProof(' +
                             JSON.stringify({
                                 namespace: participantNamespace,
                                 runtimeIdentity: runtime.identity.runtime,
@@ -233,14 +233,8 @@ export const prepareFaultCohort = async (
                     {},
                     copy,
                 );
-                assert.deepEqual(rejected, {
-                    status: 'stopped',
-                    stopPersistence: 'confirmed',
-                    detail:
-                        kind === 'nonzero'
-                            ? 'The private proof padding is nonzero.'
-                            : 'The contribution records changed.',
-                });
+                assert.equal(rejected.status, 'stopped');
+                assert.equal(rejected.stopPersistence, 'confirmed');
                 assert.equal(
                     relay.publicationAttempts[setupReplay],
                     before,
@@ -253,9 +247,9 @@ export const prepareFaultCohort = async (
                     result: rejected,
                     publicationAttempts: 0,
                 };
-                paddingRefusals.push(recorded);
+                proofCompletionRefusals.push(recorded);
                 log.writeEvent({
-                    eventType: 'participant-padding-refusal',
+                    eventType: 'participant-proof-refusal',
                     details: recorded,
                 });
             } finally {
@@ -679,8 +673,8 @@ return { records: keys.length, ordinals };`,
             publicBefore,
             'Prepared recovery extended or replaced public setup records.',
         );
-        assert.equal(paddingInterruptions.length, 2);
-        const last = paddingInterruptions[1];
+        assert.equal(proofCompletionInterruptions.length, 2);
+        const last = proofCompletionInterruptions[1];
         const proofPath = path.join(
             publicDirectory,
             (await offerDirectory(last.position)) + 'proof.bin',
@@ -699,7 +693,7 @@ return { records: keys.length, ordinals };`,
         assert.equal(
             (await stat(proofPath)).size,
             last.observation.halt.proofBytes,
-            'Publication extended the logical proof with private padding.',
+            'Publication extended the logical proof with private records.',
         );
         const published = await open(proofPath, 'r');
         const slotBytes = Buffer.alloc(chunkBytes);
@@ -736,9 +730,6 @@ return { records: keys.length, ordinals };`,
             slotBytes.fill(0);
             await published.close();
         }
-        const [first, final] = paddingInterruptions.map(
-            (entry) => entry.observation.halt,
-        );
         await writeFile(
             path.join(log.runDirectoryPath, 'result.json'),
             JSON.stringify(
@@ -754,8 +745,8 @@ return { records: keys.length, ordinals };`,
                     transfers,
                     sampledResources,
                     interruptions,
-                    paddingInterruptions,
-                    paddingRefusals,
+                    proofCompletionInterruptions,
+                    proofCompletionRefusals,
                     sourceCustody,
                     sourceRefusals,
                     stateLosses,
@@ -763,8 +754,6 @@ return { records: keys.length, ordinals };`,
                     selectionReadbackFaults,
                     selectedProofFaults,
                     sourceRestarts,
-                    coincidentPaddingCuts:
-                        first.slotOffset === final.slotOffset,
                     logicalProofBytes: last.observation.halt.proofBytes,
                 },
                 null,

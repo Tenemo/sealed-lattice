@@ -1,6 +1,6 @@
 # Security policy
 
-`sealed-lattice` is an unaudited post-quantum-targeting research prototype. End-to-end security is unestablished, and no released version is approved for production elections or other security-sensitive use.
+`sealed-lattice` is an unaudited research library targeting 128-bit end-to-end post-quantum security under the model below. No released version is approved for production elections or other security-sensitive use.
 
 ## Report a vulnerability
 
@@ -18,7 +18,7 @@ Do not attach real election data, private keys, ballots, shares, witnesses, auth
 ## Intended security model
 
 - For a fixed roster of `n` participants, let `f = floor((n - 1) / 3)`, the largest whole number below one third of `n`. The adversary is quantum polynomial time and statically compromises at most `f` participants in total; active and passive compromise are one budget.
-- The security argument may model SHAKE as an ideal random function, rely on the standard assumptions of the NIST post-quantum algorithms it uses, and assume decision Ring-LWE for its lattice encryption and circular security of its evaluation keys at the parameters it fixes, including against adversaries that also query that ideal function. It also assumes that whether and when an honest participant's browser or device runs out of memory or storage, fails a request, stalls or ends a visit is independent of that participant's private values, although the module's memory and work requests can depend on them; the package does not pad or equalize those requests. These are stated assumptions; every other assumption remains an open gap until it is reduced or removed. A concrete bound counts all adversary and honest-experiment circuit gates and charges each SHAKE call its reference permutation work. Lattice attack costs follow the same convention, which grants no quantum random-access memory. Controlled gates count in full regardless of branch probabilities, and the work bound covers every permitted execution. It also needs a finite limit on original honest registrations for one poll, including abandoned and unselected registrations, because authentication and protocol losses grow with that population. No participant can observe or enforce that population, and its numerical limit remains unresolved for the current preparation construction.
+- The security argument models the complete SHAKE interface as an ideal random function and assumes decision Ring-LWE for its lattice encryption and the declared real-versus-uniform joint evaluation-key tuple at the selected parameters, including against adversaries that also query that ideal function. Purpose-signature authentication is reduced to the plain Winternitz quantum theorem in that same ideal-hash model. It also assumes that whether and when an honest participant's browser or device runs out of memory or storage, fails a request, stalls or ends a visit is independent of that participant's private values, although the module's memory and work requests can depend on them; the package does not pad or equalize those requests. These are stated assumptions; every other assumption remains an open gap until it is reduced or removed. A concrete bound counts all adversary and honest-experiment circuit gates and charges each SHAKE call its reference permutation work. Lattice attack costs follow the same convention, which grants no quantum random-access memory. Controlled gates count in full regardless of branch probabilities, and the work bound covers every permitted execution. It also needs a finite limit on original honest registrations for one poll, including abandoned and unselected registrations, because authentication and protocol losses grow with that population. No participant can observe or enforce that population. The current limit is 37 original honest registrations per poll, the smallest assumption-group limit derived by the independent security ledger, which the FHE Ring-LWE comparisons set at every roster size. A poll with more original honest registrations is outside the claimed bound. Attack estimates that assume quantum random-access memory, which this convention treats only as a stress test, leave no positive population.
 - The compromised participants and the relay may collude, equivocate, replay, reorder, delay, omit, replace, or withhold messages. Invalid actions are ignored. If too few valid actions remain, the poll stays unresolved.
 - Completion assumes eventual delivery among cooperating honest participants and that published records remain retrievable through at least one path after their authors leave. Permanent suppression of every communication path may prevent completion.
 - The protocol protects scores, totals, margins, intermediate comparisons, and ranks. Public ballot information is limited to the fixed roster, submission authorship, signed ballot times, the close time, which participants reported holding each submission, acceptance, whether enough ballots were accepted for a result, and the requested result.
@@ -31,7 +31,7 @@ Do not attach real election data, private keys, ballots, shares, witnesses, auth
 - Missing, stale, inconsistent, or corrupt local state stops that participant. It never enables a retry, replacement, roster change, threshold reduction, alternate target, or unverified result.
 - A verified outcome must be independently retrievable and verifiable without another participant returning.
 
-These are requirements, not claims about the current package.
+The argument is conditional on these assumptions and limits. Its implementation and qualification boundary is stated below.
 
 ## Current implementation boundary
 
@@ -39,19 +39,15 @@ The [README](README.md#current-implementation-boundary) describes what the packa
 
 ## Open security blockers
 
-The emitted protocol implements constructions for the first five items. The construction remains a research direction until every item is closed for one exact emitted protocol:
+The selected construction has a chronological argument covering source-linked setup, purpose authentication, ordinary proof soundness and simulation, compact ranking, close/finality, one-target release, replay and unresolved outcomes. Its [independent security ledger](tests/security-ledger-model.ts) derives the complete work/query bounds, error terms and original honest-registration limits for the [current parameter catalogue](tests/supported-profile-model.ts). Some work charges for the reduction's own programs are checked by audit tooling or set as explicit budgets rather than proved in writing. Lattice estimates calibrate the declared hardness curves; they are not proofs of those assumptions. The argument and its proofs have not had external cryptographic review.
 
-- a malicious, dealerless, fixed-roster BFV/BGV setup that creates threshold secret shares and every evaluation key despite the permitted departures from roster fixing, without participant removal, retry or an indispensable contributor;
-- an asynchronous close rule that completes from the close responses of any `n-f` participants including the organizer and limits a malicious relay or organizer to the bounded omission above;
-- a publicly verifiable ballot proof for complete `1..10` score vectors with exact QPT extraction and zero knowledge;
-- deterministic encrypted ranking that reveals only the requested option identifiers and has exact FHE correctness and security parameters;
-- publicly verifiable, chosen-ciphertext-safe release shares for only the certified target, with any `max(f + 1, 2)` valid shares reconstructing identically;
-- one chronological composition argument covering setup, publication, proofs, encryption, finality, release, forks, replay, and unresolved behavior in a consistent QPT model;
-- concrete security and failure accounting meeting the end-to-end target;
-- production-derived resource, storage, restart, and visit bounds for scalar browser WebAssembly; and
+The remaining release and qualification requirements are:
+
+- complete current-build lifecycle, interruption, restart and retrieval evidence;
+- closure of resource planning variances, including buffering, memory, storage and transfers; and
 - release-Chrome qualification on the selected physical phone using the identical admitted package bytes.
 
-A lattice or hash primitive does not make the composed protocol post-quantum secure by itself. Native, Node.js, desktop-browser, arithmetic, and reference-library results are development evidence only.
+Native, Node.js, desktop-browser, arithmetic and reference-library checks remain development evidence. Their success does not grant admission, physical qualification or production approval.
 
 ## Outside the security model
 

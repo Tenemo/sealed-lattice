@@ -23,6 +23,9 @@ fn direct(poll: &VerifiedPoll, record: &Record) -> Result<VerifiedRegistration, 
         verifier.push_key(part)?;
     }
     verifier.finish_key()?;
+    for part in record.sources.chunks(CHUNK) {
+        verifier.push_sources(part)?;
+    }
     verifier.finish()
 }
 
@@ -37,6 +40,9 @@ fn streamed(
         session.push_key(part)?;
     }
     session.finish_key()?;
+    for part in record.sources.chunks(division) {
+        session.push_sources(part)?;
+    }
     session.finish()?.wait()
 }
 
@@ -72,6 +78,9 @@ fn sessions_verify_and_refuse_a_registration_as_its_verifier_does() {
     }
     for session in &mut sessions {
         session.finish_key().unwrap();
+        for part in record.sources.chunks(CHUNK) {
+            session.push_sources(part).unwrap();
+        }
     }
     for session in sessions {
         assert!(same(&session.finish().unwrap().wait().unwrap(), &expected));
@@ -159,6 +168,7 @@ fn checkpoint_import_preserves_the_verified_original_owner(
         bytes.extend((role.len() as u16).to_le_bytes());
         bytes.extend(role);
         bytes.extend([0; 64]);
+        bytes.extend([0; 64]);
         bytes.extend(profile.setup_statement_header());
         bytes.extend((input_hashes as u16).to_le_bytes());
         for _ in 0..input_hashes {
@@ -168,7 +178,7 @@ fn checkpoint_import_preserves_the_verified_original_owner(
     };
     let request = |role: &[u8], count| [prefix.as_slice(), &header(role, count)].concat();
     let valid = request(&expected_role, profile.participants());
-    let other_owner = Credential::from_seed([91; 32]);
+    let other_owner = Credential::from_seed([91; 64]);
     for wrong_role in [
         role(&other_owner, 0, "sealed-lattice/setup-contribution"),
         role(credential, 1, "sealed-lattice/setup-contribution"),

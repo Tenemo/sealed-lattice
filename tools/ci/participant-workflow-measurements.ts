@@ -1,7 +1,16 @@
 import assert from 'node:assert/strict';
 
+import { foregroundVisitMilliseconds } from '#packages/sdk/src/participant/worker/module/runtime-bounds.js';
 import { preparationStagePath } from '#tests/setup-selection-model.js';
 import { thresholdProfileFor } from '#tests/threshold-completion-model.js';
+
+// The owner's completion and origin-storage limits, shared by cost screens.
+export const participantWorkflowLimits = {
+    visitMilliseconds: foregroundVisitMilliseconds,
+    participantMilliseconds: 30 * 60 * 1000,
+    sequentialMilliseconds: 5 * 60 * 60 * 1000,
+    originStorageBytes: 2 * 1024 ** 3,
+} as const;
 
 export type ParticipantOperationMeasurement = Readonly<{
     id: number;

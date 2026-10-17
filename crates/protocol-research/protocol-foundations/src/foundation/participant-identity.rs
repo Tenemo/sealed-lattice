@@ -5,7 +5,7 @@ use super::{CanonicalCodecRefusal, CanonicalItem, hash_foundation_tuple_512 as h
 
 const PARTICIPANT_IDENTITY_BYTE_LENGTH: usize = 64;
 
-/// A participant identity derived from exactly one ML-DSA-65 verification key.
+/// A participant identity derived from exactly one signing verification key.
 ///
 /// This type is intentionally distinct from [`super::Hash512`]. Equal-width
 /// protocol hashes cannot be used where a roster-derived identity is required.
@@ -18,6 +18,10 @@ impl ParticipantIdentity {
 
     const fn from_bytes(bytes: [u8; Self::BYTE_LENGTH]) -> Self {
         Self(bytes)
+    }
+
+    pub fn as_bytes(&self) -> &[u8; Self::BYTE_LENGTH] {
+        &self.0
     }
 
     pub fn to_lowercase_hex(self) -> String {

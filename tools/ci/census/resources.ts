@@ -22,7 +22,7 @@ export const renderBrowserWordProverResourceCensus = (): string[] => {
     return [
         '## Browser word-prover resource census',
         '',
-        'The browser experiment streams public inputs, retains their prepared common-polynomial adjoints until the affine pass, and emits one proof record at a time. These conservative allocation allowances describe the experimental live-data schedule. They are not measurements of browser-private memory, authenticated checkpoints, a complete action, or supported-phone qualification.',
+        'The browser experiment streams public inputs, retains their prepared common-polynomial adjoints until the affine pass, and emits one proof record at a time. Private Merkle trees retain one salt seed and the implemented upper-node arrays; the first two retain leaf digests, while linear and folding trees reconstruct them. The schedule also charges temporary leaf allocation before those trees discard it. These conservative allocation allowances are not measurements of browser-private memory, authenticated checkpoints, a complete action, or supported-phone qualification.',
         '',
         table(
             ['Property', 'Value'],
@@ -34,6 +34,18 @@ export const renderBrowserWordProverResourceCensus = (): string[] => {
                 [
                     'Prepared adjoint bytes',
                     formatCount(browserWordProver.preparedAdjointBytes),
+                ],
+                [
+                    'Private tree bytes with retained leaf digests',
+                    formatCount(browserWordProver.retainedPrivateTreeBytes),
+                ],
+                [
+                    'Private tree bytes with reconstructed leaf digests',
+                    formatCount(browserWordProver.forgottenPrivateTreeBytes),
+                ],
+                [
+                    'Retained folding values and private trees',
+                    formatCount(browserWordProver.retainedFoldingBytes),
                 ],
                 [
                     'Enforced maximum bytes per opaque hasher',
@@ -216,10 +228,6 @@ export const renderContributionBodyCensus = (): string[] => {
                 [
                     'Maximum complete body bytes',
                     formatCount(contributionBody.maximumBodyBytes),
-                ],
-                [
-                    'Registered-coordinate opening salt bytes inside the contribution body header',
-                    formatCount(contributionBody.sourceOpeningSaltBytes),
                 ],
                 [
                     'Ordinary body hash-prefix bytes',
@@ -479,7 +487,7 @@ export const renderCompleteOrdinaryWorkflowResourceScreen = (): string[] => {
             ]),
         ),
         '',
-        'The outcome verifier has no participant custody and streams every usable submission for barrier authentication, classification and evaluation import before checking the target votes and release shares. Participants with intact close custody read those bodies locally. Roster restoration refetches complete registered headers and recipient keys, recomputing their canonical body identities against its retained verification. Metadata allowances are conservative: held close responses can avoid target reads, and an existing setup certificate avoids assembly reads. These are protocol-read upper bounds, not exact ordinary network traces. The action rows exclude bootstrap; add the actual module for each primary-worker invocation and the SDK for each page load. Cumulative download rows are distinct from the per-action planning target.',
+        'The outcome verifier has no participant custody and streams every usable submission for barrier authentication, classification and evaluation import before checking the target votes and release shares. Participants with intact close custody read those bodies locally. Roster restoration refetches complete registered headers, signatures, recipient keys and source ciphertext bodies, recomputing their canonical body identities and verifying their signed bindings against its retained verification. Metadata allowances are conservative: held close responses can avoid target reads, and an existing setup certificate avoids assembly reads. These are protocol-read upper bounds, not exact ordinary network traces. The action rows exclude bootstrap; add the actual module for each primary-worker invocation and the SDK for each page load. Cumulative download rows are distinct from the per-action planning target.',
         '',
         table(
             [

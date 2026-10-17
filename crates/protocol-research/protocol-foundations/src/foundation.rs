@@ -18,7 +18,7 @@ pub(crate) use schemas::FoundationSchemaRefusal;
 pub use text::StabilizedDisplayText;
 
 pub(crate) const MAXIMUM_USERNAME_BYTES: usize = 128;
-const REGISTRATION_HEADER_PURPOSE: &str = "sealed-lattice/registration-header";
+const REGISTRATION_HEADER_PURPOSE: &str = "sealed-lattice/registration-header/v7";
 /// A username arrives as at most this many bytes before normalization.
 pub const MAXIMUM_USERNAME_INGRESS_BYTES: usize = 512;
 pub fn normalize_username(bytes: &[u8]) -> Result<StabilizedDisplayText, crate::Refusal> {
@@ -39,7 +39,7 @@ pub struct RegistrationHeader {
     pub signing_public: [u8; SIGNING_PUBLIC_KEY_BYTES],
     pub recipient_key_hash: [u8; 64],
 
-    pub fhe_key_commitments: Vec<[u8; 64]>,
+    pub source_bindings: Vec<[u8; 64]>,
 }
 impl RegistrationHeader {
     /// The encoded length of a header with the longest username.
@@ -52,10 +52,7 @@ impl RegistrationHeader {
             signing_public: [0; SIGNING_PUBLIC_KEY_BYTES],
             recipient_key_hash: [0; 64],
 
-            fhe_key_commitments: vec![
-                [0; 64];
-                crate::source_binding::maximum_fhe_key_family_count()
-            ],
+            source_bindings: vec![[0; 64]; crate::source_binding::maximum_fhe_key_family_count()],
         }
         .encode()
         .expect("The longest username encodes.")
@@ -64,9 +61,8 @@ impl RegistrationHeader {
     pub fn encode(&self) -> Result<Vec<u8>, crate::Refusal> {
         if self.username.as_str().is_empty()
             || self.username.as_str().len() > MAXIMUM_USERNAME_BYTES
-            || self.fhe_key_commitments.is_empty()
-            || self.fhe_key_commitments.len()
-                > crate::source_binding::maximum_fhe_key_family_count()
+            || self.source_bindings.is_empty()
+            || self.source_bindings.len() > crate::source_binding::maximum_fhe_key_family_count()
         {
             return Err(crate::Refusal::Shape);
         }
@@ -78,7 +74,7 @@ impl RegistrationHeader {
                 CanonicalItem::fixed_bytes(self.signing_public).unwrap(),
                 CanonicalItem::hash512(self.recipient_key_hash),
                 CanonicalItem::display_text(&self.username).map_err(|_| crate::Refusal::Shape)?,
-                CanonicalItem::hash512_list(&self.fhe_key_commitments)
+                CanonicalItem::hash512_list(&self.source_bindings)
                     .map_err(|_| crate::Refusal::Shape)?,
             ],
         )
@@ -90,7 +86,9 @@ impl RegistrationHeader {
         let limits = CanonicalDecodeLimits {
             maximum_tuple_byte_length: 4096,
             maximum_item_count: 6.max(crate::source_binding::maximum_fhe_key_family_count()),
-            maximum_item_byte_length: SIGNING_PUBLIC_KEY_BYTES,
+            maximum_item_byte_length: SIGNING_PUBLIC_KEY_BYTES
+                .max(4 + MAXIMUM_USERNAME_BYTES)
+                .max(6 + 64 * crate::source_binding::maximum_fhe_key_family_count()),
             maximum_nesting_depth: 0,
             maximum_cumulative_work_byte_length: 16384,
             maximum_cumulative_allocation_byte_length: 8192,
@@ -154,7 +152,7 @@ impl RegistrationHeader {
         {
             return Err(crate::Refusal::Shape);
         }
-        let fhe_key_commitments = commitments[6..]
+        let source_bindings = commitments[6..]
             .chunks_exact(64)
             .map(|digest| digest.try_into().unwrap())
             .collect();
@@ -164,7 +162,7 @@ impl RegistrationHeader {
                 poll,
                 signing_public,
                 recipient_key_hash,
-                fhe_key_commitments,
+                source_bindings,
             },
             consumed,
         ))

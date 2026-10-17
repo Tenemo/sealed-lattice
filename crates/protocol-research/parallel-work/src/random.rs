@@ -69,8 +69,8 @@ pub fn proof(bytes: &mut [u8]) {
     }
 }
 
-/// Fills the bytes with randomness that no seed supplies: a registration's
-/// secrets and keys.
+/// Fills the bytes with randomness that no seed supplies: credential and
+/// source seeds, capsule keys and a new poll's nonce.
 pub fn fresh(bytes: &mut [u8]) {
     host::fresh(bytes);
 }

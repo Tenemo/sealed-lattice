@@ -132,20 +132,26 @@ describe('participant root manifest', () => {
 
 describe('participant root manifest decoding', () => {
     const limits = compileParticipantRuntimeLimits();
+    const sourceBytes = chunkBytes + 37;
     const { registration } = limits;
     // Each record kind's references: whole chunks, then the rest.
     const records = (lengths: readonly (readonly [number, number])[]) =>
-        lengths.flatMap(([kind, length]) =>
-            Array.from(
-                { length: Math.ceil(length / chunkBytes) },
-                (_unused, index) => ({
-                    kind,
-                    offset: index * chunkBytes,
-                    length: Math.min(chunkBytes, length - index * chunkBytes),
-                    hash: filled(64, kind + 1),
-                }),
-            ),
-        );
+        [...lengths]
+            .sort((left, right) => left[0] - right[0])
+            .flatMap(([kind, length]) =>
+                Array.from(
+                    { length: Math.ceil(length / chunkBytes) },
+                    (_unused, index) => ({
+                        kind,
+                        offset: index * chunkBytes,
+                        length: Math.min(
+                            chunkBytes,
+                            length - index * chunkBytes,
+                        ),
+                        hash: filled(64, kind + 1),
+                    }),
+                ),
+            );
     // Every record a registered participant retains.
     const enrollment = [
         [dataKind.publicKey, registration.publicKeyBytes],
@@ -156,6 +162,7 @@ describe('participant root manifest decoding', () => {
         [dataKind.pollDefinition, 40],
         [dataKind.pollSignature, registration.signatureBytes],
         [dataKind.sourceCapsule, 1],
+        [dataKind.sourceCiphertexts, sourceBytes],
     ] as const;
     const manifestAt = (
         generation: number,
@@ -255,12 +262,8 @@ describe('participant root manifest decoding', () => {
         const sourceCapsule = at(dataKind.sourceCapsule);
         for (const inventory of [
             withoutKind(dataKind.header),
-            canonical.map((reference) =>
-                reference.kind === dataKind.signature
-                    ? { ...reference, length: reference.length - 1 }
-                    : reference,
-            ),
             withoutKind(dataKind.sourceCapsule),
+            withoutKind(dataKind.sourceCiphertexts),
             [
                 ...canonical.slice(0, sourceCapsule),
                 { ...header, kind: dataKind.rosterProposal },
@@ -279,10 +282,9 @@ describe('participant root manifest decoding', () => {
         const manifest = manifestAt(
             generation,
             records([
-                ...enrollment.slice(0, -1),
+                ...enrollment,
                 [dataKind.rosterProposal, 100],
                 [dataKind.rosterProposalSignature, registration.signatureBytes],
-                enrollment[enrollment.length - 1],
             ]),
         );
         const bytes = stored(manifest, [filled(3, 7)]);
@@ -300,5 +302,61 @@ describe('participant root manifest decoding', () => {
             generation,
             'Truncated participant root suffix.',
         );
+    });
+
+    it('retains public sources after retiring private source authority', () => {
+        const retained = [
+            ...enrollment.filter(([kind]) => kind !== dataKind.sourceCapsule),
+            [dataKind.rosterProposal, 100],
+            [dataKind.rosterProposalSignature, registration.signatureBytes],
+            [dataKind.setupReference, 1],
+            [dataKind.setupCertificate, 1],
+        ] as const;
+        const generation = rootGeneration.setupRetained;
+        const inventory = records(retained);
+        const root = stored(manifestAt(generation, inventory), [
+            filled(3, 7),
+            filled(1, 8),
+            filled(1, 9),
+        ]);
+        const decoded = decodeManifest(root, generation, limits);
+        expect(decoded.dataKeys).toHaveLength(64);
+        expect(
+            decoded.references.some(
+                (reference) => reference.kind === dataKind.sourceCapsule,
+            ),
+        ).toBe(false);
+        expect(
+            decoded.references
+                .filter(
+                    (reference) =>
+                        reference.kind === dataKind.sourceCiphertexts,
+                )
+                .reduce((sum, reference) => sum + reference.length, 0),
+        ).toBe(sourceBytes);
+    });
+
+    it('refuses incomplete signature records at the current runtime width', () => {
+        for (const signatureBytes of [
+            registration.signatureBytes - 1,
+            Math.floor(registration.signatureBytes / 2),
+        ])
+            expectRefused(
+                stored(
+                    manifestAt(
+                        1,
+                        records(
+                            enrollment.map(([kind, length]) => [
+                                kind,
+                                kind === dataKind.signature
+                                    ? signatureBytes
+                                    : length,
+                            ]),
+                        ),
+                    ),
+                ),
+                1,
+                'Participant records do not match the generation.',
+            );
     });
 });

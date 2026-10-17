@@ -108,9 +108,6 @@ describe('first-oracle hash resume work', () => {
                 const expanded = resumes * latest.completeInputPermutations;
                 const budget = compileClassicalReaderOracleBudget(
                     charged * shakePermutationGateCharge,
-                    512n,
-                    0n,
-                    0n,
                     latest.completeInputFactor,
                 );
                 expect(expanded).toBeLessThanOrEqual(
@@ -133,8 +130,6 @@ describe('first-oracle hash resume work', () => {
             expect(() =>
                 firstOracleResumeHashWork(width, role, column),
             ).toThrow();
-        expect(() =>
-            compileClassicalReaderOracleBudget(0n, 512n, 0n, 0n, 4n),
-        ).toThrow();
+        expect(() => compileClassicalReaderOracleBudget(0n, 4n)).toThrow();
     });
 });

@@ -158,34 +158,32 @@ describe('threshold release noise model', () => {
         const interpolationProduct =
             oracle.maximumScaledReconstruction * oracle.maximumSimulation;
         expect(census.exactInterpolationProduct).toBe(interpolationProduct);
-        // Four releases in ring degree 32768; the joint reserve uses
+        // Four releases in ring degree 65536; the joint reserve uses
         // 2^(lambda-1) for the width 2*B_sm+1.
         for (const [exactDominantFactor, bitLength] of [
             [
                 4n *
-                    32_768n *
-                    (1n << 79n) *
+                    65_536n *
+                    (1n << 95n) *
                     oracle.maximumScaledReconstruction *
                     oracle.maximumJointSimulationSum,
-                census.jointTargetSecurityDominantNoiseReserveBitLength,
+                census.selectedJointDominantNoiseReserveBits,
             ],
             [
-                4n * 32_768n * (1n << 80n) * interpolationProduct,
-                census.exactTargetSecurityDominantNoiseBudgetLowerBoundBitLength,
+                4n * 65_536n * (1n << 96n) * interpolationProduct,
+                census.selectedExactDominantNoiseBudgetBits,
             ],
             [
-                4n * 32_768n * (1n << 128n) * interpolationProduct,
-                census.exactConservativeSecurityDominantNoiseBudgetLowerBoundBitLength,
+                4n * 65_536n * (1n << 128n) * interpolationProduct,
+                census.comparisonExactDominantNoiseBudgetBits,
             ],
         ] as const) {
             const bits = BigInt(bitLength);
             expect(exactDominantFactor).toBeLessThanOrEqual(1n << bits);
             expect(exactDominantFactor).toBeGreaterThan(1n << (bits - 1n));
         }
-        expect(
-            census.jointTargetSecurityDominantNoiseReserveBitLength,
-        ).toBeGreaterThan(
-            census.exactTargetSecurityDominantNoiseBudgetLowerBoundBitLength,
+        expect(census.selectedJointDominantNoiseReserveBits).toBeGreaterThan(
+            census.selectedExactDominantNoiseBudgetBits,
         );
     });
 
@@ -252,15 +250,12 @@ describe('threshold release noise model', () => {
         );
         const census = compileThresholdReleaseNoiseCensus();
         for (const [statisticalBits, bitLength] of [
-            [80n, census.targetSecurityDominantNoiseBudgetLowerBoundBitLength],
-            [
-                128n,
-                census.conservativeSecurityDominantNoiseBudgetLowerBoundBitLength,
-            ],
+            [96n, census.selectedAnalyticDominantNoiseBudgetBits],
+            [128n, census.comparisonAnalyticDominantNoiseBudgetBits],
         ] as const) {
             // 2^(bits-1) < scale * lower <= scale * product
             // <= scale * upper <= 2^bits, so the ceiling cannot move.
-            const scale = 4n * 32_768n * (1n << statisticalBits);
+            const scale = 4n * 65_536n * (1n << statisticalBits);
             const bits = BigInt(bitLength);
             expect(scale * productLowerBound.numerator).toBeGreaterThan(
                 (1n << (bits - 1n)) * productLowerBound.denominator,
@@ -282,17 +277,20 @@ describe('threshold release noise model', () => {
             authorizedSubsetCount: 210,
             boundedIntegerSharingReconstructionCount: 210,
             completionParticipantCount: 10,
-            exactConservativeSecurityDominantNoiseBudgetLowerBoundBitLength: 154,
+            polynomialModulusDegree: 65536,
+            selectedStatisticalBits: 96,
+            comparisonStatisticalBits: 128,
+            comparisonExactDominantNoiseBudgetBits: 155,
             exactInterpolationProduct: 352n,
             exactMaximumScaledReconstructionCoefficientOneNorm: 44n,
             exactMaximumSimulationCoefficientOneNorm: 8n,
-            exactTargetSecurityDominantNoiseBudgetLowerBoundBitLength: 106,
+            selectedExactDominantNoiseBudgetBits: 123,
             lagrangeCoefficientCount: 840,
-            productionInterpolationPointExponentStride: 4_096,
+            productionInterpolationPointExponentStride: 8_192,
             releaseThreshold: 4,
             spacedInterpolationSize: 16,
-            targetSecurityDominantNoiseBudgetLowerBoundBitLength: 110,
-            conservativeSecurityDominantNoiseBudgetLowerBoundBitLength: 158,
+            selectedAnalyticDominantNoiseBudgetBits: 127,
+            comparisonAnalyticDominantNoiseBudgetBits: 159,
         });
     });
 });

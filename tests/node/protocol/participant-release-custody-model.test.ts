@@ -12,7 +12,7 @@ describe('participant release custody layout', () => {
         // The predecessor, ballot inclusion, target length, body length and
         // key count; the 2,048-byte largest target; the 512-bit seed; 32-byte keys; the
         // envelope of the release context, body length and body identity;
-        // and the 3,309-byte signature. The largest release body
+        // and the 8,642-byte signature. The largest release body
         // fills 16 records of 1 MiB; the runtime bounds test checks its
         // length against the participant module's.
         const attempt = 10n + 2048n;
@@ -20,17 +20,17 @@ describe('participant release custody layout', () => {
         const records = 16n;
         expect(value.prefixBytes).toBe(10n);
         expect(value.envelopeBytes).toBe(envelope);
-        expect(value.maximumBodyBytes).toBe(15_829_994n);
+        expect(value.maximumBodyBytes).toBe(16_077_802n);
         expect(value.maximumBodyRecords).toBe(records);
         expect(value.phaseBytes).toEqual([
             { phase: 25, bytes: attempt },
             { phase: 26, bytes: attempt + 64n },
             { phase: 27, bytes: attempt + 32n * records + envelope },
-            { phase: 29, bytes: attempt + 32n * records + envelope + 3309n },
+            { phase: 29, bytes: attempt + 32n * records + envelope + 8642n },
         ]);
-        expect(value.maximumStateBytes).toBe(6145n);
+        expect(value.maximumStateBytes).toBe(11478n);
         expect(value.maximumEncryptedBodyBytes).toBe(
-            15_829_994n + 16n * records,
+            16_077_802n + 16n * records,
         );
     });
 });

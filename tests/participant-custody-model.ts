@@ -1,4 +1,9 @@
 import { compileContributionBodyCensus } from '#tests/contribution-body-model.js';
+import {
+    sourceOperandPolynomials,
+    sourceStatementPolynomialBytes,
+    sourceStatementPolynomialCount,
+} from '#tests/encrypted-registration-source-model.js';
 import { compileFirstOracleCheckpointCensus } from '#tests/first-oracle-checkpoint-model.js';
 import { operationSeedBytes } from '#tests/operation-seed-model.js';
 import { compileParticipantBallotCustody } from '#tests/participant-ballot-custody-model.js';
@@ -31,15 +36,20 @@ const proofRecordLayout = (maximumProofBytes: bigint) => {
     return records;
 };
 
-export const compileContributionProofStorage = (profile: SupportedProfile) => {
+export const compileContributionProofStorage = (
+    profile: SupportedProfile,
+    proofBytes?: bigint,
+) => {
     const body = compileContributionBodyCensus(profile);
-    const records = proofRecordLayout(body.maximumProofBytes);
+    const length = proofBytes ?? body.maximumProofBytes;
+    if (length < body.minimumProofBytes || length > body.maximumProofBytes)
+        throw new RangeError('Proof length is outside its bounds.');
+    const records = proofRecordLayout(length);
     const count = BigInt(records.length);
     return {
         records,
-        plaintextBytes: body.maximumProofBytes,
-        ciphertextBytes:
-            body.maximumProofBytes + retainedRecordTagBytes * count,
+        plaintextBytes: length,
+        ciphertextBytes: length + retainedRecordTagBytes * count,
         dataKeyBytes: 32n * count,
         recordIdentityBytes: 64n * count,
         recordReferenceBytes: retainedPublicReferenceBytes * count,
@@ -49,9 +59,9 @@ export const compileContributionProofStorage = (profile: SupportedProfile) => {
 
 // A byte/work projection for one observed complete proof length. The format's
 // lower framing bound does not assert that a proof of that length is possible.
-// Every full consumer authenticates the whole fixed slot set, including its
-// zero tail; only the original proof prefix is hashed or published publicly.
-export const projectContributionProofPadding = (
+// The maximum remains an allocation bound. Actual custody and every complete
+// read use the authenticated length; both formats keep the same body header.
+export const projectContributionProofStorageSavings = (
     profile: SupportedProfile,
     observedProofBytes: bigint,
     completeReadPasses: bigint,
@@ -70,29 +80,26 @@ export const projectContributionProofPadding = (
     );
     const fixed = compileContributionProofStorage(profile);
     const addedRecords = BigInt(fixed.records.length) - variableRecords;
-    const paddingBytes = fixed.plaintextBytes - observedProofBytes;
-    const additionalProofCiphertextBytes =
-        paddingBytes + retainedRecordTagBytes * addedRecords;
-    const additionalCompletedRootBytes =
-        body.headerBytes + retainedPublicReferenceBytes * addedRecords;
+    const unusedCapacityBytes = fixed.plaintextBytes - observedProofBytes;
+    const savedProofCiphertextBytes =
+        unusedCapacityBytes + retainedRecordTagBytes * addedRecords;
+    const savedCompletedRootBytes = retainedPublicReferenceBytes * addedRecords;
     return {
         observedProofBytes,
         completeReadPasses,
-        paddingBytes,
-        additionalProofRecords: addedRecords,
-        additionalProofRecordKeyBytes: 32n * addedRecords,
-        additionalProofRecordIdentityBytes: 64n * addedRecords,
-        additionalProofRecordTagBytes: retainedRecordTagBytes * addedRecords,
-        additionalProofCiphertextBytes,
-        additionalCompletedRootBytes,
-        additionalCompletedRetainedBytes:
-            additionalProofCiphertextBytes + additionalCompletedRootBytes,
-        additionalProofWriteBytes: additionalProofCiphertextBytes,
-        additionalProofReadBytes:
-            completeReadPasses * additionalProofCiphertextBytes,
-        additionalProofVerificationCalls: completeReadPasses * addedRecords,
-        // The source-opening salt stays in the body header; padding changes
-        // no proof bytes.
+        unusedCapacityBytes,
+        savedProofRecords: addedRecords,
+        savedProofRecordKeyBytes: 32n * addedRecords,
+        savedProofRecordIdentityBytes: 64n * addedRecords,
+        savedProofRecordTagBytes: retainedRecordTagBytes * addedRecords,
+        savedProofCiphertextBytes,
+        savedCompletedRootBytes,
+        savedCompletedRetainedBytes:
+            savedProofCiphertextBytes + savedCompletedRootBytes,
+        savedProofWriteBytes: savedProofCiphertextBytes,
+        savedProofReadBytes: completeReadPasses * savedProofCiphertextBytes,
+        savedProofVerificationCalls: completeReadPasses * addedRecords,
+        // Changing retained capacity changes no published proof bytes.
         publishedProofBytes: observedProofBytes,
     };
 };
@@ -105,7 +112,16 @@ export const compileParticipantCustodyCensus = (profile: SupportedProfile) => {
     const relation = compileSetupContributionRelationCensus(profile);
     const chunkBytes = 1n << 20n;
     const chunks = (bytes: bigint) => (bytes + chunkBytes - 1n) / chunkBytes;
-    const publicRecords = body.polynomials.flatMap((polynomial) => {
+    const retainedPolynomials = [
+        ...body.polynomials,
+        ...sourceOperandPolynomials(
+            Number(
+                relation.expandedStatementPolynomialCount -
+                    sourceStatementPolynomialCount,
+            ),
+        ),
+    ];
+    const publicRecords = retainedPolynomials.flatMap((polynomial) => {
         const records = [];
         for (let offset = 0n; offset < polynomial.bytes; offset += chunkBytes) {
             const remaining = polynomial.bytes - offset;
@@ -223,6 +239,7 @@ export const compileParticipantCustodyCensus = (profile: SupportedProfile) => {
             ? maximumPreparationRootBytes
             : maximumPreparedRootBytes;
     const maximumPublicBodyCiphertextBytes =
+        sourceStatementPolynomialBytes +
         body.polynomialPayloadBytes +
         body.maximumProofBytes +
         16n * (BigInt(publicRecords.length) + maximumProofRecords);
@@ -244,6 +261,7 @@ export const compileParticipantCustodyCensus = (profile: SupportedProfile) => {
         maximumReleaseStateBytes: release.maximumStateBytes,
         participants: body.participantCount,
         publicRecords,
+        retainedSourceOperandBytes: sourceStatementPolynomialBytes,
         checkpointLengths,
         metadataPrefixBytes,
         maximumCheckpointMetadataBytes,
@@ -336,7 +354,7 @@ export const compileGcmKeyHistory = (
         algorithmicAesCallUpperBound,
         maximumHashDegree,
         // Conditional terms after replacing the secret-key AES instances.
-        // The multi-key QPT PRP advantage is additional, not zero.
+        // The multi-key QPT PRP advantage is saved, not zero.
         permutationSwitchNumerator:
             (distinctAesInputUpperBound * (distinctAesInputUpperBound - 1n)) /
             2n,

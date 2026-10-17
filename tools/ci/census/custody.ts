@@ -189,7 +189,7 @@ export const renderFirstOracleCheckpointCensus = (): string[] => {
     return [
         '## First-oracle checkpoint census',
         '',
-        'The complete first-oracle checkpoint retains the actual witness, masks, leaf-salt seed, and partial row hashes. Lookup multiplicities, empty tree nodes, and the initial transcript are reconstructed. Each private record uses a separate data key. The browser root also retains encrypted generated public inputs; fixed common polynomials and verified recipient keys are reconstructed from predecessors. The proof-randomness minima split at this checkpoint: generation supplies the first-oracle masks and tree seed, while continuation supplies every response salt, starting with the salt preceding the lookup challenge. These minima exclude witness sampling and extra reads caused by rejected field candidates. Storage counts exclude database overhead and later proof phases, repeated checkpoints, and their security and resource unions.',
+        'The complete first-oracle checkpoint retains the actual witness, masks, leaf-salt seed, and partial row hashes. Lookup multiplicities, empty tree nodes, and the initial transcript are reconstructed. Each private record uses a separate data key. The browser root also retains encrypted generated public inputs and the eight source-link operands; other fixed common polynomials and verified recipient keys are reconstructed from predecessors. The proof-randomness minima split at this checkpoint: generation supplies the first-oracle masks and tree seed, while continuation supplies every response salt, starting with the salt preceding the lookup challenge. These minima exclude witness sampling and extra reads caused by rejected field candidates. Storage counts exclude database overhead and later proof phases, repeated checkpoints, and their security and resource unions.',
         '',
         table(
             ['Private field', 'Plaintext bytes', 'Encrypted records'],
@@ -311,7 +311,7 @@ export const renderSharedParticipantCustodyCensus = (): string[] => {
     return [
         '## Shared participant custody census',
         '',
-        'The shared root retains original enrollment records, the selected signed proposal, contribution state, and signing-record keys and identities. The expanded statement header is regenerated rather than retained as another body record. The existing length-prefixed contribution header field instead retains the canonical contribution body header from completed generation onward, replacing the retired first-oracle progress header. Proof storage always seals the maximum proof capacity into fixed slots. A complete consumer pass authenticates every slot and checks its zero tail, supplying only the actual-length prefix; commitment completion waits for that pass, and the existing body-commitment preflight precedes publication. The maximum payload, record-key, tag and reference envelopes already reserved this capacity. The added body header changes completed metadata and any maxima it dominates. The payload bound includes checkpoint/body overlap and signing records; browser database, key-store, and journal overhead remain measured quantities.',
+        'The shared root retains original enrollment records, the selected signed proposal, contribution state, and signing-record keys and identities. The expanded statement header is regenerated rather than retained as another body record. The existing length-prefixed contribution header field instead retains the canonical contribution body header from completed generation onward, replacing the retired first-oracle progress header. Proof storage seals exactly the authenticated proof length in complete chunks and one final partial chunk when needed. A complete consumer pass authenticates every required record before commitment completion; the existing body-commitment preflight precedes publication. Maximum payload, record-key, tag and reference envelopes remain capacity bounds. The body header is retained in both representations, so storage savings exclude its length. The payload bound includes checkpoint/body overlap and signing records; browser database, key-store, and journal overhead remain measured quantities.',
         '',
         table(
             ['Property', 'Value'],
@@ -346,27 +346,27 @@ export const renderSharedParticipantCustodyCensus = (): string[] => {
                     formatCount(participantCustody.completedBodyHeaderBytes),
                 ],
                 [
-                    'Fixed proof storage slots',
+                    'Maximum proof storage slots',
                     formatCount(contributionProofStorage.records.length),
                 ],
                 [
-                    'Fixed proof plaintext capacity bytes',
+                    'Maximum proof plaintext capacity bytes',
                     formatCount(contributionProofStorage.plaintextBytes),
                 ],
                 [
-                    'Fixed encrypted proof capacity bytes',
+                    'Maximum encrypted proof capacity bytes',
                     formatCount(contributionProofStorage.ciphertextBytes),
                 ],
                 [
-                    'Fixed proof record-key bytes',
+                    'Maximum proof record-key bytes',
                     formatCount(contributionProofStorage.dataKeyBytes),
                 ],
                 [
-                    'Fixed proof record-identity bytes',
+                    'Maximum proof record-identity bytes',
                     formatCount(contributionProofStorage.recordIdentityBytes),
                 ],
                 [
-                    'Fixed proof reference bytes in root',
+                    'Maximum proof reference bytes in root',
                     formatCount(contributionProofStorage.recordReferenceBytes),
                 ],
                 [

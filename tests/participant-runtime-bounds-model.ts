@@ -6,7 +6,12 @@ import type {
 } from '#packages/sdk/src/participant/worker/module/runtime-bounds.js';
 import { compileBallotBodyCensus } from '#tests/ballot-body-model.js';
 import { compileCloseWireCensus } from '#tests/close-wire-model.js';
+import {
+    committedOfferPolynomials,
+    compileCommittedOfferCensus,
+} from '#tests/committed-offer-model.js';
 import { compileContributionBodyCensus } from '#tests/contribution-body-model.js';
+import { sourceCiphertextBytes } from '#tests/encrypted-registration-source-model.js';
 import { compileFirstOracleCheckpointCensus } from '#tests/first-oracle-checkpoint-model.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import { compileFullWordProofLayout } from '#tests/full-word-proof-layout-model.js';
@@ -52,6 +57,7 @@ export const compileParticipantRuntimeProfile = (
     const closeCustody = compileParticipantCloseCustody(profile);
     const targetState = compileTargetSigningStateCensus();
     const releaseCustody = compileParticipantReleaseCustody(profile);
+    const aggregate = compileCommittedOfferCensus(profile);
     return {
         participantCount,
         optionCount,
@@ -77,6 +83,9 @@ export const compileParticipantRuntimeProfile = (
                 enrollment.maximumSourceCapsuleBytes,
             ),
             maximumProposalBytes: number(enrollment.maximumProposalBytes),
+            maximumSourceCiphertextBytes: number(
+                enrollment.maximumSourceCiphertextBytes,
+            ),
         },
         root: {
             maximumRecords: number(custody.maximumRootRecords),
@@ -85,12 +94,14 @@ export const compileParticipantRuntimeProfile = (
             setupCertificateBytes: number(custody.setupCertificateBytes),
         },
         contribution: {
+            sourceCiphertextBytes: number(sourceCiphertextBytes),
             expandedPolynomials: number(
                 relation.expandedStatementPolynomialCount,
             ),
             firstOracleColumns: relation.wordColumns + relation.booleanColumns,
             statementBytes: number(relation.expandedStatementByteLength),
             bodyHeaderBytes: number(body.headerBytes),
+            committedPolynomials: committedOfferPolynomials(profile),
             proofHeaderBytes: number(
                 compileFullWordProofLayout(profile).headerBytes,
             ),
@@ -113,6 +124,30 @@ export const compileParticipantRuntimeProfile = (
             checkpointLengths: custody.checkpointLengths.map(number),
         },
         preparation: {
+            publishedAggregate: {
+                limbs: Math.ceil(profile.ciphertext.bits / 96),
+                generatedLimbBytes: number(
+                    aggregate.generatedAggregateLimbBytes,
+                ),
+                maximumLimbBytes: number(aggregate.maximumAggregateLimbBytes),
+                manifestBytes: number(aggregate.aggregateManifestBytes),
+                proofHeaderBytes: number(aggregate.evaluationHeaderBytes),
+                maximumProofBytes: number(
+                    aggregate.maximumEvaluationProofBytes,
+                ),
+                maximumCollectedReferenceBytes: number(
+                    2n +
+                        BigInt(profile.setupContributorCount) *
+                            (authentication.offerEnvelopeBytes +
+                                authentication.signatureBytes +
+                                64n +
+                                64n * BigInt(body.polynomials.length)) +
+                        64n * BigInt(body.polynomials.length) +
+                        64n,
+                ),
+                retainedDataBytes:
+                    64 + 48 + 64 * aggregate.committedPolynomials.length + 64,
+            },
             selectionBodyBytes: number(authentication.selectionBodyBytes),
             endorsementBodyBytes: number(authentication.endorsementBodyBytes),
             selectionReferenceBytes: number(custody.selectionReferenceBytes),

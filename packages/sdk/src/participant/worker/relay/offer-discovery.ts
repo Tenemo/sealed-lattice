@@ -53,6 +53,12 @@ type OfferCandidate = Readonly<{
     identity: Uint8Array;
 }>;
 
+// Routing progress only. It cannot supply a verified offer or signing input.
+export type OfferDiscoveryProgress = Readonly<{
+    nextPosition: number;
+    authors: readonly Readonly<{ offset: number; total?: number }>[];
+}>;
+
 // Process one candidate per unresolved author each round. A busy corrupt
 // author's append-only log must not starve another author's available offer.
 // Each invocation scans one finite snapshot per author, so new spam cannot
@@ -67,16 +73,48 @@ export const discoverContributionOffers = async (
         offset: number,
     ) => Promise<Readonly<{ identities: Uint8Array[]; total: number }>>,
     verify: (candidate: OfferCandidate) => Promise<void>,
+    {
+        completed = [],
+        mayContinue = () => true,
+        progress,
+        saveProgress,
+    }: Readonly<{
+        completed?: readonly OfferCandidate[];
+        mayContinue?: () => boolean;
+        progress?: OfferDiscoveryProgress;
+        saveProgress?: (progress: OfferDiscoveryProgress) => Promise<void>;
+    }> = {},
 ): Promise<OfferCandidate[]> => {
-    const readers = Array.from({ length: eligibleContributorCount }, () => ({
-        offset: 0,
-        total: undefined as number | undefined,
-        entries: [] as Uint8Array[],
-        next: 0,
-        exhausted: false,
-        accepted: false,
-    }));
-    const offers: OfferCandidate[] = [];
+    const readers = Array.from(
+        { length: eligibleContributorCount },
+        (_, position) => ({
+            offset: progress?.authors[position].offset ?? 0,
+            total: progress?.authors[position].total,
+            entries: [] as Uint8Array[],
+            next: 0,
+            exhausted:
+                progress?.authors[position].total !== undefined &&
+                progress.authors[position].offset ===
+                    progress.authors[position].total,
+            accepted: completed.some((offer) => offer.position === position),
+        }),
+    );
+    const offers: OfferCandidate[] = [...completed];
+    const order = Array.from(
+        { length: eligibleContributorCount },
+        (_, index) =>
+            (index + (progress?.nextPosition ?? 0)) % eligibleContributorCount,
+    );
+    const remember = async (position: number) => {
+        await saveProgress?.({
+            nextPosition: (position + 1) % eligibleContributorCount,
+            authors: readers.map((reader) => ({
+                offset: reader.offset - reader.entries.length + reader.next,
+                ...(reader.total === undefined ? {} : { total: reader.total }),
+            })),
+        });
+    };
+    if (offers.length === setupContributorCount) return offers;
     while (
         readers.some(
             (reader) =>
@@ -84,8 +122,13 @@ export const discoverContributionOffers = async (
                 (!reader.exhausted || reader.next < reader.entries.length),
         )
     ) {
-        for (const [position, reader] of readers.entries()) {
+        for (const position of order) {
+            const reader = readers[position];
             if (reader.accepted) continue;
+            if (!mayContinue())
+                return offers.sort(
+                    (left, right) => left.position - right.position,
+                );
             if (reader.next === reader.entries.length) {
                 if (reader.exhausted) continue;
                 try {
@@ -105,6 +148,7 @@ export const discoverContributionOffers = async (
                 } catch (error) {
                     if (!(error instanceof PublicInputFailure)) throw error;
                     reader.exhausted = true;
+                    await remember(position);
                     continue;
                 }
             }
@@ -115,10 +159,12 @@ export const discoverContributionOffers = async (
                 await verify(offer);
             } catch (error) {
                 if (!(error instanceof PublicInputFailure)) throw error;
+                await remember(position);
                 continue;
             }
             reader.accepted = true;
             offers.push(offer);
+            await remember(position);
             if (offers.length === setupContributorCount)
                 return offers.sort(
                     (left, right) => left.position - right.position,

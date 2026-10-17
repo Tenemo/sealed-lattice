@@ -16,14 +16,14 @@ import {
     type InParticipantBrowser,
 } from '#tools/ci/participant-cohort-state.js';
 import {
-    type PaddingCut,
-    type PaddingHaltObservation,
-    type PaddingSlotObservation,
+    type ProofCompletionCut,
+    type ProofCompletionHaltObservation,
+    type ProofCompletionSlotObservation,
     type PreparationCut,
-    paddingHaltingClient,
+    proofCompletionHaltingClient,
     preparationHaltingClient,
-    validatePaddingObservation,
-} from '#tools/ci/participant-padding-halt.js';
+    validateProofCompletionObservation,
+} from '#tools/ci/participant-proof-completion.js';
 import { assembleParticipantRuntime } from '#tools/ci/participant-runtime-assembly.js';
 
 export const createParticipantInterruptions = ({
@@ -39,7 +39,7 @@ export const createParticipantInterruptions = ({
     browsers,
     participantBrowser,
     storedRecords,
-    paddingClients,
+    proofCompletionClients,
     retainedHead,
     bounds,
     deliveredRecords,
@@ -56,8 +56,11 @@ export const createParticipantInterruptions = ({
     browsers: CohortState['browsers'];
     participantBrowser: (position: number) => string;
     storedRecords: ParticipantStateFaults['storedRecords'];
-    paddingClients:
-        | ReadonlyMap<PaddingCut, ReturnType<typeof paddingHaltingClient>>
+    proofCompletionClients:
+        | ReadonlyMap<
+              ProofCompletionCut,
+              ReturnType<typeof proofCompletionHaltingClient>
+          >
         | undefined;
     retainedHead: ParticipantStateFaults['retainedHead'];
     bounds: ReturnType<typeof compileParticipantRuntimeProfile>;
@@ -259,11 +262,11 @@ export const createParticipantInterruptions = ({
                 },
             }),
         );
-    const paddingInterruptions: {
+    const proofCompletionInterruptions: {
         position: number;
         observation: Readonly<{
-            slots: readonly PaddingSlotObservation[];
-            halt: PaddingHaltObservation;
+            slots: readonly ProofCompletionSlotObservation[];
+            halt: ProofCompletionHaltObservation;
         }>;
         head: Readonly<{
             generation: number;
@@ -275,8 +278,11 @@ export const createParticipantInterruptions = ({
         instrumentedWorkerSha512: string;
         instrumentationMilliseconds: number;
     }[] = [];
-    const interruptPadding = async (position: number, cut: PaddingCut) => {
-        const client = paddingClients?.get(cut);
+    const interruptProofCompletion = async (
+        position: number,
+        cut: ProofCompletionCut,
+    ) => {
+        const client = proofCompletionClients?.get(cut);
         assert.ok(client);
         halting.set(position, client);
         await inBrowser(position, undefined, (chrome) => chrome.reload());
@@ -290,8 +296,8 @@ export const createParticipantInterruptions = ({
             assert.ok(checkpointRecords > 0);
             const interrupted = request(position, 'contribute');
             let observation: {
-                slots: PaddingSlotObservation[];
-                halt: PaddingHaltObservation | null;
+                slots: ProofCompletionSlotObservation[];
+                halt: ProofCompletionHaltObservation | null;
             };
             for (;;) {
                 const settled = await Promise.race([
@@ -304,10 +310,10 @@ export const createParticipantInterruptions = ({
                 assert.equal(
                     settled,
                     false,
-                    'Contribution ended without reaching the requested padding cut; no reseed or skipped case is allowed.',
+                    'Contribution ended without reaching the requested proof completion cut; no reseed or skipped case is allowed.',
                 );
                 observation = (await inBrowser(position, undefined, (chrome) =>
-                    chrome.evaluate('window.paddingReplay'),
+                    chrome.evaluate('window.proofCompletionReplay'),
                 )) as typeof observation;
                 if (observation.halt !== null) break;
             }
@@ -317,7 +323,7 @@ export const createParticipantInterruptions = ({
                 slots: observation.slots,
                 halt: observation.halt,
             };
-            validatePaddingObservation(
+            validateProofCompletionObservation(
                 captured,
                 bounds.contribution,
                 chunkBytes,
@@ -325,7 +331,7 @@ export const createParticipantInterruptions = ({
             assert.deepEqual(
                 await retainedHead(position),
                 before,
-                'Padding changed its original continuation root before the cut.',
+                'Proof completion changed its original continuation root before the cut.',
             );
             assert.equal(
                 await storedRecords(position, 'checkpoint'),
@@ -350,7 +356,7 @@ export const createParticipantInterruptions = ({
                     0,
                 ),
             };
-            paddingInterruptions.push(entry);
+            proofCompletionInterruptions.push(entry);
             interruptions.push({
                 position,
                 operation: 'contribute',
@@ -365,7 +371,7 @@ export const createParticipantInterruptions = ({
             });
             recoveryOperations.set(position, 'contribute');
             log.writeEvent({
-                eventType: 'participant-padding-interruption',
+                eventType: 'participant-proof-completion-interruption',
                 details: entry,
             });
         } finally {
@@ -394,8 +400,8 @@ export const createParticipantInterruptions = ({
         interrupt,
         interruptPreparation,
         interruptStaged,
-        paddingInterruptions,
-        interruptPadding,
+        proofCompletionInterruptions,
+        interruptProofCompletion,
         interruptDelivered,
     };
 };

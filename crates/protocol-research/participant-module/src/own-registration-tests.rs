@@ -46,15 +46,19 @@ fn refuses_malformed_and_early_commands() {
         state.command(0, CONTROL_BYTES + 1),
         Err(Refusal::Shape)
     ));
-    // Key and finish commands before any begin.
+    // Key, source and finish commands before any begin.
     assert!(matches!(
         run(&mut state, 1, &[1; 16]),
         Err(Refusal::Consumed)
     ));
     assert!(matches!(run(&mut state, 2, &[]), Err(Refusal::Consumed)));
+    assert!(matches!(
+        run(&mut state, 3, &[0; 6]),
+        Err(Refusal::Consumed)
+    ));
     assert!(matches!(run(&mut state, 4, &[]), Err(Refusal::Consumed)));
     // Unknown operations, and finishing with input.
-    for operation in [3, 5] {
+    for operation in [5, u32::MAX] {
         assert!(matches!(
             run(&mut state, operation, &[]),
             Err(Refusal::Shape)
@@ -87,11 +91,22 @@ fn verifies_the_registration_once_against_its_signed_poll() {
         run(&mut state, 1, part).unwrap();
     }
     run(&mut state, 2, &[]).unwrap();
+    assert!(run(&mut state, 4, &[]).is_err());
+    // A failed finalization consumes its pending record, so complete a fresh verifier.
+    let mut state = State::new();
+    run(&mut state, 0, &input).unwrap();
+    for part in record.key.chunks(CHUNK_LIMIT) {
+        run(&mut state, 1, part).unwrap();
+    }
+    run(&mut state, 2, &[]).unwrap();
+    for part in record.sources.chunks(CHUNK_LIMIT) {
+        run(&mut state, 3, part).unwrap();
+    }
     run(&mut state, 4, &[]).unwrap();
     let verified = state.verified.clone().expect("A verified registration");
     assert_eq!(verified.header().encode().unwrap(), record.header);
     // A verified registration takes no further command.
-    for operation in [0, 1, 2, 4] {
+    for operation in [0, 1, 2, 3, 4] {
         assert!(matches!(
             run(&mut state, operation, &[]),
             Err(Refusal::Consumed)

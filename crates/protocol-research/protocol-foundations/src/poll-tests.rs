@@ -1,6 +1,5 @@
 use super::*;
 use crate::foundation::{StabilizedDisplayText, manifest::OptionDefinition};
-use fips204::traits::{KeyGen, Signer};
 fn label(value: &str) -> StabilizedDisplayText {
     StabilizedDisplayText::from_ingress_utf8(value.as_bytes()).unwrap()
 }
@@ -26,7 +25,7 @@ fn draft(top_count: u16) -> Result<PollDraft, Refusal> {
 }
 #[test]
 fn poll_identity_binds_organizer_definition_and_runtime_without_a_future_key() {
-    let mut organizer = Credential::from_seed([7; 32]);
+    let mut organizer = Credential::from_seed([7; 64]);
     let original = *organizer.signing_public();
     let packet = organizer
         .create_poll(draft(2).unwrap(), [2; 64], [3; 32])
@@ -70,7 +69,7 @@ fn every_supported_option_count_and_top_count_can_be_created() {
                 10,
             )
             .unwrap();
-            let packet = Credential::from_seed([7; 32])
+            let packet = Credential::from_seed([7; 64])
                 .create_poll(draft, [2; 64], [3; 32])
                 .unwrap();
             let verified =
@@ -94,7 +93,7 @@ fn every_supported_participant_maximum_can_be_created() {
     for maximum in Profile::participant_range() {
         let maximum = u16::try_from(maximum).unwrap();
         let draft = PollDraft::new(manifest("Question", "First", "Second", 2), 1, maximum).unwrap();
-        let packet = Credential::from_seed([7; 32])
+        let packet = Credential::from_seed([7; 64])
             .create_poll(draft, [2; 64], [3; 32])
             .unwrap();
         let verified =
@@ -112,18 +111,17 @@ fn every_supported_participant_maximum_can_be_created() {
 
 #[test]
 fn valid_signatures_do_not_authorize_invalid_poll_fields() {
-    let mut organizer = Credential::from_seed([7; 32]);
+    let mut organizer = Credential::from_seed([7; 64]);
     let packet = organizer
         .create_poll(draft(10).unwrap(), [2; 64], [3; 32])
         .unwrap();
     let original = CanonicalTuple::decode(&packet.body, &CanonicalDecodeLimits::default()).unwrap();
-    let (_, private) = ml_dsa_65::KG::keygen_from_seed(&[7; 32]);
     let signed_refusal = |tuple: CanonicalTuple| {
+        // A corrupt owner can recreate its raw key; valid authentication must not bypass poll validation.
+        let (_, mut private) = crate::authentication::keypair_from_seed(&[7; 64]);
         let body = tuple.encode().unwrap();
         let digest = identity(&body).unwrap();
-        let signature = private
-            .try_sign_with_seed(&[5; 32], &digest, POLL_SIGNATURE_CONTEXT)
-            .unwrap();
+        let signature = private.sign(&digest, POLL_SIGNATURE_CONTEXT).unwrap();
         assert!(verify_poll(digest, [2; 64], &body, &signature).is_err());
     };
     let mut top = original.clone();

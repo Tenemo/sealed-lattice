@@ -67,10 +67,11 @@ pub(super) fn decode_program(profile: Profile, program: &[u8]) -> Result<Program
             1 | 2 | 6 => parameter == 0,
             3 => (1..=comparison_degree).contains(&(parameter as usize)) && parameter % 2 == 1,
             4 => {
-                (parameter as usize) < options * options
-                    && !(parameter as usize).is_multiple_of(options)
+                parameter == 0
+                    || ((parameter as usize) < options * options
+                        && !(parameter as usize).is_multiple_of(options))
             }
-            5 => (parameter as usize) < options + 2,
+            5 => (parameter as usize) < options + 2 || parameter as usize == options + 3,
             _ => false,
         };
         if !valid {
@@ -79,11 +80,11 @@ pub(super) fn decode_program(profile: Profile, program: &[u8]) -> Result<Program
         // Rank weights of family zero give the complete ordering; family
         // k gives the first k ranks.
         let declared_top_count = match operation {
-            4 => Some(match parameter as usize / options {
+            4 if parameter != 0 => Some(match parameter as usize / options {
                 0 => options,
                 value => value,
             }),
-            5 if parameter >= 2 => Some(match parameter {
+            5 if parameter >= 2 && (parameter as usize) < options + 2 => Some(match parameter {
                 2 => options,
                 value => value as usize - 2,
             }),
@@ -128,4 +129,53 @@ pub(super) fn peak_values(instructions: &[Instruction], mut remaining_uses: Vec<
         }
     }
     peak
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn bytes(instructions: &[[u32; 4]]) -> Vec<u8> {
+        [
+            DEGREE as u32,
+            instructions.len() as u32,
+            instructions.len() as u32 - 1,
+        ]
+        .into_iter()
+        .chain(instructions.iter().flatten().copied())
+        .flat_map(u32::to_le_bytes)
+        .collect()
+    }
+
+    #[test]
+    fn mask_and_padding_parameters_preserve_requested_length_checks() {
+        let profile = Profile::new(3, 4).unwrap();
+        let mut instructions = vec![
+            [0, u32::MAX, u32::MAX, 0],
+            [0, u32::MAX, u32::MAX, 1],
+            [1, 0, 1, 0],
+            [0, u32::MAX, u32::MAX, 2],
+            [1, 2, 3, 0],
+            [4, 4, u32::MAX, 0],
+            [4, 5, u32::MAX, 9],
+            [5, 6, u32::MAX, 4],
+            [5, 7, u32::MAX, 7],
+        ];
+        assert_eq!(
+            decode_program(profile, &bytes(&instructions))
+                .unwrap()
+                .top_count,
+            2
+        );
+        instructions[7][3] = 3;
+        assert!(decode_program(profile, &bytes(&instructions)).is_err());
+        instructions[7][3] = 4;
+        instructions[8][3] = 6;
+        assert!(decode_program(profile, &bytes(&instructions)).is_err());
+        instructions[8][3] = 8;
+        assert!(decode_program(profile, &bytes(&instructions)).is_err());
+        instructions[8][3] = 7;
+        instructions[5][3] = 4;
+        assert!(decode_program(profile, &bytes(&instructions)).is_err());
+    }
 }

@@ -1,4 +1,6 @@
 pub mod contribution;
+#[path = "encrypted-source.rs"]
+pub mod encrypted_source;
 #[path = "fhe-key-source.rs"]
 pub mod fhe_key_source;
 #[cfg(feature = "key-source-screen")]

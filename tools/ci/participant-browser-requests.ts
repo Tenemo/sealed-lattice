@@ -20,11 +20,33 @@ import {
     type CpuProfileSummary,
     summarizeCpuTrace,
 } from '#tools/ci/participant-cpu-profile.js';
+import {
+    summarizeEvaluationProfile,
+    type EvaluationProfile,
+} from '#tools/ci/participant-evaluation-profile.js';
 import type { ParticipantOperationMeasurement } from '#tools/ci/participant-workflow-measurements.js';
 
 // An honest page answers through the SDK's participant API; a patched
 // client's page answers with its worker's own result.
 type HarnessResult = ParticipantResponse | ParticipantWorkerResult;
+
+// A deliberate work boundary resumes the same stage. Failures and waiting
+// for external input are returned unchanged, and the whole stage keeps its
+// original foreground deadline.
+export const completeSavedWork = async (
+    request: () => Promise<HarnessResult>,
+) => {
+    const started = performance.now();
+    for (;;) {
+        const result = await request();
+        if (result.status !== 'pending' || result.cause !== 'work')
+            return result;
+        assert.ok(
+            performance.now() - started < operationMilliseconds,
+            'Saved setup work exceeded the stage deadline.',
+        );
+    }
+};
 
 export const createParticipantRequests = async ({
     cpuProfiling,
@@ -188,6 +210,23 @@ export const createParticipantRequests = async ({
             if (scalar && result.status === 'completed')
                 requireScalarMemory(result.details);
             const milliseconds = performance.now() - started;
+            const evaluationProfiles = (await chrome.evaluate(
+                'window.evaluationProfiles',
+            )) as EvaluationProfile[] | undefined;
+            if (
+                evaluationProfiles !== undefined &&
+                evaluationProfiles.length > 0
+            )
+                log.writeEvent({
+                    eventType: 'participant-evaluation-profile',
+                    details: {
+                        position,
+                        operation,
+                        profiles: evaluationProfiles.map(
+                            summarizeEvaluationProfile,
+                        ),
+                    },
+                });
             if (
                 recovery &&
                 result.status === 'completed' &&
@@ -248,7 +287,9 @@ export const createParticipantRequests = async ({
         operation: ParticipantOperation,
         parameters: Record<string, unknown> = {},
     ) => {
-        const result = await request(position, operation, parameters);
+        const result = await completeSavedWork(() =>
+            request(position, operation, parameters),
+        );
         assert.ok(
             result.status === 'completed',
             `${operation} at position ${String(position)}: ${JSON.stringify(result)}`,

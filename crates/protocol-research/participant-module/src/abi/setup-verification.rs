@@ -6,7 +6,7 @@ use protocol_foundations::{
 };
 use setup_aggregate::{
     CHUNK_BYTES,
-    setup_session::{Refusal, SETUP_INPUT_BYTES, SetupSession},
+    setup_session::{PublicOperation, Refusal, SETUP_INPUT_BYTES, SetupSession},
     verified::{VerifiedSelectionInputs, VerifiedSetupAggregate},
 };
 use std::{cell::RefCell, sync::Arc};
@@ -36,6 +36,21 @@ pub(super) fn selection_inputs() -> Option<Arc<VerifiedSelectionInputs>> {
 }
 pub(super) fn restore_inputs(credential: &Credential, retained: &[u8]) -> bool {
     SETUP.with(|setup| setup.borrow_mut().restore_inputs(credential, retained))
+}
+pub(super) fn retain_collection(credential: &Credential) -> Result<Vec<u8>, Refusal> {
+    SETUP.with(|setup| setup.borrow().retain_collection(credential))
+}
+pub(super) fn retain_aggregate_data(credential: &Credential) -> Result<Vec<u8>, Refusal> {
+    SETUP.with(|setup| setup.borrow().retain_aggregate_data(credential))
+}
+pub(super) fn restore_aggregate_data(credential: &Credential, bytes: &[u8]) -> Result<(), Refusal> {
+    SETUP.with(|setup| setup.borrow_mut().restore_aggregate_data(credential, bytes))
+}
+pub(super) fn restore_collection(
+    credential: &Credential,
+    bytes: &[u8],
+) -> Result<Vec<u8>, Refusal> {
+    SETUP.with(|setup| setup.borrow_mut().restore_collection(credential, bytes))
 }
 
 #[unsafe(no_mangle)]
@@ -83,8 +98,48 @@ pub extern "C" fn setup_output_length() -> usize {
     SETUP.with(|setup| setup.borrow().output().len())
 }
 #[unsafe(no_mangle)]
+pub extern "C" fn setup_public_work(
+    operation: u32,
+    index: usize,
+    offset: usize,
+    length: usize,
+) -> u32 {
+    step(|setup| {
+        setup.public_step(
+            PublicOperation::from_code(operation).ok_or(Refusal)?,
+            index,
+            offset,
+            length,
+        )
+    })
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn setup_public_output_pointer() -> usize {
+    SETUP.with(|setup| setup.borrow().public_output().as_ptr() as usize)
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn setup_public_output_length() -> usize {
+    SETUP.with(|setup| setup.borrow().public_output().len())
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn setup_inputs_available() -> u32 {
+    SETUP.with(|setup| u32::from(setup.borrow().selection_inputs().is_some()))
+}
+#[unsafe(no_mangle)]
 pub extern "C" fn setup_offer_begin(length: usize) -> u32 {
     step(|setup| setup.begin_offer(length))
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn setup_offer_source(length: usize) -> u32 {
+    step(|setup| setup.offer_source(length))
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn setup_source_range() -> u32 {
+    step(SetupSession::source_range)
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn setup_selected_offer_source(length: usize) -> u32 {
+    step(|setup| setup.selected_offer_source(length))
 }
 #[unsafe(no_mangle)]
 pub extern "C" fn setup_offer_polynomial(index: usize, offset: usize, length: usize) -> u32 {

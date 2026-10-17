@@ -1,3 +1,4 @@
+import { compileCommittedOfferCensus } from '#tests/committed-offer-model.js';
 import { compileCommonAgreementDegreeCensus } from '#tests/common-agreement-degree-model.js';
 import {
     framedProofHashBytes,
@@ -8,6 +9,11 @@ import {
     type ProofRelationCatalogueEntry,
 } from '#tests/proof-relation-catalogue-model.js';
 import { compileProofVerifierQueryCensus } from '#tests/proof-verifier-query-model.js';
+import {
+    compilePublicEvaluationHashCensus,
+    parsePublicEvaluationHashInput,
+} from '#tests/public-evaluation-hash-model.js';
+import { listSupportedProfiles } from '#tests/supported-profile-model.js';
 import { protocolHashPrefix } from '#tests/word-proof-reference/transcript.js';
 
 // Independent raw-input recognizer for the three fixed proof purposes. It does
@@ -89,6 +95,8 @@ export type ProofHashInput = {
     family:
         | 'leaf'
         | 'node'
+        | 'public-leaf'
+        | 'public-node'
         | 'message-root'
         | 'statement'
         | 'verifier-message'
@@ -155,6 +163,20 @@ export const parseProofHashInput = (
         domain.equals(Buffer.from(`bounded-proof/${name}`));
     if (
         fixed &&
+        scope.purpose === 'setup' &&
+        domain.equals(Buffer.from('committed-key/leaf')) &&
+        candidates.some((entry) => shape(4, 16 * entry.publicColumns))
+    )
+        return result('public-leaf');
+    if (
+        fixed &&
+        scope.purpose === 'setup' &&
+        domain.equals(Buffer.from('committed-key/node')) &&
+        shape(4, 64, 64)
+    )
+        return result('public-node', [fields[1], fields[2]]);
+    if (
+        fixed &&
         named('leaf') &&
         candidates.some((entry) =>
             [entry.firstWidth, entry.secondWidth, BigInt(elementBytes)].some(
@@ -170,7 +192,18 @@ export const parseProofHashInput = (
         named('message-root') &&
         (shape(tagBytes, 4, saltBytes, tagBytes) ||
             shape(tagBytes, 4, saltBytes, tagBytes, elementBytes) ||
-            shape(tagBytes, 4, saltBytes, elementBytes))
+            shape(tagBytes, 4, saltBytes, elementBytes) ||
+            candidates.some(
+                (entry) =>
+                    entry.publicColumns > 0 &&
+                    shape(
+                        tagBytes,
+                        4,
+                        saltBytes,
+                        tagBytes,
+                        48 * entry.publicColumns,
+                    ),
+            ))
     )
         return result('message-root', [
             fields[0],
@@ -247,6 +280,12 @@ export const isProofChallengeInput = (
     honestOwners: ReadonlySet<string>,
 ) => {
     const parsed = parseProofHashInput(input);
+    if (
+        parsePublicEvaluationHashInput(input) ||
+        parsed?.family === 'public-leaf' ||
+        parsed?.family === 'public-node'
+    )
+        return true;
     return parsed === undefined
         ? isRawStatementInput(input)
         : !honestOwners.has(parsed.owner);
@@ -258,15 +297,23 @@ export const hasProofHashLayout = (input: ProofHashInput) => {
     const fields = input.fields;
     const integer = (index: number) => fields[index].readUInt32LE();
     const folds = Math.log2(agreement.domainSize / 2);
+    const publicStages = input.purpose === 'setup' ? 1 : 0;
     const stageLength = (stage: number) =>
-        stage < 3
+        stage < 3 + publicStages
             ? agreement.domainSize
-            : agreement.domainSize / 2 ** (stage - 2);
+            : agreement.domainSize / 2 ** (stage - 2 - publicStages);
     switch (input.family) {
+        case 'public-leaf':
+            return integer(0) < agreement.domainSize;
+        case 'public-node':
+            return (
+                integer(0) >= 1 && integer(0) <= Math.log2(agreement.domainSize)
+            );
         case 'leaf': {
             const stage = integer(0);
             return (
-                stage < folds + 2 &&
+                stage < folds + 2 + publicStages &&
+                stage !== (publicStages ? 3 : -1) &&
                 integer(1) < stageLength(stage) &&
                 input.candidates.some(
                     (entry) =>
@@ -285,7 +332,8 @@ export const hasProofHashLayout = (input: ProofHashInput) => {
             const stage = integer(0),
                 level = integer(1);
             return (
-                stage < folds + 2 &&
+                stage < folds + 2 + publicStages &&
+                stage !== (publicStages ? 3 : -1) &&
                 level >= 1 &&
                 level <= Math.log2(stageLength(stage))
             );
@@ -295,11 +343,18 @@ export const hasProofHashLayout = (input: ProofHashInput) => {
             return (
                 round >= 1 &&
                 round <= folds + 3 &&
-                (round === 2
-                    ? fields.length === 5
-                    : round === folds + 3
-                      ? fields.length === 4 && fields[3].length === elementBytes
-                      : fields.length === 4 && fields[3].length === tagBytes)
+                (round === 3 && publicStages
+                    ? fields.length === 5 &&
+                      input.candidates.some(
+                          (entry) =>
+                              fields[4].length === 48 * entry.publicColumns,
+                      )
+                    : round === 2
+                      ? fields.length === 5
+                      : round === folds + 3
+                        ? fields.length === 4 &&
+                          fields[3].length === elementBytes
+                        : fields.length === 4 && fields[3].length === tagBytes)
             );
         }
         case 'verifier-message':
@@ -312,7 +367,12 @@ export const hasProofHashLayout = (input: ProofHashInput) => {
 
 export const compileProofHashDomainCensus = () => {
     const descriptors = proofRelationCatalogue();
-    const rows = descriptors.map((entry) => {
+    const rows: {
+        purpose: Purpose | 'aggregate';
+        profile: string;
+        maximumInputBits: bigint;
+        messageBits: bigint;
+    }[] = descriptors.map((entry) => {
         const salted = saltedProofHashInputs(entry, entry.roleBytes);
         const frames = [
             ...salted.leaves,
@@ -362,6 +422,35 @@ export const compileProofHashDomainCensus = () => {
             messageBits: 8n * entry.messageBytes,
         };
     });
+    const evaluations = listSupportedProfiles().map((profile) => ({
+        profile,
+        census: compilePublicEvaluationHashCensus(profile),
+    }));
+    rows.push(
+        ...evaluations.map(({ profile, census }) => ({
+            purpose: 'aggregate' as const,
+            profile: `${profile.participantCount}/${profile.optionCount}`,
+            maximumInputBits: census.maximumInputBits,
+            messageBits: 8n * census.messageBytes,
+        })),
+    );
+    const wordExpansion = BigInt(
+        compileProofVerifierQueryCensus(true).maximumCoreQueries,
+    );
+    const maximumAcceptedExpansionQueries = evaluations.reduce(
+        (maximum, { profile, census }) => {
+            const expansion =
+                BigInt(profile.setupContributorCount) *
+                    (wordExpansion + census.maximumVerifierQueries) +
+                BigInt(
+                    compileCommittedOfferCensus(profile).committedPolynomials
+                        .length,
+                ) +
+                1n;
+            return expansion > maximum ? expansion : maximum;
+        },
+        wordExpansion,
+    );
     return {
         rows,
         // W_F counts bits, permitting the deliberately loose union over all
@@ -384,9 +473,7 @@ export const compileProofHashDomainCensus = () => {
         // The all-zero initial state is the only fixed hash-label sentinel.
         // Missing and malformed preimages resolve to no context/oracle value.
         sentinelCount: 1n,
-        maximumAcceptedExpansionQueries: BigInt(
-            compileProofVerifierQueryCensus().maximumCoreQueries,
-        ),
+        maximumAcceptedExpansionQueries,
     };
 };
 

@@ -1,8 +1,4 @@
 use crate::release::{Refusal, ReleaseContext};
-use fips204::{
-    ml_dsa_65,
-    traits::{SerDes, Verifier as SignatureVerifier},
-};
 use linked_release_proof::{CHUNK_LIMIT, HEADER_LENGTH, Verifier, verifier};
 use num_bigint::BigInt;
 use protocol_foundations::{
@@ -41,9 +37,13 @@ impl ReleaseContext {
         let public = target.setup().roster().proposal().records()[self.position()]
             .header()
             .signing_public;
-        let key = ml_dsa_65::PublicKey::try_from_bytes(public).map_err(|_| Refusal::Context)?;
-        let signature = packet[RELEASE_ENVELOPE_BYTES..].try_into().unwrap();
-        if !key.verify(envelope.bytes(), &signature, RELEASE_SIGNATURE_CONTEXT) {
+        let signature: [u8; SIGNATURE_BYTES] = packet[RELEASE_ENVELOPE_BYTES..].try_into().unwrap();
+        if !protocol_foundations::verify_purpose_signature(
+            &public,
+            envelope.bytes(),
+            &signature,
+            RELEASE_SIGNATURE_CONTEXT,
+        ) {
             return Err(Refusal::Signature);
         }
         Ok(AuthenticatedReleaseEnvelope { envelope })

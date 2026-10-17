@@ -1,5 +1,6 @@
 import { auxiliaryInputEncryptionParameters } from '#tests/auxiliary-input-encryption-parameters.js';
 import { compileBallotEncryptionColumnLayout } from '#tests/ballot-encryption-relation-model.js';
+import { committedOfferColumns } from '#tests/committed-offer-model.js';
 import { compileCommonAgreementDegreeCensus } from '#tests/common-agreement-degree-model.js';
 import { compileLinkedReleaseColumnLayout } from '#tests/linked-release-relation-model.js';
 import { maximumSharedPathSiblings } from '#tests/merkle-path-sharing-model.js';
@@ -15,6 +16,7 @@ export const merkleSaltSeedBytes = 64n;
 export const compileWordProofLayout = (
     wordCount: number,
     lookupCount: number,
+    publicColumns = 0,
 ) => {
     if (
         !Number.isSafeInteger(wordCount) ||
@@ -44,7 +46,10 @@ export const compileWordProofLayout = (
         extensionBytes +
         BigInt(foldCount + 3) * saltBytes +
         BigInt(foldCount - 1) * tagBytes +
-        extensionBytes;
+        extensionBytes +
+        (publicColumns === 0
+            ? 0n
+            : tagBytes + BigInt(publicColumns) * extensionBytes);
     let maximumProofBytes = headerBytes;
     let maximumMultiproofBytes = headerBytes;
     let maximumCachedNodes = 0;
@@ -68,6 +73,15 @@ export const compileWordProofLayout = (
         maximumProofBytes += openingGroup(agreement.domainSize, width);
         maximumMultiproofBytes += multiproofGroup(agreement.domainSize, width);
     }
+    if (publicColumns > 0) {
+        const width = BigInt(publicColumns) * baseBytes;
+        const salts =
+            BigInt(Math.min(2 * agreement.queries, agreement.domainSize)) *
+            saltBytes;
+        maximumProofBytes += openingGroup(agreement.domainSize, width) - salts;
+        maximumMultiproofBytes +=
+            multiproofGroup(agreement.domainSize, width) - salts;
+    }
     for (let length = agreement.domainSize / 2; length > 2; length /= 2) {
         maximumProofBytes += openingGroup(length, extensionBytes);
         maximumMultiproofBytes += multiproofGroup(length, extensionBytes);
@@ -89,6 +103,8 @@ export const compileWordProofLayout = (
         proverInterpolationPoints: agreement.codeDimension,
         expandedFirstOracleBytes: firstWidth * BigInt(agreement.domainSize),
         expandedSecondOracleBytes: secondWidth * BigInt(agreement.domainSize),
+        expandedPublicOracleBytes:
+            BigInt(publicColumns) * baseBytes * BigInt(agreement.domainSize),
         treeCount,
         saltSeedBytes: treeCount * merkleSaltSeedBytes,
         minimumFirstOracleRandomBytes,
@@ -116,6 +132,7 @@ export const compileFullWordProofLayout = (profile: SupportedProfile) => {
     return compileWordProofLayout(
         shape.wordColumns + shape.booleanColumns,
         shape.lookupEntries,
+        committedOfferColumns(profile),
     );
 };
 

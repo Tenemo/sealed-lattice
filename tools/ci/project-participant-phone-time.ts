@@ -19,6 +19,7 @@ import {
     type ParticipantTransferTotals,
     type RunSummary,
 } from '#tools/ci/participant-run-files.js';
+import { participantWorkflowLimits } from '#tools/ci/participant-workflow-measurements.js';
 
 // Projects a renewal's ordinary ten-participant, ten-option sequential scalar
 // workflow from this host to a slower device: the largest uniform slowdown
@@ -26,11 +27,11 @@ import {
 const usage =
     'Usage: project-participant-phone-time.ts --renewal=<renewal run directory or record file>';
 
-// The owner's completion limits for the qualification tuple.
 const limits = {
-    visitSeconds: 15 * 60,
-    participantSeconds: 30 * 60,
-    sequentialSeconds: 5 * 60 * 60,
+    visitSeconds: participantWorkflowLimits.visitMilliseconds / 1000,
+    participantSeconds:
+        participantWorkflowLimits.participantMilliseconds / 1000,
+    sequentialSeconds: participantWorkflowLimits.sequentialMilliseconds / 1000,
 };
 // Application-payload goodputs in decimal megabits per second.
 const goodputs = [20, 50, 100, 200];
@@ -267,7 +268,8 @@ const main = async (): Promise<void> => {
                         sequential: tolerableSlowdown(
                             sequential.completionSeconds,
                             sequential.payloadBytes,
-                            limits.sequentialSeconds,
+                            participantWorkflowLimits.sequentialMilliseconds /
+                                1000,
                             megabits,
                         ),
                     },

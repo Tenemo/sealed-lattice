@@ -18,11 +18,12 @@ import {
     type ViewedParticipantRecord,
     participantCandidateView,
 } from '#tools/ci/participant-candidate-view.js';
+import { instrumentEvaluationSdk } from '#tools/ci/participant-evaluation-profile.js';
 import {
     participantOfferAnnouncements,
     serveOfferAnnouncements,
 } from '#tools/ci/participant-offer-announcements.js';
-import type { PreparationCut } from '#tools/ci/participant-padding-halt.js';
+import type { PreparationCut } from '#tools/ci/participant-proof-completion.js';
 import { participantRelayStore } from '#tools/ci/participant-relay-record.js';
 import type {
     CorruptParticipantClient,
@@ -106,9 +107,13 @@ const participantPage = harnessPage(
     `
 import { openParticipant, verifyOutcome } from '/sdk/index.js';
 const relay = new URL('./', location.href).href;
-window.verifyOutcome = (poll) => verifyOutcome({ poll, relay });
-window.runParticipant = (operation, parameters) =>
-    openParticipant({ namespace: ${JSON.stringify(participantNamespace)}, relay }).run({ operation, parameters });
+window.evaluationProfiles = [];
+window.addEventListener('participant-evaluation-profile', event => window.evaluationProfiles.push(event.detail));
+window.verifyOutcome = (poll) => { window.evaluationProfiles = []; return verifyOutcome({ poll, relay }); };
+window.runParticipant = (operation, parameters) => {
+    window.evaluationProfiles = [];
+    return openParticipant({ namespace: ${JSON.stringify(participantNamespace)}, relay }).run({ operation, parameters });
+};
 `,
     { module: true },
 );
@@ -121,7 +126,7 @@ const clientPage = (runtime: ParticipantRuntime, workerDigest: string) =>
         `
 const runtime = ${JSON.stringify({ identity: runtime.identity, worker: workerDigest })};
 window.runParticipant = async (operation, parameters) => {
-    window.paddingReplay = {slots: [], halt: null};
+    window.proofCompletionReplay = {slots: [], halt: null};
     window.preparationHalt = null;
     const response = await fetch('/worker.js', { cache: 'no-store' });
     const bytes = new Uint8Array(await response.arrayBuffer());
@@ -138,8 +143,8 @@ window.runParticipant = async (operation, parameters) => {
             URL.revokeObjectURL(url);
         };
         worker.onmessage = ({ data }) => {
-            if (data?.type === 'participant-padding-slot') { window.paddingReplay.slots.push(data); return; }
-            if (data?.type === 'participant-padding-halt') { window.paddingReplay.halt = data; return; }
+            if (data?.type === 'participant-proof-record') { window.proofCompletionReplay.slots.push(data); return; }
+            if (data?.type === 'participant-proof-completion') { window.proofCompletionReplay.halt = data; return; }
             if (data?.type === 'participant-preparation-halt') { window.preparationHalt = data; return; }
             finish();
             resolve(data);
@@ -173,6 +178,7 @@ export const startRelay = async (
         participantCount: number;
         publicationFaults: boolean;
         scalar: boolean;
+        evaluationProfiling?: boolean;
     }>,
     runtime: ParticipantRuntime,
     publicDirectory: string,
@@ -189,6 +195,9 @@ export const startRelay = async (
         publicationFaults,
         scalar,
     } = settings;
+    const diagnostic = settings.evaluationProfiling
+        ? instrumentEvaluationSdk(runtime.sdk, runtime.worker)
+        : undefined;
     const views = Array.from(
         { length: originCount },
         () => new Map<string, ViewedRecord>(),
@@ -236,7 +245,13 @@ export const startRelay = async (
                     ),
                 },
             ],
-            ['/sdk/index.js', { type: 'text/javascript', bytes: runtime.sdk }],
+            [
+                '/sdk/index.js',
+                {
+                    type: 'text/javascript',
+                    bytes: diagnostic?.sdk ?? runtime.sdk,
+                },
+            ],
             [
                 '/sdk/participant.wasm',
                 { type: 'application/wasm', bytes: runtime.module },

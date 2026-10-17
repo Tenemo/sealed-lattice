@@ -128,22 +128,15 @@ fn restore_enrollment(length: usize, prepared: bool) -> u32 {
         let Some(retained) = restore_input(&input, prepared) else {
             return 1;
         };
-        let Some(Ok(mut enrollment)) =
-            super::own_registration::with_poll(|poll| retained.enrollment(poll))
-        else {
-            return 1;
-        };
-        // The registration this instance verified. The keys stay only if it
-        // names the root's exact inputs.
+        // Authenticate the exact public record before opening private state.
         let Some(verified) = super::own_registration::verified() else {
             return 1;
         };
-        if verified.header().encode().ok().as_deref() != Some(retained.header_bytes)
-            || verified.body_digest() != retained.body_digest
-            || verified.public_key() != retained.public_key
-        {
+        let Some(Ok(mut enrollment)) =
+            super::own_registration::with_poll(|poll| retained.enrollment(poll, &verified))
+        else {
             return 1;
-        }
+        };
         // The authenticated participant root names the purposes its records
         // show unused. Every other purpose of the restored credential stays
         // locked; completed messages are restored from their own records.

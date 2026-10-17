@@ -4,11 +4,85 @@ import {
     discoverContributionOffers,
     readOfferAnnouncements,
 } from '#packages/sdk/src/participant/worker/relay/offer-discovery.js';
+import type { OfferDiscoveryProgress } from '#packages/sdk/src/participant/worker/relay/offer-discovery.js';
 import { PublicInputFailure } from '#packages/sdk/src/participant/worker/shared/failures.js';
 
 const identity = (marker: number) => new Uint8Array(64).fill(marker);
 
 afterEach(() => vi.unstubAllGlobals());
+
+it('continues a bounded scan past an invalid author across operation cuts', async () => {
+    let progress: OfferDiscoveryProgress | undefined;
+    let completed: { position: number; identity: Uint8Array }[] = [];
+    const attempted: number[] = [];
+    for (let call = 0; call < 3; call++) {
+        let remaining = 1;
+        completed = await discoverContributionOffers(
+            3,
+            2,
+            (position, offset) =>
+                Promise.resolve({
+                    total: 1,
+                    identities: offset === 0 ? [identity(position)] : [],
+                }),
+            (offer) => {
+                remaining--;
+                attempted.push(offer.position);
+                return offer.position === 0
+                    ? Promise.reject(new PublicInputFailure('invalid offer'))
+                    : Promise.resolve();
+            },
+            {
+                completed,
+                mayContinue: () => remaining > 0,
+                progress,
+                saveProgress: (value) => {
+                    progress = value;
+                    return Promise.resolve();
+                },
+            },
+        );
+    }
+    expect(attempted).toEqual([0, 1, 2]);
+    expect(completed.map((offer) => offer.position)).toEqual([1, 2]);
+});
+
+it("retains each author's finite prefix while advancing beyond invalid entries", async () => {
+    let progress: OfferDiscoveryProgress | undefined;
+    let completed: { position: number; identity: Uint8Array }[] = [];
+    const attempted: number[] = [];
+    const entries = [[1, 2, 3], [4], []];
+    for (let call = 0; call < 4; call++) {
+        let remaining = 1;
+        completed = await discoverContributionOffers(
+            3,
+            2,
+            (position, offset) =>
+                Promise.resolve({
+                    total: entries[position].length,
+                    identities: entries[position].slice(offset).map(identity),
+                }),
+            (offer) => {
+                remaining--;
+                attempted.push(offer.identity[0]);
+                return offer.identity[0] < 3
+                    ? Promise.reject(new PublicInputFailure('invalid offer'))
+                    : Promise.resolve();
+            },
+            {
+                completed,
+                mayContinue: () => remaining > 0,
+                progress,
+                saveProgress: (value) => {
+                    progress = value;
+                    return Promise.resolve();
+                },
+            },
+        );
+    }
+    expect(attempted).toEqual([1, 4, 2, 3]);
+    expect(completed.map((offer) => offer.position)).toEqual([0, 1]);
+});
 
 it('reads a truncated or unfilled offer page as unavailable public input', async () => {
     const unfilled = new Uint8Array(12 + 64);

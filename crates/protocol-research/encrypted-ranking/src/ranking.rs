@@ -5,8 +5,8 @@ mod program;
 #[path = "ranking-storage.rs"]
 mod storage;
 use memory::{
-    MEMORY_BYTES, RUNTIME_RESERVE_BYTES, TRANSFER_RESERVE_BYTES, capacity, helper_reserved_bytes,
-    scratch_bytes, value_bytes,
+    MEMORY_BYTES, PLAINTEXT_CACHE_BYTES, RUNTIME_RESERVE_BYTES, TRANSFER_RESERVE_BYTES, capacity,
+    helper_reserved_bytes, scratch_bytes, value_bytes,
 };
 pub use memory::{fewest_resident_values, helper_memory_bytes};
 pub use program::{Instruction, program_identity};
@@ -119,6 +119,8 @@ pub struct Engine {
     comparison_coefficients: Vec<i32>,
     ranking_coefficients: Vec<Vec<i32>>,
     input_offset: Vec<i32>,
+    rank_mask: Vec<i32>,
+    padding_correction: Vec<i32>,
 }
 
 impl Engine {
@@ -156,6 +158,8 @@ impl Engine {
             comparison_coefficients,
             ranking_coefficients,
             input_offset,
+            rank_mask: plaintext::rank_mask(profile),
+            padding_correction: plaintext::padding_correction(profile),
         })
     }
 
@@ -288,7 +292,8 @@ impl Engine {
         }
         let held = |operation: u32| {
             self.capacity(operation).map_or(0, |capacity| {
-                scratch_bytes(&self.arithmetic, operation, helpers)
+                PLAINTEXT_CACHE_BYTES
+                    + scratch_bytes(&self.arithmetic, operation, helpers)
                     + capacity.min(self.peak_values) * self.value_bytes()
             })
         };
@@ -526,8 +531,11 @@ impl Engine {
                 self.comparison_coefficients[instruction.parameter as usize],
             ),
             4 => {
-                let coefficients =
-                    &self.ranking_coefficients[instruction.parameter as usize % options];
+                let coefficients = if instruction.parameter == 0 {
+                    &self.rank_mask
+                } else {
+                    &self.ranking_coefficients[instruction.parameter as usize % options]
+                };
                 assert_eq!(coefficients.len(), DEGREE);
                 let plaintext = self.arithmetic.signed(coefficients);
                 std::array::from_fn(|part| self.arithmetic.multiply(&plaintext, &left[part], false))
@@ -541,6 +549,9 @@ impl Engine {
                 }
                 parameter if (parameter as usize) < options + 2 => {
                     self.add_plaintext(left, &self.ranking_coefficients[0])
+                }
+                parameter if parameter as usize == options + 3 => {
+                    self.add_plaintext(left, &self.padding_correction)
                 }
                 _ => return Err(Refusal::Program),
             },

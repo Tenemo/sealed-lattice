@@ -11,6 +11,41 @@ pub(crate) struct ConfirmedRoster {
 }
 
 impl Credential {
+    /// Opens the original encrypted source only under the already committed
+    /// confirmation and the authenticated proposal. The parent still owns
+    /// the generation intent and the required retained seed record.
+    pub fn source_contribution(
+        &self,
+        roster: &crate::roster_authentication::AuthenticatedRosterProposal,
+        position: usize,
+        source: setup_witness::encrypted_source::EncryptedSource,
+    ) -> Result<setup_witness::encrypted_source::LinkedContribution, Refusal> {
+        let proposal = roster.proposal();
+        self.check_confirmed_position(proposal, position)?;
+        self.check_unlocked(SigningPurpose::Offer)?;
+        if self.offer_signed.is_some() || self.preparation_retired {
+            return Err(Refusal::Consumed);
+        }
+        let original = proposal.records().get(position).ok_or(Refusal::Context)?;
+        let owner =
+            crate::foundation::derive_participant_identity(&original.header().signing_public)
+                .map_err(|_| Refusal::Shape)?;
+        let binding = source
+            .public()
+            .binding(
+                proposal.profile(),
+                &original.header().poll,
+                owner.as_bytes(),
+            )
+            .map_err(|_| Refusal::Shape)?;
+        if &binding != proposal.source_binding(position)? {
+            return Err(Refusal::Context);
+        }
+        source
+            .into_contribution(proposal.profile())
+            .map_err(|_| Refusal::Context)
+    }
+
     /// Mirrors the one roster already committed by the authenticated parent.
     /// An identical replay preserves the lock; another roster never replaces it.
     pub fn confirm_roster(&mut self, context: &RetainedContributionContext) -> Result<(), Refusal> {

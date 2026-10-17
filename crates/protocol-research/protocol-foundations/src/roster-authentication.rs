@@ -1,8 +1,4 @@
 use crate::{Credential, Refusal, SIGNATURE_BYTES, SigningPurpose, roster::RosterProposal};
-use fips204::{
-    ml_dsa_65,
-    traits::{SerDes, Verifier},
-};
 
 pub(crate) const ROSTER_SIGNATURE_CONTEXT: &[u8] = crate::roster::PROPOSAL_PURPOSE.as_bytes();
 
@@ -54,7 +50,7 @@ pub fn authenticate_roster_proposal(
     let key = proposal.records()[proposal.organizer_position()]
         .header()
         .signing_public;
-    let public = ml_dsa_65::PublicKey::try_from_bytes(key).map_err(|_| Refusal::Shape)?;
+    let public = crate::authentication::PublicKey::from_bytes(key);
     if !public.verify(&proposal.identity(), &signature, ROSTER_SIGNATURE_CONTEXT) {
         return Err(Refusal::Crypto);
     }

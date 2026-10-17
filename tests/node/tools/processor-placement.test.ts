@@ -1,9 +1,11 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import os from 'node:os';
 
 import { describe, expect, it } from 'vitest';
 
 import { runCommandAndCaptureOutput } from '#tools/ci/command-runner.js';
+import { readCpuTimes } from '#tools/ci/monitor-host-contention.js';
 import {
     describeProcessorPlacement,
     parseProcessorPlacement,
@@ -113,7 +115,117 @@ const observePlacedProbe = async () => {
     };
 };
 
+const observeRetiredWorkload = async () => {
+    if (process.platform !== 'win32') return { supported: false };
+    const affinity = BigInt(
+        execFileSync(
+            'powershell.exe',
+            [
+                '-NoProfile',
+                '-Command',
+                `(Get-Process -Id ${String(process.pid)}).ProcessorAffinity.ToInt64()`,
+            ],
+            { encoding: 'utf8', windowsHide: true },
+        ).trim(),
+    );
+    const placement = parseProcessorPlacement(
+        `0x${(affinity & -affinity).toString(16)}:normal`,
+    );
+    const job = { name: 'Local\\sealed-lattice-cpu-test-' + randomUUID() };
+    const invocation = placeCommand(
+        {
+            command: process.execPath,
+            args: [
+                '-e',
+                "process.stdout.write('ready\\n'); process.stdin.resume();",
+            ],
+            description: 'Keep accounting job alive',
+        },
+        placement,
+        { ...job, create: true },
+    );
+    const keeper = spawn(invocation.command, [...invocation.args], {
+        stdio: 'pipe',
+        windowsHide: true,
+    });
+    const closed = new Promise<void>((resolve, reject) => {
+        keeper.once('error', reject);
+        keeper.once('close', () => resolve());
+    });
+    let output = '',
+        errors = '';
+    keeper.stderr.on('data', (chunk: Buffer) => {
+        errors += chunk.toString();
+    });
+    try {
+        await new Promise<void>((resolve, reject) => {
+            const timeout = setTimeout(
+                () => reject(new Error('The accounting keeper did not start.')),
+                15000,
+            );
+            keeper.stdout.on('data', (chunk: Buffer) => {
+                output += chunk.toString();
+                if (output.includes('ready\n')) {
+                    clearTimeout(timeout);
+                    resolve();
+                }
+            });
+            keeper.once('error', (error) => {
+                clearTimeout(timeout);
+                reject(error);
+            });
+            keeper.once('close', () => {
+                clearTimeout(timeout);
+                reject(new Error('The accounting keeper ended: ' + errors));
+            });
+        });
+        const before = await readCpuTimes(job.name);
+        const child =
+            'const started = process.cpuUsage(); let cpu; do { for (let i=0;i<100000;i++) Math.sqrt(i); cpu=process.cpuUsage(started); } while(cpu.user+cpu.system<300000); process.stdout.write(String((cpu.user+cpu.system)/1e6));';
+        const code = `const {execFileSync}=require('node:child_process'); let seconds=0; for(let index=0;index<3;index++) seconds+=Number(execFileSync(process.execPath,['-e',${JSON.stringify(child)}],{encoding:'utf8',windowsHide:true})); process.stdout.write(String(seconds));`;
+        const workload = await runCommandAndCaptureOutput(
+            placeCommand(
+                {
+                    command: process.execPath,
+                    args: ['-e', code],
+                    description: 'Short-lived accounting descendants',
+                },
+                placement,
+                job,
+            ),
+        );
+        if (workload.exitCode !== 0) throw new Error(workload.stderr);
+        const reportedCpu = Number(workload.stdout);
+        if (!Number.isFinite(reportedCpu) || reportedCpu <= 0)
+            throw new Error('The short-lived children reported no CPU work.');
+        // The workload, its nested job, and every child have exited here.
+        const after = await readCpuTimes(job.name);
+        return {
+            supported: true,
+            retiredCpuAccounted:
+                after.ownSeconds - before.ownSeconds >= reportedCpu,
+            hostAdvanced: after.busySeconds > before.busySeconds,
+            timeAdvanced: after.at > before.at,
+        };
+    } finally {
+        keeper.kill();
+        await closed;
+    }
+};
+
 describe('processor placement', () => {
+    it('keeps CPU totals after a separately launched workload and its descendants exit', async () => {
+        expect(await observeRetiredWorkload()).toEqual(
+            process.platform === 'win32'
+                ? {
+                      supported: true,
+                      retiredCpuAccounted: true,
+                      hostAdvanced: true,
+                      timeAdvanced: true,
+                  }
+                : { supported: false },
+        );
+    });
     it('refuses a placement where no Windows job object exists', () => {
         for (const platform of ['linux', 'darwin'] as const)
             expect(() =>
@@ -212,7 +324,7 @@ describe('processor placement', () => {
         ).toString('utf16le');
         expect(script).toBe(placedCommandScript(invocation, placement));
         expect(script).toContain(
-            "[ProcessorPlacementJob]::Enter([UInt64]::Parse('43690'), [UInt32]::Parse('32768'))",
+            "[ProcessorPlacementJob]::Enter([UInt64]::Parse('43690'), [UInt32]::Parse('32768'), [string]$payload.accountingJob.name, [bool]$payload.accountingJob.create)",
         );
         const payload = /FromBase64String\('([A-Za-z0-9+/=]+)'\)/u.exec(
             script,

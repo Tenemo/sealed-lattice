@@ -63,6 +63,7 @@ export type ParticipantLimits = Readonly<{
         recipientCapsuleBytes: number;
         signingCapsuleBytes: number;
         maximumSourceCapsuleBytes: number;
+        maximumSourceCiphertextBytes: number;
         maximumProposalBytes: number;
     }>;
     root: Readonly<{
@@ -107,12 +108,15 @@ export type ParticipantProfile = Readonly<{
         statementBytes: number;
         bodyHeaderBytes: number;
         proofHeaderBytes: number;
+        committedPolynomials: readonly number[];
         minimumProofBytes: number;
         maximumProofBytes: number;
         maximumStateBytes: number;
         maximumCheckpointHeaderBytes: number;
         offerEnvelopeBytes: number;
         requiredStorageBytes: number;
+        // The registered ciphertexts for this profile's original source family.
+        sourceCiphertextBytes: number;
         // The polynomials a contribution body carries, in body order, each
         // of coefficients of one width.
         polynomials: readonly Readonly<{
@@ -129,6 +133,16 @@ export type ParticipantProfile = Readonly<{
         checkpointLengths: readonly number[];
     }>;
     preparation: Readonly<{
+        publishedAggregate: Readonly<{
+            limbs: number;
+            generatedLimbBytes: number;
+            maximumLimbBytes: number;
+            manifestBytes: number;
+            proofHeaderBytes: number;
+            maximumProofBytes: number;
+            maximumCollectedReferenceBytes: number;
+            retainedDataBytes: number;
+        }>;
         selectionBodyBytes: number;
         endorsementBodyBytes: number;
         selectionReferenceBytes: number;
@@ -225,6 +239,7 @@ const readModuleLimits = (module: ParticipantModule) => {
             recipientCapsuleBytes: take(),
             signingCapsuleBytes: take(),
             maximumSourceCapsuleBytes: take(),
+            maximumSourceCiphertextBytes: take(),
             maximumProposalBytes: take(),
         },
         contribution: {
@@ -328,6 +343,22 @@ const readModuleProfile = (
             bytes: take(),
             coefficients: take(),
         })),
+        committedPolynomials: list(take),
+        publishedAggregate: {
+            limbs: take(),
+            generatedLimbBytes: take(),
+            maximumLimbBytes: take(),
+            manifestBytes: take(),
+            proofHeaderBytes: take(),
+            maximumProofBytes: take(),
+            maximumCollectedReferenceBytes: take(),
+            retainedDataBytes: take(),
+        },
+        sourcePolynomials: list(() => ({
+            expandedIndex: take(),
+            bytes: take(),
+            coefficients: take(),
+        })),
     };
     finish();
     if (
@@ -358,6 +389,8 @@ const dataKindMaximums = (
     setupReferenceBytes,
     setupCertificateBytes,
     registration.maximumSourceCapsuleBytes,
+    0, // The enrollment key transfer is not a stored record kind.
+    registration.maximumSourceCiphertextBytes,
 ];
 
 // The largest enrollment root: every record but the setup reference and
@@ -383,6 +416,7 @@ const enrollmentPayloadBytes = (
     registration.recipientCapsuleBytes +
     registration.signingCapsuleBytes +
     registration.maximumSourceCapsuleBytes +
+    registration.maximumSourceCiphertextBytes +
     enrollmentRootBytes(registration) +
     registration.maximumPollDefinitionBytes +
     registration.signatureBytes +
@@ -404,7 +438,11 @@ const contributionBounds = (
     profile: ModuleProfile,
 ) => {
     const { contribution } = moduleLimits;
-    const publicRecords = profile.polynomials.flatMap((polynomial) =>
+    const retainedPolynomials = [
+        ...profile.polynomials,
+        ...profile.sourcePolynomials,
+    ];
+    const publicRecords = retainedPolynomials.flatMap((polynomial) =>
         Array.from({ length: chunks(polynomial.bytes) }, (_unused, index) => ({
             object: polynomial.expandedIndex + 1,
             offset: index * chunkBytes,
@@ -423,6 +461,8 @@ const contributionBounds = (
         firstOracleColumns: profile.firstOracleColumns,
         statementBytes: profile.statementBytes,
         ...contribution,
+        proofHeaderBytes: profile.minimumProofBytes,
+        committedPolynomials: profile.committedPolynomials,
         minimumProofBytes: profile.minimumProofBytes,
         maximumProofBytes: profile.maximumProofBytes,
         maximumCheckpointHeaderBytes: profile.maximumCheckpointHeaderBytes,
@@ -435,12 +475,19 @@ const contributionBounds = (
             completedStateBytes,
         ),
         polynomials: profile.polynomials,
+        // Each source equation reports its common polynomial followed by
+        // its registered ciphertext. Only the ciphertexts are downloaded.
+        sourceCiphertextBytes: profile.sourcePolynomials.reduce(
+            (total, polynomial, index) =>
+                total + (index % 2 === 1 ? polynomial.bytes : 0),
+            0,
+        ),
         publicRecords,
         checkpointLengths: profile.checkpointLengths,
-        // Sealed body and proof records, checkpoint records and signing
-        // records.
+        // Sealed body, source operand and proof records, checkpoint records
+        // and signing records.
         publicCiphertextBytes:
-            profile.polynomials.reduce(
+            retainedPolynomials.reduce(
                 (total, polynomial) => total + polynomial.bytes,
                 0,
             ) +
@@ -622,6 +669,7 @@ const profileBounds = (
     const setupCertificate = profile.certificateBytes;
     const preparation = {
         ...moduleLimits.preparation,
+        publishedAggregate: profile.publishedAggregate,
         selectionBodyBytes: profile.selectionBodyBytes,
         selectionReferenceBytes: profile.retainedReferenceBytes,
         certificateBytes: profile.certificateBytes,

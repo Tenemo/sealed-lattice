@@ -141,19 +141,24 @@ fn restore_bytes(poll: &VerifiedPoll, record: &Record) -> Vec<u8> {
     bytes
 }
 
-fn restored(poll: &VerifiedPoll, bytes: &[u8]) -> Option<Result<Enrollment, Refusal>> {
-    Some(restore_input(bytes, false)?.enrollment(poll))
+fn restored(
+    poll: &VerifiedPoll,
+    original: &protocol_foundations::registration::VerifiedRegistration,
+    bytes: &[u8],
+) -> Option<Result<Enrollment, Refusal>> {
+    Some(restore_input(bytes, false)?.enrollment(poll, original))
 }
 
 #[test]
 fn restore_input_reopens_the_retained_credential() {
     let (_, poll, record, original) = registration();
+    let verified = record.verified(&poll);
     let bytes = restore_bytes(&poll, &record);
     let input = restore_input(&bytes, false).unwrap();
     assert_eq!(input.header_bytes, record.header);
     assert_eq!(input.public_key, record.key);
     assert_eq!(input.unused, 0);
-    let enrollment = input.enrollment(&poll).unwrap();
+    let enrollment = input.enrollment(&poll, &verified).unwrap();
     assert_eq!(
         enrollment.credential.signing_public(),
         original.credential.signing_public()
@@ -165,6 +170,7 @@ fn restore_input_reopens_the_retained_credential() {
 #[test]
 fn restore_input_refuses_changed_layouts() {
     let (_, poll, record, _) = registration();
+    let verified = record.verified(&poll);
     let valid = restore_bytes(&poll, &record);
     let header_end = 68 + record.header.len();
     let mut long_header = valid.clone();
@@ -197,7 +203,10 @@ fn restore_input_refuses_changed_layouts() {
         ("long source capsule", long_sources),
     ] {
         assert!(
-            matches!(restored(&poll, &bytes), Some(Err(Refusal::Shape))),
+            matches!(
+                restored(&poll, &verified, &bytes),
+                Some(Err(Refusal::Shape))
+            ),
             "{case}"
         );
     }
@@ -206,7 +215,10 @@ fn restore_input_refuses_changed_layouts() {
         ("changed source capsule", changed_capsule),
     ] {
         assert!(
-            matches!(restored(&poll, &bytes), Some(Err(Refusal::State))),
+            matches!(
+                restored(&poll, &verified, &bytes),
+                Some(Err(Refusal::State))
+            ),
             "{case}"
         );
     }
@@ -215,6 +227,7 @@ fn restore_input_refuses_changed_layouts() {
 #[test]
 fn prepared_restore_reads_the_retained_setup_after_its_length() {
     let (_, poll, record, _) = registration();
+    let verified = record.verified(&poll);
     let valid = restore_bytes(&poll, &record);
     // The prepared layout holds two capsule keys and a framed setup in
     // place of the sources' key and capsule.
@@ -229,7 +242,7 @@ fn prepared_restore_reads_the_retained_setup_after_its_length() {
             &valid[valid.len() - 2..],
         ]
         .concat();
-        restore_input(&bytes, true).map(|input| input.enrollment(&poll))
+        restore_input(&bytes, true).map(|input| input.enrollment(&poll, &verified))
     };
     // Each setup is longer than its tag, so only the frame check refuses it
     // as malformed.

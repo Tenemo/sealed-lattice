@@ -9,6 +9,10 @@ import {
     type IntegerLiftingFamily,
 } from '#tests/relation-integer-lifting-model.js';
 import { createSetupContributionRelationModel } from '#tests/setup-contribution-relation-model.js';
+import {
+    compileSetupEquation,
+    type Equation,
+} from '#tests/setup-relation/equations.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
 import {
     deriveSupportedProfile,
@@ -40,7 +44,9 @@ describe('relation integer lifting', () => {
             'setup/FHE key equations',
             'setup/constant share equations',
             'setup/linear share equations',
+            'setup/source encryption equations',
             'setup/support sums',
+            'ballot/plaintext interval equations',
             'ballot/FHE encryption equations',
             'ballot/packing equations',
             'ballot/auxiliary encryption equations',
@@ -54,11 +60,26 @@ describe('relation integer lifting', () => {
             expect(family.residualBound).toBeLessThan(proofField);
             expect(family.hundredthsBelowField).toBeGreaterThan(0n);
         }
+        // Independent fixed-instance operands and the signed word/error
+        // ranges bound all four source components, including e + 64.
+        const auxiliaryScale = 101n << 20n;
+        const auxiliaryModulus = 257n * auxiliaryScale + 1n;
+        const sourceBound =
+            (256n + 1n) * (auxiliaryModulus / 2n) +
+            127n * auxiliaryScale +
+            64n +
+            auxiliaryModulus * (1n << 15n);
         // The relation models that derive each profile's layout charge the
         // same terms.
         for (const profile of listSupportedProfiles()) {
             const families = relationIntegerLiftingFamilies(profile);
             const ballot = compileBallotEncryptionRelationCensus(profile);
+            expect(
+                bound(families, 'setup', 'source encryption equations'),
+            ).toBe(sourceBound);
+            expect(
+                bound(families, 'ballot', 'plaintext interval equations'),
+            ).toBe(2n * 65_535n + 12_288n);
             expect(bound(families, 'ballot', 'FHE encryption equations')).toBe(
                 ballot.residualBound,
             );
@@ -97,15 +118,46 @@ describe('relation integer lifting', () => {
             const model = createSetupContributionRelationModel(profile);
             expect(model.verify()).toBe(true);
             const rows = model.rows();
-            const familyOf = model.equations.flatMap((equation) =>
-                Array.from({ length: equation.limbs * equation.degree }, () =>
-                    equation.name.endsWith('/constant')
-                        ? 'constant share equations'
-                        : equation.name.endsWith('/linear')
-                          ? 'linear share equations'
-                          : 'FHE key equations',
-                ),
+            const sourceEquations = new Set(model.sourceEquations);
+            const baseEquations = model.equations.filter(
+                (equation) => !sourceEquations.has(equation),
             );
+            const equationFamilies = (equations: readonly Equation[]) =>
+                equations.flatMap((equation) =>
+                    Array.from(
+                        { length: equation.limbs * equation.degree },
+                        () =>
+                            sourceEquations.has(equation)
+                                ? 'source encryption equations'
+                                : equation.name.endsWith('/constant')
+                                  ? 'constant share equations'
+                                  : equation.name.endsWith('/linear')
+                                    ? 'linear share equations'
+                                    : 'FHE key equations',
+                    ),
+                );
+            const baseSupportRows = 2 * (model.disjointPairs.length - 1);
+            const firstSourceRow =
+                baseEquations.reduce(
+                    (sum, equation) => sum + equation.limbs * equation.degree,
+                    0,
+                ) + baseSupportRows;
+            const sourceRows = model.sourceEquations.flatMap((equation) =>
+                compileSetupEquation(equation, model.degree),
+            );
+            expect(model.sourceEquations).toHaveLength(4);
+            expect(sourceRows).toHaveLength(4 * model.degree);
+            expect(
+                rows.slice(firstSourceRow, firstSourceRow + sourceRows.length),
+            ).toEqual(sourceRows);
+            const familyOf = [
+                ...equationFamilies(baseEquations),
+                ...Array<string>(baseSupportRows).fill('support sums'),
+                ...equationFamilies(model.sourceEquations),
+                'support sums',
+                'support sums',
+            ];
+            expect(familyOf).toHaveLength(rows.length);
             const largest = new Map<string, bigint>();
             rows.forEach((row, index) => {
                 // Every column ranges over its whole width independently,
@@ -124,7 +176,7 @@ describe('relation integer lifting', () => {
                     else low += extreme;
                 }
                 const magnitude = high > -low ? high : -low;
-                const family = familyOf[index] ?? 'support sums';
+                const family = familyOf[index];
                 if (magnitude > (largest.get(family) ?? 0n))
                     largest.set(family, magnitude);
             });
@@ -132,12 +184,29 @@ describe('relation integer lifting', () => {
                 'FHE key equations',
                 'constant share equations',
                 'linear share equations',
+                'source encryption equations',
                 'support sums',
             ]);
             for (const [family, magnitude] of largest)
                 expect(magnitude).toBeLessThanOrEqual(
                     bound(families, 'setup', family),
                 );
+        }
+    });
+
+    it('lifts the interval over the whole word box before tightening the plaintext range', () => {
+        // For every first word, the field equation determines the second.
+        // A wrapped negative complement must fail the ordinary word lookup.
+        for (let first = 0n; first <= 65_535n; first++) {
+            const complement = (12_288n - first + proofField) % proofField;
+            expect(complement <= 65_535n).toBe(first <= 12_288n);
+        }
+        for (let first = 0n; first <= 12_288n; first++) {
+            const complement = (12_288n - first + proofField) % proofField;
+            expect(first + complement).toBe(12_288n);
+            const plaintext = first - 6_144n;
+            expect(plaintext).toBeGreaterThanOrEqual(-6_144n);
+            expect(plaintext).toBeLessThanOrEqual(6_144n);
         }
     });
 

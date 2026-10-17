@@ -1,4 +1,5 @@
 import { compileCommonAgreementDegreeCensus } from '#tests/common-agreement-degree-model.js';
+import { sourceStatementPolynomialBytes } from '#tests/encrypted-registration-source-model.js';
 import { integerLimbConvolutionMagnitudeBound } from '#tests/exact-integer-convolution-model.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import {
@@ -105,12 +106,11 @@ export const deriveSetupContributionShape = (profile: SupportedProfile) => {
     const columns = variableBits.map(signedVariableColumns);
     // The FHE secret, FHE auxiliary secret and recipient ephemerals each
     // have a positive and a negative column.
-    const disjointPairs = participants + 2;
-    const wordColumns = columns.reduce((sum, value) => sum + value.words, 0);
-    const narrowWords = columns.reduce(
-        (sum, value) => sum + value.narrowWords,
-        0,
-    );
+    const disjointPairs = participants + 3;
+    const wordColumns =
+        8 + columns.reduce((sum, value) => sum + value.words, 0);
+    const narrowWords =
+        4 + columns.reduce((sum, value) => sum + value.narrowWords, 0);
     const booleanColumns =
         2 * disjointPairs +
         columns.reduce((sum, value) => sum + value.booleans, 0);
@@ -118,12 +118,13 @@ export const deriveSetupContributionShape = (profile: SupportedProfile) => {
     return {
         wordColumns,
         booleanColumns,
-        errorColumns: variableBits.filter((bits) => bits === errorBits).length,
+        errorColumns:
+            4 + variableBits.filter((bits) => bits === errorBits).length,
         disjointPairs,
         supportRows,
         lookupEntries: wordColumns + narrowWords,
         affineRows:
-            BigInt(fheEquations * fheLimbs + 4 * participants) *
+            BigInt(fheEquations * fheLimbs + 4 * participants + 4) *
                 fixedModulusBfvInputs.polynomialDegree +
             BigInt(supportRows),
     };
@@ -181,9 +182,10 @@ export const compileSetupContributionRelationCensus = (
             publicQueryValueByteLength,
         fullRingQueryCosets: BigInt(agreement.domainSize) / degree,
         expandedStatementPolynomialCount:
-            fheStatementPolynomials + sharingStatementPolynomials,
+            fheStatementPolynomials + sharingStatementPolynomials + 8n,
         expandedStatementHeaderByteLength,
         expandedStatementByteLength:
+            sourceStatementPolynomialBytes +
             expandedStatementHeaderByteLength +
             fheStatementPolynomials *
                 degree *

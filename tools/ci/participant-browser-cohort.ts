@@ -22,7 +22,10 @@ import {
     secondRosterPath,
     startRelay,
 } from '#tools/ci/participant-browser-relay.js';
-import { createParticipantRequests } from '#tools/ci/participant-browser-requests.js';
+import {
+    completeSavedWork,
+    createParticipantRequests,
+} from '#tools/ci/participant-browser-requests.js';
 import { startParticipantResourceSampling } from '#tools/ci/participant-browser-resources.js';
 import { createParticipantStateFaults } from '#tools/ci/participant-browser-state-faults.js';
 import {
@@ -33,8 +36,9 @@ import {
     type ParticipantOperation,
     type Member,
 } from '#tools/ci/participant-cohort-state.js';
-import { paddingHaltingClient } from '#tools/ci/participant-padding-halt.js';
+import { instrumentEvaluationSdk } from '#tools/ci/participant-evaluation-profile.js';
 import type { CheckpointCustodyObservation } from '#tools/ci/participant-preparation-storage.js';
+import { proofCompletionHaltingClient } from '#tools/ci/participant-proof-completion.js';
 import { assembleParticipantRuntime } from '#tools/ci/participant-runtime-assembly.js';
 import { redactDiagnosticText } from '#tools/ci/run-log-diagnostics.js';
 import { snapshotRunSources } from '#tools/ci/run-sources.js';
@@ -141,6 +145,27 @@ export const openParticipantCohort = async (
         log,
         invalidAuthor !== undefined,
     );
+    if (settings.evaluationProfiling) {
+        const diagnostic = instrumentEvaluationSdk(runtime.sdk, runtime.worker);
+        await writeFile(
+            path.join(log.artifactDirectoryPath, 'evaluation-worker.js'),
+            diagnostic.worker,
+            { flag: 'wx' },
+        );
+        await writeFile(
+            path.join(log.artifactDirectoryPath, 'evaluation-sdk.js'),
+            diagnostic.sdk,
+            { flag: 'wx' },
+        );
+        log.writeEvent({
+            eventType: 'participant-evaluation-instrumentation',
+            details: {
+                originalWorkerSha512: runtime.identity.worker,
+                instrumentedWorkerSha512: diagnostic.digest,
+                scalar: true,
+            },
+        });
+    }
     // The runner's own sources, every repository file it imports, and the
     // browser entry it bundles by path, beside the runtime sources the
     // assembly recorded.
@@ -155,12 +180,12 @@ export const openParticipantCohort = async (
             root,
         ),
     );
-    const paddingClients =
+    const proofCompletionClients =
         mode === 'preparation'
             ? new Map(
-                  (['padding', 'final-slot'] as const).map((cut) => [
+                  (['final-record', 'body-commit'] as const).map((cut) => [
                       cut,
-                      paddingHaltingClient(runtime.worker, cut),
+                      proofCompletionHaltingClient(runtime.worker, cut),
                   ]),
               )
             : undefined;
@@ -204,11 +229,11 @@ export const openParticipantCohort = async (
             preparationStorageBundle,
             { flag: 'wx' },
         );
-        for (const client of paddingClients?.values() ?? [])
+        for (const client of proofCompletionClients?.values() ?? [])
             await writeFile(
                 path.join(
                     log.runDirectoryPath,
-                    'padding-' + client.cut + '-worker.js',
+                    'proof-completion-' + client.cut + '-worker.js',
                 ),
                 client.worker,
                 { flag: 'wx' },
@@ -559,11 +584,8 @@ export const openParticipantCohort = async (
         operation: ParticipantOperation,
         parameters: Record<string, unknown> = {},
     ) => {
-        const result = await request(
-            member.origin,
-            operation,
-            parameters,
-            member.copy,
+        const result = await completeSavedWork(() =>
+            request(member.origin, operation, parameters, member.copy),
         );
         assert.ok(
             result.status === 'completed',
@@ -638,8 +660,8 @@ export const openParticipantCohort = async (
         interrupt,
         interruptPreparation,
         interruptStaged,
-        paddingInterruptions,
-        interruptPadding,
+        proofCompletionInterruptions,
+        interruptProofCompletion,
         interruptDelivered,
     } = createParticipantInterruptions({
         honest,
@@ -654,7 +676,7 @@ export const openParticipantCohort = async (
         browsers,
         participantBrowser,
         storedRecords,
-        paddingClients,
+        proofCompletionClients,
         retainedHead,
         bounds,
         deliveredRecords,
@@ -828,8 +850,8 @@ export const openParticipantCohort = async (
         interrupt,
         interruptPreparation,
         interruptStaged,
-        paddingInterruptions,
-        interruptPadding,
+        proofCompletionInterruptions,
+        interruptProofCompletion,
         interruptDelivered,
         minimumBallotAuthor,
         ballotScores,

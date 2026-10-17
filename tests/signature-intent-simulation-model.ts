@@ -6,8 +6,8 @@ type Intent = {
     lost: boolean;
 };
 
-// Abstract deterministic signing inputs, not a signature primitive. The real
-// signer and its oracle use the same fixed zero signing input from FIPS 204.
+// Abstract original-frame custody. The purpose signer and its one-query
+// oracle return the same deterministic response on an identical frame.
 const response = (message: Message): string =>
     JSON.stringify([message.key, message.context, message.body]);
 

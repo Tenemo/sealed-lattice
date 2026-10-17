@@ -13,6 +13,7 @@ import {
 } from '#packages/sdk/tests/node/participant-module/public-input-commands.js';
 import {
     instantiate,
+    organizer,
     shake,
     draws,
     call,
@@ -80,7 +81,12 @@ describe('participant module public input fuzzing', () => {
                 refuses(
                     command,
                     command.parameters.map((parameter) =>
-                        drawArgument(parameter, draw, capacity),
+                        drawArgument(
+                            parameter,
+                            draw,
+                            capacity,
+                            organizer.limits.registration.signatureBytes,
+                        ),
                     ),
                     label,
                 );

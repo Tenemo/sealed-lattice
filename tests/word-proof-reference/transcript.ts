@@ -66,6 +66,7 @@ export type WordRelation = Readonly<{
     tag: Uint8Array;
     words: number;
     booleans: number;
+    publicColumns?: number;
     lookups: readonly Readonly<{ column: number; factor: bigint }>[];
     zeroProducts: readonly (readonly [number, number])[];
     messageBytes: number;
@@ -75,8 +76,9 @@ export type WordRelation = Readonly<{
 
 // A supported relation from its catalogue entry. Setup's positive and
 // negative sparse-support columns lead its Boolean columns, one pair for
-// the FHE secret, one for its auxiliary secret and one per recipient; the
-// ballot and release layouts own their pairs.
+// the FHE secret, its auxiliary secret and each recipient. The registered
+// source-encryption ephemeral is appended after the original Boolean bank,
+// including signed-variable remainder bits. Ballot and release own their pairs.
 export const catalogueWordRelation = (
     entry: ProofRelationCatalogueEntry,
 ): WordRelation => {
@@ -85,16 +87,22 @@ export const catalogueWordRelation = (
         entry.optionCount,
     );
     let zeroProducts: (readonly [number, number])[];
-    if (entry.role === 'setup')
-        zeroProducts = Array.from(
-            { length: entry.participantCount + 2 },
-            (_, pair) =>
-                [
-                    entry.wordColumns + 2 * pair,
-                    entry.wordColumns + 2 * pair + 1,
-                ] as const,
-        );
-    else if (entry.role === 'ballot')
+    if (entry.role === 'setup') {
+        zeroProducts = [
+            ...Array.from(
+                { length: entry.participantCount + 2 },
+                (_, pair) =>
+                    [
+                        entry.wordColumns + 2 * pair,
+                        entry.wordColumns + 2 * pair + 1,
+                    ] as const,
+            ),
+            [
+                entry.wordColumns + entry.booleanColumns - 2,
+                entry.wordColumns + entry.booleanColumns - 1,
+            ],
+        ];
+    } else if (entry.role === 'ballot')
         zeroProducts = compileBallotEncryptionColumnLayout(
             profile,
         ).zeroProducts.map(([left, right]) => [left, right] as const);
@@ -108,6 +116,7 @@ export const catalogueWordRelation = (
         tag: Buffer.from(entry.relationTag, 'ascii'),
         words: entry.wordColumns,
         booleans: entry.booleanColumns,
+        publicColumns: entry.publicColumns,
         lookups: entry.lookups,
         zeroProducts,
         messageBytes: Number(entry.messageBytes),
@@ -126,17 +135,21 @@ export const wordRelationShape = (
     const columns = relation.words + relation.booleans;
     const lookups = relation.lookups.length;
     const original = columns + lookups + 4;
-    const oracles =
+    const wordOracles =
         original +
         relation.booleans +
         relation.zeroProducts.length +
         lookups +
         2;
+    const publicColumns = relation.publicColumns ?? 0;
+    const oracles = wordOracles + 2 * publicColumns;
     const degrees = Array.from({ length: oracles }, (_, index) => {
+        if (index >= wordOracles)
+            return domain.systematic - 1 - ((index - wordOracles) % 2);
         if (index < original - 1) return domain.witnessDegree;
-        if (index === original - 1 || index === oracles - 2)
+        if (index === original - 1 || index === wordOracles - 2)
             return domain.witnessDegree - 1;
-        if (index === oracles - 1) return domain.systematic - 2;
+        if (index === wordOracles - 1) return domain.systematic - 2;
         return 2 * domain.witnessDegree - domain.systematic;
     });
     return {
@@ -144,6 +157,8 @@ export const wordRelationShape = (
         lookups,
         original,
         oracles,
+        wordOracles,
+        publicColumns,
         degrees,
         firstWidth: (columns + 1) * 16 + 48,
         secondWidth: (lookups + 2) * 48,
@@ -267,6 +282,8 @@ type Header = Readonly<{
     salts: readonly Buffer[];
     foldRoots: readonly Buffer[];
     terminal: Extension;
+    publicRoot?: Buffer;
+    evaluations: readonly Extension[];
 }>;
 
 type WordVerifierRefusal =
@@ -311,8 +328,12 @@ const readExtension = (
 export const parseHeader = (
     bytes: Uint8Array,
     domain: WordProofDomain,
+    publicColumns = 0,
 ): Header => {
-    if (bytes.length !== domain.headerBytes)
+    if (
+        bytes.length !==
+        domain.headerBytes + (publicColumns === 0 ? 0 : 64 + 48 * publicColumns)
+    )
         throw new Refused('Length', 'open');
     let position = 0;
     const take = (length: number) =>
@@ -323,7 +344,20 @@ export const parseHeader = (
     const salts = Array.from({ length: domain.folds + 3 }, () => take(128));
     const foldRoots = Array.from({ length: domain.folds - 1 }, () => take(64));
     const terminal = readExtension(take(48), 'open');
-    return { statement, roots, maskSum, salts, foldRoots, terminal };
+    const publicRoot = publicColumns === 0 ? undefined : take(64);
+    const evaluations = Array.from({ length: publicColumns }, () =>
+        readExtension(take(48), 'open'),
+    );
+    return {
+        statement,
+        roots,
+        maskSum,
+        salts,
+        foldRoots,
+        terminal,
+        publicRoot,
+        evaluations,
+    };
 };
 
 export const encodeExtension = (value: Extension) =>
@@ -377,7 +411,16 @@ const committedParts = (header: Header, round: number, folds: number) =>
         : round === 2
           ? [header.roots[1], encodeExtension(header.maskSum)]
           : round === 3
-            ? [header.roots[2]]
+            ? [
+                  header.roots[2],
+                  ...(header.evaluations.length === 0
+                      ? []
+                      : [
+                            Buffer.concat(
+                                header.evaluations.map(encodeExtension),
+                            ),
+                        ]),
+              ]
             : round === folds + 3
               ? [encodeExtension(header.terminal)]
               : [header.foldRoots[round - 4]];
@@ -391,6 +434,7 @@ const challengesFrom = (
     domainLength: number,
     message: (round: number) => Buffer,
     respond: (round: number) => void,
+    publicColumns: number,
 ) => {
     let lookup = zero;
     let affine = zero;
@@ -401,7 +445,7 @@ const challengesFrom = (
         const current = message(round);
         if (round === 2) lookup = sample(current, 0, true);
         if (round === 3) {
-            affine = sample(current, 0, false);
+            affine = sample(current, 0, publicColumns > 0);
             mask = sample(current, 1, false);
         }
         if (round === 4)
@@ -451,6 +495,7 @@ export const deriveWordProofChallenges = (
                 header.salts[round - 1],
                 committedParts(header, round, domain.folds),
             ),
+        relation.publicColumns ?? 0,
     );
 };
 

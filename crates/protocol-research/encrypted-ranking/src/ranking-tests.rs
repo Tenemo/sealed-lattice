@@ -305,3 +305,70 @@ fn a_fitting_step_evicts_nothing_and_inputs_are_never_evicted() {
         Err(Refusal::Allocation)
     );
 }
+
+#[test]
+fn resident_capacity_reserves_the_retained_plaintext_arrays() {
+    use super::memory::{
+        PLAINTEXT_CACHE_BYTES, RUNTIME_RESERVE_BYTES, TRANSFER_RESERVE_BYTES, scratch_bytes,
+    };
+    let mut changed_profiles = Vec::new();
+    for profile in Profile::all() {
+        let arithmetic = shared(profile, DEGREE);
+        let mask = super::plaintext::rank_mask(profile);
+        let padding = super::plaintext::padding_correction(profile);
+        let retained = (mask.capacity() + padding.capacity()) * std::mem::size_of::<i32>();
+        assert_eq!(retained, PLAINTEXT_CACHE_BYTES);
+        let scalar_fixed = arithmetic.tensor_primes() * 2 * DEGREE * 8 + arithmetic.job_bytes(0);
+        let values = value_bytes(&arithmetic);
+        let capacities: Vec<_> = (0..=6)
+            .map(|operation| capacity(&arithmetic, operation, 0, usize::MAX).unwrap())
+            .collect();
+        let prior: Vec<_> = (0..=6)
+            .map(|operation| {
+                (MEMORY_BYTES
+                    - RUNTIME_RESERVE_BYTES
+                    - TRANSFER_RESERVE_BYTES
+                    - scalar_fixed
+                    - scratch_bytes(&arithmetic, operation, 0))
+                    / values
+            })
+            .collect();
+        if capacities != prior {
+            changed_profiles.push((profile.participants(), profile.options()));
+        }
+        for helpers in [0, 3, 8] {
+            let fixed = if helpers == 0 { scalar_fixed } else { 0 };
+            for operation in [1, 2, 4, 6] {
+                let exact_three = RUNTIME_RESERVE_BYTES
+                    + TRANSFER_RESERVE_BYTES
+                    + retained
+                    + fixed
+                    + scratch_bytes(&arithmetic, operation, helpers)
+                    + 3 * values;
+                assert_eq!(
+                    capacity(&arithmetic, operation, helpers, exact_three),
+                    Ok(3)
+                );
+                assert_eq!(
+                    capacity(&arithmetic, operation, helpers, exact_three - 1),
+                    Ok(2)
+                );
+            }
+        }
+        if [(10, 10), (20, 20)].contains(&(profile.participants(), profile.options())) {
+            println!(
+                "Native ranking capacity: participants={} options={} capacities={capacities:?} prior={prior:?} primes=[{},{},{}] jobBytes={} plaintextCacheBytes={}",
+                profile.participants(),
+                profile.options(),
+                arithmetic.tensor_primes(),
+                arithmetic.external_primes,
+                arithmetic.key_primes,
+                arithmetic.job_bytes(0),
+                retained
+            );
+        }
+    }
+    println!(
+        "Profiles whose scalar capacity changed after retaining plaintext arrays: {changed_profiles:?}"
+    );
+}

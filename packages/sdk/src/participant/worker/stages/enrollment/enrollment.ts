@@ -51,6 +51,7 @@ import {
     dataKind,
     encodeManifest,
     readDataKind,
+    readDataRecord,
 } from '../../storage/root.js';
 import { commitParticipantState } from '../../storage/state-transaction.js';
 import { unusedPreparationPurposes } from '../contribution/preparation-state.js';
@@ -214,7 +215,13 @@ export const createEnrollment = async (
             if (module.validate_joiner(input.length) !== 0)
                 return 'invalid request';
         }
-        if (!(await hasStorageRoom(2 * limits.registration.publicKeyBytes)))
+        if (
+            !(await hasStorageRoom(
+                2 *
+                    (limits.registration.publicKeyBytes +
+                        limits.registration.maximumSourceCiphertextBytes),
+            ))
+        )
             return 'insufficient storage';
         const key = await createRootKey();
         const intentPlaintext = custodyIdentity(
@@ -276,7 +283,8 @@ export const createEnrollment = async (
             }
             if (
                 (kind > dataKind.pollSignature &&
-                    kind !== dataKind.sourceCapsule) ||
+                    kind !== dataKind.sourceCapsule &&
+                    kind !== dataKind.sourceCiphertexts) ||
                 bytes.length === 0 ||
                 bytes.length > chunkBytes ||
                 offset !== lengths[kind] ||
@@ -338,6 +346,7 @@ export const createEnrollment = async (
             lengths[dataKind.signingCapsule] !==
                 registration.signingCapsuleBytes ||
             lengths[dataKind.sourceCapsule] === 0 ||
+            lengths[dataKind.sourceCiphertexts] === 0 ||
             lengths[dataKind.pollDefinition] === 0 ||
             lengths[dataKind.pollSignature] !== registration.signatureBytes
         )
@@ -493,6 +502,7 @@ const ownRegistrationStep = {
     begin: 0,
     key: 1,
     keyFinish: 2,
+    sources: 3,
     finish: 4,
 } as const;
 
@@ -536,6 +546,15 @@ export const restoreEnrollment = async (
             publicKey.subarray(offset, offset + chunkBytes),
         );
     own(ownRegistrationStep.keyFinish);
+    for (const reference of manifest.references) {
+        if (reference.kind !== dataKind.sourceCiphertexts) continue;
+        const bytes = await readDataRecord(context, reference);
+        try {
+            own(ownRegistrationStep.sources, bytes);
+        } finally {
+            bytes.fill(0);
+        }
+    }
     own(ownRegistrationStep.finish);
     const registrationBodyDigest = readModuleMemory(
         module,

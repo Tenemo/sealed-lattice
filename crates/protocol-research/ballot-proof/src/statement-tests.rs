@@ -114,6 +114,8 @@ fn ballots_satisfy_the_affine_relation_at_the_smallest_and_widest_profiles() {
         for (column, position) in [
             (layout.scores(), 0),
             (layout.fhe_carry(1, layout.fhe_limbs() - 2), 9),
+            (layout.plaintext(), 32),
+            (layout.plaintext_complement(), 32),
             (layout.auxiliary_quotient(0), 16),
         ] {
             columns[column][position] ^= 1;

@@ -22,12 +22,13 @@ export type ParticipantRefusalReason =
 
 /**
  * What a pending participant waits for or what ended its operation early:
- * missing or refused public input, storage, a device resource such as
+ * more saved work in the same operation, missing or refused public input,
+ * storage, a device resource such as
  * memory, a failed module call, or a worker or helper that ended or failed
  * before the participant's authority started.
  */
 export type ParticipantPendingCause =
-    'public input' | 'storage' | 'resource' | 'module' | 'worker';
+    'work' | 'public input' | 'storage' | 'resource' | 'module' | 'worker';
 
 // An operation that did not complete: a refusal that changed nothing, one of
 // a participant that another runtime created, naming that runtime, a pending

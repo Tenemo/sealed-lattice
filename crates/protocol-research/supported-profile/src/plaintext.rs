@@ -1,9 +1,14 @@
-//! Arithmetic modulo the plaintext modulus and the slot transform of a
-//! plaintext whose odd coefficients are zero. Such a plaintext of degree `n`
-//! is `g(x^2)` for a polynomial `g` of half the degree. Slot `s` holds
-//! `g(r^(5^s))` for the primitive `n`-th root of unity `r`, so the `n / 4`
-//! slots are `g`'s values at the orbit of five among the odd powers of `r`.
+//! The two rotation orbits of the degree-2048 plaintext subring. Its
+//! degree-4096 encoding is embedded in the ambient ciphertext ring.
 use crate::PLAINTEXT_MODULUS;
+
+pub const ENCODING_DEGREE: usize = 4_096;
+pub const ACTIVE_SLOTS: usize = ENCODING_DEGREE / 4;
+
+pub fn encoding_degree(ambient_degree: usize) -> usize {
+    assert!(ambient_degree >= 16 && ambient_degree.is_power_of_two());
+    ambient_degree.min(ENCODING_DEGREE)
+}
 
 pub fn multiply(left: u32, right: u32) -> u32 {
     (u64::from(left) * u64::from(right) % u64::from(PLAINTEXT_MODULUS)) as u32
@@ -28,10 +33,10 @@ pub fn centered(value: u32) -> i32 {
     }
 }
 /// The primitive root of unity of a power-of-two order that divides the
-/// modulus less one, a power of the generator three.
+/// modulus less one, a power of the generator eleven.
 fn primitive_root(order: usize) -> u32 {
     assert!(order.is_power_of_two() && ((PLAINTEXT_MODULUS - 1) as usize).is_multiple_of(order));
-    power(3, (PLAINTEXT_MODULUS - 1) / order as u32)
+    power(11, (PLAINTEXT_MODULUS - 1) / order as u32)
 }
 /// Replaces the values with their transform at the root, whose order is
 /// their number: each position's new value is the sum of every value times
@@ -72,36 +77,44 @@ pub fn slot_positions(degree: usize) -> impl Iterator<Item = usize> {
         position
     })
 }
-/// The centered coefficients of the plaintext of the degree whose slots hold
-/// the values and whose other odd-power values and odd coefficients are
-/// zero.
+/// Encodes the positive orbit and a zero complementary orbit.
 pub fn encode_slots(slots: &[u32], degree: usize) -> Vec<i32> {
-    assert!(degree >= 16 && slots.len() == degree / 4);
-    let mut values = vec![0; degree / 2];
-    for (position, value) in slot_positions(degree).zip(slots) {
-        values[position] = *value;
+    encode_orbits(slots, &vec![0; slots.len()], degree)
+}
+
+/// Both orbits in forward rotation order. The second orbit's slot `s`
+/// evaluates at the negative exponent `-5^s` of the same primitive root.
+pub fn encode_orbits(primary: &[u32], complementary: &[u32], degree: usize) -> Vec<i32> {
+    let encoding = encoding_degree(degree);
+    assert_eq!(primary.len(), encoding / 4);
+    assert_eq!(complementary.len(), primary.len());
+    let mut values = vec![0; encoding / 2];
+    for ((position, first), second) in slot_positions(encoding).zip(primary).zip(complementary) {
+        values[position] = *first;
+        values[encoding / 2 - 1 - position] = *second;
     }
-    let inverse_root = power(primitive_root(degree), PLAINTEXT_MODULUS - 2);
+    let inverse_root = power(primitive_root(encoding), PLAINTEXT_MODULUS - 2);
     transform(&mut values, multiply(inverse_root, inverse_root));
-    let mut twist = power((degree / 2) as u32, PLAINTEXT_MODULUS - 2);
+    let mut twist = power((encoding / 2) as u32, PLAINTEXT_MODULUS - 2);
     let mut coefficients = vec![0; degree];
+    let stride = degree / encoding;
     for (position, value) in values.into_iter().enumerate() {
-        coefficients[2 * position] = centered(multiply(value, twist));
+        coefficients[2 * stride * position] = centered(multiply(value, twist));
         twist = multiply(twist, inverse_root);
     }
     coefficients
 }
 /// The values at the odd powers of the root, in the order of those powers,
-/// of the plaintext whose canonical coefficients are given. Its odd
-/// coefficients take no part.
+/// of the embedded plaintext whose canonical coefficients are given. The
+/// caller checks coefficients outside the subring, which take no part here.
 pub fn odd_power_values(coefficients: &[u32]) -> Vec<u32> {
     let degree = coefficients.len();
-    assert!(degree >= 16);
-    let root = primitive_root(degree);
+    let encoding = encoding_degree(degree);
+    let root = primitive_root(encoding);
     let mut twist = 1;
     let mut values: Vec<_> = coefficients
         .iter()
-        .step_by(2)
+        .step_by(2 * degree / encoding)
         .map(|value| {
             let result = multiply(*value, twist);
             twist = multiply(twist, root);

@@ -1,5 +1,6 @@
 import { compileBallotBodyCensus } from '#tests/ballot-body-model.js';
 import { compileCloseWireCensus } from '#tests/close-wire-model.js';
+import { compileCommittedOfferCensus } from '#tests/committed-offer-model.js';
 import { compileContributionBodyCensus } from '#tests/contribution-body-model.js';
 import { maximum } from '#tests/exact-integer.js';
 import { compileParticipantReleaseCustody } from '#tests/participant-release-custody-model.js';
@@ -12,7 +13,7 @@ import { compileTargetSigningStateCensus } from '#tests/target-signing-state-mod
 
 // Independently maintained wire operands: u16 file count, u16 name length,
 // ASCII name, u64 payload length and one 16-byte locator per fixed chunk.
-const candidateTransportParameters = {
+export const candidateTransportParameters = {
     chunkBytes: 1_048_576n,
     manifestBytes: 1_048_576n,
     maximumFileBytes: 4_294_967_291n,
@@ -124,6 +125,7 @@ export const compileCandidatePublicationCensus = (
     const key = compileRecipientKeyCensus();
     const roster = compileRosterProposalCensus(n);
     const offer = compileContributionBodyCensus(profile);
+    const aggregate = compileCommittedOfferCensus(profile);
     const selection = compileSetupSelectionWireCensus(n);
     const ballot = compileBallotBodyCensus(profile);
     const close = compileCloseWireCensus(profile);
@@ -176,6 +178,10 @@ export const compileCandidatePublicationCensus = (
     publish(0, 'poll', pollFiles);
     const registrationFiles = [
         file('polynomial-01.bin', key.publicKeyBytes),
+        file(
+            'source-ciphertexts.bin',
+            registration.maximumSourceCiphertextBytes,
+        ),
         file('registration-header.bin', registration.maximumHeaderBytes),
         file('signature.bin', registration.signatureBytes),
     ];
@@ -209,6 +215,22 @@ export const compileCandidatePublicationCensus = (
                 ),
                 file('proof.bin', offer.maximumProofBytes),
             ],
+        );
+    publish(0, 'aggregate/' + identity(0), [
+        file('manifest.bin', aggregate.aggregateManifestBytes),
+        ...aggregate.committedPolynomials.map((index) =>
+            file(
+                'polynomial-' + String(index).padStart(2, '0') + '.bin',
+                aggregate.generatedAggregateBytes /
+                    BigInt(aggregate.committedPolynomials.length),
+            ),
+        ),
+    ]);
+    for (let ordinal = 0; ordinal < profile.setupContributorCount; ordinal++)
+        publish(
+            0,
+            'aggregate-evaluation/' + identity(0) + '/' + String(ordinal),
+            [file('proof.bin', aggregate.maximumEvaluationProofBytes)],
         );
     publish(0, 'selection', [
         file('selection.bin', selection.selectionBodyBytes),
@@ -276,6 +298,8 @@ export const compileCandidatePublicationCensus = (
     const preparation = publications.filter(
         (publication) =>
             publication.key.startsWith('contribution-') ||
+            publication.key.startsWith('aggregate/') ||
+            publication.key.startsWith('aggregate-evaluation/') ||
             publication.key === 'selection' ||
             publication.key.startsWith('selection-endorsement-') ||
             publication.key === 'setup-certificate',

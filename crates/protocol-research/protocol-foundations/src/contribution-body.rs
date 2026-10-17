@@ -1,16 +1,11 @@
-use crate::{Refusal, identity::IdentityHasher, source_binding::SOURCE_SALT_BYTES};
+use crate::{Refusal, identity::IdentityHasher};
 use std::ops::RangeInclusive;
-use supported_profile::{
-    Profile,
-    relation::{PROOF_HEADER_BYTES, setup_relation},
-};
+use supported_profile::{Profile, source_linked::relation as setup_relation};
 
-/// The complete proof length and the source opening salt.
-pub const BODY_HEADER_BYTES: usize = 8 + SOURCE_SALT_BYTES;
+pub const BODY_HEADER_BYTES: usize = 8;
 pub(crate) const BODY_DOMAIN: &str = "sealed-lattice/contribution-body";
 pub struct ContributionBodyHeader {
     pub proof_length: usize,
-    pub source_salt: [u8; SOURCE_SALT_BYTES],
 }
 impl ContributionBodyHeader {
     pub fn decode(profile: Profile, bytes: &[u8]) -> Result<Self, Refusal> {
@@ -22,19 +17,16 @@ impl ContributionBodyHeader {
         if !proof_lengths(profile).contains(&proof_length) {
             return Err(Refusal::Shape);
         }
-        Ok(Self {
-            proof_length,
-            source_salt: bytes[8..].try_into().unwrap(),
-        })
+        Ok(Self { proof_length })
     }
 }
 pub fn proof_lengths(profile: Profile) -> RangeInclusive<usize> {
-    PROOF_HEADER_BYTES..=setup_relation(profile).maximum_proof_bytes()
+    setup_relation(profile).proof_header_bytes()..=setup_relation(profile).maximum_proof_bytes()
 }
 pub fn body_lengths(profile: Profile) -> RangeInclusive<usize> {
     let fixed = BODY_HEADER_BYTES
         + profile
-            .contribution_body_polynomials()
+            .streamed_contribution_polynomials()
             .iter()
             .map(|index| profile.setup_polynomial_bytes(*index).unwrap())
             .sum::<usize>();
@@ -47,7 +39,7 @@ pub fn body_length(profile: Profile, proof_length: usize) -> Result<usize, Refus
     }
     Ok(BODY_HEADER_BYTES
         + profile
-            .contribution_body_polynomials()
+            .streamed_contribution_polynomials()
             .iter()
             .map(|index| profile.setup_polynomial_bytes(*index).unwrap())
             .sum::<usize>()
@@ -56,14 +48,12 @@ pub fn body_length(profile: Profile, proof_length: usize) -> Result<usize, Refus
 pub fn body_header(
     profile: Profile,
     proof_length: usize,
-    source_salt: &[u8; SOURCE_SALT_BYTES],
 ) -> Result<[u8; BODY_HEADER_BYTES], Refusal> {
     if !proof_lengths(profile).contains(&proof_length) {
         return Err(Refusal::Shape);
     }
     let mut header = [0; BODY_HEADER_BYTES];
     header[..8].copy_from_slice(&(proof_length as u64).to_le_bytes());
-    header[8..].copy_from_slice(source_salt);
     Ok(header)
 }
 pub struct ComputedContributionBody {
@@ -93,7 +83,7 @@ impl ContributionBodyHasher {
     pub fn new(profile: Profile, header: &[u8]) -> Result<Self, Refusal> {
         let proof_length = ContributionBodyHeader::decode(profile, header)?.proof_length;
         let polynomials: Vec<_> = profile
-            .contribution_body_polynomials()
+            .streamed_contribution_polynomials()
             .into_iter()
             .map(|index| (index, profile.setup_polynomial_bytes(index).unwrap()))
             .collect();

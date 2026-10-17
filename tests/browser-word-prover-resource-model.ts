@@ -1,9 +1,16 @@
+import { committedOfferColumns } from '#tests/committed-offer-model.js';
 import { compileCommonAgreementDegreeCensus } from '#tests/common-agreement-degree-model.js';
+import {
+    sourceStatementPolynomialBytes,
+    sourceWorkingBytes,
+    sourceCiphertextBytes,
+} from '#tests/encrypted-registration-source-model.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import {
     compileFullWordProofLayout,
     compileWordProofLayout,
 } from '#tests/full-word-proof-layout-model.js';
+import { merkleTreeStorage } from '#tests/merkle-opening-work-model.js';
 import { compileRosterProposalCensus } from '#tests/roster-proposal-model.js';
 import { compileSetupContributionRelationCensus } from '#tests/setup-relation/shape.js';
 import { compileSmallLimbProofFieldCensus } from '#tests/small-limb-proof-field-model.js';
@@ -16,6 +23,8 @@ const compileWordProverResources = (
         columns: number;
         lookups: number;
         preparedAdjointBytes: bigint;
+        publicColumns: number;
+        publicLimbs: number;
     }>,
 ) => {
     const agreement = compileCommonAgreementDegreeCensus();
@@ -32,7 +41,8 @@ const compileWordProverResources = (
     const lookups = BigInt(input.lookups);
     const preparedAdjointBytes = input.preparedAdjointBytes;
     const witness = 2n * columns * systematic + systematic * base;
-    const tree = domain * (2n * 64n + 128n);
+    const tree = merkleTreeStorage(Number(domain), false).residentBytes;
+    const forgottenTree = merkleTreeStorage(Number(domain), true).residentBytes;
     const first =
         tree +
         (columns + 1n) * mask * base +
@@ -42,8 +52,17 @@ const compileWordProverResources = (
         ((lookups + 1n) * mask + 2n * BigInt(agreement.witnessDegree + 1)) *
             extension;
     const linear =
-        tree + (BigInt(agreement.witnessDegree) + systematic - 1n) * extension;
-    const folding = (domain - 4n) * (extension + 2n * 64n + 128n);
+        forgottenTree +
+        (BigInt(agreement.witnessDegree) + systematic - 1n) * extension;
+    let folding = 0n;
+    for (let length = Number(domain / 2n); length > 2; length /= 2)
+        folding +=
+            BigInt(length) * extension +
+            merkleTreeStorage(length, true).residentBytes;
+    // Tree::new allocates leaves before forget_leaves releases them. Charge
+    // that temporary allocation even beside the complete retained state.
+    const transientLinearLeaves = domain * 64n;
+    const transientFoldingLeaves = (domain / 2n) * 64n;
     const reciprocals = systematic * extension;
     // These are explicit allocation allowances, not measured object sizes.
     // The setup prover checks the opaque hasher bound before starting work.
@@ -52,8 +71,13 @@ const compileWordProverResources = (
         domain * maximumHasherBytes + systematic * (5n * extension + 4n * base);
     const polynomialWorkspace = 12n * systematic * extension;
     const metadataAndAllocatorAllowance = 64n * 1024n * 1024n;
+    const publicPolynomial = BigInt(input.publicLimbs) * systematic * base;
+    const publicTree = 2n * domain * 64n;
+    const publicBuilder = domain * maximumHasherBytes + publicPolynomial;
+    const publicOpenings =
+        3n * BigInt(2 * agreement.queries) * BigInt(input.publicColumns) * base;
     const stages = [
-        ['first oracle', witness + first + commitmentWorkspace],
+        ['first oracle', witness + first + commitmentWorkspace + publicBuilder],
         [
             'second oracle',
             witness + first + second + reciprocals + commitmentWorkspace,
@@ -65,7 +89,8 @@ const compileWordProverResources = (
                 second +
                 reciprocals +
                 preparedAdjointBytes +
-                polynomialWorkspace,
+                polynomialWorkspace +
+                publicPolynomial,
         ],
         [
             'linear oracle',
@@ -74,7 +99,18 @@ const compileWordProverResources = (
                 second +
                 reciprocals +
                 linear +
-                polynomialWorkspace,
+                polynomialWorkspace +
+                transientLinearLeaves,
+        ],
+        [
+            'public oracle',
+            witness +
+                first +
+                second +
+                linear +
+                reciprocals +
+                polynomialWorkspace +
+                publicBuilder,
         ],
         [
             'degree combination and folding',
@@ -84,7 +120,9 @@ const compileWordProverResources = (
                 linear +
                 folding +
                 reciprocals +
-                polynomialWorkspace,
+                polynomialWorkspace +
+                publicTree +
+                transientFoldingLeaves,
         ],
         [
             'first openings',
@@ -95,7 +133,9 @@ const compileWordProverResources = (
                 folding +
                 reciprocals +
                 polynomialWorkspace +
-                3n * BigInt(2 * agreement.queries) * layout.firstWidth,
+                3n * BigInt(2 * agreement.queries) * layout.firstWidth +
+                publicTree +
+                publicOpenings,
         ],
         [
             'second openings',
@@ -105,15 +145,24 @@ const compileWordProverResources = (
                 folding +
                 reciprocals +
                 polynomialWorkspace +
-                3n * BigInt(2 * agreement.queries) * layout.secondWidth,
+                3n * BigInt(2 * agreement.queries) * layout.secondWidth +
+                publicTree +
+                publicOpenings,
         ],
     ].map(([stage, bytes]) => ({
         stage: stage as string,
         bytes: (bytes as bigint) + metadataAndAllocatorAllowance,
     }));
     return {
+        retainedPrivateTreeBytes: tree,
+        forgottenPrivateTreeBytes: forgottenTree,
+        retainedFoldingBytes: folding,
         preparedAdjointBytes,
         maximumHasherBytes,
+        publicPolynomial,
+        publicTree,
+        publicBuilder,
+        publicOpenings,
         metadataAndAllocatorAllowance,
         stages,
         maximumLiveBytes: stages.reduce(
@@ -130,12 +179,14 @@ export const compileBrowserWordProverResources = (
     const agreement = compileCommonAgreementDegreeCensus();
     const field = compileSmallLimbProofFieldCensus();
     const fullDegreeCommonPolynomials =
-        3n * profile.gadgetLength + BigInt(profile.participantCount) + 1n;
+        3n * profile.gadgetLength + BigInt(profile.participantCount) + 5n;
     return {
         fullDegreeCommonPolynomials,
         ...compileWordProverResources({
             columns: relation.wordColumns + relation.booleanColumns,
             lookups: relation.lookupEntries,
+            publicColumns: committedOfferColumns(profile),
+            publicLimbs: Math.ceil(profile.ciphertext.bits / 96),
             preparedAdjointBytes:
                 fullDegreeCommonPolynomials *
                 BigInt(agreement.systematicSize) *
@@ -162,6 +213,7 @@ export const compileContributionGenerationResources = (
     const privateWorkspace = 24n * degree * 16n;
     const publicWorkspace = 4n * degree * publicCoefficientAllowance;
     const generationAllowance =
+        sourceWorkingBytes +
         relation.syntheticWitnessByteLength +
         sparseData +
         transforms +
@@ -174,12 +226,14 @@ export const compileContributionGenerationResources = (
     const gadgetLength = profile.gadgetLength;
     const sharingGroupBytes =
         relation.expandedStatementByteLength -
+        sourceStatementPolynomialBytes -
         relation.expandedStatementHeaderByteLength -
         7n * gadgetLength * relation.largestPublicPolynomialByteLength;
     const sharingPolynomialBytes = sharingGroupBytes / (3n * participants + 1n);
     if (sharingPolynomialBytes * (3n * participants + 1n) !== sharingGroupBytes)
         throw new Error('Nonintegral sharing statement shape.');
     const regeneratedCommonBytes =
+        sourceCiphertextBytes +
         3n * gadgetLength * relation.largestPublicPolynomialByteLength +
         sharingPolynomialBytes;
     return {

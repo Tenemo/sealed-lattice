@@ -3,7 +3,6 @@ import {
     proofHashProfiles,
     setupFirstOracleResumeWork,
 } from '#tests/proof-hash-work-model.js';
-import { firstOracleResumeFactor } from '#tests/security-margin/reduction-work.js';
 import {
     completionProfile,
     deriveSupportedProfile,
@@ -13,9 +12,12 @@ import { formatCount, table } from '#tools/ci/census/format.js';
 
 // The largest complete-input factor of a resumed setup first-oracle leaf over
 // every supported profile.
-export const maximumFirstOracleResumeFactor = () =>
+const maximumFirstOracleResumeFactor = () =>
     listSupportedProfiles()
-        .map(firstOracleResumeFactor)
+        .map(
+            (profile) =>
+                setupFirstOracleResumeWork(profile).completeInputFactor,
+        )
         .reduce((maximum, factor) => (factor > maximum ? factor : maximum), 0n);
 
 export const renderProofHashByteAndPermutationWork = (): string[] => {

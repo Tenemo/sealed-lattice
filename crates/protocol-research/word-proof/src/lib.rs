@@ -14,6 +14,10 @@ pub(crate) mod linear_oracle;
 #[path = "linear-tests.rs"]
 mod linear_tests;
 pub mod oracles;
+#[path = "public-evaluation.rs"]
+pub mod public_evaluation;
+#[path = "public-oracle.rs"]
+pub mod public_oracle;
 pub mod rows;
 #[path = "setup-prover.rs"]
 pub mod setup_prover;

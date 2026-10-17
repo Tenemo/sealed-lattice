@@ -7,8 +7,8 @@ import {
     setupSelectionIdentityModel,
 } from '#tests/setup-selection-wire-model.js';
 
-// FIPS 204 Table 2: an ML-DSA-65 signature has 3309 bytes.
-const signatureBytes = 3309;
+// The fixed purpose signature has 131 chain values and four siblings.
+const signatureBytes = 8642;
 const roster = 'a2'.repeat(64);
 const selected = (count: number) =>
     Array.from({ length: count }, (_, position) => ({

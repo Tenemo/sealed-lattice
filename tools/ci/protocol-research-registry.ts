@@ -28,6 +28,7 @@ type ProtocolResearchSelection = {
 } & (
     | { name: keyof typeof protocolResearchCases }
     | { name: 'native-fhe-key-source' }
+    | { name: 'native-committed-offer' }
     | { name: 'native-setup-departure' | 'native-selection-fork' }
     | {
           name: 'scalar-fhe-key-source' | 'browser-fhe-key-source';
@@ -39,6 +40,20 @@ export const selectProtocolResearchCase = (
     commandLineArguments: readonly string[],
 ): ProtocolResearchSelection => {
     const values = [...toolArguments(commandLineArguments)];
+    if (values[0] === 'native-committed-offer') {
+        if (values.length !== 1)
+            throw new Error(
+                'The committed offer screen has a fixed three-participant, two-option profile.',
+            );
+        return {
+            name: 'native-committed-offer',
+            execution: true,
+            noResult: false,
+            participantCount: 3,
+            optionCount: 2,
+            simulatedHelpers: 0,
+        };
+    }
     if (
         values[0] === 'native-setup-departure' ||
         values[0] === 'native-selection-fork'

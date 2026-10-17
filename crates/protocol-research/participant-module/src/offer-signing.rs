@@ -1,9 +1,7 @@
+use parallel_work::ProtocolHash;
 use protocol_foundations::{
-    Credential, Refusal, SIGNATURE_BYTES,
-    contribution_body::{ContributionBodyHasher, ContributionBodyHeader},
-    contribution_offer::OfferEnvelope,
-    roster::RetainedContributionContext,
-    source_binding::FheKeyCommitmentHasher,
+    Credential, Refusal, SIGNATURE_BYTES, contribution_body::ContributionBodyHasher,
+    contribution_offer::OfferEnvelope, roster::RetainedContributionContext,
 };
 
 /// Original private work under the parent's authenticated one-shot offer
@@ -12,7 +10,7 @@ use protocol_foundations::{
 pub struct OfferSigning {
     context: Option<RetainedContributionContext>,
     body: Option<ContributionBodyHasher>,
-    source: Option<FheKeyCommitmentHasher>,
+    source: Option<(ProtocolHash, [u8; 64])>,
     source_matched: bool,
     envelope: Option<OfferEnvelope>,
     signature: Option<[u8; SIGNATURE_BYTES]>,
@@ -27,16 +25,14 @@ impl OfferSigning {
         credential: &Credential,
         context: RetainedContributionContext,
         header: &[u8],
+        original_coordinate: [u8; 64],
     ) -> Result<(), Refusal> {
         if self.context.is_some() || self.failed {
             return Err(Refusal::Consumed);
         }
         credential.validate_offer_owner(&context)?;
-        let decoded = ContributionBodyHeader::decode(context.profile(), header)?;
-        let source =
-            FheKeyCommitmentHasher::for_retained(&context, credential, &decoded.source_salt)?;
         self.body = Some(ContributionBodyHasher::new(context.profile(), header)?);
-        self.source = Some(source);
+        self.source = Some((ProtocolHash::new(), original_coordinate));
         self.context = Some(context);
         Ok(())
     }
@@ -54,15 +50,16 @@ impl OfferSigning {
                 self.source
                     .as_mut()
                     .ok_or(Refusal::Consumed)?
-                    .push(offset, bytes)?;
+                    .0
+                    .update(bytes);
                 if offset + bytes.len()
                     == context
                         .profile()
                         .setup_polynomial_bytes(index)
                         .ok_or(Refusal::Shape)?
                 {
-                    let actual = self.source.take().ok_or(Refusal::Consumed)?.finish()?;
-                    if &actual != context.fhe_key_commitment() {
+                    let (hash, expected) = self.source.take().ok_or(Refusal::Consumed)?;
+                    if hash.finalize() != expected {
                         return Err(Refusal::Context);
                     }
                     self.source_matched = true;

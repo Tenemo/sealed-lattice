@@ -7,10 +7,6 @@ use crate::{
     poll::VerifiedPoll,
     roster::RetainedContributionContext,
 };
-use fips204::{
-    ml_dsa_65,
-    traits::{SerDes, Verifier},
-};
 use supported_profile::Profile;
 
 pub(crate) const BALLOT_SIGNATURE_CONTEXT: &[u8] = b"sealed-lattice/ballot-envelope";
@@ -272,9 +268,8 @@ impl Credential {
         {
             return Err(Refusal::Context);
         }
-        let signature = signature.try_into().map_err(|_| Refusal::Shape)?;
-        let public = ml_dsa_65::PublicKey::try_from_bytes(self.signing_public)
-            .map_err(|_| Refusal::Shape)?;
+        let signature: [u8; SIGNATURE_BYTES] = signature.try_into().map_err(|_| Refusal::Shape)?;
+        let public = crate::authentication::PublicKey::from_bytes(self.signing_public);
         if !public.verify(envelope.bytes(), &signature, BALLOT_SIGNATURE_CONTEXT) {
             return Err(Refusal::Crypto);
         }
@@ -312,9 +307,7 @@ pub fn verify_ballot_signature(
     let Ok(signature) = <[u8; SIGNATURE_BYTES]>::try_from(signature) else {
         return false;
     };
-    let Ok(public) = ml_dsa_65::PublicKey::try_from_bytes(record.header().signing_public) else {
-        return false;
-    };
+    let public = crate::authentication::PublicKey::from_bytes(record.header().signing_public);
     public.verify(envelope.bytes(), &signature, BALLOT_SIGNATURE_CONTEXT)
 }
 

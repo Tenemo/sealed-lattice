@@ -2,12 +2,16 @@
 
 pub mod affine;
 pub mod coefficient;
+#[path = "committed-polynomial.rs"]
+pub mod committed_polynomial;
 mod jobs;
 pub mod negacyclic;
 #[path = "proof-field.rs"]
 pub mod proof_field;
 mod query;
 mod setup;
+#[path = "source-linked.rs"]
+pub mod source_linked;
 use coefficient::CenteredCodec;
 use proof_field::{Columns, MODULUS, add, multiply, subtract};
 pub use setup::{

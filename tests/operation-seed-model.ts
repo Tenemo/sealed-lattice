@@ -12,7 +12,8 @@ import type { SupportedProfile } from '#tests/supported-profile-model.js';
 // ballot or a release is SHAKE256 output over its stream's domain and one
 // 512-bit seed that the participant's root retains before the operation
 // draws any byte. Its original FHE secret and first encryption error instead
-// come from a separately retained registration source seed.
+// come from a separately retained registration source seed. Source generation
+// and its encryption use two purpose-separated streams of that same seed.
 export const operationSeedBytes = 64n;
 
 // The maximum seeds of one roster: each eligible contributor's
@@ -57,9 +58,9 @@ export const compilePrivateRandomnessScopes = (
         2n * contributionIntents + ballotIntents + releaseIntents;
     const domains = [
         {
-            domain: 'sealed-lattice/fhe-source-randomness',
-            initialized: registrationSourceEntries,
-            read: registrationSourceEntries,
+            domain: 'sealed-lattice/source-private/v1',
+            initialized: 2n * registrationSourceEntries,
+            read: 2n * registrationSourceEntries,
         },
         {
             domain: 'sealed-lattice/contribution-witness-randomness',

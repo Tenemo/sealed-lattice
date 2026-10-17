@@ -7,8 +7,8 @@ import {
     compileClassicalReaderOracleBudget,
     compileClassicalXofReaderBudget,
     shakePermutationGateCharge,
+    shakeQueryPermutations,
 } from '#tests/oracle-budget-model.js';
-import { shadowOracleDomainWork } from '#tests/oracle-domain-model.js';
 
 const prefixCache = (
     suppliedInput: Buffer,
@@ -220,7 +220,7 @@ describe('classical XOF reader prefix caching', () => {
         expect(original.reader.read(1)).not.toEqual(newEpoch.reader.read(1));
     });
 
-    it('covers the actual prefix-query circuits beside complete-input calls without pricing other work as free', () => {
+    it('bounds mixed complete-input and shared-reader permutations separately from routing work', () => {
         const readers = [
             { input: 135n * 8n, output: 65537n * 8n, rate: 1088n as const },
             { input: 2048n * 8n, output: 100000n * 8n, rate: 1088n as const },
@@ -230,8 +230,6 @@ describe('classical XOF reader prefix caching', () => {
                 count: 7n,
                 inputCapacity: 19n,
                 outputCapacity: 3n,
-                activeShadows: [0],
-                replacements: [],
             },
         ];
         let reference = 7n;
@@ -248,28 +246,30 @@ describe('classical XOF reader prefix caching', () => {
                     count: 1n,
                     inputCapacity: reader.input,
                     outputCapacity: capacity,
-                    activeShadows: [0],
-                    replacements: [],
                 });
                 capacity *= 2n;
             }
         }
         const bound = compileClassicalReaderOracleBudget(
             reference * shakePermutationGateCharge,
-            512n,
+        );
+        const actual = runs.reduce(
+            (total, run) =>
+                total +
+                run.count *
+                    shakeQueryPermutations(
+                        run.inputCapacity,
+                        run.outputCapacity,
+                        1088n,
+                    ),
             0n,
-            1n,
         );
-        const actual = shadowOracleDomainWork(runs, 512n, [5n]);
-        expect(actual.queryGates).toBeLessThanOrEqual(
-            bound.shadowQueryGatesUpperBound,
-        );
+        expect(actual).toBeLessThanOrEqual(bound.maximumLengthPermutations);
         expect(bound.maximumLogicalQueries).toBe(reference);
         expect(bound.maximumLengthPermutations).toBe(5n * reference);
         expect(
-            compileClassicalReaderOracleBudget(0n, 512n)
-                .shadowQueryGatesUpperBound,
+            compileClassicalReaderOracleBudget(0n).maximumLengthPermutations,
         ).toBe(0n);
-        expect(() => compileClassicalReaderOracleBudget(-1n, 512n)).toThrow();
+        expect(() => compileClassicalReaderOracleBudget(-1n)).toThrow();
     });
 });

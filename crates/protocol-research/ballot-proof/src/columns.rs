@@ -3,7 +3,7 @@ use ballot_encryption::{
     packing::PackingWitness,
 };
 use supported_profile::{
-    AUXILIARY_DEGREE, DEGREE, Profile, SETUP_ERROR_BITS, WORD_BITS,
+    AUXILIARY_DEGREE, DEGREE, PLAINTEXT_MODULUS, Profile, SETUP_ERROR_BITS, WORD_BITS,
     relation::{BallotColumns, ballot_relation},
 };
 use zeroize::Zeroizing;
@@ -61,16 +61,16 @@ pub(crate) fn from_parts(
     {
         return Err(Refusal);
     }
-    // The packed plaintext offset by half a word takes a word and one high
-    // bit.
-    let word = 1i32 << WORD_BITS;
+    // Two nonnegative words whose sum is p - 1 enforce the centered interval.
+    let plaintext_offset = (PLAINTEXT_MODULUS / 2) as i32;
     for position in 0..DEGREE {
-        let shifted = packing.message()[position] + word_offset;
-        if !(0..=word).contains(&shifted) {
+        let shifted = packing.message()[position] + plaintext_offset;
+        if !(0..PLAINTEXT_MODULUS as i32).contains(&shifted) {
             return Err(Refusal);
         }
-        columns[layout.plaintext()][position] = (shifted % word) as u16;
-        columns[layout.plaintext_high_bit()][position] = (shifted / word) as u16;
+        columns[layout.plaintext()][position] = shifted as u16;
+        columns[layout.plaintext_complement()][position] =
+            (PLAINTEXT_MODULUS as i32 - 1 - shifted) as u16;
         columns[layout.packing_quotient()][position] = signed_word(packing.quotients()[position]);
         columns[layout.fhe_positive()][position] = u16::from(fhe.ephemeral[position] == 1);
         columns[layout.fhe_positive() + 1][position] = u16::from(fhe.ephemeral[position] == -1);

@@ -38,7 +38,7 @@ import {
     aggregateSelection,
     authenticateCertificate,
     authenticateSelection,
-    modulesWithReplayedRoster,
+    rosterRegistrationCandidates,
     readSetupCertificate,
     verifyCertificateInputs,
 } from './setup-verification.js';
@@ -56,7 +56,7 @@ export const verifySetupRoster = async (
 ) => {
     const { context } = session;
     const { module, profile } = context;
-    if (modulesWithReplayedRoster.has(module)) return;
+    if (rosterRegistrationCandidates.has(module)) return;
     const { manifest } = session.root;
     const proposal = await readDataKind(
         context,
@@ -86,7 +86,7 @@ export const verifySetupRoster = async (
     writeSetupInput(module, begin);
     if (module.setup_roster_begin(begin.length) !== 0)
         throw new Error('The setup verifier refused the retained poll.');
-    await streamRegistrations(
+    const registrationCandidates = await streamRegistrations(
         relay,
         registrationBodyDigests,
         profile.registration,
@@ -119,7 +119,7 @@ export const verifySetupRoster = async (
         throw new PublicInputFailure(
             'The published registrations are not the retained proposal.',
         );
-    modulesWithReplayedRoster.add(module);
+    rosterRegistrationCandidates.set(module, registrationCandidates);
 };
 
 export const verifySelectionInputs = async (
@@ -130,6 +130,11 @@ export const verifySelectionInputs = async (
 ) => {
     await verifySetupRoster(session, relay);
     const selection = authenticateSelection(session.context, packet, retained);
+    if (
+        session.context.module.setup_inputs_available() === 1 &&
+        (await holdsFinalAggregate(session.context))
+    )
+        return selection;
     await aggregateSelection(session.context, relay, selection);
     return selection;
 };
@@ -227,7 +232,7 @@ export const ensureFinalAggregate = async (
     if (await holdsFinalAggregate(session.context)) return false;
     // A cache loss can also occur after certification in this same operation.
     // Rebuild from fresh owning verification, not an existing aggregate flag.
-    modulesWithReplayedRoster.delete(session.context.module);
+    rosterRegistrationCandidates.delete(session.context.module);
     await verifySetupRoster(session, relay);
     const certificate = await readDataKind(
         session.context,

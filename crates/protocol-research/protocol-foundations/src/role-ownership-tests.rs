@@ -38,13 +38,15 @@ fn signed_registration(
 ) -> (VerifiedRegistration, [u8; SIGNATURE_BYTES]) {
     let mut key = vec![0; KEY_BYTES];
     key[1] = body;
+    let (source_bindings, sources) =
+        crate::tests::registration_sources(poll, credential.signing_public());
     let header = RegistrationHeader {
         username: normalize_username(format!("Participant {body}").as_bytes()).unwrap(),
         poll: poll.identity(),
         signing_public: *credential.signing_public(),
         recipient_key_hash: ProtocolHash::digest(&key),
 
-        fhe_key_commitments: vec![[7; 64]; crate::source_binding::fhe_key_families(poll).len()],
+        source_bindings,
     }
     .encode()
     .unwrap();
@@ -55,6 +57,9 @@ fn signed_registration(
         verifier.push_key(chunk).unwrap();
     }
     verifier.finish_key().unwrap();
+    for chunk in sources.chunks(CHUNK_LIMIT) {
+        verifier.push_sources(chunk).unwrap();
+    }
     (verifier.finish().unwrap(), signature)
 }
 
@@ -80,7 +85,7 @@ fn custody_fixture_with_size(runtime: [u8; 64], nonce: u8, participants: usize) 
     )
     .unwrap();
     let mut credentials: Vec<_> = (1..=participants as u8)
-        .map(|seed| Credential::from_seed([seed; 32]))
+        .map(|seed| Credential::from_seed([seed; 64]))
         .collect();
     let packet = credentials[0]
         .create_poll(draft, runtime, [nonce; 32])
@@ -135,7 +140,7 @@ fn clear_preparation_purposes_share_one_original_confirmed_roster() {
     );
     // A corrupt organizer can authenticate another roster; that does not
     // let an honest member split its preparation purposes between them.
-    let mut equivocator = Credential::from_seed([1; 32]);
+    let mut equivocator = Credential::from_seed([1; 64]);
     equivocator.completed_body = Some(foreign.records()[0].body_digest());
     let signature = equivocator.sign_roster_proposal(&foreign).unwrap();
     let foreign =
@@ -453,6 +458,13 @@ fn verify_roster(fixture: &CustodyFixture) -> RosterProposal {
             verifier.push_key(position, chunk).unwrap();
         }
         verifier.finish_key(position).unwrap();
+        let (_, sources) = crate::tests::registration_sources(
+            &fixture.poll,
+            fixture.credentials[position].signing_public(),
+        );
+        for chunk in sources.chunks(65_537) {
+            verifier.push_sources(position, chunk).unwrap();
+        }
         verifier.finish_record(position).unwrap();
     }
     verifier.finish().unwrap()
@@ -503,8 +515,8 @@ fn contribution_roles_retain_the_original_owner_across_roster_verification_and_c
             role
         );
         assert_eq!(
-            context.fhe_key_commitment(),
-            fixture.proposal.fhe_key_commitment(position).unwrap()
+            context.source_binding(),
+            fixture.proposal.source_binding(position).unwrap()
         );
         assert_eq!(
             context
@@ -541,7 +553,7 @@ fn retained_context_refuses_other_original_owners_and_positions_before_signing()
     }
     // The same signing key without the original completed enrollment, or
     // after completing another body, must not impersonate that original.
-    let mut same_key = Credential::from_seed([1; 32]);
+    let mut same_key = Credential::from_seed([1; 64]);
     assert!(matches!(
         RetainedContributionContext::parse(
             &same_key,
@@ -702,4 +714,25 @@ fn checkpoint_roles_refuse_changed_routing_position_and_profile() {
             .unwrap(),
         fixture.proposal.contribution_role(1).unwrap()
     );
+}
+#[test]
+fn contribution_role_encoding_fits_every_original_position() {
+    let owner = crate::foundation::participant_identity::derive_participant_identity(
+        &[7; crate::SIGNING_PUBLIC_KEY_BYTES],
+    )
+    .unwrap();
+    let original = crate::roster::encode_contribution_role([1; 64], [3; 64], 0, owner).unwrap();
+    assert!(original.len() <= 1024);
+    let maximum = *supported_profile::Profile::participant_range().end();
+    for position in 0..maximum {
+        let role =
+            crate::roster::encode_contribution_role([1; 64], [3; 64], position, owner).unwrap();
+        assert_eq!(role.len(), original.len());
+        if position != 0 {
+            assert_ne!(role, original);
+        }
+    }
+    assert!(crate::roster::encode_contribution_role([1; 64], [3; 64], maximum, owner).is_err());
+    assert!(crate::roster::encode_contribution_role([1; 64], [3; 64], usize::MAX, owner).is_err());
+    println!("Role encoding contribution: {} bytes", original.len());
 }

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 
+import { auxiliaryInputEncryptionParameters } from '#tests/auxiliary-input-encryption-parameters.js';
 import { isCanonicalCenteredPolynomial } from '#tests/canonical-polynomial-model.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import {
@@ -491,11 +492,94 @@ export const createSetupContributionRelationModel = (
         decryptedShares.push(recovered);
         expectedShares.push(message);
     }
+    const baseEquationCount = equations.length;
+    const baseSupportCount = supportRows.length;
+    const sourceEphemeral = sparse('source encryption', degree / 2);
+    // Honest sampling embeds the auxiliary ring. The relation's support
+    // sums range over the full ambient columns, including hostile positions.
+    for (const row of supportRows.slice(baseSupportCount)) {
+        const column = row.terms[0].column;
+        row.terms = Array.from({ length: degree }, (_unused, position) => ({
+            column,
+            position,
+            factor: 1n,
+        }));
+    }
+    const sourceVariable = { ...sourceEphemeral.variable, stride: 1 };
+    const sourceValues = Array.from({ length: degree }, (_unused, index) =>
+        index % 2 === 0 ? sourceEphemeral.values[index / 2] : 0n,
+    );
+    const originalError = equations[0].error;
+    const readVariable = (variable: Variable, position: number) =>
+        variable.terms.reduce(
+            (value, term) =>
+                value +
+                term.factor *
+                    columns[term.column].values[position * variable.stride],
+            variable.offset,
+        );
+    const sourceModulus = auxiliaryInputEncryptionParameters.modulus;
+    const sourceScale = auxiliaryInputEncryptionParameters.scale;
+    for (let component = 0; component < 4; component++) {
+        const common = publicPolynomial(sourceModulus);
+        const error = errors();
+        const message = Array.from({ length: degree }, (_unused, position) =>
+            component === 0
+                ? secret.values[position] + 1n
+                : component === 2
+                  ? readVariable(originalError, position) + 64n
+                  : 0n,
+        );
+        const product = convolution(common, sourceValues);
+        const raw = product.map(
+            (value, position) =>
+                value + sourceScale * message[position] + error[position],
+        );
+        const ciphertext = raw.map((value) => center(value, sourceModulus));
+        addEquation(
+            `encrypted-source-${component}`,
+            {
+                modulus: sourceModulus,
+                degree,
+                publicValue: ciphertext,
+                publicSign: -1n,
+                convolution: [
+                    { publicCoefficients: common, variable: sourceVariable },
+                ],
+                direct:
+                    component === 0
+                        ? [{ variable: secret.variable, factor: sourceScale }]
+                        : component === 2
+                          ? [{ variable: originalError, factor: sourceScale }]
+                          : [],
+                offset: Array.from({ length: degree }, () =>
+                    component === 0
+                        ? sourceScale
+                        : component === 2
+                          ? 64n * sourceScale
+                          : 0n,
+                ),
+                errorSign: 1n,
+                limbs: 1,
+                radix: fheRadix,
+            },
+            raw.map((value, position) => value - ciphertext[position]),
+            error,
+            setupEquationWidths.fheCarryBits,
+        );
+    }
+    const appendedSourceRows = () => [
+        ...equations
+            .slice(baseEquationCount)
+            .flatMap((equation) => compileSetupEquation(equation, degree)),
+        ...supportRows.slice(baseSupportCount),
+    ];
     const rows = () => [
-        ...equations.flatMap((equation) =>
-            compileSetupEquation(equation, degree),
-        ),
-        ...supportRows,
+        ...equations
+            .slice(0, baseEquationCount)
+            .flatMap((equation) => compileSetupEquation(equation, degree)),
+        ...supportRows.slice(0, baseSupportCount),
+        ...appendedSourceRows(),
     ];
     const verify = () =>
         equations.every((equation) =>
@@ -530,12 +614,23 @@ export const createSetupContributionRelationModel = (
         rows,
         transpose: (alpha: bigint) =>
             transposeSetupRelation(
-                { degree, limbs, columns, equations, supportRows },
+                {
+                    degree,
+                    limbs,
+                    columns,
+                    equations: equations.slice(0, baseEquationCount),
+                    supportRows: [
+                        ...supportRows.slice(0, baseSupportCount),
+                        ...appendedSourceRows(),
+                    ],
+                },
                 alpha,
             ),
         evaluateRow,
         verify,
         decryptedShares,
         expectedShares,
+        sourceEquations: equations.slice(baseEquationCount),
+        sourceEphemeral: sourceVariable,
     };
 };

@@ -7,11 +7,11 @@ import { bitLength, ceilingDivide } from '#tests/exact-integer.js';
 // rules.
 export const fixedModulusBfvInputs = {
     polynomialDegree: 65536n,
-    plaintextSubringDegree: 32768n,
-    plaintextModulus: 65537n,
+    plaintextSubringDegree: 2048n,
+    plaintextModulus: 12289n,
     secretSupportWeight: 1024n,
     errorBound: 64n,
-    gadgetBase: 1n << 144n,
+    gadgetBase: 1n << 88n,
     comparisonBlockWidth: 16,
     statisticalBits: 96,
 } as const;
@@ -28,6 +28,7 @@ type NoiseParameters = Readonly<{
     errorBound: bigint;
     gadgetBase: bigint;
     quantization?: 'scale-then-round' | 'round-then-scale';
+    publicPlaintextSubringDegree: bigint;
 }>;
 type BfvNoiseValue = Readonly<{ error: bigint; depth: number }>;
 
@@ -74,6 +75,15 @@ export const createFixedModulusBfvNoiseModel = (
     const secretOneNorm = setupContributorCount * secretSupportWeight;
     const plaintextMaximumNorm = plaintextModulus / 2n;
     const plaintextOneNorm = plaintextSubringDegree * plaintextMaximumNorm;
+    const publicPlaintextOneNorm =
+        parameters.publicPlaintextSubringDegree * plaintextMaximumNorm;
+    assert(
+        parameters.publicPlaintextSubringDegree > 0n &&
+            parameters.publicPlaintextSubringDegree <= plaintextSubringDegree,
+    );
+    const publicPlaintextProductQuotient =
+        (publicPlaintextOneNorm * plaintextMaximumNorm + plaintextMaximumNorm) /
+        plaintextModulus;
     const plaintextProductMaximumNorm = plaintextOneNorm * plaintextMaximumNorm;
     const plaintextProductQuotient =
         (plaintextProductMaximumNorm + plaintextMaximumNorm) / plaintextModulus;
@@ -180,8 +190,8 @@ export const createFixedModulusBfvNoiseModel = (
         return requireDecodable({
             ...value,
             error:
-                plaintextOneNorm * value.error +
-                remainderMagnitude * plaintextProductQuotient,
+                publicPlaintextOneNorm * value.error +
+                remainderMagnitude * publicPlaintextProductQuotient,
         });
     };
     const rotate = (value: BfvNoiseValue): BfvNoiseValue => {

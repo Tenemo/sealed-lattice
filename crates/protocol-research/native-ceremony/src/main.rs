@@ -1,6 +1,8 @@
 mod aggregate;
 mod ballots;
 mod close;
+#[path = "committed-offer.rs"]
+mod committed_offer;
 mod completion;
 mod contribution;
 mod enrollment;
@@ -47,13 +49,23 @@ fn main() {
             || (arguments.len() == 6
                 && matches!(
                     arguments[5].as_str(),
-                    "empty" | "invalid-only" | "setup-departure" | "selection-fork"
+                    "empty"
+                        | "invalid-only"
+                        | "setup-departure"
+                        | "selection-fork"
+                        | "committed-offer"
                 ))
     );
     let scratch = PathBuf::from(&arguments[2]);
     assert!(scratch.is_dir());
     let profile =
         Profile::new(arguments[3].parse().unwrap(), arguments[4].parse().unwrap()).unwrap();
+    if arguments
+        .get(5)
+        .is_some_and(|mode| mode == "committed-offer")
+    {
+        assert_eq!(profile, Profile::new(3, 2).unwrap());
+    }
     let scenario = if arguments
         .get(5)
         .is_some_and(|mode| mode == "setup-departure")
@@ -93,6 +105,23 @@ fn main() {
     let roster = Arc::new(authenticate_roster_proposal(proposal, &proposal_signature).unwrap());
     println!("Verified original enrollment roster");
     let mut enrollments = OriginalEnrollments::new(enrollments);
+    if arguments
+        .get(5)
+        .is_some_and(|mode| mode == "committed-offer")
+    {
+        let authors: Vec<_> = (0..profile.setup_contributors()).collect();
+        selection::run(
+            &output,
+            &poll,
+            roster,
+            &mut enrollments,
+            &authors,
+            None,
+            false,
+        );
+        println!("Verified the committed setup and its complete certificate");
+        return;
+    }
     if let Some(position) = scenario.departed {
         // No future message or private operation can access this authority.
         enrollments.depart(position);
@@ -134,10 +163,10 @@ fn main() {
         enrollment.retire_sources();
         enrollment.credential.retire_preparation();
         assert!(enrollment.sources_retired());
-        assert!(enrollment.contribution_source(profile).is_err());
+        assert!(enrollment.contribution_source(&poll, profile).is_err());
         assert!(
             enrollment
-                .contribution_header(profile, supported_profile::relation::PROOF_HEADER_BYTES)
+                .contribution_coordinate_hash(&poll, profile)
                 .is_err()
         );
     }

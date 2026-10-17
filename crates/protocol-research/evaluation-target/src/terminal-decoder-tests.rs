@@ -8,34 +8,35 @@ fn profiles() -> Vec<Profile> {
         .collect()
 }
 // Direct evaluation-basis interpolation, independent of the decoder's NTT.
-// A nonzero evaluation at z contributes z^(-j)/32768 to coefficient j.
+// A nonzero evaluation at z contributes z^(-j)/2048 to the embedded
+// coefficient j. The primitive 4096-th root is 11^3 modulo 12289.
 fn encode_evaluations(entries: &[(usize, u32)]) -> Vec<u32> {
-    let modulus = BigInt::from(65_537u32);
-    let inverse_length = 65_535u64;
+    let modulus = BigInt::from(12_289u32);
+    let inverse_length = 12_283u64;
     let mut coefficients = vec![0u32; 65_536];
     for (index, value) in entries {
-        let root = BigInt::from(3u32).modpow(&BigInt::from(2 * index + 1), &modulus);
+        let root = BigInt::from(1_331u32).modpow(&BigInt::from(2 * index + 1), &modulus);
         let inverse = root
-            .modpow(&BigInt::from(65_535u32), &modulus)
+            .modpow(&BigInt::from(12_287u32), &modulus)
             .to_u64_digits()
             .1[0];
-        let mut term = u64::from(*value) * inverse_length % 65_537;
-        for coefficient in coefficients.iter_mut().step_by(2) {
-            *coefficient = ((u64::from(*coefficient) + term) % 65_537) as u32;
-            term = term * inverse % 65_537;
+        let mut term = u64::from(*value) * inverse_length % 12_289;
+        for coefficient in coefficients.iter_mut().step_by(32) {
+            *coefficient = ((u64::from(*coefficient) + term) % 12_289) as u32;
+            term = term * inverse % 12_289;
         }
     }
     coefficients
 }
 fn evaluation_index(slot: usize) -> usize {
     let exponent = BigInt::from(5u32)
-        .modpow(&BigInt::from(slot), &BigInt::from(65_536u32))
+        .modpow(&BigInt::from(slot), &BigInt::from(4_096u32))
         .to_u64_digits()
         .1[0] as usize;
     (exponent - 1) / 2
 }
 fn slot(profile: Profile, option: usize, rank: usize) -> usize {
-    (option * profile.options() + rank) * profile.rank_window()
+    (option * profile.rank_window() + 1_024 - rank) % 1_024
 }
 fn entries(profile: Profile, order: &[usize]) -> Vec<(usize, u32)> {
     order
@@ -92,7 +93,7 @@ fn decoder_rejects_extra_values_missing_ranks_and_noncanonical_polynomials() {
         variants.push(missing);
         for extra in [
             (evaluation_index(1), 1),
-            (evaluation_index(options * options * window), 1),
+            (evaluation_index(options * window), 1),
             // Root exponent 3 belongs to the complementary packing orbit.
             (1, 1),
             (original[0].0, 1),
@@ -109,7 +110,7 @@ fn decoder_rejects_extra_values_missing_ranks_and_noncanonical_polynomials() {
             assert!(selected_positions(profile, &encode_evaluations(&changed), options).is_err());
         }
         let valid = encode_evaluations(&original);
-        for (index, value) in [(1, 1), (0, 65_537)] {
+        for (index, value) in [(1, 1), (2, 1), (16, 1), (31, 1), (0, 12_289)] {
             let mut changed = valid.clone();
             changed[index] = value;
             assert!(selected_positions(profile, &changed, options).is_err());
@@ -124,13 +125,18 @@ fn decoder_rejects_extra_values_missing_ranks_and_noncanonical_polynomials() {
 // Direct evaluation at one packing slot, independent of every transform.
 fn slot_value(coefficients: &[u32], slot: usize) -> u32 {
     let exponent = BigInt::from(5u32)
-        .modpow(&BigInt::from(slot), &BigInt::from(65_536u32))
+        .modpow(&BigInt::from(slot % 1_024), &BigInt::from(4_096u32))
         .to_u64_digits()
         .1[0] as u32;
-    let point = u64::from(power(3, exponent));
+    let exponent = if slot < 1_024 {
+        exponent
+    } else {
+        4_096 - exponent
+    };
+    let point = u64::from(power(1_331, exponent));
     coefficients
         .iter()
-        .step_by(2)
+        .step_by(32)
         .rev()
         .fold(0u64, |sum, value| {
             (sum * point + u64::from(*value)) % u64::from(PLAINTEXT_MODULUS)
@@ -168,38 +174,26 @@ fn packed_ballots_decode_through_every_requested_result_length() {
                 i64::from(value)
             }
         };
-        // Every rank window the evaluator reads holds the same
-        // comparisons, whatever result length the poll requests.
+        // Each option has one comparison window. The other orbit holds
+        // the literal scores used by the linked ballot relation.
         let mut ranks = vec![0; options];
         for option in 0..options {
-            for rank in [0, options - 1] {
-                let mut ahead = 0;
-                for lane in 0..window {
-                    let difference = centered(slot_value(&sum, slot(profile, option, rank) + lane));
-                    let expected = if lane < options {
-                        2 * (totals[lane] - totals[option])
-                    } else {
-                        0
-                    };
-                    assert_eq!(
-                        difference, expected,
-                        "option={option}, rank={rank}, lane={lane}"
-                    );
-                    // The evaluator's tie bias favours the lower opponent.
-                    let bias = if lane < option { 1 } else { -1 };
-                    ahead += usize::from(difference + bias > 0);
-                }
-                if rank == 0 {
-                    ranks[option] = ahead;
-                }
-                assert_eq!(ahead, ranks[option]);
+            let mut ahead = 0;
+            for lane in 0..window {
+                let difference = centered(slot_value(&sum, option * window + lane));
+                let expected = if lane < options {
+                    2 * (totals[lane] - totals[option])
+                } else {
+                    0
+                };
+                assert_eq!(difference, expected, "option={option}, lane={lane}");
+                let bias = if lane < option { 1 } else { -1 };
+                ahead += usize::from(difference + bias > 0);
             }
-            assert_eq!(
-                i64::from(slot_value(&sum, options * options * window + option)),
-                totals[option]
-            );
+            ranks[option] = ahead;
+            assert_eq!(i64::from(slot_value(&sum, 1_024 + option)), totals[option]);
         }
-        for padding in [options * options * window + options, 16_383] {
+        for padding in [options * window, 1_023, 1_024 + options, 2_047] {
             assert_eq!(slot_value(&sum, padding), 0);
         }
         let mut order: Vec<usize> = (0..options).collect();

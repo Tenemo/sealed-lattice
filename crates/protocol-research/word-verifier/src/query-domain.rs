@@ -98,6 +98,7 @@ impl Coset {
 }
 
 pub(super) struct Point {
+    pub(super) value: u128,
     pub(super) inverse: u128,
     pub(super) vanishing: u128,
     pub(super) inverse_vanishing: u128,
@@ -112,6 +113,7 @@ impl Point {
         let coset = Coset::get();
         let index = index as u64;
         Self {
+            value: multiply_base(7, coset.root_power(index)),
             inverse: multiply_base(
                 coset.inverse_shift,
                 coset.root_power(EVALUATION_DOMAIN_SIZE as u64 - index),
@@ -130,11 +132,25 @@ impl Point {
         }
     }
     pub(super) fn weight(&self, shape: &Shape, challenges: &Challenges, index: usize) -> Element {
+        if index >= shape.word_oracles {
+            let shift = multiply_base(
+                super::add_base(self.vanishing, 1),
+                if (index - shape.word_oracles).is_multiple_of(2) {
+                    1
+                } else {
+                    self.value
+                },
+            );
+            return add(
+                challenges.combination[2 * index],
+                scale(challenges.combination[2 * index + 1], shift),
+            );
+        }
         let class = if index < shape.original - 1 {
             0
-        } else if index == shape.original - 1 || index == shape.oracles - 2 {
+        } else if index == shape.original - 1 || index == shape.word_oracles - 2 {
             1
-        } else if index == shape.oracles - 1 {
+        } else if index == shape.word_oracles - 1 {
             3
         } else {
             2

@@ -18,7 +18,7 @@ import {
     tupleFields,
     unsigned16,
 } from '../../shared/bytes.js';
-import { PublicInputFailure } from '../../shared/failures.js';
+import { PublicInputFailure, StorageFailure } from '../../shared/failures.js';
 import {
     decodeSignedPacket,
     encodeSignedPacket,
@@ -30,25 +30,28 @@ import type { PreparationEndorsement } from '../contribution/preparation-state.j
 import type { ParticipantSession } from '../participant-session.js';
 import { commitPreparation } from '../participant-session.js';
 
+import { openSetupCache } from './setup-cache.js';
+import {
+    readDiscoveryProgress,
+    saveDiscoveryProgress,
+    writeCollection,
+} from './setup-collection-cache.js';
+import {
+    collectOffer,
+    fullOfferReadBytes,
+    publishCollectedAggregate,
+    resumeCollection,
+    setupDownloadFits,
+} from './setup-collection.js';
+import { selectionOperation } from './setup-public-work.js';
 import {
     authenticateSelection,
     endorsementCandidateKey,
     readSelection,
     setupOutput,
-    verifyOffer,
 } from './setup-verification.js';
 import type { SelectedOffer } from './setup-verification.js';
 import { verifySelectionInputs, verifySetupRoster } from './setup.js';
-
-// The original preparation signer's operations, as the module numbers them.
-const selectionOperation = {
-    unsignedBody: 0,
-    signProposal: 1,
-    endorse: 2,
-    restoreProposal: 3,
-    restoreEndorsement: 4,
-    endorsementBody: 5,
-} as const;
 
 const selectionCommand = (
     session: ParticipantSession,
@@ -106,10 +109,25 @@ const buildOriginalSelection = (
     return actual;
 };
 
+const publishSelection = async (
+    session: ParticipantSession,
+    relay: PublicRelay,
+    retained: SignedPacket,
+) => {
+    const publication = createCandidatePublication(
+        relay,
+        'selection',
+        await openDelivery(session.context, session.root),
+    );
+    await publication.addBytes('selection.bin', retained.body);
+    await publication.addBytes('signature.bin', retained.signature);
+    await publication.finish();
+};
+
 export const selectSetup = async (
     session: ParticipantSession,
     relay: PublicRelay,
-) => {
+): Promise<boolean> => {
     if (session.root.head.generation !== rootGeneration.preparation)
         throw new Error('No confirmed roster permits setup selection.');
     await verifySetupRoster(session, relay);
@@ -120,63 +138,128 @@ export const selectSetup = async (
             selectionOperation.restoreProposal,
             encodeSignedPacket(retained),
         );
-    } else {
-        const offers: SelectedOffer[] = [];
-        if (retained !== undefined) {
-            offers.push(...originalSelectedOffers(session, retained.body));
-            for (const offer of offers)
-                await verifyOffer(session.context, relay, offer);
-        } else {
-            const profile = session.context.profile;
-            offers.push(
-                ...(await discoverContributionOffers(
-                    profile.eligibleContributorCount,
-                    profile.setupContributorCount,
+        authenticateSelection(session.context, retained, true);
+        if (session.preparation.endorsement !== undefined) {
+            await publishSelection(session, relay, retained);
+            await endorseSetup(session, relay, retained);
+            return true;
+        }
+    }
+    const cache = await openSetupCache(session.context.namespace);
+    try {
+        const required =
+            retained === undefined
+                ? undefined
+                : originalSelectedOffers(session, retained.body);
+        const offers = await resumeCollection(session, cache, required);
+        if (required !== undefined) {
+            for (const offer of required) {
+                if (
+                    offers.some(
+                        (known) =>
+                            known.position === offer.position &&
+                            equalBytes(known.identity, offer.identity),
+                    )
+                )
+                    continue;
+                if (!setupDownloadFits(fullOfferReadBytes(session.context)))
+                    return false;
+                await collectOffer(session, relay, cache, offers, offer);
+            }
+        } else if (
+            offers.length < session.context.profile.setupContributorCount
+        ) {
+            try {
+                await discoverContributionOffers(
+                    session.context.profile.eligibleContributorCount,
+                    session.context.profile.setupContributorCount,
                     (position, offset) =>
                         readOfferAnnouncements(relay, position, offset),
-                    (offer) => verifyOffer(session.context, relay, offer),
-                )),
-            );
+                    (offer) =>
+                        collectOffer(session, relay, cache, offers, offer),
+                    {
+                        completed: offers,
+                        mayContinue: () =>
+                            setupDownloadFits(
+                                fullOfferReadBytes(session.context),
+                            ),
+                        progress: await readDiscoveryProgress(
+                            cache,
+                            session.context.profile.eligibleContributorCount,
+                        ),
+                        saveProgress: (progress) =>
+                            saveDiscoveryProgress(cache, progress),
+                    },
+                );
+            } catch (error) {
+                if (error instanceof PublicInputFailure)
+                    await writeCollection(cache, (store) =>
+                        store.delete('discovery'),
+                    );
+                throw error;
+            }
         }
-        const body = buildOriginalSelection(session, offers);
-        if (retained === undefined) {
+        if (offers.length < session.context.profile.setupContributorCount)
+            return false;
+        if (retained?.stage !== 'signed') {
+            const body = buildOriginalSelection(
+                session,
+                [...offers].sort(
+                    (left, right) => left.position - right.position,
+                ),
+            );
+            if (retained === undefined) {
+                await commitPreparation(session, {
+                    selection: { stage: 'intent', body },
+                });
+                retained = session.preparation.selection;
+            }
+            if (
+                retained?.stage !== 'intent' ||
+                !equalBytes(retained.body, body)
+            )
+                throw new Error('The original selection intent changed.');
+            const signed = decodeSignedPacket(
+                selectionCommand(session, selectionOperation.signProposal),
+                session.context.profile.registration.signatureBytes,
+            );
+            if (signed === undefined || !equalBytes(signed.body, retained.body))
+                throw new Error('The organizer changed its locked selection.');
             await commitPreparation(session, {
-                selection: {
-                    stage: 'intent',
-                    body,
-                },
+                selection: { stage: 'signed', ...signed },
             });
             retained = session.preparation.selection;
         }
-        if (retained?.stage !== 'intent' || !equalBytes(retained.body, body))
-            throw new Error('The original selection intent changed.');
-        const signed = decodeSignedPacket(
-            selectionCommand(session, selectionOperation.signProposal),
-            session.context.profile.registration.signatureBytes,
+        if (retained?.stage !== 'signed')
+            throw new Error('No completed selection is retained.');
+        const selection = authenticateSelection(
+            session.context,
+            retained,
+            true,
         );
-        if (signed === undefined)
-            throw new Error('The signed selection has another shape.');
-        if (!equalBytes(signed.body, retained.body))
-            throw new Error('The organizer changed its locked selection.');
-        await commitPreparation(session, {
-            selection: { stage: 'signed', ...signed },
-        });
-        retained = session.preparation.selection;
+        if (
+            !(await publishCollectedAggregate(session, relay, cache, selection))
+        )
+            return false;
+    } catch (error) {
+        if (error instanceof StorageFailure) {
+            try {
+                await writeCollection(cache, (store) => store.clear());
+            } catch (cause) {
+                Object.assign(error, { cause });
+            }
+        }
+        throw error;
+    } finally {
+        cache.close();
     }
     if (retained?.stage !== 'signed')
         throw new Error('No completed selection is retained.');
-    const delivery = await openDelivery(session.context, session.root);
-    const publication = createCandidatePublication(
-        relay,
-        'selection',
-        delivery,
-    );
-    await publication.addBytes('selection.bin', retained.body);
-    await publication.addBytes('signature.bin', retained.signature);
-    await publication.finish();
-    // Keep the positive offer holders in this worker. Endorsement still has
-    // its own durable intent and one-shot purpose, including after a restart.
+    // The proposal becomes discoverable only once every public dependency
+    // and the organizer's own aggregate verification have completed.
+    await publishSelection(session, relay, retained);
     await endorseSetup(session, relay, retained);
+    return true;
 };
 
 const endorsementPacket = (

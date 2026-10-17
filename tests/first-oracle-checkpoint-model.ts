@@ -1,6 +1,11 @@
 import { compileCommonAgreementDegreeCensus } from '#tests/common-agreement-degree-model.js';
 import { compileContributionBodyCensus } from '#tests/contribution-body-model.js';
 import {
+    sourceOperandPolynomials,
+    sourceStatementPolynomialBytes,
+    sourceStatementPolynomialCount,
+} from '#tests/encrypted-registration-source-model.js';
+import {
     compileFullWordProofLayout,
     merkleSaltSeedBytes,
 } from '#tests/full-word-proof-layout-model.js';
@@ -52,21 +57,31 @@ export const compileFirstOracleCheckpointCensus = (
     );
     const publicPlaintextBytes =
         relation.expandedStatementHeaderByteLength +
+        sourceStatementPolynomialBytes +
         body.polynomialPayloadBytes;
     const publicRecordCount =
         1n +
-        body.polynomials.reduce(
+        [
+            ...body.polynomials,
+            ...sourceOperandPolynomials(
+                Number(
+                    relation.expandedStatementPolynomialCount -
+                        sourceStatementPolynomialCount,
+                ),
+            ),
+        ].reduce(
             (count, polynomial) =>
                 count + (polynomial.bytes + (1n << 20n) - 1n) / (1n << 20n),
             0n,
         );
     // Fixed fields: participant and option counts, column, role length,
-    // statement digest, statement header and complete original recipient-key
+    // statement digest, public oracle root, statement header and complete original recipient-key
     // hash list. Only the role payload varies.
     const fixedHeaderBytes =
         2n +
         4n +
         2n +
+        64n +
         64n +
         relation.expandedStatementHeaderByteLength +
         2n +

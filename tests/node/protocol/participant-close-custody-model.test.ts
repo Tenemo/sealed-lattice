@@ -8,8 +8,8 @@ import {
     deriveSupportedProfile,
 } from '#tests/supported-profile-model.js';
 
-// FIPS 204 Table 2: an ML-DSA-65 signature has 3309 bytes.
-const signatureBytes = 3309n;
+// The purpose credential has 131 chain values and four Merkle siblings.
+const signatureBytes = 8642n;
 const envelopeBytes = 210n;
 const recordBytes = 1n << 20n;
 
@@ -17,12 +17,12 @@ describe('participant close custody layout', () => {
     it('counts the completion roster suffix by hand', () => {
         const value = compileParticipantCloseCustody(completionProfile());
         // Ten participants, three corrupt: thirteen held bodies, nine other
-        // responders and twenty-five body records. An event opens with an
+        // responders and twenty-three body records. An event opens with an
         // 11-byte header: kind, record count, serial and payload length. The
         // locked intent is one event without records, and the suffix opens
         // with its event count.
-        expect(value.maximumBodyRecords).toBe(25n);
-        const delivery = 13n * (11n + 32n * 26n);
+        expect(value.maximumBodyRecords).toBe(23n);
+        const delivery = 13n * (11n + 32n * 24n);
         const events = delivery + 11n + 9n * (11n + 32n);
         const intent = 4n + 197n + signatureBytes;
         const response = 4n + (275n + 20n * 66n - 2n) + signatureBytes;
@@ -41,9 +41,9 @@ describe('participant close custody layout', () => {
             },
             { phase: 22, bytes: 4n + intent + events + response + proposal },
         ]);
-        expect(value.maximumStateBytes).toBe(23_817n);
+        expect(value.maximumStateBytes).toBe(38_984n);
         expect(value.maximumEvents).toBe(13n + 1n + 9n);
-        expect(value.maximumRecords).toBe(13n * 26n + 9n);
+        expect(value.maximumRecords).toBe(13n * 24n + 9n);
     });
 
     it('bounds the encrypted close records of every roster by its held bodies', () => {

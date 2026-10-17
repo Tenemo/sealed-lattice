@@ -1,8 +1,8 @@
 # sealed-lattice
 
-`sealed-lattice` is a TypeScript and Rust/WebAssembly research library for browser-first, fixed-roster, private-score polling. It targets end-to-end post-quantum security without a trusted tally service.
+`sealed-lattice` is a TypeScript and Rust/WebAssembly research library for browser-first, fixed-roster, private-score polling. It targets 128-bit end-to-end post-quantum security without a trusted tally service.
 
-Its end-to-end security is not established, so do not use it with real ballots, credentials, keys, or secret material. The [current implementation boundary](#current-implementation-boundary) states what the project implements and what remains open; read the [security policy](SECURITY.md) before experimenting.
+The package has no production approval or supported-phone qualification, so use synthetic ballots, credentials and keys. The [current implementation boundary](#current-implementation-boundary) states what the project implements and what remains open; read the [security policy](SECURITY.md) before experimenting.
 
 ## Intended protocol
 
@@ -17,15 +17,17 @@ Its end-to-end security is not established, so do not use it with real ballots, 
 
 The [security policy](SECURITY.md#intended-security-model) defines the adversary bound `f` and every threshold exactly: the departure tolerance, the closing quorums, the bounded omission, the result minimum and the completion boundary. Those thresholds are necessary constraints, not a complete protocol.
 
-The construction combines exact threshold homomorphic encryption from a dealerless fixed-roster setup, public ballot proofs, quorum-based ballot closing, deterministic encrypted ranking, and target-bound threshold release. The [security policy](SECURITY.md#open-security-blockers) lists what its security still requires.
+The construction combines exact threshold homomorphic encryption from a dealerless fixed-roster setup, public ballot proofs, quorum-based ballot closing, deterministic encrypted ranking, and target-bound threshold release. The [security policy](SECURITY.md#open-security-blockers) states the argument's conditions and remaining validation requirements.
 
 ## Current implementation boundary
 
 The public package exposes the participant API, which runs one participant's complete lifecycle in a browser worker: registration, roster agreement, setup contribution and verification, the ballot, closing, target votes, release shares and the local result, and the outcome verifier, which checks a poll's outcome from the relay without participant state. The package ships the participant WebAssembly module, the worker and their source manifest, from which anyone can recompute the runtime identity. The API returns only the participant's verified progress and its authorized result; it exposes no decryption of ballots, totals or intermediate values, no participant-secret export and no path around certified release.
 
-Preparation binds contribution sources during registration and uses registration-bound public contribution offers, an organizer proposal and quorum endorsements before ballot authority. Original roster members can accept the certified setup without completing their own offer. Recorded scalar desktop cohorts exercise departures, recovery, state loss, turnout boundaries, split rosters, losing endorsements and independent retrieval, including a ten-participant workflow.
+Preparation binds encrypted contribution sources during registration and uses source-linked public contribution offers, an organizer proposal and quorum endorsements before ballot authority. Credentials use one-time purpose signatures, and ballots use compact rank packing. Original roster members can accept the certified setup without completing their own offer. Scalar desktop evidence covers the integrated workflow, cold proof continuation, hostile source/state refusals and fresh public outcome verification. Earlier lifecycle and ten-participant runs remain evidence for their own recorded runtime bytes.
 
-An implemented step is not an established one. The construction is a research direction: it has run only in development environments, each recorded run is development evidence for the exact runtime bytes it ran, and its complete security bound, numerical registration limit, remaining resource limits, supported-phone qualification and production approval are still open.
+The construction is a research direction. Its composed security argument and independent ledger cover the selected suite under the [stated model](SECURITY.md#intended-security-model) for a poll with at most 37 original honest registrations, counting abandoned and unselected ones. Development checks apply to their exact source and runtime bytes. Remaining resource variances, complete current-build lifecycle evidence, supported-phone qualification and production approval remain open.
+
+This build accepts only its own runtime identity. Earlier-runtime participant state, polls and registrations are refused without conversion or a compatibility path.
 
 The [protocol research workspace](crates/protocol-research/README.md) holds the Rust crates from which the participant module is built, the executable native construction and the runners that exercise them.
 
@@ -94,10 +96,10 @@ A refusal's `reason` is one of:
 - `no participant`, for an operation other than `create` on an empty namespace, which stays empty;
 - `participant exists`, `insufficient storage` or `another poll`;
 - `unrecognized state`, for a namespace whose participant database this SDK does not recognize, which it leaves unchanged;
-- `another runtime`, for a participant that another build of the SDK created, with that build's `runtime` identity, so the application can continue it with that build;
+- `another runtime`, for a participant that another build of the SDK created, with that build's `runtime` identity;
 - `unavailable operation`, for an operation that the participant's stage or role does not allow.
 
-A pending `cause` is `public input`, `storage` or a device `resource` such as memory when the operation waits for them, or `module` or `worker` when the participant module or its worker failed during the operation.
+A pending `cause` is `work` when setup has saved progress at a bounded download boundary; repeat the same request to continue. The other causes are `public input`, `storage` or a device `resource` such as memory when the operation waits for them, or `module` or `worker` when the participant module or its worker failed during the operation.
 
 Enrollment interrupted after its intent is retained but before its required secrets are retained stops that participant, because the intent cannot resume private generation. Before each operation the page asks the browser to keep the origin's storage with `navigator.storage.persist()`, and a completed operation reports whether it does as `isStoragePersistent`. A browser may evict storage it does not keep under storage pressure, which stops the participant, so the application warns the participant before its state becomes necessary.
 
@@ -106,7 +108,7 @@ The preparation operations follow this order:
 1. `create` registers the organizer, with the role `organizer`, from the poll question, ordered options, result length and participant maximum, or a participant, with the role `joiner`, from the poll's signed definition. Its completed details carry the participant's `registrationBodyDigest`. `publish` delivers the registration and the organizer's poll and roster records again.
 2. `propose-roster` and `accept-roster` take the ordered `registrationBodyDigests` of the roster's registrations, verify the roster and return `rosterUsernames` in order. The application displays them before `confirm` records that participant's roster confirmation.
 3. `contribute` generates and publishes a complete signed offer for an eligible original roster position. `isEligibleContributor` reports eligibility after roster retention. Eligible offers come from the first `max(f + 1, 2) + f` positions; the eventual selection uses exactly `max(f + 1, 2)` of them.
-4. The organizer calls `select-setup` to propose and endorse a complete valid set. Other available participants call `endorse-setup` after verifying that set. An unfinished own offer does not prevent endorsement, and each participant endorses at most one selection.
+4. The organizer calls `select-setup` to collect fully verified offers and publish their aggregate and evaluation proofs before proposing and endorsing the selected set. Larger profiles can return `pending` with cause `work` and continue on another call. Other participants call `endorse-setup` to verify compact offers and the published aggregate. An unfinished own offer does not prevent endorsement, and each participant endorses at most one selection.
 5. `verify-setup` verifies the setup certificate and selected inputs, then activates ballot authority. It can accept the uniquely certified selection even when the participant's own offer or endorsement was not used.
 
 After preparation, `cast-ballot` casts or delivers the participant's single ballot. `close` gathers complete available ballots and signed close responses; the organizer proposes when the quorum is ready. `sign-target` verifies and signs that target, `release` publishes the release share, and `compute-result` combines valid published shares. `release` and `compute-result` report `hasResult`, whether the certified target carries a result, and `compute-result` reports the result's ordered option `identifiers`, none for a certified no-result target. `status` reports progress. A participant learns its `ballotInclusion`, whether its ballot is included, late, omitted or not cast, when it verifies the target, including during `release` or `compute-result` if it signed no target. Later operations report it again.

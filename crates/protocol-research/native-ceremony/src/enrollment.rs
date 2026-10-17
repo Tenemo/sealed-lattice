@@ -24,7 +24,7 @@ use zeroize::Zeroizing;
 struct EnrollmentOutput<'a> {
     files: Vec<public_output::PublicOutput>,
     controls: &'a mut [Vec<u8>; 2],
-    offsets: [usize; 3],
+    offsets: [usize; 4],
 }
 impl<'a> EnrollmentOutput<'a> {
     fn new(directory: &Path, controls: &'a mut [Vec<u8>; 2]) -> Self {
@@ -32,6 +32,7 @@ impl<'a> EnrollmentOutput<'a> {
             "polynomial-01.bin",
             "registration-header.bin",
             "signature.bin",
+            "source-ciphertexts.bin",
         ]
         .iter()
         .map(|name| public_output::PublicOutput::create(directory.join(name)).unwrap())
@@ -39,7 +40,7 @@ impl<'a> EnrollmentOutput<'a> {
         Self {
             files,
             controls,
-            offsets: [0; 3],
+            offsets: [0; 4],
         }
     }
     fn emit(&mut self, kind: u32, offset: usize, bytes: &[u8]) {
@@ -47,9 +48,10 @@ impl<'a> EnrollmentOutput<'a> {
             data_kind::PUBLIC_KEY => 0,
             data_kind::HEADER => 1,
             data_kind::SIGNATURE => 2,
+            data_kind::SOURCE_CIPHERTEXTS => 3,
             _ => return,
         };
-        if file >= 1 {
+        if (1..=2).contains(&file) {
             self.controls[file - 1].extend(bytes);
         }
         assert_eq!(offset, self.offsets[file]);
@@ -247,14 +249,20 @@ pub(crate) fn run(output: &Path, runtime: [u8; 64], scenario: &Scenario) -> Enro
             verifier.push_key(&buffer[..length]).unwrap();
         }
         verifier.finish_key().unwrap();
+        let mut sources = File::open(directory.join("source-ciphertexts.bin")).unwrap();
+        loop {
+            let length = sources.read(&mut buffer).unwrap();
+            if length == 0 {
+                break;
+            }
+            verifier.push_sources(&buffer[..length]).unwrap();
+        }
         let record = Arc::new(verifier.finish().unwrap());
         let capsules = &enrollment_capsules[position];
         let restore = |source_capsule: &[u8]| {
             Enrollment::restore(
                 &poll,
-                record.header(),
-                record.public_key(),
-                record.body_digest(),
+                &record,
                 &enrollment_data_keys[position],
                 [&capsules[0], &capsules[1], source_capsule],
             )
@@ -269,10 +277,10 @@ pub(crate) fn run(output: &Path, runtime: [u8; 64], scenario: &Scenario) -> Enro
         let mut restored = restore(&capsules[2]).unwrap();
         assert_eq!(
             restored
-                .contribution_header(profile, supported_profile::relation::PROOF_HEADER_BYTES)
+                .contribution_coordinate_hash(&poll, profile)
                 .unwrap(),
             enrollments[position]
-                .contribution_header(profile, supported_profile::relation::PROOF_HEADER_BYTES)
+                .contribution_coordinate_hash(&poll, profile)
                 .unwrap(),
         );
         // The original completed enrollment has not acted on any roster yet.

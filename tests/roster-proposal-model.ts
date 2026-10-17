@@ -46,6 +46,7 @@ export const compileRosterProposalCensus = (participantCount: number) => {
             registration.signatureBytes +
             count *
                 (key.publicKeyBytes +
+                    registration.maximumSourceCiphertextBytes +
                     registration.maximumHeaderBytes +
                     registration.signatureBytes),
     };

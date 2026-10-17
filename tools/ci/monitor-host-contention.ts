@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
@@ -20,18 +20,19 @@ import {
 } from '#tools/ci/local-run-log.js';
 import {
     placeCommand,
+    processorJobSource,
     type ProcessorPlacement,
 } from '#tools/ci/processor-placement.js';
 
 // Records how busy the host is around a timed step and how much that load
 // slows one single-threaded workload under this process's placement. It times
 // a fixed SHA-512 workload, writes `<stop file>.ready`, samples once a minute
-// the logical processors that the renewal's own processes and all other
-// processes keep busy until the stop file exists, and times the workload
-// again. Only aggregate processor use is recorded, never another program's
-// name or command line.
+// the logical processors that its shared job and the rest of the host keep
+// busy, and includes the final partial interval when stopped. The job includes
+// the monitor, the workload and terminated descendants. The end probe follows
+// the last CPU sample. Only aggregate processor use is recorded.
 const usage =
-    'Usage: monitor-host-contention.ts --label=<step> --stop-file=<path> --own-path=<checkout>...';
+    'Usage: monitor-host-contention.ts --label=<step> --stop-file=<path> --job=<accounting job>';
 export const hostContentionMonitorScriptName = 'monitor-host-contention';
 const readyLimitMilliseconds = 5 * 60_000;
 const stopLimitMilliseconds = 10 * 60_000;
@@ -49,22 +50,21 @@ export const selectMonitorOptions = (
         args: [...toolArguments(commandLineArguments)],
         options: {
             label: { type: 'string' },
-            'own-path': { type: 'string', multiple: true },
+            job: { type: 'string' },
             'stop-file': { type: 'string' },
         },
         strict: true,
     });
-    const ownPaths = values['own-path'] ?? [];
     if (
         values.label === undefined ||
         !/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(values.label) ||
         values['stop-file'] === undefined ||
-        ownPaths.length === 0
+        !values.job
     )
         throw new Error(usage);
     return {
         label: values.label,
-        ownPaths: ownPaths.map((ownPath) => path.resolve(ownPath)),
+        job: values.job,
         stopFile: path.resolve(values['stop-file']),
     };
 };
@@ -154,92 +154,126 @@ const readPlacement = async () => {
     };
 };
 
-type ProcessTimes = Readonly<{
+export type CpuTimes = Readonly<{
     at: number;
-    times: ReadonlyMap<string, Readonly<{ seconds: number; own: boolean }>>;
+    busySeconds: number;
+    ownSeconds: number;
 }>;
 
-// Parses `identifier|name|processor seconds|own` lines. A process is keyed by
-// identifier and name, so a reused identifier starts a new process; the idle
-// process is no load.
-export const parseProcessTimes = (output: string, at: number): ProcessTimes => {
-    const times = new Map<string, { seconds: number; own: boolean }>();
-    for (const line of output.split(/\r?\n/u)) {
-        const fields = line.split('|');
-        if (fields.length !== 4) continue;
-        const [identifier, name, seconds, own] = fields;
-        const processorSeconds = Number(seconds);
-        if (
-            !/^\d+$/u.test(identifier) ||
-            identifier === '0' ||
-            !Number.isFinite(processorSeconds)
-        )
-            continue;
-        times.set(`${identifier} ${name}`, {
-            seconds: processorSeconds,
-            own: own === '1',
-        });
-    }
-    return { at, times };
+// The helper reads host and job counters together, with one monotonic timestamp.
+// Host kernel time includes idle time; the native reader subtracts it.
+// Job totals include terminated processes and descendants in nested jobs.
+export const readCpuTimes = async (job: string): Promise<CpuTimes> => {
+    if (process.platform !== 'win32' || os.cpus().length > 64)
+        throw new Error(
+            'Host CPU accounting requires Windows with at most 64 logical processors.',
+        );
+    const name = Buffer.from(job, 'utf8').toString('base64');
+    const output = await powerShell(
+        [
+            "$ErrorActionPreference = 'Stop'",
+            "$source = @'",
+            processorJobSource,
+            "'@",
+            'Add-Type -TypeDefinition $source',
+            `$name = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${name}'))`,
+            '[ProcessorPlacementJob]::CpuTimes($name)',
+        ].join('\n'),
+    );
+    const values = output.trim().split('|').map(Number);
+    if (
+        values.length !== 3 ||
+        values.some((value) => !Number.isFinite(value) || value < 0)
+    )
+        throw new Error('The host CPU counters are malformed.');
+    const [at, busySeconds, ownSeconds] = values;
+    return { at, busySeconds, ownSeconds };
 };
 
-// The logical processors the renewal's own processes and all others kept
-// busy between two readings, over processes present in both.
-export const busyProcessors = (
-    previous: ProcessTimes,
-    current: ProcessTimes,
-) => {
+export const busyProcessors = (previous: CpuTimes, current: CpuTimes) => {
     const elapsedSeconds = (current.at - previous.at) / 1000;
     if (!(elapsedSeconds > 0))
-        throw new Error('Process-time readings must advance in time.');
-    let own = 0;
-    let other = 0;
-    for (const [key, { seconds, own: isOwn }] of current.times) {
-        const before = previous.times.get(key);
-        if (before === undefined) continue;
-        const delta = Math.max(0, seconds - before.seconds);
-        if (isOwn) own += delta;
-        else other += delta;
-    }
+        throw new Error('CPU-time readings must advance in time.');
+    const busySeconds = current.busySeconds - previous.busySeconds;
+    const ownSeconds = current.ownSeconds - previous.ownSeconds;
+    if (busySeconds < 0 || ownSeconds < 0)
+        throw new Error('Cumulative CPU counters must not decrease.');
+    // Separate API reads can straddle a scheduling tick. Do not report
+    // negative background use when the job counter leads the host slightly.
+    const otherSeconds = Math.max(0, busySeconds - ownSeconds);
     const round = (value: number) => Math.round(value * 1000) / 1000;
     return {
-        ownProcessors: round(own / elapsedSeconds),
-        otherProcessors: round(other / elapsedSeconds),
+        elapsedSeconds,
+        ownSeconds,
+        otherSeconds,
+        ownProcessors: round(ownSeconds / elapsedSeconds),
+        otherProcessors: round(otherSeconds / elapsedSeconds),
     };
 };
 
-// Every process's processor seconds, and whether its command line names one
-// of the renewal's checkouts, which their Node, Chrome and Rust processes do.
-const readProcessTimes = async (ownPaths: readonly string[]) => {
-    const markers = Buffer.from(
-        JSON.stringify(
-            ownPaths.map((ownPath) =>
-                ownPath.toLowerCase().replace(/\//gu, '\\'),
-            ),
-        ),
-        'utf8',
-    ).toString('base64');
-    const output = await powerShell(
-        [
-            `$markers = @([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${markers}')) | ConvertFrom-Json)`,
-            'Get-CimInstance Win32_Process | ForEach-Object {',
-            "    $line = ([string]$_.CommandLine).ToLowerInvariant().Replace('/', '\\')",
-            '    $own = 0',
-            '    foreach ($marker in $markers) { if ($line.Contains($marker)) { $own = 1 } }',
-            "    [string]::Format([cultureinfo]::InvariantCulture, '{0}|{1}|{2}|{3}', $_.ProcessId, $_.Name, ($_.KernelModeTime + $_.UserModeTime) / 1e7, $own)",
-            '}',
-        ].join('\n'),
+type CpuSample = ReturnType<typeof busyProcessors>;
+
+export const summarizeCpuLoad = (samples: readonly CpuSample[]) => {
+    const seconds = samples.reduce(
+        (sum, sample) => sum + sample.elapsedSeconds,
+        0,
     );
-    return parseProcessTimes(output, performance.now());
+    const rate = (field: 'ownSeconds' | 'otherSeconds') =>
+        seconds === 0
+            ? undefined
+            : Math.round(
+                  (samples.reduce((sum, sample) => sum + sample[field], 0) /
+                      seconds) *
+                      100,
+              ) / 100;
+    return {
+        samples: samples.length,
+        sampleSeconds,
+        measuredSeconds: seconds,
+        meanOwnProcessors: rate('ownSeconds'),
+        meanOtherProcessors: rate('otherSeconds'),
+        peakOtherProcessors:
+            samples.length === 0
+                ? undefined
+                : Math.max(...samples.map((sample) => sample.otherProcessors)),
+    };
 };
 
-const mean = (values: readonly number[]) =>
-    values.length === 0
-        ? undefined
-        : Math.round(
-              (values.reduce((sum, value) => sum + value, 0) / values.length) *
-                  100,
-          ) / 100;
+// Baseline before readiness, then every interval and the final partial interval.
+// A stopped short workload therefore still contributes an actual measurement.
+export const sampleCpuLoad = async (
+    input: Readonly<{
+        read: () => Promise<CpuTimes>;
+        ready: () => Promise<void>;
+        stopped: Promise<void>;
+        record: (sample: CpuSample) => void;
+    }>,
+) => {
+    const samples: CpuSample[] = [];
+    let previous = await input.read();
+    await input.ready();
+    for (;;) {
+        let timer!: ReturnType<typeof setTimeout>;
+        const elapsed = new Promise<boolean>((resolve) => {
+            timer = setTimeout(() => resolve(false), sampleSeconds * 1000);
+        });
+        let stopped: boolean;
+        try {
+            stopped = await Promise.race([
+                input.stopped.then(() => true),
+                elapsed,
+            ]);
+        } finally {
+            clearTimeout(timer);
+        }
+        const current = await input.read();
+        const sample = busyProcessors(previous, current);
+        samples.push(sample);
+        input.record(sample);
+        previous = current;
+        if (stopped) return samples;
+    }
+};
 
 // Starts the monitor around a step under the step's placement and waits for
 // its first probe. Its stop ends the sampling, waits for the last probe and
@@ -248,15 +282,15 @@ export const startHostContentionMonitor = async (
     input: Readonly<{
         directory: string;
         label: string;
-        ownPaths: readonly string[];
         placement: ProcessorPlacement;
         runLog: ActiveLocalRunLog;
     }>,
-): Promise<{ readonly stop: () => Promise<void> }> => {
+): Promise<{ readonly job: string; readonly stop: () => Promise<void> }> => {
     await mkdir(input.directory, { recursive: true });
     const stopFile = path.join(input.directory, `${input.label}.stop`);
     const readyFile = `${stopFile}.ready`;
     const controller = new AbortController();
+    const job = 'Local\\sealed-lattice-contention-' + randomUUID();
     const invocation: CommandInvocation = {
         ...createPackageManagerCommand(
             `Host-contention monitor around ${input.label}`,
@@ -269,7 +303,7 @@ export const startHostContentionMonitor = async (
                 ),
                 `--label=${input.label}`,
                 `--stop-file=${stopFile}`,
-                ...input.ownPaths.map((ownPath) => `--own-path=${ownPath}`),
+                `--job=${job}`,
             ],
             { logFileSlug: `${input.label}-monitor` },
         ),
@@ -277,7 +311,7 @@ export const startHostContentionMonitor = async (
     };
     let settled = false;
     const finished = runCommandAndCaptureOutput(
-        placeCommand(invocation, input.placement),
+        placeCommand(invocation, input.placement, { name: job, create: true }),
         { runLog: input.runLog, signal: controller.signal },
     ).finally(() => {
         settled = true;
@@ -306,6 +340,7 @@ export const startHostContentionMonitor = async (
         await delay(1000);
     }
     return {
+        job,
         stop: async () => {
             await writeFile(stopFile, '');
             const timer = setTimeout(
@@ -353,34 +388,29 @@ const main = async (): Promise<void> => {
                 eventType: 'host-contention-probe',
                 details: { phase: 'start', ...start },
             });
-            await writeFile(`${options.stopFile}.ready`, options.label + '\n', {
-                flag: 'wx',
+            const samples = await sampleCpuLoad({
+                read: () => readCpuTimes(options.job),
+                ready: () =>
+                    writeFile(
+                        `${options.stopFile}.ready`,
+                        options.label + '\n',
+                        { flag: 'wx' },
+                    ),
+                stopped: (async () => {
+                    while (!existsSync(options.stopFile))
+                        await delay(stopPollMilliseconds);
+                })(),
+                record: (sample) =>
+                    log.writeEvent({
+                        eventType: 'host-contention-sample',
+                        details: sample,
+                    }),
             });
-            const samples: {
-                ownProcessors: number;
-                otherProcessors: number;
-            }[] = [];
-            let previous = await readProcessTimes(options.ownPaths);
-            let nextSample = performance.now() + sampleSeconds * 1000;
-            while (!existsSync(options.stopFile)) {
-                await delay(stopPollMilliseconds);
-                if (performance.now() < nextSample) continue;
-                const current = await readProcessTimes(options.ownPaths);
-                const sample = busyProcessors(previous, current);
-                samples.push(sample);
-                log.writeEvent({
-                    eventType: 'host-contention-sample',
-                    details: sample,
-                });
-                previous = current;
-                nextSample += sampleSeconds * 1000;
-            }
             const end = probe();
             log.writeEvent({
                 eventType: 'host-contention-probe',
                 details: { phase: 'end', ...end },
             });
-            const others = samples.map((sample) => sample.otherProcessors);
             await writeFile(
                 path.join(log.runDirectoryPath, 'evidence.json'),
                 JSON.stringify(
@@ -388,18 +418,7 @@ const main = async (): Promise<void> => {
                         label: options.label,
                         placement,
                         probes: { start, end },
-                        load: {
-                            samples: samples.length,
-                            sampleSeconds,
-                            meanOtherProcessors: mean(others),
-                            peakOtherProcessors:
-                                others.length === 0
-                                    ? undefined
-                                    : Math.max(...others),
-                            meanOwnProcessors: mean(
-                                samples.map((sample) => sample.ownProcessors),
-                            ),
-                        },
+                        load: summarizeCpuLoad(samples),
                     },
                     null,
                     2,

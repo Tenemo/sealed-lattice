@@ -13,4 +13,7 @@ ballot-proof = { path = "../ballot-proof" }
 evaluation-target = { path = "../evaluation-target" }
 encrypted-ranking = { path = "../encrypted-ranking" }
 supported-profile = { path = "../supported-profile" }
+statement-stream = { path = "../statement-stream" }
+word-proof = { path = "../word-proof" }
+word-verifier = { path = "../word-verifier" }
 zeroize.workspace = true

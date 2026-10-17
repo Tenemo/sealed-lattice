@@ -12,6 +12,34 @@ use crate::{
 pub const SYSTEMATIC: usize = DEGREE;
 pub const EVALUATION_DOMAIN_SIZE: usize = 4 * SYSTEMATIC;
 pub const QUERY_COUNT: usize = 704;
+/// Evaluation quotients use the rate-one-quarter code at distance 95/256.
+pub const EVALUATION_QUERY_COUNT: usize = 429;
+pub const EVALUATION_FOLDS: usize = SYSTEMATIC.ilog2() as usize;
+pub const EVALUATION_HEADER_BYTES: usize = 96 + (EVALUATION_FOLDS - 1) * 64;
+
+pub fn evaluation_message_bytes(profile: Profile) -> usize {
+    (96 * (profile.committed_columns() + 1))
+        .max(4 * EVALUATION_QUERY_COUNT)
+        .next_power_of_two()
+}
+
+pub fn maximum_evaluation_proof_bytes(profile: Profile) -> usize {
+    let group = |length: usize, width: usize| {
+        let openings = (2 * EVALUATION_QUERY_COUNT).min(length);
+        let siblings: usize = (1..=length.ilog2())
+            .map(|level| openings.min(length >> level))
+            .sum();
+        4 + openings * (4 + width) + 64 * siblings
+    };
+    let mut bytes =
+        EVALUATION_HEADER_BYTES + group(EVALUATION_DOMAIN_SIZE, 16 * profile.committed_columns());
+    let mut length = EVALUATION_DOMAIN_SIZE / 2;
+    while length > 4 {
+        bytes += group(length, 48);
+        length /= 2;
+    }
+    bytes
+}
 pub const MASKS: usize = 2 * QUERY_COUNT + 1;
 pub const MAXIMUM_DEGREE: usize = 2 * SYSTEMATIC - 1;
 pub const WITNESS_DEGREE: usize = SYSTEMATIC + MASKS - 1;
@@ -62,6 +90,8 @@ pub struct Relation {
     pub tag: &'static [u8],
     pub words: usize,
     pub booleans: usize,
+    /// Public coefficient columns, each paired with its evaluation quotient.
+    pub public_columns: usize,
     /// Lookups after the whole words: each narrow column and the factor
     /// that scales it to a whole word.
     pub narrow: Vec<(usize, u128)>,
@@ -120,7 +150,18 @@ impl Relation {
     /// The committed oracles, then the Boolean, zero-product, lookup and
     /// table residuals and the affine remainder.
     pub fn oracles(&self) -> usize {
+        self.word_oracles() + 2 * self.public_columns
+    }
+    pub fn word_oracles(&self) -> usize {
         self.original_oracles() + self.booleans + self.zero_products() + self.lookups() + 2
+    }
+    pub fn proof_header_bytes(&self) -> usize {
+        PROOF_HEADER_BYTES
+            + if self.public_columns == 0 {
+                0
+            } else {
+                64 + 48 * self.public_columns
+            }
     }
     pub fn first_width(&self) -> usize {
         (self.columns() + 1) * 16 + EXTENSION_BYTES
@@ -158,6 +199,9 @@ impl Relation {
             self.booleans + self.zero_products() + self.lookups()
         ]);
         degrees.extend([WITNESS_DEGREE - 1, SYSTEMATIC - 2]);
+        for _ in 0..self.public_columns {
+            degrees.extend([SYSTEMATIC - 1, SYSTEMATIC - 2]);
+        }
         assert_eq!(degrees.len(), self.oracles());
         degrees
     }
@@ -172,9 +216,13 @@ impl Relation {
                 .sum();
             4 + openings * (4 + width + SALT_BYTES) + siblings * DIGEST_BYTES
         };
-        let mut total = PROOF_HEADER_BYTES;
+        let mut total = self.proof_header_bytes();
         for width in [self.first_width(), self.second_width(), EXTENSION_BYTES] {
             total += multiproof(EVALUATION_DOMAIN_SIZE, width);
+        }
+        if self.public_columns > 0 {
+            total += multiproof(EVALUATION_DOMAIN_SIZE, 16 * self.public_columns)
+                - (2 * QUERY_COUNT).min(EVALUATION_DOMAIN_SIZE) * SALT_BYTES;
         }
         let mut length = EVALUATION_DOMAIN_SIZE / 2;
         while length > 2 {
@@ -202,6 +250,7 @@ pub fn setup_relation(profile: Profile) -> Relation {
         tag: b"complete-setup-words",
         words,
         booleans: shape.boolean_columns,
+        public_columns: profile.committed_columns(),
         narrow: shape
             .narrow_words
             .iter()
@@ -236,9 +285,9 @@ pub fn setup_relation(profile: Profile) -> Relation {
 }
 
 /// Word columns of the ballot relation: each FHE ciphertext component's
-/// quotient, carries and error, the packed plaintext's lower word, the
-/// packing quotient, the scores less one, and each auxiliary component's
-/// quotient and error.
+/// quotient, carries and error, the packed plaintext's two nonnegative
+/// interval words, the packing quotient, the scores less one, and each
+/// auxiliary component's quotient and error.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BallotColumns {
     limbs: usize,
@@ -263,11 +312,14 @@ impl BallotColumns {
     pub fn plaintext(self) -> usize {
         2 * (self.limbs + 1)
     }
-    pub fn packing_quotient(self) -> usize {
+    pub fn plaintext_complement(self) -> usize {
         self.plaintext() + 1
     }
-    pub fn scores(self) -> usize {
+    pub fn packing_quotient(self) -> usize {
         self.plaintext() + 2
+    }
+    pub fn scores(self) -> usize {
+        self.plaintext() + 3
     }
     pub fn auxiliary_quotient(self, component: usize) -> usize {
         assert!(component < 2);
@@ -279,16 +331,12 @@ impl BallotColumns {
     pub fn words(self) -> usize {
         self.scores() + 5
     }
-    /// The FHE and auxiliary ephemerals' positive and negative supports, then
-    /// the packed plaintext's high bit.
+    /// The FHE and auxiliary ephemerals' positive and negative supports.
     pub fn fhe_positive(self) -> usize {
         self.words()
     }
     pub fn auxiliary_positive(self) -> usize {
         self.words() + 2
-    }
-    pub fn plaintext_high_bit(self) -> usize {
-        self.words() + 4
     }
     pub fn fhe_limbs(self) -> usize {
         self.limbs
@@ -303,7 +351,8 @@ pub fn ballot_relation(profile: Profile) -> Relation {
     let mut relation = Relation {
         tag: b"linked-scored-ballot",
         words,
-        booleans: 5,
+        booleans: 4,
+        public_columns: 0,
         narrow: vec![
             (columns.fhe_error(0), error),
             (columns.fhe_error(1), error),
@@ -321,7 +370,6 @@ pub fn ballot_relation(profile: Profile) -> Relation {
                 columns.auxiliary_positive(),
                 columns.auxiliary_positive() + 1,
             ),
-            (columns.plaintext(), columns.plaintext_high_bit()),
         ],
         supports: vec![
             half_support(1, FHE_SECRET_SUPPORT),
@@ -336,8 +384,8 @@ pub fn ballot_relation(profile: Profile) -> Relation {
         relation.lookups(),
         FHE_SECRET_SUPPORT,
         AUXILIARY_SECRET_SUPPORT,
-        1 << (WORD_BITS - 1),
-        1 << WORD_BITS,
+        crate::PLAINTEXT_MODULUS as usize / 2,
+        crate::PLAINTEXT_MODULUS as usize - 1,
     ];
     for (left, right) in relation.zero_product_pairs.clone() {
         relation.parameters.extend([left, right]);
@@ -391,6 +439,7 @@ pub fn release_relation(profile: Profile) -> Relation {
         tag: b"linked-threshold-release",
         words,
         booleans: 2,
+        public_columns: 0,
         narrow: bits
             .iter()
             .zip(&starts)

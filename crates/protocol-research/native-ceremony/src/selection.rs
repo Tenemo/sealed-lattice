@@ -51,7 +51,14 @@ pub fn run(
         .filter(|(position, _)| *position < profile.setup_eligible_contributors())
     {
         let draft = output.join(format!("draft-contribution-{position}"));
-        let (signing, header) = contribution::generate(poll, &roster, enrollment, position, &draft);
+        let (signing, header) = contribution::generate(
+            poll,
+            &roster,
+            enrollment,
+            position,
+            &output.join(format!("participant-{position}/source-ciphertexts.bin")),
+            &draft,
+        );
         let (envelope, signature) = signing.offer().unwrap();
         let author = output.join(format!("contribution-{position}"));
         fs::create_dir(&author).unwrap();
@@ -137,9 +144,22 @@ pub fn run(
     }
     let inputs = Arc::new(aggregate::verify(
         proposal.clone(),
-        selected,
+        selected.clone(),
         &selected_directories,
         &output.join("aggregates"),
+    ));
+    // The organizer's credential restores the retained committed-offer state
+    // and another remaining participant's credential must not; a departed
+    // position has no credential.
+    let other = enrollments.positions()[1];
+    let inputs = Arc::new(crate::committed_offer::verify_selection(
+        proposal.clone(),
+        &selected,
+        &selected_directories,
+        output,
+        &inputs,
+        [&enrollments[0].credential, &enrollments[other].credential],
+        poll,
     ));
     let selected_indices: Vec<_> = selected_authors
         .iter()

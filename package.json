@@ -34,7 +34,8 @@
         "test:browser:built": "vitest --project browser-desktop --run",
         "smoke:pack:npm:built": "tsx ./tools/ci/verify-packed-package.ts",
         "smoke:pack:npm": "pnpm run build && pnpm run smoke:pack:npm:built",
-        "prepare": "husky"
+        "prepare": "husky",
+        "research:evaluation-profile": "tsx ./tools/ci/run-evaluation-profile.ts"
     },
     "repository": {
         "type": "git",

@@ -451,11 +451,13 @@ describe('source coefficient allocation comparison', () => {
         for (const name of ['SETUP_QUOTIENT_BITS', 'SETUP_FHE_CARRY_BITS'])
             expect(rustIntegerConstant(profile, name)).toBe(16n);
         expect(rustIntegerConstant(profile, 'SETUP_ERROR_BITS')).toBe(7n);
-        expect(rustIntegerConstant(profile, 'GADGET_BASE_BITS')).toBe(144n);
+        expect(rustIntegerConstant(profile, 'GADGET_BASE_BITS')).toBe(88n);
         expect(rustIntegerConstant(reduction, 'MAXIMUM_LIMBS')).toBe(16n);
-        expect(reduction).toContain('digits.last().copied().unwrap() <= 65536');
-        expect(reduction).toContain('if top >= modulus_top << 16');
-        expect(reduction).toContain('for bit in (0..16).rev()');
+        expect(reduction).toContain(
+            'digits.last().copied().unwrap() < 1u128 << (QUOTIENT_BITS - 1)',
+        );
+        expect(reduction).toContain('if top >= modulus_top << QUOTIENT_BITS');
+        expect(reduction).toContain('for bit in (0..QUOTIENT_BITS).rev()');
         expect(gaussian).toContain('const THRESHOLDS: &[u8; 127 * 20]');
         expect(gaussian).toContain('rank - 64');
         expect(rustIntegerConstant(arithmetic, 'OFFSET')).toBe(133n);
@@ -475,7 +477,7 @@ describe('source coefficient allocation comparison', () => {
                 expect(gadgetBounds[gadget].maximumRawInteger).toBe(
                     arithmeticBounds.maximumRawInteger + power,
                 );
-                power <<= 144n;
+                power <<= 88n;
                 gadget++;
             }
             expect(gadgetBounds).toHaveLength(gadget);
@@ -501,8 +503,8 @@ describe('source coefficient allocation comparison', () => {
         expect(row.maximumQuotientEstimate).toBeGreaterThanOrEqual(
             row.leadingModulusDigit,
         );
-        expect(() => reduceSignedDigitModel([1n, 4n], 8n, 17n)).toThrow(
-            'single-correction',
+        expect(() => reduceSignedDigitModel([1n, 8n], 8n, 17n)).toThrow(
+            'two-correction',
         );
         for (const [modulus, radix, support, errorBound] of [
             [16n, 8n, 2n, 1n],

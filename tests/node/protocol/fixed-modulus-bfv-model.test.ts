@@ -157,6 +157,7 @@ describe('fixed-modulus BFV noise', () => {
                 setupContributorCount: 3n,
                 polynomialDegree: 8n,
                 plaintextSubringDegree: 4n,
+                publicPlaintextSubringDegree: 4n,
                 plaintextModulus: 17n,
                 ciphertextModulus,
                 secretSupportWeight: 2n,
@@ -172,9 +173,9 @@ describe('fixed-modulus BFV noise', () => {
 
     it('certifies the candidate primes and preserves the full ranking decoding margin', () => {
         const census = compileProfileBfvCensus(completionProfile());
-        expect(census.ciphertextModulus.toString(2)).toHaveLength(864);
+        expect(census.ciphertextModulus.toString(2)).toHaveLength(768);
         expect(census.releaseModulus.toString(2)).toHaveLength(192);
-        expect(census.gadgetLength).toBe(6n);
+        expect(census.gadgetLength).toBe(9n);
         expect(census.comparisonDepth).toBe(8);
         expect(census.rankingDepth).toBe(12);
         expect(census.multiplications).toBe(26 + 8);
@@ -182,16 +183,14 @@ describe('fixed-modulus BFV noise', () => {
         // relinearization outputs, and two external products per automorphism.
         expect(census.tensorProducts).toBe(136);
         expect(census.relinearizationExternalProducts).toBe(136);
-        expect(census.rotationExternalProducts).toBe(30);
-        expect(census.gadgetPolynomialProducts).toBe(996n);
+        expect(census.rotationExternalProducts).toBe(48);
+        expect(census.gadgetPolynomialProducts).toBe(1656n);
         expect(census.releaseCorrect).toBe(true);
         expect(census.jointStatisticalBoundHolds).toBe(true);
         // Four setup contributors each publish four gadget vectors.
-        expect(census.publicKeyCorpusBytes).toBe(4n * 4n * 6n * 65536n * 108n);
+        expect(census.publicKeyCorpusBytes).toBe(4n * 4n * 9n * 65536n * 96n);
         expect(() => verifyProthCertificate(9n, 4, 2n)).toThrow(); // 145 is composite.
-        expect(() =>
-            verifyProthCertificate(65537n * 65319n, 832, 1n),
-        ).toThrow();
+        expect(() => verifyProthCertificate(4289069913n, 736, 1n)).toThrow();
     });
 
     it.each(
@@ -212,6 +211,7 @@ describe('fixed-modulus BFV noise', () => {
                 setupContributorCount: 3n,
                 polynomialDegree: BigInt(degree),
                 plaintextSubringDegree: BigInt(degree / 2),
+                publicPlaintextSubringDegree: BigInt(degree / 2),
                 plaintextModulus,
                 ciphertextModulus,
                 secretSupportWeight: 2n,

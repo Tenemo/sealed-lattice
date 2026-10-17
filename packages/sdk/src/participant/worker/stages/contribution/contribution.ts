@@ -68,6 +68,8 @@ const proverPhase = {
     polynomials: 107,
     output: 110,
     done: 111,
+    publicCombination: 112,
+    publicOpenings: 113,
 } as const;
 
 const proverOperation = {
@@ -540,6 +542,31 @@ export const continueContribution = async (session: ContributionSession) => {
         // The linear oracle, then the folded combination.
         await run.advance(proverOperation.step);
         await run.advance(proverOperation.step);
+        for (const publicPhase of [
+            proverPhase.publicCombination,
+            proverPhase.publicOpenings,
+        ]) {
+            if (run.phase() !== publicPhase)
+                throw new Error(
+                    'The public contribution oracle is out of sequence.',
+                );
+            for (const index of bounds.committedPolynomials) {
+                await run.advance(proverOperation.beginPolynomial, index);
+                for (const record of retained[index]) {
+                    const bytes = await openContributionRecord(session, record);
+                    try {
+                        await run.advance(
+                            proverOperation.pushPolynomial,
+                            0,
+                            bytes,
+                        );
+                    } finally {
+                        bytes.fill(0);
+                    }
+                }
+                await run.advance(proverOperation.finishPolynomial);
+            }
+        }
         while (run.phase() === proverPhase.output) {
             await run.advance(proverOperation.nextOutput);
             const bytes = proverOutput(context);
@@ -552,7 +579,7 @@ export const continueContribution = async (session: ContributionSession) => {
         if (run.phase() !== proverPhase.done)
             throw new Error('The continued proof is incomplete.');
         // The own intent remains at phase six while the same record writer
-        // fills every remaining profile slot, including padding-only slots.
+        // retains the final proof record before the completed body commits.
         const length = await writer.finish();
         header = signing(
             context,

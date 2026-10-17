@@ -163,9 +163,8 @@ const decodeSigningRecords = (
     });
 
 // Decodes the contribution suffix of an authenticated root. The body records
-// and every physical proof slot follow the profile's fixed plan. From
-// completion onward the body header frames the logical proof prefix inside those slots,
-// and the signing records agree with its independent phase.
+// follow the profile's polynomial plan. Completed proof records follow the
+// authenticated body's exact length, and signing records match the phase.
 export const decodeContributionState = (
     bytes: Uint8Array,
     profile: ParticipantProfile,
@@ -189,7 +188,18 @@ export const decodeContributionState = (
     const signingCount = readUnsigned32(bytes, counts + 12);
     const shape = retainedShape(phase);
     const bodyRecords = bounds.publicRecords.length;
-    const proofRecords = proofRecordLayout(bounds);
+    const proofRecords =
+        phase >= contributionPhase.body &&
+        headerLength === bounds.bodyHeaderBytes &&
+        bytes.length >= prefix + headerLength
+            ? proofRecordLayout(
+                  bounds,
+                  proofLength(
+                      bounds,
+                      bytes.subarray(prefix, prefix + headerLength),
+                  ),
+              )
+            : [];
     const shaped =
         phase === contributionPhase.generationIntent
             ? headerLength === 0 && publicCount === 0 && privateCount === 0
@@ -245,8 +255,6 @@ export const decodeContributionState = (
         publicRecords.push(record);
         offset += publicEntryBytes;
     }
-    if (phase >= contributionPhase.body)
-        proofLength(bounds, bytes.subarray(prefix, prefix + headerLength));
     const privateRecords: CheckpointRecord[] = [];
     for (let index = 0; index < privateCount; index++) {
         privateRecords.push({

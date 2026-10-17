@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 
+import { auxiliaryInputEncryptionParameters } from '#tests/auxiliary-input-encryption-parameters.js';
 import { bitLength, byteLength, littleEndian } from '#tests/exact-integer.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import {
@@ -33,6 +34,7 @@ const { zero, one, base, add, subtract, multiply, scale } = wordFieldArithmetic;
 
 const productionSetupLayout = {
     degree: Number(fixedModulusBfvInputs.polynomialDegree),
+    sourceHalfSupport: Number(auxiliaryInputEncryptionParameters.support / 2n),
     fheHalfSupport: Number(fixedModulusBfvInputs.secretSupportWeight / 2n),
     shareHalfSupport: Number(
         shareEncryptionParameters.encryptionSupportWeight / 2n,
@@ -75,15 +77,19 @@ export const setupRelationOperator = (
     const gadgetLength = Number(profile.gadgetLength);
     const participants = profile.participantCount;
     const shareCommon = gadgetPolynomials * gadgetLength;
-    const polynomialCount = shareCommon + 3 * participants + 1;
+    const sourceStart = shareCommon + 3 * participants + 1;
+    const polynomialCount = sourceStart + 8;
     const header = setupHeader(profile);
     if (
         statement.length !==
         header.length +
             shareCommon * degree * (1 + byteLength(ciphertextModulus)) +
-            (polynomialCount - shareCommon) *
+            (sourceStart - shareCommon) *
                 degree *
-                (1 + byteLength(share.modulus))
+                (1 + byteLength(share.modulus)) +
+            8 *
+                degree *
+                (1 + byteLength(auxiliaryInputEncryptionParameters.modulus))
     )
         throw new RangeError('The setup statement has the wrong length.');
     if (!header.equals(statement.subarray(0, header.length)))
@@ -187,7 +193,9 @@ export const setupRelationOperator = (
             factor = multiply(factor, limbWeight);
         }
         weight = multiply(weight, power(limbWeight, fheLimbs));
+        return error;
     };
+    let originalError: Variable | undefined;
     for (let gadget = 0; gadget < gadgetLength; gadget++) {
         const gadgetDigit = fingerprint(
             fixedModulusBfvInputs.gadgetBase ** BigInt(gadget),
@@ -195,7 +203,8 @@ export const setupRelationOperator = (
             limbWeight,
         );
         const first = gadgetPolynomials * gadget;
-        key(first, first + 1, secret);
+        const encryptionError = key(first, first + 1, secret);
+        if (gadget === 0) originalError = encryptionError;
         key(first, first + 2, auxiliary, {
             variable: secret,
             factor: negate(gadgetDigit),
@@ -294,6 +303,44 @@ export const setupRelationOperator = (
         builder.addTarget(scale(weight, BigInt(half)));
         weight = multiply(weight, alpha);
     }
+    assert(originalError);
+    const oldSupportCount = supports.length;
+    const sourceEphemeral = allocateSparse(layout.sourceHalfSupport);
+    const sourceParameters = auxiliaryInputEncryptionParameters;
+    for (let component = 0; component < 4; component++) {
+        const quotient = signed(quotientBits);
+        const error = signed(errorBits);
+        register(
+            sourceStart + 2 * component,
+            sourceStart + 2 * component + 1,
+            sourceEphemeral,
+            -1n,
+        );
+        builder.putGeometric(
+            quotient,
+            degree,
+            scale(weight, -sourceParameters.modulus),
+        );
+        builder.putGeometric(error, degree, weight);
+        if (component === 0)
+            builder.putGeometric(
+                { ...secret, offset: 1n },
+                degree,
+                scale(weight, sourceParameters.scale),
+            );
+        if (component === 2)
+            builder.putGeometric(
+                { ...originalError, offset: originalError.offset + 64n },
+                degree,
+                scale(weight, sourceParameters.scale),
+            );
+        weight = multiply(weight, limbWeight);
+    }
+    for (const [supportColumn, half] of supports.slice(oldSupportCount)) {
+        builder.putOnes(column(supportColumn), degree, weight);
+        builder.addTarget(scale(weight, BigInt(half)));
+        weight = multiply(weight, alpha);
+    }
     assert.equal(nextWord, shape.wordColumns);
     assert.equal(nextBoolean, columns);
     // Each polynomial is common, entering its convolved variables'
@@ -302,10 +349,15 @@ export const setupRelationOperator = (
     const reader = createStatementReader(statement, header.length, alpha);
     for (let index = 0; index < polynomialCount; index++) {
         const fhe = index < shareCommon;
+        const source = index >= sourceStart;
         const polynomial = reader.next(
             degree,
-            fhe ? ciphertextModulus : share.modulus,
-            fhe ? fheLimbBits : limbBits,
+            fhe
+                ? ciphertextModulus
+                : source
+                  ? sourceParameters.modulus
+                  : share.modulus,
+            fhe || source ? fheLimbBits : limbBits,
         );
         const uses = commonUses.get(index);
         const values = valueUses.get(index);

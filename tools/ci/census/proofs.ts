@@ -133,7 +133,7 @@ export const renderBoundedPolynomialProofCensus = (): string[] => {
 };
 
 export const renderProofVerifierQueryBounds = (): string[] => {
-    const proofVerifierQueries = compileProofVerifierQueryCensus();
+    const proofVerifierQueries = compileProofVerifierQueryCensus(true);
     return [
         '## Proof verifier query bounds',
         '',
@@ -583,7 +583,7 @@ export const renderProofCompilerChronology = (): string[] => {
     return [
         '## Proof compiler chronology',
         '',
-        'Local producer counts for one roster, including every eligible offer even if it is not selected. Registration has no proof role. These counts do not bound speculative verification or all preselection exposure scopes; the composed ledger below owns those separate populations.',
+        'Local producer counts for one roster, including every eligible offer even if it is not selected. Registration has no proof role. These counts do not bound speculative verification; the per-credential proof-scope cap of the security argument and the composed ledger below own the complete populations.',
         '',
         table(
             [

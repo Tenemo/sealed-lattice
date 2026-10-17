@@ -1,5 +1,4 @@
 use super::*;
-use fips204::traits::{KeyGen, Signer};
 fn identity(value: u8) -> [u8; 64] {
     [value; 64]
 }
@@ -108,15 +107,11 @@ fn proposals_carry_exactly_the_quorum_including_the_organizer() {
 }
 #[test]
 fn signatures_bind_the_purpose_context() {
-    let (public, private) = ml_dsa_65::KG::keygen_from_seed(&[9; 32]);
+    let (public, mut private) = crate::authentication::keypair_from_seed(&[9; 64]);
     let public = public.into_bytes();
     let intent = CloseIntentMessage::new(identity(7), identity(8), 5).unwrap();
     let signature = private
-        .try_sign_with_seed(
-            &[10; 32],
-            intent.identity(),
-            ClosePurpose::Intent.context().as_bytes(),
-        )
+        .sign(intent.identity(), ClosePurpose::Intent.context().as_bytes())
         .unwrap();
     assert!(verify_close_signature(
         &public,

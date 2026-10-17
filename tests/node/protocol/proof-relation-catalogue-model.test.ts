@@ -64,9 +64,9 @@ describe('fixed three-purpose raw-domain catalogue', () => {
             335, 329, 404,
         ]);
         const shapes = [
-            [3, 2, 131072],
-            [10, 10, 262144],
-            [20, 20, 524288],
+            [3, 2, 262144],
+            [10, 10, 524288],
+            [20, 20, 1048576],
         ];
         for (const [participants, options, setupWidth] of shapes) {
             const entries = proofRelationCatalogueEntry(
@@ -135,11 +135,24 @@ describe('fixed three-purpose raw-domain catalogue', () => {
 
     it('bounds every static framed family in bits and reuses the source-linked verifier expansion', () => {
         const census = compileProofHashDomainCensus();
-        expect(census.rows).toHaveLength(342 * 3);
+        expect(census.rows).toHaveLength(342 * 4);
         expect(census.sentinelCount).toBe(1n);
-        expect(census.maximumAcceptedExpansionQueries).toBe(97828n);
-        expect(census.minimumMessageBits).toBe(8n * 131072n);
-        expect(census.maximumMessageBits).toBe(8n * 524288n);
+        const treeQueries = (length: number, openings: number) =>
+            Math.min(length, openings) +
+            Array.from({ length: Math.log2(length) }, (_, level) =>
+                Math.min(openings, length / 2 ** (level + 1)),
+            ).reduce((sum, value) => sum + value, 0);
+        const wordQueries = 97828 + treeQueries(262144, 1408);
+        const evaluationQueries =
+            56 +
+            Array.from({ length: 16 }, (_, stage) =>
+                treeQueries(262144 / 2 ** stage, 858),
+            ).reduce((sum, value) => sum + value, 0);
+        expect(census.maximumAcceptedExpansionQueries).toBe(
+            BigInt(7 * (wordQueries + evaluationQueries) + (4 * 10 - 1) + 1),
+        );
+        expect(census.minimumMessageBits).toBe(8n * 16384n);
+        expect(census.maximumMessageBits).toBe(8n * 1048576n);
         // The maximum is a full setup statement, which its digest hashes.
         const maximum = census.rows.find(
             (row) => row.maximumInputBits === census.maximumInputBits,
@@ -153,16 +166,20 @@ describe('fixed three-purpose raw-domain catalogue', () => {
     });
 
     it('binds the independent parameter encoder to the immutable source catalogue, excluding generic Relation mutation', () => {
-        const source = readFileSync(
-            'crates/protocol-research/supported-profile/src/relation.rs',
-            'utf8',
-        );
+        const source = ['relation.rs', 'source-linked.rs']
+            .map((file) =>
+                readFileSync(
+                    `crates/protocol-research/supported-profile/src/${file}`,
+                    'utf8',
+                ),
+            )
+            .join('\n');
         for (const tag of [
-            'complete-setup-words',
+            'encrypted-source-linked-setup',
             'linked-scored-ballot',
             'linked-threshold-release',
         ])
-            expect(source).toContain(`tag: b"${tag}"`);
+            expect(source).toContain(`b"${tag}"`);
         // Independent completion operands pinned by the Rust descriptor's
         // existing full-profile tests, rather than copied from this encoder.
         const completion = proofRelationCatalogueEntry(
@@ -171,24 +188,24 @@ describe('fixed three-purpose raw-domain catalogue', () => {
         expect(completion[0].encodedParameters.subarray(0, 72)).toEqual(
             Buffer.concat(
                 [
-                    65536, 704, 1409, 262144, 131071, 2, 262144, 65536, 331, 24,
-                    375, 1024, 256, 112, 96, 16, 7, 32,
+                    65536, 704, 1409, 262144, 131071, 2, 524288, 65536, 423, 26,
+                    483, 1024, 256, 112, 96, 16, 7, 32,
                 ].map((value) => unsigned(value, 4)),
             ),
         );
-        expect(completion[1].encodedParameters.subarray(28, 80)).toEqual(
+        expect(completion[1].encodedParameters.subarray(28, 72)).toEqual(
             Buffer.concat(
-                [
-                    27, 5, 32, 1024, 256, 32768, 65536, 27, 28, 29, 30, 20, 31,
-                ].map((value) => unsigned(value, 4)),
+                [26, 4, 31, 1024, 256, 6144, 12288, 26, 27, 28, 29].map(
+                    (value) => unsigned(value, 4),
+                ),
             ),
         );
         expect(completion[2].encodedParameters.subarray(28, 128)).toEqual(
             Buffer.concat(
                 [
-                    59,
+                    61,
                     2,
-                    68,
+                    71,
                     256,
                     96,
                     48,
@@ -201,7 +218,7 @@ describe('fixed three-purpose raw-domain catalogue', () => {
                     24,
                     16,
                     30,
-                    144,
+                    168,
                     144,
                     72,
                     72,
@@ -217,8 +234,8 @@ describe('fixed three-purpose raw-domain catalogue', () => {
         expect(source).toContain('pub zero_product_pairs: Vec<(usize, usize)>');
         expect(source).toContain('pub narrow: Vec<(usize, u128)>');
         expect(
-            completion[0].encodedParameters.subarray(-44 * 8, -43 * 8),
-        ).toEqual(Buffer.concat([unsigned(30, 4), unsigned(512, 4)]));
+            completion[0].encodedParameters.subarray(-60 * 8, -59 * 8),
+        ).toEqual(Buffer.concat([unsigned(29, 4), unsigned(512, 4)]));
         // Those generic fields are not a public constructor input here.
         expect(
             new Set(proofRelationCatalogue().map((entry) => entry.role)),

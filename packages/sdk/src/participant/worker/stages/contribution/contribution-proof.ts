@@ -8,23 +8,24 @@ type ProofBounds = Pick<
 >;
 type ProofSlot = Readonly<{ offset: number; length: number }>;
 
-// The private record plan depends only on the authenticated profile. The
-// final slot has the profile's remainder, even when the proof ends earlier.
-export const proofRecordLayout = (bounds: ProofBounds): ProofSlot[] =>
-    Array.from(
-        { length: Math.ceil(bounds.maximumProofBytes / chunkBytes) },
+// Completed records are determined by the authenticated proof length.
+export const proofRecordLayout = (
+    bounds: ProofBounds,
+    length: number,
+): ProofSlot[] => {
+    checkProofLength(bounds, length);
+    return Array.from(
+        { length: Math.ceil(length / chunkBytes) },
         (_unused, index) => ({
             offset: index * chunkBytes,
-            length: Math.min(
-                chunkBytes,
-                bounds.maximumProofBytes - index * chunkBytes,
-            ),
+            length: Math.min(chunkBytes, length - index * chunkBytes),
         }),
     );
+};
 
 const checkProofLength = (bounds: ProofBounds, length: number) => {
     if (
-        bounds.bodyHeaderBytes !== 8 + 64 ||
+        bounds.bodyHeaderBytes !== 8 ||
         !Number.isSafeInteger(length) ||
         length < bounds.minimumProofBytes ||
         length > bounds.maximumProofBytes
@@ -32,11 +33,10 @@ const checkProofLength = (bounds: ProofBounds, length: number) => {
         throw new Error('The contribution proof has an invalid length.');
 };
 
-// This fixed-width authenticated body header is the only retained carrier
-// of the actual proof length. Physical record lengths always follow the plan.
+// The existing authenticated body header remains the sole length carrier.
 export const proofLength = (bounds: ProofBounds, header: Uint8Array) => {
     if (
-        bounds.bodyHeaderBytes !== 8 + 64 ||
+        bounds.bodyHeaderBytes !== 8 ||
         header.length !== bounds.bodyHeaderBytes
     )
         throw new Error('The contribution body header is malformed.');
@@ -53,9 +53,8 @@ export const createProofWriter = (
     bounds: ProofBounds,
     store: (slot: ProofSlot, bytes: Uint8Array) => Promise<void>,
 ) => {
-    const slots = proofRecordLayout(bounds);
     const buffer = new Uint8Array(chunkBytes);
-    let next = 0;
+    let stored = 0;
     let used = 0;
     let length = 0;
     let closed = false;
@@ -64,13 +63,10 @@ export const createProofWriter = (
         buffer.fill(0);
     };
     const appendSlot = async () => {
-        const slot = slots[next];
-        if (slot === undefined || used > slot.length)
-            throw new Error('The contribution proof exceeds its record plan.');
-        buffer.fill(0, used, slot.length);
-        await store(slot, buffer.subarray(0, slot.length));
+        if (used === 0) return;
+        await store({ offset: stored, length: used }, buffer.subarray(0, used));
+        stored += used;
         buffer.fill(0);
-        next++;
         used = 0;
     };
     return {
@@ -82,17 +78,14 @@ export const createProofWriter = (
                     throw new Error('The proof exceeds its bound.');
                 length += bytes.length;
                 for (let offset = 0; offset < bytes.length;) {
-                    const slot = slots[next];
-                    if (slot === undefined)
-                        throw new Error('The proof exceeds its record plan.');
                     const count = Math.min(
                         bytes.length - offset,
-                        slot.length - used,
+                        chunkBytes - used,
                     );
                     buffer.set(bytes.subarray(offset, offset + count), used);
                     used += count;
                     offset += count;
-                    if (used === slot.length) await appendSlot();
+                    if (used === chunkBytes) await appendSlot();
                 }
             } catch (error) {
                 close();
@@ -104,7 +97,7 @@ export const createProofWriter = (
                 throw new Error('The contribution proof writer is closed.');
             try {
                 checkProofLength(bounds, length);
-                while (next < slots.length) await appendSlot();
+                await appendSlot();
                 return length;
             } finally {
                 close();
@@ -114,9 +107,8 @@ export const createProofWriter = (
     };
 };
 
-// Every planned slot is authenticated by the owning reader and checked for
-// zero padding before this pass completes. Consumers receive only the
-// framed proof prefix; commitment completion waits for the whole pass.
+// Every required slot is authenticated by the owning reader. Completion
+// waits for the complete exact-length proof, including its final record.
 export const readProof = async (
     bounds: ProofBounds,
     header: Uint8Array,
@@ -124,18 +116,12 @@ export const readProof = async (
     consume: (offset: number, bytes: Uint8Array) => void | Promise<void>,
 ) => {
     const length = proofLength(bounds, header);
-    for (const [index, slot] of proofRecordLayout(bounds).entries()) {
+    for (const [index, slot] of proofRecordLayout(bounds, length).entries()) {
         const bytes = await read(slot, index);
         try {
             if (bytes.length !== slot.length)
                 throw new Error('A private proof record has another length.');
-            const used = Math.min(
-                slot.length,
-                Math.max(0, length - slot.offset),
-            );
-            if (bytes.subarray(used).some((value) => value !== 0))
-                throw new Error('The private proof padding is nonzero.');
-            if (used > 0) await consume(slot.offset, bytes.subarray(0, used));
+            await consume(slot.offset, bytes);
         } finally {
             bytes.fill(0);
         }

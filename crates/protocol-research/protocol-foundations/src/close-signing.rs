@@ -7,10 +7,6 @@ use crate::{
     },
     roster_authentication::AuthenticatedRosterProposal,
 };
-use fips204::{
-    ml_dsa_65,
-    traits::{SerDes, Verifier},
-};
 use supported_profile::{Profile, inventory_threshold};
 
 /// Two different envelopes already make a slot conflicting, so a response
@@ -92,9 +88,7 @@ pub fn verify_close_signature(
     let Ok(signature) = <[u8; SIGNATURE_BYTES]>::try_from(signature) else {
         return false;
     };
-    let Ok(public) = ml_dsa_65::PublicKey::try_from_bytes(*public) else {
-        return false;
-    };
+    let public = crate::authentication::PublicKey::from_bytes(*public);
     public.verify(identity, &signature, purpose.context().as_bytes())
 }
 

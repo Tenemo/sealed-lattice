@@ -15,8 +15,11 @@ import {
 const cacheStore = 'aggregate';
 
 export const openSetupCache = async (namespace: string) => {
-    const opened = indexedDB.open(namespacedName(setupCacheName, namespace), 1);
-    opened.onupgradeneeded = () => opened.result.createObjectStore(cacheStore);
+    const opened = indexedDB.open(namespacedName(setupCacheName, namespace), 2);
+    opened.onupgradeneeded = () => {
+        for (const store of [cacheStore, 'collection'])
+            opened.result.createObjectStore(store);
+    };
     try {
         return await requestResult(opened);
     } catch {

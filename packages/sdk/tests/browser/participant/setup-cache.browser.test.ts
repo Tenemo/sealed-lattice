@@ -10,7 +10,18 @@ import { streamBallotKey } from '#packages/sdk/src/participant/worker/stages/bal
 import {
     streamFinalAggregate,
     readFinalAggregate,
+    openSetupCache,
 } from '#packages/sdk/src/participant/worker/stages/setup/setup-cache.js';
+import {
+    collectionBytes,
+    collectionWriter,
+    clearCollectionKind,
+    collectionBlob,
+    moveCollectedAggregate,
+    readDiscoveryProgress,
+    saveDiscoveryProgress,
+    writeCollection,
+} from '#packages/sdk/src/participant/worker/stages/setup/setup-collection-cache.js';
 import {
     namespacedName,
     setupCacheName,
@@ -41,9 +52,11 @@ const fixture = async () => {
     const namespace = 'setup-cache-' + crypto.randomUUID();
     const name = namespacedName(setupCacheName, namespace);
     names.push(name);
-    const opening = indexedDB.open(name, 1);
-    opening.onupgradeneeded = () =>
+    const opening = indexedDB.open(name, 2);
+    opening.onupgradeneeded = () => {
         opening.result.createObjectStore('aggregate');
+        opening.result.createObjectStore('collection');
+    };
     const database = await fixtureRequest(
         opening,
         'Cache fixture read failed.',
@@ -87,6 +100,101 @@ afterEach(async () => {
 });
 
 describe('bounded public aggregate cache reads', () => {
+    it('creates and reopens the current public cache with its aggregate bytes', async () => {
+        const namespace = 'setup-reopen-' + crypto.randomUUID();
+        const name = namespacedName(setupCacheName, namespace);
+        names.push(name);
+        const created = await openSetupCache(namespace);
+        databases.push(created);
+        expect(created.version).toBe(2);
+        expect([...created.objectStoreNames]).toEqual([
+            'aggregate',
+            'collection',
+        ]);
+        await write(created, (store) =>
+            store.put(new Blob([Uint8Array.of(4, 9)]), [1, 7, 0]),
+        );
+        created.close();
+        const reopened = await openSetupCache(namespace);
+        databases.push(reopened);
+        expect(reopened.version).toBe(2);
+        expect([...reopened.objectStoreNames]).toEqual([
+            'aggregate',
+            'collection',
+        ]);
+        const saved = (await fixtureRequest(
+            reopened
+                .transaction('aggregate')
+                .objectStore('aggregate')
+                .get([1, 7, 0]),
+            'Reopened cache read failed.',
+        )) as Blob;
+        expect([...new Uint8Array(await saved.arrayBuffer())]).toEqual([4, 9]);
+    });
+
+    it('retains bounded public chunks, moves sums atomically and removes only the requested temporary kind', async () => {
+        const { database } = await fixture();
+        const writer = collectionWriter(
+            database,
+            (offset) => ['offer', offset],
+            4,
+            9,
+        );
+        await writer.append(Uint8Array.of(1, 2));
+        await writer.append(Uint8Array.of(3, 4, 5, 6, 7, 8, 9));
+        expect(await writer.finish()).toBe(9);
+        expect([...(await collectionBytes(database, ['offer', 4], 4))]).toEqual(
+            [5, 6, 7, 8],
+        );
+        await expect(writer.append(Uint8Array.of(10))).rejects.toBeInstanceOf(
+            StorageFailure,
+        );
+        await expect(
+            collectionBytes(database, ['offer', 8], 4),
+        ).rejects.toBeInstanceOf(StorageFailure);
+        const sum = new Blob([Uint8Array.of(11, 12)]);
+        await writeCollection(database, (store) => store.put(sum, ['sum', 0]));
+        await clearCollectionKind(database, 'offer');
+        expect(await collectionBlob(database, ['offer', 0])).toBeUndefined();
+        expect((await collectionBlob(database, ['sum', 0]))?.size).toBe(2);
+        await moveCollectedAggregate(database, ['sum', 0], [1, 7, 0], sum);
+        expect(await collectionBlob(database, ['sum', 0])).toBeUndefined();
+        const moved = (await fixtureRequest(
+            database
+                .transaction('aggregate')
+                .objectStore('aggregate')
+                .get([1, 7, 0]),
+            'Moved sum read failed.',
+        )) as Blob;
+        expect([...new Uint8Array(await moved.arrayBuffer())]).toEqual([
+            11, 12,
+        ]);
+    });
+
+    it('keeps discovery routing across calls and discards malformed cursors', async () => {
+        const { database } = await fixture();
+        const progress = {
+            nextPosition: 1,
+            authors: [{ offset: 3, total: 7 }, { offset: 0 }],
+        };
+        await saveDiscoveryProgress(database, progress);
+        expect(await readDiscoveryProgress(database, 2)).toEqual(progress);
+        const original = await collectionBytes(database, 'discovery', 38);
+        for (const [offset, value] of [
+            [0, 2],
+            [4, 2],
+            [5, 8],
+            [12, 255],
+        ]) {
+            const changed = original.slice();
+            changed[offset] = value;
+            await writeCollection(database, (store) =>
+                store.put(new Blob([changed]), 'discovery'),
+            );
+            expect(await readDiscoveryProgress(database, 2)).toBeUndefined();
+        }
+    });
+
     it('delivers coefficient-aligned chunks in order, including the shorter final chunk', async () => {
         const { context } = await fixture();
         const seen: [number, number[]][] = [];

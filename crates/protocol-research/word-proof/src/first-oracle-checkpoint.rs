@@ -10,7 +10,7 @@ use parallel_work::{
     ProtocolHash,
     sealing::{self, Sealed, TAG_BYTES},
 };
-use supported_profile::{Profile, relation::*};
+use supported_profile::{Profile, relation::*, source_linked::relation as setup_relation};
 use zeroize::Zeroizing;
 
 /// The most plaintext bytes one record seals, the chunk bound of the
@@ -26,6 +26,7 @@ struct Header {
     column: usize,
     role: Vec<u8>,
     expected: [u8; 64],
+    public_root: [u8; 64],
     statement: Vec<u8>,
     input_hashes: Vec<[u8; 64]>,
 }
@@ -39,6 +40,7 @@ impl Header {
         bytes.extend((self.role.len() as u16).to_le_bytes());
         bytes.extend(&self.role);
         bytes.extend(self.expected);
+        bytes.extend(self.public_root);
         bytes.extend(&self.statement);
         bytes.extend((self.input_hashes.len() as u16).to_le_bytes());
         for hash in &self.input_hashes {
@@ -56,7 +58,7 @@ impl Header {
         let column = u32::from_le_bytes(bytes[2..6].try_into().unwrap()) as usize;
         let role_length = u16::from_le_bytes(bytes[6..8].try_into().unwrap()) as usize;
         let start = 8 + role_length;
-        let input_start = start + 64 + statement.len();
+        let input_start = start + 128 + statement.len();
         if role_length == 0
             || role_length > MAXIMUM_ROLE_BYTES
             || column > setup_relation(profile).columns() + 1
@@ -68,7 +70,7 @@ impl Header {
             u16::from_le_bytes(bytes[input_start..input_start + 2].try_into().unwrap()) as usize;
         if count != profile.participants()
             || bytes.len() != input_start + 2 + count * 64
-            || bytes[start + 64..input_start] != statement
+            || bytes[start + 128..input_start] != statement
         {
             return Err(Refusal::Operation);
         }
@@ -77,6 +79,7 @@ impl Header {
             column,
             role: bytes[8..start].to_vec(),
             expected: bytes[start..start + 64].try_into().unwrap(),
+            public_root: bytes[start + 64..start + 128].try_into().unwrap(),
             statement,
             input_hashes: bytes[input_start + 2..]
                 .chunks_exact(64)
@@ -113,7 +116,7 @@ pub fn record_count(relation: &Relation) -> usize {
 /// and a recipient key hash for each participant.
 pub fn maximum_header_bytes(profile: Profile) -> usize {
     8 + MAXIMUM_ROLE_BYTES
-        + 64
+        + 128
         + profile.setup_statement_header().len()
         + 2
         + profile.participants() * 64
@@ -178,6 +181,7 @@ impl Export {
                 column,
                 role: prover.role.clone(),
                 expected: prover.expected,
+                public_root: prover.public_root,
                 statement: prover.statement_header.clone(),
                 input_hashes: input_hashes.to_vec(),
             },
@@ -197,6 +201,7 @@ impl Export {
             || prover.phase != Phase::FirstColumn(self.header.column)
             || prover.role != self.header.role
             || prover.expected != self.header.expected
+            || prover.public_root != self.header.public_root
             || prover.statement_header != self.header.statement
         {
             return Err(Refusal::Operation);
@@ -351,8 +356,12 @@ impl Import {
             std::mem::take(&mut *self.columns),
         )
         .map_err(|_| ())?;
-        let mut prover =
-            SetupProver::new(self.header.profile, &self.header.role, self.header.expected);
+        let mut prover = SetupProver::new(
+            self.header.profile,
+            &self.header.role,
+            self.header.expected,
+            self.header.public_root,
+        );
         let mut transcript = Transcript::new(
             &self.header.role,
             transcript::context(&self.relation, &self.header.role, &self.header.expected),

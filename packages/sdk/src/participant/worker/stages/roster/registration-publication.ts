@@ -30,6 +30,10 @@ export const publishRegistrationRecords = async (
             registrationCandidateKey(registrationBodyDigest),
             [
                 [dataKind.publicKey, registrationFile.publicKey],
+                [
+                    dataKind.sourceCiphertexts,
+                    registrationFile.sourceCiphertexts,
+                ],
                 [dataKind.header, registrationFile.header],
                 [dataKind.signature, registrationFile.signature],
             ],

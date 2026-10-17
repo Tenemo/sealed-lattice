@@ -5,7 +5,6 @@ import {
 } from '#tests/certificate-custody-model.js';
 import { compileCloseResponseCensus } from '#tests/close-response-model.js';
 import { compileCloseWireCensus } from '#tests/close-wire-model.js';
-import { compileRecipientKeyUniquenessBound } from '#tests/recipient-key-uniqueness-model.js';
 import {
     completionProfile,
     completionProfileCounts,
@@ -122,62 +121,6 @@ export const renderThresholdKeyAggregationStructuralCensus = (): string[] => {
                 [
                     'Experiment gadget length',
                     formatCount(thresholdKeyAggregation.gadgetLength),
-                ],
-            ],
-        ),
-        '',
-    ];
-};
-
-export const renderRecipientKeyUniquenessCensus = (): string[] => {
-    const recipientKeyUniqueness = compileRecipientKeyUniquenessBound();
-    return [
-        '## Recipient-key uniqueness census',
-        '',
-        'For an ideal uniformly sampled common ring element, a determinant and union bound limits the event that any public key has two bounded witnesses. The event covers every recipient public key at once. The exponent below bounds this statistical bad-matrix event only; it is not a computational-security level and does not cover the real SHAKE common-string generator, selective completion conditioning, or proof composition.',
-        '',
-        table(
-            ['Property', 'Value'],
-            [
-                [
-                    'Current registration ring degree',
-                    formatCount(recipientKeyUniqueness.polynomialModulusDegree),
-                ],
-                [
-                    'Current registration modulus prime factor',
-                    formatCount(recipientKeyUniqueness.primeModulus),
-                ],
-                [
-                    'Recipient secret coefficient bound',
-                    formatCount(recipientKeyUniqueness.secretCoefficientBound),
-                ],
-                [
-                    'Recipient error coefficient bound',
-                    formatCount(recipientKeyUniqueness.errorCoefficientBound),
-                ],
-                [
-                    'Secret difference values per coefficient',
-                    formatCount(
-                        recipientKeyUniqueness.secretDifferenceValueCount,
-                    ),
-                ],
-                [
-                    'Error difference values per coefficient',
-                    formatCount(
-                        recipientKeyUniqueness.errorDifferenceValueCount,
-                    ),
-                ],
-                [
-                    'Squared determinant-union base numerator',
-                    formatCount(
-                        recipientKeyUniqueness.squaredFailureBaseNumerator,
-                    ),
-                ],
-                [
-                    'Uniform-matrix failure exponent',
-                    formatCount(
-                        recipientKeyUniqueness.uniformMatrixFailureExponent,
-                    ),
                 ],
             ],
         ),
@@ -521,7 +464,7 @@ export const renderThresholdReleaseFloodingBound = (): string[] => {
     return [
         '## Threshold release flooding bound',
         '',
-        'For ten participants and release threshold four, one rational-ring implementation enumerates every coefficient over the reduced degree-eight negacyclic subring, while the independent modular-ring model obtains the same maxima. The KLLPS26 trigonometric expression remains as a looser analytic cross-check. All noise-budget figures are floors from the dominant flooding term only: they omit the expanded public-proof radius, remaining correctness terms, proof slack, multi-query and multi-session unions, and hidden constants. They are not approved FHE parameters.',
+        'For ten participants and release threshold four, one rational-ring implementation enumerates every coefficient over the reduced degree-eight negacyclic subring, while the independent modular-ring model obtains the same maxima. The KLLPS26 trigonometric expression remains as a looser analytic cross-check. The selected statistical reserve is a component operand, not the suite security target. The stronger statistical reserve is only a comparison and does not change the implementation. These bit counts cover the dominant flooding term only: they omit the expanded public-proof radius, remaining correctness terms, proof slack, multi-query and multi-session unions, and hidden constants. They are not approved FHE parameters.',
         '',
         table(
             ['Property', 'Value'],
@@ -529,6 +472,10 @@ export const renderThresholdReleaseFloodingBound = (): string[] => {
                 [
                     'Authorized release subsets enumerated',
                     formatCount(thresholdReleaseNoise.authorizedSubsetCount),
+                ],
+                [
+                    'Polynomial modulus degree',
+                    formatCount(thresholdReleaseNoise.polynomialModulusDegree),
                 ],
                 [
                     'Production interpolation-point exponent stride',
@@ -565,9 +512,9 @@ export const renderThresholdReleaseFloodingBound = (): string[] => {
                     ),
                 ],
                 [
-                    'Joint-release dominant noise reserve at 80 statistical bits',
+                    `Joint-release dominant noise reserve at the selected ${thresholdReleaseNoise.selectedStatisticalBits} statistical bits`,
                     formatCount(
-                        thresholdReleaseNoise.jointTargetSecurityDominantNoiseReserveBitLength,
+                        thresholdReleaseNoise.selectedJointDominantNoiseReserveBits,
                     ),
                 ],
                 [
@@ -581,27 +528,27 @@ export const renderThresholdReleaseFloodingBound = (): string[] => {
                     `\`${thresholdReleaseNoise.interpolationProductBound.toFixed(6)}\``,
                 ],
                 [
-                    'Exact dominant noise-budget floor at 80 statistical bits',
+                    `Exact dominant noise-budget bound at the selected ${thresholdReleaseNoise.selectedStatisticalBits} statistical bits`,
                     formatCount(
-                        thresholdReleaseNoise.exactTargetSecurityDominantNoiseBudgetLowerBoundBitLength,
+                        thresholdReleaseNoise.selectedExactDominantNoiseBudgetBits,
                     ),
                 ],
                 [
-                    'Exact dominant noise-budget floor at 128 statistical bits',
+                    `Hypothetical exact dominant noise-budget bound at ${thresholdReleaseNoise.comparisonStatisticalBits} statistical bits`,
                     formatCount(
-                        thresholdReleaseNoise.exactConservativeSecurityDominantNoiseBudgetLowerBoundBitLength,
+                        thresholdReleaseNoise.comparisonExactDominantNoiseBudgetBits,
                     ),
                 ],
                 [
-                    'Analytic dominant noise-budget floor at 80 statistical bits',
+                    `Analytic dominant noise-budget bound at the selected ${thresholdReleaseNoise.selectedStatisticalBits} statistical bits`,
                     formatCount(
-                        thresholdReleaseNoise.targetSecurityDominantNoiseBudgetLowerBoundBitLength,
+                        thresholdReleaseNoise.selectedAnalyticDominantNoiseBudgetBits,
                     ),
                 ],
                 [
-                    'Analytic dominant noise-budget floor at 128 statistical bits',
+                    `Hypothetical analytic dominant noise-budget bound at ${thresholdReleaseNoise.comparisonStatisticalBits} statistical bits`,
                     formatCount(
-                        thresholdReleaseNoise.conservativeSecurityDominantNoiseBudgetLowerBoundBitLength,
+                        thresholdReleaseNoise.comparisonAnalyticDominantNoiseBudgetBits,
                     ),
                 ],
             ],

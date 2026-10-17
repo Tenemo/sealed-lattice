@@ -8,13 +8,14 @@ use protocol_foundations::{
     roster::{RetainedContributionContext, RosterProposal},
 };
 use setup_witness::{
-    PolynomialOutput,
-    contribution::{Contribution, common_records},
+    PolynomialOutput, contribution::common_records, encrypted_source::LinkedContribution,
 };
 
 use statement_stream::coefficient::{self, CenteredCodec};
+use statement_stream::committed_polynomial::CommittedPolynomial;
 use std::sync::Arc;
-use supported_profile::{Profile, relation::setup_relation, share_modulus};
+use supported_profile::{Profile, share_modulus, source_linked::relation as setup_relation};
+use word_proof::public_oracle::PublicOracleBuilder;
 use word_proof::setup_prover::{ProverStep, SetupProver, first_oracle_checkpoint};
 use zeroize::Zeroize;
 
@@ -108,9 +109,10 @@ struct PublicOutput {
     offset: usize,
     buffer: Vec<u8>,
     public_chunk: PublicChunk,
+    oracle: PublicOracleBuilder,
 }
 impl PublicOutput {
-    fn new(profile: Profile, public_chunk: PublicChunk) -> Self {
+    fn new(profile: Profile, role: &[u8], public_chunk: PublicChunk) -> Self {
         let mut output = Self {
             profile,
             hash: HashStream::new(Sponge::ProtocolHash),
@@ -119,6 +121,8 @@ impl PublicOutput {
             offset: 0,
             buffer: Vec::with_capacity(CHUNK),
             public_chunk,
+            oracle: PublicOracleBuilder::new(role, profile.committed_columns())
+                .expect("The verified contribution role and profile fit the oracle"),
         };
         output.append(&profile.setup_statement_header());
         output.flush();
@@ -141,7 +145,14 @@ impl PublicOutput {
         if self.buffer.is_empty() {
             return;
         }
-        self.hash.update(&self.buffer);
+        if self.next == 0
+            || !self
+                .profile
+                .committed_polynomials()
+                .contains(&(self.next - 1))
+        {
+            self.hash.update(&self.buffer);
+        }
         // Only canonical public polynomial/header bytes cross this callback.
         (self.public_chunk)(self.next, self.offset, &self.buffer);
         self.offset += self.buffer.len();
@@ -157,12 +168,32 @@ impl PolynomialOutput for PublicOutput {
         assert_eq!(width, self.profile.family_magnitude_bytes(family));
         let half = modulus >> 1usize;
         let mut encoded = vec![0u8; 1 + width];
+        let mut committed = self
+            .profile
+            .committed_polynomials()
+            .contains(&(self.next - 1))
+            .then(|| CommittedPolynomial::new(self.profile));
         for value in values {
             assert!(value.magnitude() <= half.magnitude());
             coefficient::encode(value, &mut encoded);
+            if let Some(committed) = &mut committed {
+                committed
+                    .push(&encoded)
+                    .expect("Generated FHE coefficients are canonical");
+            }
             self.append(&encoded);
         }
         self.flush();
+        if let Some(committed) = committed {
+            for column in committed
+                .finish()
+                .expect("The generator emits one complete polynomial")
+            {
+                self.oracle
+                    .column(&column)
+                    .expect("Generated columns have the profile's degree");
+            }
+        }
         self.next += 1;
         self.offset = 0;
     }
@@ -173,7 +204,7 @@ struct Work {
     registrations: Vec<Arc<VerifiedRegistration>>,
     retained_keys: Vec<Vec<u8>>,
     input_hashes: Vec<[u8; 64]>,
-    generator: Option<Contribution>,
+    generator: Option<LinkedContribution>,
     proof: Option<SetupProver>,
     public: Option<PublicOutput>,
     next_gadget: usize,
@@ -184,7 +215,7 @@ impl Work {
     fn new(
         proposal: &RosterProposal,
         position: usize,
-        source: setup_witness::fhe_key_source::FheKeySource,
+        source: LinkedContribution,
     ) -> Result<Self, ()> {
         let profile = proposal.profile();
         let role = proposal.contribution_role(position).map_err(|_| ())?;
@@ -197,7 +228,7 @@ impl Work {
                 .iter()
                 .map(|record| record.header().recipient_key_hash)
                 .collect(),
-            generator: Some(Contribution::from_source(profile, source).map_err(|_| ())?),
+            generator: Some(source),
             proof: None,
             public: None,
             role,
@@ -254,18 +285,27 @@ impl Work {
             {
                 return Err(());
             }
+            for record in generator.public().records().map_err(|_| ())? {
+                public.append(&record);
+                public.flush();
+                public.next += 1;
+                public.offset = 0;
+            }
             let columns = self
                 .generator
                 .take()
                 .unwrap()
                 .into_columns()
                 .map_err(|_| ())?;
-            let public = self.public.take().ok_or(())?;
+            let mut public = self.public.take().ok_or(())?;
+            let public_root = public.oracle.finish().map_err(|_| ())?.root();
+            public.hash.update(&public_root);
             self.proof = Some(
                 SetupProver::from_generated(
                     profile,
                     &self.role,
                     public.hash.finish(),
+                    public_root,
                     profile.setup_statement_header(),
                     columns,
                 )
@@ -379,7 +419,7 @@ impl ContributionSession {
         &mut self,
         proposal: &RosterProposal,
         position: usize,
-        source: setup_witness::fhe_key_source::FheKeySource,
+        source: LinkedContribution,
     ) -> Result<(), protocol_foundations::Refusal> {
         use protocol_foundations::Refusal as FoundationRefusal;
         if self.stopped
@@ -396,7 +436,7 @@ impl ContributionSession {
             .public_chunk
             .take()
             .ok_or(FoundationRefusal::Consumed)?;
-        work.public = Some(PublicOutput::new(work.profile, public_chunk));
+        work.public = Some(PublicOutput::new(work.profile, &work.role, public_chunk));
         self.output.clear();
         self.work = Some(work);
         Ok(())

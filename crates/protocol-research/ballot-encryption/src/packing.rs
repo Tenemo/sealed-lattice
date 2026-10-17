@@ -85,12 +85,9 @@ impl PackingWitness {
     }
 }
 
-/// The two comparison-orbit halves are distinct. Only the selected orbit is
-/// populated; the other half and every odd coefficient remain zero.
-///
-/// Every option has one comparison window for every rank, whatever result
-/// length the poll requests. The evaluator selects the requested ranks, so the
-/// ballot layout never depends on the result length.
+/// One comparison window per option occupies the positive orbit. Literal
+/// scores occupy the first positions of the complementary orbit, so the
+/// plaintext uniquely determines the exact score vector.
 pub fn encode(scores: &[u8]) -> Result<Vec<i32>, Refusal> {
     encode_with_degree(scores, DEGREE)
 }
@@ -112,26 +109,25 @@ fn encode_with_degree(scores: &[u8], degree: usize) -> Result<Vec<i32>, Refusal>
     if !degree.is_power_of_two() || !(16..=DEGREE).contains(&degree) {
         return Err(Refusal::Capacity);
     }
-    let ranks = scores.len();
+    let encoding = plaintext::encoding_degree(degree);
     let window = scores.len().next_power_of_two();
-    let active = scores.len() * ranks * window;
-    if active + scores.len() >= degree / 4 {
+    let active = scores.len() * window;
+    if active > encoding / 4 {
         return Err(Refusal::Capacity);
     }
-    let mut slots = vec![0u32; degree / 4];
+    let mut slots = vec![0u32; encoding / 4];
     for (option, score) in scores.iter().enumerate() {
-        for rank in 0..ranks {
-            for (opponent, other) in scores.iter().enumerate() {
-                slots[(option * ranks + rank) * window + opponent] =
-                    (2 * (i32::from(*other) - i32::from(*score)))
-                        .rem_euclid(PLAINTEXT_MODULUS as i32) as u32;
-            }
+        for (opponent, other) in scores.iter().enumerate() {
+            slots[option * window + opponent] = (2 * (i32::from(*other) - i32::from(*score)))
+                .rem_euclid(PLAINTEXT_MODULUS as i32)
+                as u32;
         }
     }
+    let mut complementary = vec![0u32; encoding / 4];
     for (position, score) in scores.iter().enumerate() {
-        slots[active + position] = u32::from(*score);
+        complementary[position] = u32::from(*score);
     }
-    Ok(plaintext::encode_slots(&slots, degree))
+    Ok(plaintext::encode_orbits(&slots, &complementary, degree))
 }
 
 #[cfg(test)]

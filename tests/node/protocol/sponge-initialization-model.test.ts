@@ -30,7 +30,7 @@ describe('fixed-input sponge initialization', () => {
         expect(value.rateBits).toBe(1088n);
         expect(value.capacityBits).toBe(512n);
         expect(value.seeds.map(({ label }) => label)).toEqual([
-            ...Array.from({ length: 6 }, (_, index) =>
+            ...Array.from({ length: 9 }, (_, index) =>
                 ['a', 'u', 'k'].map((part) => `common-fhe-${part}-${index}`),
             ).flat(),
             'common-share',
@@ -38,10 +38,10 @@ describe('fixed-input sponge initialization', () => {
             'common-auxiliary-key',
         ]);
         // Rate blocks covering each seed's prefix: 65536 FHE coefficients of
-        // 1024 bits, then 65536 share and two sets of 4096 auxiliary ones of 320 bits.
+        // 960 bits, then 65536 share and two sets of 4096 auxiliary ones of 320 bits.
         const blocks = (bits: bigint) => (bits + 1087n) / 1088n;
         expect(value.outputBlocks).toBe(
-            18n * blocks(65536n * 1024n) +
+            27n * blocks(65536n * 960n) +
                 blocks(65536n * 320n) +
                 2n * blocks(4096n * 320n),
         );

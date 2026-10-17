@@ -1,6 +1,8 @@
+import { compileCommittedOfferCensus } from '#tests/committed-offer-model.js';
 import { compileContributionBodyCensus } from '#tests/contribution-body-model.js';
 import { fixedModulusBfvInputs } from '#tests/fixed-modulus-bfv-model.js';
 import { compileRecipientKeyCensus } from '#tests/recipient-key-model.js';
+import { compileSetupSelectionWireCensus } from '#tests/setup-selection-wire-model.js';
 import type { SupportedProfile } from '#tests/supported-profile-model.js';
 
 export const setupAggregateChunkBytes = 524_288n;
@@ -28,6 +30,7 @@ export const partitionAggregatePolynomial = (
 
 export const compileSetupAggregateResources = (profile: SupportedProfile) => {
     const body = compileContributionBodyCensus(profile);
+    const committed = compileCommittedOfferCensus(profile);
     const recipient = compileRecipientKeyCensus();
     const parameters = {
         ...fixedModulusBfvInputs,
@@ -70,9 +73,45 @@ export const compileSetupAggregateResources = (profile: SupportedProfile) => {
     );
     // The verifier folds every setup contributor's body into the cache.
     const setupContributorCount = BigInt(body.setupContributorCount);
+    const streamedBytes = body.streamedPolynomialPayloadBytes;
+    const collectedSumBytes = committed.generatedAggregateBytes + streamedBytes;
+    const wire = compileSetupSelectionWireCensus(profile.participantCount);
+    const collectedReferenceBytes =
+        2n +
+        setupContributorCount *
+            (wire.offerEnvelopeBytes +
+                wire.signatureBytes +
+                64n +
+                BigInt(body.polynomials.length) * 64n) +
+        BigInt(body.polynomials.length) * 64n +
+        64n;
+    const retainedDataBytes =
+        64n + 48n + 64n * BigInt(committed.committedPolynomials.length) + 64n;
+    const discoveryCursorBytes =
+        4n + 17n * BigInt(wire.eligibleContributorCount);
+    const collectionPhases = {
+        // The incoming source is captured before replacing the old sum.
+        collection: 2n * collectedSumBytes + body.polynomialPayloadBytes,
+        evaluation:
+            streamedBytes +
+            body.polynomialPayloadBytes -
+            streamedBytes +
+            committed.maximumEvaluationProofBytes,
+        normalized: aggregateBytes + maximumReplacementChunkBytes,
+    };
     return {
         polynomials,
         aggregateBytes,
+        collectedSumBytes,
+        collectionPhases,
+        maximumCollectionPayloadBytes:
+            Object.values(collectionPhases).reduce(
+                (maximum, bytes) => (bytes > maximum ? bytes : maximum),
+                0n,
+            ) +
+            collectedReferenceBytes +
+            retainedDataBytes +
+            discoveryCursorBytes,
         coefficients: polynomials.reduce(
             (sum, polynomial) => sum + polynomial.degree,
             0n,
@@ -92,9 +131,14 @@ export const compileSetupAggregateResources = (profile: SupportedProfile) => {
         // This bounds logical payload, not physical database journals/GC.
         maximumLogicalCachePayloadBytes:
             aggregateBytes + maximumReplacementChunkBytes,
-        contributionReadBytes: setupContributorCount * aggregateBytes,
-        previousCacheReadBytes: (setupContributorCount - 1n) * aggregateBytes,
-        provisionalCacheWriteBytes: setupContributorCount * aggregateBytes,
+        contributionReadBytes:
+            setupContributorCount * streamedBytes +
+            committed.maximumAggregateBytes,
+        previousCacheReadBytes: (setupContributorCount - 1n) * streamedBytes,
+        provisionalCacheWriteBytes:
+            setupContributorCount * streamedBytes +
+            aggregateBytes -
+            streamedBytes,
         completeReadbackBytes: aggregateBytes,
     };
 };

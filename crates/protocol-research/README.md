@@ -6,7 +6,9 @@ This workspace holds the Rust crates of the executable threshold-FHE research co
 
 The setup uses signed contribution offers and a quorum-certified selection. With `d = max(f + 1, 2)`, the fixed eligible pool contains the first `d+f` original positions; the organizer selects `d` complete verified offers, and `n-f` matching endorsements certify that selection. Each member confirms the roster locally before acting, and any original member can accept the winning certificate after verifying its inputs. There is no all-participant confirmation inventory or separate contribution-opening operation.
 
-Ballots pack a comparison window for every rank, whatever result length the poll requests. The evaluator and result decoder support every requested result length of every profile of 3 to 20 participants and 2 to 20 options. The encrypted computation clears omitted ranks; the decoder rejects a plaintext containing them. Poll creation refuses only option counts outside that range, and a roster proposal refuses only sizes outside it.
+Credentials use a plain Winternitz one-time key for each signing purpose under one Merkle root. A purpose retains one exact frame and replays its identical signature. Registration publishes encrypted original FHE secrets and first errors, and each contribution proof binds its witness to the authenticated source ciphertexts.
+
+Ballots pack one comparison window per option and retain literal scores on the complementary plaintext orbit. The evaluator masks that orbit, copies encrypted ranks to the requested output positions and clears unused windows. The evaluator and result decoder support every requested result length of every profile of 3 to 20 participants and 2 to 20 options. The decoder rejects nonzero omitted ranks, padding and complementary-orbit values. Poll creation refuses only option counts outside that range, and a roster proposal refuses only sizes outside it.
 
 The `supported-profile` crate derives each profile's thresholds, interpolation points and relation layouts in closed form. Its tracked `profiles.bin` table carries the searched parameters: both moduli with their primality witnesses, the sharing and release widths, the common sampling width and the share lifting limb and carry widths. The repository's protocol tests compare that table with the independent TypeScript profile model. After a model change, regenerate it with:
 
@@ -16,7 +18,7 @@ pnpm run research:profiles -- --output crates/protocol-research/supported-profil
 
 ## Prerequisites
 
-The runners need Node.js satisfying the repository's engine requirement, the pnpm version that `package.json` pins, and the Rust toolchain, components and target that [`rust-toolchain.toml`](rust-toolchain.toml) names. Cargo's lockfile pins each registry crate's version and checksum, and the one patched dependency, `fips204`, is tracked as source under `vendor/`. Before an offline run, populate the Cargo cache from this directory, where the toolchain file selects the compiler:
+The runners need Node.js satisfying the repository's engine requirement, the pnpm version that `package.json` pins, and the Rust toolchain, components and target that [`rust-toolchain.toml`](rust-toolchain.toml) names. Cargo's lockfile pins each registry crate's version and checksum. Before an offline run, populate the Cargo cache from this directory, where the toolchain file selects the compiler:
 
 ```text
 cargo fetch --locked
