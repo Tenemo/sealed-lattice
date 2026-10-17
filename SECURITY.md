@@ -41,8 +41,6 @@ The [README](README.md#current-implementation-boundary) describes what the packa
 
 The selected construction has a chronological argument covering source-linked setup, purpose authentication, ordinary proof soundness and simulation, compact ranking, close/finality, one-target release, replay and unresolved outcomes. Its [independent security ledger](tests/security-ledger-model.ts) derives the complete work/query bounds, error terms and original honest-registration limits for the [current parameter catalogue](tests/supported-profile-model.ts). Some work charges for the reduction's own programs are checked by audit tooling or set as explicit budgets rather than proved in writing. Lattice estimates calibrate the declared hardness curves; they are not proofs of those assumptions. The argument and its proofs have not had external cryptographic review.
 
-The packed registration-source encoding has pointwise decoding and source-binding arguments, but its complete source-construction correspondence and cost application are still being reapplied. A passing numerical ledger does not close that condition.
-
 The remaining release and qualification requirements are:
 
 - complete current-build lifecycle, interruption, restart and retrieval evidence;
