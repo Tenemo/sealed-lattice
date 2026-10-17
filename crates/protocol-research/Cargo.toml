@@ -17,6 +17,7 @@ members = [
     "encrypted-ranking",
     "supported-profile",
     "parallel-work",
+    "compact-rank-proof",
 ]
 resolver = "3"
 

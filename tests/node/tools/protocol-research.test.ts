@@ -10,6 +10,22 @@ import {
 } from '#tools/ci/protocol-research-scenario.js';
 
 describe('guarded protocol research entry', () => {
+    it('requires a fixture manifest for the compact rank screen', () => {
+        expect(
+            selectProtocolResearchCase(['compact-rank-proof', 'fixtures.json']),
+        ).toMatchObject({
+            name: 'compact-rank-proof',
+            fixtureManifest: 'fixtures.json',
+            execution: true,
+        });
+        for (const values of [
+            ['compact-rank-proof'],
+            ['compact-rank-proof', ''],
+            ['compact-rank-proof', '   '],
+            ['compact-rank-proof', 'fixtures.json', 'extra'],
+        ])
+            expect(() => selectProtocolResearchCase(values)).toThrow();
+    });
     it('requires only actual response files while retaining original roster positions and all normal responders', () => {
         const departure = deriveResearchScenario(4, 2, true);
         expect(departure.participantCount).toBe(4);
